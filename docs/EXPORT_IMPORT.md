@@ -43,7 +43,7 @@ The **Data File Preview** opens tabular data files directly in VS Code as a full
 
 **Features:**
 - **Multi-sheet support** — each sheet appears as a separate tab in the data grid (for `.xlsx` and `.xlsb` files)
-- **Sorting** — click column headers to sort ascending/descending
+- **Sorting** — click the sort icon on a column header to sort ascending/descending; **Shift+Click** adds another sort column (numbered badges show sort priority)
 - **Filtering** — global text filter across all columns with debounced search
 - **Grouping** — drag column headers to the grouping panel
 - **Cell Selection** — click, Shift+click, Ctrl+click, arrow keys, Ctrl+A

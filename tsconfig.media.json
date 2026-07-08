@@ -1,0 +1,47 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "rootDir": ".",
+    "types": [
+      "jest",
+      "node"
+    ],
+    "skipLibCheck": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "strictNullChecks": true
+  },
+  "include": [
+    "media/resultPanel.ts",
+    "media/searchWorker.ts",
+    "media/queryHistory.ts",
+    "media/queryHistoryExtended.ts",
+    "media/editDataPanel.ts",
+    "media/sessionMonitor.ts",
+    "media/securityPanel.ts",
+    "media/importWizard.ts",
+    "media/visualQueryBuilder.ts",
+    "media/tableDesigner.ts",
+    "media/explainPlanGraph.ts",
+    "media/testDataGenerator.ts",
+    "media/resultPanel/**/*.ts",
+    "media/queryHistory/**/*.ts",
+    "media/editDataPanel/**/*.ts",
+    "media/sessionMonitor/**/*.ts",
+    "media/securityPanel/**/*.ts",
+    "media/importWizard/**/*.ts",
+    "media/visualQueryBuilder/**/*.ts",
+    "media/tableDesigner/**/*.ts",
+    "media/explainPlanGraph/**/*.ts",
+    "media/testDataGenerator/**/*.ts",
+    "media/shared/**/*.ts",
+    "media/resultPanel/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

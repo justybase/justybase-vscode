@@ -1,0 +1,312 @@
+/* Table Designer Styling */
+body {
+    padding: 0;
+    margin: 0;
+    font-family: var(--vscode-font-family);
+    color: var(--vscode-editor-foreground);
+    background-color: var(--vscode-editor-background);
+}
+
+.hidden {
+    display: none !important;
+}
+
+.status-banner {
+    margin: 0;
+    padding: 10px 20px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.status-banner.error {
+    background: var(--vscode-inputValidation-errorBackground);
+    color: var(--vscode-inputValidation-errorForeground);
+    border-bottom-color: var(--vscode-inputValidation-errorBorder);
+}
+
+.status-banner.info {
+    background: var(--vscode-inputValidation-infoBackground);
+    color: var(--vscode-inputValidation-infoForeground);
+}
+
+.empty-state {
+    padding: 24px;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+    border: 1px dashed var(--vscode-panel-border);
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+.empty-state-hint {
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+.designer-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.header {
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    padding-bottom: 15px;
+    flex-shrink: 0;
+}
+
+.header h2 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-weight: 500;
+}
+
+.table-info {
+    display: flex;
+    gap: 20px;
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.input-group label {
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--vscode-descriptionForeground);
+}
+
+input[type="text"] {
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    padding: 6px 8px;
+    font-family: inherit;
+    border-radius: 2px;
+    outline: none;
+    min-width: 250px;
+}
+
+input[type="text"]:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+select,
+textarea {
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    padding: 6px 8px;
+    font-family: inherit;
+    border-radius: 2px;
+    outline: none;
+}
+
+select:focus,
+textarea:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+.read-only-field {
+    padding: 6px 0;
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family);
+}
+
+.hidden {
+    display: none !important;
+}
+
+.main-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.columns-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.panel-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.table-container {
+    flex: 1;
+    overflow-y: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th {
+    position: sticky;
+    top: 0;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+td input[type="text"] {
+    width: 100%;
+    min-width: unset;
+    box-sizing: border-box;
+}
+
+td select {
+    width: 100%;
+    background-color: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    border: 1px solid var(--vscode-dropdown-border, transparent);
+    padding: 4px;
+    border-radius: 2px;
+    outline: none;
+}
+
+td select:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+.action-btn {
+    background: none;
+    border: none;
+    color: var(--vscode-icon-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.action-btn:hover {
+    background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.action-btn.delete:hover {
+    color: var(--vscode-errorForeground);
+}
+
+.ddl-panel {
+    height: 430px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.ddl-options {
+    padding: 10px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background-color: var(--vscode-editorWidget-background);
+}
+
+.option-grid {
+    display: flex;
+    gap: 16px;
+    align-items: flex-end;
+}
+
+.checkbox-group {
+    flex-direction: row;
+    gap: 16px;
+    align-items: center;
+}
+
+.checkbox-group label {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--vscode-editor-foreground);
+}
+
+#tableType {
+    min-width: 220px;
+}
+
+#tableConstraints {
+    min-height: 52px;
+    resize: vertical;
+}
+
+#ddlPreview {
+    flex: 1;
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+    border: none;
+    padding: 10px;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 13px;
+    resize: none;
+    outline: none;
+}
+
+.actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 10px;
+    border-top: 1px solid var(--vscode-panel-border);
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+/* VS Code Button Styles */
+.vscode-button {
+    color: var(--vscode-button-foreground);
+    background-color: var(--vscode-button-background);
+    border: none;
+    padding: 6px 14px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.vscode-button:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.vscode-button.secondary {
+    color: var(--vscode-button-secondaryForeground);
+    background-color: var(--vscode-button-secondaryBackground);
+}
+
+.vscode-button.secondary:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground);
+}

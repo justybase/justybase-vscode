@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#003366;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#001a3d;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="url(#bgGrad)"/>
+
+  <!-- === WIELKA LITERA V z klocków === -->
+  <!-- V: dwa ukośne ramiona zbiegające się w dół na środku -->
+  <!-- Lewe ramię: idzie od lewej góry w prawo-dół -->
+  <!-- Prawe ramię: idzie od prawej góry w lewo-dół -->
+  <!-- step=14, block=12x12 -->
+
+  <!-- LEFT ARM of V (diagonal down-right) -->
+  <!-- col 0 -->
+  <rect x="20"  y="48"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="20"  y="62"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 1 -->
+  <rect x="34"  y="76"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="34"  y="90"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 2 -->
+  <rect x="48"  y="104" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="48"  y="118" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 3 -->
+  <rect x="62"  y="132" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="62"  y="146" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 4 — bottom tip left side -->
+  <rect x="76"  y="160" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="76"  y="174" width="12" height="12" rx="3" fill="#66d4ec"/>
+
+  <!-- RIGHT ARM of V (diagonal down-left) -->
+  <!-- col 0 right -->
+  <rect x="224" y="48"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="224" y="62"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 1 right -->
+  <rect x="210" y="76"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="210" y="90"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 2 right -->
+  <rect x="196" y="104" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="196" y="118" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 3 right -->
+  <rect x="182" y="132" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="182" y="146" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <!-- col 4 right — bottom tip right side -->
+  <rect x="168" y="160" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="168" y="174" width="12" height="12" rx="3" fill="#66d4ec"/>
+
+  <!-- BOTTOM TIP of V — center meeting point -->
+  <rect x="104" y="174" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="118" y="174" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="132" y="174" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="104" y="188" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="118" y="188" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="132" y="188" width="12" height="12" rx="3" fill="#66d4ec"/>
+
+  <!-- Fill in arms thickness — left arm second column -->
+  <rect x="34"  y="48"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="34"  y="62"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="48"  y="76"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="48"  y="90"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="62"  y="104" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="62"  y="118" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="76"  y="132" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="76"  y="146" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="90"  y="160" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="90"  y="174" width="12" height="12" rx="3" fill="#00b0d4"/>
+
+  <!-- Fill in arms thickness — right arm second column -->
+  <rect x="210" y="48"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="210" y="62"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="196" y="76"  width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="196" y="90"  width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="182" y="104" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="182" y="118" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="168" y="132" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="168" y="146" width="12" height="12" rx="3" fill="#00b0d4"/>
+  <rect x="154" y="160" width="12" height="12" rx="3" fill="#66d4ec"/>
+  <rect x="154" y="174" width="12" height="12" rx="3" fill="#00b0d4"/>
+
+  <!-- Bottom indicator bars — Vertica cyan -->
+  <rect x="16"  y="218" width="48" height="14" rx="4" fill="#00b0d4"/>
+  <rect x="70"  y="218" width="48" height="14" rx="4" fill="#00b0d4" opacity="0.7"/>
+  <rect x="124" y="218" width="48" height="14" rx="4" fill="#00b0d4" opacity="0.5"/>
+  <rect x="178" y="218" width="48" height="14" rx="4" fill="#00b0d4" opacity="0.3"/>
+</svg>

@@ -1,0 +1,141 @@
+{
+  "name": "justybaselite-db2",
+  "displayName": "JustyBase Db2 Support",
+  "description": "Optional Db2 Support for JustyBase Core",
+  "version": "3.14.20",
+  "publisher": "krzysztof-d",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.103.2",
+    "node": ">=22.0.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Data Science",
+    "Other"
+  ],
+  "homepage": "https://github.com/justybase/justybase-vscode",
+  "bugs": {
+    "url": "https://github.com/justybase/justybase-vscode/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/justybase/justybase-vscode"
+  },
+  "keywords": [
+    "db2",
+    "ibm db2",
+    "sql",
+    "database"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionDependencies": [
+    "krzysztof-d.justybaselite-netezza"
+  ],
+  "scripts": {
+    "build": "node esbuild.db2.js --production",
+    "build:dev": "node esbuild.db2.js",
+    "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+    "install:vscode": "node scripts/switch-runtime.js electron",
+    "rebuild:electron": "node scripts/switch-runtime.js electron",
+    "rebuild:node": "node scripts/switch-runtime.js node",
+    "switch:runtime": "node scripts/switch-runtime.js",
+    "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/ibm_db')) { console.error('Missing ibm_db. Run npm install in extensions\\\\db2 or npm run install:db2 from the repository root before packaging.'); process.exit(1); }\"",
+    "prepackage": "npm run verify:runtime-deps",
+    "package": "node scripts/package-vsix.js package"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "justybase.db2.listPartitions",
+        "title": "Db2: List Partitions",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "justybase.db2.addPartition",
+        "title": "Db2: Add Partition",
+        "icon": "$(add)"
+      },
+      {
+        "command": "justybase.db2.detachPartition",
+        "title": "Db2: Detach Partition",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "justybase.db2.attachPartition",
+        "title": "Db2: Attach Partition (Roll-In)",
+        "icon": "$(debug-connect)"
+      },
+      {
+        "command": "justybase.db2.dropPartition",
+        "title": "Db2: Drop Partition",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "justybase.db2.listIndexes",
+        "title": "Db2: List Indexes",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "justybase.db2.createIndex",
+        "title": "Db2: Create Index",
+        "icon": "$(add)"
+      },
+      {
+        "command": "justybase.db2.dropIndex",
+        "title": "Db2: Drop Index",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "justybase.db2.reorgIndexes",
+        "title": "Db2: Reorg Indexes (Advanced)",
+        "icon": "$(tools)"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "justybase.db2.listPartitions",
+          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "group": "partition@1"
+        },
+        {
+          "command": "justybase.db2.addPartition",
+          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "group": "partition@2"
+        },
+        {
+          "command": "justybase.db2.attachPartition",
+          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "group": "partition@3"
+        },
+        {
+          "command": "justybase.db2.listIndexes",
+          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "group": "index@1"
+        },
+        {
+          "command": "justybase.db2.createIndex",
+          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "group": "index@2"
+        },
+        {
+          "command": "justybase.db2.reorgIndexes",
+          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "group": "index@3"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "ibm_db": "^4.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3"
+  },
+  "preview": true
+}

@@ -1,0 +1,332 @@
+.range-chart-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 10040;
+}
+
+.range-chart-overlay.visible {
+    display: flex;
+}
+
+.range-chart-overlay.maximized .range-chart-modal {
+    width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
+    max-width: none;
+    max-height: none;
+}
+
+.range-chart-modal {
+    width: min(1100px, calc(100vw - 32px));
+    height: min(720px, calc(100vh - 32px));
+    display: flex;
+    flex-direction: column;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 8px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.range-chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-sideBar-background);
+}
+
+.range-chart-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.range-chart-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.range-chart-header-actions button {
+    background: transparent;
+    border: 1px solid var(--vscode-panel-border);
+    color: var(--vscode-foreground);
+    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.range-chart-header-actions button:hover {
+    background: var(--vscode-toolbar-hoverBackground);
+}
+
+.range-chart-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.range-chart-canvas-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--vscode-panel-border);
+}
+
+.range-chart-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.range-chart-toolbar button {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.range-chart-toolbar button:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.range-chart-canvas {
+    flex: 1;
+    min-height: 240px;
+}
+
+.range-chart-sidebar {
+    width: 280px;
+    min-width: 240px;
+    display: flex;
+    flex-direction: column;
+    background: var(--vscode-sideBar-background);
+}
+
+.range-chart-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.range-chart-tab {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 12px;
+    text-align: center;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: var(--vscode-descriptionForeground);
+    background: transparent;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+}
+
+.range-chart-tab.active {
+    color: var(--vscode-foreground);
+    border-bottom-color: var(--vscode-focusBorder);
+    font-weight: 600;
+}
+
+.range-chart-tab-panel {
+    display: none;
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+}
+
+.range-chart-tab-panel.active {
+    display: block;
+}
+
+.range-chart-field {
+    margin-bottom: 12px;
+}
+
+.range-chart-field label {
+    display: block;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.range-chart-field select,
+.range-chart-field input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 12px;
+}
+
+.range-chart-series-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 180px;
+    overflow: auto;
+}
+
+.range-chart-series-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.range-chart-type-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.range-chart-type-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 4px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 10px;
+}
+
+.range-chart-type-btn.active {
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.range-chart-type-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.range-chart-warning {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin-top: 8px;
+    line-height: 1.4;
+    padding: 0 12px 12px;
+}
+
+.grid-context-submenu {
+    position: fixed;
+    background: var(--vscode-menu-background);
+    border: 1px solid var(--vscode-menu-border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 10001;
+    min-width: 180px;
+    padding: 4px 0;
+}
+
+.grid-context-menu-item.has-submenu::after {
+    content: '›';
+    float: right;
+    opacity: 0.7;
+}
+
+.range-chart-axis-setup {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.range-chart-axis-dropzone {
+    min-height: 42px;
+    padding: 6px;
+    border: 1px dashed var(--vscode-panel-border);
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    align-content: flex-start;
+}
+
+.range-chart-axis-dropzone.drag-over {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.range-chart-axis-dropzone-series {
+    min-height: 72px;
+}
+
+.range-chart-fields-pool {
+    min-height: 56px;
+    max-height: 110px;
+    overflow: auto;
+}
+
+.range-chart-field-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    font-size: 11px;
+    cursor: grab;
+    user-select: none;
+}
+
+.range-chart-field-chip:active {
+    cursor: grabbing;
+}
+
+.range-chart-field-chip.dragging {
+    opacity: 0.55;
+}
+
+.range-chart-field-chip--synthetic {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+}
+
+.range-chart-axis-hint {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+.range-chart-swap-axes-btn {
+    align-self: flex-start;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.range-chart-swap-axes-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+}

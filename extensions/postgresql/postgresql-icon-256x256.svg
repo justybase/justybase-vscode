@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a3a5c;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0d2137;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="url(#bgGrad)"/>
+
+  <!-- ELEPHANT facing LEFT, pixel blocks 12x12 step=14, start x=18+col*14, y=22+row*14 -->
+  <!-- light=#a8d8ea (even rows), mid=#6db3d0 (odd rows) -->
+
+  <!-- Row 0 y=22 light — ear top -->
+  <rect x="130" y="22" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="144" y="22" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="158" y="22" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="172" y="22" width="12" height="12" rx="3" fill="#a8d8ea"/>
+
+  <!-- Row 1 y=36 mid — ear + head top -->
+  <rect x="60"  y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="74"  y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="88"  y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="102" y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="116" y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="130" y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="144" y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="158" y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="172" y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="186" y="36" width="12" height="12" rx="3" fill="#6db3d0"/>
+
+  <!-- Row 2 y=50 light — ear + head (eye row) -->
+  <rect x="46"  y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="60"  y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="74"  y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <!-- eye -->
+  <rect x="88"  y="50" width="12" height="12" rx="3" fill="#0d2137"/>
+  <rect x="102" y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="116" y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="130" y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="144" y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="158" y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="172" y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="186" y="50" width="12" height="12" rx="3" fill="#a8d8ea"/>
+
+  <!-- Row 3 y=64 mid — ear + head -->
+  <rect x="46"  y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="60"  y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="74"  y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="88"  y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="102" y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="116" y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="130" y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="144" y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="158" y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="172" y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="186" y="64" width="12" height="12" rx="3" fill="#6db3d0"/>
+
+  <!-- Row 4 y=78 light — trunk root + full width head+body+ear bottom -->
+  <rect x="32"  y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="46"  y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="60"  y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="74"  y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="88"  y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="102" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="116" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="130" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="144" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="158" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="172" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="186" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="200" y="78" width="12" height="12" rx="3" fill="#a8d8ea"/>
+
+  <!-- Row 5 y=92 mid — trunk + tusk + body -->
+  <rect x="32"  y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="46"  y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <!-- tusk (lighter/white) -->
+  <rect x="60"  y="92" width="12" height="12" rx="3" fill="#ffffff" opacity="0.55"/>
+  <rect x="74"  y="92" width="12" height="12" rx="3" fill="#ffffff" opacity="0.4"/>
+  <rect x="88"  y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="102" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="116" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="130" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="144" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="158" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="172" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="186" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="200" y="92" width="12" height="12" rx="3" fill="#6db3d0"/>
+
+  <!-- Row 6 y=106 light — trunk hangs + body -->
+  <rect x="32"  y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="46"  y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="88"  y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="102" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="116" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="130" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="144" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="158" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="172" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="186" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="200" y="106" width="12" height="12" rx="3" fill="#a8d8ea"/>
+
+  <!-- Row 7 y=120 mid — trunk + body + tail -->
+  <rect x="32"  y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="46"  y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="88"  y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="102" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="116" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="130" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="144" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="158" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="172" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="186" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <!-- tail -->
+  <rect x="200" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="214" y="120" width="12" height="12" rx="3" fill="#6db3d0"/>
+
+  <!-- Row 8 y=134 light — trunk curl + body bottom -->
+  <rect x="46"  y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="60"  y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="88"  y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="102" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="116" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="130" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="144" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="158" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="172" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="186" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <!-- tail end -->
+  <rect x="214" y="134" width="12" height="12" rx="3" fill="#a8d8ea"/>
+
+  <!-- Row 9 y=148 mid — legs (front, mid, back) -->
+  <rect x="88"  y="148" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="102" y="148" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="130" y="148" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="144" y="148" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="172" y="148" width="12" height="12" rx="3" fill="#6db3d0"/>
+  <rect x="186" y="148" width="12" height="12" rx="3" fill="#6db3d0"/>
+
+  <!-- Row 10 y=162 light — legs -->
+  <rect x="88"  y="162" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="102" y="162" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="130" y="162" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="144" y="162" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="172" y="162" width="12" height="12" rx="3" fill="#a8d8ea"/>
+  <rect x="186" y="162" width="12" height="12" rx="3" fill="#a8d8ea"/>
+
+  <!-- Bottom indicator bars -->
+  <rect x="16"  y="196" width="48" height="14" rx="4" fill="#336791"/>
+  <rect x="70"  y="196" width="48" height="14" rx="4" fill="#336791" opacity="0.7"/>
+  <rect x="124" y="196" width="48" height="14" rx="4" fill="#336791" opacity="0.5"/>
+  <rect x="178" y="196" width="48" height="14" rx="4" fill="#336791" opacity="0.3"/>
+</svg>

@@ -102,6 +102,21 @@ UPDATE customers AS c SET c.status = 'inactive';
 UPDATE customers c SET c.status = 'inactive';
 ```
 
+### SQL011 - Unknown Function
+```sql
+-- ❌ Error: Function 'nonexistent_func' does not exist
+SELECT nonexistent_func(col1) FROM mytable;
+
+-- ✅ OK: GROUP_CONCAT is a known Netezza aggregate function
+SELECT GROUP_CONCAT(name) FROM employees;
+
+-- ✅ OK: GROUP_CONCAT_SORT sorts values before concatenation
+SELECT GROUP_CONCAT_SORT(name SEPARATOR ', ') FROM employees;
+
+-- ✅ OK: GROUP_CONCAT with ORDER BY
+SELECT GROUP_CONCAT(name ORDER BY name) FROM employees;
+```
+
 ### NZ013 - UNION vs UNION ALL
 ```sql
 -- ⚠️ Info: UNION performs implicit DISTINCT (slower)

@@ -1,0 +1,620 @@
+{
+    "SELECT with columns": {
+        "prefix": "nzselect",
+        "body": [
+            "SELECT ${1:column1}, ${2:column2}",
+            "FROM ${3:schema}.${4:table}",
+            "WHERE ${5:condition}",
+            "ORDER BY ${6:column1}",
+            "LIMIT ${7:100};"
+        ],
+        "description": "SELECT statement with columns and WHERE clause"
+    },
+    "SELECT all": {
+        "prefix": "nzselectall",
+        "body": [
+            "SELECT *",
+            "FROM ${1:schema}.${2:table}",
+            "LIMIT ${3:1000};"
+        ],
+        "description": "SELECT * with LIMIT"
+    },
+    "SELECT TOP": {
+        "prefix": "nzselecttop",
+        "body": [
+            "SELECT TOP ${1:100} *",
+            "FROM ${2:schema}.${3:table}",
+            "WHERE ${4:1=1};"
+        ],
+        "description": "SELECT TOP with wildcard"
+    },
+    "SELECT NEXT VALUE FOR": {
+        "prefix": "nznextvalue",
+        "body": [
+            "SELECT NEXT VALUE FOR ${1:schema}.${2:sequence_name}, ${3:1};"
+        ],
+        "description": "SELECT with NEXT VALUE FOR sequence expression"
+    },
+    "INSERT INTO": {
+        "prefix": "nzinsert",
+        "body": [
+            "INSERT INTO ${1:schema}.${2:table} (${3:column1}, ${4:column2})",
+            "VALUES (${5:value1}, ${6:value2});"
+        ],
+        "description": "INSERT INTO statement"
+    },
+    "INSERT multiple rows": {
+        "prefix": "nzinsertmulti",
+        "body": [
+            "INSERT INTO ${1:schema}.${2:table} (${3:column1}, ${4:column2})",
+            "VALUES",
+            "    (${5:value1}, ${6:value2}),",
+            "    (${7:value3}, ${8:value4});"
+        ],
+        "description": "INSERT multiple rows"
+    },
+    "UPDATE": {
+        "prefix": "nzupdate",
+        "body": [
+            "UPDATE ${1:schema}.${2:table}",
+            "SET ${3:column1} = ${4:value1},",
+            "    ${5:column2} = ${6:value2}",
+            "WHERE ${7:condition};"
+        ],
+        "description": "UPDATE statement with SET and WHERE"
+    },
+    "DELETE": {
+        "prefix": "nzdelete",
+        "body": [
+            "DELETE FROM ${1:schema}.${2:table}",
+            "WHERE ${3:condition};"
+        ],
+        "description": "DELETE statement with WHERE clause"
+    },
+    "MERGE": {
+        "prefix": "nzmerge",
+        "body": [
+            "MERGE INTO ${1:target_schema}.${2:target_table} AS target",
+            "USING ${3:source_schema}.${4:source_table} AS source",
+            "ON target.${5:id} = source.${6:id}",
+            "WHEN MATCHED THEN",
+            "    UPDATE SET",
+            "        target.${7:column1} = source.${8:column1}",
+            "WHEN NOT MATCHED THEN",
+            "    INSERT (${9:column1}, ${10:column2})",
+            "    VALUES (source.${11:column1}, source.${12:column2});"
+        ],
+        "description": "MERGE statement template"
+    },
+    "CREATE TABLE": {
+        "prefix": "nzcreatetable",
+        "body": [
+            "CREATE TABLE ${1:schema}.${2:table_name} (",
+            "    ${3:id} INTEGER NOT NULL,",
+            "    ${4:name} VARCHAR(${5:100}),",
+            "    ${6:created_at} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
+            "    PRIMARY KEY (${7:id})",
+            ")",
+            "DISTRIBUTE ON (${8:id});"
+        ],
+        "description": "CREATE TABLE with columns and distribution"
+    },
+    "CREATE_GLOBAL_TEMP_TABLE":{
+        "prefix": "nzcreateglobaltemptable",
+        "body": [
+            "CREATE GLOBAL TEMP TABLE ${1:schema}.${2:table_name} (",
+            "    ${3:id} INTEGER NOT NULL,",
+            "    ${4:name} VARCHAR(${5:100}),",
+            "    ${6:created_at} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
+            "    PRIMARY KEY (${7:id})",
+            ")",
+            "DISTRIBUTE ON (${8:id});"
+        ],
+        "description": "CREATE GLOBAL TEMP TABLE with columns and distribution"
+    },
+    "CREATE TABLE AS SELECT": {
+        "prefix": "nzcreatetableas",
+        "body": [
+            "CREATE TABLE ${1:schema}.${2:new_table} AS",
+            "SELECT ${3:*}",
+            "FROM ${4:source_schema}.${5:source_table}",
+            "WHERE ${6:1=1}",
+            "DISTRIBUTE ON (${7:column});"
+        ],
+        "description": "CREATE TABLE AS SELECT (CTAS)"
+    },
+    "CREATE VIEW": {
+        "prefix": "nzcreateview",
+        "body": [
+            "CREATE OR REPLACE VIEW ${1:schema}.${2:view_name} AS",
+            "SELECT ${3:column1}, ${4:column2}",
+            "FROM ${5:schema}.${6:table}",
+            "WHERE ${7:condition};"
+        ],
+        "description": "CREATE VIEW template"
+    },
+    "ALTER TABLE": {
+        "prefix": "nzaltertable",
+        "body": [
+            "ALTER TABLE ${1:schema}.${2:table}",
+            "${3|ADD COLUMN,DROP COLUMN,ALTER COLUMN,RENAME COLUMN,RENAME TO,OWNER TO,MODIFY COLUMN,ORGANIZE ON|} ${4:...};"
+        ],
+        "description": "ALTER TABLE with action"
+    },
+    "ALTER TABLE ADD COLUMN": {
+        "prefix": "nzaltertableadd",
+        "body": [
+            "ALTER TABLE ${1:schema}.${2:table}",
+            "ADD COLUMN ${3:column_name} ${4:VARCHAR(100)};"
+        ],
+        "description": "ALTER TABLE ADD COLUMN"
+    },
+    "ALTER TABLE DROP COLUMN": {
+        "prefix": "nzaltertabledrop",
+        "body": [
+            "ALTER TABLE ${1:schema}.${2:table}",
+            "DROP COLUMN ${3:column_name};"
+        ],
+        "description": "ALTER TABLE DROP COLUMN"
+    },
+    "DROP TABLE": {
+        "prefix": "nzdroptable",
+        "body": [
+            "DROP TABLE IF EXISTS ${1:schema}.${2:table};"
+        ],
+        "description": "DROP TABLE IF EXISTS"
+    },
+    "DROP VIEW": {
+        "prefix": "nzdropview",
+        "body": [
+            "DROP VIEW IF EXISTS ${1:schema}.${2:view};"
+        ],
+        "description": "DROP VIEW IF EXISTS"
+    },
+    "CREATE SYNONYM": {
+        "prefix": "nzcreatesynonym",
+        "body": [
+            "CREATE SYNONYM ${1:database}.${2:schema}.${3:synonym_name} FOR ${4:target_schema}.${5:target_object};"
+        ],
+        "description": "CREATE SYNONYM for an object"
+    },
+    "DROP SYNONYM": {
+        "prefix": "nzdropsynonym",
+        "body": [
+            "DROP SYNONYM ${1:database}.${2:schema}.${3:synonym_name};"
+        ],
+        "description": "DROP SYNONYM"
+    },
+    "GROOM TABLE": {
+        "prefix": "nzgroom",
+        "body": [
+            "GROOM TABLE ${1:schema}.${2:table} VERSIONS;"
+        ],
+        "description": "GROOM TABLE to reclaim deleted row space"
+    },
+    "GROOM TABLE RECORDS ALL": {
+        "prefix": "nzgroomall",
+        "body": [
+            "GROOM TABLE ${1:schema}.${2:table} RECORDS ALL;"
+        ],
+        "description": "GROOM TABLE with full reorganization"
+    },
+    "GENERATE STATISTICS": {
+        "prefix": "nzstats",
+        "body": [
+            "GENERATE STATISTICS ON ${1:schema}.${2:table};"
+        ],
+        "description": "GENERATE STATISTICS for table"
+    },
+    "GENERATE STATISTICS columns": {
+        "prefix": "nzstatscols",
+        "body": [
+            "GENERATE STATISTICS ON ${1:schema}.${2:table} (${3:column1}, ${4:column2});"
+        ],
+        "description": "GENERATE STATISTICS for specific columns"
+    },
+    "CREATE EXTERNAL TABLE": {
+        "prefix": "nzexternaltable",
+        "body": [
+            "CREATE EXTERNAL TABLE ${1:schema}.${2:ext_table} (",
+            "    ${3:column1} ${4:VARCHAR(100)},",
+            "    ${5:column2} ${6:INTEGER}",
+            ")",
+            "USING (",
+            "    DATAOBJECT ('${7:/path/to/file.csv}')",
+            "    DELIMITER '${8:,}'",
+            "    SKIPROWS ${9:1}",
+            "    NULLVALUE '${10:}'",
+            "    ENCODING 'UTF8'",
+            ");"
+        ],
+        "description": "CREATE EXTERNAL TABLE for data loading"
+    },
+    "DISTRIBUTE ON": {
+        "prefix": "nzdistribute",
+        "body": [
+            "DISTRIBUTE ON (${1:column})"
+        ],
+        "description": "DISTRIBUTE ON clause for table distribution"
+    },
+    "DISTRIBUTE ON HASH": {
+        "prefix": "nzdistributehash",
+        "body": [
+            "DISTRIBUTE ON HASH (${1:column1}, ${2:column2})"
+        ],
+        "description": "DISTRIBUTE ON HASH with multiple columns"
+    },
+    "DISTRIBUTE ON RANDOM": {
+        "prefix": "nzdistributerandom",
+        "body": [
+            "DISTRIBUTE ON RANDOM"
+        ],
+        "description": "DISTRIBUTE ON RANDOM for even distribution"
+    },
+    "ORGANIZE ON": {
+        "prefix": "nzorganize",
+        "body": [
+            "ORGANIZE ON (${1:column})"
+        ],
+        "description": "ORGANIZE ON clause for zone maps"
+    },
+    "NZPLSQL Stored Procedure": {
+        "prefix": "nzprocedure",
+        "body": [
+            "CREATE OR REPLACE PROCEDURE ${1:database}.${2:schema}.${3:procedure_name} (",
+            "    ${4:p_param1} ${5:INTEGER}",
+            ")",
+            "RETURNS ${6:INTEGER}",
+            "LANGUAGE NZPLSQL AS",
+            "BEGIN_PROC",
+            "    DECLARE",
+            "        v_result ${7:INTEGER} := 0;",
+            "    BEGIN",
+            "        ${8:-- Your logic here}",
+            "        ",
+            "        RETURN v_result;",
+            "    EXCEPTION",
+            "        WHEN OTHERS THEN",
+            "            RAISE EXCEPTION 'Error: %', SQLERRM;",
+            "    END;",
+            "END_PROC;"
+        ],
+        "description": "Complete NZPLSQL stored procedure skeleton"
+    },
+    "NZPLSQL IF ELSE": {
+        "prefix": "nzifelse",
+        "body": [
+            "IF ${1:condition} THEN",
+            "    ${2:-- true branch}",
+            "ELSIF ${3:other_condition} THEN",
+            "    ${4:-- elsif branch}",
+            "ELSE",
+            "    ${5:-- else branch}",
+            "END IF;"
+        ],
+        "description": "IF/ELSIF/ELSE block"
+    },
+    "NZPLSQL FOR loop": {
+        "prefix": "nzforloop",
+        "body": [
+            "FOR ${1:i} IN ${2:1}..${3:10} LOOP",
+            "    ${4:-- loop body}",
+            "END LOOP;"
+        ],
+        "description": "FOR loop with range"
+    },
+    "NZPLSQL FOR REVERSE loop": {
+        "prefix": "nzforreverse",
+        "body": [
+            "<<${1:outer}>> FOR ${2:i} IN REVERSE ${3:10}..${4:1} LOOP",
+            "    ${5:-- loop body}",
+            "END LOOP;"
+        ],
+        "description": "FOR loop with REVERSE range and optional label"
+    },
+    "NZPLSQL FOR IN SELECT": {
+        "prefix": "nzforselect",
+        "body": [
+            "FOR ${1:rec} IN",
+            "    SELECT ${2:columns}",
+            "    FROM ${3:schema}.${4:table}",
+            "    WHERE ${5:condition}",
+            "LOOP",
+            "    ${6:-- process row}",
+            "END LOOP;"
+        ],
+        "description": "FOR rec IN SELECT loop (implicit cursor; preferred over OPEN/CLOSE)"
+    },
+    "NZPLSQL REFTABLE procedure": {
+        "prefix": "nzreftableproc",
+        "body": [
+            "CREATE OR REPLACE PROCEDURE ${1:schema}.${2:proc_name} ()",
+            "RETURNS REFTABLE(${3:schema}.${4:table_name})",
+            "LANGUAGE NZPLSQL AS",
+            "BEGIN_PROC",
+            "BEGIN",
+            "    RETURN ${5:-- query returning table};",
+            "END;",
+            "END_PROC;"
+        ],
+        "description": "Procedure returning REFTABLE result set"
+    },
+    "NZPLSQL WHILE loop": {
+        "prefix": "nzwhileloop",
+        "body": [
+            "WHILE ${1:condition} LOOP",
+            "    ${2:-- loop body}",
+            "END LOOP;"
+        ],
+        "description": "WHILE loop"
+    },
+    "NZPLSQL EXIT label": {
+        "prefix": "nzexitlabel",
+        "body": [
+            "EXIT ${1:label} WHEN ${2:condition};"
+        ],
+        "description": "EXIT with optional loop label and WHEN condition"
+    },
+    "NZPLSQL Cursor": {
+        "prefix": "nzcursor",
+        "body": [
+            "DECLARE",
+            "    ${1:cur_name} CURSOR FOR",
+            "        SELECT ${2:column1}, ${3:column2}",
+            "        FROM ${4:schema}.${5:table}",
+            "        WHERE ${6:condition};",
+            "    ${7:rec} RECORD;",
+            "BEGIN",
+            "    OPEN ${1:cur_name};",
+            "    LOOP",
+            "        FETCH ${1:cur_name} INTO ${7:rec};",
+            "        EXIT WHEN NOT FOUND;",
+            "        ${8:-- Process record}",
+            "    END LOOP;",
+            "    CLOSE ${1:cur_name};",
+            "END;"
+        ],
+        "description": "Cursor declaration, loop and close"
+    },
+    "NZPLSQL Exception handling": {
+        "prefix": "nzexception",
+        "body": [
+            "EXCEPTION",
+            "    WHEN SQLSTATE '${1:23505}' THEN",
+            "        ${2:-- Handle constraint violation}",
+            "    WHEN ${3:NO_DATA_FOUND} THEN",
+            "        ${4:-- Handle no data}",
+            "    WHEN OTHERS THEN",
+            "        RAISE EXCEPTION 'Error: %', SQLERRM;"
+        ],
+        "description": "Exception handling block (SQLSTATE, named, OTHERS)"
+    },
+    "NZPLSQL RAISE NOTICE": {
+        "prefix": "nzraise",
+        "body": [
+            "RAISE NOTICE '${1:Message}: %', ${2:variable};"
+        ],
+        "description": "RAISE NOTICE for debugging"
+    },
+    "NZPLSQL RAISE EXCEPTION": {
+        "prefix": "nzraiseexception",
+        "body": [
+            "RAISE EXCEPTION '${1:Error message}: %', ${2:variable};"
+        ],
+        "description": "RAISE EXCEPTION to abort execution"
+    },
+    "NZPLSQL Variable declaration": {
+        "prefix": "nzvar",
+        "body": [
+            "${1:v_name} ${2:INTEGER} := ${3:0};"
+        ],
+        "description": "Variable declaration with initialization"
+    },
+    "NZPLSQL Execute immediate": {
+        "prefix": "nzexecute",
+        "body": [
+            "EXECUTE IMMEDIATE '${1:SQL statement}';"
+        ],
+        "description": "Execute dynamic SQL"
+    },
+    "INNER JOIN": {
+        "prefix": "nzjoin",
+        "body": [
+            "SELECT ${1:a.column1}, ${2:b.column2}",
+            "FROM ${3:schema}.${4:table1} a",
+            "INNER JOIN ${5:schema}.${6:table2} b ON a.${7:id} = b.${8:id}",
+            "WHERE ${9:1=1};"
+        ],
+        "description": "INNER JOIN template"
+    },
+    "LEFT JOIN": {
+        "prefix": "nzleftjoin",
+        "body": [
+            "SELECT ${1:a.column1}, ${2:b.column2}",
+            "FROM ${3:schema}.${4:table1} a",
+            "LEFT JOIN ${5:schema}.${6:table2} b ON a.${7:id} = b.${8:id}",
+            "WHERE ${9:1=1};"
+        ],
+        "description": "LEFT JOIN template"
+    },
+    "GROUP BY with aggregate": {
+        "prefix": "nzgroupby",
+        "body": [
+            "SELECT ${1:column1},",
+            "       COUNT(*) AS cnt,",
+            "       SUM(${2:amount}) AS total,",
+            "       AVG(${3:value}) AS average",
+            "FROM ${4:schema}.${5:table}",
+            "WHERE ${6:1=1}",
+            "GROUP BY ${1:column1}",
+            "HAVING COUNT(*) > ${7:1}",
+            "ORDER BY ${8:cnt} DESC;"
+        ],
+        "description": "GROUP BY with aggregates and HAVING"
+    },
+    "Common Table Expression (CTE)": {
+        "prefix": "nzcte",
+        "body": [
+            "WITH ${1:cte_name} AS (",
+            "    SELECT ${2:column1}, ${3:column2}",
+            "    FROM ${4:schema}.${5:table}",
+            "    WHERE ${6:condition}",
+            ")",
+            "SELECT *",
+            "FROM ${1:cte_name}",
+            "WHERE ${7:1=1};"
+        ],
+        "description": "Common Table Expression (WITH clause)"
+    },
+    "Multiple CTEs": {
+        "prefix": "nzctesmulti",
+        "body": [
+            "WITH ${1:cte1} AS (",
+            "    SELECT ${2:*} FROM ${3:schema}.${4:table1}",
+            "),",
+            "${5:cte2} AS (",
+            "    SELECT ${6:*} FROM ${7:schema}.${8:table2}",
+            ")",
+            "SELECT ${9:*}",
+            "FROM ${1:cte1} a",
+            "JOIN ${5:cte2} b ON a.${10:id} = b.${11:id};"
+        ],
+        "description": "Multiple CTEs"
+    },
+    "CASE WHEN": {
+        "prefix": "nzcase",
+        "body": [
+            "CASE",
+            "    WHEN ${1:condition1} THEN ${2:'value1'}",
+            "    WHEN ${3:condition2} THEN ${4:'value2'}",
+            "    ELSE ${5:'default'}",
+            "END AS ${6:column_alias}"
+        ],
+        "description": "CASE WHEN expression"
+    },
+    "CASE simple": {
+        "prefix": "nzcasesimple",
+        "body": [
+            "CASE ${1:column}",
+            "    WHEN ${2:'A'} THEN ${3:'Active'}",
+            "    WHEN ${4:'I'} THEN ${5:'Inactive'}",
+            "    ELSE ${6:'Unknown'}",
+            "END AS ${7:status}"
+        ],
+        "description": "Simple CASE expression"
+    },
+    "COALESCE": {
+        "prefix": "nzcoalesce",
+        "body": [
+            "COALESCE(${1:column}, ${2:'default'})"
+        ],
+        "description": "COALESCE function"
+    },
+    "NVL": {
+        "prefix": "nznvl",
+        "body": [
+            "NVL(${1:column}, ${2:'default'})"
+        ],
+        "description": "NVL function (Netezza null replacement)"
+    },
+    "CAST": {
+        "prefix": "nzcast",
+        "body": [
+            "CAST(${1:expression} AS ${2:VARCHAR(100)})"
+        ],
+        "description": "CAST expression"
+    },
+    "TRUNCATE TABLE": {
+        "prefix": "nztruncate",
+        "body": [
+            "TRUNCATE TABLE ${1:schema}.${2:table};"
+        ],
+        "description": "TRUNCATE TABLE"
+    },
+    "GRANT SELECT": {
+        "prefix": "nzgrantselect",
+        "body": [
+            "GRANT SELECT ON ${1:schema}.${2:table} TO ${3:user_or_group};"
+        ],
+        "description": "GRANT SELECT permission"
+    },
+    "GRANT ALL": {
+        "prefix": "nzgrantall",
+        "body": [
+            "GRANT ALL ON ${1:schema}.${2:table} TO ${3:user_or_group};"
+        ],
+        "description": "GRANT ALL permissions"
+    },
+    "ROW_NUMBER": {
+        "prefix": "nzrownumber",
+        "body": [
+            "ROW_NUMBER() OVER (PARTITION BY ${1:column} ORDER BY ${2:column}) AS ${3:rn}"
+        ],
+        "description": "ROW_NUMBER window function"
+    },
+    "RANK": {
+        "prefix": "nzrank",
+        "body": [
+            "RANK() OVER (PARTITION BY ${1:column} ORDER BY ${2:column} DESC) AS ${3:rnk}"
+        ],
+        "description": "RANK window function"
+    },
+    "Date functions": {
+        "prefix": "nzdate",
+        "body": [
+            "CURRENT_DATE AS today,",
+            "CURRENT_TIMESTAMP AS now,",
+            "DATE_TRUNC('${1|month,week,day,hour|}', ${2:date_column}) AS truncated,",
+            "ADD_MONTHS(CURRENT_DATE, ${3:1}) AS next_month,",
+            "DATEDIFF(${4|day,month,year|}, ${5:start_date}, ${6:end_date}) AS diff"
+        ],
+        "description": "Common date functions"
+    },
+    "String functions": {
+        "prefix": "nzstring",
+        "body": [
+            "UPPER(${1:column}) AS upper_case,",
+            "LOWER(${2:column}) AS lower_case,",
+            "TRIM(${3:column}) AS trimmed,",
+            "SUBSTR(${4:column}, ${5:1}, ${6:10}) AS substring,",
+            "LENGTH(${7:column}) AS len,",
+            "REPLACE(${8:column}, '${9:old}', '${10:new}') AS replaced"
+        ],
+        "description": "Common string functions"
+    },
+    "UNION ALL": {
+        "prefix": "nzunion",
+        "body": [
+            "SELECT ${1:*} FROM ${2:schema}.${3:table1}",
+            "UNION ALL",
+            "SELECT ${4:*} FROM ${5:schema}.${6:table2};"
+        ],
+        "description": "UNION ALL query"
+    },
+    "EXISTS subquery": {
+        "prefix": "nzexists",
+        "body": [
+            "SELECT *",
+            "FROM ${1:schema}.${2:table1} a",
+            "WHERE EXISTS (",
+            "    SELECT 1",
+            "    FROM ${3:schema}.${4:table2} b",
+            "    WHERE b.${5:id} = a.${6:id}",
+            ");"
+        ],
+        "description": "EXISTS subquery"
+    },
+    "NOT EXISTS subquery": {
+        "prefix": "nznotexists",
+        "body": [
+            "SELECT *",
+            "FROM ${1:schema}.${2:table1} a",
+            "WHERE NOT EXISTS (",
+            "    SELECT 1",
+            "    FROM ${3:schema}.${4:table2} b",
+            "    WHERE b.${5:id} = a.${6:id}",
+            ");"
+        ],
+        "description": "NOT EXISTS subquery"
+    }
+}

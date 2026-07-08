@@ -1,0 +1,313 @@
+# Architecture Diagram
+
+## High-Level Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        VSCode Extension                          │
+│                                                                   │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │              SqlCompletionItemProvider                      │ │
+│  │                  (completionProvider.ts)                    │ │
+│  │                                                             │ │
+│  │  • Implements vscode.CompletionItemProvider                │ │
+│  │  • Manages document parsing cache                          │ │
+│  │  • Orchestrates completion triggers                        │ │
+│  └─────────────────┬───────────────────────────────────────────┘ │
+│                    │                                              │
+│                    │ delegates to                                 │
+│                    ▼                                              │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                      Completion Modules                          │
+│                                                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │   Parsers    │  │   Matchers   │  │   Triggers   │          │
+│  ├──────────────┤  ├──────────────┤  ├──────────────┤          │
+│  │ • Comments   │  │ • Patterns   │  │ • JOIN ON    │          │
+│  │ • Variables  │  │ • Aliases    │  │ • Columns    │          │
+│  │ • SQL        │  │              │  │ • Tables     │          │
+│  │   Structures │  │              │  │ • Variables  │          │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
+│         │                  │                  │                   │
+│         └──────────────────┴──────────────────┘                  │
+│                            │                                      │
+│                            ▼                                      │
+│  ┌────────────────────────────────────────────────────┐         │
+│  │                    Providers                        │         │
+│  ├────────────────────────────────────────────────────┤         │
+│  │  • MetadataProvider (DB/Schema/Table/Column)       │         │
+│  │  • KeywordProvider (SQL Keywords)                  │         │
+│  └────────────────────────┬───────────────────────────┘         │
+│                            │                                      │
+└────────────────────────────┼──────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    External Dependencies                         │
+│                                                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ Metadata     │  │ Connection   │  │ Query        │          │
+│  │ Cache        │  │ Manager      │  │ Runner       │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Module Interaction Flow
+
+### Flow 1: User Types "FROM "
+
+```
+User Input: "FROM "
+     │
+     ▼
+[SqlCompletionItemProvider]
+     │
+     ├─> getParsedContext()
+     │   ├─> stripComments() ──────────────► [commentStripper]
+     │   ├─> parseLocalDefinitions() ──────► [sqlParser]
+     │   └─> parseVariables() ────────────► [variableParser]
+     │
+     ├─> matchFromJoinPartial() ───────────► [patternMatchers]
+     │
+     └─> handleFromJoinCompletion() ───────► [tableTrigger]
+         └─> metadataProvider.getDatabases()
+             └─> runQueryRaw() ──────────────► [queryRunner]
+                 └─> MetadataCache ─────────► [metadataCache]
+```
+
+### Flow 2: User Types "JOIN table1 t1 ON "
+
+```
+User Input: "JOIN table1 t1 ON "
+     │
+     ▼
+[SqlCompletionItemProvider]
+     │
+     ├─> matchJoinOn() ─────────────────────► [patternMatchers]
+     │
+     └─> handleJoinOnCompletion() ──────────► [joinOnTrigger]
+         │
+         ├─> getTableAndAliasBeforeCursor() ─► [aliasResolver]
+         │
+         ├─> metadataProvider.getTableColumnsMetadata()
+         │   └─> MetadataCache
+         │
+         └─> scoreColumnMatch()
+             └─> Returns suggestions based on:
+                 • Column name similarity
+                 • PK/FK relationships
+```
+
+### Flow 3: User Types "t1."
+
+```
+User Input: "t1."
+     │
+     ▼
+[SqlCompletionItemProvider]
+     │
+     ├─> matchColumnQualifier() ────────────► [patternMatchers]
+     │
+     └─> handleColumnCompletion() ──────────► [columnTrigger]
+         │
+         ├─> findAlias() ───────────────────► [aliasResolver]
+         │
+         └─> metadataProvider.getColumns()
+             └─> Returns column completions with:
+                 • Column name
+                 • Data type
+                 • PK/FK indicators 🔑 🔗
+```
+
+### Flow 4: User Types "${"
+
+```
+User Input: "${"
+     │
+     ▼
+[SqlCompletionItemProvider]
+     │
+     ├─> matchVariable() ───────────────────► [patternMatchers]
+     │
+     └─> handleVariableCompletion() ────────► [variableTrigger]
+         │
+         ├─> getVariableInsertionMode() ────► [patternMatchers]
+         │
+         └─> Returns variable completions:
+             • ${VAR1}
+             • ${VAR2}
+             • ${VAR3}
+```
+
+## Data Flow Diagram
+
+```
+┌──────────────┐
+│   Document   │
+│   Content    │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────────┐
+│  stripComments() │ ──────► Clean SQL Text
+└──────┬───────────┘
+       │
+       ├─────────────────────────┬──────────────────────┐
+       │                         │                      │
+       ▼                         ▼                      ▼
+┌───────────────┐    ┌───────────────────┐   ┌──────────────┐
+│parseVariables │    │parseLocalDefs     │   │ Line Prefix  │
+│               │    │ • CTEs            │   │ Analysis     │
+│ Returns:      │    │ • Temp Tables     │   │              │
+│ • VAR1        │    │ • Subqueries      │   │ Triggers:    │
+│ • VAR2        │    │                   │   │ • FROM       │
+└───────┬───────┘    │ Returns:          │   │ • JOIN       │
+        │            │ • name            │   │ • Alias.     │
+        │            │ • type            │   │ • ${}        │
+        │            │ • columns[]       │   └──────┬───────┘
+        │            └───────┬───────────┘          │
+        │                    │                      │
+        └────────────────────┴──────────────────────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  Parsed Cache  │
+                    │  (by document) │
+                    └────────┬───────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  Completion    │
+                    │  Triggers      │
+                    └────────┬───────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  Metadata      │
+                    │  Providers     │
+                    └────────┬───────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  Completion    │
+                    │  Items         │
+                    └────────────────┘
+```
+
+## Component Dependency Graph
+
+```
+                   ┌─────────────────────┐
+                   │   External Deps     │
+                   │  • MetadataCache    │
+                   │  • ConnectionMgr    │
+                   │  • QueryRunner      │
+                   └──────────┬──────────┘
+                              │
+                              ▼
+              ┌───────────────────────────────┐
+              │    MetadataProvider           │
+              │  • getDatabases()             │
+              │  • getSchemas()               │
+              │  • getTables()                │
+              │  • getColumns()               │
+              └───────────┬───────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              │                       │
+              ▼                       ▼
+    ┌─────────────────┐     ┌─────────────────┐
+    │   Triggers      │     │   Parsers       │
+    │  • joinOn       │     │  • comments     │
+    │  • column       │     │  • variables    │
+    │  • table        │     │  • sqlParser    │
+    │  • variable     │     └────────┬────────┘
+    └────────┬────────┘              │
+             │                       │
+             └───────────┬───────────┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │     Matchers         │
+              │  • patternMatchers   │
+              │  • aliasResolver     │
+              └──────────┬───────────┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │      Types           │
+              │  • LocalDefinition   │
+              │  • AliasInfo         │
+              │  • TableReference    │
+              │  • ParsedContext     │
+              └──────────────────────┘
+```
+
+## Module Size Comparison
+
+```
+Before Refactoring:
+┌────────────────────────────────────────┐
+│  completionProvider.ts                 │
+│  ~1000 lines                           │
+│  All logic in one file                 │
+└────────────────────────────────────────┘
+
+After Refactoring:
+┌──────────────────────┐  ~150 lines
+│ completionProvider   │  (orchestrator)
+└──────────────────────┘
+
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  Parsers     │  │  Matchers    │  │  Triggers    │
+│  ~200 lines  │  │  ~150 lines  │  │  ~300 lines  │
+└──────────────┘  └──────────────┘  └──────────────┘
+
+┌──────────────┐  ┌──────────────┐
+│  Providers   │  │  Types       │
+│  ~250 lines  │  │  ~50 lines   │
+└──────────────┘  └──────────────┘
+
+Total: ~1100 lines (similar size but better organized)
+```
+
+## Caching Strategy
+
+```
+Document Change
+     │
+     ▼
+Check parsedCache
+     │
+     ├─> Cache Hit ──────────► Return cached context
+     │                         (cleanText, localDefs, variables)
+     │
+     └─> Cache Miss
+         │
+         ├─> stripComments()
+         ├─> parseLocalDefinitions()
+         ├─> parseVariables()
+         │
+         └─> Store in cache
+             (keyed by document URI + version)
+             │
+             └─> Return new context
+```
+
+## Legend
+
+```
+┌─────┐
+│ Box │  Component or Module
+└─────┘
+
+  │
+  ▼     Flow Direction
+
+ ─►     Data Flow / Function Call
+
+ ...    Optional or Conditional Path
+```

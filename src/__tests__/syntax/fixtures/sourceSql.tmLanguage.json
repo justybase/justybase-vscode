@@ -1,0 +1,41 @@
+{
+  "scopeName": "source.sql",
+  "name": "SQL Test Fixture",
+  "patterns": [
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "name": "comment.block.sql"
+    },
+    {
+      "match": "--.*$",
+      "name": "comment.line.double-dash.sql"
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "name": "string.quoted.single.sql",
+      "patterns": [
+        {
+          "match": "''",
+          "name": "constant.character.escape.sql"
+        }
+      ]
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.sql",
+      "patterns": [
+        {
+          "match": "\"\"",
+          "name": "constant.character.escape.sql"
+        }
+      ]
+    },
+    {
+      "match": "(?i)\\b(SELECT|FROM|JOIN|WHERE|CALL|CREATE|TABLE|MERGE|INTO|USING|ON)\\b",
+      "name": "keyword.other.sql"
+    }
+  ]
+}

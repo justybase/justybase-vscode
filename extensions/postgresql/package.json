@@ -1,0 +1,51 @@
+{
+    "name": "justybaselite-postgresql",
+    "displayName": "JustyBase PostgreSQL Support",
+    "description": "Optional PostgreSQL Support for JustyBase Core",
+    "version": "3.14.20",
+    "publisher": "krzysztof-d",
+    "license": "Apache-2.0",
+    "icon": "icon.png",
+    "engines": {
+        "vscode": "^1.103.2",
+        "node": ">=22.0.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Data Science",
+        "Other"
+    ],
+    "homepage": "https://github.com/justybase/justybase-vscode",
+    "bugs": {
+        "url": "https://github.com/justybase/justybase-vscode/issues"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/justybase/justybase-vscode"
+    },
+    "keywords": [
+        "postgresql",
+        "postgres",
+        "sql",
+        "database"
+    ],
+    "main": "./dist/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "extensionDependencies": [
+        "krzysztof-d.justybaselite-netezza"
+    ],
+    "scripts": {
+        "build": "node esbuild.postgresql.js --production",
+        "build:dev": "node esbuild.postgresql.js",
+        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/pg')) { console.error('Missing pg. Run npm install in extensions\\\\postgresql before packaging.'); process.exit(1); }\"",
+        "prepackage": "npm run verify:runtime-deps",
+        "package": "node ../../node_modules/@vscode/vsce/vsce package"
+    },
+    "dependencies": {
+        "pg": "^8.12.0"
+    },
+    "preview": true
+}

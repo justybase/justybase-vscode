@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "bundler",
+    "target": "es2020",
+    "outDir": "out",
+    "lib": ["es2020", "dom", "es2022.error"],
+    "types": ["jest", "node"],
+    "sourceMap": true,
+    "rootDir": ".",
+    "paths": {
+      "@justybase/contracts": ["./packages/contracts/src"],
+      "@justybase/contracts/*": ["./packages/contracts/src/*"],
+      "@core/*": ["./src/core/*"],
+      "@metadata/*": ["./src/metadata/*"],
+      "@types/*": ["./src/types/*"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "skipLibCheck": false
+  },
+  "include": [
+    "src/**/*",
+    "extensions/*/src/**/*.ts",
+    "extensions/*/src/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", ".vscode-test", "libs"]
+}

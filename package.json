@@ -1,0 +1,4221 @@
+{
+  "name": "justybaselite-netezza",
+  "displayName": "JustyBase Core (NetezzaSQL)",
+  "description": "Core Netezza extension with built-in SQLite and optional DuckDB, Db2, Oracle, PostgreSQL, Snowflake, MS SQL Server, and MySQL support",
+  "version": "3.14.20",
+  "workspaces": [
+    "packages/*"
+  ],
+  "publisher": "krzysztof-d",
+  "author": {
+    "name": "JustyBase Maintainers"
+  },
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#1a1a2e",
+    "theme": "dark"
+  },
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
+  "engines": {
+    "vscode": "^1.103.2",
+    "node": ">=22.0.0"
+  },
+  "keywords": [
+    "netezza",
+    "IBM PureData System for Analytics",
+    "SQL",
+    "nz",
+    "database",
+    "data warehouse",
+    "dwh",
+    "sqlite",
+    "duckdb",
+    "db2",
+    "postgresql",
+    "snowflake",
+    "oracle",
+    "mssql",
+    "mysql"
+  ],
+  "categories": [
+    "Programming Languages",
+    "Data Science",
+    "Other"
+  ],
+  "homepage": "https://github.com/justybase/justybase-vscode",
+  "bugs": {
+    "url": "https://github.com/justybase/justybase-vscode/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/justybase/justybase-vscode"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:sql",
+    "onView:netezza.schema",
+    "onCommand:netezza.openLogin",
+    "onChatParticipant:netezza.sqlcopilot",
+    "onNotebook:netezza-sql-notebook"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "netezza-explorer",
+          "title": "JustyBase",
+          "icon": "$(database)"
+        }
+      ],
+      "panel": [
+        {
+          "id": "netezza-results-container",
+          "title": "SQL Results",
+          "icon": "$(database)"
+        }
+      ]
+    },
+    "views": {
+      "netezza-explorer": [
+        {
+          "id": "netezza.schema",
+          "name": "Schema",
+          "icon": "$(list-tree)"
+        },
+        {
+          "type": "webview",
+          "id": "netezza.search",
+          "name": "Object Search",
+          "icon": "$(search)"
+        },
+        {
+          "type": "webview",
+          "id": "netezza.queryHistory",
+          "name": "Query History",
+          "icon": "$(history)"
+        },
+        {
+          "type": "webview",
+          "id": "netezza.fileSearch",
+          "name": "File Search",
+          "icon": "$(file-search)"
+        }
+      ],
+      "netezza-results-container": [
+        {
+          "type": "webview",
+          "name": "Query Results",
+          "id": "netezza.results",
+          "icon": "$(output)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "netezza.copilot.changeModel",
+        "title": "JustyBase AI: Change Model"
+      },
+      {
+        "command": "netezza.copilot.clearModel",
+        "title": "JustyBase AI: Clear Persisted Model"
+      },
+      {
+        "command": "netezza.runQuery",
+        "title": "Run Query (Smart/Sequential)",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "netezza.runQueryBatch",
+        "title": "Run Query Batch",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "netezza.runQueryContinueOnError",
+        "title": "Run Query (Continue on Error)",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "netezza.visualizeQueryFlow",
+        "title": "JustyBase: Visualize Query Flow",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.exportToXlsb",
+        "title": "Export Query to XLSB",
+        "icon": "$(file-binary)"
+      },
+      {
+        "command": "netezza.exportToXlsx",
+        "title": "Export Query to XLSX",
+        "icon": "$(file)"
+      },
+      {
+        "command": "netezza.exportToCsv",
+        "title": "Export Query to CSV",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "netezza.exportToParquet",
+        "title": "Export Query to Parquet",
+        "icon": "$(database)"
+      },
+      {
+        "command": "netezza.openInFilePreview",
+        "title": "Open in Data File Preview",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "netezza.switchToNativeCsvPreview",
+        "title": "Switch to Native CSV Preview",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "netezza.exportToMdFile",
+        "title": "Export Query to MD File",
+        "icon": "$(markdown)"
+      },
+      {
+        "command": "netezza.exportToXlsbAndOpen",
+        "title": "Export Query to Excel and Open",
+        "icon": "$(file-binary)"
+      },
+      {
+        "command": "netezza.copyXlsbToClipboard",
+        "title": "Copy Query Results as XLSB to Clipboard",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "netezza.exportQueryAndOpenXlsb",
+        "title": "Execute Query and Open (XLSB)",
+        "icon": "$(file-binary)"
+      },
+      {
+        "command": "netezza.exportQueryAndOpenXlsx",
+        "title": "Execute Query and Open (XLSX)",
+        "icon": "$(file)"
+      },
+      {
+        "command": "netezza.openLogin",
+        "title": "JustyBase: Connect...",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "netezza.openSqlConsole",
+        "title": "JustyBase: Open SQL Console",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "netezza.openGettingStarted",
+        "title": "JustyBase: Open Getting Started",
+        "icon": "$(book)"
+      },
+      {
+        "command": "netezza.showMetadataCacheStats",
+        "title": "JustyBase: Show Metadata Cache Stats",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "netezza.showResultPanelPerformanceStats",
+        "title": "JustyBase: Show Result Panel Performance Stats",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.clearResultPanelPerformanceStats",
+        "title": "JustyBase: Clear Result Panel Performance Stats",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "netezza.copySelectAll",
+        "title": "Select Top 1000"
+      },
+      {
+        "command": "netezza.copyDrop",
+        "title": "Drop Table/View"
+      },
+      {
+        "command": "netezza.copyName",
+        "title": "Copy Name"
+      },
+      {
+        "command": "netezza.grantPermissions",
+        "title": "Grant Permissions"
+      },
+      {
+        "command": "netezza.groomTable",
+        "title": "Groom Table"
+      },
+      {
+        "command": "netezza.addTableComment",
+        "title": "Add/Edit Comment"
+      },
+      {
+        "command": "netezza.addColumnComment",
+        "title": "Add/Edit Column Comment"
+      },
+      {
+        "command": "netezza.generateStatistics",
+        "title": "Generate Statistics"
+      },
+      {
+        "command": "netezza.vacuumTable",
+        "title": "Vacuum Table"
+      },
+      {
+        "command": "netezza.analyzeTable",
+        "title": "Analyze Table"
+      },
+      {
+        "command": "netezza.reindexTable",
+        "title": "Reindex Table"
+      },
+      {
+        "command": "postgresql.listPartitions",
+        "title": "List Partitions",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "postgresql.createPartition",
+        "title": "Create Partition",
+        "icon": "$(add)"
+      },
+      {
+        "command": "postgresql.attachPartition",
+        "title": "Attach Partition",
+        "icon": "$(debug-connect)"
+      },
+      {
+        "command": "postgresql.listIndexes",
+        "title": "List Indexes",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "postgresql.createIndex",
+        "title": "Create Index",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.truncateTable",
+        "title": "Truncate Table"
+      },
+      {
+        "command": "netezza.addPrimaryKey",
+        "title": "Add Primary Key"
+      },
+      {
+        "command": "netezza.addForeignKey",
+        "title": "Add Foreign Key"
+      },
+      {
+        "command": "netezza.addUniqueConstraint",
+        "title": "Add Unique Constraint"
+      },
+      {
+        "command": "netezza.importClipboard",
+        "title": "Import Clipboard Data to Table",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "netezza.smartPaste",
+        "title": "Smart Paste (Auto-detect File Paths or Tabular Data)",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "netezza.importData",
+        "title": "Import Data to Table",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "netezza.importDataAdvanced",
+        "title": "Import Data to Table (Advanced Wizard)",
+        "icon": "$(table)"
+      },
+      {
+        "command": "netezza.importWithPicker",
+        "title": "Import Data",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "netezza.createDDL",
+        "title": "Create DDL Code",
+        "icon": "$(code)"
+      },
+      {
+        "command": "netezza.jumpToSchema",
+        "title": "Jump to Schema Object",
+        "icon": "$(search)"
+      },
+      {
+        "command": "netezza.goToCatalogDdl",
+        "title": "Go to Table DDL"
+      },
+      {
+        "command": "netezza.refreshSchema",
+        "title": "Refresh Schema",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "netezza.toggleKeepConnectionOpen",
+        "title": "JustyBase: Toggle Keep Connection Open (Global)",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "netezza.toggleKeepConnectionForTab",
+        "title": "Toggle Keep Connection for Tab",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "netezza.selectConnectionForTab",
+        "title": "Select Connection for SQL Tab",
+        "icon": "$(database)"
+      },
+      {
+        "command": "netezza.selectDatabaseForTab",
+        "title": "Select Database for SQL Tab",
+        "icon": "$(server)"
+      },
+      {
+        "command": "netezza.clearAutocompleteCache",
+        "title": "JustyBase: Clear Autocomplete Cache",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "netezza.cancelQuery",
+        "title": "Cancel Query",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "netezza.openSettings",
+        "title": "JustyBase: Open Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "netezza.toggleCodeLens",
+        "title": "JustyBase: Toggle CodeLens",
+        "icon": "$(pass-filled)"
+      },
+      {
+        "command": "netezza.toggleCodeLensOff",
+        "title": "JustyBase: Toggle CodeLens",
+        "icon": "$(error)"
+      },
+      {
+        "command": "netezza.recreateTable",
+        "title": "Recreate Table (Maintenance Script)"
+      },
+      {
+        "command": "netezza.checkSkew",
+        "title": "Check Data Skew"
+      },
+      {
+        "command": "netezza.changeOwner",
+        "title": "Change Owner"
+      },
+      {
+        "command": "netezza.renameTable",
+        "title": "Rename Table"
+      },
+      {
+        "command": "netezza.viewEditData",
+        "title": "View/Edit Data (Limit 50k)",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "netezza.createTableDesigner",
+        "title": "Visual Table Designer",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.alterTableWizard",
+        "title": "Alter Table Wizard",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "netezza.createProcedure",
+        "title": "Create New Procedure",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.createView",
+        "title": "Create New View",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.createExternalTable",
+        "title": "Create New External Table",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.createSequence",
+        "title": "Create New Sequence",
+        "icon": "$(symbol-number)"
+      },
+      {
+        "command": "netezza.createSnowflakeStream",
+        "title": "Create New Snowflake Stream",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "netezza.createSnowflakeTask",
+        "title": "Create New Snowflake Task",
+        "icon": "$(clock)"
+      },
+      {
+        "command": "netezza.createSnowflakeDynamicTable",
+        "title": "Create New Snowflake Dynamic Table",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "netezza.manageSnowflakeDynamicTable",
+        "title": "Manage Snowflake Dynamic Table",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "netezza.snowflake.switchWarehouse",
+        "title": "Snowflake: Switch Warehouse",
+        "icon": "$(server-process)"
+      },
+      {
+        "command": "netezza.snowflake.switchRole",
+        "title": "Snowflake: Switch Role",
+        "icon": "$(person)"
+      },
+      {
+        "command": "netezza.snowflake.prepareStageImport",
+        "title": "Snowflake: Prepare Stage Import",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "netezza.snowflake.prepareStageExport",
+        "title": "Snowflake: Prepare Stage Export",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "netezza.snowflake.showRecentQueryProfile",
+        "title": "Snowflake: Show Recent Query Profile",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.sqlite.viewIndexes",
+        "title": "SQLite: View Indexes",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "netezza.sqlite.addIndex",
+        "title": "SQLite: Add Index",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.sqlite.dropIndex",
+        "title": "SQLite: Drop Index",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "netezza.sqlite.viewForeignKeys",
+        "title": "SQLite: View Foreign Keys",
+        "icon": "$(references)"
+      },
+      {
+        "command": "netezza.sqlite.viewTriggers",
+        "title": "SQLite: View Triggers",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "netezza.sqlite.reindexTable",
+        "title": "SQLite: Reindex Table",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "netezza.sqlite.analyzeTable",
+        "title": "SQLite: Analyze Table",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.sqlite.vacuum",
+        "title": "SQLite: VACUUM",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "netezza.sqlite.vacuumInto",
+        "title": "SQLite: VACUUM INTO...",
+        "icon": "$(save-as)"
+      },
+      {
+        "command": "netezza.sqlite.integrityCheck",
+        "title": "SQLite: Integrity Check",
+        "icon": "$(check)"
+      },
+      {
+        "command": "netezza.sqlite.foreignKeyCheck",
+        "title": "SQLite: Foreign Key Check",
+        "icon": "$(link)"
+      },
+      {
+        "command": "netezza.sqlite.walCheckpoint",
+        "title": "SQLite: WAL Checkpoint",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "netezza.sqlite.databaseInfo",
+        "title": "SQLite: Database Info",
+        "icon": "$(info)"
+      },
+      {
+        "command": "netezza.explainQuery",
+        "title": "Explain Query Plan",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.explainQueryVerbose",
+        "title": "Explain Query Plan (Verbose)",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.tuningAdvisor",
+        "title": "Query Tuning Advisor",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "netezza.formatSQL",
+        "title": "Format SQL",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "netezza.lintSql",
+        "title": "Lint SQL (On-Demand)",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "netezza.validateSelectedSql",
+        "title": "Validate SQL (Chevrotain Parser)",
+        "icon": "$(check)"
+      },
+      {
+        "command": "netezza.clearValidationResults",
+        "title": "Clear SQL Validation Results",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "netezza.compareSchema",
+        "title": "Compare With...",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "netezza.batchExportDDL",
+        "title": "Export All DDL",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "netezza.showERD",
+        "title": "Show Entity Relationship Diagram",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "netezza.openVisualQueryBuilder",
+        "title": "Open Visual Query Builder",
+        "icon": "$(symbol-operator)"
+      },
+      {
+        "command": "netezza.openTestDataGenerator",
+        "title": "Generate Test Data",
+        "icon": "$(database)"
+      },
+      {
+        "command": "netezza.showSessionMonitor",
+        "title": "Session Monitor Dashboard",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "netezza.openSecurityPanel",
+        "title": "Open Security Panel (Permissions)",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "netezza.openEtlDesigner",
+        "title": "Open ETL Designer",
+        "icon": "$(symbol-event)"
+      },
+      {
+        "command": "netezza.newEtlProject",
+        "title": "New ETL Project",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "netezza.openEtlProject",
+        "title": "Open ETL Project",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "netezza.runEtlProject",
+        "title": "Run ETL Project",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "netezza.copilotFixSql",
+        "title": "Copilot: Fix SQL",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "netezza.copilotOptimizeSql",
+        "title": "Copilot: Optimize SQL",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "netezza.copilotExplainSql",
+        "title": "Copilot: Explain SQL",
+        "icon": "$(book)"
+      },
+      {
+        "command": "netezza.copilotCustomQuestion",
+        "title": "Copilot: Ask Question",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "netezza.copilotGenerateSql",
+        "title": "Copilot: Generate SQL from Description",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "netezza.copilotBestPractices",
+        "title": "Copilot: Rewrite to Best Practices",
+        "icon": "$(verified)"
+      },
+      {
+        "command": "netezza.toggleSchemaFavorite",
+        "title": "Toggle Favorite ⭐",
+        "icon": "$(star)"
+      },
+      {
+        "command": "netezza.schema.copyTableMetadataComment",
+        "title": "Copy Table Metadata Comment",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "netezza.favorites.addFolder",
+        "title": "New Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "netezza.favorites.moveToFolder",
+        "title": "Move to Folder...",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "netezza.favorites.editNote",
+        "title": "Edit Note",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "netezza.favorites.toggleCopilotAutoInclude",
+        "title": "Toggle Copilot Auto-Include",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "netezza.favorites.toggleCopilotEnabled",
+        "title": "Toggle Copilot Context",
+        "icon": "$(check)"
+      },
+      {
+        "command": "netezza.favorites.includeNow",
+        "title": "Include in Next Copilot Request",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.favorites.delete",
+        "title": "Remove from Favorites",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "netezza.favorites.addSqlSnippet",
+        "title": "Save SQL to Favorites",
+        "icon": "$(save)"
+      },
+      {
+        "command": "netezza.favorites.openSql",
+        "title": "Open SQL Snippet"
+      },
+      {
+        "command": "netezza.runStatementFromLens",
+        "title": "Run Statement",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "netezza.explainStatementFromLens",
+        "title": "Explain Statement",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.executeAndLoadToDuckDb",
+        "title": "Execute & Load into DuckDB",
+        "icon": "$(database)"
+      },
+      {
+        "command": "netezza.exportStatementFromLens",
+        "title": "Export Statement Results",
+        "icon": "$(export)"
+      },
+      {
+        "command": "netezza.exportWithFormatPicker",
+        "title": "Export with Format Picker",
+        "icon": "$(export)"
+      },
+      {
+        "command": "netezza.action.viewTableData",
+        "title": "View Data",
+        "icon": "$(search)"
+      },
+      {
+        "command": "netezza.schema.filter",
+        "title": "Filter Schema",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "netezza.schema.clearFilter",
+        "title": "Clear Schema Filter",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "netezza.schema.goToObject",
+        "title": "Go to Database Object",
+        "icon": "$(search)"
+      },
+      {
+        "command": "netezza.resultsSelectAll",
+        "title": "Select All Results"
+      },
+      {
+        "command": "netezza.notebook.createNew",
+        "title": "New Netezza SQL Notebook",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "netezza.notebook.openInFullGrid",
+        "title": "JustyBase: Open Notebook Result in Full Grid"
+      },
+      {
+        "command": "netezza.notebook.openFullGrid",
+        "title": "JustyBase: Open Notebook Result in Full Grid..."
+      },
+      {
+        "command": "netezza.fileSearch.focus",
+        "title": "File Search: Focus View"
+      },
+      {
+        "command": "netezza.fileSearch.run",
+        "title": "File Search: Search in Files"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "netezza.sqlcopilot",
+        "name": "sql-copilot",
+        "fullName": "SQL Copilot",
+        "description": "Ask questions about your SQL with full database context (DDL, tables, variables)",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "schema",
+            "description": "Get table schema (DDL) for tables referenced in current SQL file"
+          },
+          {
+            "name": "optimize",
+            "description": "Optimize the SQL query for Netezza performance"
+          },
+          {
+            "name": "fix",
+            "description": "Fix syntax errors in the SQL query"
+          },
+          {
+            "name": "explain",
+            "description": "Explain what the SQL query does"
+          },
+          {
+            "name": "best-practices",
+            "description": "Rewrite the SQL query to follow Netezza best practices"
+          }
+        ]
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "netezza_get_sql_schema",
+        "displayName": "Get SQL Schema",
+        "toolReferenceName": "schema",
+        "icon": "$(database)",
+        "userDescription": "Gets table schema (DDL) for tables referenced in the current SQL file",
+        "modelDescription": "This tool retrieves the database schema (DDL - Data Definition Language) for all tables referenced in the currently open SQL file. It analyzes the SQL code to find FROM, JOIN, INSERT INTO, UPDATE, DELETE FROM clauses, extracts table names, and fetches their column definitions, data types, and key constraints (PK/FK) from the connected IBM Netezza database. Use this tool when you need to understand the structure of tables used in a SQL query, or when optimizing/fixing SQL that involves specific tables. The tool requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "schema",
+          "netezza",
+          "ddl"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "Optional SQL code to analyze. If not provided, uses the content of the currently active editor."
+            }
+          }
+        }
+      },
+      {
+        "name": "netezza_get_columns",
+        "displayName": "Get Table Columns",
+        "toolReferenceName": "getColumns",
+        "icon": "$(list-unordered)",
+        "userDescription": "Gets column definitions for specified tables from the connected Netezza database",
+        "modelDescription": "This tool retrieves column metadata (column names, data types, nullability, PK/FK constraints) for specified tables from the connected IBM Netezza database. Provide a list of table names and the database name. Tables can be specified as simple names, SCHEMA.TABLE, or DB.SCHEMA.TABLE format. Use this when you need detailed column information for specific tables without analyzing SQL code. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "columns",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "tables": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of table names to get columns for. Can be TABLE, SCHEMA.TABLE, or DB.SCHEMA.TABLE format."
+            },
+            "database": {
+              "type": "string",
+              "description": "Database name. Required when table names don't include database prefix."
+            }
+          },
+          "required": [
+            "tables"
+          ]
+        }
+      },
+      {
+        "name": "netezza_get_tables",
+        "displayName": "Get Tables List",
+        "toolReferenceName": "getTables",
+        "icon": "$(list-flat)",
+        "userDescription": "Gets list of tables from a database or all databases in connected Netezza server",
+        "modelDescription": "This tool retrieves a list of regular tables (NOT external tables) from the connected IBM Netezza server. IMPORTANT: 1) This returns ONLY regular tables - for EXTERNAL TABLES use netezza_get_external_tables tool instead. 2) A Netezza connection provides access to multiple databases. When 'database' parameter is NOT specified, this tool searches across ALL accessible databases. When 'database' IS specified, it searches only in that specific database. Returns table names with database, schema, and owner information. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "tables",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "database": {
+              "type": "string",
+              "description": "Database name to list tables from. Optional - if not specified, searches ALL databases accessible via the connection."
+            },
+            "schema": {
+              "type": "string",
+              "description": "Optional schema name to filter tables. If not provided, returns tables from all schemas."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_execute_query",
+        "displayName": "Execute SQL Query",
+        "toolReferenceName": "executeQuery",
+        "icon": "$(play)",
+        "userDescription": "Execute a SQL query on the connected Netezza database and return results",
+        "modelDescription": "This tool executes a SQL query on the connected IBM Netezza database and returns the results. Use this when you need to run SQL queries to analyze data, check table contents, or verify query results. The query runs in read-only mode by default for safety. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "query",
+          "netezza",
+          "execute"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "SQL query to execute"
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database name to use. If not specified, uses the current database."
+            }
+          },
+          "required": [
+            "sql"
+          ]
+        }
+      },
+      {
+        "name": "netezza_get_databases",
+        "displayName": "Get Databases List",
+        "toolReferenceName": "getDatabases",
+        "icon": "$(server)",
+        "userDescription": "Gets list of databases from the connected Netezza server",
+        "modelDescription": "This tool retrieves a list of all databases from the connected IBM Netezza server. Use this when you need to explore what databases are available. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "netezza_get_schemas",
+        "displayName": "Get Schemas List",
+        "toolReferenceName": "getSchemas",
+        "icon": "$(folder)",
+        "userDescription": "Gets list of schemas from a database in the connected Netezza server",
+        "modelDescription": "This tool retrieves a list of all schemas from a specified database in the connected IBM Netezza server. Use this when you need to explore the schema structure of a database. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "schemas",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "database": {
+              "type": "string",
+              "description": "Database name to list schemas from. If not specified, uses the current database."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_get_views",
+        "displayName": "Get Views List",
+        "toolReferenceName": "getViews",
+        "icon": "$(eye)",
+        "userDescription": "Gets list of views from a database in the connected Netezza server",
+        "modelDescription": "This tool retrieves a list of all views from the connected IBM Netezza server. When 'database' parameter is NOT specified, searches across ALL accessible databases. When 'database' IS specified, searches only in that specific database. Returns view names along with their database, schema, and owner information. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "views",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "database": {
+              "type": "string",
+              "description": "Database name to list views from. Optional - if not specified, searches ALL databases accessible via the connection."
+            },
+            "schema": {
+              "type": "string",
+              "description": "Optional schema name to filter views. If not provided, returns views from all schemas."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_get_procedures",
+        "displayName": "Get Procedures List",
+        "toolReferenceName": "getProcedures",
+        "icon": "$(code)",
+        "userDescription": "Gets list of stored procedures from a database in the connected Netezza server",
+        "modelDescription": "This tool retrieves a list of all stored procedures from the connected IBM Netezza server. When 'database' parameter is NOT specified, searches across ALL accessible databases. When 'database' IS specified, searches only in that specific database. Returns procedure names along with their database, schema, and owner information. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "procedures",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "database": {
+              "type": "string",
+              "description": "Database name to list procedures from. Optional - if not specified, searches ALL databases accessible via the connection."
+            },
+            "schema": {
+              "type": "string",
+              "description": "Optional schema name to filter procedures. If not provided, returns procedures from all schemas."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_get_ddl",
+        "displayName": "Get DDL",
+        "toolReferenceName": "getDDL",
+        "icon": "$(file-code)",
+        "userDescription": "Gets the DDL (CREATE statement) for a table, view, procedure, nickname, or alias from the connected database",
+        "modelDescription": "This tool retrieves the DDL (Data Definition Language) for a specific database object from the connected IBM Netezza, Db2, or SQLite database. CRITICAL: You MUST specify the correct objectType parameter: 'table' for regular tables, 'external table' for external tables (different syntax!), 'view' for views, 'procedure' for stored procedures, 'synonym' for synonyms, 'nickname' for Db2 nicknames, and 'alias' for Db2 aliases. External tables use CREATE EXTERNAL TABLE syntax with dataobject options - using wrong type will return incorrect DDL. Supports name formats: TABLENAME, SCHEMA.TABLENAME, DATABASE..TABLENAME, DATABASE.SCHEMA.TABLENAME. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "ddl",
+          "netezza",
+          "definition",
+          "create",
+          "table",
+          "view",
+          "procedure",
+          "nickname",
+          "alias"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "objectName": {
+              "type": "string",
+              "description": "Name of the object to get DDL for. Formats: TABLENAME, SCHEMA.TABLENAME, DATABASE..TABLENAME, or DATABASE.SCHEMA.TABLENAME"
+            },
+            "objectType": {
+              "type": "string",
+              "enum": [
+                "table",
+                "view",
+                "procedure",
+                "external table",
+                "synonym",
+                "nickname",
+                "alias"
+              ],
+              "description": "Type of the object. CRITICAL: Use 'external table' for external tables (they have different CREATE syntax with dataobject options). Use 'nickname' or 'alias' for Db2 federated objects. Use 'table' only for regular tables."
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database name."
+            },
+            "schema": {
+              "type": "string",
+              "description": "Optional schema name."
+            }
+          },
+          "required": [
+            "objectName",
+            "objectType"
+          ]
+        }
+      },
+      {
+        "name": "netezza_get_table_stats",
+        "displayName": "Get Table Statistics",
+        "toolReferenceName": "getTableStats",
+        "icon": "$(graph)",
+        "userDescription": "Gets statistics (row count, size, etc.) for a table from the connected Netezza database",
+        "modelDescription": "This tool retrieves statistics for a specific table from the connected IBM Netezza database, including row count, allocated bytes, used bytes, and skew. Use this when you need to understand the size and distribution of data in a table. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "statistics",
+          "netezza",
+          "table"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "tableName": {
+              "type": "string",
+              "description": "Name of the table to get statistics for. Can be TABLE, SCHEMA.TABLE, or DB.SCHEMA.TABLE format."
+            },
+            "database": {
+              "type": "string",
+              "description": "Database name. Required when table name doesn't include database prefix."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "quick",
+                "deep"
+              ],
+              "description": "Statistics mode. 'quick' uses catalog estimates (low-cost). 'deep' runs exact COUNT(*) + DATASLICE skew scan (higher-cost). Default: quick."
+            }
+          },
+          "required": [
+            "tableName"
+          ]
+        }
+      },
+      {
+        "name": "netezza_search_schema",
+        "displayName": "Search Schema Objects",
+        "toolReferenceName": "searchSchema",
+        "icon": "$(search)",
+        "userDescription": "Search for tables, views, procedures, and other objects by name pattern in the connected Netezza database",
+        "modelDescription": "This tool searches for database objects (tables, views, procedures, functions, aggregates, synonyms, external tables) by name pattern in the connected IBM Netezza database. Use this when you need to find objects by partial name match. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "search",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "searchTerm": {
+              "type": "string",
+              "description": "Search term to match against object names. Supports SQL LIKE wildcards (% and _)."
+            },
+            "objectType": {
+              "type": "string",
+              "enum": [
+                "TABLE",
+                "VIEW",
+                "PROCEDURE",
+                "FUNCTION",
+                "AGGREGATE",
+                "SYNONYM",
+                "EXTERNAL TABLE",
+                "ALL"
+              ],
+              "description": "Type of objects to search for. Use 'ALL' to search all object types."
+            },
+            "database": {
+              "type": "string",
+              "description": "Database name to search in. If not specified, searches ALL databases accessible via the connection."
+            }
+          },
+          "required": [
+            "searchTerm"
+          ]
+        }
+      },
+      {
+        "name": "netezza_get_dependencies",
+        "displayName": "Get Object Dependencies",
+        "toolReferenceName": "getDependencies",
+        "icon": "$(type-hierarchy)",
+        "userDescription": "Builds a dependency graph for a table, view, or procedure with structured evidence",
+        "modelDescription": "This tool resolves the target object and returns a structured dependency graph with summary/data/errors/next-actions sections. It uses foreign-key metadata and text-based source scans (views/procedures), so results are best-effort and may be partial. Prefer explicit database/objectType for deterministic matching. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "dependencies",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "objectName": {
+              "type": "string",
+              "description": "Name of the object to get dependencies for. Can be TABLE, SCHEMA.TABLE, or DB.SCHEMA.TABLE format."
+            },
+            "objectType": {
+              "type": "string",
+              "enum": [
+                "TABLE",
+                "VIEW",
+                "PROCEDURE"
+              ],
+              "description": "Type of the object"
+            },
+            "database": {
+              "type": "string",
+              "description": "Database name. Required when object name doesn't include database prefix."
+            }
+          },
+          "required": [
+            "objectName",
+            "objectType"
+          ]
+        }
+      },
+      {
+        "name": "netezza_get_external_tables",
+        "displayName": "Get External Tables List",
+        "toolReferenceName": "getExternalTables",
+        "icon": "$(file-symlink-file)",
+        "userDescription": "Gets list of external tables from a database in the connected Netezza server",
+        "modelDescription": "This tool retrieves a list of EXTERNAL TABLES from the connected IBM Netezza server. EXTERNAL TABLES are different from regular tables - they reference external data files and use CREATE EXTERNAL TABLE syntax. When getting DDL for an external table, you MUST use objectType='external table' in netezza_get_ddl tool. When 'database' parameter is NOT specified, searches across ALL accessible databases. Returns external table names with database, schema, owner, and dataobject information. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "external-tables",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "database": {
+              "type": "string",
+              "description": "Database name to list external tables from. Optional - if not specified, searches ALL databases accessible via the connection."
+            },
+            "schema": {
+              "type": "string",
+              "description": "Optional schema name to filter external tables. If not provided, returns external tables from all schemas."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_find_table_locations",
+        "displayName": "Find Table Locations in SQL",
+        "toolReferenceName": "findTableLocations",
+        "icon": "$(location)",
+        "userDescription": "Finds all locations where a table is referenced in the current SQL file",
+        "modelDescription": "This tool finds all locations where a specific table is referenced in the currently open SQL file. It analyzes the SQL code and returns line/column positions where the table appears. Use this when you need to understand how a table is used in a query. No database connection required.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "analysis",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "tableName": {
+              "type": "string",
+              "description": "Name of the table to find references for. Can be TABLE, SCHEMA.TABLE, or DB.SCHEMA.TABLE format."
+            },
+            "sql": {
+              "type": "string",
+              "description": "Optional SQL code to analyze. If not provided, uses the content of the currently active editor."
+            }
+          },
+          "required": [
+            "tableName"
+          ]
+        }
+      },
+      {
+        "name": "netezza_get_comments",
+        "displayName": "Get Table/Column Comments",
+        "toolReferenceName": "getComments",
+        "icon": "$(comment)",
+        "userDescription": "Gets comments for a table and its columns from the connected Netezza database",
+        "modelDescription": "This tool retrieves comments for a specific table and its columns from the connected IBM Netezza database. Comments provide documentation about the table and columns. Use this when you need to understand the purpose and meaning of table columns. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "comments",
+          "netezza",
+          "metadata"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "tableName": {
+              "type": "string",
+              "description": "Name of the table to get comments for. Can be TABLE, SCHEMA.TABLE, or DB.SCHEMA.TABLE format."
+            },
+            "database": {
+              "type": "string",
+              "description": "Database name. Required when table name doesn't include database prefix."
+            }
+          },
+          "required": [
+            "tableName"
+          ]
+        }
+      },
+      {
+        "name": "netezza_get_favorites",
+        "displayName": "Get Favorites",
+        "toolReferenceName": "favorites",
+        "icon": "$(star)",
+        "userDescription": "Lists user's favorite tables and SQL snippets.",
+        "modelDescription": "This tool returns the user's favorite tables, views, external tables, and SQL snippets. These favorites serve as a repository of key database objects critical to the user's workflow. It includes table identifiers (database.schema.table), SQL script contents, user notes, and inclusion status. First call this with mode='summary' to see available items. If the total content is small (< 3000 chars), the full SQL will be returned immediately. Otherwise, it will say '[Content omitted]'. In that case, call this tool again with mode='content' and specify the exact names of the snippets in 'profileNames' to fetch their code. You can also use mode='full' to force fetching everything. No database connection is required to list profiles.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "copilot",
+          "favorites",
+          "ulubione",
+          "tables",
+          "sql",
+          "snippets",
+          "context"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "includeNowProfileId": {
+              "type": "string",
+              "description": "Optional profile id to include in the next Copilot request (usually DATABASE.SCHEMA.TABLE)."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "full",
+                "summary",
+                "content"
+              ],
+              "description": "The mode to fetch favorites in. 'summary' (default) returns names/notes and auto-includes code if small. 'content' is used with 'profileNames' to fetch specific snippets. 'full' returns everything."
+            },
+            "profileNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of favorite names or identifiers to fetch specifics for when mode='content'. Example: ['My Super Query', 'DB.SCHEMA.TABLE']."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_validate_sql",
+        "displayName": "Validate SQL (Parser)",
+        "toolReferenceName": "validateSqlParser",
+        "icon": "$(check)",
+        "userDescription": "Validates SQL with parser/linter rules (no database execution)",
+        "modelDescription": "This tool validates SQL using the built-in parser and linter pipeline. It returns syntax and semantic diagnostics with issue codes (e.g., SQLxxx, NZxxx, NZPxxx). Use this when you need offline validation without executing SQL. No database connection required.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "validation",
+          "syntax",
+          "parser",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "SQL code to validate. If not provided, uses the content of the currently active editor."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_validate_sql_on_database",
+        "displayName": "Validate SQL on Database",
+        "toolReferenceName": "validateSqlOnDatabase",
+        "icon": "$(database)",
+        "userDescription": "Validates SQL against connected database using EXPLAIN",
+        "modelDescription": "This tool validates SQL on the connected IBM Netezza database by running EXPLAIN (without executing DML/SELECT results). Use this when parser validation passes but runtime/database context still needs verification. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "validation",
+          "database",
+          "runtime",
+          "explain",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "SQL code to validate on database. If not provided, uses the content of the currently active editor."
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database context for validation."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_get_sql_diagnostics",
+        "displayName": "Get SQL Diagnostics",
+        "toolReferenceName": "getSqlDiagnostics",
+        "icon": "$(warning)",
+        "userDescription": "Gets current SQL linter diagnostics with codes from active editor",
+        "modelDescription": "This tool returns SQL diagnostics from the active SQL document, including linter/parser codes such as SQLxxx, NZxxx and NZPxxx. Use this before fixing SQL to get precise issue context and locations.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "diagnostics",
+          "linter",
+          "validation",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "includeWarnings": {
+              "type": "boolean",
+              "description": "When false, returns only error-level diagnostics. Default: true."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_inspect_import_file",
+        "displayName": "Inspect Import File",
+        "toolReferenceName": "inspectImportFile",
+        "icon": "$(file)",
+        "userDescription": "Inspects a source file and returns detected delimiter, inferred column types, and sample rows",
+        "modelDescription": "Use this tool before import to inspect CSV/TXT/XLSX/XLSB files. It infers delimiter and decimal separator, returns source-to-target column mapping preview, and shows sample rows. This tool does not write to database.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "import",
+          "file",
+          "schema",
+          "preview",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Path to source file to inspect."
+            },
+            "sampleRows": {
+              "type": "integer",
+              "description": "Number of sample rows to return (default 5, max 20).",
+              "default": 5,
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          "required": [
+            "filePath"
+          ]
+        }
+      },
+      {
+        "name": "netezza_propose_import_mapping",
+        "displayName": "Propose Import Mapping",
+        "toolReferenceName": "proposeImportMapping",
+        "icon": "$(wand)",
+        "userDescription": "Proposes inferred source-to-target column mapping and CREATE TABLE SQL for import",
+        "modelDescription": "Use this tool after file inspection to produce a proposed mapping for import. It infers target column names/types and returns proposed CREATE TABLE AS EXTERNAL SQL for the selected target table.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "import",
+          "mapping",
+          "schema",
+          "ddl",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Path to source file."
+            },
+            "targetTable": {
+              "type": "string",
+              "description": "Target table name in Netezza (for example MYDB.ADMIN.MYTABLE)."
+            }
+          },
+          "required": [
+            "filePath",
+            "targetTable"
+          ]
+        }
+      },
+      {
+        "name": "netezza_execute_import",
+        "displayName": "Execute Import",
+        "toolReferenceName": "executeImport",
+        "icon": "$(cloud-upload)",
+        "userDescription": "Runs dry-run or execution import flow from file to table with audit details",
+        "modelDescription": "Use this tool to execute import into Netezza. For safety, run with dryRun=true first to validate inferred mapping and SQL. When dryRun=false it performs database write import and returns audit details. Requires active database connection for non-dry-run execution.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "import",
+          "execution",
+          "dry-run",
+          "audit",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Path to source file."
+            },
+            "targetTable": {
+              "type": "string",
+              "description": "Target table name in Netezza."
+            },
+            "dryRun": {
+              "type": "boolean",
+              "description": "When true, validates mapping and SQL without writing to DB. Default: true.",
+              "default": true
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Optional import timeout in seconds."
+            }
+          },
+          "required": [
+            "filePath",
+            "targetTable"
+          ]
+        }
+      },
+      {
+        "name": "netezza_export_query_results",
+        "displayName": "Export Query Results",
+        "toolReferenceName": "exportQueryResults",
+        "icon": "$(export)",
+        "userDescription": "Exports query results to CSV, XLSX, XLSB, or Parquet file",
+        "modelDescription": "Use this tool to export either SQL query results or the active Query Results grid data to csv/xlsx/xlsb/parquet. For SQL mode, provide sql directly, sqlFilePath, or rely on active SQL editor fallback (selection preferred). For results mode, set source='activeResults'. If outputPath is omitted, a temp path is used; Desktop path is recommended for user-friendly output.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "export",
+          "query",
+          "csv",
+          "xlsx",
+          "xlsb",
+          "parquet"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "Optional SQL query to export. If not provided, tool can use sqlFilePath or active SQL editor content."
+            },
+            "sqlFilePath": {
+              "type": "string",
+              "description": "Optional path to a .sql file used as query source when sql is not provided."
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "xlsx",
+                "xlsb",
+                "parquet"
+              ],
+              "description": "Output format. Default: csv."
+            },
+            "outputPath": {
+              "type": "string",
+              "description": "Optional target file path. If omitted, a temp path is generated."
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Optional export timeout in seconds."
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "sql",
+                "activeResults"
+              ],
+              "description": "Export source. 'sql' executes query export. 'activeResults' exports the currently active Query Results grid."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_explain_plan",
+        "displayName": "Get Explain Plan",
+        "toolReferenceName": "explainPlan",
+        "icon": "$(graph)",
+        "userDescription": "Gets the explain plan for a SQL query from the connected Netezza database",
+        "modelDescription": "This tool retrieves the explain plan for a SQL query from the connected IBM Netezza database. The explain plan shows how the query will be executed, including table scans, joins, and estimated costs. Use this when you need to analyze query performance. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "explain",
+          "performance",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "SQL query to explain. If not provided, uses the content of the currently active editor."
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database name to use. If not specified, uses the current database."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_get_tuning_advice",
+        "displayName": "Get Tuning Advice",
+        "toolReferenceName": "getTuningAdvice",
+        "icon": "$(lightbulb)",
+        "userDescription": "Generates Netezza tuning recommendations using EXPLAIN and table stats (read-only)",
+        "modelDescription": "This tool generates Netezza tuning recommendations based on SQL text, EXPLAIN output, and table statistics. It uses read-only diagnostics and returns structured guidance (summary/data/errors/next-actions). Use this tool for performance tuning suggestions before changing SQL or table design.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "performance",
+          "tuning",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "Optional SQL to analyze. If omitted, uses selected SQL or full SQL from active editor."
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database name used for table statistics lookup when SQL does not include database prefix."
+            },
+            "analyzeAllTables": {
+              "type": "boolean",
+              "description": "If true (default), analyze up to maxTables referenced in SQL. If false, analyze only the first referenced table."
+            },
+            "maxTables": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Maximum number of referenced tables to analyze when analyzeAllTables=true. Default: 5."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "netezza_get_sample_data",
+        "displayName": "Get Sample Data",
+        "toolReferenceName": "getSampleData",
+        "icon": "$(table)",
+        "userDescription": "Gets sample data (first N rows) from a table in the connected Netezza database",
+        "modelDescription": "This tool retrieves sample data (first N rows) from a specific table in the connected IBM Netezza database. Use this when you need to see example data from a table. Requires an active database connection.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "database",
+          "sample",
+          "data",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "tableName": {
+              "type": "string",
+              "description": "Name of the table to get sample data from. Can be TABLE, SCHEMA.TABLE, or DB.SCHEMA.TABLE format."
+            },
+            "database": {
+              "type": "string",
+              "description": "Database name. Required when table name doesn't include database prefix."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of rows to return. Default: 10, Maximum: 100.",
+              "default": 10,
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "tableName"
+          ]
+        }
+      },
+      {
+        "name": "netezza_compile_procedure",
+        "displayName": "Compile Procedure",
+        "toolReferenceName": "compileProcedure",
+        "icon": "$(debug-start)",
+        "userDescription": "Compiles a stored procedure by executing CREATE OR REPLACE PROCEDURE DDL",
+        "modelDescription": "Executes CREATE OR REPLACE PROCEDURE DDL to compile a stored procedure on the connected Netezza database. Returns SUCCESS or FAILED with error details. Use this after modifying procedure code to verify syntax is valid. If compilation fails, use the error message to guide fixes. BEFORE starting work on a procedure, ask the user: 'Do you have diagnostic SQL queries to validate correctness?' The user may provide one or more queries that define success conditions. After each compile attempt, use netezza_run_diagnostic_queries with those queries to verify.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "compile",
+          "ddl",
+          "netezza",
+          "procedure"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "The CREATE OR REPLACE PROCEDURE SQL statement to execute."
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database name for scoped execution."
+            }
+          },
+          "required": [
+            "sql"
+          ]
+        }
+      },
+      {
+        "name": "netezza_execute_procedure",
+        "displayName": "Execute Procedure (CALL)",
+        "toolReferenceName": "executeProcedure",
+        "icon": "$(run-all)",
+        "userDescription": "Executes a stored procedure via CALL statement",
+        "modelDescription": "Executes a stored procedure via CALL statement on the connected Netezza database. Returns execution status (SUCCESS/FAILED) and any error details. Use this to test-run a compiled procedure. Does NOT return result data - use netezza_execute_query after this if you need to verify side effects.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "call",
+          "execution",
+          "netezza",
+          "procedure"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "procedureName": {
+              "type": "string",
+              "description": "Name of the procedure to call. Can use DB..PROC_NAME notation."
+            },
+            "arguments": {
+              "type": "string",
+              "description": "Optional comma-separated arguments to pass to the procedure, e.g. '1, \"text\", NULL'."
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database name for scoped execution."
+            }
+          },
+          "required": [
+            "procedureName"
+          ]
+        }
+      },
+      {
+        "name": "netezza_run_diagnostic_queries",
+        "displayName": "Run Diagnostic Queries",
+        "toolReferenceName": "runDiagnosticQueries",
+        "icon": "$(testing-run-icon)",
+        "userDescription": "Runs diagnostic SQL queries to validate procedure correctness",
+        "modelDescription": "Runs a list of diagnostic SQL queries to validate procedure correctness. Each query result is reported as PASS or FAIL. Use this after each compile attempt to check if the procedure meets success criteria. BEFORE starting work, ask the user: 'Do you have diagnostic SQL queries to validate correctness?' The user may provide one or more queries. Pass them to this tool after each compile/execute iteration. If any diagnostic fails, analyze the results and fix the procedure accordingly.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "diagnostic",
+          "netezza",
+          "procedure",
+          "validation"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "queries": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of SQL diagnostic queries to run. Each must be a complete, executable SQL statement."
+            },
+            "database": {
+              "type": "string",
+              "description": "Optional database name for scoped execution."
+            }
+          },
+          "required": [
+            "queries"
+          ]
+        }
+      }
+    ],
+    "submenus": [
+      {
+        "id": "netezza.justybase",
+        "label": "JustyBase"
+      },
+      {
+        "id": "netezza.sqlRun",
+        "label": "Run Query",
+        "icon": "$(debug-start)"
+      },
+      {
+        "id": "netezza.connectionConfig",
+        "label": "Connection",
+        "icon": "$(plug)"
+      },
+      {
+        "id": "netezza.importDataMenu",
+        "label": "Import",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "id": "netezza.ctxExport",
+        "label": "Export",
+        "icon": "$(export)"
+      },
+      {
+        "id": "netezza.ctxImport",
+        "label": "Import",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "id": "netezza.ctxSqlTools",
+        "label": "SQL Tools",
+        "icon": "$(tools)"
+      },
+      {
+        "id": "netezza.ctxCopilot",
+        "label": "AI Copilot",
+        "icon": "$(sparkle)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "netezza.switchToNativeCsvPreview",
+          "when": "activeWebviewPanelId == 'netezza.filePreview' && netezza.filePreviewExtname == .csv",
+          "group": "navigation@0"
+        },
+        {
+          "command": "netezza.switchToNativeCsvPreview",
+          "when": "activeWebviewPanelId == 'netezza.filePreview' && netezza.filePreviewExtname == .tsv",
+          "group": "navigation@0"
+        },
+        {
+          "command": "netezza.switchToNativeCsvPreview",
+          "when": "activeWebviewPanelId == 'netezza.filePreview' && netezza.filePreviewExtname == .tab",
+          "group": "navigation@0"
+        },
+        {
+          "submenu": "netezza.sqlRun",
+          "when": "resourceLangId == sql",
+          "icon": "$(debug-start)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "netezza.cancelQuery",
+          "when": "resourceLangId == sql",
+          "group": "navigation@1.5"
+        },
+        {
+          "submenu": "netezza.connectionConfig",
+          "when": "resourceLangId == sql",
+          "group": "navigation@2"
+        },
+        {
+          "command": "netezza.exportToMdFile",
+          "when": "resourceLangId == sql",
+          "group": "navigation@3.5"
+        },
+        {
+          "command": "netezza.openSettings",
+          "when": "resourceLangId == sql",
+          "group": "navigation@15"
+        },
+        {
+          "command": "netezza.toggleCodeLens",
+          "when": "resourceLangId == sql && justybase.codeLensEnabled",
+          "group": "navigation@15"
+        },
+        {
+          "command": "netezza.toggleCodeLensOff",
+          "when": "resourceLangId == sql && !justybase.codeLensEnabled",
+          "group": "navigation@15"
+        },
+        {
+          "submenu": "netezza.importDataMenu",
+          "when": "resourceLangId == sql",
+          "group": "navigation@5"
+        },
+        {
+          "command": "netezza.formatSQL",
+          "when": "resourceLangId == sql",
+          "group": "navigation@6"
+        },
+        {
+          "command": "netezza.explainQuery",
+          "when": "resourceLangId == sql && justybase.active.capabilities.supportsExplainPlan",
+          "group": "navigation@7"
+        },
+        {
+          "command": "netezza.tuningAdvisor",
+          "when": "resourceLangId == sql && justybase.active.capabilities.supportsTuningAdvisor",
+          "group": "navigation@7.5"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "netezza.explainQuery",
+          "when": "justybase.active.capabilities.supportsExplainPlan"
+        },
+        {
+          "command": "netezza.explainQueryVerbose",
+          "when": "justybase.active.capabilities.supportsExplainPlan"
+        },
+        {
+          "command": "netezza.tuningAdvisor",
+          "when": "justybase.active.capabilities.supportsTuningAdvisor"
+        },
+        {
+          "command": "netezza.showSessionMonitor",
+          "when": "justybase.active.capabilities.supportsSessionMonitor"
+        },
+        {
+          "command": "netezza.showResultPanelPerformanceStats",
+          "when": "true"
+        },
+        {
+          "command": "netezza.clearResultPanelPerformanceStats",
+          "when": "true"
+        },
+        {
+          "command": "netezza.groomTable",
+          "when": "false"
+        },
+        {
+          "command": "netezza.generateStatistics",
+          "when": "false"
+        },
+        {
+          "command": "netezza.checkSkew",
+          "when": "false"
+        },
+        {
+          "command": "netezza.recreateTable",
+          "when": "false"
+        },
+        {
+          "command": "netezza.vacuumTable",
+          "when": "false"
+        },
+        {
+          "command": "netezza.analyzeTable",
+          "when": "false"
+        },
+        {
+          "command": "netezza.reindexTable",
+          "when": "false"
+        },
+        {
+          "command": "postgresql.listPartitions",
+          "when": "false"
+        },
+        {
+          "command": "postgresql.createPartition",
+          "when": "false"
+        },
+        {
+          "command": "postgresql.attachPartition",
+          "when": "false"
+        },
+        {
+          "command": "postgresql.listIndexes",
+          "when": "false"
+        },
+        {
+          "command": "postgresql.createIndex",
+          "when": "false"
+        },
+        {
+          "command": "netezza.importDataAdvanced"
+        }
+      ],
+      "editor/context": [
+        {
+          "submenu": "netezza.justybase",
+          "when": "resourceLangId == sql",
+          "group": "navigation@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "netezza.openInFilePreview",
+          "when": "resourceExtname =~ /\\.(json|csv|xlsx|xlsb)$/",
+          "group": "navigation"
+        }
+      ],
+      "netezza.justybase": [
+        {
+          "command": "netezza.jumpToSchema",
+          "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "submenu": "netezza.ctxSqlTools",
+          "when": "resourceLangId == sql",
+          "group": "1_modification"
+        },
+        {
+          "submenu": "netezza.ctxExport",
+          "when": "editorHasSelection && resourceLangId == sql",
+          "group": "2_export"
+        },
+        {
+          "submenu": "netezza.ctxImport",
+          "when": "resourceLangId == sql",
+          "group": "3_import"
+        },
+        {
+          "submenu": "netezza.ctxCopilot",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "4_copilot"
+        },
+        {
+          "command": "netezza.favorites.addSqlSnippet",
+          "when": "resourceExtname == .sql || resourceLangId == sql",
+          "group": "5_favorites"
+        }
+      ],
+      "netezza.sqlRun": [
+        {
+          "command": "netezza.runQuery",
+          "when": "resourceLangId == sql",
+          "group": "1_run"
+        },
+        {
+          "command": "netezza.runQueryBatch",
+          "when": "resourceLangId == sql",
+          "group": "2_run"
+        },
+        {
+          "command": "netezza.runQueryContinueOnError",
+          "when": "resourceLangId == sql",
+          "group": "3_run"
+        },
+        {
+          "command": "netezza.exportToXlsb",
+          "when": "resourceLangId == sql",
+          "args": {
+            "format": "xlsb"
+          },
+          "group": "4_export"
+        },
+        {
+          "command": "netezza.exportToXlsx",
+          "when": "resourceLangId == sql",
+          "group": "5_export"
+        },
+        {
+          "command": "netezza.exportToCsv",
+          "when": "resourceLangId == sql",
+          "group": "6_export"
+        },
+        {
+          "command": "netezza.exportToParquet",
+          "when": "resourceLangId == sql",
+          "group": "7_export"
+        },
+        {
+          "command": "netezza.copyXlsbToClipboard",
+          "when": "resourceLangId == sql",
+          "group": "8_clipboard"
+        },
+        {
+          "command": "netezza.exportQueryAndOpenXlsb",
+          "when": "resourceLangId == sql",
+          "group": "9_export"
+        },
+        {
+          "command": "netezza.exportQueryAndOpenXlsx",
+          "when": "resourceLangId == sql",
+          "group": "10_export"
+        }
+      ],
+      "netezza.connectionConfig": [
+        {
+          "command": "netezza.selectConnectionForTab",
+          "when": "resourceLangId == sql",
+          "group": "1_connection"
+        },
+        {
+          "command": "netezza.selectDatabaseForTab",
+          "when": "resourceLangId == sql",
+          "group": "2_connection"
+        }
+      ],
+      "netezza.importDataMenu": [
+        {
+          "command": "netezza.importClipboard",
+          "when": "resourceLangId == sql",
+          "group": "1_import"
+        },
+        {
+          "command": "netezza.importData",
+          "when": "resourceLangId == sql",
+          "group": "2_import"
+        },
+        {
+          "command": "netezza.importDataAdvanced",
+          "when": "resourceLangId == sql",
+          "group": "3_import"
+        }
+      ],
+      "netezza.ctxSqlTools": [
+        {
+          "command": "netezza.formatSQL",
+          "when": "resourceLangId == sql",
+          "group": "1_sqltools"
+        },
+        {
+          "command": "netezza.tuningAdvisor",
+          "when": "resourceLangId == sql && justybase.active.capabilities.supportsTuningAdvisor",
+          "group": "2_sqltools"
+        },
+        {
+          "command": "netezza.validateSelectedSql",
+          "when": "resourceLangId == sql",
+          "group": "3_sqltools"
+        },
+        {
+          "command": "netezza.clearValidationResults",
+          "when": "resourceLangId == sql",
+          "group": "4_sqltools"
+        }
+      ],
+      "netezza.ctxExport": [
+        {
+          "command": "netezza.exportToXlsb",
+          "when": "resourceLangId == sql",
+          "group": "1_export"
+        },
+        {
+          "command": "netezza.exportToXlsx",
+          "when": "resourceLangId == sql",
+          "group": "2_export"
+        },
+        {
+          "command": "netezza.exportToCsv",
+          "when": "resourceLangId == sql",
+          "group": "3_export"
+        },
+        {
+          "command": "netezza.exportToParquet",
+          "when": "resourceLangId == sql",
+          "group": "4_export"
+        },
+        {
+          "command": "netezza.exportToMdFile",
+          "when": "resourceLangId == sql",
+          "group": "5_export"
+        },
+        {
+          "command": "netezza.exportToXlsbAndOpen",
+          "when": "resourceLangId == sql",
+          "group": "6_export"
+        },
+        {
+          "command": "netezza.copyXlsbToClipboard",
+          "when": "resourceLangId == sql",
+          "group": "7_export"
+        },
+        {
+          "command": "netezza.executeAndLoadToDuckDb",
+          "when": "resourceLangId == sql",
+          "group": "8_export"
+        }
+      ],
+      "netezza.ctxImport": [
+        {
+          "command": "netezza.smartPaste",
+          "when": "resourceLangId == sql",
+          "group": "1_import"
+        },
+        {
+          "command": "netezza.importClipboard",
+          "when": "resourceLangId == sql",
+          "group": "2_import"
+        },
+        {
+          "command": "netezza.importWithPicker",
+          "when": "resourceLangId == sql",
+          "group": "3_import"
+        },
+        {
+          "command": "netezza.importDataAdvanced",
+          "when": "resourceLangId == sql",
+          "group": "4_import"
+        }
+      ],
+      "netezza.ctxCopilot": [
+        {
+          "command": "netezza.copilotFixSql",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "1_copilot"
+        },
+        {
+          "command": "netezza.copilotOptimizeSql",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "2_copilot"
+        },
+        {
+          "command": "netezza.copilotBestPractices",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "3_copilot"
+        },
+        {
+          "command": "netezza.copilotExplainSql",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "4_copilot"
+        },
+        {
+          "command": "netezza.copilotCustomQuestion",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "5_copilot"
+        },
+        {
+          "command": "netezza.copilotGenerateSql",
+          "when": "resourceLangId == sql",
+          "group": "6_copilot"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "netezza.schema.filter",
+          "when": "view == netezza.schema",
+          "group": "navigation@1"
+        },
+        {
+          "command": "netezza.schema.clearFilter",
+          "when": "view == netezza.schema",
+          "group": "navigation@2"
+        },
+        {
+          "command": "netezza.openLogin",
+          "when": "view == netezza.schema",
+          "group": "navigation@3"
+        },
+        {
+          "command": "netezza.openSqlConsole",
+          "when": "view == netezza.schema",
+          "group": "navigation@3.5"
+        },
+        {
+          "command": "netezza.refreshSchema",
+          "when": "view == netezza.schema",
+          "group": "navigation@4"
+        },
+        {
+          "command": "netezza.showSessionMonitor",
+          "when": "view == netezza.schema && justybase.schema.capabilities.supportsSessionMonitor",
+          "group": "navigation@5"
+        },
+        {
+          "command": "netezza.openSecurityPanel",
+          "when": "view == netezza.schema",
+          "group": "navigation@5.5"
+        },
+        {
+          "command": "netezza.openEtlDesigner",
+          "when": "view == netezza.schema",
+          "group": "navigation@6"
+        },
+        {
+          "command": "netezza.fileSearch.run",
+          "when": "view == netezza.fileSearch",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "netezza.schema.filter",
+          "when": "view == netezza.schema && viewItem == filterInput",
+          "group": "inline@1"
+        },
+        {
+          "command": "netezza.schema.clearFilter",
+          "when": "view == netezza.schema && viewItem == filterInput",
+          "group": "inline@2"
+        },
+        {
+          "command": "netezza.openSqlConsole",
+          "when": "view == netezza.schema && viewItem == serverInstance",
+          "group": "0_console@1"
+        },
+        {
+          "command": "netezza.openSqlConsole",
+          "when": "view == netezza.schema && viewItem == database",
+          "group": "0_console@1"
+        },
+        {
+          "command": "netezza.schema.copyTableMetadataComment",
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|EXTERNAL TABLE|SYNONYM)$/ || view == netezza.schema && viewItem =~ /^favoritesObject:(TABLE|VIEW|EXTERNAL TABLE|SYNONYM)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "netezza.toggleSchemaFavorite",
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|EXTERNAL TABLE|PROCEDURE|FUNCTION|AGGREGATE)$/ || view == netezza.schema && viewItem =~ /^favoritesObject:/",
+          "group": "inline@2"
+        },
+        {
+          "command": "netezza.favorites.addFolder",
+          "when": "view == netezza.schema && viewItem == favoritesRoot",
+          "group": "inline"
+        },
+        {
+          "command": "netezza.favorites.editNote",
+          "when": "view == netezza.schema && viewItem =~ /^favorites(Folder|Sql|Object)/",
+          "group": "inline"
+        },
+        {
+          "command": "netezza.favorites.moveToFolder",
+          "when": "view == netezza.schema && viewItem =~ /^favorites(Folder|Sql|Object)/",
+          "group": "inline"
+        },
+        {
+          "command": "netezza.favorites.delete",
+          "when": "view == netezza.schema && viewItem =~ /^favorites(Folder|Sql|Object)/",
+          "group": "1_modification"
+        },
+        {
+          "command": "netezza.copySelectAll",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schemaDatabaseKind != db2",
+          "group": "1_copy"
+        },
+        {
+          "command": "netezza.copyDrop",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schemaDatabaseKind != db2",
+          "group": "1_copy"
+        },
+        {
+          "command": "netezza.copyName",
+          "when": "view == netezza.schema && viewItem =~ /netezza:.*/ || view == netezza.schema && viewItem =~ /favoritesObject:.*/",
+          "group": "1_copy"
+        },
+        {
+          "command": "netezza.grantPermissions",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "2_permissions"
+        },
+        {
+          "command": "netezza.groomTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == netezza",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.addTableComment",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.addColumnComment",
+          "when": "view == netezza.schema && viewItem == column && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "1_actions"
+        },
+        {
+          "command": "netezza.generateStatistics",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql)",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.vacuumTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2)",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.analyzeTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle)",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.reindexTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql)",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "postgresql.listPartitions",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "postgresql.createPartition",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "postgresql.attachPartition",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "postgresql.listIndexes",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "postgresql.createIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.truncateTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2",
+          "group": "4_danger"
+        },
+        {
+          "command": "netezza.addPrimaryKey",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "5_schema@1"
+        },
+        {
+          "command": "netezza.alterTableWizard",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "5_schema@0"
+        },
+        {
+          "command": "netezza.addForeignKey",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "5_schema@2"
+        },
+        {
+          "command": "netezza.addUniqueConstraint",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "5_schema@3"
+        },
+        {
+          "command": "netezza.sqlite.viewIndexes",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "group": "3_sqlite@1"
+        },
+        {
+          "command": "netezza.sqlite.addIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "group": "3_sqlite@2"
+        },
+        {
+          "command": "netezza.sqlite.dropIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "group": "3_sqlite@3"
+        },
+        {
+          "command": "netezza.sqlite.viewForeignKeys",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "group": "3_sqlite@4"
+        },
+        {
+          "command": "netezza.sqlite.viewTriggers",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "group": "3_sqlite@5"
+        },
+        {
+          "command": "netezza.sqlite.reindexTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "group": "3_sqlite@6"
+        },
+        {
+          "command": "netezza.sqlite.analyzeTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "group": "3_sqlite@7"
+        },
+        {
+          "command": "netezza.createDDL",
+          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT)/",
+          "group": "1_copy"
+        },
+        {
+          "command": "netezza.recreateTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql)",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.checkSkew",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == netezza",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.changeOwner",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.renameTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.viewEditData",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2",
+          "group": "1_copy"
+        },
+        {
+          "command": "netezza.createTableDesigner",
+          "when": "view == netezza.schema && viewItem == typeGroup:TABLE && justybase.schemaDatabaseKind != db2",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.createProcedure",
+          "when": "view == netezza.schema && viewItem == typeGroup:PROCEDURE && justybase.schema.capabilities.supportsProcedures",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.createView",
+          "when": "view == netezza.schema && viewItem == typeGroup:VIEW",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.createSequence",
+          "when": "view == netezza.schema && viewItem == typeGroup:SEQUENCE && justybase.schemaDatabaseKind == postgresql",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.createSnowflakeStream",
+          "when": "view == netezza.schema && viewItem == typeGroup:STREAM && justybase.schemaDatabaseKind == snowflake",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.createSnowflakeTask",
+          "when": "view == netezza.schema && viewItem == typeGroup:TASK && justybase.schemaDatabaseKind == snowflake",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.createSnowflakeDynamicTable",
+          "when": "view == netezza.schema && viewItem =~ /typeGroup:DYNAMIC TABLE:snowflake/",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.manageSnowflakeDynamicTable",
+          "when": "view == netezza.schema && viewItem =~ /netezza:DYNAMIC TABLE:snowflake/",
+          "group": "1_manage"
+        },
+        {
+          "command": "netezza.createExternalTable",
+          "when": "view == netezza.schema && viewItem =~ /typeGroup:EXTERNAL TABLE/ && justybase.schema.capabilities.supportsExternalTables",
+          "group": "0_create"
+        },
+        {
+          "command": "netezza.compareSchema",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|PROCEDURE)/) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "group": "6_compare"
+        },
+        {
+          "command": "netezza.batchExportDDL",
+          "when": "view == netezza.schema && viewItem == database",
+          "group": "7_export"
+        },
+        {
+          "command": "netezza.batchExportDDL",
+          "when": "view == netezza.schema && viewItem =~ /typeGroup:(TABLE|VIEW|PROCEDURE|FUNCTION|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT|WAREHOUSE)/",
+          "group": "7_export"
+        },
+        {
+          "command": "netezza.snowflake.switchWarehouse",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == snowflake",
+          "group": "2_snowflake@1"
+        },
+        {
+          "command": "netezza.snowflake.switchRole",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == snowflake",
+          "group": "2_snowflake@2"
+        },
+        {
+          "command": "netezza.snowflake.prepareStageImport",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == snowflake",
+          "group": "2_snowflake@3"
+        },
+        {
+          "command": "netezza.snowflake.prepareStageExport",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == snowflake",
+          "group": "2_snowflake@4"
+        },
+        {
+          "command": "netezza.snowflake.showRecentQueryProfile",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == snowflake",
+          "group": "2_snowflake@5"
+        },
+        {
+          "command": "netezza.sqlite.vacuum",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "group": "7_sqlite@1"
+        },
+        {
+          "command": "netezza.sqlite.vacuumInto",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "group": "7_sqlite@2"
+        },
+        {
+          "command": "netezza.sqlite.integrityCheck",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "group": "7_sqlite@3"
+        },
+        {
+          "command": "netezza.sqlite.foreignKeyCheck",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "group": "7_sqlite@4"
+        },
+        {
+          "command": "netezza.sqlite.walCheckpoint",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "group": "7_sqlite@5"
+        },
+        {
+          "command": "netezza.sqlite.databaseInfo",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "group": "7_sqlite@6"
+        },
+        {
+          "command": "netezza.openVisualQueryBuilder",
+          "when": "view == netezza.schema && viewItem == typeGroup:TABLE",
+          "group": "8_visualization@1"
+        },
+        {
+          "command": "netezza.showERD",
+          "when": "view == netezza.schema && viewItem == typeGroup:TABLE",
+          "group": "8_visualization@2"
+        },
+        {
+          "command": "netezza.openTestDataGenerator",
+          "when": "view == netezza.schema && viewItem =~ /netezza:TABLE/",
+          "group": "8_visualization@3"
+        },
+        {
+          "command": "netezza.toggleSchemaFavorite",
+          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM)/",
+          "group": "2_favorites@1"
+        },
+        {
+          "command": "netezza.toggleSchemaFavorite",
+          "when": "view == netezza.schema && viewItem == netezza:favorite",
+          "group": "2_favorites@1"
+        },
+        {
+          "command": "netezza.favorites.toggleCopilotAutoInclude",
+          "when": "view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)/",
+          "group": "3_copilot@1"
+        },
+        {
+          "command": "netezza.favorites.toggleCopilotEnabled",
+          "when": "view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)/",
+          "group": "3_copilot@2"
+        },
+        {
+          "command": "netezza.favorites.includeNow",
+          "when": "view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)/",
+          "group": "3_copilot@3"
+        }
+      ]
+    },
+    "grammars": [
+      {
+        "path": "./dialects/netezza/syntaxes/netezza.tmLanguage.json",
+        "scopeName": "netezza.injection",
+        "injectTo": [
+          "source.sql",
+          "source.tsql",
+          "source.pgsql",
+          "source.plpgsql",
+          "source.mysql",
+          "source.oracle"
+        ]
+      }
+    ],
+    "colors": [
+      {
+        "id": "justybase.sql.column",
+        "description": "SQL column identifier",
+        "defaults": {
+          "dark": "#9CDCFE",
+          "light": "#001080",
+          "highContrast": "#9CDCFE"
+        }
+      },
+      {
+        "id": "justybase.sql.table",
+        "description": "SQL table identifier",
+        "defaults": {
+          "dark": "#4EC9B0",
+          "light": "#267F99",
+          "highContrast": "#4EC9B0"
+        }
+      },
+      {
+        "id": "justybase.sql.alias",
+        "description": "SQL table alias identifier",
+        "defaults": {
+          "dark": "#4EC9B0",
+          "light": "#267F99",
+          "highContrast": "#4EC9B0"
+        }
+      },
+      {
+        "id": "justybase.sql.schema",
+        "description": "SQL schema identifier",
+        "defaults": {
+          "dark": "#4EC9B0",
+          "light": "#267F99",
+          "highContrast": "#4EC9B0"
+        }
+      },
+      {
+        "id": "justybase.sql.database",
+        "description": "SQL database identifier",
+        "defaults": {
+          "dark": "#569CD6",
+          "light": "#0000FF",
+          "highContrast": "#569CD6"
+        }
+      },
+      {
+        "id": "justybase.sql.localVariable",
+        "description": "NZPLSQL local variable or procedure parameter",
+        "defaults": {
+          "dark": "#C586C0",
+          "light": "#811F3F",
+          "highContrast": "#C586C0"
+        }
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "column",
+        "superType": "variable",
+        "description": "Column reference"
+      },
+      {
+        "id": "table",
+        "superType": "type",
+        "description": "Table reference"
+      },
+      {
+        "id": "alias",
+        "superType": "type",
+        "description": "Table alias"
+      },
+      {
+        "id": "schema",
+        "superType": "type",
+        "description": "Schema reference"
+      },
+      {
+        "id": "database",
+        "superType": "type",
+        "description": "Database reference"
+      },
+      {
+        "id": "localVariable",
+        "superType": "variable",
+        "description": "NZPLSQL local variable or procedure parameter"
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "italic",
+        "description": "Table alias (rendered in italic)"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "sql",
+        "scopes": {
+          "column": [
+            "variable.other.column.sql",
+            "variable.other.readwrite"
+          ],
+          "table": [
+            "constant.other.table-name.sql"
+          ],
+          "alias": [
+            "constant.other.table-name.sql",
+            "markup.italic"
+          ],
+          "schema": [
+            "constant.other.table-name.sql"
+          ],
+          "database": [
+            "constant.other.database-name.sql"
+          ],
+          "localVariable": [
+            "variable.other.readwrite",
+            "variable.parameter"
+          ],
+          "variable.readonly": [
+            "variable.language.netezza"
+          ],
+          "type": [
+            "storage.type.netezza"
+          ],
+          "function": [
+            "entity.name.function.netezza"
+          ],
+          "keyword": [
+            "keyword.other.netezza"
+          ]
+        }
+      },
+      {
+        "language": "mssql",
+        "scopes": {
+          "column": [
+            "variable.other.column.sql",
+            "variable.other.readwrite"
+          ],
+          "table": [
+            "constant.other.table-name.sql"
+          ],
+          "alias": [
+            "constant.other.table-name.sql",
+            "markup.italic"
+          ],
+          "schema": [
+            "constant.other.table-name.sql"
+          ],
+          "database": [
+            "constant.other.database-name.sql"
+          ],
+          "localVariable": [
+            "variable.other.readwrite",
+            "variable.parameter"
+          ],
+          "variable.readonly": [
+            "variable.language.netezza"
+          ],
+          "type": [
+            "storage.type.netezza"
+          ],
+          "function": [
+            "entity.name.function.netezza"
+          ],
+          "keyword": [
+            "keyword.other.netezza"
+          ]
+        }
+      },
+      {
+        "language": "netezza-sql",
+        "scopes": {
+          "column": [
+            "variable.other.column.sql",
+            "variable.other.readwrite"
+          ],
+          "table": [
+            "constant.other.table-name.sql"
+          ],
+          "alias": [
+            "constant.other.table-name.sql",
+            "markup.italic"
+          ],
+          "schema": [
+            "constant.other.table-name.sql"
+          ],
+          "database": [
+            "constant.other.database-name.sql"
+          ],
+          "localVariable": [
+            "variable.other.readwrite",
+            "variable.parameter"
+          ],
+          "variable.readonly": [
+            "variable.language.netezza"
+          ],
+          "type": [
+            "storage.type.netezza"
+          ],
+          "function": [
+            "entity.name.function.netezza"
+          ],
+          "keyword": [
+            "keyword.other.netezza"
+          ]
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.editor.decorations.badges": true,
+      "[sql]": {
+        "editor.semanticHighlighting.enabled": true,
+        "editor.suggest.showDetails": true
+      },
+      "[mssql]": {
+        "editor.semanticHighlighting.enabled": true,
+        "editor.suggest.showDetails": true
+      },
+      "[netezza-sql]": {
+        "editor.semanticHighlighting.enabled": true,
+        "editor.suggest.showDetails": true
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "enabled": true,
+        "[*Light*]": {
+          "rules": {
+            "column:sql": {
+              "foreground": "#0451A5"
+            },
+            "column:mssql": {
+              "foreground": "#0451A5"
+            },
+            "column:netezza-sql": {
+              "foreground": "#0451A5"
+            },
+            "table:sql": {
+              "foreground": "#098658"
+            },
+            "table:mssql": {
+              "foreground": "#098658"
+            },
+            "table:netezza-sql": {
+              "foreground": "#098658"
+            },
+            "alias:sql": {
+              "foreground": "#098658",
+              "fontStyle": "italic"
+            },
+            "alias:mssql": {
+              "foreground": "#098658",
+              "fontStyle": "italic"
+            },
+            "alias:netezza-sql": {
+              "foreground": "#098658",
+              "fontStyle": "italic"
+            },
+            "schema:sql": {
+              "foreground": "#0070C1"
+            },
+            "schema:mssql": {
+              "foreground": "#0070C1"
+            },
+            "schema:netezza-sql": {
+              "foreground": "#0070C1"
+            },
+            "database:sql": {
+              "foreground": "#0451A5"
+            },
+            "database:mssql": {
+              "foreground": "#0451A5"
+            },
+            "database:netezza-sql": {
+              "foreground": "#0451A5"
+            },
+            "function:sql": {
+              "foreground": "#795E26"
+            },
+            "function:mssql": {
+              "foreground": "#795E26"
+            },
+            "function:netezza-sql": {
+              "foreground": "#795E26"
+            },
+            "keyword:sql": {
+              "foreground": "#0000FF"
+            },
+            "keyword:mssql": {
+              "foreground": "#0000FF"
+            },
+            "keyword:netezza-sql": {
+              "foreground": "#0000FF"
+            },
+            "variable.readonly:sql": {
+              "foreground": "#0451A5"
+            },
+            "variable.readonly:mssql": {
+              "foreground": "#0451A5"
+            },
+            "variable.readonly:netezza-sql": {
+              "foreground": "#0451A5"
+            },
+            "localVariable:sql": {
+              "foreground": "#811F3F"
+            },
+            "localVariable:mssql": {
+              "foreground": "#811F3F"
+            },
+            "localVariable:netezza-sql": {
+              "foreground": "#811F3F"
+            }
+          }
+        },
+        "[*Dark*]": {
+          "rules": {
+            "column:sql": {
+              "foreground": "#9CDCFE"
+            },
+            "column:mssql": {
+              "foreground": "#9CDCFE"
+            },
+            "column:netezza-sql": {
+              "foreground": "#9CDCFE"
+            },
+            "table:sql": {
+              "foreground": "#4EC9B0"
+            },
+            "table:mssql": {
+              "foreground": "#4EC9B0"
+            },
+            "table:netezza-sql": {
+              "foreground": "#4EC9B0"
+            },
+            "alias:sql": {
+              "foreground": "#4EC9B0",
+              "fontStyle": "italic"
+            },
+            "alias:mssql": {
+              "foreground": "#4EC9B0",
+              "fontStyle": "italic"
+            },
+            "alias:netezza-sql": {
+              "foreground": "#4EC9B0",
+              "fontStyle": "italic"
+            },
+            "schema:sql": {
+              "foreground": "#4FC1FF"
+            },
+            "schema:mssql": {
+              "foreground": "#4FC1FF"
+            },
+            "schema:netezza-sql": {
+              "foreground": "#4FC1FF"
+            },
+            "database:sql": {
+              "foreground": "#569CD6"
+            },
+            "database:mssql": {
+              "foreground": "#569CD6"
+            },
+            "database:netezza-sql": {
+              "foreground": "#569CD6"
+            },
+            "function:sql": {
+              "foreground": "#DCDCAA"
+            },
+            "function:mssql": {
+              "foreground": "#DCDCAA"
+            },
+            "function:netezza-sql": {
+              "foreground": "#DCDCAA"
+            },
+            "keyword:sql": {
+              "foreground": "#569CD6"
+            },
+            "keyword:mssql": {
+              "foreground": "#569CD6"
+            },
+            "keyword:netezza-sql": {
+              "foreground": "#569CD6"
+            },
+            "variable.readonly:sql": {
+              "foreground": "#9CDCFE"
+            },
+            "variable.readonly:mssql": {
+              "foreground": "#9CDCFE"
+            },
+            "variable.readonly:netezza-sql": {
+              "foreground": "#9CDCFE"
+            },
+            "localVariable:sql": {
+              "foreground": "#C586C0"
+            },
+            "localVariable:mssql": {
+              "foreground": "#C586C0"
+            },
+            "localVariable:netezza-sql": {
+              "foreground": "#C586C0"
+            }
+          }
+        },
+        "rules": {
+          "column:sql": {
+            "foreground": "#9CDCFE"
+          },
+          "column:mssql": {
+            "foreground": "#9CDCFE"
+          },
+          "column:netezza-sql": {
+            "foreground": "#9CDCFE"
+          },
+          "table:sql": {
+            "foreground": "#4EC9B0"
+          },
+          "table:mssql": {
+            "foreground": "#4EC9B0"
+          },
+          "table:netezza-sql": {
+            "foreground": "#4EC9B0"
+          },
+          "alias:sql": {
+            "foreground": "#4EC9B0",
+            "fontStyle": "italic"
+          },
+          "alias:mssql": {
+            "foreground": "#4EC9B0",
+            "fontStyle": "italic"
+          },
+          "alias:netezza-sql": {
+            "foreground": "#4EC9B0",
+            "fontStyle": "italic"
+          },
+          "schema:sql": {
+            "foreground": "#4FC1FF"
+          },
+          "schema:mssql": {
+            "foreground": "#4FC1FF"
+          },
+          "schema:netezza-sql": {
+            "foreground": "#4FC1FF"
+          },
+          "database:sql": {
+            "foreground": "#569CD6"
+          },
+          "database:mssql": {
+            "foreground": "#569CD6"
+          },
+          "database:netezza-sql": {
+            "foreground": "#569CD6"
+          },
+          "function:sql": {
+            "foreground": "#DCDCAA"
+          },
+          "function:mssql": {
+            "foreground": "#DCDCAA"
+          },
+          "function:netezza-sql": {
+            "foreground": "#DCDCAA"
+          },
+          "keyword:sql": {
+            "foreground": "#569CD6"
+          },
+          "keyword:mssql": {
+            "foreground": "#569CD6"
+          },
+          "keyword:netezza-sql": {
+            "foreground": "#569CD6"
+          },
+          "variable.readonly:sql": {
+            "foreground": "#9CDCFE"
+          },
+          "variable.readonly:mssql": {
+            "foreground": "#9CDCFE"
+          },
+          "variable.readonly:netezza-sql": {
+            "foreground": "#9CDCFE"
+          },
+          "localVariable:sql": {
+            "foreground": "#C586C0"
+          },
+          "localVariable:mssql": {
+            "foreground": "#C586C0"
+          },
+          "localVariable:netezza-sql": {
+            "foreground": "#C586C0"
+          }
+        }
+      },
+      "editor.tokenColorCustomizations": {
+        "[*Light*]": {
+          "textMateRules": [
+            {
+              "scope": "variable.other.column.sql",
+              "settings": {
+                "foreground": "#0451A5"
+              }
+            },
+            {
+              "scope": "constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#098658"
+              }
+            },
+            {
+              "scope": "constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#0451A5"
+              }
+            },
+            {
+              "scope": "constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#0070C1"
+              }
+            },
+            {
+              "scope": "keyword.control.macro.sas.sql",
+              "settings": {
+                "foreground": "#AF00DB"
+              }
+            },
+            {
+              "scope": "support.function.macro.sas.sql",
+              "settings": {
+                "foreground": "#795E26"
+              }
+            },
+            {
+              "scope": "variable.other.macro.sas.sql",
+              "settings": {
+                "foreground": "#001080"
+              }
+            }
+          ]
+        },
+        "[*Dark*]": {
+          "textMateRules": [
+            {
+              "scope": "variable.other.column.sql",
+              "settings": {
+                "foreground": "#9CDCFE"
+              }
+            },
+            {
+              "scope": "constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#4EC9B0"
+              }
+            },
+            {
+              "scope": "constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#569CD6"
+              }
+            },
+            {
+              "scope": "constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#4FC1FF"
+              }
+            },
+            {
+              "scope": "keyword.control.macro.sas.sql",
+              "settings": {
+                "foreground": "#C586C0"
+              }
+            },
+            {
+              "scope": "support.function.macro.sas.sql",
+              "settings": {
+                "foreground": "#DCDCAA"
+              }
+            },
+            {
+              "scope": "variable.other.macro.sas.sql",
+              "settings": {
+                "foreground": "#9CDCFE"
+              }
+            }
+          ]
+        },
+        "textMateRules": [
+          {
+            "scope": "variable.other.column.sql",
+            "settings": {
+              "foreground": "#9CDCFE"
+            }
+          },
+          {
+            "scope": "constant.other.table-name.sql",
+            "settings": {
+              "foreground": "#4EC9B0"
+            }
+          },
+          {
+            "scope": "constant.other.database-name.sql",
+            "settings": {
+              "foreground": "#569CD6"
+            }
+          },
+          {
+            "scope": "constant.other.schema-name.sql",
+            "settings": {
+              "foreground": "#4FC1FF"
+            }
+          }
+        ]
+      }
+    },
+    "snippets": [
+      {
+        "language": "sql",
+        "path": "./dialects/netezza/snippets/netezza.code-snippets"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "netezzaGettingStarted",
+        "title": "JustyBase: First 5 Minutes",
+        "description": "Connect to a database, run your first query, and validate SQL.",
+        "steps": [
+          {
+            "id": "connect",
+            "title": "1) Create connection",
+            "description": "Open the connection dialog and add your host, user and password.",
+            "completionEvents": [
+              "onCommand:netezza.openLogin"
+            ],
+            "media": {
+              "markdown": "media/walkthrough/01-connect.md"
+            }
+          },
+          {
+            "id": "run-query",
+            "title": "2) Run your first query",
+            "description": "Run current statement with Ctrl+Enter / F5 and open the result panel.",
+            "completionEvents": [
+              "onCommand:netezza.runQuery"
+            ],
+            "media": {
+              "markdown": "media/walkthrough/02-run-query.md"
+            }
+          },
+          {
+            "id": "lint-validate",
+            "title": "3) Validate SQL quality",
+            "description": "Use on-demand linting and parser validation to catch mistakes early.",
+            "completionEvents": [
+              "onCommand:netezza.lintSql",
+              "onCommand:netezza.validateSelectedSql"
+            ],
+            "media": {
+              "markdown": "media/walkthrough/03-validate.md"
+            }
+          }
+        ]
+      }
+    ],
+    "notebooks": [
+      {
+        "type": "netezza-sql-notebook",
+        "displayName": "Netezza SQL Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.sqlnb"
+          },
+          {
+            "filenamePattern": "*.nzsql-nb"
+          }
+        ]
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "netezza.filePreview",
+        "displayName": "Data File Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.parquet"
+          },
+          {
+            "filenamePattern": "*.xlsx"
+          },
+          {
+            "filenamePattern": "*.xlsb"
+          },
+          {
+            "filenamePattern": "*.tsv"
+          },
+          {
+            "filenamePattern": "*.tab"
+          },
+          {
+            "filenamePattern": "*.nzpreview"
+          },
+          {
+            "filenamePattern": "*.csv"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Netezza Configuration",
+      "properties": {
+        "justybase.highlightActiveStatement": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable highlighting of the active SQL statement."
+        },
+        "justybase.longQueryAlertThreshold": {
+          "type": "number",
+          "default": 10,
+          "description": "Notify when a query execution exceeds this threshold (in minutes). Set to 0 to disable."
+        },
+        "justybase.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python executable for running scripts."
+        },
+        "justybase.showConflictWarnings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show warning when other SQL extensions (SQLTools, MS SQL, etc.) are detected that may cause conflicts."
+        },
+        "justybase.formatSQL.tabWidth": {
+          "type": "integer",
+          "default": 4,
+          "description": "Number of spaces for indentation in formatted SQL."
+        },
+        "justybase.formatSQL.keywordCase": {
+          "type": "string",
+          "default": "upper",
+          "enum": [
+            "upper",
+            "lower",
+            "preserve"
+          ],
+          "description": "Keyword case in formatted SQL."
+        },
+        "justybase.linter.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable SQL linting for Netezza files."
+        },
+        "justybase.linter.mode": {
+          "type": "string",
+          "default": "advanced",
+          "enum": [
+            "advanced"
+          ],
+          "description": "Linting mode. Advanced parser-based SQL validation is always used."
+        },
+        "justybase.sql.showHoverTooltips": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show SQL editor hover tooltips for aliases, tables, and columns."
+        },
+        "justybase.sql.showInlineTypeHints": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show inline SQL type hints for resolved qualified columns (for example: alias.column INT8)."
+        },
+        "justybase.linter.rules": {
+          "type": "object",
+          "default": {
+            "NZ001": "warning",
+            "NZ002": "error",
+            "NZ003": "error",
+            "NZ004": "warning",
+            "NZ005": "hint",
+            "NZ006": "information",
+            "NZ007": "information",
+            "NZ008": "warning",
+            "NZ009": "hint",
+            "NZ010": "information",
+            "NZ011": "warning",
+            "NZ012": "warning",
+            "NZ013": "information",
+            "NZ014": "error",
+            "NZ015": "warning",
+            "NZ016": "warning",
+            "NZ017": "information",
+            "NZ018": "warning",
+            "NZ019": "error",
+            "NZ020": "information",
+            "NZ023": "information",
+            "NZP001": "error",
+            "NZP002": "error",
+            "NZP003": "warning",
+            "NZP004": "error",
+            "NZP005": "error",
+            "NZP006": "error",
+            "NZP007": "warning",
+            "NZP008": "information",
+            "NZP009": "information",
+            "NZP010": "information",
+            "NZP011": "warning",
+            "NZP012": "error",
+            "NZP013": "warning"
+          },
+          "description": "Configure SQL linter rules severity. Available rules: NZ001 (SELECT *), NZ002 (DELETE without WHERE), NZ003 (UPDATE without WHERE), NZ004 (CROSS JOIN), NZ005 (Leading wildcard LIKE), NZ006 (ORDER BY without LIMIT), NZ007 (Inconsistent keyword case), NZ008 (TRUNCATE), NZ009 (Multiple OR), NZ010 (Missing table alias), NZ011 (CTAS missing DISTRIBUTE ON), NZ012 (UPDATE with AS alias), NZ013 (UNION vs UNION ALL), NZ014 (OR in JOIN condition), NZ015 (Function in WHERE), NZ016 (Implicit Casting in Join), NZ017 (Double Quoted Identifiers), NZ018 (Self-referential JOIN), NZ019 (CASE without END), NZ020 (IN (SELECT) subquery), NZ023 (Qualify table references), NZP001 (Missing BEGIN_PROC/END_PROC), NZP002 (Missing LANGUAGE clause), NZP003 (Missing RETURNS clause), NZP004 (Unmatched BEGIN/END blocks), NZP005 (Unmatched IF statement), NZP006 (Unmatched LOOP statement), NZP008 (Unused variable), NZP010 (RAISE without severity), NZP011 (Missing INTO in SELECT), NZP012 (Incorrect ELSIF syntax), NZP013 (Missing THEN), NZP017 (Unmatched CASE), NZP022 (OUT/INOUT assignment), NZP024 (Missing RETURN). On-demand procedure heuristics: NZP007, NZP009, NZP014, NZP015, NZP016, NZP018, NZP019, NZP020, NZP025, NZP026, NZP027, NZP028, NZP029, NZP030. Values: error, warning, information, hint, off."
+        },
+        "justybase.enableStreaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable streaming mode for query results. When enabled, results are sent to the UI in chunks for better memory efficiency and faster first-data display with large result sets."
+        },
+        "justybase.streamingChunkSize": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 1000,
+          "maximum": 50000,
+          "description": "Number of rows per chunk when streaming mode is enabled. Larger chunks are more efficient but use more memory."
+        },
+        "justybase.schemaSearch.searchAllDatabases": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, Schema Search queries all databases on the connection. When disabled, only the active/default database is searched (recommended for large Netezza warehouses)."
+        },
+        "justybase.cacheTTL": {
+          "type": "integer",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 168,
+          "description": "Metadata cache time-to-live in hours. Cached schema, tables, and columns will be refreshed after this period. Default: 12 hours."
+        },
+        "justybase.metadataCache.diskPersistence": {
+          "type": "boolean",
+          "default": true,
+          "description": "Persist metadata cache to disk between VS Code sessions (enabled by default). When enabled, metadata is loaded instantly from disk on startup, avoiding slow database prefetches. Disable only if the cache file takes up too much disk space."
+        },
+        "justybase.metadataCache.crossWindowSync": {
+          "type": "boolean",
+          "default": true,
+          "description": "Synchronize metadata cache across multiple VS Code windows using file-system watch + polling. When enabled, a window that finishes a prefetch notifies other windows to reload from disk instead of re-fetching from the database."
+        },
+        "justybase.metadataCache.memoryWarningBytes": {
+          "type": "number",
+          "default": 268435456,
+          "minimum": 0,
+          "description": "Estimated in-memory metadata cache size (bytes) above which a warning is logged when viewing cache stats. Default: 256 MB."
+        },
+        "justybase.copilot.prompts.optimize": {
+          "type": "string",
+          "default": "Optimize the following Netezza SQL query for performance and readability:",
+          "description": "Prompt used for optimizing SQL queries."
+        },
+        "justybase.copilot.prompts.fix": {
+          "type": "string",
+          "default": "Fix the syntax errors in the following Netezza SQL query:",
+          "description": "Prompt used for fixing SQL queries."
+        },
+        "justybase.copilot.prompts.explain": {
+          "type": "string",
+          "default": "Explain what this Netezza SQL query does:",
+          "description": "Prompt used for explaining SQL queries."
+        },
+        "justybase.query.rowLimit": {
+          "type": "number",
+          "default": 200000,
+          "minimum": 1,
+          "maximum": 10000000,
+          "description": "Maximum number of rows to fetch per query execution"
+        },
+        "justybase.query.executionTimeout": {
+          "type": "number",
+          "default": 3600,
+          "minimum": 1,
+          "maximum": 7200,
+          "description": "Query execution timeout in seconds (default: 1 hour)"
+        },
+        "justybase.sqlParser.fastPathThreshold": {
+          "type": "integer",
+          "default": 1572864,
+          "minimum": 102400,
+          "maximum": 52428800,
+          "description": "Character count threshold for using fast lexer-based SQL statement splitting. Files larger than this use the legacy character-scan method which is faster for huge files. Default: ~1.5M characters (1572864)."
+        },
+        "justybase.safeExecute.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show confirmation dialog before executing risky SQL (DELETE/UPDATE without WHERE, TRUNCATE)."
+        },
+        "justybase.codeLens.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show CodeLens toolbar at top of document and per-statement actions (Run, Explain, Visualize Query Flow, Export)."
+        },
+        "justybase.codeLens.run": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'Run' button in top-level CodeLens toolbar."
+        },
+        "justybase.codeLens.runBatch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'Run Batch' button in top-level CodeLens toolbar."
+        },
+        "justybase.codeLens.openAsXlsx": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'Open as XLSX' button in top-level CodeLens toolbar."
+        },
+        "justybase.codeLens.openAsXlsb": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'Open as XLSB' button in top-level CodeLens toolbar."
+        },
+        "justybase.codeLens.export": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'Export' button in top-level CodeLens toolbar."
+        },
+        "justybase.codeLens.markdown": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'MD' (Markdown export) button in top-level CodeLens toolbar."
+        },
+        "justybase.codeLens.explain": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'Explain' button in top-level CodeLens toolbar."
+        },
+        "justybase.codeLens.import": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show 'Import' button in top-level CodeLens toolbar."
+        },
+        "justybase.ddl.maxTablesForContext": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of tables to include in Copilot DDL context"
+        },
+        "justybase.ddl.cacheTTL": {
+          "type": "number",
+          "default": 3600000,
+          "minimum": 60000,
+          "maximum": 86400000,
+          "description": "DDL cache time-to-live in milliseconds (default: 1 hour)"
+        },
+        "justybase.copilot.requestTimeout": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 5000,
+          "maximum": 300000,
+          "description": "Copilot API request timeout in milliseconds (default: 1 minute)"
+        },
+        "justybase.copilot.maxWorkspaceProfilesInContext": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum number of workspace Copilot table profiles included in one Copilot request context."
+        },
+        "justybase.copilot.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered SQL assistance features (Fix SQL, Optimize SQL, Explain SQL, Generate SQL). When disabled, no data will be sent to GitHub Copilot and all AI features will be unavailable."
+        },
+        "justybase.copilot.skipPrivacyConfirmation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip the privacy confirmation dialog before sending data to AI. Enable only if you understand the data transmission implications and have verified your organization's data policy."
+        },
+        "justybase.logging.level": {
+          "type": "string",
+          "enum": [
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR"
+          ],
+          "default": "INFO",
+          "description": "Logging level for extension output channel"
+        },
+        "justybase.results.maxDataResults": {
+          "type": "integer",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 500,
+          "description": "Maximum number of data result sets to keep per SQL file. Older unpinned results are automatically pruned when this limit is exceeded."
+        },
+        "justybase.results.maxPinnedDataResults": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum number of result sets that can be manually pinned per SQL file."
+        },
+        "justybase.results.diskBackedResults.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Spill large result sets to a temporary SQLite database to reduce memory usage."
+        },
+        "justybase.results.diskBackedResults.rowThreshold": {
+          "type": "integer",
+          "default": 500000,
+          "minimum": 10000,
+          "maximum": 5000000,
+          "description": "Hard upper row count before disk-backed storage must activate (when enabled)."
+        },
+        "justybase.results.diskBackedResults.memoryRowThreshold": {
+          "type": "integer",
+          "default": 25000,
+          "minimum": 1000,
+          "maximum": 5000000,
+          "description": "Spill result rows to SQLite once this row count is reached (host RAM)."
+        },
+        "justybase.results.diskBackedResults.insertBatchSize": {
+          "type": "integer",
+          "default": 50000,
+          "minimum": 1000,
+          "maximum": 200000,
+          "description": "Rows per SQLite INSERT batch during spill."
+        },
+        "justybase.results.diskBackedResults.idleSpillMinutes": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "Spill idle in-memory results to SQLite after this many minutes without interaction (0 = disabled)."
+        },
+        "justybase.results.diskBackedResults.idleSpillRowThreshold": {
+          "type": "integer",
+          "default": 10000,
+          "minimum": 1000,
+          "maximum": 5000000,
+          "description": "Minimum row count for idle spill eligibility."
+        },
+        "justybase.results.gridFontFamily": {
+          "type": "string",
+          "default": "Menlo, Monaco, Consolas, 'Courier New', monospace",
+          "description": "Font family used by the main results data grid. Use 'editor' to follow the current VS Code editor font, or provide a custom CSS font-family stack. Available: JetBrains Mono, Fira Code, Cascadia Code, Source Code Pro, IBM Plex Mono, Menlo, Consolas, Ubuntu Mono, Droid Sans Mono, Courier New."
+        },
+        "justybase.results.gridFontSize": {
+          "type": "integer",
+          "default": 12,
+          "minimum": 9,
+          "maximum": 24,
+          "description": "Font size (px) used by the main results data grid and row view."
+        },
+        "justybase.results.integerGrouping": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use grouped thousands for integer-like result columns such as SMALLINT, INT, and BIGINT."
+        },
+        "justybase.results.decimalGrouping": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use grouped thousands for NUMERIC and DECIMAL result columns."
+        },
+        "justybase.results.groupSeparator": {
+          "type": "string",
+          "default": " ",
+          "enum": [
+            " ",
+            ",",
+            "_"
+          ],
+          "description": "Grouping separator used in formatted result grid numbers. The default is a space."
+        },
+        "justybase.results.decimalSeparator": {
+          "type": "string",
+          "default": ".",
+          "enum": [
+            ".",
+            ","
+          ],
+          "description": "Decimal separator used in formatted NUMERIC and DECIMAL result values."
+        },
+        "justybase.results.decimalScale": {
+          "type": "integer",
+          "default": 4,
+          "minimum": 0,
+          "maximum": 12,
+          "description": "Default number of decimal places shown for NUMERIC and DECIMAL result columns."
+        },
+        "justybase.results.preserveTrailingZeros": {
+          "type": "boolean",
+          "default": true,
+          "description": "Preserve trailing zeros when rendering NUMERIC and DECIMAL result values."
+        },
+        "justybase.results.roundingMode": {
+          "type": "string",
+          "default": "half-up",
+          "enum": [
+            "half-up",
+            "half-even",
+            "floor",
+            "ceil",
+            "truncate"
+          ],
+          "description": "Rounding mode used when formatted result values need to reduce decimal precision."
+        },
+        "justybase.results.useFormattedValuesForExport": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use formatted display values instead of raw values for result exports initiated from the results grid."
+        },
+        "justybase.results.copyFormat": {
+          "type": "string",
+          "default": "markdown",
+          "enum": [
+            "tabbed",
+            "markdown",
+            "csv",
+            "csv-semicolon"
+          ],
+          "markdownDescription": "Default plain text format for Ctrl+C in the results grid. `tabbed` uses tab-separated columns (plain text). `markdown` uses Markdown table syntax. `csv` uses comma-separated values. `csv-semicolon` uses semicolon-separated values (useful when comma is a decimal separator)."
+        },
+        "justybase.filePreview.maxRows": {
+          "type": "integer",
+          "default": 20000,
+          "minimum": 100,
+          "maximum": 1000000,
+          "description": "Maximum number of rows to display in the file preview (Parquet, XLSX, XLSB, CSV). Increasing this value may affect performance for large files."
+        },
+        "justybase.filePreview.csvPreviewMode": {
+          "type": "string",
+          "default": "custom",
+          "enum": [
+            "custom",
+            "native"
+          ],
+          "description": "Choose the default preview mode for CSV files. 'custom' uses the Netezza Data File Preview with advanced features. 'native' uses VS Code's built-in CSV preview."
+        },
+        "justybase.importWizard.defaultMode": {
+          "type": "string",
+          "default": "prompt",
+          "enum": [
+            "prompt",
+            "simple",
+            "advanced"
+          ],
+          "description": "Default mode for the Import Data command. Use prompt to choose each time, simple to keep the current best-effort flow, or advanced to open the import wizard directly."
+        },
+        "justybase.importWizard.previewRowCount": {
+          "type": "integer",
+          "default": 10,
+          "enum": [
+            5,
+            10,
+            20
+          ],
+          "description": "Number of rows shown in the advanced import wizard preview grid."
+        },
+        "justybase.importWizard.validationSampleSize": {
+          "type": "integer",
+          "default": 25,
+          "minimum": 5,
+          "maximum": 200,
+          "description": "Number of preview rows validated synchronously in the advanced import wizard."
+        },
+        "justybase.importWizard.backgroundValidationEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable asynchronous background validation for large imports. When enabled, validation runs in the background after the initial preview loads."
+        },
+        "justybase.importWizard.backgroundValidationSampleSize": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Number of rows to validate in background for large imports. Higher values provide more thorough validation but take longer."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "netezza.runQuery",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql",
+        "args": []
+      },
+      {
+        "command": "netezza.runQuery",
+        "key": "f5",
+        "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql",
+        "args": []
+      },
+      {
+        "command": "netezza.runQueryBatch",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql",
+        "args": []
+      },
+      {
+        "command": "netezza.lintSql",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql",
+        "args": []
+      },
+      {
+        "command": "netezza.openSqlConsole",
+        "key": "ctrl+shift+alt+s",
+        "mac": "cmd+shift+alt+s",
+        "when": "!notebookEditorFocused"
+      },
+      {
+        "command": "netezza.schema.goToObject",
+        "key": "ctrl+alt+o",
+        "mac": "cmd+alt+o",
+        "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql"
+      },
+      {
+        "command": "netezza.goToCatalogDdl",
+        "key": "f12",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
+      },
+      {
+        "command": "netezza.copySelection",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "netezza.resultsHasSelection && netezza.resultsCopyPrimed"
+      },
+      {
+        "command": "netezza.resultsSelectAll",
+        "key": "ctrl+a",
+        "mac": "cmd+a",
+        "when": "focusedView == netezza.results && !netezza.resultsInputFocused && !editorTextFocus"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "netezza-sql",
+        "label": "SQL Execution",
+        "languages": [
+          "sql"
+        ],
+        "configuration": {
+          "type": "object",
+          "title": "SQL Execution Configuration",
+          "properties": {
+            "netezza-sql.query": {
+              "type": "string",
+              "default": "",
+              "description": "SQL query to execute. Leave empty to use selected text or statement at cursor."
+            },
+            "netezza-sql.mode": {
+              "type": "string",
+              "enum": [
+                "run",
+                "explain",
+                "batch"
+              ],
+              "default": "run",
+              "description": "Execution mode: run (single statement), explain (show plan), batch (run all)."
+            },
+            "netezza-sql.connection": {
+              "type": "string",
+              "default": "active",
+              "description": "Connection name to use. Defaults to active connection."
+            },
+            "query": {
+              "type": "string",
+              "default": "",
+              "description": "SQL query to execute."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "run",
+                "explain",
+                "batch"
+              ],
+              "default": "run",
+              "description": "Execution mode."
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "SQL: Run Statement",
+            "description": "Execute the SQL statement at cursor or selected text",
+            "body": {
+              "type": "netezza-sql",
+              "request": "launch",
+              "name": "Run SQL Statement",
+              "query": "",
+              "mode": "run"
+            }
+          },
+          {
+            "label": "SQL: Explain Statement",
+            "description": "Show EXPLAIN plan for the SQL statement at cursor",
+            "body": {
+              "type": "netezza-sql",
+              "request": "launch",
+              "name": "Explain SQL Statement",
+              "query": "",
+              "mode": "explain"
+            }
+          },
+          {
+            "label": "SQL: Run All Statements",
+            "description": "Execute all SQL statements in the current file",
+            "body": {
+              "type": "netezza-sql",
+              "request": "launch",
+              "name": "Run All SQL Statements",
+              "query": "",
+              "mode": "batch"
+            }
+          }
+        ],
+        "defaults": {
+          "query": ""
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "scaffold": "npx tsx scripts/scaffold-dialect.ts",
+    "build": "node esbuild.js --production",
+    "build:db2": "npm --prefix extensions/db2 run build",
+    "build:duckdb": "node scripts/run-optional-extension-task.js duckdb build",
+    "build:oracle": "node scripts/run-optional-extension-task.js oracle build",
+    "build:postgresql": "node scripts/run-optional-extension-task.js postgresql build",
+    "build:vertica": "node scripts/run-optional-extension-task.js vertica build",
+    "build:snowflake": "node scripts/run-optional-extension-task.js snowflake build",
+    "build:mssql": "node scripts/run-optional-extension-task.js mssql build",
+    "build:mysql": "node scripts/run-optional-extension-task.js mysql build",
+    "build:dev": "node esbuild.js",
+    "build:watch": "node esbuild.js --watch",
+    "clean:db2": "rimraf extensions/db2/dist",
+    "db2:runtime:node": "node ./extensions/db2/scripts/switch-runtime.js node",
+    "db2:runtime:electron": "node ./extensions/db2/scripts/switch-runtime.js electron",
+    "install:db2": "npm --prefix extensions/db2 run install:vscode",
+    "install:duckdb": "node scripts/run-optional-extension-task.js duckdb install",
+    "install:oracle": "node scripts/run-optional-extension-task.js oracle install",
+    "install:postgresql": "node scripts/run-optional-extension-task.js postgresql install",
+    "install:vertica": "node scripts/run-optional-extension-task.js vertica install",
+    "install:snowflake": "node scripts/run-optional-extension-task.js snowflake install",
+    "install:mssql": "node scripts/run-optional-extension-task.js mssql install",
+    "install:mysql": "node scripts/run-optional-extension-task.js mysql install",
+    "lint:db2": "eslint extensions/db2/src --ext .ts",
+    "lint:duckdb": "node scripts/run-optional-extension-task.js duckdb lint",
+    "lint:oracle": "node scripts/run-optional-extension-task.js oracle lint",
+    "lint:postgresql": "node scripts/run-optional-extension-task.js postgresql lint",
+    "lint:vertica": "node scripts/run-optional-extension-task.js vertica lint",
+    "lint:snowflake": "node scripts/run-optional-extension-task.js snowflake lint",
+    "lint:mssql": "node scripts/run-optional-extension-task.js mssql lint",
+    "lint:mysql": "node scripts/run-optional-extension-task.js mysql lint",
+    "rebuild:db2": "npm run db2:runtime:electron",
+    "verify:db2": "npm run lint:db2 && npm run check-types:db2 && npm run build:db2",
+    "verify:duckdb": "node scripts/run-optional-extension-task.js duckdb verify",
+    "verify:oracle": "node scripts/run-optional-extension-task.js oracle verify",
+    "verify:postgresql": "node scripts/run-optional-extension-task.js postgresql verify",
+    "verify:vertica": "node scripts/run-optional-extension-task.js vertica verify",
+    "verify:snowflake": "node scripts/run-optional-extension-task.js snowflake verify",
+    "verify:mssql": "node scripts/run-optional-extension-task.js mssql verify",
+    "verify:mysql": "node scripts/run-optional-extension-task.js mysql verify",
+    "test": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest",
+    "test:fast": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --testPathIgnorePatterns=\"completionEngine.test.ts|metadataCache.test.ts|sqlLinter.test.ts|sqlValidator.test.ts|validator.advanced.test.ts|extension.test.ts\"",
+    "test:parser": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"sqlParser|validator|completionEngine|identifierRoleCollector|semanticTokens|parserSqlContext|procedure\"",
+    "test:serial": "cross-env NODE_ENV=test JEST_SILENT=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest",
+    "test:watch": "cross-env NODE_ENV=test JEST_SILENT=1 jest --watch",
+    "test:unit:debug": "cross-env NODE_ENV=test JEST_SILENT=0 JEST_VERBOSE=1 JEST_LOG_HEAP=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand",
+    "test:coverage": "cross-env NODE_ENV=test JEST_SILENT=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --coverage --runInBand",
+    "test:live:local": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node scripts/live-test-matrix.js --smoke-only",
+    "test:live:prefetch-heavy": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config Benchmark/jest.config.js --runInBand --verbose Benchmark/metadataPrefetchHeavyLive.test.ts",
+    "provision:heavy-prefetch-schema": "npx tsx Benchmark/provisionHeavyPrefetchSchema.ts",
+    "test:live:list": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node scripts/live-test-matrix.js --list",
+    "test:live:matrix": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node scripts/live-test-matrix.js",
+    "benchmark": "npm run benchmark:suggest && npm run benchmark:lsp && npm run benchmark:quality && npm run benchmark:result-panel",
+    "benchmark:suggest": "jest --config Benchmark/jest.config.js --runInBand Benchmark/suggestBenchmark.test.ts",
+    "benchmark:result-panel": "jest --config Benchmark/jest.config.js --runInBand Benchmark/resultPanelHydrationBenchmark.test.ts",
+    "benchmark:quality": "jest --config Benchmark/jest.config.js --runInBand Benchmark/qualityRulesBenchmark.test.ts",
+    "benchmark:lsp": "jest --config Benchmark/jest.config.js --runInBand Benchmark/lspFeatureBenchmark.test.ts",
+    "test:playwright": "npx playwright test --config=test-harness/playwright.config.ts",
+    "test:playwright:ui": "npx playwright test --ui --config=test-harness/playwright.config.ts",
+    "test:playwright:install": "npx playwright install chromium",
+    "test:duckdb:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/duckdb.integration.test.ts",
+    "test:db2:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/db2.integration.test.ts",
+    "test:metadata-cache:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand src/__tests__/integration/metadataCacheRestart.integration.test.ts",
+    "test:postgres:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/postgres.integration.test.ts",
+    "test:snowflake:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/snowflake.integration.test.ts",
+    "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",
+    "test:quickfix-regression": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"linterCodeActions.test.ts\"",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "validate": "npm run check-types && npm run lint",
+    "check-types": "tsc --noEmit && tsc --project tsconfig.media.json --noEmit",
+    "check-types:media": "tsc --project tsconfig.media.json --noEmit",
+    "check-types:media:strict": "tsc --project tsconfig.media.json --noEmit",
+    "check-types:db2": "node ./node_modules/typescript/bin/tsc --project extensions/db2/tsconfig.json --noEmit",
+    "check-types:duckdb": "node scripts/run-optional-extension-task.js duckdb check-types",
+    "check-types:oracle": "node scripts/run-optional-extension-task.js oracle check-types",
+    "check-types:postgresql": "node scripts/run-optional-extension-task.js postgresql check-types",
+    "check-types:vertica": "node scripts/run-optional-extension-task.js vertica check-types",
+    "check-types:snowflake": "node scripts/run-optional-extension-task.js snowflake check-types",
+    "check-types:mssql": "node scripts/run-optional-extension-task.js mssql check-types",
+    "check-types:mysql": "node scripts/run-optional-extension-task.js mysql check-types",
+    "clean": "rimraf dist",
+    "package": "vsce package --no-dependencies",
+    "package:db2": "npm --prefix extensions/db2 run package",
+    "package:duckdb": "node scripts/run-optional-extension-task.js duckdb package",
+    "package:oracle": "node scripts/run-optional-extension-task.js oracle package",
+    "package:postgresql": "node scripts/run-optional-extension-task.js postgresql package",
+    "package:vertica": "node scripts/run-optional-extension-task.js vertica package",
+    "package:snowflake": "node scripts/run-optional-extension-task.js snowflake package",
+    "package:mssql": "node scripts/run-optional-extension-task.js mssql package",
+    "package:mysql": "node scripts/run-optional-extension-task.js mysql package",
+    "package:db2:full": "npm run rebuild:db2 && npm run clean:db2 && npm run lint:db2 && npm run check-types:db2 && npm run build:db2 && npm run package:db2",
+    "package:duckdb:full": "npm run lint:duckdb && npm run check-types:duckdb && npm run build:duckdb && npm run package:duckdb",
+    "package:oracle:full": "npm run lint:oracle && npm run check-types:oracle && npm run build:oracle && npm run package:oracle",
+    "package:postgresql:full": "npm run lint:postgresql && npm run check-types:postgresql && npm run build:postgresql && npm run package:postgresql",
+    "package:vertica:full": "npm run lint:vertica && npm run check-types:vertica && npm run build:vertica && npm run package:vertica",
+    "package:snowflake:full": "npm run lint:snowflake && npm run check-types:snowflake && npm run build:snowflake && npm run package:snowflake",
+    "package:mssql:full": "npm run lint:mssql && npm run check-types:mssql && npm run build:mssql && npm run package:mssql",
+    "package:mysql:full": "npm run lint:mysql && npm run check-types:mysql && npm run build:mysql && npm run package:mysql",
+    "package:pre": "npm run build && npm run package",
+    "publish": "vsce publish --no-dependencies",
+    "version:check": "node scripts/version-sync.js check",
+    "version:set": "node scripts/version-sync.js set",
+    "version:bump": "node scripts/version-sync.js bump",
+    "version:patch": "node scripts/version-sync.js bump patch",
+    "version:minor": "node scripts/version-sync.js bump minor",
+    "version:major": "node scripts/version-sync.js bump major",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --max-warnings=0 --no-warn-ignored"
+    ]
+  },
+  "dependencies": {
+    "@justybase/netezza-driver": "*",
+    "@justybase/spreadsheet-tasks": "*",
+    "@msgpack/msgpack": "^3.1.3",
+    "chevrotain": "^12.0.0",
+    "echarts": "^6.1.0",
+    "hyparquet": "^1.26.1",
+    "hyparquet-compressors": "^1.1.1",
+    "hyparquet-writer": "^0.16.1",
+    "mssql": "^12.5.0",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.0",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.60.0",
+    "@tanstack/table-core": "^8.21.3",
+    "@tanstack/virtual-core": "^3.17.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.5.0",
+    "@types/pg": "^8.20.0",
+    "@types/snowflake-sdk": "^1.6.24",
+    "@types/vscode": "^1.103.2",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
+    "@vscode/vsce": "^3.9.2",
+    "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1",
+    "babel-jest": "^30.3.0",
+    "cross-env": "^10.1.0",
+    "debug": "^4.4.3",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.0.3",
+    "http-server": "^14.1.1",
+    "husky": "^9.1.7",
+    "jest": "^30.3.0",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.7.4",
+    "rimraf": "^6.1.3",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.57.1",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.2.0",
+    "yauzl": "^3.2.1"
+  },
+  "overrides": {
+    "flatted": "^3.4.1",
+    "undici": "^7.24.4",
+    "yauzl": "^3.2.1"
+  }
+}

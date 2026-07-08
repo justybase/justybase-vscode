@@ -1,0 +1,38 @@
+import { createDelegatingMetadataProvider } from '../../../src/core/metadataProviderFactory';
+import {
+    buildColumnMetadataQuery,
+    buildColumnsWithKeysQuery,
+    buildListDatabasesQuery,
+    buildListProceduresQuery,
+    buildListSchemasQuery,
+    buildListTablesQuery,
+    buildListViewsQuery,
+    buildLookupColumnsQuery,
+    buildObjectSearchQuery,
+    buildObjectTypeQuery,
+    buildTableCommentQuery,
+    buildTableColumnsQuery,
+    buildTypeGroupsQuery,
+    buildViewSourceSearchQuery,
+    buildProcedureSourceSearchQuery,
+} from './verticaSystemQueries';
+
+export const verticaMetadataProvider = createDelegatingMetadataProvider({
+    defaultObjectTypes: ['TABLE', 'VIEW', 'PROJECTION', 'FUNCTION', 'PROCEDURE'],
+    defaultColumnObjectTypes: ['TABLE', 'VIEW'],
+    listDatabases: buildListDatabasesQuery,
+    listSchemas: () => buildListSchemasQuery(),
+    listTables: (_database, schema) => buildListTablesQuery(schema),
+    listViews: (_database, schema) => buildListViewsQuery(schema),
+    listProcedures: (_database, schema) => buildListProceduresQuery(schema),
+    objectType: (_database, objectType) => buildObjectTypeQuery(objectType),
+    typeGroups: () => buildTypeGroupsQuery(),
+    columnsWithKeys: (_database, options) => buildColumnsWithKeysQuery(options?.schema, options?.tableName, options?.objTypes),
+    tableColumns: (_database, schema, tableName) => buildTableColumnsQuery(schema, tableName),
+    columnMetadata: (_database, schema, tableName) => buildColumnMetadataQuery(schema, tableName),
+    lookupColumns: buildLookupColumnsQuery,
+    tableComment: (_database, schema, tableName) => buildTableCommentQuery(schema, tableName),
+    objectSearch: buildObjectSearchQuery,
+    viewSourceSearch: buildViewSourceSearchQuery,
+    procedureSourceSearch: buildProcedureSourceSearchQuery,
+});

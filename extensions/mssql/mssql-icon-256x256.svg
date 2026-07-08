@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#c82500;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#6b0d00;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="url(#bgGrad)"/>
+
+  <!-- ===  Microsoft Windows logo (pixel art, top-right) === -->
+  <!-- top-left: czerwony -->
+  <rect x="185" y="16" width="20" height="20" rx="4" fill="#f25022" opacity="0.95"/>
+  <!-- top-right: zielony -->
+  <rect x="209" y="16" width="20" height="20" rx="4" fill="#7fba00" opacity="0.95"/>
+  <!-- bottom-left: niebieski -->
+  <rect x="185" y="40" width="20" height="20" rx="4" fill="#00a4ef" opacity="0.95"/>
+  <!-- bottom-right: żółty -->
+  <rect x="209" y="40" width="20" height="20" rx="4" fill="#ffb900" opacity="0.95"/>
+
+  <!-- === LITERA S === x0=31, cols: 31,46,61,76 -->
+  <rect x="46"  y="77"  width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="61"  y="77"  width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="76"  y="77"  width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="31"  y="92"  width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="31"  y="107" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="46"  y="122" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="61"  y="122" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="76"  y="137" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="76"  y="152" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="31"  y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="46"  y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="61"  y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+
+  <!-- === LITERA Q === x0=100, cols: 100,115,130,145 -->
+  <rect x="115" y="77"  width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="130" y="77"  width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="100" y="92"  width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="145" y="92"  width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="100" y="107" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="145" y="107" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="100" y="122" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="145" y="122" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="100" y="137" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="130" y="137" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="145" y="137" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="100" y="152" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="145" y="152" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="115" y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="130" y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="145" y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+
+  <!-- === LITERA L === x0=169, cols: 169,184,199,214 -->
+  <rect x="169" y="77"  width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="169" y="92"  width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="169" y="107" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="169" y="122" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="169" y="137" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="169" y="152" width="12" height="12" rx="3" fill="#ff8c78"/>
+  <rect x="169" y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="184" y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="199" y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+  <rect x="214" y="167" width="12" height="12" rx="3" fill="#ffcec4"/>
+
+  <!-- Bottom indicator bars -->
+  <rect x="16"  y="222" width="48" height="16" rx="4" fill="#e03e00"/>
+  <rect x="70"  y="222" width="48" height="16" rx="4" fill="#e03e00" opacity="0.7"/>
+  <rect x="124" y="222" width="48" height="16" rx="4" fill="#e03e00" opacity="0.5"/>
+  <rect x="178" y="222" width="48" height="16" rx="4" fill="#e03e00" opacity="0.3"/>
+</svg>

@@ -1,0 +1,15 @@
+services:
+    postgres:
+        image: postgres:16-alpine
+        container_name: justybase-postgres-integration
+        ports:
+            - '55432:5432'
+        environment:
+            POSTGRES_DB: justybase
+            POSTGRES_USER: justybase
+            POSTGRES_PASSWORD: justybase
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U justybase -d justybase']
+            interval: 5s
+            timeout: 5s
+            retries: 20

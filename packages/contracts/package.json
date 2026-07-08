@@ -1,0 +1,27 @@
+{
+  "name": "@justybase/contracts",
+  "version": "3.14.20",
+  "description": "Shared type definitions and interfaces for JustyBase extensions",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "JustyBase Maintainers"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/justybase/justybase-vscode"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:watch": "tsc -p tsconfig.build.json --watch",
+    "clean": "rm -rf dist",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^6.0.0"
+  }
+}

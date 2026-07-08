@@ -1,0 +1,96 @@
+src/
+.vscode/
+.vscode-test/
+.gitignore
+.editorconfig
+.eslintrc.json
+tsconfig.json
+esbuild.js
+**/*.map
+**/*.tsbuildinfo
+.prettierrc
+.npmrc
+*.vsix
+CONTRIBUTING.md
+.github/
+test/
+**/.DS_Store
+coverage/
+.husky/
+plans/
+
+.agents
+
+.vs/
+**/.git*/
+
+# Exclude bundled sources
+node_modules/
+
+icon.svg
+
+# Redundant media sources (already in dist/media)
+media/resultPanel.ts
+media/searchWorker.ts
+media/queryHistory.ts
+media/queryHistoryExtended.ts
+media/editDataPanel.ts
+media/sessionMonitor.ts
+media/securityPanel.ts
+media/importWizard.ts
+media/visualQueryBuilder.ts
+media/tableDesigner.ts
+media/explainPlanGraph.ts
+media/testDataGenerator.ts
+media/resultPanel/
+media/src/
+media/**/*.ts
+media/README-icons.txt
+
+# Build and config files
+eslint.config.mjs
+jest.config.js
+tsconfig.media.json
+.prettierignore
+babel.config.js
+
+# Documentation and project files
+extensions/
+samples/
+docs/
+CHANGELOG.md
+AGENTS.md
+GEMINI.md
+Benchmark/
+.kilocode/
+validation_manual/
+.old
+netezza_reference
+
+# Dev/test scripts and utilities
+scripts/
+packages/contracts/
+test-harness/
+test-infer.ts
+sync.sh
+
+# Environment and secrets
+.env.local
+
+# Build artifacts
+out/
+package-lock.json
+test-results/
+
+# Build/diagnostic logs
+.validation-*
+build-check.log
+snowflake.log
+
+# IDE metadata
+.commandcode/
+.cursor/
+.opencode/
+.codex
+.pytest_cache/
+.gitattributes

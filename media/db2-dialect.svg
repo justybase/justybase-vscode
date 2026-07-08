@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>IBM Db2</title>
+  <rect x="0" y="0" width="64" height="64" rx="10" fill="#0f62fe"/>
+  <g fill="#ffffff">
+    <!-- Letter 'D' - Perfectly geometric with consistent 4px thickness -->
+    <path fill-rule="evenodd" d="M 4 20 h 8 a 12 12 0 0 1 0 24 h -8 z M 8 24 v 16 h 4 a 8 8 0 0 0 0 -16 z" />
+    
+    <!-- Letter 'b' - Perfectly aligned to D, 4px stem and bowl -->
+    <path fill-rule="evenodd" d="M 28 14 h 4 v 6 a 12 12 0 0 1 0 24 h -4 z M 32 24 v 16 a 8 8 0 0 0 0 -16 z" />
+    
+    <!-- Number '2' - Classic typography overlapping geometry -->
+    <path d="M 46 26 A 7 7 0 0 1 60 26 L 46 44 V 39 L 56 26 A 3 3 0 0 0 50 26 Z" />
+    <path d="M 46 40 h 14 v 4 h -14 z" />
+  </g>
+</svg>

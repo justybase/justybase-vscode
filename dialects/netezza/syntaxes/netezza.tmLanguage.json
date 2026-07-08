@@ -1,0 +1,213 @@
+{
+  "scopeName": "netezza.injection",
+  "name": "Netezza SQL Injection",
+  "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block), L:source.tsql - (string.quoted | comment.line | comment.block), L:source.pgsql - (string.quoted | comment.line | comment.block), L:source.plpgsql - (string.quoted | comment.line | comment.block), L:source.mysql - (string.quoted | comment.line | comment.block), L:source.oracle - (string.quoted | comment.line | comment.block)",
+  "patterns": [
+    {
+      "comment": "Line guard (?m)(?<!^--). Block comments are excluded by injectionSelector per source target.",
+      "name": "constant.language.netezza",
+      "begin": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\bCURRENT_(?:TIMEZONE|SID|DB|TX_SCHEMA|DATE|TIME(?:STAMP)?|USER|CATALOG|SCHEMA)\\b",
+      "end": "(?=[^\\w]|$)"
+    },
+    {
+      "comment": "P1b: Standalone session user keywords (constant.language)",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(SESSION_USER|SYSTEM_USER|USER)\\b",
+      "name": "constant.language.netezza"
+    },
+    {
+      "comment": "─── P2: Netezza system columns (variable.language) ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ROWID|CREATEXID|DELETEXID|DATASLICEID)\\b",
+      "name": "variable.language.netezza"
+    },
+    {
+      "comment": "─── P3a: SAS-like macro directives ───",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)%(LET|PUT)\\b",
+      "name": "keyword.control.macro.sas.sql"
+    },
+    {
+      "comment": "─── P3b: SAS-like macro functions ───",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)%(EVAL|SQL|SQLLIST)\\b",
+      "name": "support.function.macro.sas.sql"
+    },
+    {
+      "comment": "─── P3: Variable substitution ───",
+      "match": "(?m)(?<!^\\s*--[^\\n]*)(?:\\$\\{\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*\\}|[&$][a-zA-Z_][a-zA-Z0-9_]*\\b)",
+      "name": "variable.other.macro.sas.sql"
+    },
+    {
+      "comment": "─── P4: Built-in functions (entity.name.function = yellow/gold) ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(BTRIM|INSTR|STRPOS|UNICHR|UNICODE|UNICODES|OVERLAPS|DURATION_ADD|DURATION_SUBTRACT|TIMEOFDAY|TIMEZONE|HEX_TO_BINARY|HEX_TO_GEOMETRY|INT_TO_STRING|STRING_TO_INT|ISFALSE|ISNOTFALSE|ISTRUE|ISNOTTRUE|VERSION|GET_VIEWDEF|SETSEED|DCEIL|DFLOOR|FPOW|NUMERIC_SQRT|POW|INT1AND|INT1OR|INT1XOR|INT1NOT|INT1SHL|INT1SHR|INT2AND|INT2OR|INT2XOR|INT2NOT|INT2SHL|INT2SHR|INT4AND|INT4OR|INT4XOR|INT4NOT|INT4SHL|INT4SHR|INT8AND|INT8OR|INT8XOR|INT8NOT|INT8SHL|INT8SHR|DAYS_BETWEEN|HOURS_BETWEEN|MINUTES_BETWEEN|SECONDS_BETWEEN|WEEKS_BETWEEN|NEXT_WEEK|NEXT_MONTH|NEXT_QUARTER|NEXT_YEAR|THIS_WEEK|THIS_MONTH|THIS_QUARTER|THIS_YEAR|ISNULL|STRLEFT|STRRIGHT|PROC_ARGUMENT_TYPES|HASH|HASH4|HASH8|HASH_NVARCHAR)\\b",
+      "name": "entity.name.function.netezza"
+    },
+    {
+      "comment": "─── P5: Netezza-specific data types (storage.type = teal/blue) ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(BYTEINT|INT1|INT2|INT4|INT8|FLOAT4|FLOAT8|TIMETZ|TIMESTAMPTZ|ABSTIME|RELTIME|VARBYTE|BYTEA|NCHAR|NVARCHAR)\\b",
+      "name": "storage.type.netezza"
+    },
+    {
+      "comment": "─── P6: Netezza DDL multi-word commands ─── keyword.other.ddl ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(MATERIALIZED)\\s+VIEW\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GROOM)\\s+TABLE\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ORGANIZE)\\s+ON\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DISTRIBUTE)\\s+ON\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GENERATE)\\s+(EXPRESS\\s+)?STATISTICS\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(EXTERNAL)\\s+TABLE\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(COMMENT)\\s+ON\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(CREATE|ALTER|DROP)\\s+SYNONYM\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ADD)\\s+COLUMN\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DROP)\\s+(COLUMN|CONSTRAINT)\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ALTER)\\s+COLUMN\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(MODIFY)\\s+COLUMN\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(RENAME)\\s+(COLUMN|TO)\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(SET)\\s+PRIVILEGES\\s+TO\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "comment": "─── P7: DDL single-word keywords ───",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(VERSIONS|RECORDS|PAGES|READY|RECLAIM|BACKUPSET|REORGANIZE|RENAME|MODIFY|PRIVILEGES)\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DISTRIBUTE|ORGANIZE|RANDOM|SAMEAS|EXPRESS|NONE)\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(SHOW|COPY|LOCK|REINDEX|RESET)\\b",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "comment": "─── P8: DML: MERGE ───",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(MERGE)(?=\\s+INTO\\b)",
+      "name": "keyword.other.ddl.netezza"
+    },
+    {
+      "comment": "─── P9: Window frame ─── keyword.other ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GROUPS|FILTER|EXCLUDE|TIES)\\b",
+      "name": "keyword.other.netezza"
+    },
+    {
+      "comment": "─── P10: Sequence syntax ───",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(NEXT)\\s+(VALUE)\\s+(FOR)\\b",
+      "name": "keyword.other.netezza"
+    },
+    {
+      "comment": "─── P11: Modifiers (TEMP, GLOBAL, EXPLAIN options, CASCADE) ─── storage.modifier ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(TEMP|TEMPORARY|GLOBAL|PLANTEXT|PLANGRAPH|VERBOSE|DISTRIBUTION|CASCADE|RESTRICT)\\b",
+      "name": "storage.modifier.netezza"
+    },
+    {
+      "comment": "─── P12: NZPLSQL control flow ─── keyword.control ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(BEGIN_PROC|END_PROC)\\b",
+      "name": "keyword.control.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(EXCEPTION|RAISE|OTHERS|SQLSTATE)\\b",
+      "name": "keyword.control.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DECLARE|ELSIF|LOOP|WHILE|EXIT|ELSE)\\b",
+      "name": "keyword.control.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(COMMIT|ROLLBACK)\\b",
+      "name": "keyword.control.netezza"
+    },
+    {
+      "comment": "─── P13: NZPLSQL metadata keywords ─── keyword.other.nzplsql ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(NZPLSQL|RETURNS?|LANGUAGE|OWNER|CALLER|REFTABLE|VARARGS|ALIAS|CONSTANT|NOTICE|DEBUG|WARNING|ERROR|PERFORM|REVERSE|INOUT|OUT)\\b",
+      "name": "keyword.other.nzplsql.netezza"
+    },
+    {
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(EXECUTE|EXEC|CALL|IMMEDIATE)\\b",
+      "name": "keyword.other.nzplsql.netezza"
+    },
+    {
+      "comment": "─── P14: Operator: ILIKE ─── keyword.operator ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ILIKE)\\b",
+      "name": "keyword.operator.pattern.netezza"
+    },
+    {
+      "comment": "─── P14b: NOTNULL (shorthand for IS NOT NULL) ─── keyword.other.DDL.create.II.sql (matches base grammar's IS NOT NULL scope) ──",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(NOTNULL)\\b",
+      "name": "keyword.other.DDL.create.II.sql"
+    },
+    {
+      "comment": "─── P15: Netezza DB..TABLE notation ──",
+      "captures": {
+        "1": {
+          "name": "constant.other.database-name.sql"
+        },
+        "2": {
+          "name": "constant.other.table-name.sql"
+        }
+      },
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(\\w+)\\.\\.(\\w+)\\b"
+    },
+    {
+      "comment": "─── P16: 3-part name after DDL/FROM context — database + schema + table scopes ──",
+      "captures": {
+        "1": {
+          "name": "constant.other.database-name.sql"
+        },
+        "2": {
+          "name": "constant.other.schema-name.sql"
+        },
+        "3": {
+          "name": "constant.other.table-name.sql"
+        }
+      },
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW|DROP|ALTER|TRUNCATE)\\s+)(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+    },
+    {
+      "comment": "─── P17b: SCHEMA.TABLE in FROM/JOIN only — schema + table; alias.column handled by semantic tokens ──",
+      "captures": {
+        "1": {
+          "name": "constant.other.schema-name.sql"
+        },
+        "2": {
+          "name": "constant.other.table-name.sql"
+        }
+      },
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\b(?:FROM|JOIN)\\s+)(\\w+)\\.(\\w+)\\b"
+    }
+  ]
+}

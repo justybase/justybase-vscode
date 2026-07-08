@@ -1,0 +1,644 @@
+/* Edit Data Panel - Matching Netezza Results Grid Style */
+
+:root {
+    --border-color: var(--vscode-panel-border);
+    --header-bg: var(--vscode-editorGroupHeader-tabsBackground);
+    --header-fg: var(--vscode-tab-activeForeground);
+    --row-hover: var(--vscode-list-hoverBackground);
+    --row-even: var(--vscode-editor-background);
+    --row-odd: var(--vscode-list-oddRowBackground, rgba(255, 255, 255, 0.02));
+    --cell-fg: var(--vscode-editor-foreground);
+    --input-bg: var(--vscode-input-background);
+    --input-fg: var(--vscode-input-foreground);
+    --input-border: var(--vscode-input-border);
+    --tab-inactive-bg: var(--vscode-editorGroupHeader-tabsBackground);
+    --tab-active-bg: var(--vscode-editor-background);
+    --tab-border: var(--vscode-contrastBorder, transparent);
+    --tab-active-fg: var(--vscode-tab-activeForeground);
+    --tab-inactive-fg: var(--vscode-tab-inactiveForeground);
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+}
+
+/* Tabs Container */
+.tabs-header {
+    display: flex;
+    background-color: var(--tab-inactive-bg);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.tab {
+    padding: 8px 16px;
+    cursor: pointer;
+    color: var(--tab-inactive-fg);
+    border-right: 1px solid var(--border-color);
+    border-top: 1px solid transparent;
+    /* Highlight line placeholder */
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+}
+
+.tab:hover {
+    background-color: var(--row-hover);
+}
+
+.tab.active {
+    background-color: var(--tab-active-bg);
+    color: var(--tab-active-fg);
+    border-top-color: var(--vscode-tab-activeBorderTop, var(--vscode-activityBar-activeBorder));
+}
+
+
+/* Toolbar */
+.toolbar {
+    padding: 8px;
+    background-color: var(--vscode-editor-background);
+    border-bottom: 1px solid var(--vscode-panel-border);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.title {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+    display: none;
+    /* Hidden in tabs view often, or kept? Let's hide if usage of tabs makes it clear */
+}
+
+.status {
+    font-size: 12px;
+    opacity: 0.8;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.actions {
+    display: flex;
+    gap: 6px;
+}
+
+.filter-container {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.toolbar-input {
+    background-color: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    padding: 4px 8px;
+    border-radius: 2px;
+    font-size: 12px;
+    min-width: 150px;
+    width: 200px;
+    outline: none;
+    font-family: var(--vscode-font-family);
+}
+
+.toolbar-input:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+/* Button Styles */
+button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background-color: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid var(--vscode-contrastBorder, transparent);
+    padding: 4px 10px;
+    cursor: pointer;
+    border-radius: 2px;
+    font-family: var(--vscode-font-family);
+    font-size: 12px;
+    line-height: 18px;
+    transition: background-color 0.1s, transform 0.05s;
+    user-select: none;
+    white-space: nowrap;
+}
+
+button:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+button:active {
+    transform: translateY(1px);
+}
+
+button.primary {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-border, transparent);
+}
+
+button.primary:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Main Layout */
+.main-layout {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Metadata Panel (Tab Content) */
+.tab-content {
+    display: none;
+    flex: 1;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.tab-content.active {
+    display: flex;
+}
+
+.metadata-content {
+    padding: 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    background: linear-gradient(180deg, var(--vscode-editor-background) 0%, rgba(0, 0, 0, 0.02) 100%);
+}
+
+/* Card Base Style */
+.metadata-card {
+    background-color: var(--vscode-editorWidget-background);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: visible;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    flex-shrink: 0;
+}
+
+.metadata-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, var(--header-bg) 0%, rgba(0, 0, 0, 0.03) 100%);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.metadata-card-header h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--header-fg);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.metadata-card-header h3 .icon {
+    font-size: 16px;
+}
+
+.metadata-card-body {
+    padding: 16px;
+}
+
+/* Table Comment Section */
+.comment-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.section-label {
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--vscode-descriptionForeground);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.section-label .icon {
+    font-size: 14px;
+}
+
+textarea.comment-box {
+    background-color: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    padding: 12px;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+    resize: vertical;
+    min-height: 80px;
+    border-radius: 4px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+textarea.comment-box:focus {
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 2px rgba(0, 127, 255, 0.15);
+}
+
+textarea.comment-box::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+    font-style: italic;
+}
+
+/* Metadata Grid inside Panel */
+.metadata-grid-container {
+    border-radius: 4px;
+    overflow-x: auto;
+    overflow-y: visible;
+    border: 1px solid var(--border-color);
+    max-height: 50vh;
+}
+
+.metadata-table {
+    width: 100%;
+    min-width: 750px;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+
+.metadata-table th,
+.metadata-table td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.metadata-table th {
+    background: linear-gradient(180deg, var(--header-bg) 0%, rgba(0, 0, 0, 0.02) 100%);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.metadata-table tbody tr {
+    transition: background-color 0.1s;
+}
+
+.metadata-table tbody tr:hover {
+    background-color: var(--row-hover);
+}
+
+.metadata-table tbody tr:nth-child(even) {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* Column key indicators */
+.key-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.key-indicator.pk {
+    background-color: rgba(241, 196, 15, 0.15);
+}
+
+.key-indicator.fk {
+    background-color: rgba(52, 152, 219, 0.15);
+}
+
+/* Column type badge */
+.type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    background-color: rgba(102, 178, 255, 0.1);
+    color: var(--vscode-textLink-foreground);
+    border: 1px solid rgba(102, 178, 255, 0.2);
+}
+
+/* Not null indicator */
+.null-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.null-indicator.required {
+    background-color: rgba(231, 76, 60, 0.15);
+    color: var(--vscode-errorForeground);
+}
+
+.null-indicator.nullable {
+    background-color: rgba(127, 140, 141, 0.15);
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Default value */
+.default-value {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    padding: 2px 6px;
+    background-color: rgba(0, 0, 0, 0.05);
+    border-radius: 3px;
+    color: var(--vscode-debugTokenExpression-string);
+}
+
+.no-default {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+    opacity: 0.6;
+}
+
+.metadata-table input.inline-edit {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    color: inherit;
+    padding: 6px 8px;
+    border-radius: 3px;
+    transition: all 0.15s;
+}
+
+.metadata-table input.inline-edit:hover {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+.metadata-table input.inline-edit:focus {
+    background-color: var(--input-bg);
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 2px rgba(0, 127, 255, 0.1);
+}
+
+.metadata-table input.inline-edit::placeholder {
+    font-style: italic;
+    color: var(--vscode-input-placeholderForeground);
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    color: var(--vscode-icon-foreground);
+    cursor: pointer;
+    opacity: 0.5;
+    padding: 6px;
+    border-radius: 4px;
+    transition: all 0.15s;
+    font-size: 16px;
+}
+
+.icon-btn:hover {
+    opacity: 1;
+    background-color: rgba(255, 80, 80, 0.1);
+    color: var(--vscode-errorForeground);
+}
+
+/* Add Column Form */
+.add-column-form {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    background-color: var(--vscode-editorWidget-background);
+    padding: 16px;
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    flex-wrap: wrap;
+}
+
+.add-column-form .form-label {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.add-column-form .form-label .icon {
+    font-size: 16px;
+    color: var(--vscode-charts-green);
+}
+
+.form-input {
+    background-color: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    padding: 8px 12px;
+    font-size: 12px;
+    border-radius: 4px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.form-input:focus {
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 2px rgba(0, 127, 255, 0.1);
+    outline: none;
+}
+
+.form-input::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+/* Small button variant */
+button.small-btn {
+    padding: 6px 12px;
+    font-size: 11px;
+}
+
+
+/* Grid Container */
+.grid-container {
+    flex: 1;
+    width: 100%;
+    position: relative;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Table Styles - matching resultPanel exactly */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+}
+
+thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: var(--header-bg);
+}
+
+th {
+    padding: 8px;
+    text-align: left;
+    border: 1px solid var(--border-color);
+    font-weight: 600;
+    color: var(--header-fg);
+    user-select: none;
+    background-color: var(--header-bg);
+    position: relative;
+}
+
+th:hover {
+    background-color: var(--row-hover);
+}
+
+td {
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    color: var(--cell-fg);
+    white-space: nowrap;
+}
+
+tr.even,
+tbody tr:nth-child(even) {
+    background-color: var(--row-even);
+}
+
+tr.odd,
+tbody tr:nth-child(odd) {
+    background-color: var(--row-odd);
+}
+
+tbody tr:hover {
+    background-color: var(--row-hover);
+}
+
+/* Action Column */
+td:first-child,
+th:first-child {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    text-align: center;
+}
+
+.delete-btn {
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--vscode-errorForeground, #f14c4c);
+    opacity: 0.6;
+    transition: opacity 0.1s;
+}
+
+.delete-btn:hover {
+    opacity: 1;
+}
+
+/* Input Styles */
+td input {
+    background: transparent;
+    border: none;
+    color: inherit;
+    width: 100%;
+    padding: 2px 0;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+td input::placeholder {
+    color: var(--vscode-editorInfo-foreground);
+    font-style: italic;
+    opacity: 0.7;
+}
+
+td input:focus {
+    background-color: var(--vscode-input-background);
+    outline: 1px solid var(--vscode-focusBorder);
+    border-radius: 1px;
+}
+
+/* Readonly Columns (ROWID) */
+td.readonly {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.readonly-val {
+    color: var(--vscode-editorInfo-foreground);
+    font-style: italic;
+    opacity: 0.7;
+}
+
+/* Editing State Highlights */
+.cell-modified {
+    background-color: rgba(255, 200, 0, 0.15) !important;
+}
+
+.row-new {
+    background-color: rgba(80, 200, 80, 0.12) !important;
+}
+
+.row-new td:first-child {
+    border-left: 3px solid rgba(80, 200, 80, 0.8);
+}
+
+.row-deleted {
+    background-color: rgba(255, 80, 80, 0.12) !important;
+}
+
+.row-deleted td {
+    text-decoration: line-through;
+    opacity: 0.5;
+}
+
+.row-deleted input {
+    pointer-events: none;
+}
+
+.empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}

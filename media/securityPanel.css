@@ -1,0 +1,173 @@
+body {
+    margin: 0;
+    padding: 0;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+}
+
+.container {
+    padding: 16px;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.header h2 {
+    margin: 0;
+}
+
+.hint {
+    margin: 0 0 16px 0;
+    color: var(--vscode-descriptionForeground);
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.full-width {
+    grid-column: 1 / -1;
+}
+
+label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+}
+
+input,
+select,
+textarea {
+    border: 1px solid var(--vscode-input-border);
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border-radius: 4px;
+    padding: 6px 8px;
+}
+
+.checkbox-label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.checkbox-label-text {
+    /* Placeholder to align with other input labels */
+}
+
+.checkbox-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 31px; /* Match approximate input height (padding + border) */
+    padding: 6px 0;
+    box-sizing: border-box;
+}
+
+.checkbox-wrapper input[type="checkbox"] {
+    margin: 0;
+    padding: 0;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.btn {
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 6px 12px;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.btn-primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.btn-secondary {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+}
+
+.btn-danger {
+    background: #b71c1c;
+    color: #fff;
+}
+
+.section {
+    margin-top: 14px;
+}
+
+.section h3 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+}
+
+#sqlPreview {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+    font-family: var(--vscode-editor-font-family);
+}
+
+.status-message {
+    margin-top: 6px;
+    color: var(--vscode-descriptionForeground);
+    min-height: 18px;
+}
+
+.status-message.error {
+    color: var(--vscode-errorForeground);
+}
+
+.table-wrap {
+    max-height: 240px;
+    overflow: auto;
+    border: 1px solid var(--vscode-panel-border);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+th,
+td {
+    padding: 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    text-align: left;
+}
+
+th {
+    position: sticky;
+    top: 0;
+    background: var(--vscode-editor-background);
+}
+
+.empty {
+    color: var(--vscode-descriptionForeground);
+}

@@ -1,0 +1,54 @@
+{
+    "name": "justybaselite-mssql",
+    "displayName": "JustyBase MS SQL Server Support",
+    "description": "Optional Microsoft SQL Server Support for JustyBase Core",
+    "version": "3.14.20",
+    "publisher": "krzysztof-d",
+    "license": "Apache-2.0",
+    "icon": "icon.png",
+    "engines": {
+        "vscode": "^1.103.2",
+        "node": ">=22.0.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Data Science",
+        "Other"
+    ],
+    "homepage": "https://github.com/justybase/justybase-vscode",
+    "bugs": {
+        "url": "https://github.com/justybase/justybase-vscode/issues"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/justybase/justybase-vscode"
+    },
+    "keywords": [
+        "mssql",
+        "sqlserver",
+        "sql",
+        "database"
+    ],
+    "main": "./dist/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "extensionDependencies": [
+        "krzysztof-d.justybaselite-netezza"
+    ],
+    "scripts": {
+        "build": "node esbuild.mssql.js --production",
+        "build:dev": "node esbuild.mssql.js",
+        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/mssql')) { console.error('Missing mssql. Run npm install in extensions\\\\mssql before packaging.'); process.exit(1); }\"",
+        "prepackage": "npm run verify:runtime-deps",
+        "package": "node ../../node_modules/@vscode/vsce/vsce package"
+    },
+    "dependencies": {
+        "mssql": "^11.0.1"
+    },
+    "devDependencies": {
+        "@types/mssql": "^9.1.9"
+    },
+    "preview": true
+}

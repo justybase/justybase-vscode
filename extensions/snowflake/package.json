@@ -1,0 +1,53 @@
+{
+    "name": "justybaselite-snowflake",
+    "displayName": "JustyBase Snowflake Support",
+    "description": "Optional Snowflake Support for JustyBase Core",
+    "version": "3.14.20",
+    "publisher": "krzysztof-d",
+    "license": "Apache-2.0",
+    "icon": "icon.png",
+    "engines": {
+        "vscode": "^1.103.2",
+        "node": ">=22.0.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Data Science",
+        "Other"
+    ],
+    "homepage": "https://github.com/justybase/justybase-vscode",
+    "bugs": {
+        "url": "https://github.com/justybase/justybase-vscode/issues"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/justybase/justybase-vscode"
+    },
+    "keywords": [
+        "snowflake",
+        "sql",
+        "database",
+        "cloud data warehouse"
+    ],
+    "main": "./dist/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "extensionDependencies": [
+        "krzysztof-d.justybaselite-netezza"
+    ],
+    "scripts": {
+        "build": "node esbuild.snowflake.js --production",
+        "build:dev": "node esbuild.snowflake.js",
+        "lint": "node ../../node_modules/eslint/bin/eslint.js src --ext .ts",
+        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "verify": "npm run lint && npm run check-types && npm run build",
+        "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/snowflake-sdk')) { console.error('Missing snowflake-sdk. Run npm install snowflake-sdk in extensions\\\\snowflake before packaging or using the runtime.'); process.exit(1); }\"",
+        "prepackage": "npm run verify:runtime-deps",
+        "package": "node ../../node_modules/@vscode/vsce/vsce package"
+    },
+    "dependencies": {
+        "snowflake-sdk": "^2.3.5"
+    },
+    "preview": true
+}

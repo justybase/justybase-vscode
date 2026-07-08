@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a2a1a;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0d1a0d;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="url(#bgGrad)"/>
+
+  <!-- DUCK pixel art, step=14, block=12x12 -->
+  <!-- Colors: #f5c842 (yellow body), #e8971a (darker yellow/orange), #f08030 (beak/feet orange), #0d1a0d (eye) -->
+
+  <!-- HEAD rows -->
+
+  <!-- Row 0 y=30 — head top -->
+  <rect x="102" y="30" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="116" y="30" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="130" y="30" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="144" y="30" width="12" height="12" rx="3" fill="#f5c842"/>
+
+  <!-- Row 1 y=44 — head -->
+  <rect x="88"  y="44" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="102" y="44" width="12" height="12" rx="3" fill="#e8971a"/>
+  <!-- eye -->
+  <rect x="116" y="44" width="12" height="12" rx="3" fill="#0d1a0d"/>
+  <rect x="130" y="44" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="144" y="44" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="158" y="44" width="12" height="12" rx="3" fill="#e8971a"/>
+
+  <!-- Row 2 y=58 — head + beak -->
+  <rect x="60"  y="58" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="74"  y="58" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="88"  y="58" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="102" y="58" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="116" y="58" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="130" y="58" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="144" y="58" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="158" y="58" width="12" height="12" rx="3" fill="#f5c842"/>
+
+  <!-- Row 3 y=72 — neck + beak lower -->
+  <rect x="60"  y="72" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="88"  y="72" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="102" y="72" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="116" y="72" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="130" y="72" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="144" y="72" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="158" y="72" width="12" height="12" rx="3" fill="#e8971a"/>
+
+  <!-- BODY rows -->
+
+  <!-- Row 4 y=86 — body start wide -->
+  <rect x="88"  y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="102" y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="116" y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="130" y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="144" y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="158" y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="172" y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="186" y="86" width="12" height="12" rx="3" fill="#f5c842"/>
+
+  <!-- Row 5 y=100 — body -->
+  <rect x="74"  y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="88"  y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="102" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="116" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="130" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="144" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="158" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="172" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="186" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="200" y="100" width="12" height="12" rx="3" fill="#e8971a"/>
+
+  <!-- Row 6 y=114 — body wide -->
+  <rect x="74"  y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="88"  y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="102" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="116" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="130" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="144" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="158" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="172" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="186" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="200" y="114" width="12" height="12" rx="3" fill="#f5c842"/>
+
+  <!-- Row 7 y=128 — body + wing highlight -->
+  <rect x="74"  y="128" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="88"  y="128" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="102" y="128" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="116" y="128" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="130" y="128" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="144" y="128" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="158" y="128" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="172" y="128" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="186" y="128" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="200" y="128" width="12" height="12" rx="3" fill="#e8971a"/>
+
+  <!-- Row 8 y=142 — body bottom + tail -->
+  <rect x="88"  y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="102" y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="116" y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="130" y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="144" y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="158" y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="172" y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <rect x="186" y="142" width="12" height="12" rx="3" fill="#f5c842"/>
+  <!-- tail bump -->
+  <rect x="200" y="142" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="214" y="142" width="12" height="12" rx="3" fill="#e8971a"/>
+
+  <!-- Row 9 y=156 — tail + belly -->
+  <rect x="102" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="116" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="130" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="144" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="158" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="172" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="200" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+  <rect x="214" y="156" width="12" height="12" rx="3" fill="#e8971a"/>
+
+  <!-- Row 10 y=170 — feet -->
+  <rect x="102" y="170" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="116" y="170" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="158" y="170" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="172" y="170" width="12" height="12" rx="3" fill="#f08030"/>
+
+  <!-- Row 11 y=184 — toes -->
+  <rect x="88"  y="184" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="102" y="184" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="116" y="184" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="144" y="184" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="158" y="184" width="12" height="12" rx="3" fill="#f08030"/>
+  <rect x="172" y="184" width="12" height="12" rx="3" fill="#f08030"/>
+
+  <!-- Bottom indicator bars — DuckDB yellow/gold -->
+  <rect x="16"  y="216" width="48" height="14" rx="4" fill="#e8971a"/>
+  <rect x="70"  y="216" width="48" height="14" rx="4" fill="#e8971a" opacity="0.7"/>
+  <rect x="124" y="216" width="48" height="14" rx="4" fill="#e8971a" opacity="0.5"/>
+  <rect x="178" y="216" width="48" height="14" rx="4" fill="#e8971a" opacity="0.3"/>
+</svg>

@@ -1,0 +1,9 @@
+export type {
+    DatabaseBatchDDLOptions as BatchDDLOptions,
+    DatabaseBatchDDLResult as BatchDDLResult,
+    DatabaseDdlColumnInfo as ColumnInfo,
+    DatabaseDdlKeyInfo as KeyInfo,
+    DatabaseDdlResult as DDLResult,
+    DatabaseExternalTableInfo as ExternalTableInfo,
+    DatabaseProcedureInfo as ProcedureInfo
+} from '../../../contracts/database';

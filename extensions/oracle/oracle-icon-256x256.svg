@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7a0000;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#3d0000;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="url(#bgGrad)"/>
+
+  <!-- === LITERA O === x0=34 (wyśrodkowane, +22) -->
+  <rect x="44"  y="77"  width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="59"  y="77"  width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="34"  y="92"  width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="74"  y="92"  width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="34"  y="107" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="74"  y="107" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="34"  y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="74"  y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="34"  y="137" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="74"  y="137" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="34"  y="152" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="74"  y="152" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="44"  y="167" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="59"  y="167" width="12" height="12" rx="3" fill="#ffb3b3"/>
+
+  <!-- === LITERA R === x0=100 (+22) -->
+  <rect x="100" y="77"  width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="115" y="77"  width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="130" y="77"  width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="100" y="92"  width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="145" y="92"  width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="100" y="107" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="145" y="107" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="100" y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="115" y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="130" y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="100" y="137" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="135" y="137" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="100" y="152" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="140" y="152" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="100" y="167" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="145" y="167" width="12" height="12" rx="3" fill="#ffb3b3"/>
+
+  <!-- === LITERA A === x0=166 (+22) -->
+  <rect x="181" y="77"  width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="196" y="77"  width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="166" y="92"  width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="211" y="92"  width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="166" y="107" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="211" y="107" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="166" y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="181" y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="196" y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="211" y="122" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="166" y="137" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="211" y="137" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="166" y="152" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="211" y="152" width="12" height="12" rx="3" fill="#ff8080"/>
+  <rect x="166" y="167" width="12" height="12" rx="3" fill="#ffb3b3"/>
+  <rect x="211" y="167" width="12" height="12" rx="3" fill="#ffb3b3"/>
+
+  <!-- Bottom indicator bars — Oracle red tones -->
+  <rect x="16"  y="222" width="48" height="16" rx="4" fill="#c0392b"/>
+  <rect x="70"  y="222" width="48" height="16" rx="4" fill="#c0392b" opacity="0.7"/>
+  <rect x="124" y="222" width="48" height="16" rx="4" fill="#c0392b" opacity="0.5"/>
+  <rect x="178" y="222" width="48" height="16" rx="4" fill="#c0392b" opacity="0.3"/>
+</svg>

@@ -1,0 +1,794 @@
+/* ============================================
+   Session Monitor Dashboard — Modernized
+   Inspired by SQL Results panel design language
+   ============================================ */
+
+:root {
+    /* Design tokens — mirrors resultPanel.css */
+    --bg: var(--vscode-editor-background, #0b0d12);
+    --s1: var(--vscode-sideBar-background, #11141c);
+    --s2: var(--vscode-editorGroupHeader-tabsBackground, #181c27);
+    --s3: var(--vscode-widget-background, #1e2332);
+    --bd: var(--vscode-panel-border, #232840);
+    --bd2: var(--vscode-widget-border, #2d3350);
+    --ac: var(--vscode-focusBorder, #3b82f6);
+    --ac-lo: rgba(59, 130, 246, 0.12);
+    --ac-hl: rgba(59, 130, 246, 0.28);
+    --tx: var(--vscode-editor-foreground, #d1d9f0);
+    --tx2: var(--vscode-descriptionForeground, #6b7599);
+    --tx3: var(--vscode-disabledForeground, #3a4160);
+    --gr: var(--vscode-testing-iconPassed, #22c55e);
+    --am: var(--vscode-editorWarning-foreground, #f59e0b);
+    --rd: var(--vscode-errorForeground, #ef4444);
+    --mono: var(--vscode-editor-font-family, 'JetBrains Mono', monospace);
+    --r: 6px;
+}
+
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+}
+
+body.vscode-light {
+    --selection-bg: #cce0f7;
+}
+
+body.vscode-dark {
+    --selection-bg: #1e3a5f;
+}
+
+/* ── Container ── */
+.container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--tx);
+}
+
+/* ── Header bar ── */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 14px;
+    min-height: 36px;
+    background: var(--s1);
+    border-bottom: 1px solid var(--bd);
+    flex-shrink: 0;
+}
+
+.header h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--tx);
+    white-space: nowrap;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* ── Auto-refresh toggle ── */
+.auto-refresh {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--tx2);
+    cursor: pointer;
+    user-select: none;
+}
+
+.auto-refresh input[type="checkbox"] {
+    accent-color: var(--ac);
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    cursor: pointer;
+}
+
+/* ── Buttons ── */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border: 1px solid var(--bd2);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--tx2);
+    font-family: var(--vscode-font-family);
+    font-size: 11px;
+    line-height: 16px;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+    transition: background .12s, border-color .12s, color .12s, transform .08s;
+}
+
+.btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+    border-color: var(--ac);
+    color: var(--tx);
+}
+
+.btn:active {
+    transform: scale(.97);
+}
+
+.btn-primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: transparent;
+}
+
+.btn-primary:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.btn-danger {
+    background: transparent;
+    color: var(--rd);
+    border-color: color-mix(in srgb, var(--rd), transparent 65%);
+    padding: 2px 7px;
+    font-size: 10px;
+    border-radius: 4px;
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: var(--rd);
+}
+
+/* ── Loading overlay (blur backdrop, modern card) ── */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 10020;
+    backdrop-filter: blur(2px);
+    pointer-events: none;
+}
+
+.loading-overlay.visible {
+    display: flex;
+}
+
+.loading-card {
+    background: var(--bg);
+    border: 1px solid var(--bd);
+    border-radius: 10px;
+    padding: 28px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    min-width: 180px;
+    pointer-events: auto;
+}
+
+.loading-spinner {
+    width: 36px;
+    height: 36px;
+    animation: loading-rotate 1.4s linear infinite;
+}
+
+.loading-spinner-circle {
+    width: 100%;
+    height: 100%;
+}
+
+.loading-spinner-path {
+    stroke: var(--ac);
+    stroke-linecap: round;
+    stroke-dasharray: 126;
+    stroke-dashoffset: 100;
+    animation: loading-dash 1.4s ease-in-out infinite;
+}
+
+@keyframes loading-rotate {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes loading-dash {
+    0% { stroke-dashoffset: 126; }
+    50% { stroke-dashoffset: 30; }
+    100% { stroke-dashoffset: 126; }
+}
+
+.loading-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--tx);
+}
+
+/* ── Overview strip ── */
+.overview-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--s1);
+    border-bottom: 1px solid var(--bd);
+    flex-shrink: 0;
+}
+
+.overview-card {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 10px;
+    background: var(--bg);
+    border: 1px solid var(--bd);
+    border-radius: var(--r);
+    transition: border-color .15s;
+}
+
+.overview-card:hover {
+    border-color: var(--bd2);
+}
+
+.overview-label {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--tx2);
+    line-height: 1.2;
+}
+
+.overview-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--tx);
+    line-height: 1.2;
+    font-family: var(--mono);
+}
+
+.overview-value.small {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--tx2);
+}
+
+/* Load level pill */
+.load-level {
+    display: inline-flex;
+    width: fit-content;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+}
+
+.load-low {
+    background: color-mix(in srgb, var(--gr), transparent 82%);
+    color: var(--gr);
+}
+
+.load-medium {
+    background: color-mix(in srgb, var(--am), transparent 82%);
+    color: var(--am);
+}
+
+.load-high {
+    background: color-mix(in srgb, #f97316, transparent 80%);
+    color: #f97316;
+}
+
+.load-critical {
+    background: color-mix(in srgb, var(--rd), transparent 80%);
+    color: var(--rd);
+}
+
+/* ── Tabs — SQL Results style ── */
+.tabs {
+    display: flex;
+    align-items: stretch;
+    background: var(--s1);
+    border-bottom: 1px solid var(--bd);
+    padding: 0;
+    gap: 0;
+    flex-shrink: 0;
+    font-size: 12px;
+}
+
+.tab-btn {
+    padding: 5px 14px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--tx2);
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: background .12s, border-color .12s, color .12s;
+}
+
+.tab-btn:hover {
+    color: var(--tx);
+    background: var(--s2);
+    border-bottom-color: var(--bd);
+}
+
+.tab-btn.active {
+    color: var(--vscode-tab-activeForeground, var(--tx));
+    background: var(--s2);
+    border-bottom-color: var(--ac);
+}
+
+.tab-btn .tab-count {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--tx3), transparent 70%);
+    color: var(--tx2);
+    font-weight: 600;
+    line-height: 16px;
+}
+
+.tab-btn.active .tab-count {
+    background: var(--ac-lo);
+    color: var(--ac);
+}
+
+/* ── Tab Content ── */
+.tab-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.tab-content.hidden {
+    display: none;
+}
+
+/* ── Section header (toolbar) ── */
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--bd);
+    background: var(--bg);
+    flex-shrink: 0;
+    min-height: 32px;
+}
+
+.section-header h3 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tx);
+    white-space: nowrap;
+}
+
+.section-header .spacer {
+    flex: 1;
+}
+
+.filter-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.filter-input {
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--bd));
+    padding: 2px 8px;
+    border-radius: 3px;
+    height: 22px;
+    font-family: var(--vscode-font-family);
+    font-size: 11px;
+    box-sizing: border-box;
+    min-width: 140px;
+    max-width: 220px;
+    flex: 1;
+}
+
+.filter-input:focus {
+    outline: 1px solid var(--ac);
+    border-color: var(--ac);
+}
+
+.filter-input::placeholder {
+    color: var(--vscode-input-placeholderForeground, var(--tx3));
+}
+
+.count {
+    font-size: 11px;
+    color: var(--tx2);
+    background: color-mix(in srgb, var(--tx3), transparent 80%);
+    padding: 1px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* ── Tables — SQL Results style ── */
+.table-container {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+    min-height: 0;
+}
+
+.table-container.small {
+    max-height: 300px;
+}
+
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-family: var(--vscode-font-family);
+    font-size: 12px;
+}
+
+thead {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background-color: var(--s2);
+}
+
+/* Blue accent line under header — matches resultPanel */
+thead::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--ac);
+    pointer-events: none;
+    z-index: 200;
+}
+
+th {
+    padding: 5px 8px;
+    text-align: left;
+    border-left: 1px solid var(--bd);
+    border-right: 1px solid var(--bd);
+    border-top: 1px solid var(--bd);
+    border-bottom: 2px solid var(--ac);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--vscode-tab-activeForeground, var(--tx));
+    background-color: var(--s2);
+    white-space: nowrap;
+    user-select: none;
+    cursor: default;
+    box-sizing: border-box;
+}
+
+th:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+td {
+    padding: 4px 8px;
+    border-left: 1px solid var(--bd);
+    border-right: 1px solid var(--bd);
+    border-top: 1px solid var(--bd);
+    border-bottom: 1px solid var(--bd);
+    color: var(--tx);
+    vertical-align: top;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: normal;
+    font-weight: 400;
+    box-sizing: border-box;
+}
+
+tbody tr:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+/* Alternating rows */
+tbody tr:nth-child(even) {
+    background-color: var(--bg);
+}
+
+tbody tr:nth-child(odd) {
+    background-color: color-mix(in srgb, var(--bg), rgba(127, 127, 127, 0.04));
+}
+
+/* ── Status badges — theme-aware ── */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.status-active {
+    background: color-mix(in srgb, var(--gr), transparent 82%);
+    color: var(--gr);
+}
+
+.status-idle {
+    background: color-mix(in srgb, var(--tx3), transparent 65%);
+    color: var(--tx2);
+}
+
+.status-running {
+    background: color-mix(in srgb, var(--ac), transparent 82%);
+    color: var(--ac);
+}
+
+.status-queued {
+    background: color-mix(in srgb, var(--am), transparent 82%);
+    color: var(--am);
+}
+
+.status-undefined, .status-unknown {
+    background: color-mix(in srgb, var(--tx3), transparent 70%);
+    color: var(--tx3);
+}
+
+/* ── SQL preview — monospace pill ── */
+.sql-preview {
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--tx2);
+    background: color-mix(in srgb, var(--tx3), transparent 88%);
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    line-height: 1.4;
+    transition: white-space .15s;
+}
+
+.sql-preview:hover {
+    white-space: normal;
+    word-break: break-all;
+    color: var(--tx);
+}
+
+/* ── Resources Grid ── */
+.resources-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    flex: 1;
+    overflow: auto;
+    padding: 12px 14px;
+    min-height: 0;
+}
+
+.resource-section {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.resource-section h4 {
+    margin: 0 0 6px 0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--tx2);
+}
+
+/* ── Progress bars ── */
+.progress-bar {
+    height: 14px;
+    background: var(--bd);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--ac);
+    transition: width .3s ease;
+    border-radius: 3px;
+}
+
+.progress-text {
+    font-size: 10px;
+    text-align: right;
+    margin-top: 2px;
+    color: var(--tx2);
+    font-family: var(--mono);
+}
+
+/* ── Empty state ── */
+.empty-state {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--tx2);
+}
+
+.empty-state-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+    opacity: 0.6;
+}
+
+/* ── Skew indicator ── */
+.skew-indicator {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+.skew-good { background: var(--gr); }
+.skew-warn { background: var(--am); }
+.skew-bad { background: var(--rd); }
+
+/* ── Summary box (resource metrics) ── */
+.summary-box {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: var(--bg);
+    border: 1px solid var(--bd);
+    border-radius: var(--r);
+}
+
+.summary-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 14px;
+    background: var(--s1);
+    border-radius: var(--r);
+    min-width: 72px;
+}
+
+.summary-label {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--tx2);
+    margin-bottom: 3px;
+}
+
+.summary-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--tx);
+    font-family: var(--mono);
+}
+
+/* ── Alert settings ── */
+.alert-settings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 14px;
+    margin-bottom: 8px;
+    align-items: center;
+    background: var(--s1);
+    border-bottom: 1px solid var(--bd);
+}
+
+.alert-settings label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--tx2);
+    white-space: nowrap;
+}
+
+.alert-settings input[type="checkbox"] {
+    accent-color: var(--ac);
+    width: 13px;
+    height: 13px;
+}
+
+.alert-settings input[type="number"] {
+    width: 56px;
+    border: 1px solid var(--vscode-input-border, var(--bd));
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border-radius: 3px;
+    padding: 3px 5px;
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+.alert-settings input[type="number"]:focus {
+    outline: 1px solid var(--ac);
+    border-color: var(--ac);
+}
+
+/* ── Alerts list ── */
+.alerts-list {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 14px;
+    min-height: 0;
+}
+
+.alert-card {
+    border-left: 3px solid transparent;
+    background: var(--s1);
+    border-radius: 0 var(--r) var(--r) 0;
+    padding: 8px 12px;
+    transition: border-color .15s;
+}
+
+.alert-warning {
+    border-left-color: var(--am);
+}
+
+.alert-critical {
+    border-left-color: var(--rd);
+}
+
+.alert-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tx);
+}
+
+.alert-message {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--tx2);
+    line-height: 1.4;
+}
+
+.alert-meta {
+    margin-top: 3px;
+    font-size: 10px;
+    color: var(--tx3);
+    font-family: var(--mono);
+}
+
+/* ── Responsive ── */
+@media (max-width: 800px) {
+    .resources-grid {
+        grid-template-columns: 1fr;
+    }
+    .overview-strip {
+        grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+    }
+}

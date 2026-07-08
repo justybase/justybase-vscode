@@ -1,0 +1,14 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DuckDB">
+    <defs>
+        <linearGradient id="duckdbGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ffda7a" />
+            <stop offset="100%" stop-color="#f4a51c" />
+        </linearGradient>
+    </defs>
+    <rect x="6" y="6" width="52" height="52" rx="16" fill="url(#duckdbGradient)" />
+    <circle cx="24" cy="32" r="8" fill="#111111" />
+    <path
+        d="M25 19h8c9.941 0 18 8.059 18 18s-8.059 18-18 18h-8v-8h8c5.523 0 10-4.477 10-10s-4.477-10-10-10h-8z"
+        fill="#111111"
+    />
+</svg>
