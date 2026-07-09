@@ -2,7 +2,7 @@
     "name": "justybaselite-postgresql",
     "displayName": "JustyBase PostgreSQL Support",
     "description": "Optional PostgreSQL Support for JustyBase Core",
-    "version": "3.14.20",
+    "version": "3.14.21",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
