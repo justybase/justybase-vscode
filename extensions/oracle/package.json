@@ -2,7 +2,7 @@
     "name": "justybaselite-oracle",
     "displayName": "JustyBase Oracle Support",
     "description": "Optional Oracle Support for JustyBase Core using node-oracledb thin mode",
-    "version": "3.14.21",
+    "version": "3.14.22",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
