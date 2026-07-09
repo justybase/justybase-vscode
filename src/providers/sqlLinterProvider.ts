@@ -307,9 +307,19 @@ export class SqlLinterProvider {
     const connectionName =
       validationContext?.connectionManager.resolveConnectionName?.(documentUri);
     if (connectionName && validationContext) {
-      await validationContext.metadataCache.preloadColumnsForConnection(
+      const preloadColumns = validationContext.metadataCache.preloadColumnsForConnection(
         connectionName,
       );
+      if (onDemand) {
+        await preloadColumns;
+      } else {
+        void preloadColumns.then(undefined, (error: unknown) => {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          Logger.getInstance().debug(
+            `[SqlLinter] Background column metadata preload failed for ${connectionName}: ${errorMessage}`,
+          );
+        });
+      }
       if (
         validationContext.metadataCache.hasTableCacheForConnection(connectionName)
         && !validationContext.metadataCache.isConnectionPrefetchFresh(connectionName)

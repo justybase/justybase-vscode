@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import {
-    formatPutLogMessage,
+    logMacroPreprocessResult,
     normalizeVariableName,
     normalizeVariableValues,
 } from './variableUtils';
@@ -104,7 +104,7 @@ export async function resolveQueryVariables(
     logCallback?: (message: string) => void,
     macroContext: MacroPreprocessorContext = {},
 ): Promise<string> {
-    const promptValues = await collectQueryVariableValues(query, silent, context);
+    const promptValues = await collectQueryVariableValues(query, silent, context, macroContext);
     return await resolveQueryVariablesWithValues(
         query,
         promptValues,
@@ -117,12 +117,13 @@ export async function collectQueryVariableValues(
     query: string,
     silent: boolean,
     context?: vscode.ExtensionContext,
+    macroContext: MacroPreprocessorContext = {},
 ): Promise<Record<string, string>> {
     const preprocessor = new MacroPreprocessor();
-    const scanResult = preprocessor.processScriptSync(query, {
+    const scanResult = await preprocessor.processScript(query, {
         environment: new MacroEnvironment(),
         replaceVariables: false,
-    });
+    }, macroContext);
     const promptVariables = new Set(Array.from(scanResult.unresolvedVariables, normalizeVariableName));
     return await promptForVariableValues(promptVariables, silent, {}, context);
 }
@@ -140,9 +141,7 @@ export async function resolveQueryVariablesWithValues(
         replaceVariables: true,
     }, macroContext);
 
-    result.putMessages.forEach(message => {
-        logCallback?.(formatPutLogMessage(message));
-    });
+    logMacroPreprocessResult(result, logCallback);
 
     return result.sql;
 }

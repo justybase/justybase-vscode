@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate synchronized versions
+        run: npm run version:check
+
+      - name: Type check core
+        run: npm run check-types
+
+      - name: Type check DB2 extension
+        if: hashFiles('extensions/db2/package-lock.json') != ''
+        run: npm run check-types:db2
+
+      - name: Type check DuckDB extension
+        if: hashFiles('extensions/duckdb/package-lock.json') != ''
+        run: npm run check-types:duckdb
+
+      - name: Type check Oracle extension
+        if: hashFiles('extensions/oracle/package-lock.json') != ''
+        run: npm run check-types:oracle
+
+      - name: Type check PostgreSQL extension
+        if: hashFiles('extensions/postgresql/package-lock.json') != ''
+        run: npm run check-types:postgresql
+
+      - name: Type check Vertica extension
+        if: hashFiles('extensions/vertica/package-lock.json') != ''
+        run: npm run check-types:vertica
+
+      - name: Type check MS SQL extension
+        if: hashFiles('extensions/mssql/package-lock.json') != ''
+        run: npm run check-types:mssql
+
+      - name: Type check MySQL extension
+        if: hashFiles('extensions/mysql/package-lock.json') != ''
+        run: npm run check-types:mysql
+
+      - name: Type check Snowflake extension
+        if: hashFiles('extensions/snowflake/package-lock.json') != ''
+        run: npm run check-types:snowflake
+
+      - name: Lint
+        run: npm run lint
+
+  completion-parity:
+    name: Completion Parity Gate
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run completion parity tests
+        run: npm run test:completion-parity
+
+  quickfix-regression:
+    name: Quick-Fix Regression Gate
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quick-fix regression tests
+        run: npm run test:quickfix-regression

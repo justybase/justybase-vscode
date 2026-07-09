@@ -164,8 +164,16 @@ function readMacroDirectiveRange(
   start: number,
 ): { start: number; end: number } | undefined {
   const directiveStart = skipHorizontalWhitespace(sql, start);
+  const ifMatch = sql.slice(directiveStart).match(/^%if\s+/i);
+  if (ifMatch) {
+    return {
+      start: directiveStart,
+      end: findMacroIfBlockEnd(sql, findDirectiveEnd(sql, directiveStart + ifMatch[0].length)),
+    };
+  }
+
   const directiveMatch = sql.slice(directiveStart).match(
-    /^(?:%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+)/i,
+    /^(?:%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%else\s+%do\b\s*|%end\b\s*)/i,
   );
 
   if (!directiveMatch) {
@@ -176,6 +184,56 @@ function readMacroDirectiveRange(
     start: directiveStart,
     end: findDirectiveEnd(sql, directiveStart + directiveMatch[0].length),
   };
+}
+
+function findMacroIfBlockEnd(sql: string, bodyStart: number): number {
+  let offset = bodyStart;
+  let atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+  let allowChainedDirective = true;
+  let depth = 0;
+
+  while (offset < sql.length) {
+    if (atLineStart || allowChainedDirective) {
+      const directiveStart = skipHorizontalWhitespace(sql, offset);
+      const text = sql.slice(directiveStart);
+      const ifMatch = text.match(/^%if\s+/i);
+      if (ifMatch) {
+        depth++;
+        offset = findDirectiveEnd(sql, directiveStart + ifMatch[0].length);
+        atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+        allowChainedDirective = true;
+        continue;
+      }
+
+      const endMatch = text.match(/^%end\b\s*;?/i);
+      if (endMatch) {
+        const end = directiveStart + endMatch[0].length;
+        if (depth === 0) {
+          return end;
+        }
+        depth--;
+        offset = end;
+        atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+        allowChainedDirective = true;
+        continue;
+      }
+
+      const directiveMatch = text.match(/^%(?:else\s+%do|let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|put\s+|export\b\s*|include\s+)/i);
+      if (directiveMatch) {
+        offset = findDirectiveEnd(sql, directiveStart + directiveMatch[0].length);
+        atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+        allowChainedDirective = true;
+        continue;
+      }
+    }
+
+    const char = sql[offset] ?? "";
+    offset++;
+    allowChainedDirective = false;
+    atLineStart = updateLineStartState(atLineStart, char);
+  }
+
+  return sql.length;
 }
 
 function sanitizeMacroDirectives(sql: string): string {

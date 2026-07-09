@@ -114,7 +114,7 @@ function readMacroDirectiveRange(
   }
 
   const directiveMatch = sql.slice(directiveStart).match(
-    /^(?:%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+)/i,
+    /^(?:%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*)/i,
   );
   if (!directiveMatch) {
     return undefined;

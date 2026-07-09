@@ -47,7 +47,7 @@ export function registerEditorInsertCommands(deps: SchemaCommandsDependencies): 
 
                 if (typeof label === 'string') {
                     // if it's a column with type in label like ID (INTEGER)
-                    if (item.contextValue === 'column') {
+                    if (item.contextValue === 'column' || item.contextValue === 'cteColumn') {
                         // Extract just the column name using a simple regex or split
                         // Supports nested type suffixes, e.g. "AMOUNT (NUMERIC(10,2))"
                         const match = label.match(/^(.+)\s+\((.+)\)$/);

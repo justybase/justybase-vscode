@@ -175,4 +175,53 @@ SELECT &as_of_key AS as_of_key FROM &dim_table;`,
     expect(result.actionableParserErrors).toHaveLength(0);
     expect(result.cst).toBeDefined();
   });
+
+  it("sanitizes multiline %EXPORT directives before parsing and validation", () => {
+    const result = parseSqlStatements({
+      sql: `%LET dim_table = JUST_DATA.ADMIN.DIMDATE;
+%EXPORT(
+  format='xlsx',
+  file='/tmp/dimdate.xlsx',
+  sheet='Dim Date',
+  query=(
+    SELECT DATEKEY, CALENDARQUARTER
+    FROM &dim_table
+  )
+);
+SELECT 1;`,
+      runtime: NETEZZA_SQL_PARSING_RUNTIME,
+    });
+
+    expect(result.lexResult.errors).toHaveLength(0);
+    expect(result.actionableParserErrors).toHaveLength(0);
+    expect(result.cst).toBeDefined();
+  });
+
+  it("sanitizes SAS-like control-flow macro blocks before parsing", () => {
+    const result = parseSqlStatements({
+      sql: `%LET run_bad_sql = 0;
+%IF &run_bad_sql = 1 %THEN %DO;
+  THIS IS NOT VALID SQL FROM A SKIPPED BRANCH
+%ELSE %DO;
+  %PUT skipped invalid branch;
+%END;
+SELECT 1;`,
+      runtime: NETEZZA_SQL_PARSING_RUNTIME,
+    });
+
+    expect(result.lexResult.errors).toHaveLength(0);
+    expect(result.actionableParserErrors).toHaveLength(0);
+    expect(result.cst).toBeDefined();
+  });
+
+  it("sanitizes %INCLUDE directives before parsing", () => {
+    const result = parseSqlStatements({
+      sql: "%INCLUDE 'shared.sql';\nSELECT 1;",
+      runtime: NETEZZA_SQL_PARSING_RUNTIME,
+    });
+
+    expect(result.lexResult.errors).toHaveLength(0);
+    expect(result.actionableParserErrors).toHaveLength(0);
+    expect(result.cst).toBeDefined();
+  });
 });

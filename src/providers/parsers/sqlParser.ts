@@ -61,6 +61,13 @@ function parseTempTables(text: string, definitions: LocalDefinition[]): void {
 /**
  * Parse CTE (Common Table Expression) definitions
  */
+function extractExplicitCteColumnNames(columnListText: string): string[] {
+    return columnListText
+        .split(',')
+        .map((column) => column.trim().replace(/^["']|["']$/g, ''))
+        .filter((column) => !!column);
+}
+
 function parseCTEs(text: string, definitions: LocalDefinition[]): void {
     const withRegex = /\bWITH\s+/gi;
     let match;
@@ -70,8 +77,8 @@ function parseCTEs(text: string, definitions: LocalDefinition[]): void {
 
         // Loop to parse multiple CTEs separated by comma
         while (true) {
-            // Expect: CTE_NAME AS (
-            const cteHeaderRegex = /^\s*([a-zA-Z0-9_]+)\s+AS\s*\(/i;
+            // Expect: CTE_NAME [(col1, col2, ...)] AS (
+            const cteHeaderRegex = /^\s*([a-zA-Z0-9_]+)(?:\s*\(([^)]*)\))?\s+AS\s*\(/i;
             const remainingText = text.substring(currentIndex);
             const cteMatch = remainingText.match(cteHeaderRegex);
 
@@ -80,15 +87,18 @@ function parseCTEs(text: string, definitions: LocalDefinition[]): void {
             }
 
             const cteName = cteMatch[1];
+            const explicitColumnList = cteMatch[2];
 
-            // Find the first '(' after AS
-            const relativeOpenParen = remainingText.indexOf('(', cteMatch.index! + cteMatch[1].length);
+            const relativeOpenParen =
+                cteMatch.index! + cteMatch[0].length - 1;
             const absoluteOpenParen = currentIndex + relativeOpenParen;
 
             const query = extractBalancedParenthesisContent(text, absoluteOpenParen + 1);
 
             if (query) {
-                const columns = extractColumnsFromQuery(query);
+                const columns = explicitColumnList
+                    ? extractExplicitCteColumnNames(explicitColumnList)
+                    : extractColumnsFromQuery(query);
                 definitions.push({ name: cteName, type: 'CTE', columns });
 
                 // Move index past this CTE

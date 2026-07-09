@@ -372,6 +372,28 @@ comment */; SELECT 2;`;
             expect(result[1].sql).toBe('SELECT 2\nFROM t2');
             expect(sql.substring(result[0].startOffset, result[0].endOffset).trim()).toBe('SELECT 1\nFROM t1');
         });
+
+        it('keeps SAS-like macro control blocks together', () => {
+            const sql = `%LET run = 1;
+%IF &run = 1 %THEN %DO;
+  SELECT 1;
+%ELSE %DO;
+  THIS IS SKIPPED;
+%END;
+SELECT 2;`;
+            const result = SqlParser.splitStatementsWithPositions(sql);
+
+            expect(result).toHaveLength(3);
+            expect(result[0].sql).toBe('%LET run = 1');
+            expect(result[1].sql).toContain('%IF &run = 1 %THEN %DO;');
+            expect(result[1].sql).toContain('%END');
+            expect(result[2].sql).toBe('SELECT 2');
+
+            const plain = SqlParser.splitStatements(sql);
+            expect(plain).toHaveLength(3);
+            expect(plain[1]).toContain('THIS IS SKIPPED;');
+            expect(plain[2]).toBe('SELECT 2');
+        });
     });
 });
 

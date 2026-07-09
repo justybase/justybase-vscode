@@ -1,0 +1,90 @@
+name: DuckDB Extension Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build-duckdb:
+    name: Build DuckDB (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            expected_binding_package: '@duckdb/node-bindings-win32-x64'
+          - os: ubuntu-latest
+            target: linux-x64
+            expected_binding_package: '@duckdb/node-bindings-linux-x64'
+          - os: macos-14
+            target: darwin-arm64
+            expected_binding_package: '@duckdb/node-bindings-darwin-arm64'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install DuckDB extension dependencies
+        working-directory: extensions/duckdb
+        run: npm install
+
+      - name: Type check DuckDB extension
+        run: npm run check-types:duckdb
+
+      - name: Build DuckDB extension
+        run: npm run build:duckdb
+
+      - name: Package DuckDB VSIX
+        run: >
+          npm run package:duckdb --
+          --target ${{ matrix.target }}
+          --out justybaselite-duckdb-${{ matrix.target }}.vsix
+
+      - name: Verify packaged DuckDB runtime files
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile
+
+          vsix_path = 'extensions/duckdb/justybaselite-duckdb-${{ matrix.target }}.vsix'
+          expected_binding = 'node_modules/${{ matrix.expected_binding_package }}/duckdb.node'
+
+          with zipfile.ZipFile(vsix_path, 'r') as archive:
+              names = archive.namelist()
+              has_api = any('node_modules/@duckdb/node-api/' in name for name in names)
+              has_binding = any(expected_binding in name for name in names)
+
+          if not has_api:
+              raise SystemExit('Missing @duckdb/node-api runtime files in packaged VSIX')
+
+          if not has_binding:
+              raise SystemExit(f'Missing expected DuckDB native binding in VSIX: {expected_binding}')
+
+          print('DuckDB VSIX runtime asset verification passed')
+          PY
+
+      - name: Upload DuckDB VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: justybaselite-duckdb-${{ matrix.target }}
+          path: extensions/duckdb/justybaselite-duckdb-${{ matrix.target }}.vsix
+          retention-days: 1

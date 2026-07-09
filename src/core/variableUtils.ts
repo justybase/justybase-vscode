@@ -1,4 +1,8 @@
-import { MacroEnvironment, MacroPreprocessor } from './macroPreprocessor';
+import {
+    MacroEnvironment,
+    MacroPreprocessor,
+    type MacroPreprocessResult,
+} from './macroPreprocessor';
 
 /**
  * SQL Variable Utilities
@@ -26,6 +30,27 @@ export function normalizeVariableValues(values?: Record<string, string>): Record
 
 export function formatPutLogMessage(message: string): string {
     return `>>> %PUT: ${message}`;
+}
+
+/** Log %PUT, %INCLUDE, %IF branch, %EXPORT, and error events from macro preprocessing. */
+export function logMacroPreprocessResult(
+    result: Pick<MacroPreprocessResult, 'putMessages' | 'scriptEvents'>,
+    logCallback?: (message: string) => void,
+): void {
+    if (!logCallback) {
+        return;
+    }
+
+    // Preprocessor emits matching %PUT entries in both arrays; scriptEvents is the
+    // superset used for logging (includes branch/include/export/error events).
+    if (result.scriptEvents && result.scriptEvents.length > 0) {
+        for (const event of result.scriptEvents) {
+            logCallback(event.message);
+        }
+        return;
+    }
+
+    result.putMessages.forEach(message => logCallback(formatPutLogMessage(message)));
 }
 
 /**

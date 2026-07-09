@@ -497,6 +497,27 @@ describe('ConnectionManager', () => {
             expect(effectiveDb).toBe('testdb');
         });
 
+        it('should resolve effective schema synchronously for Netezza connections', async () => {
+            await manager.saveConnection(sampleConnection);
+
+            const docUri = 'file:///test.sql';
+            manager.setDocumentConnection(docUri, 'TestConnection');
+
+            expect(manager.getEffectiveSchemaSync(docUri, 'testdb')).toBe('ADMIN');
+        });
+
+        it('should prefer connection schema in effective schema sync', async () => {
+            await manager.saveConnection({
+                ...postgresqlConnection,
+                schema: 'analytics',
+            });
+
+            const docUri = 'file:///postgres.sql';
+            manager.setDocumentConnection(docUri, 'WarehousePostgreSQL');
+
+            expect(manager.getEffectiveSchemaSync(docUri, 'appdb')).toBe('analytics');
+        });
+
         it('should resolve import connection details with tab override', async () => {
             await manager.saveConnection(sampleConnection);
 

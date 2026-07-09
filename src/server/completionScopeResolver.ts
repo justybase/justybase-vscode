@@ -115,6 +115,11 @@ export class CompletionScopeResolver {
           cursorOffset,
           databaseKind,
         );
+    const parserFriendlyDocument = this.contextExtractor.prepareParserFriendlySql(
+      documentText,
+      cursorOffset,
+      databaseKind,
+    ).sql;
     const aliasBindingsRaw = this.mergeAliasMaps(
       this.getAliasBindings(
         documentUri,
@@ -165,7 +170,7 @@ export class CompletionScopeResolver {
     if (localDefinition) {
       const resolvedColumns = await this.metadataResolver.resolveLocalDefinitionColumns(
         localDefinition,
-        documentText,
+        parserFriendlyDocument,
         resolutionLocalDefs,
         documentUri,
         request.documentVersion,
@@ -185,7 +190,7 @@ export class CompletionScopeResolver {
       if (rawLocalAliasTarget) {
         const resolvedColumns = await this.metadataResolver.resolveLocalDefinitionColumns(
           rawLocalAliasTarget,
-          documentText,
+          parserFriendlyDocument,
           resolutionLocalDefs,
           documentUri,
           request.documentVersion,
@@ -206,7 +211,7 @@ export class CompletionScopeResolver {
       if (localAliasTarget) {
         const resolvedColumns = await this.metadataResolver.resolveLocalDefinitionColumns(
           localAliasTarget,
-          documentText,
+          parserFriendlyDocument,
           resolutionLocalDefs,
           documentUri,
           request.documentVersion,

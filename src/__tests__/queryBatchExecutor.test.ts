@@ -5,6 +5,10 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
 // Mock vscode module
 jest.mock("vscode", () => ({
     window: {
@@ -25,21 +29,37 @@ jest.mock("vscode", () => ({
                 return defaultValue;
             }),
         })),
+        getWorkspaceFolder: jest.fn(),
+    },
+    Uri: {
+        file: jest.fn((filePath: string) => ({
+            scheme: "file",
+            fsPath: filePath,
+            toString: () => `file://${filePath}`,
+        })),
+        parse: jest.fn((value: string) => ({
+            scheme: value.startsWith("file://") ? "file" : "untitled",
+            fsPath: value.replace(/^file:\/\//, ""),
+            toString: () => value,
+        })),
     },
 }));
 
 // Mock variable utils
-jest.mock("../core/variableUtils", () => ({
-    extractVariables: jest.fn().mockReturnValue(new Set<string>()),
-    formatPutLogMessage: jest.fn((message: string) => `>>> %PUT: ${message}`),
-    parseSetVariables: jest.fn((sql: string) => ({
-        sql,
-        setValues: {},
-    })),
-    replaceVariablesInSql: jest.fn(
-        (sql: string, _vars: Record<string, string>) => sql,
-    ),
-}));
+jest.mock("../core/variableUtils", () => {
+    const actual = jest.requireActual("../core/variableUtils");
+    return {
+        ...actual,
+        extractVariables: jest.fn().mockReturnValue(new Set<string>()),
+        parseSetVariables: jest.fn((sql: string) => ({
+            sql,
+            setValues: {},
+        })),
+        replaceVariablesInSql: jest.fn(
+            (sql: string, _vars: Record<string, string>) => sql,
+        ),
+    };
+});
 
 // Mock variable resolver
 jest.mock("../core/variableResolver", () => ({
@@ -82,7 +102,10 @@ import {
     captureSessionId,
     setupBatchLogger,
     logBatch,
+    executeMacroExport,
+    createMacroFileReadContext,
     prepareQueryForExecution,
+    splitExpandedMacroStatements,
     logQueryToHistoryAsync,
     handleBatchRetry,
     handleBatchError,
@@ -444,6 +467,170 @@ describe("queryBatchExecutor", () => {
                 "SELECT MAX(DATEKEY)\n  FROM JUST_DATA.ADMIN.DIMDATE",
             );
         });
+
+        it("executes %EXPORT directives and writes an XLSX file", async () => {
+            const outputPath = path.join(
+                os.tmpdir(),
+                `justybase_macro_export_${Date.now()}.xlsx`,
+            );
+            const queryExecutor = jest.fn().mockResolvedValueOnce({
+                columns: [{ name: "ID", type: "INTEGER" }, { name: "NAME", type: "VARCHAR" }],
+                rows: [[1, "Alpha"], [2, "Beta"]],
+            });
+            const logCallback = jest.fn();
+
+            try {
+                const result = await prepareQueryForExecution(
+                    `%EXPORT(
+  file='${outputPath}',
+  sheet='Data',
+  query=(SELECT ID, NAME FROM TEST_TABLE)
+);`,
+                    {},
+                    logCallback,
+                    queryExecutor,
+                );
+
+                expect(result).toBe("");
+                expect(queryExecutor).toHaveBeenCalledWith("SELECT ID, NAME FROM TEST_TABLE");
+                expect(fs.existsSync(outputPath)).toBe(true);
+                expect(fs.statSync(outputPath).size).toBeGreaterThan(0);
+                expect(logCallback).toHaveBeenCalledWith(
+                    `>>> %EXPORT: Exported 2 rows to ${outputPath}`,
+                );
+            } finally {
+                if (fs.existsSync(outputPath)) {
+                    fs.unlinkSync(outputPath);
+                }
+            }
+        });
+
+        it("reads %INCLUDE files through the macro file context", async () => {
+            const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "justybase-macro-include-"));
+            const sourcePath = path.join(tempDir, "main.sql");
+            const includePath = path.join(tempDir, "settings.sql");
+            fs.writeFileSync(includePath, "%LET x = 42;\n");
+
+            try {
+                const vars: Record<string, string> = {};
+                const result = await prepareQueryForExecution(
+                    "%INCLUDE 'settings.sql';\nSELECT &x;",
+                    vars,
+                    undefined,
+                    undefined,
+                    createMacroFileReadContext(sourcePath),
+                );
+
+                expect(result.trim()).toBe("SELECT 42;");
+                expect(vars.X).toBe("42");
+            } finally {
+                fs.rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+
+        it("rejects absolute %INCLUDE files outside the active workspace", async () => {
+            const vscode = require("vscode");
+            const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "justybase-workspace-"));
+            const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "justybase-outside-"));
+            const outsidePath = path.join(outsideDir, "outside.sql");
+            fs.writeFileSync(outsidePath, "%LET x = 42;\n");
+            vscode.workspace.getWorkspaceFolder.mockReturnValue({
+                uri: { fsPath: workspaceDir },
+            });
+
+            try {
+                await expect(
+                    prepareQueryForExecution(
+                        `%INCLUDE '${outsidePath}';`,
+                        {},
+                        undefined,
+                        undefined,
+                        createMacroFileReadContext(path.join(workspaceDir, "main.sql")),
+                    ),
+                ).rejects.toThrow("%INCLUDE path escapes the workspace");
+            } finally {
+                vscode.workspace.getWorkspaceFolder.mockReset();
+                fs.rmSync(workspaceDir, { recursive: true, force: true });
+                fs.rmSync(outsideDir, { recursive: true, force: true });
+            }
+        });
+
+        it("rejects absolute %INCLUDE files outside allowed directories when no workspace is open", async () => {
+            const vscode = require("vscode");
+            const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "justybase-outside-"));
+            const outsidePath = path.join(outsideDir, "outside.sql");
+            fs.writeFileSync(outsidePath, "%LET x = 42;\n");
+            vscode.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+            vscode.workspace.workspaceFolders = undefined;
+
+            try {
+                await expect(
+                    prepareQueryForExecution(
+                        `%INCLUDE '${outsidePath}';`,
+                        {},
+                        undefined,
+                        undefined,
+                        createMacroFileReadContext(),
+                    ),
+                ).rejects.toThrow("%INCLUDE path escapes allowed directories");
+            } finally {
+                fs.rmSync(outsideDir, { recursive: true, force: true });
+            }
+        });
+
+        it("logs macro script events from preprocessing", async () => {
+            const logCallback = jest.fn();
+            const readFile = jest.fn().mockResolvedValue({
+                path: "/workspace/inc.sql",
+                content: "SELECT 1;",
+            });
+
+            await prepareQueryForExecution(
+                `%INCLUDE 'inc.sql';
+%IF 1 = 1 %THEN %DO;
+  %PUT included=1;
+  SELECT 1;
+%END;`,
+                {},
+                logCallback,
+                undefined,
+                {
+                    ...createMacroFileReadContext("/workspace/main.sql"),
+                    readFile,
+                },
+            );
+
+            expect(logCallback).toHaveBeenCalledWith(">>> %INCLUDE: /workspace/inc.sql");
+            expect(logCallback).toHaveBeenCalledWith(">>> %PUT: included=1");
+            expect(logCallback).toHaveBeenCalledWith(">>> %IF: executed THEN branch");
+        });
+
+        it("refuses to overwrite %EXPORT targets unless overwrite is enabled", async () => {
+            const outputPath = path.join(
+                os.tmpdir(),
+                `justybase_macro_export_existing_${Date.now()}.xlsx`,
+            );
+            fs.writeFileSync(outputPath, "existing");
+
+            try {
+                await expect(
+                    executeMacroExport(
+                        {
+                            format: "xlsx",
+                            filePath: outputPath,
+                            query: "SELECT 1",
+                            sheetName: "Data",
+                            overwrite: false,
+                        },
+                        jest.fn(),
+                    ),
+                ).rejects.toThrow("%EXPORT target already exists");
+            } finally {
+                if (fs.existsSync(outputPath)) {
+                    fs.unlinkSync(outputPath);
+                }
+            }
+        });
     });
 
     // -----------------------------------------------------------------------
@@ -494,6 +681,22 @@ describe("queryBatchExecutor", () => {
                     "conn",
                 ),
             ).not.toThrow();
+        });
+    });
+
+    // -----------------------------------------------------------------------
+    // splitExpandedMacroStatements
+    // -----------------------------------------------------------------------
+    describe("splitExpandedMacroStatements", () => {
+        it("splits multi-statement expanded macro SQL", () => {
+            expect(splitExpandedMacroStatements("SELECT 1; SELECT 2;")).toEqual([
+                "SELECT 1",
+                "SELECT 2",
+            ]);
+        });
+
+        it("returns a single statement unchanged", () => {
+            expect(splitExpandedMacroStatements("SELECT 1")).toEqual(["SELECT 1"]);
         });
     });
 

@@ -50,15 +50,18 @@ jest.mock('../core/queryHistoryManager', () => ({
     },
 }));
 
-jest.mock('../core/variableUtils', () => ({
-    extractVariables: jest.fn().mockReturnValue(new Set()),
-    formatPutLogMessage: jest.fn((message: string) => `>>> %PUT: ${message}`),
-    parseSetVariables: jest.fn().mockImplementation((sql: string) => ({
-        sql,
-        setValues: {},
-    })),
-    replaceVariablesInSql: jest.fn().mockImplementation((sql: string) => sql),
-}));
+jest.mock('../core/variableUtils', () => {
+    const actual = jest.requireActual('../core/variableUtils');
+    return {
+        ...actual,
+        extractVariables: jest.fn().mockReturnValue(new Set()),
+        parseSetVariables: jest.fn().mockImplementation((sql: string) => ({
+            sql,
+            setValues: {},
+        })),
+        replaceVariablesInSql: jest.fn().mockImplementation((sql: string) => sql),
+    };
+});
 
 jest.mock('../core/variableResolver', () => ({
     promptForVariableValues: jest.fn().mockResolvedValue({}),
@@ -259,8 +262,29 @@ describe('batchQueryExecutor', () => {
             );
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
-            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1;');
-            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2;');
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1');
+            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2');
+        });
+
+        it('executes each statement from an expanded macro branch sequentially', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
+                error: null,
+            });
+
+            await runQueriesSequentially(
+                mockContext,
+                [`%IF 1 = 1 %THEN %DO;
+  SELECT 1;
+  SELECT 2;
+%END;`],
+                mockConnManager,
+                'file:///test.sql',
+            );
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1');
+            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2');
         });
 
         it('should continue executing later queries when continueOnError is enabled', async () => {
@@ -701,6 +725,29 @@ describe('batchQueryExecutor', () => {
             );
 
             expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(1);
+        });
+
+        it('streams each statement from an expanded macro branch separately', async () => {
+            mockExecuteWithStreaming.mockResolvedValue({
+                totalRows: 1,
+                limitReached: false,
+                error: null,
+                recordsAffected: undefined,
+            });
+
+            await runQueriesWithStreaming(
+                mockContext,
+                [`%IF 1 = 1 %THEN %DO;
+  SELECT 1;
+  SELECT 2;
+%END;`],
+                mockConnManager,
+                'file:///test.sql',
+            );
+
+            expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(2);
+            expect(mockExecuteWithStreaming.mock.calls[0]?.[1]).toBe('SELECT 1');
+            expect(mockExecuteWithStreaming.mock.calls[1]?.[1]).toBe('SELECT 2');
         });
 
         it('should throw when no connection selected', async () => {

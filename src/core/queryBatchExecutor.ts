@@ -6,16 +6,22 @@
  */
 
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { getExtensionConfiguration } from "../compatibility/configuration";
 import { ConnectionManager } from "./connectionManager";
 import { QueryHistoryManager } from "./queryHistoryManager";
 import {
-    formatPutLogMessage,
+    logMacroPreprocessResult,
 } from "./variableUtils";
 import { promptForVariableValues } from "./variableResolver";
+import { SqlParser } from "../sql/sqlParser";
 import {
     MacroEnvironment,
     MacroPreprocessor,
+    type MacroExportExecutionResult,
+    type MacroExportRequest,
+    type MacroPreprocessorContext,
     type MacroQueryExecutor,
     type MacroQueryExecutionResult,
 } from "./macroPreprocessor";
@@ -116,16 +122,18 @@ export function resolveBatchConnectionName(
 export async function resolveBatchVariables(
     queries: string[],
     context: vscode.ExtensionContext,
+    documentUri?: string,
 ): Promise<Record<string, string>> {
     const unresolvedVariables = new Set<string>();
     const scanEnvironment = new MacroEnvironment();
     const preprocessor = new MacroPreprocessor();
+    const macroContext = createMacroFileReadContext(documentUri);
 
     for (const q of queries) {
-        const result = preprocessor.processScriptSync(q, {
+        const result = await preprocessor.processScript(q, {
             environment: scanEnvironment,
             replaceVariables: false,
-        });
+        }, macroContext);
         result.unresolvedVariables.forEach(variable => {
             unresolvedVariables.add(variable);
         });
@@ -233,17 +241,223 @@ export async function prepareQueryForExecution(
     resolvedVars: Record<string, string>,
     logCallback?: (message: string) => void,
     queryExecutor?: MacroQueryExecutor,
+    macroContext: MacroPreprocessorContext = {},
 ): Promise<string> {
     const environment = new MacroEnvironment(resolvedVars);
     const result = await new MacroPreprocessor().processScript(query, {
         environment,
         replaceVariables: true,
     }, {
-        query: queryExecutor,
+        ...macroContext,
+        query: queryExecutor ?? macroContext.query,
+        exporter: queryExecutor
+            ? request => executeMacroExport(request, queryExecutor, logCallback)
+            : macroContext.exporter,
     });
     Object.assign(resolvedVars, result.variables);
-    result.putMessages.forEach(message => logCallback?.(formatPutLogMessage(message)));
+    logMacroPreprocessResult(result, logCallback);
     return result.sql;
+}
+
+/**
+ * Split macro-expanded SQL into individual statements for execution.
+ * Pre-split batches keep inner %DO semicolons together until expansion;
+ * after preprocessing, each statement should run (and stream) separately.
+ */
+export function splitExpandedMacroStatements(sql: string): string[] {
+    return SqlParser.splitStatements(sql).filter(statement => statement.trim().length > 0);
+}
+
+export function createMacroFileReadContext(
+    documentUri?: string,
+): Pick<MacroPreprocessorContext, "readFile" | "sourceName"> {
+    const sourceName = documentUri ? uriToFsPath(documentUri) ?? documentUri : undefined;
+
+    return {
+        sourceName,
+        readFile: async (includePath: string, fromSource?: string) => {
+            const resolvedPath = resolveMacroIncludePath(includePath, fromSource, sourceName);
+            const content = await readMacroIncludeFile(resolvedPath);
+            return {
+                path: resolvedPath,
+                content,
+            };
+        },
+    };
+}
+
+async function readMacroIncludeFile(filePath: string): Promise<string> {
+    const workspaceFs = vscode.workspace.fs;
+    if (workspaceFs && vscode.Uri?.file) {
+        const bytes = await workspaceFs.readFile(vscode.Uri.file(filePath));
+        return new TextDecoder("utf-8").decode(bytes);
+    }
+
+    return await fs.promises.readFile(filePath, "utf8");
+}
+
+function resolveMacroIncludePath(
+    includePath: string,
+    fromSource?: string,
+    mainSource?: string,
+): string {
+    const trimmedPath = includePath.trim();
+    const workspaceFolder = getWorkspaceFolderPath(mainSource);
+    const resolvedPath = path.isAbsolute(trimmedPath)
+        ? path.normalize(trimmedPath)
+        : path.resolve(resolveMacroIncludeBasePath(fromSource, mainSource, workspaceFolder), trimmedPath);
+
+    assertMacroIncludePathAllowed(resolvedPath, includePath, mainSource, workspaceFolder);
+
+    return resolvedPath;
+}
+
+function assertMacroIncludePathAllowed(
+    resolvedPath: string,
+    includePath: string,
+    mainSource?: string,
+    workspaceFolder?: string,
+): void {
+    const normalizedPath = path.normalize(resolvedPath);
+    const allowedRoots = getMacroIncludeAllowedRoots(mainSource, workspaceFolder);
+
+    if (allowedRoots.some(root => isPathWithinAllowedRoot(normalizedPath, root))) {
+        return;
+    }
+
+    throw new Error(
+        workspaceFolder
+            ? `%INCLUDE path escapes the workspace: ${includePath}`
+            : `%INCLUDE path escapes allowed directories: ${includePath}`,
+    );
+}
+
+function getMacroIncludeAllowedRoots(
+    mainSource?: string,
+    workspaceFolder?: string,
+): string[] {
+    const roots = new Set<string>();
+
+    if (workspaceFolder) {
+        roots.add(path.normalize(workspaceFolder));
+    }
+    if (mainSource && path.isAbsolute(mainSource)) {
+        roots.add(path.normalize(path.dirname(mainSource)));
+    }
+    roots.add(path.normalize(process.cwd()));
+
+    return Array.from(roots);
+}
+
+function isPathWithinAllowedRoot(resolvedPath: string, root: string): boolean {
+    const relative = path.relative(root, resolvedPath);
+    return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function resolveMacroIncludeBasePath(
+    fromSource: string | undefined,
+    mainSource: string | undefined,
+    workspaceFolder: string | undefined,
+): string {
+    if (fromSource && path.isAbsolute(fromSource)) {
+        return path.dirname(fromSource);
+    }
+    if (mainSource && path.isAbsolute(mainSource)) {
+        return path.dirname(mainSource);
+    }
+    return workspaceFolder ?? process.cwd();
+}
+
+function getWorkspaceFolderPath(sourceName?: string): string | undefined {
+    const sourceUri = sourceName && vscode.Uri?.file ? vscode.Uri.file(sourceName) : undefined;
+    const folder = sourceUri && vscode.workspace.getWorkspaceFolder
+        ? vscode.workspace.getWorkspaceFolder(sourceUri)
+        : vscode.workspace.workspaceFolders?.[0];
+    return folder?.uri.fsPath;
+}
+
+function uriToFsPath(uriText: string): string | undefined {
+    try {
+        if (!vscode.Uri?.parse) {
+            return undefined;
+        }
+        const uri = vscode.Uri.parse(uriText);
+        return uri.scheme === "file" ? uri.fsPath : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+export async function executeMacroExport(
+    request: MacroExportRequest,
+    queryExecutor: MacroQueryExecutor,
+    _logCallback?: (message: string) => void,
+): Promise<MacroExportExecutionResult> {
+    if (fs.existsSync(request.filePath) && !request.overwrite) {
+        throw new Error(`%EXPORT target already exists: ${request.filePath}`);
+    }
+
+    const queryResult = await queryExecutor(request.query);
+    const rows = queryResult.rows.map(row => Array.from(row));
+    const columns = normalizeMacroExportColumns(queryResult, rows);
+
+    if (columns.length === 0) {
+        throw new Error('%EXPORT query returned no columns to export');
+    }
+
+    const item = {
+        columns,
+        rows,
+        sql: request.query,
+        name: request.sheetName,
+    };
+
+    const result = request.format === 'xlsx'
+        ? await (await import('../export/xlsxExporter')).exportStructuredToXlsx(
+            [item],
+            request.filePath,
+            false,
+        )
+        : await (await import('../export/xlsbExporter')).exportStructuredToXlsb(
+            [item],
+            request.filePath,
+            false,
+        );
+
+    if (!result.success) {
+        throw new Error(result.message);
+    }
+
+    const rowsExported = result.details?.rows_exported ?? rows.length;
+    const columnCount = result.details?.columns ?? columns.length;
+    const message = `>>> %EXPORT: Exported ${rowsExported} rows to ${request.filePath}`;
+
+    return {
+        filePath: request.filePath,
+        format: request.format,
+        rowsExported,
+        columns: columnCount,
+        message,
+    };
+}
+
+function normalizeMacroExportColumns(
+    queryResult: MacroQueryExecutionResult,
+    rows: unknown[][],
+): { name: string; type?: string }[] {
+    if (queryResult.columns && queryResult.columns.length > 0) {
+        return queryResult.columns.map((column, index) => ({
+            name: column.name || `COL${index + 1}`,
+            type: column.type,
+        }));
+    }
+
+    const firstRow = rows[0];
+    if (!firstRow) {
+        return [];
+    }
+
+    return firstRow.map((_, index) => ({ name: `COL${index + 1}` }));
 }
 
 export async function executeMacroQuery(

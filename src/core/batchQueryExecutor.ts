@@ -14,7 +14,9 @@ import {
     captureSessionId,
     setupBatchLogger,
     logBatch,
+    createMacroFileReadContext,
     prepareQueryForExecution,
+    splitExpandedMacroStatements,
     executeMacroQuery,
     logQueryToHistoryAsync,
     handleBatchRetry,
@@ -150,7 +152,7 @@ export async function runQueriesSequentially(
     }
 
     // Resolve variables BEFORE connecting so the user sees the prompt immediately
-    const resolvedVars = await resolveBatchVariables(queries, context);
+    const resolvedVars = await resolveBatchVariables(queries, context, documentUri);
 
     try {
         const details = await connManager.getConnection(resolvedConnectionName);
@@ -201,6 +203,8 @@ export async function runQueriesSequentially(
                 currentExecutionId = executionId;
                 const startTime = Date.now();
                 let queryToExecute = query;
+                let activeStatementSql = query;
+                let activeExecutionId: string | undefined = executionId;
 
                 try {
                     queryToExecute = await prepareQueryForExecution(
@@ -214,135 +218,151 @@ export async function runQueriesSequentially(
                             sessionId ? String(sessionId) : undefined,
                             connManager,
                         ),
+                        createMacroFileReadContext(documentUri),
                     );
                     if (queryToExecute.trim().length === 0) {
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: variable directive only.`);
                         continue;
                     }
 
-                    if (queryStartCallback && !executionId) {
-                        executionId = queryStartCallback(i, queryToExecute, resolvedConnectionName);
-                        currentExecutionId = executionId;
-                    }
+                    const statementsToExecute = splitExpandedMacroStatements(queryToExecute);
+                    for (let subIndex = 0; subIndex < statementsToExecute.length; subIndex++) {
+                        const statementToExecute = statementsToExecute[subIndex];
+                        activeStatementSql = statementToExecute;
+                        let statementExecutionId =
+                            subIndex === 0 ? activeExecutionId : undefined;
+                        currentExecutionId = statementExecutionId;
+                        const statementStartTime = Date.now();
 
-                    // Check cancellation after logExecutionStart (event loop may have processed cancel)
-                    if (documentUri && streamingManager.isAborted(documentUri)) {
-                        const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(
-                                executionId,
+                        if (queryStartCallback && !statementExecutionId) {
+                            statementExecutionId = queryStartCallback(i, statementToExecute, resolvedConnectionName);
+                        }
+                        activeExecutionId = statementExecutionId;
+                        currentExecutionId = statementExecutionId;
+
+                        // Check cancellation after logExecutionStart (event loop may have processed cancel)
+                        if (documentUri && streamingManager.isAborted(documentUri)) {
+                            const durationMs = Date.now() - statementStartTime;
+                            if (queryEndCallback && statementExecutionId) {
+                                queryEndCallback(
+                                    statementExecutionId,
+                                    0,
+                                    durationMs,
+                                    'cancelled',
+                                    'Query cancelled',
+                                );
+                            }
+                            throw new Error('Query cancelled');
+                        }
+
+                        const { queryTimeout, rowLimit } = getQueryConfig();
+
+                        const {
+                            results: batchResults,
+                            error: batchError,
+                            recordsAffected: batchRecordsAffected,
+                        } = await streamingManager.executeAndFetch(
+                            connection,
+                            statementToExecute,
+                            rowLimit,
+                            queryTimeout,
+                            documentUri,
+                            sessionId ? String(sessionId) : undefined,
+                            connManager,
+                            maxRows,
+                            createDropSessionCallback(connManager, documentUri),
+                        );
+
+                        // Check cancellation after execution completes
+                        if (documentUri && streamingManager.isAborted(documentUri)) {
+                            const durationMs = Date.now() - statementStartTime;
+                            if (queryEndCallback && statementExecutionId) {
+                                queryEndCallback(
+                                    statementExecutionId,
+                                    0,
+                                    durationMs,
+                                    'cancelled',
+                                    'Query cancelled',
+                                );
+                            }
+                            throw new Error('Query cancelled');
+                        }
+
+                        const durationMs = Date.now() - statementStartTime;
+                        const totalRows =
+                            batchResults?.reduce(
+                                (sum, rs) => sum + (rs.rows?.length || 0),
                                 0,
-                                durationMs,
-                                'cancelled',
-                                'Query cancelled',
-                            );
+                            ) || 0;
+
+                        if (logCallback) {
+                            let logMessage = `Executed query ${i + 1}/${queries.length}`;
+                            if (statementsToExecute.length > 1) {
+                                logMessage += ` (statement ${subIndex + 1}/${statementsToExecute.length})`;
+                            }
+                            logMessage += ` in ${durationMs}ms`;
+                            if (batchRecordsAffected !== undefined && batchRecordsAffected > 0) {
+                                logMessage += ` (records affected: ${batchRecordsAffected})`;
+                            }
+                            logCallback(logMessage);
                         }
-                        throw new Error('Query cancelled');
-                    }
 
-                    const { queryTimeout, rowLimit } = getQueryConfig();
-
-                    const {
-                        results: batchResults,
-                        error: batchError,
-                        recordsAffected: batchRecordsAffected,
-                    } = await streamingManager.executeAndFetch(
-                        connection,
-                        queryToExecute,
-                        rowLimit,
-                        queryTimeout,
-                        documentUri,
-                        sessionId ? String(sessionId) : undefined,
-                        connManager,
-                        maxRows,
-                        createDropSessionCallback(connManager, documentUri),
-                    );
-
-                    // Check cancellation after execution completes
-                    if (documentUri && streamingManager.isAborted(documentUri)) {
-                        const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(
-                                executionId,
-                                0,
-                                durationMs,
-                                'cancelled',
-                                'Query cancelled',
-                            );
+                        if (queryEndCallback && statementExecutionId) {
+                            queryEndCallback(statementExecutionId, totalRows, durationMs, 'success');
                         }
-                        throw new Error('Query cancelled');
-                    }
 
-                    const durationMs = Date.now() - startTime;
-                    const totalRows =
-                        batchResults?.reduce(
-                            (sum, rs) => sum + (rs.rows?.length || 0),
-                            0,
-                        ) || 0;
+                        logQueryToHistoryAsync(
+                            historyManager,
+                            details.host,
+                            details.database,
+                            statementToExecute,
+                            resolvedConnectionName,
+                            historyTags,
+                            'success',
+                            durationMs,
+                            batchRecordsAffected !== undefined && batchRecordsAffected > 0 ? batchRecordsAffected : totalRows,
+                        );
 
-                    if (logCallback) {
-                        let logMessage = `Executed query ${i + 1}/${queries.length} in ${durationMs}ms`;
-                        if (batchRecordsAffected !== undefined && batchRecordsAffected > 0) {
-                            logMessage += ` (records affected: ${batchRecordsAffected})`;
+                        if (batchResults && batchResults.length > 0) {
+                            for (const rs of batchResults) {
+                                allResults.push({
+                                    columns: rs.columns.length > 0 ? rs.columns : [],
+                                    data: rs.columns.length > 0 ? rs.rows : [],
+                                    rowsAffected: undefined,
+                                    limitReached: rs.limitReached,
+                                    message: rs.columns.length > 0 ? undefined : "Query executed successfully",
+                                    sql: statementToExecute,
+                                });
+                            }
                         }
-                        logCallback(logMessage);
-                    }
 
-                    if (queryEndCallback && executionId) {
-                        queryEndCallback(executionId, totalRows, durationMs, 'success');
-                    }
-
-                    logQueryToHistoryAsync(
-                        historyManager,
-                        details.host,
-                        details.database,
-                        query,
-                        resolvedConnectionName,
-                        historyTags,
-                        'success',
-                        durationMs,
-                        batchRecordsAffected !== undefined && batchRecordsAffected > 0 ? batchRecordsAffected : totalRows,
-                    );
-
-                    if (batchResults && batchResults.length > 0) {
-                        for (const rs of batchResults) {
-                            allResults.push({
+                        if (resultCallback && batchResults && batchResults.length > 0) {
+                            const queryResults: QueryResult[] = batchResults.map((rs) => ({
                                 columns: rs.columns.length > 0 ? rs.columns : [],
                                 data: rs.columns.length > 0 ? rs.rows : [],
                                 rowsAffected: undefined,
                                 limitReached: rs.limitReached,
                                 message: rs.columns.length > 0 ? undefined : "Query executed successfully",
-                                sql: queryToExecute,
-                            });
+                                sql: statementToExecute,
+                            }));
+                            resultCallback(queryResults);
                         }
-                    }
 
-                    if (resultCallback && batchResults && batchResults.length > 0) {
-                        const queryResults: QueryResult[] = batchResults.map((rs) => ({
-                            columns: rs.columns.length > 0 ? rs.columns : [],
-                            data: rs.columns.length > 0 ? rs.rows : [],
-                            rowsAffected: undefined,
-                            limitReached: rs.limitReached,
-                            message: rs.columns.length > 0 ? undefined : "Query executed successfully",
-                            sql: queryToExecute,
-                        }));
-                        resultCallback(queryResults);
-                    }
-
-                    if (batchError) {
-                        handleBatchQueryFailure({
-                            err: batchError,
-                            queryIndex: i,
-                            sql: queryToExecute,
-                            executionId,
-                            startTime,
-                            batchOptions: _batchOptions,
-                            queryEndCallback,
-                            outputChannel,
-                            allResults,
-                            resultCallback,
-                        });
-                        continue;
+                        if (batchError) {
+                            handleBatchQueryFailure({
+                                err: batchError,
+                                queryIndex: i,
+                                sql: statementToExecute,
+                                executionId: statementExecutionId,
+                                startTime: statementStartTime,
+                                batchOptions: _batchOptions,
+                                queryEndCallback,
+                                outputChannel,
+                                allResults,
+                                resultCallback,
+                            });
+                            break;
+                        }
                     }
                 } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
@@ -362,8 +382,8 @@ export async function runQueriesSequentially(
                     handleBatchQueryFailure({
                         err,
                         queryIndex: i,
-                        sql: queryToExecute,
-                        executionId,
+                        sql: activeStatementSql,
+                        executionId: activeExecutionId,
                         startTime,
                         batchOptions: _batchOptions,
                         queryEndCallback,
@@ -492,7 +512,7 @@ export async function runQueriesWithStreaming(
     }
 
     // Resolve variables BEFORE connecting so the user sees the prompt immediately
-    const resolvedVars = await resolveBatchVariables(queries, context);
+    const resolvedVars = await resolveBatchVariables(queries, context, documentUri);
 
     try {
         const details = await connManager.getConnection(resolvedConnectionName);
@@ -540,6 +560,8 @@ export async function runQueriesWithStreaming(
                 currentExecutionId = executionId;
                 const startTime = Date.now();
                 let queryToExecute = query;
+                let activeStatementSql = query;
+                let activeExecutionId: string | undefined = executionId;
 
                 try {
                     queryToExecute = await prepareQueryForExecution(
@@ -553,107 +575,123 @@ export async function runQueriesWithStreaming(
                             sessionId ? String(sessionId) : undefined,
                             connManager,
                         ),
+                        createMacroFileReadContext(documentUri),
                     );
                     if (queryToExecute.trim().length === 0) {
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: variable directive only.`);
                         continue;
                     }
 
-                    if (queryStartCallback && !executionId) {
-                        executionId = queryStartCallback(i, queryToExecute, resolvedConnectionName);
-                        currentExecutionId = executionId;
-                    }
+                    const statementsToExecute = splitExpandedMacroStatements(queryToExecute);
+                    for (let subIndex = 0; subIndex < statementsToExecute.length; subIndex++) {
+                        const statementToExecute = statementsToExecute[subIndex];
+                        activeStatementSql = statementToExecute;
+                        let statementExecutionId =
+                            subIndex === 0 ? activeExecutionId : undefined;
+                        currentExecutionId = statementExecutionId;
+                        const statementStartTime = Date.now();
 
-                    // Check cancellation after logExecutionStart (event loop may have processed cancel)
-                    if (documentUri && streamingManager.isAborted(documentUri)) {
-                        const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(
-                                executionId,
-                                0,
-                                durationMs,
-                                'cancelled',
-                                'Query cancelled',
-                            );
+                        if (queryStartCallback && !statementExecutionId) {
+                            statementExecutionId = queryStartCallback(i, statementToExecute, resolvedConnectionName);
                         }
-                        throw new Error('Query cancelled');
-                    }
+                        activeExecutionId = statementExecutionId;
+                        currentExecutionId = statementExecutionId;
 
-                    const { queryTimeout, rowLimit } = getQueryConfig();
+                        // Check cancellation after logExecutionStart (event loop may have processed cancel)
+                        if (documentUri && streamingManager.isAborted(documentUri)) {
+                            const durationMs = Date.now() - statementStartTime;
+                            if (queryEndCallback && statementExecutionId) {
+                                queryEndCallback(
+                                    statementExecutionId,
+                                    0,
+                                    durationMs,
+                                    'cancelled',
+                                    'Query cancelled',
+                                );
+                            }
+                            throw new Error('Query cancelled');
+                        }
 
-                    const { totalRows, limitReached, error, recordsAffected } =
-                        await streamingManager.executeWithStreaming(
-                            connection,
-                            queryToExecute,
-                            rowLimit,
-                            chunkSize,
-                            queryTimeout,
-                            documentUri,
-                            (chunk: StreamingChunk) => {
-                                if (chunkCallback) {
-                                    chunkCallback(i, chunk, queryToExecute);
-                                }
-                            },
-                            sessionId,
-                            connManager,
-                            maxRows,
-                            createDropSessionCallback(connManager, documentUri),
+                        const { queryTimeout, rowLimit } = getQueryConfig();
+
+                        const { totalRows, limitReached, error, recordsAffected } =
+                            await streamingManager.executeWithStreaming(
+                                connection,
+                                statementToExecute,
+                                rowLimit,
+                                chunkSize,
+                                queryTimeout,
+                                documentUri,
+                                (chunk: StreamingChunk) => {
+                                    if (chunkCallback) {
+                                        chunkCallback(i, chunk, statementToExecute);
+                                    }
+                                },
+                                sessionId,
+                                connManager,
+                                maxRows,
+                                createDropSessionCallback(connManager, documentUri),
+                            );
+
+                        // Check cancellation after execution completes
+                        if (documentUri && streamingManager.isAborted(documentUri)) {
+                            const durationMs = Date.now() - statementStartTime;
+                            if (queryEndCallback && statementExecutionId) {
+                                queryEndCallback(
+                                    statementExecutionId,
+                                    0,
+                                    durationMs,
+                                    'cancelled',
+                                    'Query cancelled',
+                                );
+                            }
+                            throw new Error('Query cancelled');
+                        }
+
+                        const durationMs = Date.now() - statementStartTime;
+                        if (logCallback) {
+                            let logMessage = `Query ${i + 1}/${queries.length}`;
+                            if (statementsToExecute.length > 1) {
+                                logMessage += ` (statement ${subIndex + 1}/${statementsToExecute.length})`;
+                            }
+                            logMessage += `: ${totalRows} rows`;
+                            if (recordsAffected !== undefined && recordsAffected > 0) {
+                                logMessage += ` (records affected: ${recordsAffected})`;
+                            }
+                            logMessage += ` in ${durationMs}ms${limitReached ? " (limit reached)" : ""}`;
+                            logCallback(logMessage);
+                        }
+
+                        if (queryEndCallback && statementExecutionId) {
+                            queryEndCallback(statementExecutionId, totalRows, durationMs, 'success');
+                        }
+
+                        logQueryToHistoryAsync(
+                            historyManager,
+                            details.host,
+                            details.database,
+                            statementToExecute,
+                            resolvedConnectionName,
+                            historyTags,
+                            'success',
+                            durationMs,
+                            recordsAffected !== undefined && recordsAffected > 0 ? recordsAffected : totalRows,
                         );
 
-                    // Check cancellation after execution completes
-                    if (documentUri && streamingManager.isAborted(documentUri)) {
-                        const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(
-                                executionId,
-                                0,
-                                durationMs,
-                                'cancelled',
-                                'Query cancelled',
-                            );
+                        if (error) {
+                            handleBatchQueryFailure({
+                                err: error,
+                                queryIndex: i,
+                                sql: statementToExecute,
+                                executionId: statementExecutionId,
+                                startTime: statementStartTime,
+                                batchOptions: _batchOptions,
+                                queryEndCallback,
+                                outputChannel,
+                                resultCallback: undefined,
+                            });
+                            break;
                         }
-                        throw new Error('Query cancelled');
-                    }
-
-                    const durationMs = Date.now() - startTime;
-                    if (logCallback) {
-                        let logMessage = `Query ${i + 1}/${queries.length}: ${totalRows} rows`;
-                        if (recordsAffected !== undefined && recordsAffected > 0) {
-                            logMessage += ` (records affected: ${recordsAffected})`;
-                        }
-                        logMessage += ` in ${durationMs}ms${limitReached ? " (limit reached)" : ""}`;
-                        logCallback(logMessage);
-                    }
-
-                    if (queryEndCallback && executionId) {
-                        queryEndCallback(executionId, totalRows, durationMs, 'success');
-                    }
-
-                    logQueryToHistoryAsync(
-                        historyManager,
-                        details.host,
-                        details.database,
-                        query,
-                        resolvedConnectionName,
-                        historyTags,
-                        'success',
-                        durationMs,
-                        recordsAffected !== undefined && recordsAffected > 0 ? recordsAffected : totalRows,
-                    );
-
-                    if (error) {
-                        handleBatchQueryFailure({
-                            err: error,
-                            queryIndex: i,
-                            sql: queryToExecute,
-                            executionId,
-                            startTime,
-                            batchOptions: _batchOptions,
-                            queryEndCallback,
-                            outputChannel,
-                            resultCallback: undefined,
-                        });
-                        continue;
                     }
                 } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
@@ -673,8 +711,8 @@ export async function runQueriesWithStreaming(
                     handleBatchQueryFailure({
                         err,
                         queryIndex: i,
-                        sql: queryToExecute,
-                        executionId,
+                        sql: activeStatementSql,
+                        executionId: activeExecutionId,
                         startTime,
                         batchOptions: _batchOptions,
                         queryEndCallback,

@@ -32,7 +32,18 @@ export interface QueryResult {
   rowsAffected?: number;
   message?: string;
   limitReached?: boolean;
+  /**
+   * SQL text associated with this result. For single-query execution after macro
+   * expansion, this is the last executed statement when multiple statements
+   * were run sequentially; otherwise the sole executed statement.
+   */
   sql?: string;
+  /**
+   * Full macro-expanded SQL before statement splitting. Present when
+   * {@link executeRawQuery} preprocesses directives; use this when callers need
+   * the entire expanded script rather than the last executed statement.
+   */
+  expandedSql?: string;
   isLog?: boolean;
   isError?: boolean;
   isCancelled?: boolean;

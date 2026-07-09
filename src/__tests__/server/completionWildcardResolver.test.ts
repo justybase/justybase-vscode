@@ -77,4 +77,49 @@ SELECT t.* FROM ITEMS t;
 
     expect(second).toBe(first);
   });
+
+  it("detects explicit CTE column lists", () => {
+    const sql = `
+WITH CTE1 (out_col1, out_col2) AS (
+  SELECT * FROM DIMDATE
+)
+SELECT * FROM CTE1;
+`;
+
+    expect(
+      resolver.definitionHasExplicitColumnList(sql, "CTE1", "netezza"),
+    ).toBe(true);
+    expect(
+      resolver.definitionHasExplicitColumnList(sql, "DIMDATE", "netezza"),
+    ).toBe(false);
+  });
+
+  it("returns statement-scoped offsets for CTE definitions", () => {
+    const sql = `
+WITH DIMDATE AS (SELECT 1 AS cte_col)
+SELECT * FROM DIMDATE;
+
+WITH cte2 AS (SELECT * FROM DIMDATE)
+SELECT * FROM cte2;
+`;
+    const cte2Offset = resolver.findDefinitionScopeOffset(sql, "cte2", "netezza");
+    const dimdateOffset = resolver.findDefinitionScopeOffset(sql, "DIMDATE", "netezza");
+
+    expect(cte2Offset).toBeDefined();
+    expect(dimdateOffset).toBeDefined();
+    expect(cte2Offset).toBeGreaterThan(dimdateOffset ?? 0);
+  });
+
+  it("detects explicit CTE column lists from tokens when CST parse fails", () => {
+    const sql = `
+WITH c(out_a, out_b) AS (
+  SELECT * FROM DIMDATE
+)
+SELECT c.
+FROM c`;
+
+    expect(
+      resolver.definitionHasExplicitColumnList(sql, "c", "netezza"),
+    ).toBe(true);
+  });
 });

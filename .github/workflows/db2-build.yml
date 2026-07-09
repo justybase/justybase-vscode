@@ -1,0 +1,89 @@
+name: DB2 Extension Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-db2:
+    name: Build DB2 (${{ matrix.platform }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            electron: "42.2.0"
+            expected_driver: node_modules/ibm_db/installer/clidriver/bin/db2cli64.dll
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            electron: "42.2.0"
+            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.so
+          - os: macos-14
+            platform: darwin
+            arch: arm64
+            electron: "42.2.0"
+            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.dylib
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install DB2 extension dependencies
+        working-directory: extensions/db2
+        run: npm ci
+
+      - name: Rebuild ibm_db for Electron runtime
+        working-directory: extensions/db2
+        run: node scripts/rebuild-electron.js --electron ${{ matrix.electron }}
+        env:
+          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+
+      - name: Type check DB2 extension
+        run: npm run check-types:db2
+
+      - name: Build DB2 extension
+        run: npm run build:db2
+
+      - name: Package DB2 VSIX
+        working-directory: extensions/db2
+        run: npm run package -- --out justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
+
+      - name: Verify packaged runtime files
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile
+          vsix_path = 'extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix'
+          expected_driver = '${{ matrix.expected_driver }}'
+          with zipfile.ZipFile(vsix_path, 'r') as z:
+              names = z.namelist()
+              has_binding = any('node_modules/ibm_db/build/Release/odbc_bindings.node' in name for name in names)
+              has_driver = any(expected_driver in name for name in names)
+              if not has_binding:
+                  raise SystemExit('Missing odbc_bindings.node in packaged VSIX')
+              if not has_driver:
+                  raise SystemExit(f'Missing expected platform driver file in VSIX: {expected_driver}')
+          print('VSIX runtime asset verification passed')
+          PY
+
+      - name: Upload DB2 VSIX artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}
+          path: extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
+          retention-days: 1

@@ -1,0 +1,654 @@
+name: Publish Marketplace Extensions
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Release tag to build and publish, for example v2.2.4."
+        required: true
+        type: string
+      publish_targets:
+        description: "Comma-separated targets: core, all, db2, duckdb, oracle, postgresql, vertica, mssql, mysql, snowflake."
+        required: false
+        default: core
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to build and publish, for example v2.2.4."
+        required: true
+        type: string
+      publish_core:
+        description: "Publish core Netezza extension."
+        required: true
+        default: true
+        type: boolean
+      publish_db2:
+        description: "Publish DB2 extension."
+        required: true
+        default: false
+        type: boolean
+      publish_duckdb:
+        description: "Publish DuckDB extension."
+        required: true
+        default: false
+        type: boolean
+      publish_oracle:
+        description: "Publish Oracle extension."
+        required: true
+        default: false
+        type: boolean
+      publish_postgresql:
+        description: "Publish PostgreSQL extension."
+        required: true
+        default: false
+        type: boolean
+      publish_vertica:
+        description: "Publish Vertica extension."
+        required: true
+        default: false
+        type: boolean
+      publish_mssql:
+        description: "Publish MS SQL Server extension."
+        required: true
+        default: false
+        type: boolean
+      publish_mysql:
+        description: "Publish MySQL extension."
+        required: true
+        default: false
+        type: boolean
+      publish_snowflake:
+        description: "Publish Snowflake extension."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "22"
+  ELECTRON_VERSION: "42.2.0"
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+
+jobs:
+  validate-release:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      any_targets: ${{ steps.targets.outputs.any_targets }}
+      optional_matrix: ${{ steps.targets.outputs.optional_matrix }}
+      optional_targets: ${{ steps.targets.outputs.optional_targets }}
+      publish_core: ${{ steps.targets.outputs.publish_core }}
+      publish_db2: ${{ steps.targets.outputs.publish_db2 }}
+      publish_duckdb: ${{ steps.targets.outputs.publish_duckdb }}
+      release_version: ${{ steps.version_check.outputs.release_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Validate tag against core version
+        id: version_check
+        shell: bash
+        run: |
+          node scripts/version-sync.js check --release-tag "$RELEASE_TAG"
+          normalized_tag="${RELEASE_TAG#v}"
+          echo "release_version=$normalized_tag" >> "$GITHUB_OUTPUT"
+          echo "Validated release tag $RELEASE_TAG for core version $normalized_tag."
+
+      - name: Resolve publish targets
+        id: targets
+        shell: bash
+        env:
+          RAW_TARGETS: ${{ inputs.publish_targets || '' }}
+          CHECKBOX_CORE: ${{ inputs.publish_core }}
+          CHECKBOX_DB2: ${{ inputs.publish_db2 }}
+          CHECKBOX_DUCKDB: ${{ inputs.publish_duckdb }}
+          CHECKBOX_ORACLE: ${{ inputs.publish_oracle }}
+          CHECKBOX_POSTGRESQL: ${{ inputs.publish_postgresql }}
+          CHECKBOX_VERTICA: ${{ inputs.publish_vertica }}
+          CHECKBOX_MSSQL: ${{ inputs.publish_mssql }}
+          CHECKBOX_MYSQL: ${{ inputs.publish_mysql }}
+          CHECKBOX_SNOWFLAKE: ${{ inputs.publish_snowflake }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const rawTargets = process.env.RAW_TARGETS || '';
+          const requested = new Set();
+
+          if (rawTargets.trim()) {
+            for (const target of rawTargets.split(/[,\s]+/)) {
+              const normalized = target.trim().toLowerCase();
+              if (normalized) {
+                requested.add(normalized);
+              }
+            }
+          } else if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
+            const checkboxTargets = [
+              ['core', process.env.CHECKBOX_CORE],
+              ['db2', process.env.CHECKBOX_DB2],
+              ['duckdb', process.env.CHECKBOX_DUCKDB],
+              ['oracle', process.env.CHECKBOX_ORACLE],
+              ['postgresql', process.env.CHECKBOX_POSTGRESQL],
+              ['vertica', process.env.CHECKBOX_VERTICA],
+              ['mssql', process.env.CHECKBOX_MSSQL],
+              ['mysql', process.env.CHECKBOX_MYSQL],
+              ['snowflake', process.env.CHECKBOX_SNOWFLAKE],
+            ];
+
+            for (const [target, enabled] of checkboxTargets) {
+              if (String(enabled).toLowerCase() === 'true') {
+                requested.add(target);
+              }
+            }
+          } else {
+            requested.add('core');
+          }
+
+          const optional = [
+            { id: 'oracle', display_name: 'Oracle' },
+            { id: 'postgresql', display_name: 'PostgreSQL' },
+            { id: 'vertica', display_name: 'Vertica' },
+            { id: 'mssql', display_name: 'MS SQL Server' },
+            { id: 'mysql', display_name: 'MySQL' },
+            { id: 'snowflake', display_name: 'Snowflake' },
+          ];
+          const known = new Set(['all', 'core', 'db2', 'duckdb', ...optional.map((item) => item.id)]);
+          const unknown = [...requested].filter((target) => !known.has(target));
+          if (unknown.length > 0) {
+            console.error(`Unknown publish target(s): ${unknown.join(', ')}`);
+            process.exit(1);
+          }
+
+          const includes = (target) => requested.has('all') || requested.has(target);
+          const publishCore = includes('core');
+          const publishDb2 = includes('db2');
+          const publishDuckdb = includes('duckdb');
+          const optionalTargets = optional.filter((item) => includes(item.id));
+          const anyTargets = publishCore || publishDb2 || publishDuckdb || optionalTargets.length > 0;
+          if (!anyTargets) {
+            console.error('No publish targets selected.');
+            process.exit(1);
+          }
+
+          const lines = [
+            `any_targets=${anyTargets}`,
+            `publish_core=${publishCore}`,
+            `publish_db2=${publishDb2}`,
+            `publish_duckdb=${publishDuckdb}`,
+            `optional_matrix=${JSON.stringify({ include: optionalTargets })}`,
+            `optional_targets=${optionalTargets.map((item) => item.id).join(',')}`,
+          ];
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`);
+          console.log(`Publish targets: ${[...requested].join(', ')}`);
+          NODE
+
+  quality-gate:
+    name: Lint and typecheck
+    needs: validate-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run check-types
+
+  test-gate:
+    name: Fast non-live tests
+    needs:
+      - validate-release
+      - quality-gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run completion parity tests
+        run: npm run test:completion-parity
+
+      - name: Run quick-fix regression tests
+        run: npm run test:quickfix-regression
+
+      - name: Run selected optional extension unit tests
+        shell: bash
+        env:
+          PUBLISH_DB2: ${{ needs.validate-release.outputs.publish_db2 }}
+          PUBLISH_DUCKDB: ${{ needs.validate-release.outputs.publish_duckdb }}
+          OPTIONAL_TARGETS: ${{ needs.validate-release.outputs.optional_targets }}
+        run: |
+          patterns=()
+
+          if [ "$PUBLISH_DB2" = "true" ]; then
+            patterns+=("db2")
+          fi
+
+          if [ "$PUBLISH_DUCKDB" = "true" ]; then
+            patterns+=("duckdb")
+          fi
+
+          IFS=',' read -ra optional_targets <<< "$OPTIONAL_TARGETS"
+          for target in "${optional_targets[@]}"; do
+            if [ -n "$target" ]; then
+              patterns+=("$target")
+            fi
+          done
+
+          if [ "${#patterns[@]}" -eq 0 ]; then
+            echo "No optional extension unit tests selected."
+            exit 0
+          fi
+
+          joined=$(IFS='|'; echo "${patterns[*]}")
+          npx jest --runInBand --testPathPatterns="extensions/(${joined})|(${joined}).*(AdvancedFeatures|ExplainParser|ImportTypeMapper|ReferenceProvider|SystemQueries|TuningAdvisor|Connection|ImportExport|ImportPlanner|QueryProfile)\\.test\\.ts"
+
+  build-main:
+    name: Build main VSIX
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+    if: ${{ needs.validate-release.outputs.publish_core == 'true' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package main VSIX
+        run: npm run package -- --out justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+
+      - name: Upload main VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-main
+          path: justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+          retention-days: 1
+
+  build-db2:
+    name: Build DB2 VSIX (${{ matrix.target }})
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+    if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            expected_driver: node_modules/ibm_db/installer/clidriver/bin/db2cli64.dll
+          - os: ubuntu-latest
+            target: linux-x64
+            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.so
+          - os: macos-14
+            target: darwin-arm64
+            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.dylib
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/db2/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install DB2 extension dependencies
+        working-directory: extensions/db2
+        run: npm ci
+
+      - name: Cache ibm_db Electron rebuild
+        id: cache-ibm-db
+        uses: actions/cache@v4
+        with:
+          path: |
+            extensions/db2/node_modules/ibm_db/build
+            extensions/db2/node_modules/ibm_db/installer/clidriver
+          key: ibm-db-electron-${{ env.ELECTRON_VERSION }}-${{ matrix.target }}-${{ hashFiles('extensions/db2/package-lock.json') }}
+          restore-keys: |
+            ibm-db-electron-${{ env.ELECTRON_VERSION }}-${{ matrix.target }}-
+            ibm-db-electron-${{ env.ELECTRON_VERSION }}-
+
+      - name: Rebuild ibm_db for Electron runtime
+        if: steps.cache-ibm-db.outputs.cache-hit != 'true'
+        working-directory: extensions/db2
+        run: node scripts/rebuild-electron.js --electron ${{ env.ELECTRON_VERSION }}
+        env:
+          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+
+      - name: Build DB2 extension
+        run: npm run build:db2
+
+      - name: Package DB2 VSIX
+        working-directory: extensions/db2
+        run: >
+          npm run package --
+          --target ${{ matrix.target }}
+          --out justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+
+      - name: Verify packaged runtime files
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile
+
+          vsix_path = 'extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
+          expected_driver = '${{ matrix.expected_driver }}'
+
+          with zipfile.ZipFile(vsix_path, 'r') as archive:
+              names = archive.namelist()
+              has_binding = any('node_modules/ibm_db/build/Release/odbc_bindings.node' in name for name in names)
+              has_driver = any(expected_driver in name for name in names)
+
+          if not has_binding:
+              raise SystemExit('Missing odbc_bindings.node in packaged VSIX')
+
+          if not has_driver:
+              raise SystemExit(f'Missing expected platform driver file in VSIX: {expected_driver}')
+
+          print('VSIX runtime asset verification passed')
+          PY
+
+      - name: Upload DB2 VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-db2-${{ matrix.target }}
+          path: extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          retention-days: 1
+
+  build-duckdb:
+    name: Build DuckDB VSIX (${{ matrix.target }})
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+    if: ${{ needs.validate-release.outputs.publish_duckdb == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            expected_binding_package: '@duckdb/node-bindings-win32-x64'
+          - os: ubuntu-latest
+            target: linux-x64
+            expected_binding_package: '@duckdb/node-bindings-linux-x64'
+          - os: macos-14
+            target: darwin-arm64
+            expected_binding_package: '@duckdb/node-bindings-darwin-arm64'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/duckdb/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install DuckDB extension dependencies
+        working-directory: extensions/duckdb
+        run: npm install
+
+      - name: Build DuckDB extension
+        run: npm run build:duckdb
+
+      - name: Package DuckDB VSIX
+        run: >
+          npm run package:duckdb --
+          --target ${{ matrix.target }}
+          --out justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+
+      - name: Verify packaged DuckDB runtime files
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile
+
+          vsix_path = 'extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
+          expected_binding = 'node_modules/${{ matrix.expected_binding_package }}/duckdb.node'
+
+          with zipfile.ZipFile(vsix_path, 'r') as archive:
+              names = archive.namelist()
+              has_api = any('node_modules/@duckdb/node-api/' in name for name in names)
+              has_binding = any(expected_binding in name for name in names)
+
+          if not has_api:
+              raise SystemExit('Missing @duckdb/node-api runtime files in packaged VSIX')
+
+          if not has_binding:
+              raise SystemExit(f'Missing expected DuckDB native binding in VSIX: {expected_binding}')
+
+          print('DuckDB VSIX runtime asset verification passed')
+          PY
+
+      - name: Upload DuckDB VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-duckdb-${{ matrix.target }}
+          path: extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          retention-days: 1
+
+  build-optional:
+    name: Build ${{ matrix.display_name }} VSIX
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+    if: ${{ needs.validate-release.outputs.optional_targets != '' }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-release.outputs.optional_matrix) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/${{ matrix.id }}/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install extension dependencies
+        working-directory: extensions/${{ matrix.id }}
+        run: npm ci
+
+      - name: Build extension
+        run: npm run build:${{ matrix.id }}
+
+      - name: Package extension VSIX
+        run: >
+          npm run package:${{ matrix.id }} --
+          --out justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
+
+      - name: Upload extension VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.id }}
+          path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
+          retention-days: 1
+
+  publish-marketplace:
+    name: Publish selected VSIX files to Marketplace
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+      - build-main
+      - build-db2
+      - build-duckdb
+      - build-optional
+    if: |
+      always()
+      && needs.validate-release.result == 'success'
+      && needs.quality-gate.result == 'success'
+      && needs.test-gate.result == 'success'
+      && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
+      && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
+      && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
+      && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Validate Marketplace token
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT repository secret is required to publish VSIX files to Visual Studio Code Marketplace."
+            exit 1
+          fi
+
+      - name: Install VSCE
+        run: npm install --global @vscode/vsce@3.7.1
+
+      - name: Download packaged VSIX files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Show prepared VSIX files
+        shell: bash
+        run: ls -1 artifacts
+
+      - name: Publish main extension
+        if: ${{ needs.validate-release.outputs.publish_core == 'true' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: >
+          vsce publish
+          --packagePath artifacts/justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+          -p "$VSCE_PAT"
+
+      - name: Publish DB2 extensions
+        if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for target in win32-x64 linux-x64 darwin-arm64; do
+            vsce publish \
+              --packagePath "artifacts/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
+              -p "$VSCE_PAT"
+          done
+
+      - name: Publish DuckDB extensions
+        if: ${{ needs.validate-release.outputs.publish_duckdb == 'true' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for target in win32-x64 linux-x64 darwin-arm64; do
+            vsce publish \
+              --packagePath "artifacts/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
+              -p "$VSCE_PAT"
+          done
+
+      - name: Publish optional extensions
+        if: ${{ needs.validate-release.outputs.optional_targets != '' }}
+        shell: bash
+        env:
+          OPTIONAL_TARGETS: ${{ needs.validate-release.outputs.optional_targets }}
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.release_version }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          IFS=',' read -ra targets <<< "$OPTIONAL_TARGETS"
+          for target in "${targets[@]}"; do
+            package_path="artifacts/justybaselite-${target}-${RELEASE_VERSION}.vsix"
+            if [ ! -f "$package_path" ]; then
+              echo "Missing package for ${target}: $package_path" >&2
+              exit 1
+            fi
+            vsce publish --packagePath "$package_path" -p "$VSCE_PAT"
+          done

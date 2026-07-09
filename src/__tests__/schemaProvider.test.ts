@@ -3,10 +3,13 @@
  * Tests tree data provider functionality, schema hierarchy, and SchemaItem
  */
 
+jest.unmock('chevrotain');
+
 import * as vscode from 'vscode';
 import { SchemaProvider, SchemaItem } from '../providers/schemaProvider';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
+import { DocumentParseSession } from '../sqlParser/documentParseSession';
 
 // Mock dependencies
 jest.mock('../core/queryRunner', () => ({
@@ -87,6 +90,16 @@ describe('SchemaProvider', () => {
             }),
             ensureFullyLoaded: jest.fn().mockResolvedValue(undefined),
             getConnectionForExecution: jest.fn().mockReturnValue('TestConnection'),
+            getActiveConnectionName: jest.fn().mockReturnValue('TestConnection'),
+            getConnectionMetadata: jest.fn().mockReturnValue({
+                name: 'TestConnection',
+                host: 'localhost',
+                port: 5480,
+                database: 'TESTDB',
+                user: 'admin'
+            }),
+            getDocumentDatabase: jest.fn().mockReturnValue(undefined),
+            getEffectiveSchemaSync: jest.fn().mockReturnValue('ADMIN'),
             onDidChangeConnections: jest.fn().mockReturnValue({ dispose: jest.fn() }),
             dispose: jest.fn()
         } as unknown as jest.Mocked<ConnectionManager>;
@@ -110,6 +123,7 @@ describe('SchemaProvider', () => {
             getTables: jest.fn().mockReturnValue(undefined),
             setTables: jest.fn(),
             getColumns: jest.fn().mockReturnValue(null),
+            getColumnsAnySchema: jest.fn().mockReturnValue(undefined),
             setColumns: jest.fn(),
             hasConnectionPrefetchTriggered: jest.fn().mockReturnValue(false),
             isConnectionPrefetchFresh: jest.fn().mockReturnValue(false),
@@ -124,6 +138,7 @@ describe('SchemaProvider', () => {
             mockConnectionManager,
             mockMetadataCache
         );
+        (vscode.window as unknown as { activeTextEditor: vscode.TextEditor | undefined }).activeTextEditor = undefined;
     });
 
     describe('constructor', () => {
@@ -188,6 +203,270 @@ describe('SchemaProvider', () => {
 
             // Should have iconPath set (from asAbsolutePath)
             expect(children[0]).toBeDefined();
+        });
+    });
+
+    describe('getChildren - active SQL CTEs', () => {
+        const createProviderWithParseSession = (): SchemaProvider =>
+            new SchemaProvider(
+                mockContext,
+                mockConnectionManager,
+                mockMetadataCache,
+                new DocumentParseSession()
+            );
+
+        const setActiveSql = (sql: string): void => {
+            const document = {
+                languageId: 'sql',
+                version: 1,
+                uri: { toString: () => 'file:///query.sql' },
+                getText: () => sql
+            } as unknown as vscode.TextDocument;
+            (vscode.window as unknown as { activeTextEditor: vscode.TextEditor | undefined }).activeTextEditor = {
+                document
+            } as vscode.TextEditor;
+        };
+
+        it('adds a CTE root for the active SQL editor', async () => {
+            setActiveSql('WITH CTE1 AS (SELECT column1 FROM your_table) SELECT * FROM CTE1');
+            schemaProvider = createProviderWithParseSession();
+
+            const children = await schemaProvider.getChildren();
+
+            expect(children.map(child => child.contextValue)).toEqual([
+                'serverInstance',
+                'cteRoot',
+                'favoritesRoot'
+            ]);
+        });
+
+        it('lists active SQL CTEs alphabetically', async () => {
+            setActiveSql(`
+                WITH cte2 AS (SELECT b FROM table_b),
+                     CTE1 AS (SELECT a FROM table_a)
+                SELECT * FROM CTE1
+            `);
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+
+            const ctes = await schemaProvider.getChildren(root);
+
+            expect(ctes.map(item => item.label)).toEqual(['CTE1', 'cte2']);
+        });
+
+        it('shows inferred CTE columns including SELECT aliases', async () => {
+            setActiveSql(`
+                WITH CTE1 AS (
+                    SELECT
+                        column1,
+                        column2,
+                        ROW_NUMBER() OVER (PARTITION BY column1 ORDER BY column2 DESC) AS rn
+                    FROM your_table
+                )
+                SELECT * FROM CTE1
+            `);
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const cte = (await schemaProvider.getChildren(root))[0];
+
+            const columns = await schemaProvider.getChildren(cte);
+
+            expect(columns.map(item => item.label)).toEqual(['column1', 'column2', 'rn']);
+            expect(runQueryRaw).not.toHaveBeenCalled();
+            expect(mockMetadataCache.ensureColumnsLoadedForTableKey).not.toHaveBeenCalled();
+        });
+
+        it('uses explicit CTE column aliases before inferred names', async () => {
+            setActiveSql(`
+                WITH CTE1 (out_col1, out_col2) AS (
+                    SELECT source_col1, source_col2 FROM your_table
+                )
+                SELECT * FROM CTE1
+            `);
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const cte = (await schemaProvider.getChildren(root))[0];
+
+            const columns = await schemaProvider.getChildren(cte);
+
+            expect(columns.map(item => item.label)).toEqual(['out_col1', 'out_col2']);
+        });
+
+        it('does not append wildcard metadata when CTE has an explicit column list', async () => {
+            setActiveSql(`
+                WITH CTE1 (out_col1, out_col2) AS (
+                    SELECT * FROM DIMDATE
+                )
+                SELECT * FROM CTE1
+            `);
+            mockMetadataCache.getColumnsAnySchema.mockImplementation((_connectionName, dbName, tableName) => {
+                if (dbName === 'TESTDB' && tableName === 'DIMDATE') {
+                    return [
+                        { ATTNAME: 'DATEKEY', FORMAT_TYPE: 'INTEGER', label: 'DATEKEY' },
+                        { ATTNAME: 'CALENDAR_DATE', FORMAT_TYPE: 'DATE', label: 'CALENDAR_DATE' }
+                    ];
+                }
+                return undefined;
+            });
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const cte = (await schemaProvider.getChildren(root))[0];
+
+            const columns = await schemaProvider.getChildren(cte);
+
+            expect(columns.map(item => item.label)).toEqual(['out_col1', 'out_col2']);
+        });
+
+        it('does not append wildcard metadata for explicit CTE columns when SELECT has trailing dot', async () => {
+            setActiveSql(`
+                WITH c(out_a, out_b) AS (
+                    SELECT * FROM DIMDATE
+                )
+                SELECT c.
+                FROM c
+            `);
+            mockMetadataCache.getColumnsAnySchema.mockImplementation((_connectionName, dbName, tableName) => {
+                if (dbName === 'TESTDB' && tableName === 'DIMDATE') {
+                    return [
+                        { ATTNAME: 'DATEKEY', FORMAT_TYPE: 'INTEGER', label: 'DATEKEY' },
+                        { ATTNAME: 'CALENDAR_DATE', FORMAT_TYPE: 'DATE', label: 'CALENDAR_DATE' }
+                    ];
+                }
+                return undefined;
+            });
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const cte = (await schemaProvider.getChildren(root)).find(item => String(item.label) === 'c')!;
+
+            const columns = await schemaProvider.getChildren(cte);
+
+            expect(columns.map(item => item.label)).toEqual(['out_a', 'out_b']);
+        });
+
+        it('resolves SELECT star CTE columns from cached metadata on expand', async () => {
+            setActiveSql(`
+                WITH cte1 AS (
+                    SELECT 1 AS col1
+                ),
+                cte2 AS (
+                    SELECT * FROM DIMDATE
+                )
+                SELECT * FROM cte2
+            `);
+            mockMetadataCache.getColumnsAnySchema.mockImplementation((_connectionName, dbName, tableName) => {
+                if (dbName === 'TESTDB' && tableName === 'DIMDATE') {
+                    return [
+                        { ATTNAME: 'DATEKEY', FORMAT_TYPE: 'INTEGER', label: 'DATEKEY' },
+                        { ATTNAME: 'CALENDAR_DATE', FORMAT_TYPE: 'DATE', label: 'CALENDAR_DATE' }
+                    ];
+                }
+                return undefined;
+            });
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const cte2 = (await schemaProvider.getChildren(root)).find(item => String(item.label).toLowerCase() === 'cte2')!;
+
+            const columns = await schemaProvider.getChildren(cte2);
+
+            expect(columns.map(item => item.label)).toEqual(['DATEKEY', 'CALENDAR_DATE']);
+            expect(runQueryRaw).not.toHaveBeenCalled();
+            expect(mockMetadataCache.ensureColumnsLoadedForTableKey).not.toHaveBeenCalled();
+        });
+
+        it('does not shadow cached metadata with CTEs from earlier statements', async () => {
+            setActiveSql(`
+                WITH DIMDATE AS (
+                    SELECT 1 AS cte_col
+                )
+                SELECT * FROM DIMDATE;
+
+                WITH cte2 AS (
+                    SELECT * FROM DIMDATE
+                )
+                SELECT * FROM cte2
+            `);
+            mockMetadataCache.getColumnsAnySchema.mockImplementation((_connectionName, dbName, tableName) => {
+                if (dbName === 'TESTDB' && tableName === 'DIMDATE') {
+                    return [
+                        { ATTNAME: 'DATEKEY', FORMAT_TYPE: 'INTEGER', label: 'DATEKEY' },
+                        { ATTNAME: 'CALENDAR_DATE', FORMAT_TYPE: 'DATE', label: 'CALENDAR_DATE' }
+                    ];
+                }
+                return undefined;
+            });
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const cte2 = (await schemaProvider.getChildren(root)).find(item => String(item.label).toLowerCase() === 'cte2')!;
+
+            const columns = await schemaProvider.getChildren(cte2);
+
+            expect(columns.map(item => item.label)).toEqual(['DATEKEY', 'CALENDAR_DATE']);
+        });
+
+        it('merges explicit CTE columns with SELECT star metadata columns on expand', async () => {
+            setActiveSql(`
+                WITH CTE1 AS (
+                    SELECT 1 AS COL1 FROM JUST_DATA..DIMPRODUCTCATEGORY
+                ),
+                CTE2 AS (
+                    SELECT 1 AS COL1, * FROM JUST_DATA..DIMPRODUCTCATEGORY
+                )
+                SELECT * FROM CTE2
+            `);
+            mockMetadataCache.getColumnsAnySchema.mockImplementation((_connectionName, dbName, tableName) => {
+                if (dbName === 'JUST_DATA' && tableName === 'DIMPRODUCTCATEGORY') {
+                    return [
+                        { ATTNAME: 'PRODUCTCATEGORYKEY', FORMAT_TYPE: 'INTEGER', label: 'PRODUCTCATEGORYKEY' },
+                        { ATTNAME: 'PRODUCTCATEGORYNAME', FORMAT_TYPE: 'VARCHAR(50)', label: 'PRODUCTCATEGORYNAME' }
+                    ];
+                }
+                return undefined;
+            });
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const cte2 = (await schemaProvider.getChildren(root)).find(item => item.label === 'CTE2')!;
+
+            const columns = await schemaProvider.getChildren(cte2);
+
+            expect(columns.map(item => item.label)).toEqual([
+                'COL1',
+                'PRODUCTCATEGORYKEY',
+                'PRODUCTCATEGORYNAME'
+            ]);
+            expect(runQueryRaw).not.toHaveBeenCalled();
+            expect(mockMetadataCache.ensureColumnsLoadedForTableKey).not.toHaveBeenCalled();
+        });
+
+        it('lists CREATE GLOBAL TEMP TABLE definitions with CTEs', async () => {
+            setActiveSql(`
+                CREATE GLOBAL TEMP TABLE TMP_STAGE AS (
+                    SELECT 1 AS stage_id
+                );
+
+                WITH CTE1 AS (
+                    SELECT 2 AS cte_id
+                )
+                SELECT * FROM CTE1
+            `);
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+
+            const items = await schemaProvider.getChildren(root);
+            const tempTable = items.find(item => item.label === 'TMP_STAGE')!;
+            const tempColumns = await schemaProvider.getChildren(tempTable);
+
+            expect(items.map(item => item.label)).toEqual(['CTE1', 'TMP_STAGE']);
+            expect(tempTable.objType).toBe('TEMP TABLE');
+            expect(tempColumns.map(item => item.label)).toEqual(['stage_id']);
+        });
+
+        it('does not add the CTE root when no SQL editor is active', async () => {
+            (vscode.window as unknown as { activeTextEditor: vscode.TextEditor | undefined }).activeTextEditor = undefined;
+            schemaProvider = createProviderWithParseSession();
+
+            const children = await schemaProvider.getChildren();
+
+            expect(children.some(child => child.contextValue === 'cteRoot')).toBe(false);
         });
     });
 
@@ -989,6 +1268,76 @@ describe('SchemaProvider', () => {
             expect(dataTransfer.set).toHaveBeenCalledWith(
                 'text/plain',
                 expect.any(Object)
+            );
+        });
+
+        it('should set text data transfer for CTE tree items', () => {
+            const item = new SchemaItem(
+                'cte1',
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'cteObject',
+                undefined,
+                'CTE',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'cte1'
+            );
+
+            const dataTransfer = {
+                set: jest.fn()
+            } as unknown as vscode.DataTransfer;
+
+            const token = { isCancellationRequested: false } as vscode.CancellationToken;
+
+            schemaProvider.handleDrag([item], dataTransfer, token);
+
+            expect(dataTransfer.set).toHaveBeenCalledWith(
+                'application/vnd.code.tree.netezza',
+                expect.any(Object)
+            );
+            expect(dataTransfer.set).toHaveBeenCalledWith(
+                'text/plain',
+                expect.objectContaining({ value: 'cte1' })
+            );
+        });
+
+        it('should set text data transfer for CTE column tree items', () => {
+            const item = new SchemaItem(
+                'stage id',
+                vscode.TreeItemCollapsibleState.None,
+                'cteColumn',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'TMP_STAGE',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'stage id'
+            );
+
+            const dataTransfer = {
+                set: jest.fn()
+            } as unknown as vscode.DataTransfer;
+
+            const token = { isCancellationRequested: false } as vscode.CancellationToken;
+
+            schemaProvider.handleDrag([item], dataTransfer, token);
+
+            expect(dataTransfer.set).toHaveBeenCalledWith(
+                'text/plain',
+                expect.objectContaining({ value: '"stage id"' })
             );
         });
 

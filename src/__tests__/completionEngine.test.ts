@@ -1555,6 +1555,7 @@ SELECT \${|`,
       const letItem = items.find((item) => item.label === "%let variable = value;");
       const sqlItem = items.find((item) => item.label === "%sql(SELECT ...)");
       const sqlListItem = items.find((item) => item.label === "%sqllist(SELECT ...)");
+      const exportItem = items.find((item) => item.label === "%export(format, file, query);");
 
       expect(letItem).toBeDefined();
       expect(letItem?.kind).toBe(CompletionItemKind.Snippet);
@@ -1563,6 +1564,8 @@ SELECT \${|`,
       expect(sqlItem?.textEdit?.newText).toBe("sql(SELECT ${1:expression} FROM ${2:table})");
       expect(sqlListItem?.kind).toBe(CompletionItemKind.Snippet);
       expect(sqlListItem?.textEdit?.newText).toBe("sqllist(SELECT ${1:column} FROM ${2:table})");
+      expect(exportItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(exportItem?.textEdit?.newText).toContain("export(format='${1:xlsx}'");
     });
 
     it("returns inline macro variable completions after ampersand trigger", async () => {
@@ -2996,6 +2999,44 @@ SELECT C.| FROM CTE1 C`);
       expect(labels(items)).toEqual(
         expect.arrayContaining(["ACCT_ID", "ACCT_NAME"]),
       );
+    });
+
+    it("returns only explicit CTE columns when CTE has column list and SELECT star", async () => {
+      const session = new DocumentParseSession();
+      const scopedEngine = new LspCompletionEngine(metadataProvider, session);
+      const items = await completeWithEngine(
+        scopedEngine,
+        `WITH c(out_a, out_b) AS (
+  SELECT * FROM JUST_DATA..DIMDATE
+)
+SELECT c.|
+FROM c`,
+      );
+
+      expect(labelsWithoutExpand(items).sort()).toEqual(["out_a", "out_b"]);
+    });
+
+    it("does not shadow cached metadata with CTEs from earlier statements", async () => {
+      const session = new DocumentParseSession();
+      const scopedEngine = new LspCompletionEngine(metadataProvider, session);
+      const items = await completeWithEngine(
+        scopedEngine,
+        `WITH DIMDATE AS (
+  SELECT 999 AS cte_only_col
+)
+SELECT * FROM DIMDATE;
+
+WITH cte2 AS (
+  SELECT * FROM JUST_DATA..DIMDATE
+)
+SELECT cte2.|
+FROM cte2`,
+      );
+
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["DATEKEY", "CALENDARQUARTER"]),
+      );
+      expect(labels(items)).not.toContain("cte_only_col");
     });
 
     it("handles UNION query with column completion", async () => {

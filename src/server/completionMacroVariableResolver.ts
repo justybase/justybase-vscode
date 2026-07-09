@@ -117,6 +117,18 @@ function buildPercentMacroCompletions(
     },
     sortText: "0_%sqllist",
   }, {
+    label: "%export(format, file, query);",
+    kind: CompletionItemKind.Snippet,
+    detail: "Export SQL macro",
+    documentation:
+      "Executes the inner query during preprocessing and exports the result to XLSX or XLSB.",
+    insertTextFormat: InsertTextFormat.Snippet,
+    textEdit: {
+      range,
+      newText: "export(format='${1:xlsx}', file='${2:/tmp/results.xlsx}', sheet='${3:Query Results}', query=(\n  ${4:SELECT * FROM table}\n), overwrite=${5:false});",
+    },
+    sortText: "0_%export",
+  }, {
     label: "%put message;",
     kind: CompletionItemKind.Snippet,
     detail: "Print message to output log",

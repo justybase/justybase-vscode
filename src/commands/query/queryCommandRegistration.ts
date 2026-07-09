@@ -29,6 +29,7 @@ import {
 } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { runSmartSequentialQuery } from './querySmartSequentialRun';
+import { tryAcquireQueryExecution } from './queryExecutionGate';
 
 const VIEW_DATA_ROW_LIMIT = 100;
 
@@ -349,54 +350,64 @@ export function registerQueryCommands(
 
             const selection = editor.selection;
             const sourceUri = document.uri.toString();
-
-            const text = !selection.isEmpty
-                ? document.getText(selection)
-                : document.getText();
-
-            if (!text.trim()) {
-                vscode.window.showWarningMessage('No SQL query to execute');
+            const executionGate = tryAcquireQueryExecution(sourceUri, resultPanelProvider);
+            if (!executionGate) {
                 return;
             }
 
-            // Check for Python script
-            const scriptDetection = detectPythonScript(text.trim());
-            if (scriptDetection.isPython && scriptDetection.script) {
-                const config = getExtensionConfiguration();
-                const pythonPath = config.get<string>('pythonPath') || 'python';
-
-                const python = scriptDetection.pythonPath || pythonPath;
-                const cmd = buildExecCommand(
-                    python,
-                    scriptDetection.script,
-                    scriptDetection.args || []
-                );
-
-                const term = vscode.window.createTerminal({ name: 'JustyBase: Script' });
-                term.show(true);
-                term.sendText(cmd, true);
-                vscode.window.showInformationMessage(`Running script: ${cmd}`);
-                return;
-            }
-
-            const statementsForSafeExecute = SqlParser.splitStatements(text).filter(
-                q => q.trim().length > 0
-            );
-            if (
-                !(await confirmSafeExecute(
-                    statementsForSafeExecute.length > 0 ? statementsForSafeExecute : [text]
-                ))
-            ) {
-                return;
-            }
-
-            const runBatchTimer = createPerformanceTimer('query.run_batch', {
-                payloadSize: text.length
-            });
+            let text = '';
+            let runBatchTimer: ReturnType<typeof createPerformanceTimer> | undefined;
+            let executionStarted = false;
 
             try {
+                text = !selection.isEmpty
+                    ? document.getText(selection)
+                    : document.getText();
+
+                if (!text.trim()) {
+                    vscode.window.showWarningMessage('No SQL query to execute');
+                    return;
+                }
+
+                // Check for Python script
+                const scriptDetection = detectPythonScript(text.trim());
+                if (scriptDetection.isPython && scriptDetection.script) {
+                    const config = getExtensionConfiguration();
+                    const pythonPath = config.get<string>('pythonPath') || 'python';
+
+                    const python = scriptDetection.pythonPath || pythonPath;
+                    const cmd = buildExecCommand(
+                        python,
+                        scriptDetection.script,
+                        scriptDetection.args || []
+                    );
+
+                    const term = vscode.window.createTerminal({ name: 'JustyBase: Script' });
+                    term.show(true);
+                    term.sendText(cmd, true);
+                    vscode.window.showInformationMessage(`Running script: ${cmd}`);
+                    return;
+                }
+
+                const statementsForSafeExecute = SqlParser.splitStatements(text).filter(
+                    q => q.trim().length > 0
+                );
+                if (
+                    !(await confirmSafeExecute(
+                        statementsForSafeExecute.length > 0 ? statementsForSafeExecute : [text]
+                    ))
+                ) {
+                    return;
+                }
+
+                runBatchTimer = createPerformanceTimer('query.run_batch', {
+                    payloadSize: text.length
+                });
+
                 resultPanelProvider.setActiveSource(sourceUri);
                 resultPanelProvider.startExecution(sourceUri);
+                executionStarted = true;
+                resultPanelProvider.log(sourceUri, 'Preparing SQL batch execution...');
 
                 // Per-query logging callbacks
                 const queryStartCallback = (
@@ -456,54 +467,66 @@ export function registerQueryCommands(
 
                 resultPanelProvider.finalizeExecution(sourceUri);
                 await handleExecutionCompletion(sourceUri);
-                const successEvent = runBatchTimer.finish({
-                    result: 'ok',
-                    metadata: {
-                        query_count: statementsForSafeExecute.length > 0 ? statementsForSafeExecute.length : 1
-                    }
-                });
-                console.log(formatPerformanceEvent(successEvent));
+                if (runBatchTimer) {
+                    const successEvent = runBatchTimer.finish({
+                        result: 'ok',
+                        metadata: {
+                            query_count: statementsForSafeExecute.length > 0 ? statementsForSafeExecute.length : 1
+                        }
+                    });
+                    console.log(formatPerformanceEvent(successEvent));
+                }
             } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
 
                 // If it's a cancellation error, log info but don't show error dialog or error result
                 if (msg.includes('Query cancelled')) {
-                    resultPanelProvider.log(
-                        sourceUri,
-                        'Query execution cancelled by user.'
-                    );
-                    resultPanelProvider.finalizeExecution(sourceUri);
-                    const cancelledEvent = runBatchTimer.finish({
-                        result: 'cancelled',
-                        errorCode: 'QUERY_CANCELLED'
-                    });
-                    console.log(formatPerformanceEvent(cancelledEvent));
+                    if (executionStarted) {
+                        resultPanelProvider.log(
+                            sourceUri,
+                            'Query execution cancelled by user.'
+                        );
+                        resultPanelProvider.finalizeExecution(sourceUri);
+                    }
+                    if (runBatchTimer) {
+                        const cancelledEvent = runBatchTimer.finish({
+                            result: 'cancelled',
+                            errorCode: 'QUERY_CANCELLED'
+                        });
+                        console.log(formatPerformanceEvent(cancelledEvent));
+                    }
                     return;
                 }
 
                 // Add error result BEFORE finalizing so it gets properly pinned
-                resultPanelProvider.updateResults(
-                    [
-                        {
-                            columns: [],
-                            data: [],
-                            message: msg,
-                            isError: true,
-                            sql: text
-                        }
-                    ],
-                    sourceUri,
-                    true
-                );
+                if (executionStarted) {
+                    resultPanelProvider.updateResults(
+                        [
+                            {
+                                columns: [],
+                                data: [],
+                                message: msg,
+                                isError: true,
+                                sql: text
+                            }
+                        ],
+                        sourceUri,
+                        true
+                    );
 
-                // Finalize AFTER adding error so the error pin is preserved
-                resultPanelProvider.finalizeExecution(sourceUri);
-                const errorEvent = runBatchTimer.finish({
-                    result: 'error',
-                    errorCode: toPerfErrorCode(msg)
-                });
-                console.log(formatPerformanceEvent(errorEvent));
+                    // Finalize AFTER adding error so the error pin is preserved
+                    resultPanelProvider.finalizeExecution(sourceUri);
+                }
+                if (runBatchTimer) {
+                    const errorEvent = runBatchTimer.finish({
+                        result: 'error',
+                        errorCode: toPerfErrorCode(msg)
+                    });
+                    console.log(formatPerformanceEvent(errorEvent));
+                }
                 vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+            } finally {
+                executionGate.dispose();
             }
         }),
 

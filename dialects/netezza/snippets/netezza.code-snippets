@@ -258,6 +258,38 @@
         ],
         "description": "ORGANIZE ON clause for zone maps"
     },
+    "Macro IF THEN DO": {
+        "prefix": "nzmacroif",
+        "body": [
+            "%IF ${1:&flag = 1} %THEN %DO;",
+            "    ${2:SELECT 1;}",
+            "%END;"
+        ],
+        "description": "SAS-like macro IF/THEN DO block"
+    },
+    "Macro ELSE DO": {
+        "prefix": "nzmacroelse",
+        "body": [
+            "%ELSE %DO;",
+            "    ${1:SELECT 1;}",
+            "%END;"
+        ],
+        "description": "SAS-like macro ELSE DO block"
+    },
+    "Macro END": {
+        "prefix": "nzmacroend",
+        "body": [
+            "%END;"
+        ],
+        "description": "SAS-like macro END directive"
+    },
+    "Macro INCLUDE": {
+        "prefix": "nzmacroinclude",
+        "body": [
+            "%INCLUDE '${1:path/to/file.sql}';"
+        ],
+        "description": "SAS-like macro INCLUDE directive"
+    },
     "NZPLSQL Stored Procedure": {
         "prefix": "nzprocedure",
         "body": [

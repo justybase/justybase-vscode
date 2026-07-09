@@ -74,10 +74,18 @@ jest.mock('../core/connectionManager', () => ({
     ConnectionManager: jest.fn(),
 }));
 
-jest.mock('../core/queryBatchExecutor', () => ({
-    createDropSessionCallback: jest.fn().mockReturnValue(undefined),
-    getQueryConfig: jest.fn().mockReturnValue({ queryTimeout: 1800, rowLimit: 200000 }),
-}));
+jest.mock('../core/queryBatchExecutor', () => {
+    const actual = jest.requireActual('../core/queryBatchExecutor');
+    return {
+        ...actual,
+        createDropSessionCallback: jest.fn().mockReturnValue(undefined),
+        createMacroFileReadContext: jest.fn((documentUri?: string) => ({
+            sourceName: documentUri,
+            readFile: jest.fn(),
+        })),
+        getQueryConfig: jest.fn().mockReturnValue({ queryTimeout: 1800, rowLimit: 200000 }),
+    };
+});
 
 jest.mock('../core/streaming', () => ({
     ResultFormatter: {
@@ -212,6 +220,64 @@ describe('singleQueryExecutor', () => {
 
             expect(result.columns).toEqual([{ name: 'id' }]);
             expect(result.data).toEqual([[1]]);
+        });
+
+        it('passes include file context to the single-query variable scan', async () => {
+            const { collectQueryVariableValues } = require('../core/variableResolver');
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'id' }], rows: [[1]], limitReached: false }],
+                error: null,
+            });
+
+            await runQueryRaw({
+                context: mockContext,
+                query: "%INCLUDE 'settings.sql';\nSELECT 1",
+                connectionManager: mockConnManager,
+                documentUri: 'file:///workspace/main.sql',
+            });
+
+            expect(collectQueryVariableValues).toHaveBeenCalledWith(
+                "%INCLUDE 'settings.sql';\nSELECT 1",
+                false,
+                mockContext,
+                expect.objectContaining({
+                    sourceName: 'file:///workspace/main.sql',
+                    readFile: expect.any(Function),
+                }),
+            );
+        });
+
+        it('executes each statement from an expanded macro branch separately', async () => {
+            const { resolveQueryVariablesWithValues } = require('../core/variableResolver');
+            (resolveQueryVariablesWithValues as jest.Mock).mockResolvedValueOnce(
+                'SELECT 1;\nSELECT 2;',
+            );
+            mockExecuteAndFetch
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'a' }], rows: [[1]], limitReached: false }],
+                    error: null,
+                })
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'b' }], rows: [[2]], limitReached: false }],
+                    error: null,
+                });
+
+            const result = await runQueryRaw({
+                context: mockContext,
+                query: `%IF 1 = 1 %THEN %DO;
+  SELECT 1;
+  SELECT 2;
+%END;`,
+                connectionManager: mockConnManager,
+                documentUri: 'file:///test.sql',
+            });
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1');
+            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2');
+            expect(result.data).toEqual([[2]]);
+            expect(result.sql).toBe('SELECT 2');
+            expect(result.expandedSql).toBe('SELECT 1;\nSELECT 2;');
         });
 
         it('should not abort state when no documentUri is provided', async () => {

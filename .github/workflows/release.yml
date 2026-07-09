@@ -1,0 +1,256 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release increment type. Choose exact to provide a specific version."
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+          - exact
+      version:
+        description: "Explicit version when release_type=exact, for example 1.2.3"
+        required: false
+        type: string
+      draft:
+        description: "Create a draft GitHub Release. Draft releases do not trigger Marketplace publishing until manually published."
+        required: true
+        default: true
+        type: boolean
+      prerelease:
+        description: "Mark the GitHub Release as a pre-release."
+        required: true
+        default: false
+        type: boolean
+      target_branch:
+        description: "Branch to release from."
+        required: true
+        default: master
+        type: string
+      publish_core:
+        description: "Publish core Netezza extension."
+        required: true
+        default: true
+        type: boolean
+      publish_db2:
+        description: "Publish DB2 extension."
+        required: true
+        default: false
+        type: boolean
+      publish_duckdb:
+        description: "Publish DuckDB extension."
+        required: true
+        default: false
+        type: boolean
+      publish_oracle:
+        description: "Publish Oracle extension."
+        required: true
+        default: false
+        type: boolean
+      publish_postgresql:
+        description: "Publish PostgreSQL extension."
+        required: true
+        default: false
+        type: boolean
+      publish_vertica:
+        description: "Publish Vertica extension."
+        required: true
+        default: false
+        type: boolean
+      publish_mssql:
+        description: "Publish MS SQL Server extension."
+        required: true
+        default: false
+        type: boolean
+      publish_mysql:
+        description: "Publish MySQL extension."
+        required: true
+        default: false
+        type: boolean
+      publish_snowflake:
+        description: "Publish Snowflake extension."
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22"
+
+concurrency:
+  group: release-${{ github.event.inputs.target_branch }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    name: Prepare release commit, tag and GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: refs/heads/${{ github.event.inputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Bump synchronized versions
+        id: version
+        shell: bash
+        run: |
+          release_type='${{ github.event.inputs.release_type }}'
+          explicit_version='${{ github.event.inputs.version }}'
+
+          if [ "$release_type" = 'exact' ]; then
+            if [ -z "$explicit_version" ]; then
+              echo 'Input version is required when release_type=exact.' >&2
+              exit 1
+            fi
+
+            node scripts/version-sync.js set "$explicit_version" --include-optionals
+          else
+            node scripts/version-sync.js bump "$release_type" --include-optionals
+          fi
+
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release metadata
+        run: node scripts/version-sync.js check --release-tag ${{ steps.version.outputs.tag }} --include-optionals
+
+      - name: Ensure release tag does not already exist remotely
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags origin refs/tags/${{ steps.version.outputs.tag }} >/dev/null 2>&1; then
+            echo 'Remote tag already exists: ${{ steps.version.outputs.tag }}' >&2
+            exit 1
+          fi
+
+      - name: Configure Git identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Commit release version files
+        shell: bash
+        run: |
+          git add package.json package-lock.json
+          git add packages/contracts/package.json
+          git add extensions/*/package.json extensions/*/package-lock.json
+
+          if git diff --cached --quiet; then
+            echo 'No version changes detected to commit.' >&2
+            exit 1
+          fi
+
+          git commit -m "chore: release ${{ steps.version.outputs.version }} [skip ci]"
+
+      - name: Create annotated tag
+        run: git tag -a ${{ steps.version.outputs.tag }} -m ${{ steps.version.outputs.tag }}
+
+      - name: Push release commit and tag
+        run: |
+          git push origin HEAD:${{ github.event.inputs.target_branch }}
+          git push origin ${{ steps.version.outputs.tag }}
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+
+          if [ '${{ github.event.inputs.draft }}' = 'true' ]; then
+            flags+=(--draft)
+          fi
+
+          if [ '${{ github.event.inputs.prerelease }}' = 'true' ]; then
+            flags+=(--prerelease)
+          fi
+
+          gh release create '${{ steps.version.outputs.tag }}' \
+            --target '${{ github.event.inputs.target_branch }}' \
+            --title '${{ steps.version.outputs.tag }}' \
+            --generate-notes \
+            "${flags[@]}"
+
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo '## Release prepared'
+            echo ''
+            echo '- Version: `${{ steps.version.outputs.version }}`'
+            echo '- Tag: `${{ steps.version.outputs.tag }}`'
+            echo '- Branch: `${{ github.event.inputs.target_branch }}`'
+            echo '- Draft release: `${{ github.event.inputs.draft }}`'
+            echo '- Pre-release: `${{ github.event.inputs.prerelease }}`'
+            echo ''
+            echo 'If draft=false, selected extensions are automatically published to Marketplace.'
+            echo 'If draft=true, no publishing occurs. Run Publish Marketplace workflow manually after publishing the draft.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  resolve-publish-targets:
+    name: Resolve selected publish targets
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    outputs:
+      publish_targets: ${{ steps.resolve.outputs.targets }}
+    steps:
+      - name: Build targets string from checkboxes
+        id: resolve
+        env:
+          CORE: ${{ github.event.inputs.publish_core }}
+          DB2: ${{ github.event.inputs.publish_db2 }}
+          DUCKDB: ${{ github.event.inputs.publish_duckdb }}
+          ORACLE: ${{ github.event.inputs.publish_oracle }}
+          POSTGRESQL: ${{ github.event.inputs.publish_postgresql }}
+          VERTICA: ${{ github.event.inputs.publish_vertica }}
+          MSSQL: ${{ github.event.inputs.publish_mssql }}
+          MYSQL: ${{ github.event.inputs.publish_mysql }}
+          SNOWFLAKE: ${{ github.event.inputs.publish_snowflake }}
+        run: |
+          targets=()
+          [ "$CORE" = "true" ] && targets+=("core")
+          [ "$DB2" = "true" ] && targets+=("db2")
+          [ "$DUCKDB" = "true" ] && targets+=("duckdb")
+          [ "$ORACLE" = "true" ] && targets+=("oracle")
+          [ "$POSTGRESQL" = "true" ] && targets+=("postgresql")
+          [ "$VERTICA" = "true" ] && targets+=("vertica")
+          [ "$MSSQL" = "true" ] && targets+=("mssql")
+          [ "$MYSQL" = "true" ] && targets+=("mysql")
+          [ "$SNOWFLAKE" = "true" ] && targets+=("snowflake")
+          IFS=','; echo "targets=${targets[*]}" >> "$GITHUB_OUTPUT"
+
+  publish-extensions:
+    name: Publish selected extensions to Marketplace
+    if: ${{ github.event.inputs.draft == 'false' && needs.resolve-publish-targets.outputs.publish_targets != '' }}
+    needs:
+      - prepare-release
+      - resolve-publish-targets
+    uses: ./.github/workflows/publish-marketplace.yml
+    with:
+      release_tag: ${{ needs.prepare-release.outputs.release_tag }}
+      publish_targets: ${{ needs.resolve-publish-targets.outputs.publish_targets }}
+    secrets: inherit

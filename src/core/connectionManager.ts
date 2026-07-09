@@ -745,29 +745,78 @@ export class ConnectionManager {
       const connectionName = this.getConnectionForExecution(documentUri);
       if (!connectionName) return null;
       const details = await this.getConnection(connectionName);
-      if (!details) return null;
-      // Check if schema is defined in connection details (e.g., for DB2, PostgreSQL, etc.)
-      if ('schema' in details && typeof details.schema === 'string' && details.schema.length > 0) {
+      const effectiveDb = await this.getEffectiveDatabase(documentUri);
+      return this.resolveEffectiveSchemaFromDetails(
+        connectionName,
+        effectiveDb,
+        details,
+      );
+    }
+
+    /**
+     * Synchronous effective schema for UI paths that cannot await connection load.
+     * Uses cached connection metadata when available.
+     */
+    getEffectiveSchemaSync(
+      documentUri: string,
+      effectiveDb?: string,
+    ): string | undefined {
+      const connectionName = this.getConnectionForExecution(documentUri);
+      if (!connectionName) {
+        return undefined;
+      }
+      const details = this.getConnectionMetadata(connectionName);
+      const resolvedDb =
+        effectiveDb ??
+        this.getDocumentDatabase(documentUri) ??
+        getLogicalDefaultDatabase(details) ??
+        undefined;
+      return (
+        this.resolveEffectiveSchemaFromDetails(
+          connectionName,
+          resolvedDb ?? null,
+          details,
+        ) ?? undefined
+      );
+    }
+
+    private resolveEffectiveSchemaFromDetails(
+      connectionName: string,
+      effectiveDb: string | null | undefined,
+      details: ConnectionDetails | undefined,
+    ): string | null {
+      if (!details) {
+        return null;
+      }
+      if (
+        "schema" in details &&
+        typeof details.schema === "string" &&
+        details.schema.length > 0
+      ) {
         return details.schema;
       }
-      // Check for searchPath in options (PostgreSQL)
-      if (details.options?.searchPath && typeof details.options.searchPath === 'string') {
-        const searchPath = details.options.searchPath as string;
-        // Extract first schema from search_path (e.g., "public,my_schema" -> "public")
-        const firstSchema = searchPath.split(',')[0]?.trim();
+      if (
+        details.options?.searchPath &&
+        typeof details.options.searchPath === "string"
+      ) {
+        const firstSchema = (details.options.searchPath as string)
+          .split(",")[0]
+          ?.trim();
         if (firstSchema) {
           return firstSchema;
         }
       }
-      const effectiveDb = await this.getEffectiveDatabase(documentUri);
       if (effectiveDb) {
-        const cachedSchema = this._metadataCache?.getCurrentSchema(connectionName, effectiveDb);
+        const cachedSchema = this._metadataCache?.getCurrentSchema(
+          connectionName,
+          effectiveDb,
+        );
         if (cachedSchema) {
           return cachedSchema;
         }
       }
-      if (this.getConnectionDatabaseKind(connectionName) === 'netezza') {
-        return 'ADMIN';
+      if (this.getConnectionDatabaseKind(connectionName) === "netezza") {
+        return "ADMIN";
       }
       return null;
     }

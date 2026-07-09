@@ -1,0 +1,52 @@
+name: Snowflake Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_live_tests:
+        description: 'Run live Snowflake integration tests'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  snowflake-integration:
+    if: ${{ inputs.run_live_tests == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Install core dependencies
+        run: npm ci
+
+      - name: Install Snowflake optional extension dependencies
+        run: npm --prefix extensions/snowflake ci
+
+      - name: Verify Snowflake type checks
+        run: npm run check-types:snowflake
+
+      - name: Run opt-in Snowflake integration test
+        env:
+          RUN_SNOWFLAKE_INTEGRATION: '1'
+          SNOWFLAKE_LIVE_TEST_ENABLED: '1'
+          SNOWFLAKE_LIVE_TEST_ACCOUNT: ${{ secrets.SNOWFLAKE_LIVE_TEST_ACCOUNT }}
+          SNOWFLAKE_LIVE_TEST_HOST: ${{ secrets.SNOWFLAKE_LIVE_TEST_HOST }}
+          SNOWFLAKE_LIVE_TEST_DATABASE: ${{ secrets.SNOWFLAKE_LIVE_TEST_DATABASE }}
+          SNOWFLAKE_LIVE_TEST_USER: ${{ secrets.SNOWFLAKE_LIVE_TEST_USER }}
+          SNOWFLAKE_LIVE_TEST_PASSWORD: ${{ secrets.SNOWFLAKE_LIVE_TEST_PASSWORD }}
+          SNOWFLAKE_LIVE_TEST_WAREHOUSE: ${{ secrets.SNOWFLAKE_LIVE_TEST_WAREHOUSE }}
+          SNOWFLAKE_LIVE_TEST_ROLE: ${{ secrets.SNOWFLAKE_LIVE_TEST_ROLE }}
+          SNOWFLAKE_LIVE_TEST_SCHEMA: ${{ secrets.SNOWFLAKE_LIVE_TEST_SCHEMA }}
+        run: npm run test:snowflake:integration

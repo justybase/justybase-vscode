@@ -241,7 +241,7 @@ export class SqlParser {
             }
         }
 
-        return semicolonOffsets;
+        return this.filterMacroBlockSemicolonOffsets(text, semicolonOffsets);
     }
 
     private static collectSemicolonOffsetsLegacy(text: string): number[] {
@@ -285,7 +285,61 @@ export class SqlParser {
             }
         }
 
-        return semicolonOffsets;
+        return this.filterMacroBlockSemicolonOffsets(text, semicolonOffsets);
+    }
+
+    private static filterMacroBlockSemicolonOffsets(text: string, semicolonOffsets: number[]): number[] {
+        if (!/%(?:if|else|end)\b/i.test(text)) {
+            return semicolonOffsets;
+        }
+
+        const filtered: number[] = [];
+        let macroBlockDepth = 0;
+
+        for (const offset of semicolonOffsets) {
+            const directive = this.readMacroDirectiveBeforeSemicolon(text, offset);
+            if (directive === 'if') {
+                macroBlockDepth++;
+                continue;
+            }
+            if (directive === 'else' && macroBlockDepth > 0) {
+                continue;
+            }
+            if (directive === 'end' && macroBlockDepth > 0) {
+                macroBlockDepth--;
+                if (macroBlockDepth === 0) {
+                    filtered.push(offset);
+                }
+                continue;
+            }
+            if (macroBlockDepth === 0) {
+                filtered.push(offset);
+            }
+        }
+
+        return filtered;
+    }
+
+    private static readMacroDirectiveBeforeSemicolon(
+        text: string,
+        semicolonOffset: number,
+    ): 'if' | 'else' | 'end' | undefined {
+        let lineStart = semicolonOffset;
+        while (lineStart > 0 && text[lineStart - 1] !== '\n' && text[lineStart - 1] !== '\r') {
+            lineStart--;
+        }
+
+        const linePrefix = text.slice(lineStart, semicolonOffset).trim();
+        if (/^%if\b[\s\S]*\s+%then\s+%do$/i.test(linePrefix)) {
+            return 'if';
+        }
+        if (/^%else\s+%do$/i.test(linePrefix)) {
+            return 'else';
+        }
+        if (/^%end$/i.test(linePrefix)) {
+            return 'end';
+        }
+        return undefined;
     }
 
     private static hasValidTokenOffsets(text: string, tokens: IToken[]): boolean {
@@ -393,6 +447,7 @@ export class SqlParser {
         let inLineComment = false;
         let inBlockComment = false;
         let i = 0;
+        let macroBlockDepth = 0;
 
         while (i < text.length) {
             const char = text[i];
@@ -427,6 +482,30 @@ export class SqlParser {
                 } else if (char === '"') {
                     inDoubleQuote = true;
                 } else if (char === ';') {
+                    const directive = this.readMacroDirectiveBeforeSemicolon(text, i);
+                    if (directive === 'if') {
+                        macroBlockDepth++;
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
+                    if (directive === 'else' && macroBlockDepth > 0) {
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
+                    if (directive === 'end' && macroBlockDepth > 0) {
+                        macroBlockDepth--;
+                        if (macroBlockDepth > 0) {
+                            currentStatement += char;
+                            i++;
+                            continue;
+                        }
+                    } else if (macroBlockDepth > 0) {
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
                     if (currentStatement.trim()) {
                         statements.push(currentStatement.trim());
                     }
@@ -459,6 +538,7 @@ export class SqlParser {
         let inBlockComment = false;
         let i = 0;
         let foundNonWhitespace = false;
+        let macroBlockDepth = 0;
 
         while (i < text.length) {
             const char = text[i];
@@ -498,6 +578,30 @@ export class SqlParser {
                 } else if (char === '"') {
                     inDoubleQuote = true;
                 } else if (char === ';') {
+                    const directive = this.readMacroDirectiveBeforeSemicolon(text, i);
+                    if (directive === 'if') {
+                        macroBlockDepth++;
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
+                    if (directive === 'else' && macroBlockDepth > 0) {
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
+                    if (directive === 'end' && macroBlockDepth > 0) {
+                        macroBlockDepth--;
+                        if (macroBlockDepth > 0) {
+                            currentStatement += char;
+                            i++;
+                            continue;
+                        }
+                    } else if (macroBlockDepth > 0) {
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
                     if (currentStatement.trim()) {
                         statements.push({
                             sql: currentStatement.trim(),

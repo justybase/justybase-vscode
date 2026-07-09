@@ -4,6 +4,7 @@ import { SchemaProvider } from '../providers/schemaProvider';
 import { MetadataCache } from '../metadataCache';
 import { runQueryRaw } from '../core/queryRunner';
 import { Logger } from '../utils/logger';
+import { getExtensionDocumentParseSession } from '../core/extensionDocumentParseSession';
 import {
     createExtensionServices,
     type ExtensionServices,
@@ -36,7 +37,12 @@ export function activateCoreServices(
     });
 
     t = performance.now();
-    const schemaProvider = new SchemaProvider(context, connectionManager, metadataCache);
+    const schemaProvider = new SchemaProvider(
+        context,
+        connectionManager,
+        metadataCache,
+        getExtensionDocumentParseSession(),
+    );
     logger.info(`[perf] SchemaProvider ctor: ${(performance.now() - t).toFixed(1)}ms`);
 
     context.subscriptions.push({

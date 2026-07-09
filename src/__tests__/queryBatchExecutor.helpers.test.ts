@@ -39,15 +39,18 @@ jest.mock("../core/queryHistoryManager", () => ({
   },
 }));
 
-jest.mock("../core/variableUtils", () => ({
-  extractVariables: jest.fn().mockReturnValue(new Set(["var1", "var2"])),
-  formatPutLogMessage: jest.fn((message: string) => `>>> %PUT: ${message}`),
-  parseSetVariables: jest.fn().mockImplementation((sql: string) => ({
-    sql,
-    setValues: {},
-  })),
-  replaceVariablesInSql: jest.fn().mockImplementation((sql: string) => sql),
-}));
+jest.mock("../core/variableUtils", () => {
+  const actual = jest.requireActual("../core/variableUtils");
+  return {
+    ...actual,
+    extractVariables: jest.fn().mockReturnValue(new Set(["var1", "var2"])),
+    parseSetVariables: jest.fn().mockImplementation((sql: string) => ({
+      sql,
+      setValues: {},
+    })),
+    replaceVariablesInSql: jest.fn().mockImplementation((sql: string) => sql),
+  };
+});
 
 jest.mock("../core/variableResolver", () => ({
   promptForVariableValues: jest

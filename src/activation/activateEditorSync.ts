@@ -40,6 +40,16 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         metadataPrefetchCoordinator,
     } = params;
 
+    let resultsCopyPrimedContext: boolean | undefined;
+
+    const clearPrimedResultCopyContext = (): void => {
+        if (resultsCopyPrimedContext === false) {
+            return;
+        }
+        resultsCopyPrimedContext = false;
+        void vscode.commands.executeCommand('setContext', 'netezza.resultsCopyPrimed', false);
+    };
+
     const syncResultPanelSourceWithEditor = (editor: vscode.TextEditor | undefined) => {
         if (isResultSyncSqlDocument(editor?.document)) {
             resultPanelProvider.setActiveSource(editor.document.uri.toString());
@@ -53,7 +63,7 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
     };
 
     const clearPrimedResultCopy = () => {
-        void vscode.commands.executeCommand('setContext', 'netezza.resultsCopyPrimed', false);
+        clearPrimedResultCopyContext();
     };
     const clearResultPanelFocusContexts = () => {
         void vscode.commands.executeCommand('setContext', 'netezza.resultsFocused', false);

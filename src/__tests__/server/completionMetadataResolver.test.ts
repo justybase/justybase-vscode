@@ -2,6 +2,9 @@ import { CompletionItemKind } from "vscode-languageserver/node";
 import { CompletionMetadataResolver } from "../../server/completionMetadataResolver";
 import { CompletionWildcardResolver } from "../../server/completionWildcardResolver";
 import type { CompletionMetadataProvider } from "../../server/completionTypes";
+import { DocumentParseSession } from "../../sqlParser/documentParseSession";
+
+jest.unmock("chevrotain");
 
 function createMetadataProvider(): CompletionMetadataProvider {
   return {
@@ -122,5 +125,83 @@ describe("CompletionMetadataResolver", () => {
       "DIMACCOUNT_NS",
       "PUBLIC",
     );
+  });
+
+  it("returns only explicit CTE columns when the CTE has a column list and SELECT star", async () => {
+    const metadataProvider = {
+      ...createMetadataProvider(),
+      getColumns: jest.fn(async () => [
+        { name: "DATEKEY", type: "INTEGER" },
+        { name: "CALENDAR_DATE", type: "DATE" },
+      ]),
+    };
+    const parseSession = new DocumentParseSession();
+    const wildcardResolver = new CompletionWildcardResolver(parseSession);
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      wildcardResolver,
+      parseSession,
+    );
+    const sql = `WITH c(out_a, out_b) AS (
+  SELECT * FROM DIMDATE
+)
+SELECT * FROM c`;
+
+    const columns = await resolver.resolveLocalDefinitionColumns(
+      { name: "c", type: "CTE", columns: ["out_a", "out_b"] },
+      sql,
+      [],
+      "file:///test.sql",
+      1,
+      "MYDB",
+      "ADMIN",
+      "netezza",
+      new Set(),
+    );
+
+    expect(columns).toEqual(["out_a", "out_b"]);
+    expect(metadataProvider.getColumns).not.toHaveBeenCalled();
+  });
+
+  it("does not shadow cached metadata with CTEs from earlier statements", async () => {
+    const metadataProvider = {
+      ...createMetadataProvider(),
+      getColumns: jest.fn(async () => [
+        { name: "DATEKEY", type: "INTEGER" },
+        { name: "CALENDAR_DATE", type: "DATE" },
+      ]),
+    };
+    const parseSession = new DocumentParseSession();
+    const wildcardResolver = new CompletionWildcardResolver(parseSession);
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      wildcardResolver,
+      parseSession,
+    );
+    const sql = `WITH DIMDATE AS (
+  SELECT 999 AS cte_only_col
+)
+SELECT * FROM DIMDATE;
+
+WITH cte2 AS (
+  SELECT * FROM DIMDATE
+)
+SELECT * FROM cte2`;
+
+    const columns = await resolver.resolveLocalDefinitionColumns(
+      { name: "cte2", type: "CTE", columns: ["*"] },
+      sql,
+      [],
+      "file:///test.sql",
+      1,
+      "MYDB",
+      "ADMIN",
+      "netezza",
+      new Set(),
+    );
+
+    expect(columns).toEqual(["DATEKEY", "CALENDAR_DATE"]);
+    expect(columns).not.toContain("cte_only_col");
+    expect(metadataProvider.getColumns).toHaveBeenCalled();
   });
 });

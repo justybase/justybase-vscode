@@ -22,8 +22,11 @@ import {
 } from "./queryRunnerHelpers";
 import {
   createDropSessionCallback,
+  createMacroFileReadContext,
+  executeMacroExport,
   executeMacroQuery,
   getQueryConfig,
+  splitExpandedMacroStatements,
 } from "./queryBatchExecutor";
 
 // ---------------------------------------------------------------------------
@@ -137,7 +140,13 @@ export async function runQueryRaw(
   let promptValues: Record<string, string>;
 
   try {
-    promptValues = await collectQueryVariableValues(query, silent, context);
+    const macroFileContext = createMacroFileReadContext(documentUri);
+    promptValues = await collectQueryVariableValues(
+      query,
+      silent,
+      context,
+      macroFileContext,
+    );
     queryToExecute = query;
     resolvedConnectionName = resolveConnectionName(
       connManager,
@@ -306,6 +315,11 @@ export async function runQueryRaw(
 
 /**
  * Execute a raw query against a connection (extracted from runQueryRaw to eliminate retry duplication).
+ *
+ * Macro directives are expanded first, then the SQL is split into individual
+ * statements and executed sequentially on one connection. {@link QueryResult.sql}
+ * identifies the last executed statement; {@link QueryResult.expandedSql} holds
+ * the full expanded script when preprocessing ran.
  */
 export async function executeRawQuery(
   connManager: ConnectionManager,
@@ -367,6 +381,18 @@ export async function executeRawQuery(
           sessionId,
           connManager,
         ),
+        exporter: request => executeMacroExport(
+          request,
+          sql => executeMacroQuery(
+            connection,
+            sql,
+            documentUri,
+            sessionId,
+            connManager,
+          ),
+          (message) => logOutput(logger, message),
+        ),
+        ...createMacroFileReadContext(documentUri),
       },
     );
     if (queryToExecute.trim().length === 0) {
@@ -380,65 +406,101 @@ export async function executeRawQuery(
       };
     }
 
+    const statementsToExecute = splitExpandedMacroStatements(queryToExecute);
+    const expandedSql = queryToExecute;
     const { queryTimeout, rowLimit } = getQueryConfig();
-    logOutput(logger, "Executing SQL on server...");
+    let lastResult: QueryResult | undefined;
 
-    const { results, error, recordsAffected } =
-      await streamingManager.executeAndFetch(
-        connection,
-        queryToExecute,
-        maxRows !== undefined ? maxRows : rowLimit,
-        queryTimeout,
-        documentUri,
-        sessionId,
-        connManager,
-        undefined,
-        createDropSessionCallback(connManager, documentUri),
-      );
-    if (error) {
-      throw error;
+    for (let subIndex = 0; subIndex < statementsToExecute.length; subIndex++) {
+      const statementToExecute = statementsToExecute[subIndex];
+      if (statementsToExecute.length > 1) {
+        logOutput(
+          logger,
+          `Executing statement ${subIndex + 1}/${statementsToExecute.length}...`,
+        );
+      } else {
+        logOutput(logger, "Executing SQL on server...");
+      }
+
+      const { results, error, recordsAffected } =
+        await streamingManager.executeAndFetch(
+          connection,
+          statementToExecute,
+          maxRows !== undefined ? maxRows : rowLimit,
+          queryTimeout,
+          documentUri,
+          sessionId,
+          connManager,
+          undefined,
+          createDropSessionCallback(connManager, documentUri),
+        );
+      if (error) {
+        throw error;
+      }
+
+      const columns = results[0]?.columns || [];
+      const data = results[0]?.rows || [];
+      const limitReached = results[0]?.limitReached || false;
+      const rowsAffectedValue =
+        recordsAffected !== undefined && recordsAffected >= 0
+          ? recordsAffected
+          : -1;
+
+      if (columns.length > 0) {
+        lastResult = {
+          columns,
+          data,
+          rowsAffected: rowsAffectedValue >= 0 ? rowsAffectedValue : undefined,
+          limitReached,
+          sql: statementToExecute,
+        };
+      } else {
+        const msg =
+          rowsAffectedValue >= 0
+            ? `Query executed successfully. Records affected: ${rowsAffectedValue}`
+            : "Query executed successfully. Records affected: N/A";
+        lastResult = {
+          columns: [],
+          data: [],
+          rowsAffected: rowsAffectedValue >= 0 ? rowsAffectedValue : undefined,
+          message:
+            rowsAffectedValue >= 0
+              ? `Records affected: ${rowsAffectedValue}`
+              : "Query executed successfully.",
+          sql: statementToExecute,
+        };
+        if (statementsToExecute.length === 1) {
+          logOutput(logger, msg);
+        }
+      }
     }
 
-    const columns = results[0]?.columns || [];
-    const data = results[0]?.rows || [];
-    const limitReached = results[0]?.limitReached || false;
-    const rowsAffectedValue =
-      recordsAffected !== undefined && recordsAffected >= 0
-        ? recordsAffected
-        : -1;
-
-    if (columns.length > 0) {
-      logOutput(logger, "Query completed.");
-      logOutput(
-        logger,
-        rowsAffectedValue >= 0
-          ? `Records affected: ${rowsAffectedValue}`
-          : "Records affected: N/A",
-      );
-      return {
-        columns,
-        data,
-        rowsAffected: rowsAffectedValue >= 0 ? rowsAffectedValue : undefined,
-        limitReached,
-        sql: queryToExecute,
-      };
-    } else {
-      const msg =
-        rowsAffectedValue >= 0
-          ? `Query executed successfully. Records affected: ${rowsAffectedValue}`
-          : "Query executed successfully. Records affected: N/A";
-      logOutput(logger, msg);
+    if (!lastResult) {
       return {
         columns: [],
         data: [],
-        rowsAffected: rowsAffectedValue >= 0 ? rowsAffectedValue : undefined,
-        message:
-          rowsAffectedValue >= 0
-            ? `Records affected: ${rowsAffectedValue}`
-            : "Query executed successfully.",
-        sql: queryToExecute,
+        message: "No SQL to execute after processing variable directives.",
+        sql: "",
+        expandedSql,
       };
     }
+
+    if (lastResult.columns.length > 0) {
+      logOutput(logger, "Query completed.");
+      logOutput(
+        logger,
+        lastResult.rowsAffected !== undefined
+          ? `Records affected: ${lastResult.rowsAffected}`
+          : "Records affected: N/A",
+      );
+    } else if (statementsToExecute.length > 1) {
+      logOutput(logger, "Query completed.");
+    }
+
+    return {
+      ...lastResult,
+      expandedSql,
+    };
   } finally {
     if (noticeHandler) {
       connection.removeListener("notice", noticeHandler);

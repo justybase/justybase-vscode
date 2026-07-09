@@ -42,6 +42,58 @@ export class CompletionWildcardResolver {
 
   constructor(private readonly parseSession?: DocumentParseSession) {}
 
+  public definitionHasExplicitColumnList(
+    fullSql: string,
+    definitionName: string,
+    databaseKind?: DatabaseKind,
+    documentUri?: string,
+    documentVersion?: number,
+  ): boolean {
+    const fromDocument = this.lookupDefinitionInDocument(
+      fullSql,
+      definitionName,
+      databaseKind,
+      documentUri,
+      documentVersion,
+    );
+    if (fromDocument) {
+      return fromDocument.hasExplicitColumnList;
+    }
+
+    return (
+      this.lookupDefinitionMetadataFromTokens(
+        fullSql,
+        definitionName,
+        databaseKind,
+      )?.hasExplicitColumnList ?? false
+    );
+  }
+
+  public findDefinitionScopeOffset(
+    fullSql: string,
+    definitionName: string,
+    databaseKind?: DatabaseKind,
+    documentUri?: string,
+    documentVersion?: number,
+  ): number | undefined {
+    const fromDocument = this.lookupDefinitionInDocument(
+      fullSql,
+      definitionName,
+      databaseKind,
+      documentUri,
+      documentVersion,
+    );
+    if (fromDocument) {
+      return fromDocument.scopeOffset;
+    }
+
+    return this.lookupDefinitionMetadataFromTokens(
+      fullSql,
+      definitionName,
+      databaseKind,
+    )?.scopeOffset;
+  }
+
   public extractWildcardTableSources(
     fullSql: string,
     definitionName: string,
@@ -494,13 +546,19 @@ export class CompletionWildcardResolver {
     return result;
   }
 
-  private findDefinitionQueryNode(
+  private lookupDefinitionInDocument(
     fullSql: string,
     definitionName: string,
     databaseKind?: DatabaseKind,
     documentUri?: string,
     documentVersion?: number,
-  ): CstNode | undefined {
+  ):
+    | {
+        queryNode: CstNode;
+        hasExplicitColumnList: boolean;
+        scopeOffset: number;
+      }
+    | undefined {
     const cst = this.resolveDocumentCst(
       fullSql,
       databaseKind,
@@ -526,10 +584,20 @@ export class CompletionWildcardResolver {
           cteNameToken &&
           stripQuotes(cteNameToken.image).toUpperCase() === targetName
         ) {
-          return (
+          const queryNode =
             getChildNodes(current, "withStatement")[0] ??
-            getChildNodes(current, "selectStatement")[0]
-          );
+            getChildNodes(current, "selectStatement")[0];
+          if (!queryNode) {
+            return undefined;
+          }
+          const queryRange = getNodeTextRange(queryNode);
+          const cteNameOffset =
+            cteNameToken.startOffset ?? queryRange?.start ?? 0;
+          return {
+            queryNode,
+            hasExplicitColumnList: getChildNodes(current, "cteColumnList").length > 0,
+            scopeOffset: queryRange?.start ?? cteNameOffset,
+          };
         }
       }
 
@@ -537,10 +605,22 @@ export class CompletionWildcardResolver {
         const qualifiedNameNode = getChildNodes(current, "qualifiedName")[0];
         const tableRef = parseQualifiedTableName(qualifiedNameNode, databaseKind);
         if (tableRef && tableRef.table.toUpperCase() === targetName) {
-          return (
+          const queryNode =
             getChildNodes(current, "withStatement")[0] ??
-            getChildNodes(current, "selectStatement")[0]
-          );
+            getChildNodes(current, "selectStatement")[0];
+          if (!queryNode) {
+            return undefined;
+          }
+          const queryRange = getNodeTextRange(queryNode);
+          const tableNameToken = getTokens(qualifiedNameNode, "Identifier").at(-1);
+          const tableNameOffset =
+            tableNameToken?.startOffset ?? queryRange?.start ?? 0;
+          return {
+            queryNode,
+            hasExplicitColumnList:
+              getChildNodes(current, "columnDefinitionList").length > 0,
+            scopeOffset: queryRange?.start ?? tableNameOffset,
+          };
         }
       }
 
@@ -558,6 +638,22 @@ export class CompletionWildcardResolver {
     }
 
     return undefined;
+  }
+
+  private findDefinitionQueryNode(
+    fullSql: string,
+    definitionName: string,
+    databaseKind?: DatabaseKind,
+    documentUri?: string,
+    documentVersion?: number,
+  ): CstNode | undefined {
+    return this.lookupDefinitionInDocument(
+      fullSql,
+      definitionName,
+      databaseKind,
+      documentUri,
+      documentVersion,
+    )?.queryNode;
   }
 
   private resolveDocumentCst(
@@ -619,11 +715,48 @@ export class CompletionWildcardResolver {
     );
   }
 
-  private extractCteDefinitionQuerySqlFromTokens(
+  private lookupDefinitionMetadataFromTokens(
+    fullSql: string,
+    definitionName: string,
+    databaseKind?: DatabaseKind,
+  ):
+    | {
+        hasExplicitColumnList: boolean;
+        scopeOffset: number;
+      }
+    | undefined {
+    const lexResult = resolveSqlParsingRuntime({
+      databaseKind,
+    }).SqlLexer.tokenize(fullSql);
+    if (lexResult.errors.length > 0 || lexResult.tokens.length === 0) {
+      return undefined;
+    }
+
+    return (
+      this.lookupCteDefinitionMetadataFromTokens(
+        lexResult.tokens,
+        fullSql,
+        definitionName,
+      ) ??
+      this.lookupCreateTableDefinitionMetadataFromTokens(
+        lexResult.tokens,
+        fullSql,
+        definitionName,
+      )
+    );
+  }
+
+  private lookupCteDefinitionMetadataFromTokens(
     tokens: IToken[],
     fullSql: string,
     definitionName: string,
-  ): string | undefined {
+  ):
+    | {
+        hasExplicitColumnList: boolean;
+        scopeOffset: number;
+        queryEndOffset: number;
+      }
+    | undefined {
     const targetName = definitionName.toUpperCase();
 
     for (let index = 0; index < tokens.length; index++) {
@@ -636,11 +769,13 @@ export class CompletionWildcardResolver {
       }
 
       let scanIndex = index + 1;
+      let hasExplicitColumnList = false;
       if (tokens[scanIndex]?.tokenType.name === "LParen") {
         const columnListEnd = consumeBalancedParentheses(tokens, scanIndex);
         if (!columnListEnd) {
           continue;
         }
+        hasExplicitColumnList = true;
         scanIndex = columnListEnd;
       }
 
@@ -672,17 +807,133 @@ export class CompletionWildcardResolver {
 
       const openParenToken = tokens[scanIndex];
       const closeParenToken = tokens[queryEnd - 1];
-      const startOffset =
+      const scopeOffset =
         (openParenToken.endOffset ?? openParenToken.startOffset ?? 0) + 1;
-      const endOffset = closeParenToken.startOffset ?? startOffset;
-      if (endOffset <= startOffset) {
+      const queryEndOffset = closeParenToken.startOffset ?? scopeOffset;
+      if (queryEndOffset <= scopeOffset) {
         continue;
       }
 
-      return fullSql.substring(startOffset, endOffset);
+      return {
+        hasExplicitColumnList,
+        scopeOffset,
+        queryEndOffset,
+      };
     }
 
     return undefined;
+  }
+
+  private lookupCreateTableDefinitionMetadataFromTokens(
+    tokens: IToken[],
+    fullSql: string,
+    definitionName: string,
+  ):
+    | {
+        hasExplicitColumnList: boolean;
+        scopeOffset: number;
+      }
+    | undefined {
+    const targetName = definitionName.toUpperCase();
+
+    for (let index = 0; index < tokens.length; index++) {
+      if (tokens[index].tokenType.name !== "Create") {
+        continue;
+      }
+
+      let scanIndex = index + 1;
+      if (
+        tokens[scanIndex]?.tokenType.name === "Or" &&
+        tokens[scanIndex + 1]?.tokenType.name === "Replace"
+      ) {
+        scanIndex += 2;
+      }
+      if (
+        tokens[scanIndex]?.tokenType.name === "Temp" ||
+        tokens[scanIndex]?.tokenType.name === "Temporary"
+      ) {
+        scanIndex += 1;
+      }
+      if (tokens[scanIndex]?.tokenType.name !== "Table") {
+        continue;
+      }
+
+      const tableRef = parseQualifiedTableNameFromTokens(tokens, scanIndex + 1);
+      if (!tableRef) {
+        continue;
+      }
+      if (tableRef.tableRef.table.toUpperCase() !== targetName) {
+        continue;
+      }
+
+      scanIndex = tableRef.nextIndex;
+      let hasExplicitColumnList = false;
+      if (tokens[scanIndex]?.tokenType.name === "LParen") {
+        const columnListEnd = consumeBalancedParentheses(tokens, scanIndex);
+        if (!columnListEnd) {
+          continue;
+        }
+        hasExplicitColumnList = true;
+        scanIndex = columnListEnd;
+      }
+
+      while (
+        scanIndex < tokens.length &&
+        tokens[scanIndex].tokenType.name !== "As"
+      ) {
+        if (tokens[scanIndex].tokenType.name === "Semicolon") {
+          break;
+        }
+        scanIndex += 1;
+      }
+      if (tokens[scanIndex]?.tokenType.name !== "As") {
+        continue;
+      }
+
+      const queryStart = scanIndex + 1;
+      if (tokens[queryStart]?.tokenType.name === "LParen") {
+        const queryEnd = consumeBalancedParentheses(tokens, queryStart);
+        if (!queryEnd) {
+          continue;
+        }
+        const openParenToken = tokens[queryStart];
+        const scopeOffset =
+          (openParenToken.endOffset ?? openParenToken.startOffset ?? 0) + 1;
+        return {
+          hasExplicitColumnList,
+          scopeOffset,
+        };
+      }
+
+      const queryStartOffset = tokens[queryStart]?.startOffset;
+      if (queryStartOffset === undefined) {
+        continue;
+      }
+
+      return {
+        hasExplicitColumnList,
+        scopeOffset: queryStartOffset,
+      };
+    }
+
+    return undefined;
+  }
+
+  private extractCteDefinitionQuerySqlFromTokens(
+    tokens: IToken[],
+    fullSql: string,
+    definitionName: string,
+  ): string | undefined {
+    const metadata = this.lookupCteDefinitionMetadataFromTokens(
+      tokens,
+      fullSql,
+      definitionName,
+    );
+    if (!metadata) {
+      return undefined;
+    }
+
+    return fullSql.substring(metadata.scopeOffset, metadata.queryEndOffset);
   }
 
   private extractCreateTableDefinitionQuerySqlFromTokens(

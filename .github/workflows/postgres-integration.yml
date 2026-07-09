@@ -1,0 +1,41 @@
+name: PostgreSQL Integration
+
+on:
+    workflow_dispatch:
+
+jobs:
+    postgres-integration:
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: 'npm'
+
+            - name: Install core dependencies
+              run: npm ci
+
+            - name: Install PostgreSQL optional extension dependencies
+              run: npm --prefix extensions/postgresql ci
+
+            - name: Start PostgreSQL docker-compose stack
+              run: docker compose -f extensions/postgresql/docker-compose.integration.yml up -d
+
+            - name: Wait for PostgreSQL health
+              run: docker compose -f extensions/postgresql/docker-compose.integration.yml ps
+
+            - name: Run PostgreSQL integration test
+              env:
+                  POSTGRES_LIVE_TEST_HOST: 127.0.0.1
+                  POSTGRES_LIVE_TEST_PORT: 55432
+                  POSTGRES_LIVE_TEST_DATABASE: justybase
+                  POSTGRES_LIVE_TEST_USER: justybase
+                  POSTGRES_LIVE_TEST_PASSWORD: justybase
+              run: npm run test:postgres:integration
+
+            - name: Stop PostgreSQL docker-compose stack
+              if: always()
+              run: docker compose -f extensions/postgresql/docker-compose.integration.yml down -v

@@ -1,0 +1,35 @@
+name: DuckDB Integration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  duckdb-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Install core dependencies
+        run: npm ci
+
+      - name: Install DuckDB optional extension dependencies
+        run: npm --prefix extensions/duckdb install
+
+      - name: Verify DuckDB type checks
+        run: npm run check-types:duckdb
+
+      - name: Build DuckDB extension
+        run: npm run build:duckdb
+
+      - name: Run DuckDB integration test
+        run: npm run test:duckdb:integration

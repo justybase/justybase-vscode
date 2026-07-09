@@ -248,6 +248,21 @@ describe('providers/linterRules', () => {
             expect(issues).toEqual([]);
         });
 
+        it('should not flag keywords inside %EXPORT directives', () => {
+            const sql = `%EXPORT(
+  format='xlsx',
+  file='/tmp/out.xlsx',
+  query=(
+    SELECT DATEKEY
+    FROM JUST_DATA.ADMIN.DIMDATE
+  )
+);`;
+
+            const issues = ruleNZ007.check(sql);
+
+            expect(issues).toEqual([]);
+        });
+
         it('should still flag inconsistent SQL after macro directives', () => {
             const sql = `%PUT As-of DATEKEY resolved from database: &as_of_key;
 SELECT * from JUST_DATA.ADMIN.DIMDATE;`;

@@ -184,7 +184,7 @@ export class ParserSqlContextCollector {
     // so autocomplete suggests base metadata for the CTE.
     const inferredTableRef =
       this.inferSimpleStarQueryTableRefFromCst(nestedQuery);
-    if (inferredTableRef) {
+    if (inferredTableRef && explicitColumns.length === 0) {
       const cteName = normalizeTokenText(cteNameToken).toUpperCase();
       const binding = {
         db: inferredTableRef.database,

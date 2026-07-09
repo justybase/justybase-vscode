@@ -1,5 +1,16 @@
+import type { DatabaseKind } from "../contracts/database";
+import { parseSemanticScopeWithParser } from "../providers/parsers/parserSqlContext";
 import type { LocalDefinition } from "../providers/types";
+import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import { stripQuotes } from "./completionDialectAdapter";
+import type { CompletionWildcardResolver } from "./completionWildcardResolver";
+
+export interface WildcardResolutionDocumentContext {
+  documentUri: string;
+  documentVersion: number;
+  sql: string;
+  databaseKind?: DatabaseKind;
+}
 
 /**
  * Helpers for merging and resolving parser-derived local definitions.
@@ -81,6 +92,46 @@ export function normalizeColumnNames(columns: string[]): string[] {
   return columns
     .map((column) => stripQuotes(column.trim()))
     .filter((column) => !!column);
+}
+
+export function getWildcardResolutionLocalDefinitions(
+  parseSession: DocumentParseSession | undefined,
+  wildcardResolver: CompletionWildcardResolver,
+  documentContext: WildcardResolutionDocumentContext,
+  definition: LocalDefinition,
+): LocalDefinition[] {
+  const scopeOffset = wildcardResolver.findDefinitionScopeOffset(
+    documentContext.sql,
+    definition.name,
+    documentContext.databaseKind,
+    documentContext.documentUri,
+    documentContext.documentVersion,
+  );
+
+  try {
+    const scope = parseSession
+      ? parseSession.getSemanticScope({
+          documentUri: documentContext.documentUri,
+          documentVersion: documentContext.documentVersion,
+          sql: documentContext.sql,
+          databaseKind: documentContext.databaseKind,
+          cursorOffset: scopeOffset,
+        })
+      : parseSemanticScopeWithParser(
+          documentContext.sql,
+          scopeOffset,
+          documentContext.databaseKind,
+        );
+    const persistentDefinitions = scope.localDefinitions.filter(
+      isPersistentDocumentDefinition,
+    );
+    return mergeLocalDefinitions(
+      persistentDefinitions,
+      scope.visibleLocalDefinitions,
+    );
+  } catch {
+    return [];
+  }
 }
 
 export function dedupeColumnNames(columns: string[]): string[] {

@@ -1,0 +1,86 @@
+name: Optional Extension Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build-optional:
+    name: Build ${{ matrix.display_name }} Extension
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: oracle
+            display_name: Oracle
+          - id: postgresql
+            display_name: PostgreSQL
+          - id: vertica
+            display_name: Vertica
+          - id: mssql
+            display_name: MS SQL Server
+          - id: mysql
+            display_name: MySQL
+          - id: snowflake
+            display_name: Snowflake
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Detect extension package
+        id: detect
+        shell: bash
+        run: |
+          if [ -f "extensions/${{ matrix.id }}/package.json" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping ${{ matrix.display_name }} because extensions/${{ matrix.id }}/package.json is not present."
+          fi
+
+      - name: Install root dependencies
+        if: steps.detect.outputs.present == 'true'
+        run: npm ci
+
+      - name: Install extension dependencies
+        if: steps.detect.outputs.present == 'true'
+        working-directory: extensions/${{ matrix.id }}
+        run: npm ci
+
+      - name: Type check extension
+        if: steps.detect.outputs.present == 'true'
+        run: npm run check-types:${{ matrix.id }}
+
+      - name: Build extension
+        if: steps.detect.outputs.present == 'true'
+        run: npm run build:${{ matrix.id }}
+
+      - name: Package VSIX
+        if: steps.detect.outputs.present == 'true'
+        run: >
+          npm run package:${{ matrix.id }} --
+          --out justybaselite-${{ matrix.id }}.vsix
+
+      - name: Upload VSIX artifact
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: justybaselite-${{ matrix.id }}
+          path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}.vsix
+          retention-days: 1

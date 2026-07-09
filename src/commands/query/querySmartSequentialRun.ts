@@ -12,6 +12,7 @@ import { QueryCommandsDependencies } from './queryCommandTypes';
 import { confirmSafeExecute, detectPythonScript, handleExecutionCompletion } from './queryCommandSafety';
 import { toPerfErrorCode } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
+import { tryAcquireQueryExecution } from './queryExecutionGate';
 
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
@@ -85,49 +86,62 @@ export async function runSmartSequentialQuery(
         return;
     }
 
-    const resolved = resolveSmartSequentialQueries(editor);
-    if (!resolved) {
+    const sourceUri = editor.document.uri.toString();
+    const executionGate = tryAcquireQueryExecution(sourceUri, resultPanelProvider);
+    if (!executionGate) {
         return;
     }
 
-    const { queries, sourceUri } = resolved;
-    const continueOnError = options.continueOnError === true;
-
-    const single = queries.length === 1 ? queries[0].trim() : null;
-    if (single) {
-        const scriptDetection = detectPythonScript(single);
-        if (scriptDetection.isPython && scriptDetection.script) {
-            const config = getExtensionConfiguration();
-            const pythonPath = config.get<string>('pythonPath') || 'python';
-            const python = scriptDetection.pythonPath || pythonPath;
-            const cmd = buildExecCommand(
-                python,
-                scriptDetection.script,
-                scriptDetection.args || [],
-            );
-
-            const term = vscode.window.createTerminal({ name: 'JustyBase: Script' });
-            term.show(true);
-            term.sendText(cmd, true);
-            vscode.window.showInformationMessage(`Running script: ${cmd}`);
-            return;
-        }
-    }
-
-    if (!(await confirmSafeExecute(queries))) {
-        return;
-    }
-
-    const runQueryTimer = createPerformanceTimer(
-        continueOnError ? 'query.run_continue_on_error' : 'query.run',
-        {
-            payloadSize: queries.reduce((sum, q) => sum + q.length, 0),
-        },
-    );
+    let queriesForError: string[] = [];
+    let runQueryTimer: ReturnType<typeof createPerformanceTimer> | undefined;
+    let executionStarted = false;
 
     try {
+        const resolved = resolveSmartSequentialQueries(editor);
+        if (!resolved) {
+            return;
+        }
+
+        const { queries } = resolved;
+        queriesForError = queries;
+        const continueOnError = options.continueOnError === true;
+
+        const single = queries.length === 1 ? queries[0].trim() : null;
+        if (single) {
+            const scriptDetection = detectPythonScript(single);
+            if (scriptDetection.isPython && scriptDetection.script) {
+                const config = getExtensionConfiguration();
+                const pythonPath = config.get<string>('pythonPath') || 'python';
+                const python = scriptDetection.pythonPath || pythonPath;
+                const cmd = buildExecCommand(
+                    python,
+                    scriptDetection.script,
+                    scriptDetection.args || [],
+                );
+
+                const term = vscode.window.createTerminal({ name: 'JustyBase: Script' });
+                term.show(true);
+                term.sendText(cmd, true);
+                vscode.window.showInformationMessage(`Running script: ${cmd}`);
+                return;
+            }
+        }
+
+        if (!(await confirmSafeExecute(queries))) {
+            return;
+        }
+
+        runQueryTimer = createPerformanceTimer(
+            continueOnError ? 'query.run_continue_on_error' : 'query.run',
+            {
+                payloadSize: queries.reduce((sum, q) => sum + q.length, 0),
+            },
+        );
+
         resultPanelProvider.setActiveSource(sourceUri);
         resultPanelProvider.startExecution(sourceUri);
+        executionStarted = true;
+        resultPanelProvider.log(sourceUri, 'Preparing SQL execution...');
 
         const config = getExtensionConfiguration();
         const enableStreaming = config.get<boolean>('enableStreaming', true) ?? true;
@@ -259,49 +273,60 @@ export async function runSmartSequentialQuery(
 
         resultPanelProvider.finalizeExecution(sourceUri);
         await handleExecutionCompletion(sourceUri);
-        const successEvent = runQueryTimer.finish({
-            result: 'ok',
-            metadata: {
-                query_count: queries.length,
-                streaming_enabled: enableStreaming,
-                continue_on_error: continueOnError,
-            },
-        });
-        console.log(formatPerformanceEvent(successEvent));
+        if (runQueryTimer) {
+            const successEvent = runQueryTimer.finish({
+                result: 'ok',
+                metadata: {
+                    query_count: queries.length,
+                    streaming_enabled: enableStreaming,
+                    continue_on_error: continueOnError,
+                },
+            });
+            console.log(formatPerformanceEvent(successEvent));
+        }
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
 
         if (msg.includes('Query cancelled')) {
-            resultPanelProvider.log(sourceUri, 'Query execution cancelled by user.');
-            resultPanelProvider.finalizeExecution(sourceUri);
-            const cancelledEvent = runQueryTimer.finish({
-                result: 'cancelled',
-                errorCode: 'QUERY_CANCELLED',
-                metadata: {
-                    query_count: queries.length,
-                    continue_on_error: continueOnError,
-                },
-            });
-            console.log(formatPerformanceEvent(cancelledEvent));
+            if (executionStarted) {
+                resultPanelProvider.log(sourceUri, 'Query execution cancelled by user.');
+                resultPanelProvider.finalizeExecution(sourceUri);
+            }
+            if (runQueryTimer) {
+                const cancelledEvent = runQueryTimer.finish({
+                    result: 'cancelled',
+                    errorCode: 'QUERY_CANCELLED',
+                    metadata: {
+                        query_count: queriesForError.length,
+                        continue_on_error: options.continueOnError === true,
+                    },
+                });
+                console.log(formatPerformanceEvent(cancelledEvent));
+            }
             return;
         }
 
-        resultPanelProvider.updateResults(
-            [buildQueryErrorResult(queries.length === 1 ? queries[0] : undefined, msg)],
-            sourceUri,
-            true,
-        );
-
-        resultPanelProvider.finalizeExecution(sourceUri);
-        const errorEvent = runQueryTimer.finish({
-            result: 'error',
-            errorCode: toPerfErrorCode(msg),
-            metadata: {
-                query_count: queries.length,
-                continue_on_error: continueOnError,
-            },
-        });
-        console.log(formatPerformanceEvent(errorEvent));
+        if (executionStarted) {
+            resultPanelProvider.updateResults(
+                [buildQueryErrorResult(queriesForError.length === 1 ? queriesForError[0] : undefined, msg)],
+                sourceUri,
+                true,
+            );
+            resultPanelProvider.finalizeExecution(sourceUri);
+        }
+        if (runQueryTimer) {
+            const errorEvent = runQueryTimer.finish({
+                result: 'error',
+                errorCode: toPerfErrorCode(msg),
+                metadata: {
+                    query_count: queriesForError.length,
+                    continue_on_error: options.continueOnError === true,
+                },
+            });
+            console.log(formatPerformanceEvent(errorEvent));
+        }
         vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+    } finally {
+        executionGate.dispose();
     }
 }

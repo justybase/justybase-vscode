@@ -40,6 +40,7 @@ export class LspCompletionEngine {
     this.metadataResolver = new CompletionMetadataResolver(
       metadataProvider,
       this.wildcardResolver,
+      parseSession,
     );
     this.scopeResolver = new CompletionScopeResolver(
       this.contextExtractor,

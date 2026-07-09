@@ -5,19 +5,26 @@ import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
+import type { DocumentParseSession } from '../sqlParser/documentParseSession';
 import { MetadataCache } from '../metadataCache';
 import { buildColumnMetadataQuery, parseColumnMetadata } from './tableMetadataProvider';
 import { buildIdLookupKey, extractLabel } from '../metadata/helpers';
 import { getTablesForScope, refreshTableLikeTypeForSchema, hasTreeReadyColumnCache, normalizeColumnCacheEntry, isTableCacheObjectType, buildSchemaCacheKey } from '../metadata/cache/schemaTreeDataSource';
 import { buildColumnCacheKey } from '../metadata/columnRowMapping';
 import { DatabaseMetadata, TableMetadata, ColumnMetadata, ProcedureMetadata } from '../metadata/types';
+import type { LocalDefinition } from './types';
+import { buildMetadataLookupTargets } from '../server/completionPathUtils';
+import { findLocalDefinition, dedupeColumnNames, normalizeColumnNames, getWildcardResolutionLocalDefinitions } from '../server/completionLocalDefinitionUtils';
+import { CompletionWildcardResolver } from '../server/completionWildcardResolver';
+import type { WildcardTableSource } from '../server/completionQualifierUtils';
 import { FavoritesManager } from '../core/favoritesManager';
-import { formatQualifiedObjectName, unquoteIdentifier, stripIdentifierQuoting } from '../utils/identifierUtils';
+import { formatIdentifierForSql, formatQualifiedObjectName, unquoteIdentifier, stripIdentifierQuoting } from '../utils/identifierUtils';
 import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
 import { getConnectionAccentResourceUri } from '../utils/connectionAccent';
 import { getDialectIconUri } from '../utils/dialectIcons';
 import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
 import { logWithFallback } from '../utils/logger';
+import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 import {
     buildSchemaFilterRegex,
     columnVisibleInSchemaFilter,
@@ -28,6 +35,7 @@ import {
  * Default timeout for schema queries (60 seconds)
  */
 const SCHEMA_QUERY_TIMEOUT = 60000;
+const CTE_TREE_REFRESH_DEBOUNCE_MS = 400;
 
 const DB2_GLOBAL_TYPE_GROUPS = new Set([
     'SERVER',
@@ -39,6 +47,21 @@ const DB2_GLOBAL_TYPE_GROUPS = new Set([
 ]);
 
 const DB2_SCHEMA_SCOPED_TYPE_GROUPS = new Set(['TABLE', 'VIEW', 'NICKNAME', 'ALIAS', 'PROCEDURE', 'FUNCTION']);
+
+interface ActiveCteDefinition {
+    name: string;
+    type: string;
+    columns: string[];
+}
+
+interface ActiveSqlDocumentContext {
+    document: vscode.TextDocument;
+    documentUri: string;
+    connectionName?: string;
+    databaseKind?: DatabaseKind;
+    effectiveDb?: string;
+    effectiveSchema?: string;
+}
 
 /**
  * Error thrown when schema query times out
@@ -311,6 +334,9 @@ export class SchemaProvider
     // Filter state
     private _filterString?: string;
     private _filterRegex?: RegExp;
+    private _cteRootItem?: SchemaItem;
+    private _cteRefreshTimer?: NodeJS.Timeout;
+    private readonly _cteWildcardResolver: CompletionWildcardResolver;
 
     // Drag and Drop support
     readonly dragMimeTypes = ['application/vnd.code.tree.netezza', 'text/plain'];
@@ -320,7 +346,10 @@ export class SchemaProvider
         private context: vscode.ExtensionContext,
         private connectionManager: ConnectionManager,
         private metadataCache: MetadataCache,
+        private readonly parseSession?: DocumentParseSession,
     ) {
+        this._cteWildcardResolver = new CompletionWildcardResolver(parseSession);
+
         // Listen for connection changes to refresh tree and clear errors
         this.connectionManager.onDidChangeConnections(() => {
             this._connectionErrors.clear();
@@ -337,6 +366,26 @@ export class SchemaProvider
         metadataCache.onDidExternalRefresh(() => {
             this.refresh();
         });
+
+        context.subscriptions.push(
+            vscode.window.onDidChangeActiveTextEditor(() => {
+                this.clearPendingCteRefresh();
+                this._cteRootItem = undefined;
+                this.refresh();
+            }),
+            vscode.workspace.onDidChangeTextDocument((event) => {
+                const activeEditor = vscode.window.activeTextEditor;
+                if (
+                    activeEditor?.document === event.document &&
+                    isSqlAuthoringLanguageId(activeEditor.document.languageId)
+                ) {
+                    this.scheduleCteTreeRefresh();
+                }
+            }),
+            {
+                dispose: () => this.clearPendingCteRefresh(),
+            },
+        );
     }
 
     private getConnectionDatabaseKind(connectionName?: string): DatabaseKind | undefined {
@@ -362,8 +411,294 @@ export class SchemaProvider
         return getDatabaseMetadataProvider(this.requireConnectionDatabaseKind(connectionName, 'load schema metadata'));
     }
 
+    private getActiveSqlDocumentContext(): ActiveSqlDocumentContext | undefined {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || !isSqlAuthoringLanguageId(editor.document.languageId)) {
+            return undefined;
+        }
+
+        const documentUri = editor.document.uri.toString();
+        const connectionName =
+            this.connectionManager.getConnectionForExecution(documentUri) ||
+            this.connectionManager.getActiveConnectionName?.();
+        const databaseKind = connectionName ? this.getConnectionDatabaseKind(connectionName) : undefined;
+        const connectionMetadata = connectionName ? this.connectionManager.getConnectionMetadata(connectionName) : undefined;
+        const effectiveDb = this.connectionManager.getDocumentDatabase(documentUri) || connectionMetadata?.database;
+        const effectiveSchema = connectionName
+            ? this.connectionManager.getEffectiveSchemaSync(documentUri, effectiveDb)
+            : undefined;
+
+        return {
+            document: editor.document,
+            documentUri,
+            connectionName: connectionName || undefined,
+            databaseKind,
+            effectiveDb,
+            effectiveSchema,
+        };
+    }
+
+    private createCteRootItem(): SchemaItem | undefined {
+        if (!this.getActiveSqlDocumentContext()) {
+            this._cteRootItem = undefined;
+            return undefined;
+        }
+
+        const item = new SchemaItem('CTEs / Temp Tables', vscode.TreeItemCollapsibleState.Collapsed, 'cteRoot');
+        item.iconPath = new vscode.ThemeIcon('symbol-namespace');
+        item.description = 'active SQL';
+        this._cteRootItem = item;
+        return item;
+    }
+
+    private getActiveCteDefinitions(): ActiveCteDefinition[] {
+        const activeContext = this.getActiveSqlDocumentContext();
+        if (!activeContext || !this.parseSession) {
+            return [];
+        }
+
+        const localDefinitions = this.getActiveLocalDefinitions(activeContext);
+        if (!localDefinitions) {
+            return [];
+        }
+
+        const ctes = new Map<string, ActiveCteDefinition>();
+        for (const definition of localDefinitions) {
+            const definitionType = definition.type.toUpperCase();
+            if (definitionType !== 'CTE' && definitionType !== 'TEMP TABLE') {
+                continue;
+            }
+
+            const name = definition.name.trim();
+            if (!name) {
+                continue;
+            }
+
+            const normalizedName = name.toUpperCase();
+            if (ctes.has(normalizedName)) {
+                continue;
+            }
+
+            ctes.set(normalizedName, {
+                name,
+                type: definition.type,
+                columns: definition.columns,
+            });
+        }
+
+        return Array.from(ctes.values()).sort((left, right) =>
+            left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }),
+        );
+    }
+
+    private createEmptyCteItem(label: string): SchemaItem {
+        const item = new SchemaItem(label, vscode.TreeItemCollapsibleState.None, 'emptyCtes');
+        item.iconPath = new vscode.ThemeIcon('info');
+        return item;
+    }
+
+    private getActiveLocalDefinitions(activeContext: ActiveSqlDocumentContext): LocalDefinition[] | undefined {
+        if (!this.parseSession) {
+            return undefined;
+        }
+
+        try {
+            return this.parseSession.getSemanticScope({
+                documentUri: activeContext.documentUri,
+                documentVersion: activeContext.document.version,
+                sql: activeContext.document.getText(),
+                databaseKind: activeContext.databaseKind,
+            }).localDefinitions;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            logWithFallback('debug', `[SchemaProvider] Failed to parse active SQL CTEs: ${message}`);
+            return undefined;
+        }
+    }
+
+    private resolveCteColumnsForTreeItem(element: SchemaItem): string[] {
+        const existingColumns = this.normalizeResolvedColumnNames(element.cteColumns ?? []);
+
+        const activeContext = this.getActiveSqlDocumentContext();
+        if (!activeContext) {
+            return existingColumns;
+        }
+
+        const localDefinitions = this.getActiveLocalDefinitions(activeContext);
+        if (!localDefinitions) {
+            return existingColumns;
+        }
+
+        const definition = findLocalDefinition(localDefinitions, element.rawLabel || element.label);
+        if (!definition) {
+            return existingColumns;
+        }
+
+        const resolvedColumns = this.resolveLocalDefinitionColumnsForSchemaTree(
+            definition,
+            activeContext,
+            new Set<string>(),
+        );
+        return resolvedColumns.length > 0 ? resolvedColumns : existingColumns;
+    }
+
+    private resolveLocalDefinitionColumnsForSchemaTree(
+        definition: LocalDefinition,
+        activeContext: ActiveSqlDocumentContext,
+        resolving: Set<string>,
+    ): string[] {
+        const definitionKey = definition.name.toUpperCase();
+        if (resolving.has(definitionKey)) {
+            return this.normalizeResolvedColumnNames(definition.columns);
+        }
+
+        const nextResolving = new Set(resolving);
+        nextResolving.add(definitionKey);
+
+        const explicitColumns = this.normalizeResolvedColumnNames(definition.columns);
+        const fullSql = activeContext.document.getText();
+
+        if (
+            this._cteWildcardResolver.definitionHasExplicitColumnList(
+                fullSql,
+                definition.name,
+                activeContext.databaseKind,
+                activeContext.documentUri,
+                activeContext.document.version,
+            )
+        ) {
+            return explicitColumns;
+        }
+
+        const wildcardSources = this._cteWildcardResolver.extractWildcardTableSources(
+            fullSql,
+            definition.name,
+            activeContext.databaseKind,
+            activeContext.documentUri,
+            activeContext.document.version,
+        );
+        if (wildcardSources.length === 0) {
+            return explicitColumns;
+        }
+
+        const resolutionLocalDefinitions = getWildcardResolutionLocalDefinitions(
+            this.parseSession,
+            this._cteWildcardResolver,
+            {
+                documentUri: activeContext.documentUri,
+                documentVersion: activeContext.document.version,
+                sql: fullSql,
+                databaseKind: activeContext.databaseKind,
+            },
+            definition,
+        );
+        const wildcardColumns: string[] = [];
+        for (const source of wildcardSources) {
+            const localSourceDefinition = findLocalDefinition(
+                resolutionLocalDefinitions,
+                source.table,
+            );
+            if (localSourceDefinition) {
+                wildcardColumns.push(
+                    ...this.resolveLocalDefinitionColumnsForSchemaTree(
+                        localSourceDefinition,
+                        activeContext,
+                        nextResolving,
+                    ),
+                );
+                continue;
+            }
+
+            wildcardColumns.push(
+                ...this.getCachedColumnsForWildcardSource(activeContext, source)
+                    .map((column) => column.label || column.ATTNAME),
+            );
+        }
+
+        return dedupeColumnNames([...explicitColumns, ...wildcardColumns]);
+    }
+
+    private normalizeResolvedColumnNames(columns: string[]): string[] {
+        return dedupeColumnNames(
+            normalizeColumnNames(columns).filter((column) => column !== '*' && !column.endsWith('.*')),
+        );
+    }
+
+    private getCachedColumnsForWildcardSource(
+        activeContext: ActiveSqlDocumentContext,
+        source: WildcardTableSource,
+    ): ColumnMetadata[] {
+        if (!activeContext.connectionName) {
+            return [];
+        }
+
+        const lookupTargets = buildMetadataLookupTargets(
+            source,
+            activeContext.effectiveDb,
+            activeContext.effectiveSchema,
+            activeContext.databaseKind,
+        );
+
+        for (const target of lookupTargets) {
+            if (!target.database) {
+                continue;
+            }
+
+            const columns = target.schema
+                ? this.metadataCache.getColumns(
+                    activeContext.connectionName,
+                    buildColumnCacheKey(target.database, target.schema, target.table),
+                )
+                : this.metadataCache.getColumnsAnySchema(
+                    activeContext.connectionName,
+                    target.database,
+                    target.table,
+                );
+            if (columns && columns.length > 0) {
+                return columns;
+            }
+        }
+
+        const databases = this.metadataCache.getDatabases(activeContext.connectionName) ?? [];
+        for (const database of databases) {
+            const dbName = database.DATABASE || database.label;
+            if (!dbName) {
+                continue;
+            }
+            const columns = this.metadataCache.getColumnsAnySchema(
+                activeContext.connectionName,
+                dbName,
+                source.table,
+            );
+            if (columns && columns.length > 0) {
+                return columns;
+            }
+        }
+
+        return [];
+    }
+
     refresh(): void {
         this._onDidChangeTreeData.fire();
+    }
+
+    private scheduleCteTreeRefresh(): void {
+        this.clearPendingCteRefresh();
+        this._cteRefreshTimer = setTimeout(() => {
+            this._cteRefreshTimer = undefined;
+            if (this._cteRootItem) {
+                this._onDidChangeTreeData.fire(this._cteRootItem);
+            } else {
+                this.refresh();
+            }
+        }, CTE_TREE_REFRESH_DEBOUNCE_MS);
+    }
+
+    private clearPendingCteRefresh(): void {
+        if (this._cteRefreshTimer) {
+            clearTimeout(this._cteRefreshTimer);
+            this._cteRefreshTimer = undefined;
+        }
     }
 
     /**
@@ -569,6 +904,21 @@ export class SchemaProvider
                 item.connectionName ? this.connectionManager.getConnectionDatabaseKind(item.connectionName) : undefined,
             );
             dataTransfer.set('text/plain', new vscode.DataTransferItem(insertText));
+        }
+        // Enable drag for active SQL local definitions (CTEs and temp tables)
+        else if (item.contextValue === 'cteObject' || item.contextValue === 'cteColumn') {
+            const itemName = item.rawLabel || item.label;
+            const activeContext = this.getActiveSqlDocumentContext();
+            const dragUri = vscode.Uri.parse(`netezza-local-sql://${item.contextValue}/${encodeURIComponent(itemName)}`);
+            dataTransfer.set('application/vnd.code.tree.netezza', new vscode.DataTransferItem(dragUri.toString()));
+            const insertText =
+                item.contextValue === 'cteColumn'
+                    ? formatIdentifierForSql(itemName, activeContext?.databaseKind)
+                    : itemName;
+            dataTransfer.set(
+                'text/plain',
+                new vscode.DataTransferItem(insertText),
+            );
         }
     }
 
@@ -1193,6 +1543,11 @@ export class SchemaProvider
                 }
             }
 
+            const cteRootItem = this.createCteRootItem();
+            if (cteRootItem) {
+                items.push(cteRootItem);
+            }
+
             // Add Favorites node at the end
             const favoritesItem = new SchemaItem(
                 'Favorites',
@@ -1202,6 +1557,66 @@ export class SchemaProvider
             items.push(favoritesItem);
 
             return items;
+        } else if (element.contextValue === 'cteRoot') {
+            const ctes = this.getActiveCteDefinitions();
+            if (ctes.length === 0) {
+                return [this.createEmptyCteItem('(No CTEs in active SQL)')];
+            }
+
+            return ctes.map((cte) => {
+                const objectType = cte.type.toUpperCase() === 'TEMP TABLE' ? 'TEMP TABLE' : 'CTE';
+                const item = new SchemaItem(
+                    cte.name,
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    'cteObject',
+                    undefined,
+                    objectType,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    cte.name,
+                    undefined,
+                    undefined,
+                    cte.columns,
+                );
+                item.description = cte.columns.length === 1 ? '1 column' : `${cte.columns.length} columns`;
+                item.tooltip = new vscode.MarkdownString(`**${objectType === 'TEMP TABLE' ? 'Temp Table' : 'CTE'}:** ${cte.name}`);
+                return item;
+            });
+        } else if (element.contextValue === 'cteObject') {
+            const columns = this.resolveCteColumnsForTreeItem(element);
+            if (columns.length === 0) {
+                return [this.createEmptyCteItem('(Columns not inferred)')];
+            }
+
+            return columns.map((columnName) => {
+                const item = new SchemaItem(
+                    columnName,
+                    vscode.TreeItemCollapsibleState.None,
+                    'cteColumn',
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    element.rawLabel || element.label,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    columnName,
+                );
+                item.sourceContext = 'cte';
+                item.id = `${item.id}|cte`;
+                return item;
+            });
         } else if (element.contextValue === 'favoritesRoot' || element.contextValue === 'favoritesFolder') {
             const favoritesManager = FavoritesManager.getInstance(this.context);
             // Provide undefined when it's the root node, else provide the element's id
@@ -2048,6 +2463,7 @@ export class SchemaItem extends vscode.TreeItem {
         rawLabel?: string,
         public readonly dataType?: string,
         public readonly isDistributionKey?: boolean,
+        public readonly cteColumns?: string[],
     ) {
         super(label, collapsibleState);
         this.rawLabel = rawLabel ?? label;
@@ -2108,6 +2524,14 @@ export class SchemaItem extends vscode.TreeItem {
             this.iconPath = new vscode.ThemeIcon('folder');
         } else if (contextValue === 'favoritesRoot') {
             this.iconPath = new vscode.ThemeIcon('star-full', new vscode.ThemeColor('charts.yellow'));
+        } else if (contextValue === 'cteRoot') {
+            this.iconPath = new vscode.ThemeIcon('symbol-namespace');
+        } else if (contextValue === 'cteObject') {
+            this.iconPath = objType === 'TEMP TABLE' ? new vscode.ThemeIcon('table') : new vscode.ThemeIcon('symbol-struct');
+        } else if (contextValue === 'cteColumn') {
+            this.iconPath = new vscode.ThemeIcon('symbol-field');
+        } else if (contextValue === 'emptyCtes') {
+            this.iconPath = new vscode.ThemeIcon('info');
         } else if (contextValue.startsWith('netezza:') || contextValue.startsWith('favoritesObject:')) {
             this.iconPath = this.getIconForType(objType);
         } else if (contextValue === 'column') {
@@ -2141,6 +2565,8 @@ export class SchemaItem extends vscode.TreeItem {
             'favoritesObject:EXTERNAL TABLE',
             'favoritesObject:PROCEDURE',
             'favoritesObject:FUNCTION',
+            'cteObject',
+            'cteColumn',
         ];
         if (insertableContexts.includes(contextValue)) {
             this.command = {

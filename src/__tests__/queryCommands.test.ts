@@ -15,6 +15,7 @@ import {
 import { SqlParser } from '../sql/sqlParser';
 import { parseExplainOutput } from '../views/explainPlanView';
 import { buildExecCommand } from '../utils/shellUtils';
+import { clearQueryExecutionGateForTests } from '../commands/query/queryExecutionGate';
 
 // Mock vscode module
 jest.mock('vscode', () => ({
@@ -112,6 +113,7 @@ describe('commands/queryCommands', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        clearQueryExecutionGateForTests();
         Object.keys(mockGlobalStateStore).forEach(key => delete mockGlobalStateStore[key]);
         (vscode.window.withProgress as jest.Mock).mockImplementation(async (_options, callback) => {
             return callback({ report: jest.fn() });
@@ -602,6 +604,50 @@ describe('commands/queryCommands', () => {
             expect(vscode.commands.executeCommand).toHaveBeenCalledWith('netezza.results.focus');
         });
 
+        it('should ignore duplicate runQuery while the same tab is already running', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            };
+            registerQueryCommands(deps);
+            (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({ sql: 'SELECT 1', start: 0, end: 8 });
+
+            let resolveRun: (() => void) | undefined;
+            (runQueriesWithStreaming as jest.Mock).mockImplementation(
+                () => new Promise<void>(resolve => {
+                    resolveRun = resolve;
+                })
+            );
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.runQuery'
+            )?.[1];
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    uri: { toString: () => 'file:///test.sql' },
+                    getText: jest.fn(() => 'SELECT 1'),
+                    offsetAt: jest.fn(() => 1),
+                    positionAt: jest.fn(() => ({ line: 0, character: 0 }))
+                },
+                selection: { isEmpty: true, active: { line: 0, character: 1 } }
+            };
+
+            const firstRun = handler();
+            await Promise.resolve();
+            await handler();
+
+            expect(runQueriesWithStreaming).toHaveBeenCalledTimes(1);
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+                expect.stringContaining('already running')
+            );
+
+            resolveRun?.();
+            await firstRun;
+        });
+
         it('should show completion notification and switch to source document when finished in another editor', async () => {
             const deps: QueryCommandsDependencies = {
                 context: mockContext,
@@ -834,6 +880,45 @@ describe('commands/queryCommands', () => {
             await handler();
             expect(runQueriesSequentially).toHaveBeenCalled();
             expect(mockResultPanelProvider.finalizeExecution).toHaveBeenCalled();
+        });
+
+        it('should ignore duplicate batch run while the same tab is already running', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            };
+            registerQueryCommands(deps);
+
+            let resolveRun: (() => void) | undefined;
+            (runQueriesSequentially as jest.Mock).mockImplementation(
+                () => new Promise<void>(resolve => {
+                    resolveRun = resolve;
+                })
+            );
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.runQueryBatch'
+            )?.[1];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: { uri: { toString: () => 'file:///test.sql' }, getText: jest.fn(() => 'SELECT 1') },
+                selection: { isEmpty: true }
+            };
+
+            const firstRun = handler();
+            for (let i = 0; i < 10 && (runQueriesSequentially as jest.Mock).mock.calls.length === 0; i++) {
+                await Promise.resolve();
+            }
+            await handler();
+
+            expect(runQueriesSequentially).toHaveBeenCalledTimes(1);
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+                expect.stringContaining('already running')
+            );
+
+            resolveRun?.();
+            await firstRun;
         });
 
         it('should show completion notification for batch when active editor is different', async () => {

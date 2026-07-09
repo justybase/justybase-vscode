@@ -1,0 +1,47 @@
+name: Build Main Extension
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    name: Build Main Extension
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run check-types
+
+      - name: Build
+        run: npm run build
+
+      - name: Package VSIX
+        run: npx @vscode/vsce package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: justybaselite-netezza
+          path: justybaselite-netezza-*.vsix
+          retention-days: 1

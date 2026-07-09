@@ -5,8 +5,10 @@
 import * as vscode from 'vscode';
 import { SqlParser } from '../sql/sqlParser';
 import { affectsExtensionConfiguration, getExtensionConfiguration } from '../compatibility/configuration';
+import { LARGE_SCRIPT_CHAR_THRESHOLD, LARGE_SCRIPT_LINE_THRESHOLD } from '../sqlParser/validationConfig';
 
 const SELECTION_HIGHLIGHT_DEBOUNCE_MS = 100;
+const LARGE_SCRIPT_HIGHLIGHT_DEBOUNCE_MS = 500;
 
 /**
  * Create decoration type for SQL statement highlighting
@@ -94,10 +96,21 @@ export function updateSqlHighlight(
 
     try {
         const document = editor.document;
+        if (document.lineCount > LARGE_SCRIPT_LINE_THRESHOLD) {
+            editor.setDecorations(sqlStatementDecoration, []);
+            clearHighlightState(editor);
+            return;
+        }
+
         const documentId = document.uri.toString();
         const position = editor.selection.active;
         const offset = document.offsetAt(position);
-        const text = document.getText();
+        const text = document.getText() ?? '';
+        if (text.length > LARGE_SCRIPT_CHAR_THRESHOLD) {
+            editor.setDecorations(sqlStatementDecoration, []);
+            clearHighlightState(editor);
+            return;
+        }
         const documentKey = {
             documentId,
             version: document.version,
@@ -138,11 +151,15 @@ function scheduleSqlHighlightUpdate(
         clearTimeout(selectionHighlightTimer);
     }
 
+    const debounceMs = editor?.document.lineCount && editor.document.lineCount > LARGE_SCRIPT_LINE_THRESHOLD
+        ? LARGE_SCRIPT_HIGHLIGHT_DEBOUNCE_MS
+        : SELECTION_HIGHLIGHT_DEBOUNCE_MS;
+
     selectionHighlightTimer = setTimeout(() => {
         selectionHighlightTimer = undefined;
         updateSqlHighlight(sqlStatementDecoration, pendingHighlightEditor);
         pendingHighlightEditor = undefined;
-    }, SELECTION_HIGHLIGHT_DEBOUNCE_MS);
+    }, debounceMs);
 }
 
 function clearSqlHighlightScheduling(): void {

@@ -14,7 +14,12 @@ import {
   type MetadataLookupOptions,
 } from "./completionPathUtils";
 import { dedupeWildcardSources } from "./completionQualifierUtils";
-import { findLocalDefinition, dedupeColumnNames, normalizeColumnNames } from "./completionLocalDefinitionUtils";
+import {
+  findLocalDefinition,
+  dedupeColumnNames,
+  normalizeColumnNames,
+  getWildcardResolutionLocalDefinitions,
+} from "./completionLocalDefinitionUtils";
 import {
   parseProcedureArgumentNames,
   procedureMatchesCallName,
@@ -26,6 +31,7 @@ import type {
   FromJoinContext,
 } from "./completionTypes";
 import { CompletionWildcardResolver } from "./completionWildcardResolver";
+import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 
 /**
  * Resolves metadata-backed completion candidates and local-definition columns.
@@ -34,6 +40,7 @@ export class CompletionMetadataResolver {
   constructor(
     private readonly metadataProvider: CompletionMetadataProvider,
     private readonly wildcardResolver: CompletionWildcardResolver,
+    private readonly parseSession?: DocumentParseSession,
   ) {}
 
   public async resolveTablePathCompletions(
@@ -598,7 +605,7 @@ export class CompletionMetadataResolver {
   public async resolveLocalDefinitionColumns(
     definition: LocalDefinition,
     fullSql: string,
-    localDefs: LocalDefinition[],
+    _localDefs: LocalDefinition[],
     documentUri: string,
     documentVersion: number,
     effectiveDb: string | undefined,
@@ -618,6 +625,19 @@ export class CompletionMetadataResolver {
     const explicitColumns = normalizedColumns.filter(
       (column) => column !== "*" && !column.endsWith(".*"),
     );
+
+    if (
+      this.wildcardResolver.definitionHasExplicitColumnList(
+        fullSql,
+        definition.name,
+        databaseKind,
+        documentUri,
+        documentVersion,
+      )
+    ) {
+      return explicitColumns;
+    }
+
     const wildcardSources = dedupeWildcardSources(
       this.wildcardResolver.extractWildcardTableSources(
         fullSql,
@@ -649,14 +669,28 @@ export class CompletionMetadataResolver {
       return explicitColumns;
     }
 
+    const resolutionLocalDefinitions = getWildcardResolutionLocalDefinitions(
+      this.parseSession,
+      this.wildcardResolver,
+      {
+        documentUri,
+        documentVersion,
+        sql: fullSql,
+        databaseKind,
+      },
+      definition,
+    );
     const wildcardColumns: string[] = [];
     for (const source of wildcardSources) {
-      const localSourceDefinition = findLocalDefinition(localDefs, source.table);
+      const localSourceDefinition = findLocalDefinition(
+        resolutionLocalDefinitions,
+        source.table,
+      );
       if (localSourceDefinition) {
         const nestedColumns = await this.resolveLocalDefinitionColumns(
           localSourceDefinition,
           fullSql,
-          localDefs,
+          resolutionLocalDefinitions,
           documentUri,
           documentVersion,
           effectiveDb,
