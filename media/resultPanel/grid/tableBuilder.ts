@@ -1035,6 +1035,8 @@ export function createResultSetGrid(
             cell.removeAttribute('class');
             cell.removeAttribute('style');
             cell.removeAttribute('colspan');
+            delete cell.dataset.cellId;
+            delete cell.dataset.rowNumber;
             return cell;
         }
         return document.createElement('td');

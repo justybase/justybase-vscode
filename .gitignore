@@ -4,3 +4,4 @@ out/
 coverage/
 *.vsix
 .env
+.vscode/justybase-favorites.json

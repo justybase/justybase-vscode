@@ -40,11 +40,24 @@ class FakeClassList {
 class FakeCell {
     public readonly dataset: Record<string, string> = {};
     public readonly classList: FakeClassList;
+    public readonly style: Record<string, string> = {};
     public textContent: string;
+    public colSpan = 1;
+    public row: FakeRow | null = null;
 
     constructor(textContent: string, classNames: string[] = []) {
         this.textContent = textContent;
         this.classList = new FakeClassList(classNames);
+    }
+
+    closest(selector: string) {
+        if (selector === 'td') {
+            return this;
+        }
+        if (selector === 'tr') {
+            return this.row;
+        }
+        return null;
     }
 
     getBoundingClientRect() {
@@ -55,10 +68,14 @@ class FakeCell {
 class FakeRow {
     public readonly dataset: Record<string, string>;
     public readonly children: FakeCell[];
+    public readonly classList = new FakeClassList();
 
     constructor(index: number, cells: FakeCell[]) {
         this.dataset = { index: String(index) };
         this.children = cells;
+        cells.forEach(cell => {
+            cell.row = this;
+        });
     }
 
     querySelectorAll(selector: string): FakeCell[] {
@@ -67,6 +84,11 @@ class FakeRow {
         }
         if (selector === 'td[data-cell-id]') {
             return this.children.filter(cell => typeof cell.dataset.cellId === 'string');
+        }
+        if (selector === 'td[data-cell-id]:not(.row-number-cell)') {
+            return this.children.filter(
+                cell => typeof cell.dataset.cellId === 'string' && !cell.classList.contains('row-number-cell')
+            );
         }
         return [];
     }
@@ -78,12 +100,32 @@ class FakeWrapper {
     public readonly rows: FakeRow[];
     public isConnected = true;
     public tabIndex = 0;
+    private readonly listeners = new Map<string, Array<(event: Record<string, unknown>) => void>>();
 
     constructor(rows: FakeRow[]) {
         this.rows = rows;
     }
 
-    addEventListener() {}
+    addEventListener(type: string, listener: (event: Record<string, unknown>) => void) {
+        const entries = this.listeners.get(type) || [];
+        entries.push(listener);
+        this.listeners.set(type, entries);
+    }
+
+    dispatchMouseDown(target: FakeCell, options: Record<string, unknown> = {}) {
+        const event = {
+            target,
+            button: 0,
+            ctrlKey: false,
+            metaKey: false,
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn(),
+            ...options,
+        };
+        for (const listener of this.listeners.get('mousedown') || []) {
+            listener(event);
+        }
+    }
 
     appendChild() {}
 
@@ -101,6 +143,16 @@ class FakeWrapper {
         if (selector === 'tbody') {
             return {};
         }
+        const cellIdMatch = selector.match(/^\[data-cell-id="(.+)"\]$/);
+        if (cellIdMatch) {
+            const cellId = cellIdMatch[1];
+            for (const row of this.rows) {
+                const found = row.children.find(cell => cell.dataset.cellId === cellId);
+                if (found) {
+                    return found;
+                }
+            }
+        }
         return null;
     }
 
@@ -109,6 +161,12 @@ class FakeWrapper {
             return this.rows;
         }
         if (selector === 'tr.row-selected') {
+            return [];
+        }
+        if (selector === '.selected-cell') {
+            return this.rows.flatMap(row => row.children.filter(cell => cell.classList.contains('selected-cell')));
+        }
+        if (selector === '.anchor-cell') {
             return [];
         }
         return [];
@@ -249,5 +307,107 @@ describe('result panel selection lifecycle', () => {
         expect(secondGrid.dataCell.classList.contains('selected-cell')).toBe(true);
         expect(firstGrid.dataCell.classList.contains('selected-cell')).toBe(false);
         expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('keeps row-number column out of Ctrl+A selection even with stale cell ids', () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: {
+                wrappers: FakeWrapper[];
+                documentMock: { activeWrapper: FakeWrapper | null; dispatchKeydown: (event: Record<string, unknown>) => void };
+            };
+        }).__selectionTestState;
+
+        const rowNumberCell = new FakeCell('1', ['row-number-cell']);
+        rowNumberCell.dataset.cellId = 'stale-row-header-cell-id';
+        const dataCell = new FakeCell('value');
+        const row = new FakeRow(0, [rowNumberCell, dataCell]);
+        const wrapper = new FakeWrapper([row]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+
+        const tableApi = {
+            getAllColumns: () => [],
+            getRowModel: () => ({ rows: [] }),
+            getFilteredRowModel: () => ({ rows: [] })
+        };
+
+        setupCellSelectionEvents(wrapper, tableApi, 1);
+
+        const event = {
+            key: 'a',
+            ctrlKey: true,
+            metaKey: false,
+            target: null,
+            defaultPrevented: false,
+            preventDefault() {
+                this.defaultPrevented = true;
+            },
+            stopImmediatePropagation() {}
+        };
+
+        documentMock.dispatchKeydown(event);
+
+        expect(dataCell.classList.contains('selected-cell')).toBe(true);
+        expect(rowNumberCell.classList.contains('selected-cell')).toBe(false);
+        expect(rowNumberCell.dataset.cellId).toBeUndefined();
+    });
+
+    it('clears virtualized Ctrl+A selection on click and selects only the clicked cell', () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: {
+                wrappers: FakeWrapper[];
+                documentMock: { activeWrapper: FakeWrapper | null; dispatchKeydown: (event: Record<string, unknown>) => void };
+            };
+        }).__selectionTestState;
+
+        const createRow = (index: number, label: string) => {
+            const rowNumberCell = new FakeCell(String(index + 1), ['row-number-cell']);
+            const dataCell = new FakeCell(label);
+            dataCell.dataset.cellId = `${index}-0`;
+            return new FakeRow(index, [rowNumberCell, dataCell]);
+        };
+
+        const initialRow = createRow(0, 'initial');
+        const virtualizedRow = createRow(5, 'virtualized');
+        const clickedRow = createRow(7, 'clicked');
+        const wrapper = new FakeWrapper([initialRow, virtualizedRow, clickedRow]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+
+        const tableApi = {
+            getAllColumns: () => [],
+            getRowModel: () => ({ rows: [{}, {}, {}, {}, {}, {}, {}, {}] }),
+            getFilteredRowModel: () => ({ rows: [] }),
+            getVisibleLeafColumns: () => [{ id: '0', columnDef: { header: 'col' } }],
+        };
+
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1);
+
+        documentMock.dispatchKeydown({
+            key: 'a',
+            ctrlKey: true,
+            metaKey: false,
+            target: null,
+            defaultPrevented: false,
+            preventDefault() {
+                this.defaultPrevented = true;
+            },
+            stopImmediatePropagation() {}
+        });
+
+        // Simulate virtualization re-render: isAllSelected paints new rows without updating selectedCells.
+        virtualizedRow.children[1].classList.add('selected-cell');
+
+        const clickedCell = clickedRow.children[1];
+        wrapper.dispatchMouseDown(clickedCell);
+
+        const selectedCount = wrapper.querySelectorAll('.selected-cell').length;
+        expect(selectedCount).toBe(1);
+        expect(clickedCell.classList.contains('selected-cell')).toBe(true);
+        expect(initialRow.children[1].classList.contains('selected-cell')).toBe(false);
+        expect(virtualizedRow.children[1].classList.contains('selected-cell')).toBe(false);
+        expect(handlers.hasSelection()).toBe(true);
     });
 });

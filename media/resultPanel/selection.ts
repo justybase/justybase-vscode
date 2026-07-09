@@ -228,12 +228,9 @@ export function setupCellSelectionEvents(
         isAllSelected = false;
         selRect.style.display = 'none';
         wrapper.querySelectorAll('.anchor-cell').forEach(el => el.classList.remove('anchor-cell'));
-        selectedCells.forEach(cellId => {
-            const cell = queryCell(cellId);
-            if (cell) {
-                cell.classList.remove('selected-cell');
-            }
-        });
+        // Clear every visible selected cell — not only selectedCells entries. After Ctrl+A,
+        // virtualization re-renders rows with isAllSelected styling without updating the Set.
+        wrapper.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
         selectedCells.clear();
         wrapper.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
     }
@@ -480,6 +477,8 @@ export function setupCellSelectionEvents(
                 cells.forEach((td, cellIndex) => {
                     // Skip row number cell (first column), it doesn't get a cellId
                     if (td.classList.contains('row-number-cell')) {
+                        delete (td as HTMLElement).dataset.cellId;
+                        td.classList.remove('selected-cell');
                         return;
                     }
                     // Subtract 1 from cellIndex because first column is row number
@@ -501,14 +500,14 @@ export function setupCellSelectionEvents(
 function performSelectAll() {
   _internalClearSelection();
   isAllSelected = true;
-  const rows = wrapper.querySelectorAll('tbody tr[data-index]');
+    const rows = wrapper.querySelectorAll('tbody tr[data-index]');
 
   rows.forEach(tr => {
     // Note: We don't add 'row-selected' class here because 'select all' should
     // select data cells only, not the row number column. The visual selection
     // is handled by .selected-cell class on individual cells.
     // Select all data cells (skip row number cell)
-    const cells = tr.querySelectorAll('td[data-cell-id]');
+    const cells = tr.querySelectorAll('td[data-cell-id]:not(.row-number-cell)');
     cells.forEach((td) => {
       const cellId = (td as HTMLElement).dataset.cellId;
       if (cellId) {
@@ -663,7 +662,7 @@ function performSelectAll() {
     });
 
     function selectEntireRow(rowIndex: number, tr: Element): void {
-        const cells = tr.querySelectorAll('td[data-cell-id]');
+        const cells = tr.querySelectorAll('td[data-cell-id]:not(.row-number-cell)');
         cells.forEach((cell, colIndex) => {
             const cellId = `${rowIndex}-${colIndex}`;
             (cell as HTMLElement).dataset.cellId = cellId;
