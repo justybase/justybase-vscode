@@ -644,7 +644,7 @@ export class SchemaProvider
                 continue;
             }
 
-            const columns = target.schema
+            let columns = target.schema
                 ? this.metadataCache.getColumns(
                     activeContext.connectionName,
                     buildColumnCacheKey(target.database, target.schema, target.table),
@@ -654,6 +654,13 @@ export class SchemaProvider
                     target.database,
                     target.table,
                 );
+            if ((!columns || columns.length === 0) && target.schema) {
+                columns = this.metadataCache.getColumnsAnySchema(
+                    activeContext.connectionName,
+                    target.database,
+                    target.table,
+                );
+            }
             if (columns && columns.length > 0) {
                 return columns;
             }

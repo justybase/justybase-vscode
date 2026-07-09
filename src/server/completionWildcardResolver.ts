@@ -612,7 +612,8 @@ export class CompletionWildcardResolver {
             return undefined;
           }
           const queryRange = getNodeTextRange(queryNode);
-          const tableNameToken = getTokens(qualifiedNameNode, "Identifier").at(-1);
+          const identifiers = getTokens(qualifiedNameNode, "Identifier");
+          const tableNameToken = identifiers[identifiers.length - 1];
           const tableNameOffset =
             tableNameToken?.startOffset ?? queryRange?.start ?? 0;
           return {
@@ -748,7 +749,7 @@ export class CompletionWildcardResolver {
 
   private lookupCteDefinitionMetadataFromTokens(
     tokens: IToken[],
-    fullSql: string,
+    _fullSql: string,
     definitionName: string,
   ):
     | {
@@ -826,7 +827,7 @@ export class CompletionWildcardResolver {
 
   private lookupCreateTableDefinitionMetadataFromTokens(
     tokens: IToken[],
-    fullSql: string,
+    _fullSql: string,
     definitionName: string,
   ):
     | {

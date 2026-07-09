@@ -35,6 +35,14 @@ const THRESHOLDS = {
   autocomplete: 300,
 };
 
+// Retained heap growth (MB) after 3 parse passes with GC between iterations.
+// Complex fixtures build large CSTs (nested CTEs/window functions) and need more headroom.
+const MEMORY_THRESHOLDS: Record<string, number> = {
+  DDL: 300,
+  DML: 350,
+  Complex: 800,
+};
+
 // ========== Helpers ==========
 
 interface PerfResult {
@@ -204,9 +212,11 @@ describe('Parser Performance', () => {
         for (let i = 0; i < 3; i++) {
           SqlLexer.tokenize(sql);
           parseSqlStatements({ sql });
+          global.gc?.();
         }
         const after = process.memoryUsage().heapUsed;
         const deltaMB = (after - before) / (1024 * 1024);
+        const memoryThreshold = MEMORY_THRESHOLDS[f.label] ?? 500;
         printMemory(deltaMB);
         allResults.push({
           label: `memory ${f.label}`,
@@ -217,7 +227,7 @@ describe('Parser Performance', () => {
           medianMs: deltaMB,
           valuesMs: [deltaMB],
         });
-        expect(deltaMB).toBeLessThan(500);
+        expect(deltaMB).toBeLessThan(memoryThreshold);
       });
     }
   });

@@ -10,6 +10,7 @@ export interface ConnectionDetails {
   options?: DatabaseConnectionOptions;
   dbType?: DatabaseKind;
   accentColor?: string;
+  schema?: string;
 }
 
 export type NamedConnectionDetails = ConnectionDetails & { name: string };

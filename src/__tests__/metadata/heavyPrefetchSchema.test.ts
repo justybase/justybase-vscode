@@ -5,7 +5,7 @@ import {
     countFactTables,
     estimateHeavySchemaStats,
     resolveHeavySchemaDatabaseNames,
-} from '../../../Benchmark/heavyPrefetchSchema';
+} from '../../metadata/heavyPrefetchSchema';
 
 describe('heavyPrefetchSchema', () => {
     const sampleConfig = {

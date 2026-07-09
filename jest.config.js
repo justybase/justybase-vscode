@@ -2,6 +2,7 @@ const jestSilent = process.env.JEST_SILENT !== "0";
 const jestVerbose = process.env.JEST_VERBOSE === "1";
 const jestLogHeapUsage = process.env.JEST_LOG_HEAP === "1";
 const jestMaxWorkers = process.env.JEST_MAX_WORKERS ?? "50%";
+const liveDbIgnorePatterns = require("./scripts/jestLiveDbIgnorePatterns.cjs");
 
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
@@ -11,16 +12,7 @@ module.exports = {
   testMatch: ["**/__tests__/**/*.test.ts"],
   testPathIgnorePatterns: [
     "/node_modules/",
-    "realDatabase.integration.test.ts",
-    "optionalDialects.live.integration.test.ts",
-    "postgres.integration.test.ts",
-    "duckdb.integration.test.ts",
-    "snowflake.integration.test.ts",
-    "mysql.integration.test.ts",
-    "mssql.integration.test.ts",
-    "oracle.integration.test.ts",
-    "db2.integration.test.ts",
-    "vertica.integration.test.ts",
+    ...liveDbIgnorePatterns,
     "/__tests__/performance/",
   ],
   moduleFileExtensions: ["ts", "js", "json"],

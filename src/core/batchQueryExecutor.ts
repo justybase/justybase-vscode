@@ -198,7 +198,7 @@ export async function runQueriesSequentially(
                 const query = queries[i];
                 logBatch(outputChannel, logCallback, `Executing query ${i + 1}/${queries.length}...`);
 
-                let executionId: string | undefined =
+                const executionId: string | undefined =
                     i === _startIndex ? _resumeExecutionId : undefined;
                 currentExecutionId = executionId;
                 const startTime = Date.now();
@@ -555,7 +555,7 @@ export async function runQueriesWithStreaming(
                 const query = queries[i];
                 logBatch(outputChannel, logCallback, `Executing query ${i + 1}/${queries.length}...`);
 
-                let executionId: string | undefined =
+                const executionId: string | undefined =
                     i === _startIndex ? _resumeExecutionId : undefined;
                 currentExecutionId = executionId;
                 const startTime = Date.now();

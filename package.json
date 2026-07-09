@@ -4089,6 +4089,7 @@
     "verify:mssql": "node scripts/run-optional-extension-task.js mssql verify",
     "verify:mysql": "node scripts/run-optional-extension-task.js mysql verify",
     "test": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest",
+    "test:validate": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.validate.config.js",
     "test:fast": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --testPathIgnorePatterns=\"completionEngine.test.ts|metadataCache.test.ts|sqlLinter.test.ts|sqlValidator.test.ts|validator.advanced.test.ts|extension.test.ts\"",
     "test:parser": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"sqlParser|validator|completionEngine|identifierRoleCollector|semanticTokens|parserSqlContext|procedure\"",
     "test:serial": "cross-env NODE_ENV=test JEST_SILENT=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest",

@@ -40,13 +40,7 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         metadataPrefetchCoordinator,
     } = params;
 
-    let resultsCopyPrimedContext: boolean | undefined;
-
     const clearPrimedResultCopyContext = (): void => {
-        if (resultsCopyPrimedContext === false) {
-            return;
-        }
-        resultsCopyPrimedContext = false;
         void vscode.commands.executeCommand('setContext', 'netezza.resultsCopyPrimed', false);
     };
 
