@@ -1,6 +1,7 @@
 import { CstNode, type IToken } from "chevrotain";
 import type { DatabaseKind } from "../../../contracts/database";
 import { resolveSqlParsingRuntime } from "../../../sqlParser/parsingRuntime";
+import { formatQualifiedObjectName } from "../../../utils/identifierUtils";
 import type { AliasInfo, LocalDefinition } from "../../types";
 import { getOrderedReferenceTokens } from "./referenceTokenCollector";
 import {
@@ -31,11 +32,16 @@ const PARSER_COLLECTOR_CACHE = new WeakMap<CstNode, ParserSqlContextCollector>()
 
 export class ParserSqlContextCollector {
 
+  private readonly _databaseKind?: DatabaseKind;
   private readonly _localDefinitions = new Map<string, LocalDefinition>();
   private readonly _scopes: AliasScope[] = [];
   private readonly _activeScopes: AliasScope[] = [];
   private _currentScopeBindings: Map<string, AliasInfo> | null = null;
   private readonly _rangeCache: NodeRangeCache = new WeakMap();
+
+  public constructor(databaseKind?: DatabaseKind) {
+    this._databaseKind = databaseKind;
+  }
 
   public collect(root: CstNode): void {
     this.visitNode(root);
@@ -238,29 +244,48 @@ export class ParserSqlContextCollector {
 
   private visitCreateTableStatement(node: CstNode): void {
     const qualifiedNameNode = getChildNodesByKey(node, "qualifiedName")[0];
-    const tableName = this.parseQualifiedTableName(qualifiedNameNode)?.table;
-    if (!tableName) {
+    const tableRef = this.parseQualifiedTableName(qualifiedNameNode);
+    if (!tableRef) {
       this.visitChildren(node);
       return;
     }
 
-    const type = getChildNodesByKey(node, "tableTypeClause")[0]
-      ? "Temp Table"
-      : "Table";
-    const columnsFromDefinition = this.extractColumnsFromColumnDefinitionList(
-      getChildNodesByKey(node, "columnDefinitionList")[0],
-    );
+    const tableTypeClause = getChildNodesByKey(node, "tableTypeClause")[0];
     const queryNode =
       getChildNodesByKey(node, "withStatement")[0] ??
       getChildNodesByKey(node, "selectStatement")[0];
+    if (!queryNode && !tableTypeClause) {
+      this.visitChildren(node);
+      return;
+    }
+
+    let type = "Table";
+    if (tableTypeClause) {
+      const isGlobal = getTokensByKey(tableTypeClause, "Global").length > 0;
+      type = isGlobal ? "Global Temp Table" : "Temp Table";
+    }
+
+    const columnsFromDefinition = this.extractColumnsFromColumnDefinitionList(
+      getChildNodesByKey(node, "columnDefinitionList")[0],
+    );
     const columnsFromQuery = this.extractColumnsFromQueryNode(queryNode);
     const columns =
       columnsFromDefinition.length > 0
         ? columnsFromDefinition
         : columnsFromQuery;
 
-    this.setLocalDefinition(tableName, type, columns);
+    const displayName = this.formatQualifiedTableDisplayName(tableRef);
+    this.setLocalDefinition(displayName, type, columns);
     this.visitChildren(node);
+  }
+
+  private formatQualifiedTableDisplayName(ref: QualifiedTableName): string {
+    return formatQualifiedObjectName(
+      ref.database,
+      ref.schema,
+      ref.table,
+      this._databaseKind,
+    );
   }
 
   private visitTableSource(node: CstNode): void {
@@ -664,10 +689,11 @@ export class ParserSqlContextCollector {
 
 export function getOrCreateParserSqlContextCollector(
   cst: CstNode,
+  databaseKind?: DatabaseKind,
 ): ParserSqlContextCollector {
   let collector = PARSER_COLLECTOR_CACHE.get(cst);
   if (!collector) {
-    collector = new ParserSqlContextCollector();
+    collector = new ParserSqlContextCollector(databaseKind);
     collector.collect(cst);
     PARSER_COLLECTOR_CACHE.set(cst, collector);
   }

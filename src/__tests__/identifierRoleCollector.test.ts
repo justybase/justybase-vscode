@@ -200,6 +200,56 @@ END_PROC;`;
     expect(roleAt(sql, 'MY_VIEW')).toBe('table');
   });
 
+  it.each([
+    [
+      'CREATE TABLE',
+      'CREATE TABLE JUST_DATA.ADMIN.TEST2 AS (\nSELECT * FROM DIMDATE\n);',
+      'TEST2',
+    ],
+    [
+      'CREATE TEMP TABLE',
+      'CREATE TEMP TABLE JUST_DATA.ADMIN.TEST_TMP AS (\nSELECT * FROM DIMDATE\n);',
+      'TEST_TMP',
+    ],
+    [
+      'CREATE GLOBAL TEMP TABLE',
+      'CREATE GLOBAL TEMP TABLE JUST_DATA.ADMIN.TEST1 AS (\nSELECT * FROM DIMDATE\n) DISTRIBUTE ON RANDOM;',
+      'TEST1',
+    ],
+  ])(
+    'classifies %s CTAS qualified names as database, schema, and table',
+    (_label, sql, tableName) => {
+      expect(roleAt(sql, 'JUST_DATA')).toBe('database');
+      expect(roleAt(sql, 'ADMIN')).toBe('schema');
+      expect(roleAt(sql, tableName)).toBe('table');
+    },
+  );
+
+  it.each([
+    [
+      'GROOM TABLE unqualified',
+      'GROOM TABLE DIMACCOUNT2 VERSIONS;',
+      { table: 'DIMACCOUNT2' },
+    ],
+    [
+      'GROOM TABLE three-part',
+      'GROOM TABLE JUST_DATA.ADMIN.DIMACCOUNT2 VERSIONS;',
+      { database: 'JUST_DATA', schema: 'ADMIN', table: 'DIMACCOUNT2' },
+    ],
+    [
+      'GROOM TABLE database double-dot',
+      'GROOM TABLE JUST_DATA..DIMACCOUNT2 VERSIONS;',
+      { database: 'JUST_DATA', table: 'DIMACCOUNT2' },
+    ],
+  ])(
+    'classifies %s qualified names as database, schema, and table',
+    (_label, sql, names) => {
+      for (const [kind, identifier] of Object.entries(names)) {
+        expect(roleAt(sql, identifier)).toBe(kind);
+      }
+    },
+  );
+
   it('keeps CREATE TABLE database role when an NZPLSQL procedure follows', () => {
     const sql = `CREATE TABLE JUST_DATA.ADMIN.COLOR_CHECK_FACT (
   ID INT NOT NULL,

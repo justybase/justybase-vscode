@@ -4,6 +4,7 @@ import {
 } from "vscode-languageserver/node";
 import { SqlLexer } from "../sqlParser";
 import type { DatabaseKind } from "../contracts/database";
+import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import {
   parseSemanticScopeWithParser,
@@ -73,6 +74,10 @@ export interface SemanticScopeCompletionRequest {
   databaseKind?: DatabaseKind;
   completionKeywords: readonly string[];
   sqlFunctionNames: readonly string[];
+  sqlFunctionSignatures: ReadonlyMap<
+    string,
+    readonly DatabaseSqlFunctionSignature[]
+  >;
   specialBuiltinValues: readonly string[];
 }
 
@@ -268,6 +273,7 @@ export class CompletionScopeResolver {
       netezzaSchemasEnabled,
       completionKeywords,
       sqlFunctionNames,
+      sqlFunctionSignatures,
       specialBuiltinValues,
     } = request;
 
@@ -322,6 +328,7 @@ export class CompletionScopeResolver {
       typedPrefix,
       position,
       sqlFunctionNames,
+      sqlFunctionSignatures,
     );
     const clauseKeywordItems = buildExpressionClauseKeywordItems(
       statementPrefix,

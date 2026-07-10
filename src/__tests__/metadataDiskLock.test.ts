@@ -91,9 +91,11 @@ describe('MetadataDiskLock', () => {
     describe('heartbeat', () => {
         beforeEach(() => {
             jest.useFakeTimers();
+            jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
         });
 
-        afterEach(() => {
+        afterEach(async () => {
+            await jest.runOnlyPendingTimersAsync();
             jest.useRealTimers();
         });
 
@@ -160,23 +162,45 @@ describe('MetadataDiskLock', () => {
             // Should not throw even though ownedLocks still has 'conn1'
         });
 
-        it('should keep other instance from acquiring during heartbeat', async () => {
+        it('should keep other instance from acquiring while heartbeat is fresh', async () => {
+            jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
             await lock.acquireLock('conn1');
             lock.startHeartbeat('conn1', 1000);
+            await jest.runOnlyPendingTimersAsync();
+
+            const lockPath = lock.getLockPath('conn1');
+            const lock2 = new MetadataDiskLock(tempDir);
+            const currentNow = Date.now();
+
+            fs.writeFileSync(
+                lockPath,
+                JSON.stringify({
+                    pid: process.pid,
+                    startedAt: currentNow - 60_000,
+                    lastHeartbeatAt: currentNow,
+                }),
+            );
+
+            expect(await lock2.acquireLock('conn1')).toBe(false);
+            lock.stopHeartbeat('conn1');
+        });
+
+        it('should allow takeover when heartbeat is stale', async () => {
+            jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+            const lockPath = lock.getLockPath('conn1');
+            const staleAt = Date.now() - LOCK_TTL_MS - 10_000;
+            fs.writeFileSync(
+                lockPath,
+                JSON.stringify({
+                    pid: process.pid,
+                    startedAt: staleAt,
+                    lastHeartbeatAt: staleAt,
+                }),
+            );
 
             const lock2 = new MetadataDiskLock(tempDir);
-
-            // lock2 should NOT be able to acquire while heartbeat is active,
-            // even though we've passed the old 5min TTL.
-            // The heartbeat keeps lastHeartbeatAt fresh within LOCK_TTL_MS.
-            jest.advanceTimersByTime(LOCK_TTL_MS - 1000);
-            expect(await lock2.acquireLock('conn1')).toBe(false);
-
-            // Stop heartbeat — simulate process crash / completion.
-            lock.stopHeartbeat('conn1');
-
-            // After TTL + buffer with no heartbeat, lock2 can take over.
-            jest.advanceTimersByTime(LOCK_TTL_MS + 1000);
             expect(await lock2.acquireLock('conn1')).toBe(true);
         });
 

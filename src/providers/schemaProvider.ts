@@ -223,7 +223,7 @@ export function buildInsertText(label: string, schema?: string, dbName?: string,
  * Extracts pure function for determining if object type is expandable - testable
  */
 export function isExpandableType(objType: string | undefined): boolean {
-    const expandableTypes = ['TABLE', 'VIEW', 'NICKNAME', 'ALIAS', 'SYNONYM', 'EXTERNAL TABLE', 'SYSTEM VIEW', 'SYSTEM TABLE'];
+    const expandableTypes = ['TABLE', 'GLOBAL TEMP TABLE', 'VIEW', 'NICKNAME', 'ALIAS', 'SYNONYM', 'EXTERNAL TABLE', 'SYSTEM VIEW', 'SYSTEM TABLE'];
     return objType ? expandableTypes.includes(objType) : false;
 }
 
@@ -336,6 +336,7 @@ export class SchemaProvider
     private _filterRegex?: RegExp;
     private _cteRootItem?: SchemaItem;
     private _cteRefreshTimer?: NodeJS.Timeout;
+    private _cteDefinitionsSnapshot?: ActiveCteDefinition[];
     private readonly _cteWildcardResolver: CompletionWildcardResolver;
 
     // Drag and Drop support
@@ -371,6 +372,7 @@ export class SchemaProvider
             vscode.window.onDidChangeActiveTextEditor(() => {
                 this.clearPendingCteRefresh();
                 this._cteRootItem = undefined;
+                this._cteDefinitionsSnapshot = undefined;
                 this.refresh();
             }),
             vscode.workspace.onDidChangeTextDocument((event) => {
@@ -452,6 +454,16 @@ export class SchemaProvider
     }
 
     private getActiveCteDefinitions(): ActiveCteDefinition[] {
+        if (this._cteRefreshTimer !== undefined && this._cteDefinitionsSnapshot !== undefined) {
+            return this._cteDefinitionsSnapshot;
+        }
+
+        const fresh = this.buildActiveCteDefinitions();
+        this._cteDefinitionsSnapshot = fresh;
+        return fresh;
+    }
+
+    private buildActiveCteDefinitions(): ActiveCteDefinition[] {
         const activeContext = this.getActiveSqlDocumentContext();
         if (!activeContext || !this.parseSession) {
             return [];
@@ -465,7 +477,12 @@ export class SchemaProvider
         const ctes = new Map<string, ActiveCteDefinition>();
         for (const definition of localDefinitions) {
             const definitionType = definition.type.toUpperCase();
-            if (definitionType !== 'CTE' && definitionType !== 'TEMP TABLE') {
+            if (
+                definitionType !== 'CTE' &&
+                definitionType !== 'TEMP TABLE' &&
+                definitionType !== 'GLOBAL TEMP TABLE' &&
+                definitionType !== 'TABLE'
+            ) {
                 continue;
             }
 
@@ -624,6 +641,33 @@ export class SchemaProvider
         );
     }
 
+    private mapCteTreeObjectType(type: string): string {
+        const upperType = type.toUpperCase();
+        if (upperType === 'GLOBAL TEMP TABLE') {
+            return 'GLOBAL TEMP TABLE';
+        }
+        if (upperType === 'TEMP TABLE') {
+            return 'TEMP TABLE';
+        }
+        if (upperType === 'TABLE') {
+            return 'TABLE';
+        }
+        return 'CTE';
+    }
+
+    private formatCteTreeTypeLabel(objectType: string): string {
+        switch (objectType) {
+            case 'GLOBAL TEMP TABLE':
+                return 'Global Temp Table';
+            case 'TEMP TABLE':
+                return 'Temp Table';
+            case 'TABLE':
+                return 'Table';
+            default:
+                return 'CTE';
+        }
+    }
+
     private getCachedColumnsForWildcardSource(
         activeContext: ActiveSqlDocumentContext,
         source: WildcardTableSource,
@@ -693,6 +737,7 @@ export class SchemaProvider
         this.clearPendingCteRefresh();
         this._cteRefreshTimer = setTimeout(() => {
             this._cteRefreshTimer = undefined;
+            this._cteDefinitionsSnapshot = this.buildActiveCteDefinitions();
             if (this._cteRootItem) {
                 this._onDidChangeTreeData.fire(this._cteRootItem);
             } else {
@@ -1571,7 +1616,7 @@ export class SchemaProvider
             }
 
             return ctes.map((cte) => {
-                const objectType = cte.type.toUpperCase() === 'TEMP TABLE' ? 'TEMP TABLE' : 'CTE';
+                const objectType = this.mapCteTreeObjectType(cte.type);
                 const item = new SchemaItem(
                     cte.name,
                     vscode.TreeItemCollapsibleState.Collapsed,
@@ -1592,12 +1637,15 @@ export class SchemaProvider
                     undefined,
                     cte.columns,
                 );
-                item.description = cte.columns.length === 1 ? '1 column' : `${cte.columns.length} columns`;
-                item.tooltip = new vscode.MarkdownString(`**${objectType === 'TEMP TABLE' ? 'Temp Table' : 'CTE'}:** ${cte.name}`);
+                const typeLabel = this.formatCteTreeTypeLabel(objectType);
+                item.tooltip = new vscode.MarkdownString(`**${typeLabel}:** ${cte.name}`);
                 return item;
             });
         } else if (element.contextValue === 'cteObject') {
             const columns = this.resolveCteColumnsForTreeItem(element);
+            if (columns.length > 0) {
+                element.cteColumns = columns;
+            }
             if (columns.length === 0) {
                 return [this.createEmptyCteItem('(Columns not inferred)')];
             }
@@ -2215,6 +2263,7 @@ export class SchemaProvider
                     }) => {
                         const expandableTypes = [
                             'TABLE',
+                            'GLOBAL TEMP TABLE',
                             'VIEW',
                             'NICKNAME',
                             'ALIAS',
@@ -2470,7 +2519,7 @@ export class SchemaItem extends vscode.TreeItem {
         rawLabel?: string,
         public readonly dataType?: string,
         public readonly isDistributionKey?: boolean,
-        public readonly cteColumns?: string[],
+        public cteColumns?: string[],
     ) {
         super(label, collapsibleState);
         this.rawLabel = rawLabel ?? label;
@@ -2554,6 +2603,7 @@ export class SchemaItem extends vscode.TreeItem {
         // Add command for insert to editor
         const insertableContexts = [
             'netezza:TABLE',
+            'netezza:GLOBAL TEMP TABLE',
             'netezza:VIEW',
             'netezza:NICKNAME',
             'netezza:ALIAS',
@@ -2587,6 +2637,7 @@ export class SchemaItem extends vscode.TreeItem {
     private getIconForType(type?: string): vscode.ThemeIcon {
         switch (type) {
             case 'TABLE':
+            case 'GLOBAL TEMP TABLE':
                 return new vscode.ThemeIcon('table');
             case 'VIEW':
                 return new vscode.ThemeIcon('eye');

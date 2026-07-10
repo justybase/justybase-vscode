@@ -456,8 +456,83 @@ describe('SchemaProvider', () => {
             const tempColumns = await schemaProvider.getChildren(tempTable);
 
             expect(items.map(item => item.label)).toEqual(['CTE1', 'TMP_STAGE']);
-            expect(tempTable.objType).toBe('TEMP TABLE');
+            expect(tempTable.objType).toBe('GLOBAL TEMP TABLE');
             expect(tempColumns.map(item => item.label)).toEqual(['stage_id']);
+        });
+
+        it('lists CTAS and qualified temp table definitions', async () => {
+            setActiveSql(`
+                CREATE TABLE JUST_DATA..TEST2 AS (
+                    SELECT 1 AS id FROM DIMDATE
+                );
+
+                CREATE TABLE JUST_DATA.ADMIN.TEST3 AS (
+                    SELECT 2 AS id FROM DIMDATE
+                );
+
+                CREATE GLOBAL TEMP TABLE TEST11 AS (
+                    SELECT 3 AS id FROM DIMDATE
+                ) DISTRIBUTE ON RANDOM;
+
+                CREATE GLOBAL TEMP TABLE JUST_DATA.ADMIN.TEST12 AS (
+                    SELECT 4 AS id FROM DIMDATE
+                ) DISTRIBUTE ON RANDOM;
+            `);
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+            const items = await schemaProvider.getChildren(root);
+
+            expect(items.map(item => item.label)).toEqual([
+                'JUST_DATA..TEST2',
+                'JUST_DATA.ADMIN.TEST12',
+                'JUST_DATA.ADMIN.TEST3',
+                'TEST11',
+            ]);
+            expect(items.find(item => item.label === 'JUST_DATA..TEST2')?.objType).toBe('TABLE');
+            expect(items.find(item => item.label === 'TEST11')?.objType).toBe('GLOBAL TEMP TABLE');
+        });
+
+        it('reuses debounced CTE snapshot while SQL is being edited', async () => {
+            jest.useFakeTimers();
+            try {
+                setActiveSql('WITH CTE1 AS (SELECT 1 AS id) SELECT * FROM CTE1');
+                schemaProvider = createProviderWithParseSession();
+                const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+                const initial = await schemaProvider.getChildren(root);
+                expect(initial.map(item => item.label)).toEqual(['CTE1']);
+
+                setActiveSql('WITH CTE1 AS (SELECT 1 AS id), CTE2 AS (SELECT 2 AS id) SELECT * FROM CTE2');
+                const editor = (vscode.window as unknown as { activeTextEditor: vscode.TextEditor }).activeTextEditor;
+                (editor.document as { version: number }).version = 2;
+                (schemaProvider as unknown as { scheduleCteTreeRefresh: () => void }).scheduleCteTreeRefresh();
+
+                const duringDebounce = await schemaProvider.getChildren(root);
+                expect(duringDebounce.map(item => item.label)).toEqual(['CTE1']);
+
+                jest.advanceTimersByTime(400);
+                const afterDebounce = await schemaProvider.getChildren(root);
+                expect(afterDebounce.map(item => item.label)).toEqual(['CTE1', 'CTE2']);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('lists hundreds of CTAS definitions within a reasonable budget', async () => {
+            const statements = Array.from(
+                { length: 300 },
+                (_, index) =>
+                    `CREATE TABLE JUST_DATA..T_${index} AS (SELECT ${index} AS id);`,
+            ).join('\n');
+            setActiveSql(statements);
+            schemaProvider = createProviderWithParseSession();
+            const root = (await schemaProvider.getChildren()).find(child => child.contextValue === 'cteRoot')!;
+
+            const startedAt = performance.now();
+            const items = await schemaProvider.getChildren(root);
+            const elapsedMs = performance.now() - startedAt;
+
+            expect(items).toHaveLength(300);
+            expect(elapsedMs).toBeLessThan(3000);
         });
 
         it('does not add the CTE root when no SQL editor is active', async () => {

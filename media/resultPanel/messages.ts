@@ -17,6 +17,7 @@ import {
     evictSourceCacheNotInList,
     getColumnFilterState,
     getAggregationState,
+    setAggregationState,
     getPinnedColumnsState,
     getResultFormattingPayload,
     getResultFormattingState,
@@ -34,6 +35,9 @@ import { updateRowCountInfo, applyRowLimitReachedFlag, renderRowCountInfo } from
 import { syncDiskStreamingRowCount } from './diskQuerySpec.js';
 import { syncAnalysisView } from './analysis.js';
 import { updateResultLimitBanner } from './banners.js';
+import { handleDatabaseAggregationResult, clearAllDatabaseAggregationPending } from './databaseAggregations.js';
+import { handleDatabaseFilterValuesResult, handleDatabaseFilterApplyResult, clearAllDatabaseFilterPending } from './databaseFilters.js';
+import { updateAllRefreshFailureBanners } from './refreshFailureBanner.js';
 import {
     markRunningUiPending,
     resetRunningUiDelay,
@@ -104,6 +108,7 @@ interface HydrateData {
     resultSetsMsgPack?: Uint8Array | { data?: number[]; byteLength?: number };
     resultSetsJson?: string;
     formatSettings?: unknown;
+    dataVersion?: number;
 }
 
 function resolveDiskBackedStreamCapEnabled(message?: Record<string, unknown>): boolean {
@@ -416,6 +421,32 @@ export function setupStreamingMessageHandler(): void {
             case 'diskQueryResult':
                 handleDiskQueryResult(message);
                 break;
+            case 'databaseAggregationResult':
+                handleDatabaseAggregationResult(message as {
+                    requestId: number;
+                    aggregations?: import('./types.js').DiskAggregationResult[];
+                    error?: string;
+                });
+                break;
+            case 'databaseFilterValuesResult':
+                handleDatabaseFilterValuesResult(message as {
+                    requestId: number;
+                    sourceUri?: string;
+                    resultSetIndex?: number;
+                    columnIndex?: number;
+                    values?: import('./types.js').DiskDistinctValue[];
+                    truncated?: boolean;
+                    error?: string;
+                });
+                break;
+            case 'databaseFilterApplyResult':
+                handleDatabaseFilterApplyResult(message as {
+                    requestId: number;
+                    sourceUri?: string;
+                    resultSetIndex?: number;
+                    error?: string;
+                });
+                break;
             case 'switchToResultSet':
                 if (typeof message.resultSetIndex === 'number') {
                     switchToResultSet(message.resultSetIndex);
@@ -615,12 +646,15 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         }
         syncAnalysisView();
         callPanelMethod('updateEditButtons');
+        updateAllRefreshFailureBanners();
         return;
     }
 
     clearAllSearchWorkerData();
     clearDiskBackedPendingRequests();
     clearAllDiskGrouping();
+    clearAllDatabaseFilterPending();
+    clearAllDatabaseAggregationPending();
     resetEditSession();
 
     renderDocIndicator(getActiveSourceUri());
@@ -640,6 +674,7 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     switchToResultSet(activeRsIndex);
     syncAnalysisView();
     callPanelMethod('updateEditButtons');
+    updateAllRefreshFailureBanners();
 }
 
 // Track last hydrate data fingerprint to skip duplicates.
@@ -652,8 +687,34 @@ function buildHydrateDedupKey(data: HydrateData): string {
         (data.activeSourceJson ?? '') + '|' +
         (data.activeResultSetIndex ?? '') + '|' +
         (data.resultSetsMsgPack instanceof Uint8Array ? data.resultSetsMsgPack.byteLength : 0) + '|' +
-        (data.executingSourcesJson ?? '')
+        (data.executingSourcesJson ?? '') + '|' +
+        (data.dataVersion ?? '')
     );
+}
+
+function migrateAggregationStateAcrossRefresh(
+    previousSets: readonly ResultSet[],
+    nextSets: readonly ResultSet[],
+    sourceUri: string | null | undefined,
+): void {
+    if (!sourceUri) {
+        return;
+    }
+    const count = Math.min(previousSets.length, nextSets.length);
+    for (let index = 0; index < count; index += 1) {
+        const previous = previousSets[index];
+        const next = nextSets[index];
+        if (!previous || !next || previous.isLog || next.isLog || previous.isError || next.isError) {
+            continue;
+        }
+        if (previous.executionTimestamp === next.executionTimestamp) {
+            continue;
+        }
+        const aggregations = getAggregationState(index, previous.executionTimestamp, sourceUri);
+        if (aggregations && Object.keys(aggregations).length > 0) {
+            setAggregationState(index, aggregations, next.executionTimestamp, sourceUri);
+        }
+    }
 }
 
 function releaseRowsForReplacedResults(previous: ResultSet[], next: ResultSet[]): void {
@@ -678,6 +739,8 @@ export function handleHydrate(data: HydrateData): void {
     clearAllSearchWorkerData();
     clearDiskBackedPendingRequests();
     clearAllDiskGrouping();
+    // Do not clear database filter/aggregation pending here — apply/distinct responses
+    // are posted before hydrate, and stale responses are rejected via request context.
 
     setPreserveScrollDuringHydrate(true);
     try {
@@ -728,6 +791,7 @@ export function handleHydrate(data: HydrateData): void {
                 const nextResultSets = decode(buffer) as ResultSet[];
                 if (previousSource && previousSource === hydratedSource) {
                     releaseRowsForReplacedResults(existingResultSets, nextResultSets);
+                    migrateAggregationStateAcrossRefresh(existingResultSets, nextResultSets, hydratedSource);
                 }
                 setResultSets(nextResultSets);
             } catch (e: unknown) {
@@ -739,6 +803,7 @@ export function handleHydrate(data: HydrateData): void {
             const nextResultSets = JSON.parse(data.resultSetsJson) as ResultSet[];
             if (previousSource && previousSource === hydratedSource) {
                 releaseRowsForReplacedResults(existingResultSets, nextResultSets);
+                migrateAggregationStateAcrossRefresh(existingResultSets, nextResultSets, hydratedSource);
             }
             setResultSets(nextResultSets);
         }
@@ -869,12 +934,14 @@ export function handleAppendRows(message: Record<string, unknown>): void {
     if (isFirstChunk && !isLog) {
         const columns = message.columns as ResultSet['columns'] | undefined;
         const sql = message.sql as string | undefined;
+        const refreshSql = message.refreshSql as string | undefined;
         const executionTimestamp = message.executionTimestamp as number | undefined;
         if (columns && columns.length > 0 && executionTimestamp !== undefined) {
             const shell: ResultSet = {
                 columns,
                 data: [],
                 sql: sql ?? '',
+                refreshSql: refreshSql ?? sql ?? '',
                 executionTimestamp,
                 limitReached: limitReached === true,
                 isEditable: message.isEditable === true,

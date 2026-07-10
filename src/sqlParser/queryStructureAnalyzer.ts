@@ -49,6 +49,15 @@ export interface CteMaterializationCandidate {
     tempTableInsertOffset: number;
 }
 
+export interface CteBulkMaterializationCandidate {
+    statementIndex: number;
+    statementKind: SqlStatementKind;
+    withClauseRange: SqlTextRange;
+    statementRange: SqlTextRange;
+    withRootNode: CstNode;
+    hasRecursive: boolean;
+}
+
 export interface TempTableInlineCandidate {
     statementIndex: number;
     statementKind: SqlStatementKind;
@@ -92,6 +101,7 @@ export interface QueryFlowGraph {
 export interface SqlQueryStructureAnalysis {
     extractSubqueryCandidates: ExtractSubqueryCandidate[];
     cteMaterializationCandidates: CteMaterializationCandidate[];
+    cteBulkMaterializationCandidates: CteBulkMaterializationCandidate[];
     tempTableInlineCandidates: TempTableInlineCandidate[];
     statementFlows: QueryFlowGraph[];
 }
@@ -510,6 +520,7 @@ class SqlQueryStructureAnalyzer {
             return {
                 extractSubqueryCandidates: [],
                 cteMaterializationCandidates: [],
+                cteBulkMaterializationCandidates: [],
                 tempTableInlineCandidates: [],
                 statementFlows: []
             };
@@ -517,6 +528,7 @@ class SqlQueryStructureAnalyzer {
 
         const extractSubqueryCandidates: ExtractSubqueryCandidate[] = [];
         const cteMaterializationCandidates: CteMaterializationCandidate[] = [];
+        const cteBulkMaterializationCandidates: CteBulkMaterializationCandidate[] = [];
         const tempTableInlineCandidates: TempTableInlineCandidate[] = [];
         const statementFlows: QueryFlowGraph[] = [];
 
@@ -526,6 +538,7 @@ class SqlQueryStructureAnalyzer {
         for (const statement of statements) {
             extractSubqueryCandidates.push(...this.collectExtractSubqueryCandidates(statement));
             cteMaterializationCandidates.push(...this.collectCteMaterializationCandidates(statement));
+            cteBulkMaterializationCandidates.push(...this.collectCteBulkMaterializationCandidates(statement));
 
             if (statement.kind === 'create_temp_table') {
                 const tempTable = this.getTempTableDefinition(statement);
@@ -604,6 +617,7 @@ class SqlQueryStructureAnalyzer {
         return {
             extractSubqueryCandidates,
             cteMaterializationCandidates,
+            cteBulkMaterializationCandidates,
             tempTableInlineCandidates,
             statementFlows
         };
@@ -896,6 +910,35 @@ class SqlQueryStructureAnalyzer {
         }
 
         return candidates;
+    }
+
+    private collectCteBulkMaterializationCandidates(statement: StatementRecord): CteBulkMaterializationCandidate[] {
+        if (statement.kind !== 'with_select') {
+            return [];
+        }
+
+        const withRootNode = statement.rootNode.name === 'withStatement' || statement.rootNode.name === 'withAnyStatement'
+            ? statement.rootNode
+            : undefined;
+        if (!withRootNode) {
+            return [];
+        }
+
+        const withClauseRange = this.getNodeRange(withRootNode);
+        if (!withClauseRange) {
+            return [];
+        }
+
+        const hasRecursive = this.getTokens(withRootNode, 'Recursive').length > 0;
+
+        return [{
+            statementIndex: statement.index,
+            statementKind: statement.kind,
+            withClauseRange,
+            statementRange: statement.contentRange,
+            withRootNode,
+            hasRecursive,
+        }];
     }
 
     private getTempTableDefinition(statement: StatementRecord): NamedDefinitionRecord | undefined {
@@ -1219,4 +1262,8 @@ export function statementSupportsQueryFlow(statementSql: string, databaseKind?: 
 
 export function rangeContainsOffsets(range: SqlTextRange, startOffset: number, endOffset: number): boolean {
     return startOffset >= range.startOffset && endOffset <= range.endOffset;
+}
+
+export function rangesIntersect(range: SqlTextRange, startOffset: number, endOffset: number): boolean {
+    return startOffset < range.endOffset && endOffset > range.startOffset;
 }

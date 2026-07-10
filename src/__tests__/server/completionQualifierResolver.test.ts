@@ -35,6 +35,7 @@ function makeRequestContext(
     variables: [],
     completionKeywords: [],
     sqlFunctionNames: [],
+    sqlFunctionSignatures: new Map(),
     specialBuiltinValues: [],
     ...overrides,
   };

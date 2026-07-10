@@ -132,6 +132,7 @@ export enum SymbolKind {
 export const languages = {
   registerHoverProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerInlayHintsProvider: jest.fn(() => ({ dispose: jest.fn() })),
+  registerCodeActionsProvider: jest.fn(() => ({ dispose: jest.fn() })),
   createDiagnosticCollection: jest.fn(() => ({
     set: jest.fn(),
     delete: jest.fn(),
@@ -339,6 +340,26 @@ export class Range {
     public start: Position,
     public end: Position,
   ) { }
+
+  contains(positionOrRange: Position | Range): boolean {
+    if (positionOrRange instanceof Range) {
+      return this.contains(positionOrRange.start) && this.contains(positionOrRange.end);
+    }
+    if (positionOrRange.line < this.start.line || positionOrRange.line > this.end.line) {
+      return false;
+    }
+    if (positionOrRange.line === this.start.line && positionOrRange.character < this.start.character) {
+      return false;
+    }
+    if (positionOrRange.line === this.end.line && positionOrRange.character > this.end.character) {
+      return false;
+    }
+    return true;
+  }
+
+  get isEmpty(): boolean {
+    return this.start.line === this.end.line && this.start.character === this.end.character;
+  }
 }
 
 export class DocumentSymbol {
@@ -393,6 +414,28 @@ export class CodeLens {
   get isResolved(): boolean {
     return this.command !== undefined;
   }
+}
+
+class CodeActionKindValue {
+  constructor(public value: string) {}
+
+  contains(other: CodeActionKindValue): boolean {
+    return other.value === this.value || other.value.startsWith(`${this.value}.`);
+  }
+}
+
+export const CodeActionKind = {
+  Empty: new CodeActionKindValue(''),
+  QuickFix: new CodeActionKindValue('quickfix'),
+  Source: new CodeActionKindValue('source'),
+};
+
+export class CodeAction {
+  command?: { command: string; title: string; arguments?: unknown[] };
+  constructor(
+    public title: string,
+    public kind?: CodeActionKindValue,
+  ) {}
 }
 
 export class Diagnostic {

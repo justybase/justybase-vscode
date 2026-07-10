@@ -99,6 +99,8 @@ export class SqlVisitor
   private canReferenceSelectAliases = false;
   /** Subqueries in expressions (IN, EXISTS, scalar subselect) — not CTE bodies. */
   private embeddedSelectDepth = 0;
+  /** CTEs have their own duplicate-output diagnostic after explicit column aliases are applied. */
+  private duplicateOutputWarningSuppressionDepth = 0;
 
   constructor(
     schemaProvider?: SchemaProvider,
@@ -224,6 +226,14 @@ export class SqlVisitor
 
   setEmbeddedSelectDepth(value: number): void {
     this.embeddedSelectDepth = value;
+  }
+
+  getDuplicateOutputWarningSuppressionDepth(): number {
+    return this.duplicateOutputWarningSuppressionDepth;
+  }
+
+  setDuplicateOutputWarningSuppressionDepth(value: number): void {
+    this.duplicateOutputWarningSuppressionDepth = value;
   }
 
   setProcedureScope(scope: ProcedureScopeBuilder | null): void {
@@ -923,6 +933,10 @@ export class SqlVisitor
     expressionVisitor.filterClause(this, ctx);
   }
 
+  withinGroupClause(ctx: Record<string, CstNode[]>): void {
+    expressionVisitor.withinGroupClause(this, ctx);
+  }
+
   partitionByClause(ctx: Record<string, CstNode[]>): void {
     expressionVisitor.partitionByClause(this, ctx);
   }
@@ -1305,8 +1319,8 @@ export class SqlVisitor
     commandVisitor.groomStatement(this, ctx);
   }
 
-  generateStatisticsStatement(): void {
-    // No validation needed
+  generateStatisticsStatement(ctx: Record<string, CstNode[]>): void {
+    commandVisitor.generateStatisticsStatement(this, ctx);
   }
 
   groomModeClause(): void {

@@ -452,17 +452,13 @@ export class SessionMonitorView {
                 <label class="auto-refresh">
                     <input type="checkbox" id="autoRefresh"> Auto-refresh
                 </label>
+                <div class="refresh-indicator" id="refreshIndicator" aria-hidden="true" title="Refreshing…">
+                    <svg class="refresh-spinner" viewBox="0 0 50 50" aria-hidden="true">
+                        <circle class="refresh-spinner-circle" cx="25" cy="25" r="20" fill="none" stroke-width="5"/>
+                        <path class="refresh-spinner-path" d="M25 5 A20 20 0 0 1 45 25" fill="none" stroke-width="5"/>
+                    </svg>
+                </div>
                 <button id="refreshBtn" class="btn">↻ Refresh</button>
-            </div>
-        </div>
-
-        <div class="loading-overlay" id="loadingOverlay">
-            <div class="loading-card">
-                <svg class="loading-spinner" viewBox="0 0 50 50">
-                    <circle class="loading-spinner-circle" cx="25" cy="25" r="20" fill="none" stroke-width="4"/>
-                    <path class="loading-spinner-path" d="M25 5 A20 20 0 0 1 45 25" fill="none" stroke-width="4"/>
-                </svg>
-                <span class="loading-text">Refreshing…</span>
             </div>
         </div>
 

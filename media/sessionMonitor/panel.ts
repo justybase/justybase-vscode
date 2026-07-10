@@ -49,7 +49,7 @@ let currentData: SessionMonitorViewState = {
 // DOM Elements
 const refreshBtn = getElementById<HTMLButtonElement>('refreshBtn');
 const autoRefreshCheckbox = getElementById<HTMLInputElement>('autoRefresh');
-const loadingOverlay = getElementById('loadingOverlay');
+const refreshIndicator = getElementById('refreshIndicator');
 const tabButtons = document.querySelectorAll('.tab-btn');
 const tabContents = document.querySelectorAll('.tab-content');
 const saveAlertSettingsBtn = getElementById<HTMLButtonElement>('saveAlertSettingsBtn');
@@ -133,7 +133,9 @@ window.addEventListener('message', event => {
 
     switch (message.command) {
         case 'setLoading':
-            loadingOverlay?.classList.toggle('visible', message.loading);
+            refreshIndicator?.classList.toggle('visible', message.loading);
+            refreshIndicator?.setAttribute('aria-hidden', message.loading ? 'false' : 'true');
+            refreshBtn?.toggleAttribute('disabled', message.loading);
             break;
         case 'updateData':
             renderData(message.data);

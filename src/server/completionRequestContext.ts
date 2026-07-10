@@ -94,6 +94,7 @@ export class CompletionRequestContextBuilder {
       variables: parsed.variables,
       completionKeywords: authoring.completionKeywords,
       sqlFunctionNames: this.getSqlFunctionNames(databaseKind),
+      sqlFunctionSignatures: authoring.signatures,
       specialBuiltinValues: this.getSpecialBuiltinValues(databaseKind),
     };
   }

@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../../core/connectionManager';
 import { MetadataCache } from '../../metadataCache';
 import { SchemaProvider, SchemaItem } from '../../providers/schemaProvider';
+import type { TableDdlSynchronizer } from '../../metadata/tableDdlSynchronizer';
 
 /**
  * Dependencies required by schema commands
@@ -16,6 +17,7 @@ export interface SchemaCommandsDependencies {
     metadataCache: MetadataCache;
     schemaProvider: SchemaProvider;
     schemaTreeView: vscode.TreeView<SchemaItem>;
+    tableDdlSynchronizer?: TableDdlSynchronizer;
 }
 
 /**

@@ -26,6 +26,7 @@ import {
     type MacroQueryExecutionResult,
 } from "./macroPreprocessor";
 import { NzConnection } from "../types";
+import type { DatabaseConnection } from "../contracts/database";
 import { streamingManager } from "./queryCancellation";
 import {
     normalizeUriKey,
@@ -75,6 +76,18 @@ export type BatchExecutionStatus =
 export interface BatchQueryRunOptions {
     continueOnError?: boolean;
     onQueryError?: (queryIndex: number, sql: string, errorMessage: string) => void;
+    onStatementSucceeded?: (event: {
+        sql: string;
+        connectionName: string;
+        documentUri?: string;
+        connection: DatabaseConnection;
+    }) => Promise<void>;
+    onStatementFailed?: (event: {
+        sql: string;
+        connectionName: string;
+        documentUri?: string;
+        errorMessage: string;
+    }) => void;
 }
 
 /**
@@ -412,17 +425,36 @@ export async function executeMacroExport(
         name: request.sheetName,
     };
 
-    const result = request.format === 'xlsx'
-        ? await (await import('../export/xlsxExporter')).exportStructuredToXlsx(
-            [item],
-            request.filePath,
-            false,
-        )
-        : await (await import('../export/xlsbExporter')).exportStructuredToXlsb(
-            [item],
-            request.filePath,
-            false,
+    let result: { success: boolean; message: string; details?: { rows_exported?: number; columns?: number } };
+    if (request.format === 'xlsx') {
+        result = await (await import('../export/xlsxExporter')).exportStructuredToXlsx(
+            [item], request.filePath, false,
         );
+    } else if (request.format === 'xlsb') {
+        result = await (await import('../export/xlsbExporter')).exportStructuredToXlsb(
+            [item], request.filePath, false,
+        );
+    } else if (request.format === 'parquet') {
+        result = await (await import('../export/parquetExporter')).exportStructuredToParquet(
+            [item], request.filePath, false,
+        );
+    } else if (request.format === 'xpt') {
+        result = await (await import('../export/xptExporter')).exportStructuredToXpt(
+            [item], request.filePath, false,
+        );
+    } else {
+        // CSV
+        const csvWriter = (await import('../export/csvStream')).createCsvFileWriter(request.filePath);
+        try {
+            csvWriter.stream.write(item.columns.map((c: { name: string }) => c.name).join(',') + '\n');
+            for (const row of item.rows) {
+                csvWriter.stream.write(row.map((v: unknown) => String(v)).join(',') + '\n');
+            }
+        } finally {
+            await csvWriter.finalize();
+        }
+        result = { success: true, message: 'CSV export from %EXPORT completed' };
+    }
 
     if (!result.success) {
         throw new Error(result.message);

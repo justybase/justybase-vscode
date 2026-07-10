@@ -87,6 +87,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
 
   private readonly _viewsCatalogLoaded = new Set<string>();
   private readonly _objectsCatalogLoaded = new Set<string>();
+  private readonly _invalidatedColumnLayerKeys = new Set<string>();
   private prefetcher: CachePrefetcher;
   private readonly _diskPersistenceEnabled: boolean;
   private readonly _crossWindowSyncEnabled: boolean;
@@ -301,6 +302,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     connectionName: string,
     layerKey: string,
   ): Promise<void> {
+    if (this._invalidatedColumnLayerKeys.has(`${connectionName}|${layerKey}`)) {
+      return;
+    }
     return ensureColumnsLoadedForTableKey(
       this.columnLoaderDeps,
       connectionName,
@@ -394,6 +398,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     this._diskLifecycleState.metadataHydratePromises.clear();
     this._viewsCatalogLoaded.clear();
     this._objectsCatalogLoaded.clear();
+    this._invalidatedColumnLayerKeys.clear();
     this.prefetcher.reset();
     this._stats.clearAll();
     this._onDidInvalidate.fire();
@@ -687,7 +692,27 @@ export class MetadataCache implements MetadataPrefetchTarget {
     key: string,
     data: ColumnMetadata[],
   ): void {
+    this._invalidatedColumnLayerKeys.delete(`${connectionName}|${key}`);
     this._layers.setColumns(connectionName, key, data);
+  }
+
+  invalidateTableColumns(
+    connectionName: string,
+    database: string,
+    schema: string,
+    tableName: string,
+  ): void {
+    const directKey = buildColumnCacheKey(database, schema, tableName);
+    const aggregateKey = buildColumnCacheKey(database, undefined, tableName);
+    this._store.columnCache.delete(`${connectionName}|${directKey}`);
+    this._store.columnCache.delete(`${connectionName}|${aggregateKey}`);
+    this._invalidatedColumnLayerKeys.add(`${connectionName}|${directKey}`);
+    this._invalidatedColumnLayerKeys.add(`${connectionName}|${aggregateKey}`);
+  }
+
+  /** Notify tree/LSP subscribers after a precise cache mutation. */
+  notifyMetadataChanged(): void {
+    this._onDidInvalidate.fire();
   }
 
   getColumnsAnySchema(

@@ -35,6 +35,8 @@ const AGGREGATE_FUNCTIONS = new Set([
   "VAR_SAMP",
   "GROUP_CONCAT",
   "GROUP_CONCAT_SORT",
+  "PERCENTILE_CONT",
+  "PERCENTILE_DISC",
   "ROW_NUMBER",
   "RANK",
   "DENSE_RANK",
@@ -60,6 +62,11 @@ const WINDOW_FUNCTIONS_REQUIRING_ORDER_BY = new Set([
   "PERCENT_RANK",
   "CUME_DIST",
   "NTH_VALUE",
+]);
+
+const ORDERED_SET_AGGREGATE_FUNCTIONS = new Set([
+  "PERCENTILE_CONT",
+  "PERCENTILE_DISC",
 ]);
 
 const WINDOW_FUNCTIONS_WITHOUT_FRAME = new Set([
@@ -479,6 +486,29 @@ export function functionCall(
     host.visit(ctx.filterClause[0] as unknown as CstNode);
   }
 
+  if (ctx.withinGroupClause) {
+    const withinGroupNode = ctx.withinGroupClause[0] as unknown as CstNode;
+    if (fnToken && ctx.overClause) {
+      host.addError(
+        `Ordered-set aggregate '${upper}' cannot be used as a window aggregate`,
+        fnToken,
+        "error",
+        "SQL047",
+      );
+    }
+    host.visit(withinGroupNode);
+  } else if (
+    fnToken &&
+    ORDERED_SET_AGGREGATE_FUNCTIONS.has(upper)
+  ) {
+    host.addError(
+      `Ordered-set aggregate '${upper}' requires WITHIN GROUP (ORDER BY ...) clause`,
+      fnToken,
+      "error",
+      "SQL047",
+    );
+  }
+
   if (ctx.overClause) {
     const overNode = ctx.overClause[0] as unknown as CstNode;
     if (
@@ -541,6 +571,15 @@ export function filterClause(
 ): void {
   if (ctx.expression) {
     host.visit(ctx.expression[0]);
+  }
+}
+
+export function withinGroupClause(
+  host: SqlVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.orderByClause) {
+    host.visit(ctx.orderByClause[0]);
   }
 }
 

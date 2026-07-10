@@ -17,6 +17,7 @@ import { registerFavoritesCommands } from './favoritesCommands';
 import { registerEditorInsertCommands } from './editorInsertCommands';
 import { registerFilterCommands } from './filterCommands';
 import { registerGoToObjectCommands } from './goToObjectCommands';
+import { registerRefreshMetadataCommands } from './refreshMetadataCommands';
 
 /**
  * Register utility commands.
@@ -32,6 +33,7 @@ export function registerUtilityCommands(deps: SchemaCommandsDependencies): vscod
         ...registerFavoritesCommands(deps),
         ...registerEditorInsertCommands(deps),
         ...registerFilterCommands(deps),
-        ...registerGoToObjectCommands(deps)
+        ...registerGoToObjectCommands(deps),
+        ...registerRefreshMetadataCommands(deps),
     ];
 }

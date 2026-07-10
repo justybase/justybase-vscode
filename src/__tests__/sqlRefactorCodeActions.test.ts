@@ -125,7 +125,82 @@ SELECT * FROM SALES_CTE;`;
         const edit = action?.edit as unknown as MockWorkspaceEdit;
         expect(edit.replace).toHaveBeenCalledTimes(1);
         expect(edit.replace.mock.calls[0][2]).toContain('CREATE TEMP TABLE SALES_CTE AS');
-        expect(edit.replace.mock.calls[0][2]).toContain('DISTRIBUTE ON RANDOM;');
+        expect(edit.replace.mock.calls[0][2]).toContain('(\n    SELECT CUSTOMER_ID');
+        expect(edit.replace.mock.calls[0][2]).toContain('FROM SALES..ORDERS');
+        expect(edit.replace.mock.calls[0][2]).toContain(')DISTRIBUTE ON RANDOM;');
+    });
+
+    it('does not offer bulk CTE conversion when selection is inside a single CTE definition', () => {
+        const sql = `WITH CTE1 AS (
+    SELECT 1 AS VALUE
+),
+CTE2 AS (
+    SELECT 2 AS VALUE
+)
+SELECT * FROM CTE2;`;
+        const document = createMockDocument(sql);
+        const selection = new vscode.Range(new vscode.Position(0, 6), new vscode.Position(1, 22));
+
+        const actions = provider.provideCodeActions(
+            document,
+            selection,
+            { diagnostics: [] } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken
+        );
+
+        expect(actions.find(item => item.title === '⚡ Refactor: Materialize CTE to Temporary Table')).toBeDefined();
+        expect(actions.find(item => item.title === '⚡ Refactor: Convert CTEs to Temp Tables')).toBeUndefined();
+        expect(actions.find(item => item.title === '⚡ Refactor: Convert CTEs to Global Temp Tables')).toBeUndefined();
+    });
+
+    it('creates bulk Convert CTEs to Temp Tables refactor actions', () => {
+        const sql = `WITH CTE1 AS (
+    SELECT 1 AS VALUE
+),
+CTE2 AS (
+    SELECT 2 AS VALUE
+)
+SELECT * FROM CTE2;`;
+        const document = createMockDocument(sql);
+        const selection = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(6, 20));
+
+        const actions = provider.provideCodeActions(
+            document,
+            selection,
+            { diagnostics: [] } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken
+        );
+
+        const tempAction = actions.find(item => item.title === '⚡ Refactor: Convert CTEs to Temp Tables');
+        const globalAction = actions.find(item => item.title === '⚡ Refactor: Convert CTEs to Global Temp Tables');
+        expect(tempAction).toBeDefined();
+        expect(globalAction).toBeDefined();
+
+        const edit = tempAction?.edit as unknown as MockWorkspaceEdit;
+        expect(edit.replace).toHaveBeenCalledTimes(1);
+        expect(edit.replace.mock.calls[0][2]).toContain('CREATE TEMP TABLE CTE1');
+        expect(edit.replace.mock.calls[0][2]).toContain('CREATE TEMP TABLE CTE2');
+        expect(edit.replace.mock.calls[0][2]).not.toContain('WITH CTE1');
+        expect(edit.replace.mock.calls[0][2]).toContain('SELECT * FROM CTE2;');
+    });
+
+    it('does not offer bulk CTE conversion for WITH RECURSIVE', () => {
+        const sql = `WITH RECURSIVE CTE1 AS (
+    SELECT 1 AS VALUE
+)
+SELECT * FROM CTE1;`;
+        const document = createMockDocument(sql);
+        const selection = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(3, 20));
+
+        const actions = provider.provideCodeActions(
+            document,
+            selection,
+            { diagnostics: [] } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken
+        );
+
+        expect(actions.find(item => item.title === '⚡ Refactor: Convert CTEs to Temp Tables')).toBeUndefined();
+        expect(actions.find(item => item.title === '⚡ Refactor: Convert CTEs to Global Temp Tables')).toBeUndefined();
     });
 
     it('creates an Inline Temp Table as CTE refactor action', () => {

@@ -182,6 +182,14 @@ describe('providers/linterRules', () => {
             expect(issues.length).toBe(0);
         });
 
+        it('should not flag ORDER BY inside WITHIN GROUP ordered-set aggregate', () => {
+            const sql = `SELECT d.CALENDARQUARTER
+, percentile_cont(0.4) WITHIN GROUP (ORDER BY D.CALENDARQUARTER) AS fortieth
+FROM DIMDATE D GROUP BY d.CALENDARQUARTER`;
+            const issues = ruleNZ006.check(sql);
+            expect(issues.length).toBe(0);
+        });
+
         it('should still flag top-level ORDER BY when query also has window ORDER BY', () => {
             const sql = 'SELECT ROW_NUMBER() OVER (ORDER BY salary DESC) AS rn FROM users ORDER BY name';
             const issues = ruleNZ006.check(sql);
@@ -271,6 +279,19 @@ SELECT * from JUST_DATA.ADMIN.DIMDATE;`;
 
             expect(issues).toHaveLength(1);
             expect(issues[0].message).toContain("'from'");
+        });
+
+        it('should detect inconsistent TRUNCATE keyword casing', () => {
+            const sql = 'TRUNCATE table DIMACCOUNT2;';
+            const issues = ruleNZ007.check(sql);
+            expect(issues.length).toBeGreaterThan(0);
+            expect(issues.some((issue) => issue.message.includes("'table'"))).toBe(true);
+        });
+
+        it('should flag lowercase TRUNCATE in predominantly uppercase SQL', () => {
+            const sql = 'SELECT * FROM DIMACCOUNT2; truncate TABLE DIMACCOUNT2;';
+            const issues = ruleNZ007.check(sql);
+            expect(issues.some((issue) => issue.message.includes("'truncate'"))).toBe(true);
         });
     });
 

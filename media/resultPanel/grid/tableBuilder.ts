@@ -14,6 +14,7 @@ import {
     setResultFormattingState,
     saveScrollStateToCache,
 } from '../state.js';
+import { matchesFilterValueSearch } from '../filterValueSort.js';
 import { GLOBAL_FILTER_WORKER_ROW_THRESHOLD } from '../searchWorkerBridge.js';
 import {
     formatCellValue,
@@ -24,6 +25,14 @@ import { getSavedStateFor, saveAllGridStates, resolveScrollStateForResultSet } f
 import { createHeaderCellWithFilter, reorderColumnsForPinning, renderRowCountInfo } from '../filter.js';
 import { setupCellSelectionEvents } from '../selection.js';
 import { postHostMessage } from '../protocol.js';
+import {
+    clearDatabaseAggregationError,
+    getDatabaseAggregationError,
+    queryDatabaseAggregations,
+} from '../databaseAggregations.js';
+import {
+    ALL_ROWS_RETRY_TIMEOUT_SECONDS,
+} from '../allRowsOperationTimeouts.js';
 import {
     GridHandle,
     ResultSet,
@@ -70,6 +79,24 @@ import {
     getAggregationSymbol,
     getAggFn,
 } from './aggregation.js';
+import { buildInMemoryAggregationCacheKey } from './aggregationCacheKey.js';
+
+function createDatabaseAggRetryButton(
+    errorMessage: string,
+    onRetry: () => void,
+): HTMLButtonElement {
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.className = 'filter-btn agg-retry-btn';
+    retryBtn.textContent = `Retry (${ALL_ROWS_RETRY_TIMEOUT_SECONDS}s)`;
+    retryBtn.title = errorMessage;
+    retryBtn.onclick = (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        onRetry();
+    };
+    return retryBtn;
+}
 import type {
     GridColumnDef,
     GridTanStackTable,
@@ -206,7 +233,13 @@ export function createResultSetGrid(
 
     // Initialize table state
     const tableState = initializeTableState(savedState);
-    setGlobalFilterState(rsIndex, tableState.globalFilter, rs.executionTimestamp, getActiveSourceUri());
+    const databaseGlobalSearch = rs.databaseFilterSpec?.globalSearch?.trim();
+    if (databaseGlobalSearch) {
+        // Keep the search box in sync; rows were already filtered on the server.
+        setGlobalFilterState(rsIndex, databaseGlobalSearch, rs.executionTimestamp, getActiveSourceUri());
+    } else {
+        setGlobalFilterState(rsIndex, tableState.globalFilter, rs.executionTimestamp, getActiveSourceUri());
+    }
 
     // Load pinned columns state (only if timestamp matches - otherwise treat as new result)
     if (savedState && savedState.pinnedColumns && savedState.pinnedColumns.length > 0) {
@@ -243,6 +276,12 @@ export function createResultSetGrid(
     let aggregationCacheKey = '';
     let aggregationCacheBottom: Record<string, string[]> | null = null;
     let aggregationCacheTop: Record<string, string[]> | null = null;
+    let databaseAggregationCacheKey = '';
+    let databaseAggregationCache: Record<string, unknown> | null = null;
+    let databaseAggregationPendingKey = '';
+    let databaseAggregationErrorKey = '';
+    let databaseAggregationError = '';
+    let databaseAggregationRequestIsRetry = false;
     let selectionHandlers: CellSelectionHandlers | null = null;
     let editModeDblClickBound = false;
     let disposed = false;
@@ -475,7 +514,7 @@ export function createResultSetGrid(
             for (const aggItem of values) {
                 const isBottom = typeof aggItem === 'string' || aggItem.position !== 'top';
                 const fn = getAggFn(aggItem);
-                if (!isBottom) {
+                if (!isBottom || (typeof aggItem !== 'string' && aggItem.scope === 'database')) {
                     continue;
                 }
                 requests.push({
@@ -774,7 +813,7 @@ export function createResultSetGrid(
             }
 
             const bottomAggs = configuredAggs.filter((aggItem) =>
-                typeof aggItem === 'string' || aggItem.position !== 'top'
+                typeof aggItem === 'string' || (aggItem.position !== 'top' && aggItem.scope !== 'database')
             );
             if (bottomAggs.length === 0) {
                 tr.appendChild(td);
@@ -1413,6 +1452,11 @@ export function createResultSetGrid(
             var visibleColumns = tanTable.getVisibleLeafColumns();
             var currentAggs = getAggregationState(rsIndex, rs.executionTimestamp, getActiveSourceUri()) || {};
             var pinnedColumns = getPinnedColumnsState(rsIndex, rs.executionTimestamp, getActiveSourceUri());
+            const directSql = rs.refreshSql || rs.sql || '';
+
+            function isDatabaseAgg(aggItem: ColumnAggregationValue): boolean {
+                return typeof aggItem !== 'string' && aggItem.scope === 'database';
+            }
 
             var bottomAggs: Record<string, ColumnAggregationValue[]> = {};
             var topAggs: Record<string, ColumnAggregationValue[]> = {};
@@ -1437,22 +1481,150 @@ export function createResultSetGrid(
                 return;
             }
 
+            function collectDatabaseRequests(): Array<{ columnIndex: number; fn: string }> {
+                const seen = new Set<string>();
+                const requests: Array<{ columnIndex: number; fn: string }> = [];
+                for (const aggMap of [bottomAggs, topAggs]) {
+                    for (const [columnId, values] of Object.entries(aggMap)) {
+                        if (!Array.isArray(values)) {
+                            continue;
+                        }
+                        for (const aggItem of values) {
+                            if (!isDatabaseAgg(aggItem)) {
+                                continue;
+                            }
+                            const columnIndex = Number.parseInt(columnId, 10);
+                            const fn = getAggFn(aggItem);
+                            const key = `${columnIndex}:${fn}`;
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                requests.push({ columnIndex, fn });
+                            }
+                        }
+                    }
+                }
+                return requests;
+            }
+
+            const databaseRequests = collectDatabaseRequests();
+            const databaseKey = [
+                getActiveSourceUri() ?? '',
+                rsIndex,
+                rs.executionTimestamp ?? 0,
+                directSql,
+                JSON.stringify(databaseRequests),
+            ].join('|');
+
+            const rememberedAggregationError = getDatabaseAggregationError(databaseKey);
+            if (rememberedAggregationError) {
+                databaseAggregationError = rememberedAggregationError;
+                databaseAggregationErrorKey = databaseKey;
+            }
+
+            if (databaseRequests.length === 0) {
+                databaseAggregationCacheKey = '';
+                databaseAggregationCache = null;
+                databaseAggregationPendingKey = '';
+                databaseAggregationErrorKey = '';
+                databaseAggregationError = '';
+            } else if (
+                databaseAggregationCacheKey !== databaseKey
+                && databaseAggregationPendingKey !== databaseKey
+                && databaseAggregationErrorKey !== databaseKey
+            ) {
+                databaseAggregationCache = null;
+                databaseAggregationCacheKey = '';
+                databaseAggregationError = '';
+                databaseAggregationErrorKey = '';
+                const sourceUri = getActiveSourceUri();
+                if (sourceUri && directSql) {
+                    databaseAggregationPendingKey = databaseKey;
+                    const requestIsRetry = databaseAggregationRequestIsRetry;
+                    void queryDatabaseAggregations(
+                        sourceUri,
+                        rsIndex,
+                        databaseRequests,
+                        requestIsRetry
+                            ? { isRetry: true, aggregationKey: databaseKey }
+                            : { aggregationKey: databaseKey },
+                    )
+                        .then((results) => {
+                            if (databaseAggregationPendingKey !== databaseKey) {
+                                return;
+                            }
+                            const nextCache: Record<string, unknown> = {};
+                            results.forEach((entry) => {
+                                nextCache[`${entry.columnIndex}:${entry.fn}`] = entry.value;
+                            });
+                            databaseAggregationCache = nextCache;
+                            databaseAggregationCacheKey = databaseKey;
+                            databaseAggregationPendingKey = '';
+                            invalidateAggregationCache();
+                            scheduleRender();
+                        })
+                        .catch((error) => {
+                            if (databaseAggregationPendingKey !== databaseKey) {
+                                return;
+                            }
+                            databaseAggregationError = error instanceof Error ? error.message : String(error);
+                            databaseAggregationErrorKey = databaseKey;
+                            databaseAggregationPendingKey = '';
+                            invalidateAggregationCache();
+                            scheduleRender();
+                        })
+                        .finally(() => {
+                            if (requestIsRetry) {
+                                databaseAggregationRequestIsRetry = false;
+                            }
+                        });
+                }
+            }
+
+            function retryDatabaseAggregations(): void {
+                clearDatabaseAggregationError(databaseKey);
+                databaseAggregationCacheKey = '';
+                databaseAggregationPendingKey = '';
+                databaseAggregationErrorKey = '';
+                databaseAggregationError = '';
+                databaseAggregationCache = null;
+                databaseAggregationRequestIsRetry = true;
+                invalidateAggregationCache();
+                scheduleRender();
+            }
+
+            function formatDatabaseAggregation(aggItem: ColumnAggregationValue, col: TanStackColumn): string | undefined {
+                if (!isDatabaseAgg(aggItem)) {
+                    return undefined;
+                }
+                if (!directSql || !getActiveSourceUri()) {
+                    return 'No SQL';
+                }
+                if (databaseAggregationErrorKey === databaseKey && databaseAggregationError) {
+                    return 'Error';
+                }
+                if (databaseAggregationCacheKey !== databaseKey || !databaseAggregationCache) {
+                    return '…';
+                }
+                const key = `${Number.parseInt(col.id, 10)}:${getAggFn(aggItem)}`;
+                return formatDiskAggregationResult(aggItem, databaseAggregationCache[key], col);
+            }
+
             if (rs.storageMode === 'sqlite') {
                 void (async () => {
                     try {
                         const requests: Array<{ columnIndex: number; fn: string }> = [];
 
-                        function collectRequests(
-                            aggMap: Record<string, ColumnAggregationValue[]>,
-                            position: 'top' | 'bottom',
-                        ): void {
+                        function collectRequests(aggMap: Record<string, ColumnAggregationValue[]>): void {
                             for (let ci = 0; ci < visibleColumns.length; ci++) {
                                 const col = visibleColumns[ci];
                                 const colAggs = aggMap[col.id];
                                 if (!Array.isArray(colAggs) || colAggs.length === 0) {
                                     continue;
                                 }
-                                colAggs.forEach((aggItem, aggIndex) => {
+                                colAggs.forEach((aggItem) => {
+                                    if (isDatabaseAgg(aggItem)) {
+                                        return;
+                                    }
                                     const fn = getAggFn(aggItem);
                                     requests.push({
                                         columnIndex: Number.parseInt(col.id, 10),
@@ -1462,15 +1634,13 @@ export function createResultSetGrid(
                             }
                         }
 
-                        collectRequests(bottomAggs, 'bottom');
-                        collectRequests(topAggs, 'top');
-
-                        if (requests.length === 0) {
-                            return;
-                        }
+                        collectRequests(bottomAggs);
+                        collectRequests(topAggs);
 
                         syncDiskQuerySpecFromGrid(rsIndex);
-                        const sqlResults = await queryDiskAggregations(rsIndex, requests);
+                        const sqlResults = requests.length > 0
+                            ? await queryDiskAggregations(rsIndex, requests)
+                            : [];
                         const resultByKey = new Map<string, unknown>();
                         sqlResults.forEach((entry) => {
                             resultByKey.set(`${entry.columnIndex}:${entry.fn}`, entry.value);
@@ -1490,6 +1660,10 @@ export function createResultSetGrid(
                                     continue;
                                 }
                                 target[col.id] = colAggs.map((aggItem) => {
+                                    const databaseValue = formatDatabaseAggregation(aggItem, col);
+                                    if (databaseValue !== undefined) {
+                                        return databaseValue;
+                                    }
                                     const fn = getAggFn(aggItem);
                                     const columnIndex = Number.parseInt(col.id, 10);
                                     const rawValue = resultByKey.get(`${columnIndex}:${fn}`);
@@ -1512,14 +1686,17 @@ export function createResultSetGrid(
                 return;
             }
 
-            var nextCacheKey = [
-                rows.length,
-                rs.data.length,
-                JSON.stringify(tableState.sorting),
-                JSON.stringify(tableState.columnFilters),
-                tableState.globalFilter,
-                JSON.stringify(currentAggs)
-            ].join('|');
+            var nextCacheKey = buildInMemoryAggregationCacheKey({
+                filteredRowCount: rows.length,
+                dataRowCount: rs.data.length,
+                sorting: tableState.sorting,
+                columnFilters: tableState.columnFilters,
+                globalFilter: tableState.globalFilter,
+                currentAggs,
+                databaseAggregationCacheKey,
+                databaseAggregationPendingKey,
+                databaseAggregationErrorKey,
+            });
 
             var cachedBottomResults: Record<string, string[]> | null = null;
             var cachedTopResults: Record<string, string[]> | null = null;
@@ -1537,6 +1714,10 @@ export function createResultSetGrid(
                         }
                         var typeInfo = getAggregationColumnTypeInfo(cacheCol);
                         resultMap[cacheCol.id] = cacheColAggs.map(function (aggItem) {
+                            const databaseValue = formatDatabaseAggregation(aggItem, cacheCol);
+                            if (databaseValue !== undefined) {
+                                return databaseValue;
+                            }
                             return calculateAggregation(aggItem, rows, cacheCol, typeInfo);
                         });
                     }
@@ -1631,15 +1812,28 @@ export function createResultSetGrid(
 
                         var valueSpan = document.createElement('span');
                         valueSpan.className = 'agg-value';
-                        valueSpan.textContent = result;
                         valueSpan.style.flex = '1';
-                        if (alignRight) {
-                            cellContent.classList.add('cell-align-right');
-                            valueSpan.classList.add('cell-align-right');
-                        }
+                        const isDatabaseAggTimedOut = isDatabaseAgg(aggItem)
+                            && databaseAggregationErrorKey === databaseKey
+                            && Boolean(databaseAggregationError);
 
                         cellContent.appendChild(labelSpan);
-                        cellContent.appendChild(valueSpan);
+                        if (isDatabaseAggTimedOut) {
+                            if (alignRight) {
+                                cellContent.classList.add('cell-align-right');
+                            }
+                            cellContent.appendChild(createDatabaseAggRetryButton(
+                                databaseAggregationError,
+                                retryDatabaseAggregations,
+                            ));
+                        } else {
+                            valueSpan.textContent = result;
+                            if (alignRight) {
+                                cellContent.classList.add('cell-align-right');
+                                valueSpan.classList.add('cell-align-right');
+                            }
+                            cellContent.appendChild(valueSpan);
+                        }
                         td.appendChild(cellContent);
                         aggRow.appendChild(td);
                     }
@@ -1719,7 +1913,7 @@ export function createResultSetGrid(
             }
             invalidateRowNumberCache();
             invalidateAggregationCache();
-            scheduleRender();
+            scheduleRender({ chrome: true });
             saveAllGridStates();
         },
         onGroupingChange: (updater) => {
@@ -1777,6 +1971,10 @@ export function createResultSetGrid(
                 // Disk-backed filtering is applied via SQL window fetch.
                 return true;
             }
+            if (rsForFilter?.databaseFilterSpec?.globalSearch?.trim()) {
+                // Memory-backed results with a server-side database global search.
+                return true;
+            }
 
             const matches = getSearchMatches(rsIndex);
             if (matches !== undefined && matches !== null) {
@@ -1797,7 +1995,7 @@ export function createResultSetGrid(
                 return true;
             }
 
-            const query = String(filterValue).toLowerCase();
+            const query = String(filterValue);
             const original = groupableRow.original;
             if (!original || !Array.isArray(original)) {
                 return false;
@@ -1810,7 +2008,7 @@ export function createResultSetGrid(
                 } else {
                     val = String(val);
                 }
-                if (val.toLowerCase().includes(query)) {
+                if (matchesFilterValueSearch(val, query)) {
                     return true;
                 }
             }

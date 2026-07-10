@@ -388,6 +388,7 @@ function normalizeAggItem(agg: ColumnAggregationValue | unknown): AggregationSel
             fn: item.fn || 'sum',
             precision: item.precision ?? null,
             position: item.position || 'bottom',
+            scope: item.scope === 'database' ? 'database' : 'visible',
         };
     }
     return agg;

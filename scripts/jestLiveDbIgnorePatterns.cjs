@@ -10,4 +10,5 @@ module.exports = [
   "oracle.integration.test.ts",
   "db2.integration.test.ts",
   "vertica.integration.test.ts",
+  "allRowsTimeoutSession.live.integration.test.ts",
 ];

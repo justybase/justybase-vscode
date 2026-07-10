@@ -120,6 +120,39 @@ describe('providers/linterCodeActions', () => {
         });
     });
 
+    it('adds only one Copilot action when multiple diagnostics are present', () => {
+        const document = makeDocument('DELETE FROM users; SELECT * FROM orders;');
+        (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
+            sql: 'DELETE FROM users; SELECT * FROM orders',
+            start: 0,
+            end: 42
+        });
+        const diagnostics = [
+            makeDiagnostic('NZ002', 'NZ002: DELETE statement without WHERE clause will delete all rows'),
+            makeDiagnostic('NZ006', 'NZ006: ORDER BY without LIMIT may process too many rows'),
+            makeDiagnostic('SQL018', 'SQL018: Unused CTE'),
+        ];
+
+        const actions = provider.provideCodeActions(
+            document as vscode.TextDocument,
+            {} as vscode.Range,
+            { diagnostics } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken
+        );
+
+        const copilotFixes = actions.filter(action => action.title === 'Fix with Copilot');
+        expect(copilotFixes).toHaveLength(1);
+        expect(copilotFixes[0]?.diagnostics).toHaveLength(3);
+        expect(copilotFixes[0]?.command).toEqual({
+            title: 'Fix with Copilot',
+            command: 'netezza.fixSqlError',
+            arguments: [
+                diagnostics.map(diagnostic => diagnostic.message).join('\n'),
+                'DELETE FROM users; SELECT * FROM orders',
+            ],
+        });
+    });
+
     it('adds NZ006 FETCH FIRST quick fix', () => {
         const document = makeDocument('SELECT * FROM users ORDER BY created_at;');
         (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
@@ -248,6 +281,40 @@ describe('providers/linterCodeActions', () => {
             diagnostic.range,
             'SELECT'
         );
+    });
+
+    it('adds only one keyword casing fix when multiple NZ007 diagnostics are present', () => {
+        const statementSql = 'select id from users';
+        const selectOffset = statementSql.indexOf('select');
+        const fromOffset = statementSql.indexOf('from');
+        const document = makeDocument(statementSql);
+        const diagnostics = [
+            makeDiagnostic(
+                'NZ007',
+                "NZ007: Keyword 'select' should be UPPERCASE",
+                selectOffset,
+                selectOffset + 'select'.length,
+            ),
+            makeDiagnostic(
+                'NZ007',
+                "NZ007: Keyword 'from' should be UPPERCASE",
+                fromOffset,
+                fromOffset + 'from'.length,
+            ),
+        ];
+
+        const actions = provider.provideCodeActions(
+            document as vscode.TextDocument,
+            {} as vscode.Range,
+            { diagnostics } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken
+        );
+
+        const normalizeFixes = actions.filter(action => action.title === 'Normalize keyword casing');
+        expect(normalizeFixes).toHaveLength(1);
+        expect(normalizeFixes[0]?.diagnostics).toHaveLength(2);
+        const edit = normalizeFixes[0]?.edit as unknown as MockWorkspaceEdit;
+        expect(edit.replace).toHaveBeenCalledTimes(2);
     });
 
     it('adds NZ001 quick fix to expand SELECT * into explicit columns', () => {

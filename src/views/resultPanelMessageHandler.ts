@@ -16,10 +16,15 @@ import { ResultFormattingSettingsStore } from '../results/resultFormattingSettin
 import { ResultFormattingUpdateRequest } from '../results/resultFormattingTypes';
 import type {
     DiskAggregationRequest,
+    DiskDistinctValue,
     DiskGroupLevel,
     DiskGroupPathItem,
     DiskQuerySpec,
 } from '../core/resultDataProvider/types';
+import type {
+    DatabaseAggregationRequest,
+    DatabaseAggregationResult,
+} from '../results/databaseAggregationSql';
 import { diskQuerySpecIsActive } from '../core/resultDataProvider/types';
 import { bucketizePayloadSize, formatPerformanceEvent } from '../services/perf/performanceEvents';
 import type { ResultSet } from '../types';
@@ -47,6 +52,30 @@ export interface MessageHandlerCallbacks {
     onRecordHydrationMetrics?: (metrics: ResultPanelHydrationMetricsPayload) => void;
     onSaveEdits?: (request: SaveEditsRequest) => Promise<{ success: boolean; message: string }>;
     onGetWebviewUri?: (uri: vscode.Uri) => string;
+    onRefreshResult?: (sourceUri: string, resultSetIndex: number, limitValue?: string) => Promise<void>;
+    onRequestDatabaseAggregations?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        aggregations: DatabaseAggregationRequest[],
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ) => Promise<DatabaseAggregationResult[]>;
+    onRequestDatabaseFilterValues?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        columnIndex: number,
+        querySpec?: DiskQuerySpec,
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ) => Promise<{ values: DiskDistinctValue[]; truncated: boolean }>;
+    onApplyDatabaseFilter?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        querySpec?: DiskQuerySpec,
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ) => Promise<void>;
+    onClearRefreshFailure?: (sourceUri: string, resultSetIndex: number) => void;
 }
 
 export type SelectionStats = SelectionStatsPayload;
@@ -212,6 +241,48 @@ export class ResultPanelMessageHandler {
             case 'closeResult':
                 this._stateManager.closeResult(message.sourceUri, message.resultSetIndex);
                 this._callbacks.onForceHydrate();
+                return;
+
+            case 'refreshResult':
+                void this._handleRefreshResult(message.sourceUri, message.resultSetIndex, message.limitValue);
+                return;
+
+            case 'clearRefreshFailure':
+                this._callbacks.onClearRefreshFailure?.(message.sourceUri, message.resultSetIndex);
+                return;
+
+            case 'requestDatabaseAggregations':
+                void this._handleDatabaseAggregations(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.aggregations,
+                    message.timeoutSeconds,
+                    message.isRetry,
+                );
+                return;
+
+            case 'requestDatabaseFilterValues':
+                void this._handleDatabaseFilterValues(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.columnIndex,
+                    message.requestId,
+                    message.querySpec,
+                    message.timeoutSeconds,
+                    message.isRetry,
+                );
+                return;
+
+            case 'applyDatabaseFilter':
+                void this._handleApplyDatabaseFilter(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.querySpec,
+                    message.timeoutSeconds,
+                    message.isRetry,
+                );
                 return;
 
             case 'closeAllResults':
@@ -630,6 +701,147 @@ export class ResultPanelMessageHandler {
         if (sourceUri) {
             console.log(`[ResultPanelMessageHandler] Received cancelQuery message for: ${sourceUri}`);
             vscode.commands.executeCommand('netezza.cancelQuery', sourceUri, currentRowCounts);
+        }
+    }
+
+    private async _handleRefreshResult(sourceUri: string, resultSetIndex: number, limitValue?: string): Promise<void> {
+        if (!this._callbacks.onRefreshResult) {
+            vscode.window.showErrorMessage('Result refresh is not available in this context.');
+            return;
+        }
+        await this._callbacks.onRefreshResult(sourceUri, resultSetIndex, limitValue);
+    }
+
+    private async _handleDatabaseAggregations(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        aggregations: DatabaseAggregationRequest[],
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ): Promise<void> {
+        if (!this._callbacks.onRequestDatabaseAggregations) {
+            this._callbacks.onPostMessage({
+                command: 'databaseAggregationResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: 'Database aggregations are not available in this context.',
+            });
+            return;
+        }
+
+        try {
+            const results = await this._callbacks.onRequestDatabaseAggregations(
+                sourceUri,
+                resultSetIndex,
+                aggregations,
+                timeoutSeconds,
+                isRetry,
+            );
+            this._callbacks.onPostMessage({
+                command: 'databaseAggregationResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                aggregations: this._encoder.sanitizeForMessagePack(results) as DatabaseAggregationResult[],
+            });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'databaseAggregationResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handleDatabaseFilterValues(
+        sourceUri: string,
+        resultSetIndex: number,
+        columnIndex: number,
+        requestId: number,
+        querySpec?: DiskQuerySpec,
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ): Promise<void> {
+        if (!this._callbacks.onRequestDatabaseFilterValues) {
+            this._callbacks.onPostMessage({
+                command: 'databaseFilterValuesResult',
+                sourceUri,
+                resultSetIndex,
+                columnIndex,
+                requestId,
+                error: 'Database filter values are not available in this context.',
+            });
+            return;
+        }
+        try {
+            const result = await this._callbacks.onRequestDatabaseFilterValues(
+                sourceUri,
+                resultSetIndex,
+                columnIndex,
+                querySpec,
+                timeoutSeconds,
+                isRetry,
+            );
+            this._callbacks.onPostMessage({
+                command: 'databaseFilterValuesResult',
+                sourceUri,
+                resultSetIndex,
+                columnIndex,
+                requestId,
+                values: this._encoder.sanitizeForMessagePack(result.values) as DiskDistinctValue[],
+                truncated: result.truncated,
+            });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'databaseFilterValuesResult',
+                sourceUri,
+                resultSetIndex,
+                columnIndex,
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handleApplyDatabaseFilter(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        querySpec?: DiskQuerySpec,
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ): Promise<void> {
+        if (!this._callbacks.onApplyDatabaseFilter) {
+            this._callbacks.onPostMessage({
+                command: 'databaseFilterApplyResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: 'Database filtering is not available in this context.',
+            });
+            return;
+        }
+        try {
+            await this._callbacks.onApplyDatabaseFilter(sourceUri, resultSetIndex, querySpec, timeoutSeconds, isRetry);
+            this._callbacks.onPostMessage({
+                command: 'databaseFilterApplyResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+            });
+            this._callbacks.onUpdateWebview();
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'databaseFilterApplyResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
     }
 

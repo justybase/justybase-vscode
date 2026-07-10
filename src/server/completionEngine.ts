@@ -116,6 +116,7 @@ export class LspCompletionEngine {
       databaseKind,
       completionKeywords,
       sqlFunctionNames,
+      sqlFunctionSignatures,
       specialBuiltinValues,
       variables,
     } = requestContext;
@@ -145,6 +146,7 @@ export class LspCompletionEngine {
         databaseKind,
         completionKeywords,
         sqlFunctionNames,
+        sqlFunctionSignatures,
         specialBuiltinValues,
       },
     );

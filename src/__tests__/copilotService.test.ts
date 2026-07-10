@@ -197,6 +197,38 @@ describe('CopilotService - Comprehensive Tests', () => {
         });
     });
 
+    describe('sensitive language model tools', () => {
+        it('excludes query and sample-data tools until the user enables them', () => {
+            (vscode.lm.tools as unknown[]) = [
+                { name: 'netezza_execute_query', description: 'Run query', inputSchema: {} },
+                { name: 'netezza_get_sample_data', description: 'Get samples', inputSchema: {} },
+                { name: 'netezza_get_tables', description: 'Get tables', inputSchema: {} }
+            ];
+
+            const tools = service['getAvailableLanguageModelTools']();
+
+            expect(tools.map(tool => tool.name)).toEqual(['netezza_get_tables']);
+        });
+
+        it('includes sensitive tools after the user explicitly enables them', () => {
+            (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue({
+                get: jest.fn((key: string) => key.startsWith('tools.') ? true : undefined),
+                update: jest.fn().mockResolvedValue(undefined)
+            });
+            (vscode.lm.tools as unknown[]) = [
+                { name: 'netezza_execute_query', description: 'Run query', inputSchema: {} },
+                { name: 'netezza_get_sample_data', description: 'Get samples', inputSchema: {} }
+            ];
+
+            const tools = service['getAvailableLanguageModelTools']();
+
+            expect(tools.map(tool => tool.name)).toEqual([
+                'netezza_execute_query',
+                'netezza_get_sample_data'
+            ]);
+        });
+    });
+
     describe('Model Selection', () => {
         it('should get selected model ID', () => {
             service['modelSelector']['selectedModelId'] = 'custom-model-id';

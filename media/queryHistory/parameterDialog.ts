@@ -1,4 +1,5 @@
 import type { QueryHistoryParameterDto } from './hostContracts.js';
+import { iconPlay, iconSettings } from './icons.js';
 import { escapeHtml } from './utils.js';
 
 export interface ParameterDialogOptions {
@@ -19,7 +20,7 @@ export function showParameterDialog(options: ParameterDialogOptions): void {
     modal.className = 'parameter-modal';
     modal.innerHTML = `
         <div class="parameter-modal-content">
-            <h3>🔧 Quick Rerun with Parameters</h3>
+            <h3>${iconSettings()} Quick Rerun with Parameters</h3>
             <p>This query contains ${parameters.length} parameter(s). Enter values below:</p>
             <div class="parameter-list">
                 ${parameters
@@ -37,7 +38,7 @@ export function showParameterDialog(options: ParameterDialogOptions): void {
             </div>
             <div class="parameter-actions">
                 <button id="cancelParamsBtn" class="secondary">Cancel</button>
-                <button id="runWithParamsBtn" class="primary">▶️ Run Query</button>
+                <button id="runWithParamsBtn" class="primary">${iconPlay()} Run Query</button>
             </div>
         </div>
     `;

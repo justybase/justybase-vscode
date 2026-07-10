@@ -460,7 +460,21 @@ export function registerQueryCommands(
                             false, // _isRetry
                             undefined, // maxRows
                             queryStartCallback,
-                            queryEndCallback
+                            queryEndCallback,
+                            undefined,
+                            0,
+                            undefined,
+                            [],
+                            {
+                                onStatementSucceeded: event =>
+                                    deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
+                                onStatementFailed: event => {
+                                    deps.tableDdlSynchronizer?.handleExecutionFailure(
+                                        event.connectionName,
+                                        event.documentUri,
+                                    );
+                                },
+                            },
                         );
                     }
                 );

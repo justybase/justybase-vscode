@@ -189,6 +189,14 @@ describe('SQL Linter Rules', () => {
             const issues = ruleNZ006.check(sql);
             expect(issues.length).toBe(0);
         });
+
+        it('should not flag ORDER BY inside WITHIN GROUP ordered-set aggregate', () => {
+            const sql = `SELECT d.CALENDARQUARTER
+, percentile_cont(0.4) WITHIN GROUP (ORDER BY D.CALENDARQUARTER) AS fortieth
+FROM DIMDATE D GROUP BY d.CALENDARQUARTER`;
+            const issues = ruleNZ006.check(sql);
+            expect(issues.length).toBe(0);
+        });
     });
 
     describe('NZ007 - Inconsistent keyword casing', () => {

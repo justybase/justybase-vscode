@@ -47,7 +47,12 @@ export {
   analyzeSqlQueryStructures,
   statementSupportsQueryFlow,
   rangeContainsOffsets,
+  rangesIntersect,
 } from "./queryStructureAnalyzer";
+export {
+  buildCteToTempTableTransform,
+  buildCreateTempTableStatement,
+} from "./cteToTempTableTransformer";
 export type {
   SqlRenameResolution,
   SqlRenameOccurrence,
@@ -66,12 +71,17 @@ export type {
   SqlTextRange,
   ExtractSubqueryCandidate,
   CteMaterializationCandidate,
+  CteBulkMaterializationCandidate,
   TempTableInlineCandidate,
   QueryFlowNode,
   QueryFlowEdge,
   QueryFlowGraph,
   SqlQueryStructureAnalysis,
 } from "./queryStructureAnalyzer";
+export type {
+  TempTableMaterializationKind,
+  CteToTempTableTransformPlan,
+} from "./cteToTempTableTransformer";
 export type {
   TokenPosition,
   ValidationError,

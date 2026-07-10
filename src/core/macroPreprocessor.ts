@@ -50,7 +50,7 @@ export type MacroQueryExecutor = (
     sql: string,
 ) => Promise<MacroQueryExecutionResult>;
 
-export type MacroExportFormat = 'xlsx' | 'xlsb';
+export type MacroExportFormat = 'xlsx' | 'xlsb' | 'parquet' | 'csv' | 'xpt';
 
 export interface MacroExportRequest {
     format: MacroExportFormat;
@@ -1292,18 +1292,17 @@ function unwrapResolvedScalarExportValue(value: string): string {
 
 function inferExportFormatFromPath(filePath: string): string {
     const lowerPath = filePath.toLowerCase();
-    if (lowerPath.endsWith('.xlsx')) {
-        return 'xlsx';
-    }
-    if (lowerPath.endsWith('.xlsb')) {
-        return 'xlsb';
-    }
-    throw new Error('%EXPORT format is required when file extension is not .xlsx or .xlsb');
+    if (lowerPath.endsWith('.xlsx')) return 'xlsx';
+    if (lowerPath.endsWith('.xlsb')) return 'xlsb';
+    if (lowerPath.endsWith('.parquet')) return 'parquet';
+    if (lowerPath.endsWith('.csv')) return 'csv';
+    if (lowerPath.endsWith('.xpt')) return 'xpt';
+    throw new Error('%EXPORT format is required when file extension is not .xlsx/.xlsb/.parquet/.csv/.xpt');
 }
 
 function parseExportFormat(format: string): MacroExportFormat {
     const normalized = format.trim().toLowerCase();
-    if (normalized === 'xlsx' || normalized === 'xlsb') {
+    if (normalized === 'xlsx' || normalized === 'xlsb' || normalized === 'parquet' || normalized === 'csv' || normalized === 'xpt') {
         return normalized;
     }
     throw new Error(`Unsupported %EXPORT format: ${format}`);

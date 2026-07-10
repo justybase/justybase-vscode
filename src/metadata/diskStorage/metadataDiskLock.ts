@@ -62,6 +62,7 @@ function isProcessAlive(pid: number): boolean {
 export class MetadataDiskLock {
     private readonly ownedLocks = new Set<string>();
     private readonly heartbeatTimers = new Map<string, NodeJS.Timeout>();
+    private readonly renewInFlight = new Map<string, Promise<void>>();
 
     constructor(private readonly storageDir: string) {}
 
@@ -75,22 +76,52 @@ export class MetadataDiskLock {
      * heartbeat on I/O error (lock file deleted externally).
      */
     private async renewLock(connectionName: string): Promise<void> {
-        if (!this.ownedLocks.has(connectionName)) {
+        if (!this.ownedLocks.has(connectionName) || !this.heartbeatTimers.has(connectionName)) {
             return;
         }
-        const lockPath = this.getLockPath(connectionName);
+
+        const previous = this.renewInFlight.get(connectionName);
+        const current = (async () => {
+            if (previous) {
+                await previous.catch(() => { /* superseded renewal */ });
+            }
+            if (!this.ownedLocks.has(connectionName) || !this.heartbeatTimers.has(connectionName)) {
+                return;
+            }
+
+            const lockPath = this.getLockPath(connectionName);
+            const tempPath = `${lockPath}.tmp`;
+            try {
+                const startedAt = (await this.readStartedAt(lockPath)) ?? Date.now();
+                if (!this.ownedLocks.has(connectionName) || !this.heartbeatTimers.has(connectionName)) {
+                    return;
+                }
+                const content: LockFileContent = {
+                    pid: process.pid,
+                    startedAt,
+                    lastHeartbeatAt: Date.now(),
+                };
+                await fs.promises.writeFile(tempPath, JSON.stringify(content), 'utf8');
+                await fs.promises.rename(tempPath, lockPath);
+            } catch {
+                try {
+                    await fs.promises.unlink(tempPath);
+                } catch {
+                    // Best-effort cleanup for partial temp file.
+                }
+                // File may have been deleted (releaseLock) between check and write.
+                // Stop the timer to avoid repeated failures.
+                this.stopHeartbeat(connectionName);
+            }
+        })();
+
+        this.renewInFlight.set(connectionName, current);
         try {
-            const startedAt = (await this.readStartedAt(lockPath)) ?? Date.now();
-            const content: LockFileContent = {
-                pid: process.pid,
-                startedAt,
-                lastHeartbeatAt: Date.now(),
-            };
-            await fs.promises.writeFile(lockPath, JSON.stringify(content), 'utf8');
-        } catch {
-            // File may have been deleted (releaseLock) between check and write.
-            // Stop the timer to avoid repeated failures.
-            this.stopHeartbeat(connectionName);
+            await current;
+        } finally {
+            if (this.renewInFlight.get(connectionName) === current) {
+                this.renewInFlight.delete(connectionName);
+            }
         }
     }
 
@@ -179,18 +210,21 @@ export class MetadataDiskLock {
 
         // Read existing lock file to decide whether to steal.
         try {
+            const tempPath = `${lockPath}.tmp`;
             const existingRaw = await fs.promises.readFile(lockPath, 'utf8');
             const existing = JSON.parse(existingRaw) as LockFileContent;
 
             if (typeof existing.pid !== 'number' || typeof existing.startedAt !== 'number') {
                 // Corrupted or unknown format — remove and retry.
                 try { await fs.promises.unlink(lockPath); } catch { /* ignore */ }
+                try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
                 return tryCreate();
             }
 
             // Phase 1b: PID check — if the owning process is dead, steal immediately.
             if (!isProcessAlive(existing.pid)) {
                 try { await fs.promises.unlink(lockPath); } catch { /* ignore */ }
+                try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
                 return tryCreate();
             }
 
@@ -199,7 +233,12 @@ export class MetadataDiskLock {
             // - Legacy lock files (from before heartbeat) have only `startedAt`.
             const lastSeen = existing.lastHeartbeatAt ?? existing.startedAt;
             if (lastSeen > Date.now() - lockTtlMs) {
-                return false; // Lock is still valid.
+                try {
+                    await fs.promises.access(tempPath);
+                    return false;
+                } catch {
+                    return false; // Lock is still valid.
+                }
             }
 
             // Lock is stale — fall through to remove and retry.
@@ -207,6 +246,11 @@ export class MetadataDiskLock {
             // Lock file missing or unreadable — try again fresh.
         }
 
+        try {
+            await fs.promises.unlink(`${lockPath}.tmp`);
+        } catch {
+            // Best-effort cleanup for abandoned renewal temp files.
+        }
         try {
             await fs.promises.unlink(lockPath);
         } catch {

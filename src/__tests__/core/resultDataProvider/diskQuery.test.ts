@@ -91,6 +91,18 @@ describe('diskQueryBuilder', () => {
         expect(built.whereSql).toBe('"col_0" > ?');
         expect(built.whereParams).toEqual([BigInt('111111111111111111')]);
     });
+
+    it('parses grouped numeric condition values for integer columns', () => {
+        const spec: DiskQuerySpec = {
+            columnFilters: [{
+                columnIndex: 0,
+                conditions: [{ type: 'greaterThan', value: '123 456' }],
+            }],
+        };
+        const built = buildDiskQuery(spec, 1, ['INT4']);
+        expect(built.whereSql).toBe('"col_0" > ?');
+        expect(built.whereParams).toEqual([123456]);
+    });
 });
 
 describeIfSqlite('SqliteResultStore disk queries', () => {

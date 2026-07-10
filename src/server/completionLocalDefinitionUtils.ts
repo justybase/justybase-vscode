@@ -19,14 +19,31 @@ export function isPersistentDocumentDefinition(
   definition: LocalDefinition,
 ): boolean {
   const type = definition.type.toUpperCase();
-  return type === "TEMP TABLE" || type === "TABLE";
+  return type === "TEMP TABLE" || type === "GLOBAL TEMP TABLE" || type === "TABLE";
 }
 
 export function isCompletableLocalDefinition(
   definition: LocalDefinition,
 ): boolean {
   const type = definition.type.toUpperCase();
-  return type === "CTE" || type === "TABLE" || type === "TEMP TABLE";
+  return (
+    type === "CTE" ||
+    type === "TABLE" ||
+    type === "TEMP TABLE" ||
+    type === "GLOBAL TEMP TABLE"
+  );
+}
+
+function localDefinitionShortName(definitionName: string): string | undefined {
+  const doubleDotIndex = definitionName.lastIndexOf("..");
+  if (doubleDotIndex >= 0) {
+    return definitionName.slice(doubleDotIndex + 2);
+  }
+  const dotIndex = definitionName.lastIndexOf(".");
+  if (dotIndex >= 0) {
+    return definitionName.slice(dotIndex + 1);
+  }
+  return undefined;
 }
 
 export function findLocalDefinition(
@@ -34,7 +51,15 @@ export function findLocalDefinition(
   name: string,
 ): LocalDefinition | undefined {
   const upperName = name.toUpperCase();
-  return localDefs.find((def) => def.name.toUpperCase() === upperName);
+  const direct = localDefs.find((def) => def.name.toUpperCase() === upperName);
+  if (direct) {
+    return direct;
+  }
+
+  return localDefs.find((def) => {
+    const shortName = localDefinitionShortName(def.name);
+    return shortName?.toUpperCase() === upperName;
+  });
 }
 
 export function mergeLocalDefinitions(

@@ -24,9 +24,9 @@
         "url": "https://github.com/justybase/justybase-vscode"
     },
     "keywords": [
+        "SQL",
         "duckdb",
         "analytics",
-        "sql",
         "database"
     ],
     "main": "./dist/extension.js",

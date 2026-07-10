@@ -51,6 +51,7 @@ interface AppendRowsMessage {
     editSource?: { db?: string; schema?: string; table: string } | null;
     columns?: { name: string; type?: string; scale?: number }[];
     sql?: string;
+    refreshSql?: string;
     executionTimestamp?: number;
 }
 
@@ -706,6 +707,118 @@ export class ResultStateManager {
         this._onDidChangeState.fire();
     }
 
+    public startResultRefresh(sourceUri: string, resultSetIndex: number): boolean {
+        const results = this._resultsMap.get(sourceUri);
+        const resultSet = results?.[resultSetIndex];
+        if (!resultSet || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
+            return false;
+        }
+
+        this._executingSources.add(sourceUri);
+        this._cancelledSources.delete(sourceUri);
+        this._streamingCompletedSources.delete(sourceUri);
+        this._activeSourceUri = sourceUri;
+        this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
+        this._incrementDataVersion(sourceUri);
+        this._onDidChangeState.fire();
+        return true;
+    }
+
+    public finalizeResultRefresh(sourceUri: string, resultSetIndex: number): void {
+        this._executingSources.delete(sourceUri);
+        this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
+        this._incrementDataVersion(sourceUri);
+        this._onDidChangeState.fire();
+    }
+
+    public setResultSetRefreshFailure(
+        sourceUri: string,
+        resultSetIndex: number,
+        failure: { message: string; sql?: string },
+    ): void {
+        const results = this._resultsMap.get(sourceUri);
+        const resultSet = results?.[resultSetIndex];
+        if (!resultSet || resultSet.isLog) {
+            return;
+        }
+
+        resultSet.refreshFailure = {
+            message: failure.message,
+            sql: failure.sql,
+            failedAt: Date.now(),
+        };
+        this._incrementDataVersion(sourceUri);
+        this._onDidChangeState.fire();
+    }
+
+    public clearResultSetRefreshFailure(sourceUri: string, resultSetIndex: number): void {
+        const results = this._resultsMap.get(sourceUri);
+        const resultSet = results?.[resultSetIndex];
+        if (!resultSet?.refreshFailure) {
+            return;
+        }
+
+        delete resultSet.refreshFailure;
+        this._incrementDataVersion(sourceUri);
+        this._onDidChangeState.fire();
+    }
+
+    public replaceResultSet(sourceUri: string, resultSetIndex: number, resultSet: ResultSet): void {
+        const results = this._resultsMap.get(sourceUri);
+        if (!results || resultSetIndex < 0 || resultSetIndex >= results.length) {
+            throw new Error('Result set not found');
+        }
+
+        const existing = results[resultSetIndex];
+        if (!existing || existing.isLog) {
+            throw new Error('Result set cannot be refreshed');
+        }
+
+        this._releaseResultSetResources(existing);
+
+        if (!resultSet.executionTimestamp) {
+            resultSet.executionTimestamp = Date.now();
+        }
+
+        if (!resultSet.refreshSql && existing.refreshSql) {
+            resultSet.refreshSql = existing.refreshSql;
+        }
+
+        if (resultSet.refreshSql) {
+            const editSource = detectEditSource(resultSet.refreshSql);
+            resultSet.isEditable = editSource !== null;
+            resultSet.editSource = editSource ?? undefined;
+        }
+
+        results[resultSetIndex] = resultSet;
+        this._activeSourceUri = sourceUri;
+        this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
+        this.touchResultSetAccess(sourceUri, resultSetIndex);
+
+        // Replaced result sets must be delivered via full hydrate, not streaming lightweight updates.
+        this.clearStreamingCompleted(sourceUri);
+        this.markStale(sourceUri);
+
+        if (!resultSet.isLog && !resultSet.isError) {
+            const rowCount = resultSet.totalRowCount ?? resultSet.data.length;
+            if (this._shouldUseDiskBacking(rowCount, resultSet.data.length)) {
+                const props = this.spillResultSetToDisk(
+                    sourceUri,
+                    resultSet,
+                    resultSetIndex,
+                    rowCount,
+                    resultSet.limitReached === true,
+                );
+                if (props) {
+                    this._onDidSpillToDisk.fire(props);
+                }
+            }
+        }
+
+        this._incrementDataVersion(sourceUri);
+        this._onDidChangeState.fire();
+    }
+
     public updateResults(results: ResultSet[], sourceUri: string, _append: boolean = false) {
         if (!this._resultsMap.has(sourceUri)) {
             this._pinnedSources.add(sourceUri);
@@ -1146,7 +1259,8 @@ export class ResultStateManager {
     public appendStreamingChunk(
         sourceUri: string,
         chunk: OneChunk,
-        sql: string
+        sql: string,
+        refreshSql?: string,
     ): AppendStreamingResult {
         if (this._cancelledSources.has(sourceUri)) {
             return { type: 'ignore' };
@@ -1155,13 +1269,15 @@ export class ResultStateManager {
         const existingResults = this._resultsMap.get(sourceUri) || [];
 
         if (chunk.isFirstChunk && chunk.columns.length > 0) {
-            const editSource = sql ? detectEditSource(sql) : null;
+            const directSql = refreshSql ?? sql;
+            const editSource = directSql ? detectEditSource(directSql) : null;
             const isEditable = editSource !== null;
             const newResultSet: ResultSet = {
                 columns: chunk.columns,
                 data: chunk.rows,
                 executionTimestamp: Date.now(),
                 sql,
+                refreshSql: refreshSql ?? sql,
                 limitReached: chunk.limitReached,
                 isEditable,
                 editSource: editSource ?? undefined,
@@ -1215,6 +1331,7 @@ export class ResultStateManager {
                     editSource: editSource ?? undefined,
                     columns: chunk.columns,
                     sql,
+                    refreshSql: refreshSql ?? sql,
                     executionTimestamp: newResultSet.executionTimestamp,
                 },
             };

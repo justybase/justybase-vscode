@@ -39,6 +39,11 @@ export interface QueryResult {
    */
   sql?: string;
   /**
+   * Direct SQL used to re-run this specific result set. Unlike `sql` or
+   * `expandedSql`, this intentionally excludes earlier script/setup statements.
+   */
+  refreshSql?: string;
+  /**
    * Full macro-expanded SQL before statement splitting. Present when
    * {@link executeRawQuery} preprocesses directives; use this when callers need
    * the entire expanded script rather than the last executed statement.
@@ -56,6 +61,12 @@ export interface QueryResult {
 
 export type ResultSetStorageMode = 'memory' | 'sqlite';
 
+export interface ResultSetRefreshFailure {
+  message: string;
+  sql?: string;
+  failedAt: number;
+}
+
 export type { DiskQuerySpec } from '../core/resultDataProvider/types';
 
 export type ResultSet = QueryResult & {
@@ -66,6 +77,10 @@ export type ResultSet = QueryResult & {
   storageMode?: ResultSetStorageMode;
   /** Active SQL-backed filter/sort spec for disk-backed export and host queries. */
   diskQuerySpec?: import('../core/resultDataProvider/types').DiskQuerySpec;
+  /** Active database-side filter spec applied by wrapping refreshSql without its trailing LIMIT. */
+  databaseFilterSpec?: import('../core/resultDataProvider/types').DiskQuerySpec;
+  /** Non-destructive refresh failure; previous grid data remains visible. */
+  refreshFailure?: ResultSetRefreshFailure;
   /** Row count after applying diskQuerySpec filters (sort does not change count). */
   diskFilteredCount?: number;
   /** JSON key of the spec used for the cached diskFilteredCount. */

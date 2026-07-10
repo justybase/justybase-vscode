@@ -2,11 +2,16 @@ import * as vscode from 'vscode';
 import type { DatabaseKind } from '../contracts/database';
 import {
     analyzeSqlQueryStructures,
+    buildCreateTempTableStatement,
+    buildCteToTempTableTransform,
     rangeContainsOffsets,
+    rangesIntersect,
+    type CteBulkMaterializationCandidate,
     type CteMaterializationCandidate,
     type ExtractSubqueryCandidate,
     type SqlTextRange,
-    type TempTableInlineCandidate
+    type TempTableInlineCandidate,
+    type TempTableMaterializationKind,
 } from '../sqlParser';
 
 const REFACTOR_KIND: vscode.CodeActionKind =
@@ -70,6 +75,26 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
             actions.push(this.createMaterializeCteAction(document, sql, cteCandidate));
         }
 
+        const selectionWithinSingleCteDefinition = analysis.cteMaterializationCandidates.some(candidate =>
+            rangeContainsOffsets(candidate.cteDefinitionRange, startOffset, endOffset)
+        );
+        const bulkCteCandidate = !selectionWithinSingleCteDefinition
+            ? analysis.cteBulkMaterializationCandidates.find(candidate =>
+                !candidate.hasRecursive
+                && rangesIntersect(candidate.withClauseRange, startOffset, endOffset)
+            )
+            : undefined;
+        if (bulkCteCandidate) {
+            const tempAction = this.createBulkMaterializeCteAction(document, sql, bulkCteCandidate, 'TEMP');
+            if (tempAction) {
+                actions.push(tempAction);
+            }
+            const globalAction = this.createBulkMaterializeCteAction(document, sql, bulkCteCandidate, 'GLOBAL_TEMP');
+            if (globalAction) {
+                actions.push(globalAction);
+            }
+        }
+
         const tempTableCandidate = analysis.tempTableInlineCandidates.find(candidate =>
             rangeContainsOffsets(candidate.tempTableStatementRange, startOffset, endOffset)
         );
@@ -108,7 +133,7 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
         candidate: CteMaterializationCandidate
     ): vscode.CodeAction {
         const cteBody = this.readTextRange(sql, candidate.cteBodyRange);
-        const tempTableStatement = this.buildTempTableStatement(candidate.cteName, cteBody);
+        const tempTableStatement = buildCreateTempTableStatement(candidate.cteName, cteBody, 'TEMP');
         const edit = new vscode.WorkspaceEdit();
 
         if (candidate.tempTableInsertOffset === candidate.withRemovalRange.startOffset) {
@@ -122,6 +147,33 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
             '⚡ Refactor: Materialize CTE to Temporary Table',
             REFACTOR_REWRITE_KIND
         );
+        action.edit = edit;
+        return action;
+    }
+
+    private createBulkMaterializeCteAction(
+        document: vscode.TextDocument,
+        sql: string,
+        candidate: CteBulkMaterializationCandidate,
+        kind: TempTableMaterializationKind,
+    ): vscode.CodeAction | undefined {
+        const plan = buildCteToTempTableTransform(
+            sql,
+            candidate.withRootNode,
+            candidate.statementRange,
+            kind,
+        );
+        if (!plan) {
+            return undefined;
+        }
+
+        const title = kind === 'GLOBAL_TEMP'
+            ? '⚡ Refactor: Convert CTEs to Global Temp Tables'
+            : '⚡ Refactor: Convert CTEs to Temp Tables';
+
+        const action = new vscode.CodeAction(title, REFACTOR_REWRITE_KIND);
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(document.uri, this.toRange(document, plan.replacementRange), plan.outputSql);
         action.edit = edit;
         return action;
     }
@@ -156,11 +208,6 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
             .join('\n');
 
         return `${indent}${name} AS (\n${indentedBody}\n${indent})`;
-    }
-
-    private buildTempTableStatement(name: string, body: string): string {
-        const normalizedBody = this.normalizeBlockIndentation(body);
-        return `CREATE TEMP TABLE ${name} AS\n${normalizedBody}\nDISTRIBUTE ON RANDOM;\n\n`;
     }
 
     private normalizeBlockIndentation(text: string): string {

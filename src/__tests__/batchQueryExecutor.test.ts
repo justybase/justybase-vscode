@@ -484,6 +484,76 @@ describe('batchQueryExecutor', () => {
             expect(queryEndCallback).toHaveBeenCalledWith('exec-001', 2, expect.any(Number), 'success');
         });
 
+        it('should invoke the statement-success hook only after a successful fetch', async () => {
+            const onStatementSucceeded = jest.fn().mockResolvedValue(undefined);
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [],
+                error: null,
+                recordsAffected: 0,
+            });
+
+            await runQueriesSequentially(
+                mockContext,
+                ['CREATE TABLE T1 (ID INTEGER)'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                0,
+                undefined,
+                [],
+                { onStatementSucceeded },
+            );
+
+            expect(onStatementSucceeded).toHaveBeenCalledWith({
+                sql: 'CREATE TABLE T1 (ID INTEGER)',
+                connectionName: 'testConn',
+                documentUri: 'file:///test.sql',
+                connection: mockConn,
+            });
+        });
+
+        it('should invoke the statement-failure hook instead of the success hook', async () => {
+            const onStatementSucceeded = jest.fn().mockResolvedValue(undefined);
+            const onStatementFailed = jest.fn();
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [],
+                error: new Error('DDL failed'),
+            });
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                ['CREATE TABLE T1 (ID INTEGER)'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                0,
+                undefined,
+                [],
+                { onStatementSucceeded, onStatementFailed },
+            )).rejects.toThrow('DDL failed');
+
+            expect(onStatementSucceeded).not.toHaveBeenCalled();
+            expect(onStatementFailed).toHaveBeenCalledWith(expect.objectContaining({
+                sql: 'CREATE TABLE T1 (ID INTEGER)',
+                connectionName: 'testConn',
+                errorMessage: 'DDL failed',
+            }));
+        });
+
         it('should handle query execution error with queryEndCallback', async () => {
             const queryEndCallback = jest.fn();
             const queryStartCallback = jest.fn().mockReturnValue('exec-err');

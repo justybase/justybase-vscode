@@ -107,7 +107,16 @@ function buildProcedureSourceSearchQuery(database: string, options: DatabaseSour
     `.trim();
 }
 
-export const netezzaMetadataProvider: DatabaseMetadataProvider = {
+export interface NetezzaMetadataProvider extends DatabaseMetadataProvider {
+    buildObjectByNameQuery(
+        database: string,
+        schema: string,
+        objectName: string,
+        objectTypes: readonly string[],
+    ): string;
+}
+
+export const netezzaMetadataProvider: NetezzaMetadataProvider = {
     defaultObjectTypes: NZ_DEFAULT_OBJECT_TYPES,
     defaultColumnObjectTypes: ['TABLE', 'VIEW', 'EXTERNAL TABLE'],
     buildListDatabasesQuery(): string {
@@ -183,6 +192,25 @@ export const netezzaMetadataProvider: DatabaseMetadataProvider = {
             `.trim();
         }
         return `SELECT OBJNAME, SCHEMA, OBJID, COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER FROM ${database}.._V_OBJECT_DATA WHERE DBNAME = '${escapeSqlLiteral(database)}' AND OBJTYPE = '${escapeSqlLiteral(objectType)}' ORDER BY OBJNAME`;
+    },
+    buildObjectByNameQuery(
+        database: string,
+        schema: string,
+        objectName: string,
+        objectTypes: readonly string[],
+    ): string {
+        const types = objectTypes
+            .map(type => `'${escapeSqlLiteral(type)}'`)
+            .join(', ');
+        return `
+            SELECT OBJNAME, SCHEMA, OBJID, OBJTYPE,
+                   COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER
+            FROM ${database}.._V_OBJECT_DATA
+            WHERE ${buildDatabasePredicate(database)}
+              AND ${buildSchemaPredicate(schema)}
+              AND UPPER(OBJNAME) = UPPER('${escapeSqlLiteral(objectName)}')
+              AND OBJTYPE IN (${types})
+        `.trim();
     },
     buildTypeGroupsQuery(database: string): string {
         return `SELECT DISTINCT OBJTYPE FROM ${database}..${NZ_SYSTEM_VIEWS.OBJECT_DATA} WHERE DBNAME = '${escapeSqlLiteral(database)}' ORDER BY OBJTYPE`;

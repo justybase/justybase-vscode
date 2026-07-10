@@ -130,6 +130,16 @@ const stringUtilityQueries: Array<[string, string]> = [
   ['URLPARSEQUERY', "SELECT URLPARSEQUERY('key1=value1&key2=value2');"],
 ];
 
+const fuzzyPhoneticQueries: Array<[string, string]> = [
+  ['LE_DST', "SELECT LE_DST('two', 'tow');"],
+  ['DLE_DST', "SELECT DLE_DST('two', 'tow');"],
+  ['NYSIIS', "SELECT NYSIIS('Washington');"],
+  ['DBL_MP', "SELECT DBL_MP('washington');"],
+  ['PRI_MP', 'SELECT PRI_MP(781598358);'],
+  ['SEC_MP', 'SELECT SEC_MP(781598358);'],
+  ['SCORE_MP', 'SELECT SCORE_MP(781598358, 781596310, 1, 2, 3, 4);'],
+];
+
 describe('SqlLinterProvider function coverage', () => {
   let provider: SqlLinterProvider;
 
@@ -160,6 +170,7 @@ describe('SqlLinterProvider function coverage', () => {
     ...miscellaneousQueries,
     ...regexpQueries,
     ...stringUtilityQueries,
+    ...fuzzyPhoneticQueries,
   ];
 
   it.each(allQueries)(

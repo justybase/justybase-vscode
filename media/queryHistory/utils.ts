@@ -6,15 +6,15 @@ export interface DurationDisplay {
 }
 
 export interface StatusDisplay {
-    icon: string;
+    iconClass: string;
     text: string;
     className: string;
 }
 
 const statusMap: Record<QueryExecutionStatus, StatusDisplay> = {
-    success: { icon: '✅', text: 'Success', className: 'status-success' },
-    error: { icon: '❌', text: 'Error', className: 'status-error' },
-    cancelled: { icon: '⚠️', text: 'Cancelled', className: 'status-cancelled' },
+    success: { iconClass: 'codicon codicon-pass', text: 'Success', className: 'status-success' },
+    error: { iconClass: 'codicon codicon-error', text: 'Error', className: 'status-error' },
+    cancelled: { iconClass: 'codicon codicon-warning', text: 'Cancelled', className: 'status-cancelled' },
 };
 
 export function formatDuration(durationMs: number | undefined | null): DurationDisplay {
@@ -43,6 +43,10 @@ export function getStatusInfo(status: QueryExecutionStatus | undefined): StatusD
     return statusMap.success;
 }
 
+export function renderStatusIndicator(statusInfo: StatusDisplay): string {
+    return `<span class="status-indicator ${statusInfo.className}" title="${escapeHtml(statusInfo.text)}"><span class="status-dot"></span></span>`;
+}
+
 export function formatRowsAffected(rowsAffected: number | undefined | null): string {
     if (rowsAffected === undefined || rowsAffected === null) {
         return '';
@@ -55,6 +59,28 @@ export function formatRowsAffected(rowsAffected: number | undefined | null): str
 
 export function formatTimestamp(timestamp: number): string {
     return new Date(timestamp).toLocaleString();
+}
+
+export interface TimestampParts {
+    time: string;
+    date: string;
+}
+
+export function formatTimestampParts(timestamp: number): TimestampParts {
+    const date = new Date(timestamp);
+    return {
+        time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        date: date.toLocaleDateString(),
+    };
+}
+
+export function renderContextChips(
+    parts: Array<{ label: string; value: string | undefined | null }>,
+): string {
+    return parts
+        .filter((part): part is { label: string; value: string } => Boolean(part.value && part.value.trim()))
+        .map(part => `<span class="ctx-chip" title="${escapeHtml(part.label)}">${escapeHtml(part.value.trim())}</span>`)
+        .join('');
 }
 
 export function escapeHtml(text: string | number | null | undefined): string {
@@ -96,4 +122,11 @@ export function gridSqlPreview(query: string, maxLen: number): string {
         return cleaned;
     }
     return `${cleaned.substring(0, maxLen)}...`;
+}
+
+export function buildContextLine(parts: Array<string | undefined | null>): string {
+    return parts
+        .filter((part): part is string => Boolean(part && part.trim()))
+        .map(part => escapeHtml(part.trim()))
+        .join('<span class="context-sep">·</span>');
 }

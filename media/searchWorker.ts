@@ -81,12 +81,30 @@ function getCellValue(
     return String(val);
 }
 
+function compactFilterSearchText(value: string): string {
+    return String(value).toLowerCase().replace(/[\s\u00A0\u202F,]/g, '');
+}
+
+function cellMatchesGlobalFilter(cellText: string, query: string): boolean {
+    const lowerCell = cellText.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    if (lowerCell.includes(lowerQuery)) {
+        return true;
+    }
+
+    const compactQuery = compactFilterSearchText(query);
+    if (!compactQuery) {
+        return false;
+    }
+
+    return compactFilterSearchText(cellText).includes(compactQuery);
+}
+
 function findMatchedIndices(
     rows: unknown[],
     columns: SearchColumnDef[],
     query: string,
 ): number[] {
-    const normalizedQuery = query.toLowerCase();
     const matchedIndices: number[] = [];
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
@@ -96,7 +114,7 @@ function findMatchedIndices(
         for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
             const column = columns[columnIndex];
             const cellText = getCellValue(row, columnIndex, column);
-            if (cellText.toLowerCase().includes(normalizedQuery)) {
+            if (cellMatchesGlobalFilter(cellText, query)) {
                 match = true;
                 break;
             }

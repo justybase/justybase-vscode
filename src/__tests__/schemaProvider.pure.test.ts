@@ -238,6 +238,10 @@ describe('SchemaProvider pure functions', () => {
             expect(isExpandableType('TABLE')).toBe(true);
         });
 
+        it('should return true for GLOBAL TEMP TABLE', () => {
+            expect(isExpandableType('GLOBAL TEMP TABLE')).toBe(true);
+        });
+
         it('should return true for VIEW', () => {
             expect(isExpandableType('VIEW')).toBe(true);
         });

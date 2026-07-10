@@ -28,6 +28,8 @@ import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf
 import { findVisibleQueryFlowEditor } from '../utils/queryFlowEditor';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import type { QueryFlowNode } from '../sqlParser';
+import type { TableDdlSynchronizer } from '../metadata/tableDdlSynchronizer';
+import type { BatchQueryRunOptions } from '../core/queryRunner';
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -42,6 +44,7 @@ export interface CoreCommandsContext {
         connectionName: string,
         metadataCache?: MetadataCache,
     ) => Promise<string[]>;
+    tableDdlSynchronizer?: TableDdlSynchronizer;
 }
 
 export interface StartupCommandsContext {
@@ -94,7 +97,15 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
         resultPanelProvider,
         keepConnectionStatusBar,
         getDatabaseList,
+        tableDdlSynchronizer,
     } = ctx;
+
+    const ddlBatchOptions: BatchQueryRunOptions = {
+        onStatementSucceeded: event => tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
+        onStatementFailed: event => {
+            tableDdlSynchronizer?.handleExecutionFailure(event.connectionName, event.documentUri);
+        },
+    };
 
     let queryFlowRevealDecoration: vscode.TextEditorDecorationType | undefined;
     let queryFlowRevealTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -822,6 +833,10 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                     undefined,
                                     queryStartCallback,
                                     queryEndCallback,
+                                    undefined,
+                                    0,
+                                    undefined,
+                                    ddlBatchOptions,
                                 );
                             } else {
                                 await runQueriesSequentially(
@@ -836,6 +851,11 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                     undefined,
                                     queryStartCallback,
                                     queryEndCallback,
+                                    undefined,
+                                    0,
+                                    undefined,
+                                    [],
+                                    ddlBatchOptions,
                                 );
                             }
                         },
@@ -920,6 +940,11 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                 undefined,
                                 queryStartCallback,
                                 queryEndCallback,
+                                undefined,
+                                0,
+                                undefined,
+                                [],
+                                ddlBatchOptions,
                             );
                         },
                     );
@@ -1032,6 +1057,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                         { label: '$(file-zip) CSV.GZ', description: 'Gzip-compressed CSV', value: 'csv.gz' },
                         { label: '$(file-zip) CSV.ZST', description: 'Zstandard-compressed CSV', value: 'csv.zst' },
                         { label: '$(database) Parquet', description: 'Apache Parquet (columnar, compressed)', value: 'parquet' },
+                        { label: '$(file-binary) SAS XPORT', description: 'SAS Transport Format v5 (.xpt)', value: 'xpt' },
                     ],
                     { placeHolder: 'Select export format' },
                 );
@@ -1046,11 +1072,13 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                           ? { 'Excel Workbook': ['xlsx'] }
                           : format.value === 'parquet'
                             ? { 'Parquet Files': ['parquet'] }
-                            : format.value === 'csv.gz'
-                              ? { 'CSV.GZ Files': ['csv.gz'] }
-                              : format.value === 'csv.zst'
-                                ? { 'CSV.ZST Files': ['csv.zst'] }
-                                : { 'CSV Files': ['csv'] };
+                            : format.value === 'xpt'
+                              ? { 'SAS XPORT Files': ['xpt'] }
+                              : format.value === 'csv.gz'
+                                ? { 'CSV.GZ Files': ['csv.gz'] }
+                                : format.value === 'csv.zst'
+                                  ? { 'CSV.ZST Files': ['csv.zst'] }
+                                  : { 'CSV Files': ['csv'] };
 
                 const saveUri = await vscode.window.showSaveDialog({
                     filters,
@@ -1104,6 +1132,22 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                             } else if (format.value === 'parquet') {
                                 const { exportQueryToParquet } = await import('../export/parquetExporter');
                                 const result = await exportQueryToParquet(
+                                    connectionDetails,
+                                    statementSql.trim(),
+                                    saveUri.fsPath,
+                                    false,
+                                    (message: string) => {
+                                        progress.report({ message });
+                                    },
+                                    queryTimeout,
+                                    token,
+                                );
+                                if (!result.success) {
+                                    throw new Error(result.message);
+                                }
+                            } else if (format.value === 'xpt') {
+                                const { exportQueryToXpt } = await import('../export/xptExporter');
+                                const result = await exportQueryToXpt(
                                     connectionDetails,
                                     statementSql.trim(),
                                     saveUri.fsPath,

@@ -3,6 +3,10 @@ import * as vscode from 'vscode';
 import { registerSqlLanguageFeatures } from '../activation/sqlLanguageRegistration';
 
 jest.mock('vscode', () => ({
+    CodeActionKind: {
+        QuickFix: { value: 'quickfix' },
+    },
+    CodeAction: jest.fn().mockImplementation((title: string, kind: unknown) => ({ title, kind })),
     languages: {
         registerFoldingRangeProvider: jest.fn(() => ({ dispose: jest.fn() })),
         registerDocumentSymbolProvider: jest.fn(() => ({ dispose: jest.fn() })),
@@ -11,7 +15,8 @@ jest.mock('vscode', () => ({
         registerHoverProvider: jest.fn(() => ({ dispose: jest.fn() })),
         registerDocumentSemanticTokensProvider: jest.fn(() => ({ dispose: jest.fn() })),
         registerDocumentFormattingEditProvider: jest.fn(() => ({ dispose: jest.fn() })),
-        registerDocumentRangeFormattingEditProvider: jest.fn(() => ({ dispose: jest.fn() }))
+        registerDocumentRangeFormattingEditProvider: jest.fn(() => ({ dispose: jest.fn() })),
+        registerCodeActionsProvider: jest.fn(() => ({ dispose: jest.fn() })),
     },
     workspace: {
         onDidCloseTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
@@ -64,6 +69,16 @@ jest.mock('../providers/semanticTokensProvider', () => ({
     }))
 }));
 
+jest.mock('../providers/sqlSelectionActionHoverProvider', () => ({
+    SqlSelectionActionHoverProvider: jest.fn().mockImplementation(() => ({}))
+}));
+
+jest.mock('../providers/sqlExecutionCodeActions', () => ({
+    SqlExecutionCodeActionProvider: jest.fn().mockImplementation(() => ({
+        providedCodeActionKinds: [{ value: 'quickfix' }],
+    })),
+}));
+
 jest.mock('../providers/sqlFormattingProvider', () => ({
     SqlFormattingProvider: jest.fn().mockImplementation(() => ({}))
 }));
@@ -91,19 +106,21 @@ describe('registerSqlLanguageFeatures', () => {
         process.env.NODE_ENV = originalNodeEnv;
     });
 
-    it('always registers the local hover provider regardless of NODE_ENV', () => {
+    it('always registers parser and selection hover providers regardless of NODE_ENV', () => {
         process.env.NODE_ENV = 'production';
 
         registerSqlLanguageFeatures(createParams());
 
-        expect(vscode.languages.registerHoverProvider).toHaveBeenCalledTimes(1);
+        expect(vscode.languages.registerHoverProvider).toHaveBeenCalledTimes(2);
+        expect(vscode.languages.registerCodeActionsProvider).toHaveBeenCalledTimes(1);
     });
 
-    it('registers the legacy hover provider in test mode as a fallback', () => {
+    it('registers parser and selection hover providers in test mode', () => {
         process.env.NODE_ENV = 'test';
 
         registerSqlLanguageFeatures(createParams());
 
-        expect(vscode.languages.registerHoverProvider).toHaveBeenCalledTimes(1);
+        expect(vscode.languages.registerHoverProvider).toHaveBeenCalledTimes(2);
+        expect(vscode.languages.registerCodeActionsProvider).toHaveBeenCalledTimes(1);
     });
 });

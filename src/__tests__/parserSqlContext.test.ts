@@ -215,4 +215,23 @@ SELECT * FROM ABC`;
         );
         expect(scope.visibleLocalDefinitions.map((definition) => definition.name)).toEqual(['ABC']);
     });
+
+    it('parses qualified CTAS and global temp table local definitions', () => {
+        const definitions = parseLocalDefinitionsWithParser(
+            `CREATE TABLE JUST_DATA..TEST2 AS (SELECT 1 AS id);
+             CREATE TABLE JUST_DATA.ADMIN.TEST3 AS (SELECT 2 AS id);
+             CREATE GLOBAL TEMP TABLE TEST11 AS (SELECT 3 AS id);
+             CREATE GLOBAL TEMP TABLE JUST_DATA.ADMIN.TEST12 AS (SELECT 4 AS id);`,
+            'netezza',
+        );
+
+        expect(definitions).toEqual(
+            expect.arrayContaining([
+                { name: 'JUST_DATA..TEST2', type: 'Table', columns: ['id'] },
+                { name: 'JUST_DATA.ADMIN.TEST3', type: 'Table', columns: ['id'] },
+                { name: 'TEST11', type: 'Global Temp Table', columns: ['id'] },
+                { name: 'JUST_DATA.ADMIN.TEST12', type: 'Global Temp Table', columns: ['id'] },
+            ]),
+        );
+    });
 });

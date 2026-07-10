@@ -254,6 +254,8 @@ Column type resolution follows this priority:
 
 ### Disk-backed results (SQLite spill)
 
+See [SQL_RESULTS_FILTERING.md](./SQL_RESULTS_FILTERING.md) for how **Loaded rows**, **All rows + LIMIT**, and **disk-backed** filtering relate.
+
 1. Host spill triggers at `min(memoryRowThreshold, rowThreshold)` (defaults: **25 000** / **500 000**). This is independent of the webview stream cap (`DISK_BACKED_WEBVIEW_STREAM_CAP` = **250 000**).
 2. When spill activates during streaming, the host clears `ResultSet.data`, subsequent chunks insert directly into SQLite, and the webview receives `diskBackedActivate` with a first page plus a ~600-row scroll window.
 3. While still streaming above the webview cap but before/after spill, the webview may receive `rowCountUpdate` instead of full `appendRows` payloads.

@@ -15,6 +15,14 @@ function createProvider(
   };
 }
 
+const qualificationProposal: QualificationProposal = {
+  database: "DB1",
+  schema: "PUBLIC",
+  name: "DIMACCOUNT2",
+  qualifiedText: "DB1.PUBLIC.DIMACCOUNT2",
+  isPreferred: true,
+};
+
 describe("table qualification diagnostics", () => {
   it("emits SQL048 with suggestedFix when a qualification proposal exists", () => {
     const validator = new SqlValidator(
@@ -74,4 +82,29 @@ describe("table qualification diagnostics", () => {
     expect(highlighted).toBe("JUST_DATA..DEPARTMENT");
     expect(diagnostic?.suggestedFix).toBe("JUST_DATA.ADMIN.DEPARTMENT");
   });
+
+  it.each([
+    ["TRUNCATE TABLE DIMACCOUNT2;", "TRUNCATE TABLE DIMACCOUNT2"],
+    ["GROOM TABLE DIMACCOUNT2 VERSIONS;", "GROOM TABLE DIMACCOUNT2 VERSIONS"],
+    ["LOCK TABLE DIMACCOUNT2;", "LOCK TABLE DIMACCOUNT2"],
+    ["GENERATE STATISTICS ON DIMACCOUNT2;", "GENERATE STATISTICS ON DIMACCOUNT2"],
+    [
+      "GENERATE EXPRESS STATISTICS FOR TABLE DIMACCOUNT2;",
+      "GENERATE EXPRESS STATISTICS FOR TABLE DIMACCOUNT2",
+    ],
+  ])(
+    "emits SQL048 for table maintenance command: %s",
+    (sql, _label) => {
+      const validator = new SqlValidator(createProvider([qualificationProposal]));
+
+      const result = validator.validate(sql);
+      const diagnostic = result.warnings.find((warning) => warning.code === "SQL048");
+
+      expect(diagnostic).toMatchObject({
+        code: "SQL048",
+        severity: "information",
+        suggestedFix: "DB1.PUBLIC.DIMACCOUNT2",
+      });
+    },
+  );
 });

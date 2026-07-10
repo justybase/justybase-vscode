@@ -28,6 +28,11 @@ import {
   getQueryConfig,
   splitExpandedMacroStatements,
 } from "./queryBatchExecutor";
+import {
+  isBusyConnectionError,
+  isConnectionRecoveryError,
+  waitForPersistentConnectionReady,
+} from "./connectionReadiness";
 
 // ---------------------------------------------------------------------------
 // Connection resolution
@@ -59,6 +64,8 @@ export interface RunQueryRawOptions {
   extensionUri?: vscode.Uri;
   maxRows?: number;
   isUserQuery?: boolean;
+  /** Overrides global query.executionTimeout for this call only (seconds). */
+  timeoutSeconds?: number;
 }
 
 export function isRunQueryRawOptions(
@@ -119,6 +126,7 @@ export async function runQueryRaw(
     logCallback,
     maxRows,
     isUserQuery = true,
+    timeoutSeconds,
   } = options;
 
   const connManager = connectionManager || new ConnectionManager(context);
@@ -184,6 +192,7 @@ export async function runQueryRaw(
       maxRows,
       logger,
       promptValues,
+      timeoutSeconds,
     );
 
     const durationMs = Date.now() - queryStartTime;
@@ -203,6 +212,7 @@ export async function runQueryRaw(
 
     return result;
   } catch (error: unknown) {
+    let activeError: unknown = error;
     const durationMs = Date.now() - queryStartTime;
     const errObj = error as { message?: string };
     const errMsg = errObj.message || String(error);
@@ -226,6 +236,7 @@ export async function runQueryRaw(
           maxRows,
           logger,
           promptValues,
+          timeoutSeconds,
         );
 
         const retryDurationMs = Date.now() - queryStartTime;
@@ -265,10 +276,58 @@ export async function runQueryRaw(
       }
     }
 
+    // Silent auxiliary queries (refresh, All rows): wait and retry once when connection is still busy.
+    if (
+      isBusyConnectionError(error)
+      && documentUri
+      && keepConnectionOpen
+      && silent
+    ) {
+      logOutput(
+        logger,
+        "Connection is busy. Waiting for the previous command to finish...",
+      );
+      try {
+        await waitForPersistentConnectionReady(
+          connManager,
+          documentUri,
+          resolvedConnectionName,
+        );
+        const result = await executeRawQuery(
+          connManager,
+          resolvedConnectionName,
+          keepConnectionOpen,
+          documentUri,
+          queryToExecute,
+          maxRows,
+          logger,
+          promptValues,
+          timeoutSeconds,
+        );
+
+        const retryDurationMs = Date.now() - queryStartTime;
+        await logQueryToHistory(
+          context,
+          connManager,
+          resolvedConnectionName,
+          query,
+          isUserQuery,
+          documentUri,
+          'success',
+          retryDurationMs,
+          result.rowsAffected,
+        );
+
+        return result;
+      } catch (retryError: unknown) {
+        activeError = retryError;
+      }
+    }
+
     // Check for busy connection
     if (
       await handleBusyConnectionError(
-        error,
+        activeError,
         connManager,
         logger,
         documentUri,
@@ -330,6 +389,7 @@ export async function executeRawQuery(
   maxRows: number | undefined,
   logger: OutputLogger,
   macroValues: Record<string, string> = {},
+  timeoutSeconds?: number,
 ): Promise<QueryResult> {
   const { connection, shouldCloseConnection } = await getConnectionForDocument(
     connManager,
@@ -409,6 +469,7 @@ export async function executeRawQuery(
     const statementsToExecute = splitExpandedMacroStatements(queryToExecute);
     const expandedSql = queryToExecute;
     const { queryTimeout, rowLimit } = getQueryConfig();
+    const effectiveTimeout = timeoutSeconds ?? queryTimeout;
     let lastResult: QueryResult | undefined;
 
     for (let subIndex = 0; subIndex < statementsToExecute.length; subIndex++) {
@@ -427,7 +488,7 @@ export async function executeRawQuery(
           connection,
           statementToExecute,
           maxRows !== undefined ? maxRows : rowLimit,
-          queryTimeout,
+          effectiveTimeout,
           documentUri,
           sessionId,
           connManager,
@@ -435,6 +496,15 @@ export async function executeRawQuery(
           createDropSessionCallback(connManager, documentUri),
         );
       if (error) {
+        if (keepConnectionOpen && documentUri && isConnectionRecoveryError(error)) {
+          void waitForPersistentConnectionReady(
+            connManager,
+            documentUri,
+            resolvedConnectionName,
+          ).catch(() => {
+            // Best-effort recovery after surfacing the error to callers.
+          });
+        }
         throw error;
       }
 
@@ -453,6 +523,7 @@ export async function executeRawQuery(
           rowsAffected: rowsAffectedValue >= 0 ? rowsAffectedValue : undefined,
           limitReached,
           sql: statementToExecute,
+          refreshSql: statementToExecute,
         };
       } else {
         const msg =
@@ -468,6 +539,7 @@ export async function executeRawQuery(
               ? `Records affected: ${rowsAffectedValue}`
               : "Query executed successfully.",
           sql: statementToExecute,
+          refreshSql: statementToExecute,
         };
         if (statementsToExecute.length === 1) {
           logOutput(logger, msg);

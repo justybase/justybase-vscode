@@ -118,7 +118,8 @@ function getAggregationSymbol(agg: ColumnAggregationValue): string {
         avg: 'μ',
         min: '↓',
         max: '↑',
-        stdev: 'σ'
+        stdev: 'σ',
+        median: 'M'
     };
     const fn = (typeof agg === 'string' ? agg : agg?.fn) || String(agg);
     return symbols[fn] || fn;
@@ -146,7 +147,7 @@ export function createGroupFooterRow(
     visibleColumns.forEach((col: TanStackColumn) => {
         const aggs = currentAggs[col.id];
         if (aggs && Array.isArray(aggs) && aggs.length > 0) {
-            const bottomOnly = aggs.filter(a => (typeof a === 'string' ? true : (a.position !== 'top')));
+            const bottomOnly = aggs.filter(a => (typeof a === 'string' ? true : (a.position !== 'top' && a.scope !== 'database')));
             if (bottomOnly.length > 0) {
                 groupAggs[col.id] = bottomOnly;
                 hasAnyAggregation = true;
@@ -279,6 +280,15 @@ function reduceNumericMax(values: number[]): number {
     return max;
 }
 
+function calculateMedian(values: number[]): number {
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 1) {
+        return sorted[middle];
+    }
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 /**
  * Format number with thousand separators and appropriate decimal places
  * Format: ### ###.XXXX (space as thousand separator, dot as decimal)
@@ -385,6 +395,7 @@ function calculateAggregation(
         case 'min':
         case 'max':
         case 'stdev':
+        case 'median':
             if (values.length === 0) return '';
             break;
         default:
@@ -404,6 +415,8 @@ function calculateAggregation(
             const mean = values.reduce((a, b) => a + b, 0) / values.length;
             const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
             return formatAggregationNumber(Math.sqrt(variance), typeInfo.hasDecimal, precision);
+        case 'median':
+            return formatAggregationNumber(calculateMedian(values), typeInfo.hasDecimal, precision);
         default:
             return '';
     }
@@ -451,6 +464,7 @@ export function calculateAggregationForRows(
         case 'min':
         case 'max':
         case 'stdev':
+        case 'median':
             if (values.length === 0) return '';
             break;
         default:
@@ -470,6 +484,8 @@ export function calculateAggregationForRows(
             const mean = values.reduce((a, b) => a + b, 0) / values.length;
             const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
             return formatAggregationNumber(Math.sqrt(variance), typeInfo.hasDecimal, precision);
+        case 'median':
+            return formatAggregationNumber(calculateMedian(values), typeInfo.hasDecimal, precision);
         default:
             return '';
     }

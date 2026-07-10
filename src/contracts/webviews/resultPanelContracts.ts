@@ -9,6 +9,10 @@ import type {
     DiskGroupQueryResult,
     DiskQuerySpec,
 } from '../../core/resultDataProvider/types';
+import type {
+    DatabaseAggregationRequest,
+    DatabaseAggregationResult,
+} from '../../results/databaseAggregationSql';
 
 export type ResultPanelExportFormat = 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'xml' | 'sql' | 'markdown' | 'parquet';
 
@@ -52,6 +56,8 @@ export interface ResultPanelViewData {
     maxDataResults: number;
     /** When true, webview may cap streamed rows above DISK_BACKED_WEBVIEW_STREAM_CAP (host-aligned). */
     diskBackedStreamCapEnabled: boolean;
+    /** Bumps whenever active-source result data changes; used to avoid stale hydrate dedup. */
+    dataVersion?: number;
 }
 
 export type ResultPanelWebviewToHostMessage =
@@ -90,6 +96,36 @@ export type ResultPanelWebviewToHostMessage =
     | { command: 'unpinResult'; resultId: string }
     | { command: 'closeSource'; sourceUri: string }
     | { command: 'closeResult'; sourceUri: string; resultSetIndex: number }
+    | { command: 'refreshResult'; sourceUri: string; resultSetIndex: number; limitValue?: string }
+    | { command: 'clearRefreshFailure'; sourceUri: string; resultSetIndex: number }
+    | {
+        command: 'requestDatabaseAggregations';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        aggregations: DatabaseAggregationRequest[];
+        timeoutSeconds?: number;
+        isRetry?: boolean;
+      }
+    | {
+        command: 'requestDatabaseFilterValues';
+        sourceUri: string;
+        resultSetIndex: number;
+        columnIndex: number;
+        requestId: number;
+        querySpec?: DiskQuerySpec;
+        timeoutSeconds?: number;
+        isRetry?: boolean;
+      }
+    | {
+        command: 'applyDatabaseFilter';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        querySpec?: DiskQuerySpec;
+        timeoutSeconds?: number;
+        isRetry?: boolean;
+      }
     | { command: 'closeAllResults'; sourceUri: string }
     | { command: 'cancelQuery'; sourceUri: string; currentRowCounts?: number[] }
     | { command: 'copyToClipboard'; text: string }
@@ -172,6 +208,7 @@ export type ResultPanelHostToWebviewMessage =
         isFirstChunk?: boolean;
         columns?: { name: string; type?: string; scale?: number }[];
         sql?: string;
+        refreshSql?: string;
         executionTimestamp?: number;
         /** Mirrors host isDiskBackedResultsAvailable — webview caps rows only when true. */
         diskBackedStreamCapEnabled?: boolean;
@@ -226,6 +263,31 @@ export type ResultPanelHostToWebviewMessage =
         distinctTruncated?: boolean;
         aggregations?: DiskAggregationResult[];
         groupResult?: DiskGroupQueryResult;
+    }
+    | {
+        command: 'databaseAggregationResult';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        aggregations?: DatabaseAggregationResult[];
+        error?: string;
+    }
+    | {
+        command: 'databaseFilterValuesResult';
+        sourceUri: string;
+        resultSetIndex: number;
+        columnIndex: number;
+        requestId: number;
+        values?: DiskDistinctValue[];
+        truncated?: boolean;
+        error?: string;
+    }
+    | {
+        command: 'databaseFilterApplyResult';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        error?: string;
     };
 
 export type ResultPanelInboundMessage = ResultPanelWebviewToHostMessage;
@@ -260,6 +322,11 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'unpinResult',
   'closeSource',
   'closeResult',
+  'refreshResult',
+  'clearRefreshFailure',
+  'requestDatabaseAggregations',
+  'requestDatabaseFilterValues',
+  'applyDatabaseFilter',
   'closeAllResults',
   'cancelQuery',
   'copyToClipboard',
@@ -301,7 +368,10 @@ export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
   'diskBackedActivate',
   'rowCountUpdate',
   'rowWindow',
-  'diskQueryResult'
+  'diskQueryResult',
+  'databaseAggregationResult',
+  'databaseFilterValuesResult',
+  'databaseFilterApplyResult'
 ] as const satisfies readonly ResultPanelHostToWebviewMessage['command'][];
 
 export const RESULT_PANEL_INBOUND_COMMANDS = RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS;

@@ -4,6 +4,8 @@ export interface DatabaseSqlFunctionSignature {
     name: string;
     parameters: readonly string[];
     description: string;
+    /** Optional usage example shown in completion/signature help tooltips. */
+    example?: string;
 }
 
 export interface DatabaseSqlTypeSpec {

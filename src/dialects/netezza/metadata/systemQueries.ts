@@ -713,6 +713,7 @@ export const NZ_OBJECT_TYPES = {
     SYSTEM_VIEW: 'SYSTEM VIEW',
     SYSTEM_TABLE: 'SYSTEM TABLE',
     SYNONYM: 'SYNONYM',
+    GLOBAL_TEMP_TABLE: 'GLOBAL TEMP TABLE',
 } as const;
 
 /**
@@ -730,6 +731,7 @@ export const NZ_DEFAULT_OBJECT_TYPES: readonly string[] = [
     'SYSTEM TABLE',
     'SYSTEM VIEW',
     'MATERIALIZED VIEW',
+    'GLOBAL TEMP TABLE',
 ] as const;
 
 /** Object types loaded into tableCache during connection prefetch (disk-persisted). */
@@ -741,6 +743,7 @@ export const NZ_PREFETCH_CATALOG_OBJECT_TYPES: readonly string[] = [
     NZ_OBJECT_TYPES.SEQUENCE,
     NZ_OBJECT_TYPES.MATERIALIZED_VIEW,
     NZ_OBJECT_TYPES.SYSTEM_VIEW,
+    NZ_OBJECT_TYPES.GLOBAL_TEMP_TABLE,
 ] as const;
 
 /**

@@ -1069,20 +1069,45 @@ describe("StreamingManager", () => {
 
     it("should cleanup command on timeout error", async () => {
       const cmd = new MockNzCommand();
-      const docUri = "file:///test.sql";
       jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
 
       const timeoutError = new Error("Query timeout expired");
+      const cancelSpy = jest.spyOn(cmd, "cancel");
       jest.spyOn(cmd, "executeReader").mockRejectedValue(timeoutError);
 
-      // The command should not be registered after executeReader fails
-      // because registration happens before executeReader
-      manager.registerCommand(docUri, cmd);
-      expect(manager.isActive(docUri)).toBe(true);
+      const result = await manager.executeAndFetch(
+        mockConnection,
+        "SELECT 1",
+        100,
+        5,
+        "file:///test.sql",
+      );
 
-      // Simulate cleanup that would happen in finally block
-      manager.unregisterCommand(docUri);
-      expect(manager.isActive(docUri)).toBe(false);
+      expect(result.error).toBe(timeoutError);
+      expect(cancelSpy).toHaveBeenCalled();
+      expect(manager.isActive("file:///test.sql")).toBe(false);
+    });
+
+    it("should cancel command when read loop throws a timeout error", async () => {
+      const cmd = new MockNzCommand();
+      jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
+      const mockReader = new MockNzDataReader([[1]]);
+      jest.spyOn(cmd, "executeReader").mockResolvedValue(mockReader);
+      const cancelSpy = jest.spyOn(cmd, "cancel");
+      const closeSpy = jest.spyOn(mockReader, "close").mockResolvedValue(undefined);
+      jest.spyOn(mockReader, "read").mockRejectedValue(new Error("Command execution timeout"));
+
+      const result = await manager.executeAndFetch(
+        mockConnection,
+        "SELECT 1",
+        100,
+        5,
+        "file:///test.sql",
+      );
+
+      expect(result.error?.message).toContain("timeout");
+      expect(cancelSpy).toHaveBeenCalled();
+      expect(closeSpy).toHaveBeenCalled();
     });
 
     it("should return recordsAffected from command", async () => {

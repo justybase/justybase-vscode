@@ -76,4 +76,6 @@ export interface SqlVisitorHost {
   replaceCurrentSelectOutputAliases(value: Set<string>): void;
   popSelectOutputAliases(): Set<string> | undefined;
   getCurrentSelectOutputAliases(): Set<string> | undefined;
+  getDuplicateOutputWarningSuppressionDepth(): number;
+  setDuplicateOutputWarningSuppressionDepth(value: number): void;
 }

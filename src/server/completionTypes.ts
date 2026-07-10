@@ -1,6 +1,7 @@
 import type { CstNode } from "chevrotain";
 import type { Position } from "vscode-languageserver/node";
 import type { DatabaseKind } from "../contracts/database";
+import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { LocalDefinition } from "../providers/types";
 
@@ -85,6 +86,10 @@ export interface CompletionRequestContext {
   variables: string[];
   completionKeywords: readonly string[];
   sqlFunctionNames: readonly string[];
+  sqlFunctionSignatures: ReadonlyMap<
+    string,
+    readonly DatabaseSqlFunctionSignature[]
+  >;
   specialBuiltinValues: readonly string[];
 }
 

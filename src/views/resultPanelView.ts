@@ -15,7 +15,15 @@ import { ResultSet } from '../types';
 import { detectEditSource } from '../results/editSourceDetector';
 import { MessagePackEncoder } from '../core/streaming';
 import { diskBackedStoreRegistry } from '../core/resultDataProvider/diskBackedStoreRegistry';
-import { DISK_BACKED_FIRST_PAGE_SIZE, DISK_BACKED_STREAMING_PREVIEW_ROWS, DISK_BACKED_WEBVIEW_STREAM_CAP, STREAMING_ROW_COUNT_REPORT_INTERVAL, STREAMING_ROW_COUNT_REPORT_INTERVAL_NEAR_THRESHOLD } from '../core/resultDataProvider/types';
+import {
+    DISK_BACKED_FIRST_PAGE_SIZE,
+    DISK_BACKED_STREAMING_PREVIEW_ROWS,
+    DISK_BACKED_WEBVIEW_STREAM_CAP,
+    STREAMING_ROW_COUNT_REPORT_INTERVAL,
+    STREAMING_ROW_COUNT_REPORT_INTERVAL_NEAR_THRESHOLD,
+    type DiskDistinctValue,
+    type DiskQuerySpec,
+} from '../core/resultDataProvider/types';
 import {
     getDiskBackedResultsSettings,
     getEffectiveSpillThreshold,
@@ -26,6 +34,24 @@ import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf
 import { ResultPanelPerformanceStore } from '../services/perf/resultPanelPerformanceStore';
 import { affectsExtensionConfiguration } from '../compatibility/configuration';
 import { getConnectionForDocument } from '../core/queryRunnerHelpers';
+import { ensurePersistentConnectionReadyForQuery } from '../core/connectionReadiness';
+import { runQueryRaw } from '../core/queryRunner';
+import {
+    ALL_ROWS_AGGREGATIONS_TIMEOUT_SECONDS,
+    ALL_ROWS_APPLY_FILTER_TIMEOUT_SECONDS,
+    ALL_ROWS_FILTER_VALUES_TIMEOUT_SECONDS,
+    resolveAllRowsOperationTimeout,
+} from '../results/allRowsOperationTimeouts';
+import { findTrailingLimitClause, replaceTrailingLimitValue } from '../results/refreshSqlLimit';
+import {
+    buildDatabaseAggregationSql,
+    DatabaseAggregationRequest,
+    DatabaseAggregationResult,
+} from '../results/databaseAggregationSql';
+import {
+    buildDatabaseDistinctValuesSql,
+    buildDatabaseFilteredSql,
+} from '../results/databaseFilterSql';
 
 interface HydratePayloadMetrics {
     activeSource: string | null;
@@ -56,6 +82,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     private _performanceStore?: ResultPanelPerformanceStore;
     /** Last row count posted to webview per streaming result set (pre-insert throttling). */
     private _streamingRowCountLastReported = new Map<string, number>();
+    private readonly _context?: vscode.ExtensionContext;
+    private readonly _connectionManager?: ConnectionManager;
 
     private _setResultsFocusContext(focused: boolean): void {
         void vscode.commands.executeCommand('setContext', 'netezza.resultsFocused', focused);
@@ -72,6 +100,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
     constructor(contextOrExtensionUri: vscode.ExtensionContext | vscode.Uri, connectionManager?: ConnectionManager) {
         const context = 'extensionUri' in contextOrExtensionUri ? contextOrExtensionUri : undefined;
+        this._context = context;
+        this._connectionManager = connectionManager;
         this._extensionUri = context ? context.extensionUri : contextOrExtensionUri as vscode.Uri;
         this._stateManager = new ResultStateManager();
         this._exportManager = new ExportManager(this._stateManager.resultsMap);
@@ -94,7 +124,18 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 void this._performanceStore?.recordFirstPaint(metrics);
             },
             onSaveEdits: request => this._handleSaveEdits(request, connectionManager),
-            onGetWebviewUri: uri => this._view ? String(this._view.webview.asWebviewUri(uri)) : String(uri)
+            onGetWebviewUri: uri => this._view ? String(this._view.webview.asWebviewUri(uri)) : String(uri),
+            onRefreshResult: (sourceUri, resultSetIndex, limitValue) => this._handleRefreshResult(sourceUri, resultSetIndex, limitValue),
+            onRequestDatabaseAggregations: (sourceUri, resultSetIndex, aggregations, timeoutSeconds, isRetry) =>
+                this._handleDatabaseAggregations(sourceUri, resultSetIndex, aggregations, timeoutSeconds, isRetry),
+            onRequestDatabaseFilterValues: (sourceUri, resultSetIndex, columnIndex, querySpec, timeoutSeconds, isRetry) =>
+                this._handleDatabaseFilterValues(sourceUri, resultSetIndex, columnIndex, querySpec, timeoutSeconds, isRetry),
+            onApplyDatabaseFilter: (sourceUri, resultSetIndex, querySpec, timeoutSeconds, isRetry) =>
+                this._handleApplyDatabaseFilter(sourceUri, resultSetIndex, querySpec, timeoutSeconds, isRetry),
+            onClearRefreshFailure: (sourceUri, resultSetIndex) => {
+                this._stateManager.clearResultSetRefreshFailure(sourceUri, resultSetIndex);
+                this._updateWebview();
+            },
         };
 
         this._messageHandler = new ResultPanelMessageHandler(
@@ -409,6 +450,299 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
     }
 
+    private async _handleRefreshResult(sourceUri: string, resultSetIndex: number, limitValue?: string): Promise<void> {
+        if (!this._context || !this._connectionManager) {
+            vscode.window.showErrorMessage('Result refresh is not available in this view.');
+            return;
+        }
+
+        if (this._stateManager.executingSources.has(sourceUri)) {
+            vscode.window.showWarningMessage('A query is already running for this SQL Results source.');
+            return;
+        }
+
+        const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
+        const refreshSql = resultSet?.refreshSql?.trim();
+        if (!resultSet || !refreshSql || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
+            vscode.window.showWarningMessage('This result set does not have refresh SQL.');
+            return;
+        }
+
+        const preservedFilterSpec = resultSet.databaseFilterSpec;
+        const baseRefreshSql = this._resolveRefreshSqlLimit(refreshSql, limitValue);
+        if (!baseRefreshSql) {
+            return;
+        }
+        const sqlToExecute = preservedFilterSpec
+            && ((preservedFilterSpec.columnFilters?.length ?? 0) > 0 || preservedFilterSpec.globalSearch?.trim())
+            ? buildDatabaseFilteredSql(baseRefreshSql, resultSet.columns, preservedFilterSpec)
+            : baseRefreshSql;
+
+        const connectionName =
+            this._connectionManager.getConnectionForExecution(sourceUri)
+            || this._connectionManager.getActiveConnectionName()
+            || undefined;
+        if (!connectionName) {
+            vscode.window.showErrorMessage('No database connection. Please connect first.');
+            return;
+        }
+
+        if (!this._stateManager.startResultRefresh(sourceUri, resultSetIndex)) {
+            vscode.window.showWarningMessage('This result set cannot be refreshed.');
+            return;
+        }
+
+        this.setActiveSource(sourceUri);
+        this._revealViewForExecution();
+        this.log(sourceUri, `Refreshing result ${resultSetIndex}...`);
+        const executionId = this.logExecutionStart(sourceUri, sqlToExecute, connectionName);
+        const startTime = Date.now();
+        this._stateManager.clearResultSetRefreshFailure(sourceUri, resultSetIndex);
+
+        try {
+            await ensurePersistentConnectionReadyForQuery(
+                this._connectionManager,
+                sourceUri,
+                connectionName,
+            );
+
+            const refreshed = await runQueryRaw({
+                context: this._context,
+                query: sqlToExecute,
+                silent: true,
+                connectionManager: this._connectionManager,
+                connectionName,
+                documentUri: sourceUri,
+                logCallback: message => this.log(sourceUri, message),
+            });
+
+            const nextResultSet: ResultSet = {
+                ...refreshed,
+                sql: sqlToExecute,
+                refreshSql: baseRefreshSql,
+                databaseFilterSpec: preservedFilterSpec,
+                name: resultSet.name,
+                executionTimestamp: Date.now(),
+            };
+            this._stateManager.replaceResultSet(sourceUri, resultSetIndex, nextResultSet);
+            this.logExecutionEnd(
+                executionId,
+                nextResultSet.totalRowCount ?? nextResultSet.data.length,
+                'success',
+            );
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            this._stateManager.setResultSetRefreshFailure(sourceUri, resultSetIndex, {
+                message,
+                sql: sqlToExecute,
+            });
+            this.logExecutionEnd(executionId, 0, 'error', message);
+            vscode.window.showErrorMessage(`Refresh failed: ${message}`);
+        } finally {
+            this._stateManager.finalizeResultRefresh(sourceUri, resultSetIndex);
+            this._updateWebview();
+            const durationMs = Date.now() - startTime;
+            console.log(formatPerformanceEvent({
+                operation: 'result_panel.refresh_result',
+                duration_ms: durationMs,
+                result: 'ok',
+                payload_size_bucket: 'none',
+                timestamp: new Date().toISOString(),
+                metadata: {
+                    source_uri: sourceUri,
+                    result_set_index: resultSetIndex,
+                },
+            }));
+        }
+    }
+
+    private _resolveRefreshSqlLimit(refreshSql: string, limitValue?: string): string | undefined {
+        if (limitValue === undefined) {
+            return refreshSql;
+        }
+
+        const normalizedLimit = limitValue.trim();
+        if (!/^\d+$/.test(normalizedLimit)) {
+            vscode.window.showErrorMessage('Invalid LIMIT value for refresh.');
+            return undefined;
+        }
+
+        if (!findTrailingLimitClause(refreshSql)) {
+            return refreshSql;
+        }
+
+        return replaceTrailingLimitValue(refreshSql, normalizedLimit);
+    }
+
+    private _resolveConnectionForSource(sourceUri: string): string {
+        const connectionName =
+            this._connectionManager?.getConnectionForExecution(sourceUri)
+            || this._connectionManager?.getActiveConnectionName()
+            || undefined;
+        if (!connectionName) {
+            throw new Error('No database connection. Please connect first.');
+        }
+        return connectionName;
+    }
+
+    private _resolveFilterableResultSet(sourceUri: string, resultSetIndex: number): ResultSet {
+        const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
+        const directSql = this._resolveResultSetDirectSql(resultSet);
+        if (!resultSet || !directSql || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
+            throw new Error('This result set does not have refresh SQL.');
+        }
+        return resultSet;
+    }
+
+    private _resolveResultSetDirectSql(resultSet: ResultSet | undefined): string {
+        return (resultSet?.refreshSql || resultSet?.sql || '').trim();
+    }
+
+    private async _handleDatabaseFilterValues(
+        sourceUri: string,
+        resultSetIndex: number,
+        columnIndex: number,
+        querySpec?: DiskQuerySpec,
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ): Promise<{ values: DiskDistinctValue[]; truncated: boolean }> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Database filtering is not available in this view.');
+        }
+        const resultSet = this._resolveFilterableResultSet(sourceUri, resultSetIndex);
+        const directSql = this._resolveResultSetDirectSql(resultSet);
+        const sql = buildDatabaseDistinctValuesSql(
+            directSql,
+            resultSet.columns,
+            columnIndex,
+            querySpec ?? resultSet.databaseFilterSpec,
+        );
+        const queryResult = await runQueryRaw({
+            context: this._context,
+            query: sql,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName: this._resolveConnectionForSource(sourceUri),
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            maxRows: 10_002,
+            isUserQuery: false,
+            timeoutSeconds: resolveAllRowsOperationTimeout(
+                ALL_ROWS_FILTER_VALUES_TIMEOUT_SECONDS,
+                timeoutSeconds,
+                isRetry,
+            ),
+        });
+        const values = queryResult.data.slice(0, 10_001).map((row) => ({
+            raw: row[0] ?? null,
+            count: typeof row[1] === 'number' ? row[1] : Number(row[1] ?? 0),
+        }));
+        return {
+            values,
+            truncated: queryResult.data.length > 10_001,
+        };
+    }
+
+    private async _handleApplyDatabaseFilter(
+        sourceUri: string,
+        resultSetIndex: number,
+        querySpec?: DiskQuerySpec,
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ): Promise<void> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Database filtering is not available in this view.');
+        }
+        const resultSet = this._resolveFilterableResultSet(sourceUri, resultSetIndex);
+        const baseRefreshSql = this._resolveResultSetDirectSql(resultSet);
+        const nextFilterSpec = querySpec && ((querySpec.columnFilters?.length ?? 0) > 0 || querySpec.globalSearch?.trim())
+            ? querySpec
+            : undefined;
+        const sqlToExecute = buildDatabaseFilteredSql(baseRefreshSql, resultSet.columns, nextFilterSpec);
+        const connectionName = this._resolveConnectionForSource(sourceUri);
+        const refreshed = await runQueryRaw({
+            context: this._context,
+            query: sqlToExecute,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName,
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            isUserQuery: false,
+            timeoutSeconds: resolveAllRowsOperationTimeout(
+                ALL_ROWS_APPLY_FILTER_TIMEOUT_SECONDS,
+                timeoutSeconds,
+                isRetry,
+            ),
+        });
+        const nextResultSet: ResultSet = {
+            ...refreshed,
+            sql: sqlToExecute,
+            refreshSql: baseRefreshSql,
+            databaseFilterSpec: nextFilterSpec,
+            name: resultSet.name,
+            executionTimestamp: Date.now(),
+        };
+        this._stateManager.replaceResultSet(sourceUri, resultSetIndex, nextResultSet);
+    }
+
+    private async _handleDatabaseAggregations(
+        sourceUri: string,
+        resultSetIndex: number,
+        aggregations: DatabaseAggregationRequest[],
+        timeoutSeconds?: number,
+        isRetry?: boolean,
+    ): Promise<DatabaseAggregationResult[]> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Database aggregations are not available in this view.');
+        }
+
+        const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
+        const refreshSql = this._resolveResultSetDirectSql(resultSet);
+        if (!resultSet || !refreshSql || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
+            throw new Error('This result set does not have refresh SQL.');
+        }
+
+        const built = buildDatabaseAggregationSql(refreshSql, resultSet.columns, aggregations, resultSet.databaseFilterSpec);
+        const connectionName =
+            this._connectionManager.getConnectionForExecution(sourceUri)
+            || this._connectionManager.getActiveConnectionName()
+            || undefined;
+        if (!connectionName) {
+            throw new Error('No database connection. Please connect first.');
+        }
+
+        const queryResult = await runQueryRaw({
+            context: this._context,
+            query: built.sql,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName,
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            maxRows: 1,
+            isUserQuery: false,
+            timeoutSeconds: resolveAllRowsOperationTimeout(
+                ALL_ROWS_AGGREGATIONS_TIMEOUT_SECONDS,
+                timeoutSeconds,
+                isRetry,
+            ),
+        });
+
+        const firstRow = queryResult.data[0] ?? [];
+        const valueByColumnName = new Map<string, unknown>();
+        queryResult.columns.forEach((column, index) => {
+            valueByColumnName.set(column.name, firstRow[index]);
+            valueByColumnName.set(column.name.toLowerCase(), firstRow[index]);
+        });
+
+        return built.aliases.map(alias => ({
+            columnIndex: alias.columnIndex,
+            fn: alias.fn,
+            value: valueByColumnName.get(alias.alias) ?? valueByColumnName.get(alias.alias.toLowerCase()) ?? null,
+        }));
+    }
+
     public appendStreamingChunk(
         sourceUri: string,
         _queryIndex: number,
@@ -420,7 +754,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             totalRowsSoFar: number;
             limitReached: boolean;
         },
-        sql: string
+        sql: string,
+        refreshSql?: string,
     ) {
         this._syncActiveSourceWithFocusedEditor();
         const isActiveSource = this._stateManager.activeSourceUri === sourceUri;
@@ -445,7 +780,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             );
         }
 
-        const result = this._stateManager.appendStreamingChunk(sourceUri, chunk, sql);
+        const result = this._stateManager.appendStreamingChunk(sourceUri, chunk, sql, refreshSql);
 
         if (result.type === 'diskBackedActivate' && isActiveSource) {
             this._revealViewForExecution();
@@ -1003,6 +1338,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 queryRowLimit: vscode.workspace.getConfiguration('justybase.query').get<number>('rowLimit', 200_000),
                 maxDataResults: vscode.workspace.getConfiguration('justybase.results').get<number>('maxDataResults', 50),
                 diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled(),
+                dataVersion: activeSource ? this._stateManager.getDataVersion(activeSource) : 0,
             },
             metrics: {
                 activeSource,

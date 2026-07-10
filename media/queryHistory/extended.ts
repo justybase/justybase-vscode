@@ -13,6 +13,7 @@ import type {
 } from './hostContracts.js';
 import { postToHost, vscode, asHostMessage } from './protocol.js';
 import { showParameterDialog as openParameterDialog } from './parameterDialog.js';
+import { iconHistory, iconLoading, iconWarning } from './icons.js';
 import {
     escapeHtml,
     formatDuration,
@@ -20,6 +21,7 @@ import {
     formatTimestamp,
     getStatusInfo,
     gridSqlPreview,
+    renderStatusIndicator,
 } from './utils.js';
 
 declare const TableCore: {
@@ -127,9 +129,11 @@ function buildColumns(): unknown[] {
                 const entry = info.getValue();
                 const si = getStatusInfo(entry.status);
                 const span = document.createElement('span');
-                span.className = 'tcell-status-badge ' + si.className;
-                span.textContent = si.icon;
+                span.className = `tcell-status ${si.className}`;
                 span.title = si.text;
+                const dot = document.createElement('span');
+                dot.className = 'status-dot';
+                span.appendChild(dot);
                 return span;
             }
         }),
@@ -373,9 +377,11 @@ function renderTableRows(): void {
 
             if (col.id === 'statusIcon') {
                 const span = document.createElement('span');
-                span.className = 'tcell-status-badge ' + si.className;
-                span.textContent = si.icon;
+                span.className = 'tcell-status ' + si.className;
                 span.title = si.text;
+                const dot = document.createElement('span');
+                dot.className = 'status-dot';
+                span.appendChild(dot);
                 td.appendChild(span);
             } else if (col.id === 'duration') {
                 const dur = formatDuration(entry.durationMs);
@@ -491,13 +497,17 @@ function renderUiState(state: QueryHistoryUiState): void {
         updateStats(state.stats);
     }
 
-    const icon = state.kind === 'error' ? '⚠️' : state.kind === 'loading' ? '⏳' : '📜';
+    const emptyIcon = state.kind === 'error'
+        ? iconWarning()
+        : state.kind === 'loading'
+            ? iconLoading()
+            : iconHistory();
     const primaryText = state.kind === 'loading' ? state.message : state.title;
     const secondaryText = state.kind === 'loading' ? '' : state.detail;
 
     container.innerHTML = `
         <div class="empty-details" data-state-kind="${escapeHtml(state.kind)}">
-            <div class="empty-details-icon">${icon}</div>
+            <div class="empty-details-icon">${emptyIcon}</div>
             <div>${escapeHtml(primaryText)}</div>
             ${secondaryText ? `<div>${escapeHtml(secondaryText)}</div>` : ''}
             ${state.kind !== 'loading' && state.action ? `<button class="secondary state-action-btn" data-action-type="${escapeHtml(state.action.messageType)}">${escapeHtml(state.action.label)}</button>` : ''}
@@ -563,18 +573,18 @@ function showEntryDetails(entry: QueryHistoryEntryDto): void {
             <div class="detail-execution-info">
                 <div class="detail-execution-item">
                     <span class="execution-label">Status</span>
-                    <span class="execution-value"><span class="status-badge ${statusInfo.className}">${statusInfo.icon}</span> ${statusInfo.text}</span>
+                    <span class="execution-value">${renderStatusIndicator(statusInfo)} ${statusInfo.text}</span>
                 </div>
                 ${durationInfo.text ? `
                 <div class="detail-execution-item">
                     <span class="execution-label">Duration</span>
-                    <span class="execution-value"><span class="duration-badge ${durationInfo.className}">${escapeHtml(durationInfo.text)}</span></span>
+                    <span class="execution-value metric-duration ${durationInfo.className}">${escapeHtml(durationInfo.text)}</span>
                 </div>
                 ` : ''}
                 ${rowsText ? `
                 <div class="detail-execution-item">
                     <span class="execution-label">Rows Affected</span>
-                    <span class="execution-value">📊 ${escapeHtml(rowsText)}</span>
+                    <span class="execution-value">${escapeHtml(rowsText)}</span>
                 </div>
                 ` : ''}
                 ${entry.durationMs ? `
@@ -619,7 +629,7 @@ function showEntryDetails(entry: QueryHistoryEntryDto): void {
 
     const favoriteBtn = document.getElementById('toggleFavoriteBtn');
     if (favoriteBtn) {
-        favoriteBtn.textContent = entry.is_favorite ? '⭐ Unfavorite' : '☆ Favorite';
+        favoriteBtn.textContent = entry.is_favorite ? 'Unfavorite' : 'Favorite';
         favoriteBtn.classList.toggle('favorite', entry.is_favorite);
     }
 }
@@ -630,8 +640,7 @@ function showEmptyDetails(): void {
 
     content.innerHTML = `
         <div class="empty-details">
-            <div class="empty-details-icon">📋</div>
-            <div>Select an entry to view details</div>
+            <div class="empty-details-hint">Select a row to inspect query details</div>
         </div>
     `;
 }

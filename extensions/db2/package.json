@@ -24,9 +24,9 @@
     "url": "https://github.com/justybase/justybase-vscode"
   },
   "keywords": [
+    "SQL",
     "db2",
     "ibm db2",
-    "sql",
     "database"
   ],
   "main": "./dist/extension.js",

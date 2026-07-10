@@ -34,7 +34,23 @@
       ]
     },
     {
-      "match": "(?i)\\b(SELECT|FROM|JOIN|WHERE|CALL|CREATE|TABLE|MERGE|INTO|USING|ON)\\b",
+      "comment": "Built-in VS Code meta.create.sql (CREATE TABLE first identifier capture)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.create.sql"
+        },
+        "2": {
+          "name": "keyword.other.sql"
+        },
+        "5": {
+          "name": "entity.name.function.sql"
+        }
+      },
+      "match": "(?i:^\\s*(create(?:\\s+or\\s+replace)?)\\s+(aggregate|conversion|database|domain|function|group|(unique\\s+)?index|language|operator class|operator|rule|schema|sequence|table|tablespace|trigger|type|user|view)\\s+)(['\"`]?)(\\w+)\\4",
+      "name": "meta.create.sql"
+    },
+    {
+      "match": "(?i)\\b(SELECT|FROM|JOIN|WHERE|CALL|CREATE|TABLE|MERGE|INTO|USING|ON|TEMP|TEMPORARY|GLOBAL|AS|DISTRIBUTE)\\b",
       "name": "keyword.other.sql"
     }
   ]

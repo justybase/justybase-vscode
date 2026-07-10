@@ -10,6 +10,7 @@ import {
     createErrorView,
     createTextContentView,
 } from './alternateViews.js';
+import { updateAllRefreshFailureBanners } from '../refreshFailureBanner.js';
 import { createResultSetGrid } from './tableBuilder.js';
 
 export function renderGrids() {
@@ -86,4 +87,6 @@ export function renderGrids() {
     if (document.body.classList.contains('sidebar-layout')) {
         getResultPanelWindow().renderSidebarSchema?.();
     }
+
+    updateAllRefreshFailureBanners();
 }

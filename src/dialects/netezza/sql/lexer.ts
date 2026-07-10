@@ -251,6 +251,7 @@ export const Unbounded = createToken({ name: 'Unbounded', pattern: /UNBOUNDED/i,
 export const Preceding = createToken({ name: 'Preceding', pattern: /PRECEDING/i, longer_alt: Identifier })
 export const Following = createToken({ name: 'Following', pattern: /FOLLOWING/i, longer_alt: Identifier })
 export const Filter = createToken({ name: 'Filter', pattern: /FILTER/i, longer_alt: Identifier })
+export const Within = createToken({ name: 'Within', pattern: /WITHIN/i, longer_alt: Identifier })
 export const Exclude = createToken({ name: 'Exclude', pattern: /EXCLUDE/i, longer_alt: Identifier })
 export const Ties = createToken({ name: 'Ties', pattern: /TIES/i, longer_alt: Identifier })
 
@@ -548,6 +549,7 @@ export const allTokens = [
     RefTable,
     Varargs,
     Nzplsql,
+    Within,
     With,
     Final,
     Recursive,

@@ -34,7 +34,7 @@ export interface ExcelExportMetadata {
 }
 
 export interface ExportRequest extends ExportMetadata {
-    format: 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'xml' | 'sql' | 'markdown' | 'parquet';
+    format: 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'xml' | 'sql' | 'markdown' | 'parquet' | 'xpt';
 }
 
 export interface HydratedExportItem {
@@ -68,7 +68,8 @@ export class ExportManager {
             xml: 'xml',
             sql: 'sql',
             markdown: 'md',
-            parquet: 'parquet'
+            parquet: 'parquet',
+            xpt: 'xpt',
         };
 
         const uri = await vscode.window.showSaveDialog({
@@ -94,6 +95,19 @@ export class ExportManager {
                             : columns.map((_, i) => i);
                         const filteredRows = resolveExportRows(resultSet, rowIndices, visibleColumnIndices);
                         await exportStructuredToParquet([{
+                            columns: visibleColumnIndices.map(i => columns[i]),
+                            rows: filteredRows,
+                            sql: resultSet.sql || '',
+                            name: resultSet.name || 'Result'
+                        }], uri.fsPath);
+                    } else if (format === 'xpt') {
+                        const { exportStructuredToXpt } = await import('../export/xptExporter');
+                        const columns = resultSet.columns.map(c => ({ name: c.name, type: c.type, scale: c.scale }));
+                        const visibleColumnIndices = columnIds
+                            ? columnIds.map(id => parseInt(id)).filter(idx => !isNaN(idx) && idx >= 0 && idx < columns.length)
+                            : columns.map((_, i) => i);
+                        const filteredRows = resolveExportRows(resultSet, rowIndices, visibleColumnIndices);
+                        await exportStructuredToXpt([{
                             columns: visibleColumnIndices.map(i => columns[i]),
                             rows: filteredRows,
                             sql: resultSet.sql || '',
@@ -358,7 +372,8 @@ export class ExportManager {
             { label: 'XML', description: 'Extensible Markup Language', id: 'xml' },
             { label: 'SQL INSERT', description: 'SQL Insert Statements', id: 'sql' },
             { label: 'Markdown', description: 'Markdown Table', id: 'markdown' },
-            { label: 'Parquet', description: 'Apache Parquet Columnar Format', id: 'parquet' }
+            { label: 'Parquet', description: 'Apache Parquet Columnar Format', id: 'parquet' },
+            { label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5', id: 'xpt' }
         ];
 
         const selectedFormat = await vscode.window.showQuickPick(formatItems, { placeHolder: 'Select export format' });
@@ -411,6 +426,12 @@ export class ExportManager {
                 );
             } else if (formatId === 'parquet') {
                 await this._handleParquetExport(
+                    exportData,
+                    resultSet,
+                    destinationId as 'file' | 'temp' | 'open' | 'clipboard'
+                );
+            } else if (formatId === 'xpt') {
+                await this._handleXptExport(
                     exportData,
                     resultSet,
                     destinationId as 'file' | 'temp' | 'open' | 'clipboard'
@@ -532,6 +553,65 @@ export class ExportManager {
         if (destination === 'temp') {
             if (os.platform() === 'win32') {
                 const { copyFileToClipboard } = await import('../export/parquetExporter');
+                const success = await copyFileToClipboard(targetPath);
+                if (success) {
+                    vscode.window.showInformationMessage(`Exported and file copied to clipboard: ${targetPath}`);
+                } else {
+                    vscode.window.showInformationMessage(`Exported to ${targetPath} (Clipboard copy failed)`);
+                }
+            } else {
+                await vscode.env.clipboard.writeText(targetPath);
+                vscode.window.showInformationMessage(`Exported to temp. Path copied: ${targetPath}`);
+            }
+        } else if (destination === 'open') {
+            vscode.env.openExternal(vscode.Uri.file(targetPath));
+            vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
+        } else {
+            vscode.window.showInformationMessage(`Exported to ${targetPath}`);
+        }
+    }
+
+    private async _handleXptExport(
+        _exportData: ExportMetadata,
+        resultSet: ResultSet,
+        destination: 'file' | 'temp' | 'open' | 'clipboard'
+    ): Promise<void> {
+        const ext = 'xpt';
+
+        if (destination === 'clipboard') {
+            vscode.window.showWarningMessage('Clipboard is not supported for SAS XPORT format. Saving to file instead.');
+            destination = 'temp';
+        }
+
+        let targetPath: string;
+        if (destination === 'file') {
+            const uri = await vscode.window.showSaveDialog({
+                filters: { 'SAS XPORT Files': [ext] },
+                saveLabel: 'Export SAS XPORT'
+            });
+            if (!uri) return;
+            targetPath = uri.fsPath;
+        } else {
+            targetPath = path.join(os.tmpdir(), `netezza_export_${Date.now()}.${ext}`);
+        }
+
+        const { exportStructuredToXpt } = await import('../export/xptExporter');
+        const visibleColumnIndices = _exportData.columnIds
+            ? _exportData.columnIds
+                .map(id => Number.parseInt(id, 10))
+                .filter(idx => Number.isInteger(idx) && idx >= 0 && idx < resultSet.columns.length)
+            : resultSet.columns.map((_, i) => i);
+        const rows = resolveExportRows(resultSet, _exportData.rowIndices, visibleColumnIndices);
+        await exportStructuredToXpt([{
+            columns: visibleColumnIndices.map(i => resultSet.columns[i]),
+            rows,
+            sql: resultSet.sql || '',
+            name: resultSet.name || 'Result'
+        }], targetPath, destination === 'temp');
+
+        if (destination === 'temp') {
+            if (os.platform() === 'win32') {
+                const { copyFileToClipboard } = await import('../export/xptExporter');
                 const success = await copyFileToClipboard(targetPath);
                 if (success) {
                     vscode.window.showInformationMessage(`Exported and file copied to clipboard: ${targetPath}`);

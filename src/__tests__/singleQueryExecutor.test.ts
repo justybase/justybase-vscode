@@ -67,6 +67,9 @@ jest.mock('../core/queryRunnerUtils', () => ({
     }),
     logOutput: jest.fn(),
     isConnectionBrokenError: jest.fn().mockReturnValue(false),
+    isBusyConnectionError: jest.fn((error: unknown) => (
+        error instanceof Error && error.message.includes('Connection is already executing a command')
+    )),
     resolveConnectionName: jest.fn().mockReturnValue('testConn'),
 }));
 
@@ -84,6 +87,15 @@ jest.mock('../core/queryBatchExecutor', () => {
             readFile: jest.fn(),
         })),
         getQueryConfig: jest.fn().mockReturnValue({ queryTimeout: 1800, rowLimit: 200000 }),
+    };
+});
+
+const mockWaitForPersistentConnectionReady = jest.fn().mockResolvedValue(undefined);
+jest.mock('../core/connectionReadiness', () => {
+    const actual = jest.requireActual('../core/connectionReadiness');
+    return {
+        ...actual,
+        waitForPersistentConnectionReady: mockWaitForPersistentConnectionReady,
     };
 });
 
@@ -516,6 +528,34 @@ describe('singleQueryExecutor', () => {
             ).rejects.toThrow('query failed');
         });
 
+        it('should not await connection recovery before throwing executeAndFetch errors', async () => {
+            let resolveWait: (() => void) | undefined;
+            mockWaitForPersistentConnectionReady.mockReturnValueOnce(
+                new Promise<void>((resolve) => {
+                    resolveWait = resolve;
+                }),
+            );
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [],
+                error: new Error('Command execution timeout'),
+            });
+
+            await expect(
+                executeRawQuery(
+                    mockConnManager,
+                    'testConn',
+                    true,
+                    'file:///test.sql',
+                    'SELECT 1',
+                    undefined,
+                    logger,
+                ),
+            ).rejects.toThrow('Command execution timeout');
+
+            expect(mockWaitForPersistentConnectionReady).toHaveBeenCalled();
+            resolveWait?.();
+        });
+
         it('should close connection when shouldCloseConnection is true', async () => {
             mockGetConnectionForDocument.mockResolvedValue({
                 connection: mockConn,
@@ -577,6 +617,55 @@ describe('singleQueryExecutor', () => {
             // The 3rd argument to executeAndFetch is the rowLimit/maxRows value
             const callArgs = mockExecuteAndFetch.mock.calls[0];
             expect(callArgs[2]).toBe(50); // maxRows should be used instead of default rowLimit
+        });
+
+        it('should pass timeoutSeconds override to executeAndFetch when provided', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
+                error: null,
+            });
+
+            await executeRawQuery(
+                mockConnManager, 'testConn', true, undefined,
+                'SELECT 1', undefined, logger, {}, 5,
+            );
+
+            const callArgs = mockExecuteAndFetch.mock.calls[0];
+            expect(callArgs[3]).toBe(5);
+        });
+
+        it('should use global queryTimeout when timeoutSeconds override is omitted', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
+                error: null,
+            });
+
+            await executeRawQuery(
+                mockConnManager, 'testConn', true, undefined,
+                'SELECT 1', undefined, logger,
+            );
+
+            const callArgs = mockExecuteAndFetch.mock.calls[0];
+            expect(callArgs[3]).toBe(1800);
+        });
+    });
+
+    describe('runQueryRaw timeout override', () => {
+        it('should forward timeoutSeconds from options to executeAndFetch', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
+                error: null,
+            });
+
+            await runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 1',
+                connectionManager: mockConnManager,
+                connectionName: 'testConn',
+                timeoutSeconds: 7,
+            });
+
+            expect(mockExecuteAndFetch.mock.calls[0][3]).toBe(7);
         });
     });
 

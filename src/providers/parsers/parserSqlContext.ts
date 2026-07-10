@@ -108,7 +108,7 @@ export function buildSemanticScopeFromParseResult(
       : undefined;
 
   if (cst) {
-    const collector = getOrCreateParserSqlContextCollector(cst);
+    const collector = getOrCreateParserSqlContextCollector(cst, databaseKind);
 
     const localDefinitions = collector.getLocalDefinitions();
     const visibleLocalDefinitions = filterVisibleLocalDefinitions(

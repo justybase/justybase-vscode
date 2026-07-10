@@ -481,6 +481,70 @@ JOIN JUST_DATA.ADMIN.DEPARTMENT B`;
     });
   });
 
+  describe("SQL049: repeated projected column names", () => {
+    it("should warn when SELECT * expands colliding CTE column names", () => {
+      const validator = new SqlValidator();
+      const sql = `WITH CTE1 AS (
+  SELECT 1 AS DATEKEY, 2 AS OTHER_COLUMN
+), CTE2 AS (
+  SELECT 3 AS DATEKEY
+)
+SELECT *
+FROM CTE1
+JOIN CTE2 ON 1 = 1;`;
+
+      const result = validator.validate(sql);
+      const warning = result.warnings.find((item) => item.code === "SQL049");
+
+      expect(result.errors).toHaveLength(0);
+      expect(warning?.message).toContain("'DATEKEY'");
+      expect(warning?.position.offset).toBe(sql.lastIndexOf("*"));
+    });
+
+    it("should warn for duplicate explicit projection names", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(
+        "SELECT 1 AS DATEKEY, 2 AS DATEKEY;",
+      );
+
+      expect(result.warnings.some((item) => item.code === "SQL049")).toBe(true);
+    });
+
+    it("should not warn when colliding source columns receive unique aliases", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(`WITH CTE1 AS (SELECT 1 AS DATEKEY),
+CTE2 AS (SELECT 2 AS DATEKEY)
+SELECT CTE1.DATEKEY, CTE2.DATEKEY AS CTE2_DATEKEY
+FROM CTE1
+JOIN CTE2 ON 1 = 1;`);
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some((item) => item.code === "SQL049")).toBe(false);
+    });
+
+    it("should not warn for a qualified star from only one joined source", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(`WITH CTE1 AS (SELECT 1 AS DATEKEY),
+CTE2 AS (SELECT 2 AS DATEKEY)
+SELECT CTE1.*
+FROM CTE1
+JOIN CTE2 ON 1 = 1;`);
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some((item) => item.code === "SQL049")).toBe(false);
+    });
+
+    it("should keep SQL023 as the CTE-specific duplicate diagnostic", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(
+        "WITH CTE1 AS (SELECT 1 AS ID, 2 AS ID) SELECT CTE1.ID FROM CTE1;",
+      );
+
+      expect(result.errors.some((item) => item.code === "SQL023")).toBe(true);
+      expect(result.warnings.some((item) => item.code === "SQL049")).toBe(false);
+    });
+  });
+
   describe("SQL021: aggregate in WHERE clause", () => {
     it("should report error for SUM in WHERE", () => {
       const validator = new SqlValidator();

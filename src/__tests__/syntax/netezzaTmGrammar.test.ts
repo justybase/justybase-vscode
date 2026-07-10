@@ -165,6 +165,185 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     expect(hasScope(table, /table-name/)).toBe(true);
   });
 
+  it.each([
+    [
+      'CREATE TABLE',
+      'CREATE TABLE JUST_DATA.ADMIN.TEST2 AS (SELECT * FROM DIMDATE);',
+    ],
+    [
+      'CREATE TEMP TABLE',
+      'CREATE TEMP TABLE JUST_DATA.ADMIN.TEST_TMP AS (SELECT * FROM DIMDATE);',
+    ],
+    [
+      'CREATE GLOBAL TEMP TABLE',
+      'CREATE GLOBAL TEMP TABLE JUST_DATA.ADMIN.TEST1 AS (SELECT * FROM DIMDATE) DISTRIBUTE ON RANDOM;',
+    ],
+  ])(
+    'highlights %s CTAS qualified 3-part names (P0) instead of meta.create entity.name.function',
+    async (_label, sql) => {
+      const tokens = await tokenizeSql(sql);
+      const db = findTokenContaining(tokens, 'JUST_DATA', { onlyActiveCode: true });
+      const schema = findTokenContaining(tokens, 'ADMIN', { onlyActiveCode: true });
+      const table = findTokenContaining(tokens, 'TEST', { onlyActiveCode: true });
+
+      expect(hasScope(db, /constant\.other\.database-name\.sql/)).toBe(true);
+      expect(hasScope(schema, /constant\.other\.schema-name\.sql/)).toBe(true);
+      expect(hasScope(table, /constant\.other\.table-name\.sql/)).toBe(true);
+      expect(hasScope(db, /entity\.name\.function\.sql/)).toBe(false);
+    },
+  );
+
+  it('highlights CREATE TABLE DB..TABLE notation (P0.2)', async () => {
+    const sql = 'CREATE TABLE JUST_DATA..WORKING_SET AS (SELECT 1);';
+    const tokens = await tokenizeSql(sql);
+    const db = findTokenContaining(tokens, 'JUST_DATA', { onlyActiveCode: true });
+    const table = findTokenContaining(tokens, 'WORKING_SET', { onlyActiveCode: true });
+
+    expect(hasScope(db, /constant\.other\.database-name\.sql/)).toBe(true);
+    expect(hasScope(table, /constant\.other\.table-name\.sql/)).toBe(true);
+    expect(hasScope(db, /entity\.name\.function\.sql/)).toBe(false);
+  });
+
+  it('highlights CREATE TABLE DB..TABLE with user-reported multiline CTAS (P0.2)', async () => {
+    const sql = 'CREATE TABLE JUST_DATA..TEST2 AS (\n    SELECT * FROM DIMDATE\n);';
+    const tokens = await tokenizeSql(sql);
+    const db = findTokenContaining(tokens, 'JUST_DATA', { onlyActiveCode: true });
+    const table = findTokenContaining(tokens, 'TEST2', { onlyActiveCode: true });
+
+    expect(hasScope(db, /constant\.other\.database-name\.sql/)).toBe(true);
+    expect(hasScope(table, /constant\.other\.table-name\.sql/)).toBe(true);
+    expect(hasScope(db, /entity\.name\.function\.sql/)).toBe(false);
+  });
+
+  it('highlights CREATE TEMP TABLE single unqualified name (P0.4/P0d)', async () => {
+    const sql = 'CREATE TEMP TABLE TEST1 AS (\n    SELECT * FROM DIMDATE\n) DISTRIBUTE';
+    const tokens = await tokenizeSql(sql);
+    const table = findTokenContaining(tokens, 'TEST1', { onlyActiveCode: true });
+
+    expect(hasScope(table, /constant\.other\.table-name\.sql/)).toBe(true);
+  });
+
+  it.each([
+    {
+      label: 'unqualified table',
+      sql: 'CREATE TABLE TEST0 AS (SELECT 1);',
+      names: { table: 'TEST0' },
+      modifiers: [],
+    },
+    {
+      label: 'temporary unqualified table',
+      sql: 'CREATE TEMP TABLE TEST1 AS (SELECT 1);',
+      names: { table: 'TEST1' },
+      modifiers: ['TEMP'],
+    },
+    {
+      label: 'temporary long-form unqualified table',
+      sql: 'CREATE TEMPORARY TABLE TEST1_LONG AS (SELECT 1);',
+      names: { table: 'TEST1_LONG' },
+      modifiers: ['TEMPORARY'],
+    },
+    {
+      label: 'database double-dot table',
+      sql: 'CREATE TABLE JUST_DATA..TEST2 AS (SELECT 1);',
+      names: { database: 'JUST_DATA', table: 'TEST2' },
+      modifiers: [],
+    },
+    {
+      label: 'three-part table',
+      sql: 'CREATE TABLE JUST_DATA.ADMIN.TEST3 AS (SELECT 1);',
+      names: { database: 'JUST_DATA', schema: 'ADMIN', table: 'TEST3' },
+      modifiers: [],
+    },
+    {
+      label: 'global temporary unqualified table',
+      sql: 'CREATE GLOBAL TEMP TABLE TEST11 AS (SELECT 1);',
+      names: { table: 'TEST11' },
+      modifiers: ['GLOBAL', 'TEMP'],
+    },
+    {
+      label: 'global temporary three-part table',
+      sql: 'CREATE GLOBAL TEMP TABLE JUST_DATA.ADMIN.TEST12 AS (SELECT 1);',
+      names: { database: 'JUST_DATA', schema: 'ADMIN', table: 'TEST12' },
+      modifiers: ['GLOBAL', 'TEMP'],
+    },
+  ])('scopes the CREATE TABLE prefix and target for $label CTAS', async ({ sql, names, modifiers }) => {
+    const tokens = await tokenizeSql(sql);
+    const create = findTokenContaining(tokens, 'CREATE', { onlyActiveCode: true });
+    const tableKeyword = findTokenContaining(tokens, 'TABLE', { onlyActiveCode: true });
+
+    expect(hasScope(create, /keyword\.other\.ddl\.netezza/)).toBe(true);
+    expect(hasScope(tableKeyword, /keyword\.other\.ddl\.netezza/)).toBe(true);
+
+    for (const modifier of modifiers) {
+      const token = findTokenContaining(tokens, modifier, { onlyActiveCode: true });
+      expect(hasScope(token, /storage\.modifier\.netezza/)).toBe(true);
+    }
+
+    for (const [kind, identifier] of Object.entries(names)) {
+      const token = findTokenContaining(tokens, identifier, { onlyActiveCode: true });
+      expect(hasScope(token, new RegExp(`constant\\.other\\.${kind}-name\\.sql`))).toBe(true);
+    }
+  });
+
+  it.each([
+    ['OR REPLACE', 'CREATE OR REPLACE TABLE REPLACED_TABLE AS (SELECT 1);'],
+    ['IF NOT EXISTS', 'CREATE TABLE IF NOT EXISTS NEW_TABLE AS (SELECT 1);'],
+  ])('scopes the optional %s CREATE TABLE clause as DDL', async (clause, sql) => {
+    const tokens = await tokenizeSql(sql);
+    const token = findTokenContaining(tokens, clause, { onlyActiveCode: true });
+
+    expect(hasScope(token, /keyword\.other\.ddl\.netezza/)).toBe(true);
+  });
+
+  it('highlights GROOM TABLE single unqualified name (P0g.4/P0gd)', async () => {
+    const sql = 'GROOM TABLE DIMACCOUNT2 VERSIONS;';
+    const tokens = await tokenizeSql(sql);
+    const table = findTokenContaining(tokens, 'DIMACCOUNT2', { onlyActiveCode: true });
+
+    expect(hasScope(table, /constant\.other\.table-name\.sql/)).toBe(true);
+  });
+
+  it('highlights GROOM TABLE DB..TABLE notation (P0g.2)', async () => {
+    const sql = 'GROOM TABLE JUST_DATA..DIMACCOUNT2 VERSIONS;';
+    const tokens = await tokenizeSql(sql);
+    const db = findTokenContaining(tokens, 'JUST_DATA', { onlyActiveCode: true });
+    const table = findTokenContaining(tokens, 'DIMACCOUNT2', { onlyActiveCode: true });
+
+    expect(hasScope(db, /constant\.other\.database-name\.sql/)).toBe(true);
+    expect(hasScope(table, /constant\.other\.table-name\.sql/)).toBe(true);
+  });
+
+  it.each([
+    {
+      label: 'unqualified table',
+      sql: 'GROOM TABLE DIMACCOUNT2 VERSIONS;',
+      names: { table: 'DIMACCOUNT2' },
+    },
+    {
+      label: 'database double-dot table',
+      sql: 'GROOM TABLE JUST_DATA..DIMACCOUNT2 VERSIONS;',
+      names: { database: 'JUST_DATA', table: 'DIMACCOUNT2' },
+    },
+    {
+      label: 'three-part table',
+      sql: 'GROOM TABLE JUST_DATA.ADMIN.DIMACCOUNT2 VERSIONS;',
+      names: { database: 'JUST_DATA', schema: 'ADMIN', table: 'DIMACCOUNT2' },
+    },
+  ])('scopes the GROOM TABLE prefix and target for $label', async ({ sql, names }) => {
+    const tokens = await tokenizeSql(sql);
+    const groom = findTokenContaining(tokens, 'GROOM', { onlyActiveCode: true });
+    const tableKeyword = findTokenContaining(tokens, 'TABLE', { onlyActiveCode: true });
+
+    expect(hasScope(groom, /keyword\.other\.ddl\.netezza/)).toBe(true);
+    expect(hasScope(tableKeyword, /keyword\.other\.ddl\.netezza/)).toBe(true);
+
+    for (const [kind, identifier] of Object.entries(names)) {
+      const token = findTokenContaining(tokens, identifier, { onlyActiveCode: true });
+      expect(hasScope(token, new RegExp(`constant\\.other\\.${kind}-name\\.sql`))).toBe(true);
+      expect(hasScope(token, /meta\.ddl\.table-target\.netezza/)).toBe(true);
+    }
+  });
+
   it('still highlights schema.table in active FROM/JOIN SQL (P17)', async () => {
     const sql = 'JOIN ADMIN.DIMACCOUNT a ON 1=1';
     const tokens = await tokenizeSql(sql);

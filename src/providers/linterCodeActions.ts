@@ -392,10 +392,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
             }
 
             if (code === 'NZ007') {
-                const action = this.createKeywordCaseFix(document, diagnostic);
-                if (action) {
-                    actions.push(action);
-                }
+                continue;
             }
 
             if (code === 'NZ001') {
@@ -507,11 +504,16 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
             if (templateActions.length > 0) {
                 actions.push(...templateActions);
             }
+        }
 
-            const copilotFix = this.createCopilotFixAction(document, diagnostic);
-            if (copilotFix) {
-                actions.push(copilotFix);
-            }
+        const keywordCaseFix = this.createKeywordCaseFixForDiagnostics(document, context.diagnostics);
+        if (keywordCaseFix) {
+            actions.push(keywordCaseFix);
+        }
+
+        const copilotFix = this.createCopilotFixAction(document, range, context.diagnostics, isTestMode);
+        if (copilotFix) {
+            actions.push(copilotFix);
         }
 
         actions.push(...this.createFixAllSafeActions(document, range, context.diagnostics));
@@ -525,7 +527,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
     private getStatementBoundaryForRange(
         document: vscode.TextDocument,
         range: vscode.Range | vscode.Selection
-    ): { startOffset: number; endOffset: number } | undefined {
+    ): { startOffset: number; endOffset: number; sql: string } | undefined {
         try {
             const candidate = range as { start?: vscode.Position };
             if (!candidate?.start) {
@@ -540,7 +542,8 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
 
             return {
                 startOffset: statement.start,
-                endOffset: statement.end
+                endOffset: statement.end,
+                sql: statement.sql,
             };
         } catch {
             return undefined;
@@ -749,14 +752,47 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         return actions;
     }
 
-    private createKeywordCaseFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction | undefined {
-        const edit = this.buildSafeFixEdit(document, diagnostic, 'NZ007');
-        if (!edit) {
+    private getUniqueDiagnosticsByRange(diagnostics: readonly vscode.Diagnostic[]): vscode.Diagnostic[] {
+        return Array.from(
+            new Map(
+                diagnostics.map(diagnostic => {
+                    const range = diagnostic.range;
+                    const key = `${range.start.line}:${range.start.character}:${range.end.line}:${range.end.character}`;
+                    return [key, diagnostic] as const;
+                }),
+            ).values(),
+        );
+    }
+
+    private createKeywordCaseFixForDiagnostics(
+        document: vscode.TextDocument,
+        diagnostics: readonly vscode.Diagnostic[],
+    ): vscode.CodeAction | undefined {
+        const nz007Diagnostics = this.getUniqueDiagnosticsByRange(
+            diagnostics.filter(diagnostic => this.getDiagnosticCode(diagnostic) === 'NZ007'),
+        );
+        if (nz007Diagnostics.length === 0) {
+            return undefined;
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        const orderedDiagnostics = nz007Diagnostics
+            .slice()
+            .sort((left, right) => document.offsetAt(right.range.start) - document.offsetAt(left.range.start));
+
+        let appliedCount = 0;
+        for (const diagnostic of orderedDiagnostics) {
+            if (this.applySafeFixToWorkspaceEdit(document, diagnostic, edit)) {
+                appliedCount++;
+            }
+        }
+
+        if (appliedCount === 0) {
             return undefined;
         }
 
         const action = new vscode.CodeAction(ERROR_CODE_ACTIONS.NZ007.title, vscode.CodeActionKind.QuickFix);
-        action.diagnostics = [diagnostic];
+        action.diagnostics = orderedDiagnostics;
         action.isPreferred = true;
         action.edit = edit;
         return action;
@@ -2023,24 +2059,50 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         return 'T1';
     }
 
-    private createCopilotFixAction(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction | undefined {
-        const code = typeof diagnostic.code === 'string' ? diagnostic.code : String(diagnostic.code);
-        if (!code || (!code.startsWith('NZ') && !code.startsWith('SQL') && !code.startsWith('NZP'))) {
+    private isCopilotEligibleDiagnostic(
+        diagnostic: vscode.Diagnostic,
+        isTestMode: boolean,
+    ): boolean {
+        const code = this.getDiagnosticCode(diagnostic);
+        if (!code) {
+            return false;
+        }
+        if (!isTestMode && LSP_SERVED_CODES.has(code)) {
+            return false;
+        }
+        return code.startsWith('NZ') || code.startsWith('SQL') || code.startsWith('NZP');
+    }
+
+    private createCopilotFixAction(
+        document: vscode.TextDocument,
+        range: vscode.Range | vscode.Selection,
+        diagnostics: readonly vscode.Diagnostic[],
+        isTestMode: boolean,
+    ): vscode.CodeAction | undefined {
+        const eligibleDiagnostics = diagnostics.filter(diagnostic =>
+            this.isCopilotEligibleDiagnostic(diagnostic, isTestMode)
+        );
+        if (eligibleDiagnostics.length === 0) {
             return undefined;
         }
 
-        const statementBoundary = this.getStatementBoundary(document, diagnostic);
-        const sqlContext = statementBoundary?.sql || document.getText(diagnostic.range);
+        const statementBoundary = this.getStatementBoundaryForRange(document, range)
+            ?? this.getStatementBoundary(document, eligibleDiagnostics[0]);
+        const sqlContext = statementBoundary?.sql
+            ?? document.getText(eligibleDiagnostics[0].range);
         if (!sqlContext.trim()) {
             return undefined;
         }
 
+        const uniqueMessages = Array.from(new Set(eligibleDiagnostics.map(diagnostic => diagnostic.message)));
+        const combinedMessage = uniqueMessages.join('\n');
+
         const action = new vscode.CodeAction('Fix with Copilot', vscode.CodeActionKind.QuickFix);
-        action.diagnostics = [diagnostic];
+        action.diagnostics = eligibleDiagnostics;
         action.command = {
             title: 'Fix with Copilot',
             command: 'netezza.fixSqlError',
-            arguments: [diagnostic.message, sqlContext]
+            arguments: [combinedMessage, sqlContext],
         };
         return action;
     }

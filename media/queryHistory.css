@@ -1,25 +1,44 @@
-/* Query History View Styles */
+/* Query History — card-based professional layout */
+
+:root {
+    --bg: var(--vscode-editor-background, #0b0d12);
+    --s1: var(--vscode-sideBar-background, #11141c);
+    --s2: var(--vscode-editorGroupHeader-tabsBackground, #181c27);
+    --s3: var(--vscode-widget-background, #1e2332);
+    --bd: var(--vscode-panel-border, #232840);
+    --bd2: var(--vscode-widget-border, #2d3350);
+    --ac: var(--vscode-focusBorder, #3b82f6);
+    --ac-lo: rgba(59, 130, 246, 0.12);
+    --tx: var(--vscode-editor-foreground, #d1d9f0);
+    --tx2: var(--vscode-descriptionForeground, #6b7599);
+    --gr: var(--vscode-testing-iconPassed, #22c55e);
+    --am: var(--vscode-editorWarning-foreground, #f59e0b);
+    --rd: var(--vscode-errorForeground, #ef4444);
+    --mono: var(--vscode-editor-font-family, 'JetBrains Mono', monospace);
+}
 
 body {
     padding: 0;
     margin: 0;
     font-family: var(--vscode-font-family);
-    font-size: var(--vscode-font-size);
-    color: var(--vscode-foreground);
-    background-color: var(--vscode-editor-background);
+    font-size: 12px;
+    color: var(--tx);
+    background-color: var(--bg);
     height: 100vh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 
+/* ── Toolbar ── */
 .toolbar {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 8px;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    background-color: var(--vscode-sideBar-background);
+    gap: 5px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--bd);
+    background-color: var(--s1);
+    flex-shrink: 0;
 }
 
 .toolbar-top {
@@ -35,25 +54,27 @@ body {
     flex-wrap: wrap;
 }
 
-.toolbar-buttons button {
-    padding: 2px 5px;
-    font-size: 10px;
-    line-height: 14px;
-}
-
 .stats {
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+    color: var(--tx2);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 input[type="search"] {
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
-    padding: 4px 8px;
-    font-size: 12px;
+    padding: 5px 10px;
+    font-size: 11px;
     flex: 1;
-    min-width: 150px;
+    min-width: 100px;
+    border-radius: 3px;
+}
+
+input[type="search"]:focus {
+    outline: 1px solid var(--ac);
+    border-color: var(--ac);
 }
 
 button {
@@ -61,185 +82,321 @@ button {
     align-items: center;
     justify-content: center;
     gap: 4px;
-    background-color: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
-    border: 1px solid var(--vscode-contrastBorder, transparent);
-    padding: 2px 6px;
+    background-color: transparent;
+    color: var(--tx2);
+    border: 1px solid var(--bd2);
+    padding: 3px 8px;
     cursor: pointer;
-    border-radius: 2px;
+    border-radius: 3px;
     font-family: var(--vscode-font-family);
     font-size: 11px;
     line-height: 16px;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
 button:hover {
     background-color: var(--vscode-button-secondaryHoverBackground);
+    color: var(--tx);
+    border-color: var(--bd);
 }
 
-/* Primary button override */
 button.primary {
     background-color: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
+    border-color: transparent;
 }
 
 button.primary:hover {
     background-color: var(--vscode-button-hoverBackground);
+    color: var(--vscode-button-foreground);
 }
 
+.toolbar-buttons button {
+    font-size: 10px;
+    padding: 3px 7px;
+}
+
+/* ── History list ── */
 .history-container {
     overflow-y: auto;
     flex-grow: 1;
-    /* height: calc(100vh - 50px); Remove fixed height calc */
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .history-item {
-    padding: 12px;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    cursor: pointer;
+    display: flex;
+    background: var(--s2);
+    border: 1px solid var(--bd);
+    border-radius: 4px;
+    overflow: hidden;
+    min-height: 72px;
+    flex-shrink: 0;
 }
 
 .history-item:hover {
-    background-color: var(--vscode-list-hoverBackground);
+    border-color: var(--ac);
+    background: color-mix(in srgb, var(--s2) 85%, var(--ac) 15%);
 }
 
-.history-item:hover .action-btn {
-    opacity: 0.7;
+.history-status-rail {
+    width: 3px;
+    flex-shrink: 0;
+    background: var(--gr);
 }
 
-.history-item-header {
+.history-item.status-error .history-status-rail {
+    background: var(--rd);
+}
+
+.history-item.status-cancelled .history-status-rail {
+    background: var(--am);
+}
+
+.history-body {
+    flex: 1;
+    min-width: 0;
     display: flex;
+    flex-direction: column;
+    padding: 7px 10px 6px;
+    gap: 5px;
+}
+
+.history-header {
+    display: flex;
+    align-items: flex-start;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
+    gap: 8px;
 }
 
-.history-item-time {
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground);
-}
-
-.history-item-actions {
+.history-context {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
+    min-width: 0;
+    flex: 1;
+}
+
+.ctx-chip {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--tx2);
+    background: var(--s3);
+    border: 1px solid var(--bd2);
+    border-radius: 2px;
+    padding: 1px 5px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-stats {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-duration {
+    font-weight: 600;
+}
+
+.stat-duration.duration-fast { color: var(--gr); }
+.stat-duration.duration-medium { color: var(--am); }
+.stat-duration.duration-slow { color: var(--rd); }
+
+.stat-sep {
+    color: var(--tx2);
+    opacity: 0.4;
+}
+
+.stat-rows {
+    color: var(--tx2);
+}
+
+.history-sql {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--tx);
+    background: var(--bg);
+    border: 1px solid var(--bd);
+    border-radius: 3px;
+    padding: 6px 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-description {
+    font-size: 10px;
+    color: var(--tx2);
+    font-style: italic;
+    padding: 0 2px;
+}
+
+.history-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 1px;
+}
+
+.history-timestamp {
+    font-size: 10px;
+    color: var(--tx2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.stat-time {
+    color: var(--tx);
+    font-weight: 500;
+}
+
+.history-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
 }
 
 .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 3px;
     padding: 2px 6px;
-    font-size: 11px;
-    background-color: transparent;
-    color: var(--vscode-foreground);
-    border: none;
-    border-radius: 2px;
+    min-width: 24px;
+    min-height: 22px;
+    font-size: 10px;
+    background: transparent;
+    color: var(--tx2);
+    border: 1px solid transparent;
+    border-radius: 3px;
     cursor: pointer;
-    font-family: var(--vscode-font-family);
-    opacity: 0.8;
-    transition: opacity 0.2s, background-color 0.2s;
+}
+
+.action-btn svg {
+    flex-shrink: 0;
+    display: block;
+}
+
+.action-btn span {
+    font-weight: 500;
 }
 
 .action-btn:hover {
-    opacity: 1;
-    background-color: var(--vscode-button-secondaryBackground);
+    background: var(--s3);
+    color: var(--tx);
+    border-color: var(--bd2);
 }
 
-.action-btn.delete:hover {
-    background-color: var(--vscode-button-destructiveHoverBackground);
-    color: var(--vscode-button-destructiveForeground);
+.action-btn.primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: transparent;
+    padding: 2px 8px;
+}
+
+.action-btn.primary:hover {
+    background: var(--vscode-button-hoverBackground);
+    color: var(--vscode-button-foreground);
 }
 
 .action-btn.favorite {
-    color: gold;
-    opacity: 1;
+    color: var(--vscode-charts-yellow, #e2c08d);
 }
 
-.tags {
-    background: var(--vscode-badge-background);
-    color: var(--vscode-badge-foreground);
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-size: 10px;
+.action-btn.delete:hover {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--rd);
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.context-tags {
+    display: inline-flex;
+    gap: 3px;
+}
+
+.tag-chip {
+    display: inline-block;
+    border: 1px solid var(--ac);
+    color: var(--ac);
+    background: var(--ac-lo);
+    border-radius: 2px;
+    padding: 0 5px;
+    font-size: 9px;
+    font-weight: 600;
     cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 
-.history-item-description {
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground);
-    margin: 4px 0;
-    font-style: italic;
+.tag-chip:hover {
+    background: var(--ac);
+    color: var(--vscode-button-foreground, #fff);
 }
 
-.history-item-meta {
-    font-size: 12px;
-    color: var(--vscode-descriptionForeground);
-    margin-bottom: 4px;
-}
-
-.history-item-meta span {
-    margin-right: 12px;
-}
-
-.history-item-query {
-    font-family: var(--vscode-editor-font-family);
-    font-size: 12px;
-    background: var(--vscode-textCodeBlock-background);
-    padding: 6px;
-    border-radius: 3px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
+/* ── Empty / loading ── */
 .empty-state {
     text-align: center;
-    padding: 40px 20px;
-    color: var(--vscode-descriptionForeground);
+    padding: 40px 16px;
+    color: var(--tx2);
 }
 
 .empty-state-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
+    margin: 0 auto 12px;
+    opacity: 0.35;
+    color: var(--tx2);
+}
+
+.empty-state-icon svg {
+    display: block;
+    margin: 0 auto;
+}
+
+.spin-icon {
+    animation: qh-spin 1s linear infinite;
+}
+
+@keyframes qh-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .loading-indicator {
-    padding: 10px;
+    padding: 6px;
     text-align: center;
-    color: var(--vscode-descriptionForeground);
-    font-size: 11px;
-    border-top: 1px solid var(--vscode-panel-border);
-}
-
-.search-archive-prompt {
-    display: inline-flex;
-    margin-left: 8px;
+    color: var(--tx2);
+    font-size: 10px;
+    border-top: 1px solid var(--bd);
+    flex-shrink: 0;
 }
 
 .search-status {
-    font-size: 11px;
-    margin-left: 8px;
+    font-size: 10px;
+    margin-left: 6px;
     font-style: italic;
+    color: var(--gr);
 }
 
-/* Optimization for large lists */
-.history-item {
-    padding: 12px;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    cursor: pointer;
-    content-visibility: auto;
-    contain-intrinsic-size: 75px;
-}
-
-/* ====================
-   Saved Filter Views
-   ==================== */
-
+/* ── Saved views ── */
 .saved-views-container {
     display: flex;
     gap: 4px;
-    padding: 4px 8px;
-    background-color: var(--vscode-sideBar-background);
-    border-bottom: 1px solid var(--vscode-panel-border);
+    padding: 4px 10px;
+    background-color: var(--s1);
+    border-bottom: 1px solid var(--bd);
     align-items: center;
 }
 
@@ -247,28 +404,23 @@ button.primary:hover {
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
-    padding: 4px 8px;
-    font-size: 12px;
-    flex: 1;
-    min-width: 150px;
-    cursor: pointer;
-}
-
-.saved-views-container button {
-    padding: 2px 6px;
+    padding: 3px 6px;
     font-size: 11px;
+    flex: 1;
+    min-width: 100px;
+    cursor: pointer;
+    border-radius: 3px;
 }
 
-/* ====================
-   Parameter Modal (Quick Rerun)
-   ==================== */
+.saved-views-container .icon-btn {
+    padding: 3px 6px;
+    min-width: 26px;
+}
 
+/* ── Parameter modal ── */
 .parameter-modal {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     background-color: rgba(0, 0, 0, 0.5);
     display: flex;
     align-items: center;
@@ -277,10 +429,10 @@ button.primary:hover {
 }
 
 .parameter-modal-content {
-    background-color: var(--vscode-editor-background);
-    border: 1px solid var(--vscode-panel-border);
+    background-color: var(--bg);
+    border: 1px solid var(--bd);
     border-radius: 4px;
-    padding: 20px;
+    padding: 16px;
     width: 90%;
     max-width: 500px;
     max-height: 80vh;
@@ -288,125 +440,53 @@ button.primary:hover {
 }
 
 .parameter-modal-content h3 {
-    margin: 0 0 10px 0;
-    font-size: 16px;
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .parameter-modal-content p {
-    margin: 0 0 15px 0;
-    color: var(--vscode-descriptionForeground);
-    font-size: 12px;
+    margin: 0 0 12px 0;
+    color: var(--tx2);
+    font-size: 11px;
 }
 
 .parameter-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 10px;
+    margin-bottom: 16px;
 }
 
 .parameter-item {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
 }
 
 .parameter-item label {
-    font-weight: bold;
-    font-size: 12px;
+    font-weight: 600;
+    font-size: 11px;
 }
 
 .parameter-item input {
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
-    padding: 6px 8px;
-    font-size: 12px;
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 3px;
 }
 
 .parameter-actions {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     justify-content: flex-end;
 }
 
 .parameter-actions button {
-    padding: 6px 12px;
-}
-
-/* Quick rerun button in history items */
-.action-btn.quick-rerun {
-    background-color: var(--vscode-button-background);
-    color: var(--vscode-button-foreground);
-}
-
-.action-btn.quick-rerun:hover {
-    background-color: var(--vscode-button-hoverBackground);
-}
-
-/* ====================
-   Status Badges
-   ==================== */
-
-.history-item-status-badges {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 10px;
-}
-
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    font-size: 12px;
-    padding: 0 2px;
-}
-
-.duration-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 1px 5px;
-    border-radius: 8px;
-    font-size: 10px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-}
-
-.duration-fast {
-    color: var(--vscode-testing-iconPassed, #4ec9b0);
-    background-color: rgba(78, 201, 176, 0.1);
-}
-
-.duration-medium {
-    color: var(--vscode-editorWarning-foreground, #cca700);
-    background-color: rgba(204, 167, 0, 0.1);
-}
-
-.duration-slow {
-    color: var(--vscode-testing-iconFailed, #f14c4c);
-    background-color: rgba(241, 76, 76, 0.1);
-}
-
-.rows-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 1px 5px;
-    border-radius: 8px;
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--vscode-badge-foreground);
-    background-color: var(--vscode-badge-background);
-}
-
-/* History item status background tint */
-.history-item.status-error {
-    border-left: 3px solid var(--vscode-testing-iconFailed, #f14c4c);
-}
-
-.history-item.status-cancelled {
-    border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
-}
-
-.history-item.status-success {
-    border-left: 3px solid var(--vscode-testing-iconPassed, #4ec9b0);
+    padding: 4px 10px;
 }

@@ -26,34 +26,69 @@ export function parseLocalDefinitions(text: string): LocalDefinition[] {
 }
 
 /**
- * Parse temp table definitions
+ * Parse temp table and CTAS definitions
  */
 function parseTempTables(text: string, definitions: LocalDefinition[]): void {
-    const tempTableRegex = /CREATE\s+(?:(?:TEMP|TEMPORARY)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)\s+AS\b/gi;
-    let match;
+    const qualifiedNamePattern =
+        '(?:[\\w$#]+|"[^"]+")(?:\\s*\\.\\s*\\.?\\s*(?:[\\w$#]+|"[^"]+")){0,2}';
+    const tempTableRegex = new RegExp(
+        `CREATE\\s+(?:GLOBAL\\s+)?(?:(?:TEMP|TEMPORARY)\\s+)?TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(${qualifiedNamePattern})\\s+AS\\b`,
+        'gi',
+    );
+    const ctasRegex = new RegExp(
+        `CREATE\\s+(?!(?:GLOBAL\\s+)?(?:(?:TEMP|TEMPORARY)\\s+))TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(${qualifiedNamePattern})\\s+AS\\b`,
+        'gi',
+    );
 
-    while ((match = tempTableRegex.exec(text)) !== null) {
+    parseCreateTableAsMatches(text, tempTableRegex, definitions, (tableName, isGlobal) => ({
+        name: normalizeQualifiedObjectName(tableName),
+        type: isGlobal ? 'Global Temp Table' : 'Temp Table',
+    }), (match) => /\bGLOBAL\b/i.test(match[0]));
+
+    parseCreateTableAsMatches(text, ctasRegex, definitions, (tableName) => ({
+        name: normalizeQualifiedObjectName(tableName),
+        type: 'Table',
+    }));
+}
+
+function normalizeQualifiedObjectName(name: string): string {
+    return name
+        .replace(/\s*\.\s*\.\s*/g, '..')
+        .replace(/\s*\.\s*/g, '.')
+        .trim();
+}
+
+function parseCreateTableAsMatches(
+    text: string,
+    regex: RegExp,
+    definitions: LocalDefinition[],
+    buildDefinition: (tableName: string, isGlobal: boolean) => Pick<LocalDefinition, 'name' | 'type'>,
+    isGlobalMatch: (match: RegExpExecArray) => boolean = () => false,
+): void {
+    let match: RegExpExecArray | null;
+    regex.lastIndex = 0;
+
+    while ((match = regex.exec(text)) !== null) {
         const tableName = match[1];
         const afterAs = text.substring(match.index + match[0].length);
         const trimmedAfterAs = afterAs.trimStart();
+        const { name, type } = buildDefinition(tableName, isGlobalMatch(match));
 
         if (trimmedAfterAs.startsWith('(')) {
-            // Parenthesized version
             const openParenIndex = text.indexOf('(', match.index + match[0].length);
             const query = extractBalancedParenthesisContent(text, openParenIndex + 1);
             if (query) {
                 const columns = extractColumnsFromQuery(query);
-                definitions.push({ name: tableName, type: 'Temp Table', columns });
+                definitions.push({ name, type, columns });
             }
-        } else {
-            // Non-parenthesized version - until next semicolon or end of script
-            const endPos = afterAs.indexOf(';');
-            const query = endPos !== -1 ? afterAs.substring(0, endPos) : afterAs;
+            continue;
+        }
 
-            if (query.trim()) {
-                const columns = extractColumnsFromQuery(query);
-                definitions.push({ name: tableName, type: 'Temp Table', columns });
-            }
+        const endPos = afterAs.indexOf(';');
+        const query = endPos !== -1 ? afterAs.substring(0, endPos) : afterAs;
+        if (query.trim()) {
+            const columns = extractColumnsFromQuery(query);
+            definitions.push({ name, type, columns });
         }
     }
 }

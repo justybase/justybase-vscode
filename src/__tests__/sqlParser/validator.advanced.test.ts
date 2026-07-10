@@ -118,7 +118,6 @@ FROM (
     });
 
     it("should validate complex query with CTEs, subqueries, and analytics combined", () => {
-      // Note: PERCENTILE_CONT not supported by parser, using alternative approach
       expectValid(`WITH 
     SALARY_STATS AS (
         SELECT DEPARTMENT_ID,
@@ -154,7 +153,6 @@ ORDER BY EWS.DEPARTMENT_ID, EWS.SALARY DESC;`);
     });
 
     it("should validate recursive CTE pattern (tree traversal)", () => {
-      // Note: PERCENTILE_CONT not supported, using simpler aggregation
       expectValid(`WITH MANAGER_HIERARCHY AS (
     -- Anchor: top-level managers
     SELECT EMPLOYEE_ID, FIRST_NAME, MANAGER_ID, 1 AS LEVEL

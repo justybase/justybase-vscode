@@ -1,6 +1,8 @@
 import type { HistoryFilter, QueryParameter } from '../../core/queryHistoryManager';
 import type { ConnectionDetails } from '../../core/connectionManager';
+import type { DiskDistinctValue, DiskQuerySpec } from '../../core/resultDataProvider/types';
 import type { ExcelExportMetadata, ExportMetadata } from '../../export/exportManager';
+import type { DatabaseAggregationRequest, DatabaseAggregationResult } from '../../results/databaseAggregationSql';
 import type { ResultFormattingPayload, ResultFormattingUpdateRequest } from '../../results/resultFormattingTypes';
 
 export type ResultPanelExportFormat = 'csv' | 'json' | 'xml' | 'sql' | 'markdown';
@@ -42,6 +44,11 @@ export type ResultPanelInboundMessage =
     | { command: 'unpinResult'; resultId: string }
     | { command: 'closeSource'; sourceUri: string }
     | { command: 'closeResult'; sourceUri: string; resultSetIndex: number }
+    | { command: 'refreshResult'; sourceUri: string; resultSetIndex: number; limitValue?: string }
+    | { command: 'clearRefreshFailure'; sourceUri: string; resultSetIndex: number }
+    | { command: 'requestDatabaseAggregations'; sourceUri: string; resultSetIndex: number; requestId: number; aggregations: DatabaseAggregationRequest[]; timeoutSeconds?: number; isRetry?: boolean }
+    | { command: 'requestDatabaseFilterValues'; sourceUri: string; resultSetIndex: number; columnIndex: number; requestId: number; querySpec?: DiskQuerySpec; timeoutSeconds?: number; isRetry?: boolean }
+    | { command: 'applyDatabaseFilter'; sourceUri: string; resultSetIndex: number; requestId: number; querySpec?: DiskQuerySpec; timeoutSeconds?: number; isRetry?: boolean }
     | { command: 'closeAllResults'; sourceUri: string }
     | { command: 'cancelQuery'; sourceUri: string; currentRowCounts?: number[] }
     | { command: 'copyToClipboard'; text: string }
@@ -114,6 +121,7 @@ export type ResultPanelOutboundMessage =
         isFirstChunk?: boolean;
         columns?: { name: string; type?: string; scale?: number }[];
         sql?: string;
+        refreshSql?: string;
         executionTimestamp?: number;
         diskBackedStreamCapEnabled?: boolean;
     }
@@ -127,6 +135,9 @@ export type ResultPanelOutboundMessage =
     | { command: 'switchToResultSet'; resultSetIndex: number }
     | { command: 'resultFormattingState'; data: ResultFormattingPayload }
     | { command: 'selectAll'; selected: boolean }
+    | { command: 'databaseAggregationResult'; sourceUri: string; resultSetIndex: number; requestId: number; aggregations?: DatabaseAggregationResult[]; error?: string }
+    | { command: 'databaseFilterValuesResult'; sourceUri: string; resultSetIndex: number; columnIndex: number; requestId: number; values?: DiskDistinctValue[]; truncated?: boolean; error?: string }
+    | { command: 'databaseFilterApplyResult'; sourceUri: string; resultSetIndex: number; requestId: number; error?: string }
     | { command: 'saveEdits'; sourceUri: string; resultSetIndex: number; editSource: unknown; edits: unknown[]; deleteRowIndices?: number[] };
 
 /** Shape of the full hydrate payload sent to the result panel webview */
@@ -142,6 +153,7 @@ export interface ResultPanelViewData {
     queryRowLimit: number;
     maxDataResults: number;
     diskBackedStreamCapEnabled: boolean;
+    dataVersion?: number;
 }
 
 // ============================================================================
@@ -289,6 +301,11 @@ export const RESULT_PANEL_INBOUND_COMMANDS = [
     'unpinResult',
     'closeSource',
     'closeResult',
+    'refreshResult',
+    'clearRefreshFailure',
+    'requestDatabaseAggregations',
+    'requestDatabaseFilterValues',
+    'applyDatabaseFilter',
     'closeAllResults',
     'cancelQuery',
     'copyToClipboard',
@@ -318,7 +335,10 @@ export const RESULT_PANEL_OUTBOUND_COMMANDS = [
     'appendRows',
     'streamingComplete',
     'switchToResultSet',
-    'resultFormattingState'
+    'resultFormattingState',
+    'databaseAggregationResult',
+    'databaseFilterValuesResult',
+    'databaseFilterApplyResult'
 ] as const satisfies readonly ResultPanelOutboundMessage['command'][];
 
 export const QUERY_HISTORY_INBOUND_TYPES = [

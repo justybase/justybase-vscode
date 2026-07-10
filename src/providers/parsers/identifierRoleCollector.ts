@@ -90,6 +90,7 @@ class IdentifierRoleCollector {
         return;
       case "createTableStatement":
       case "truncateStatement":
+      case "groomStatement":
       case "createSequenceStatement":
       case "alterTableStatement":
       case "callStatement":

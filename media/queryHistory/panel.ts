@@ -15,9 +15,21 @@ import {
     escapeHtml,
     formatDuration,
     formatRowsAffected,
-    formatTimestamp,
+    formatTimestampParts,
     getStatusInfo,
+    renderContextChips,
 } from './utils.js';
+import {
+    iconCopy,
+    iconEdit,
+    iconHistory,
+    iconLoading,
+    iconPlay,
+    iconSave,
+    iconStar,
+    iconTrash,
+    iconWarning,
+} from './icons.js';
 
 type QueryHistoryEntry = QueryHistoryEntryDto;
 type QueryHistoryStats = QueryHistoryStatsDto;
@@ -118,7 +130,7 @@ function renderUiState(state: QueryHistoryUiState): void {
         if (allHistory.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-state-icon">⏳</div>
+                    <div class="empty-state-icon">${iconLoading()}</div>
                     <div>${escapeHtml(state.message)}</div>
                 </div>
             `;
@@ -136,7 +148,7 @@ function renderUiState(state: QueryHistoryUiState): void {
 
         container.innerHTML = `
             <div class="empty-state" data-state-kind="empty">
-                <div class="empty-state-icon">📜</div>
+                <div class="empty-state-icon">${iconHistory()}</div>
                 <div>${escapeHtml(state.title)}</div>
                 <div>${escapeHtml(state.detail)}</div>
                 ${state.action ? `<button class="secondary state-action-btn" data-action-type="${escapeHtml(state.action.messageType)}">${escapeHtml(state.action.label)}</button>` : ''}
@@ -147,7 +159,7 @@ function renderUiState(state: QueryHistoryUiState): void {
 
     container.innerHTML = `
         <div class="empty-state" data-state-kind="error">
-            <div class="empty-state-icon">⚠️</div>
+            <div class="empty-state-icon">${iconWarning()}</div>
             <div>${escapeHtml(state.title)}</div>
             <div>${escapeHtml(state.detail)}</div>
             ${state.action ? `<button class="secondary state-action-btn" data-action-type="${escapeHtml(state.action.messageType)}">${escapeHtml(state.action.label)}</button>` : ''}
@@ -164,7 +176,7 @@ function renderHistory(history: QueryHistoryEntryDto[], append = false): void {
         if (history.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-state-icon">📜</div>
+                    <div class="empty-state-icon">${iconHistory()}</div>
                     <div>No query history found</div>
                 </div>
             `;
@@ -176,32 +188,42 @@ function renderHistory(history: QueryHistoryEntryDto[], append = false): void {
         const statusInfo = getStatusInfo(entry.status);
         const durationInfo = formatDuration(entry.durationMs);
         const rowsText = formatRowsAffected(entry.rowsAffected);
+        const ts = formatTimestampParts(entry.timestamp);
+        const contextChips = renderContextChips([
+            { label: 'Connection', value: entry.connectionName },
+            { label: 'Host', value: entry.host },
+            { label: 'Database', value: entry.database },
+            { label: 'Schema', value: entry.schema },
+        ]);
+        const tagChips = entry.tags
+            ? entry.tags.split(',').map(tag => tag.trim()).filter(Boolean).map(tag =>
+                `<span class="tag-chip" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`
+            ).join('')
+            : '';
         return `
         <div class="history-item ${statusInfo.className}">
-            <div class="history-item-header">
-                <div class="history-item-time">${formatTimestamp(entry.timestamp)}</div>
-                <div class="history-item-status-badges">
-                    <span class="status-badge ${statusInfo.className}" title="${statusInfo.text}">${statusInfo.icon}</span>
-                    ${durationInfo.text ? `<span class="duration-badge ${durationInfo.className}" title="Execution time">${escapeHtml(durationInfo.text)}</span>` : ''}
-                    ${rowsText ? `<span class="rows-badge" title="Rows affected">📊 ${escapeHtml(rowsText)}</span>` : ''}
+            <div class="history-status-rail" title="${escapeHtml(statusInfo.text)}"></div>
+            <div class="history-body">
+                <div class="history-header">
+                    <div class="history-context">${contextChips}${tagChips ? `<span class="context-tags">${tagChips}</span>` : ''}</div>
+                    <div class="history-stats">
+                        <span class="stat-duration ${durationInfo.className}" title="Execution time">${durationInfo.text ? escapeHtml(durationInfo.text) : '—'}</span>
+                        ${rowsText ? `<span class="stat-sep">|</span><span class="stat-rows" title="Rows returned">${escapeHtml(rowsText)}</span>` : ''}
+                    </div>
                 </div>
-                <div class="history-item-actions">
-                    <button class="action-btn ${entry.is_favorite ? 'favorite' : ''}" data-action="favorite" data-id="${escapeHtml(entry.id)}">${entry.is_favorite ? '⭐' : '☆'}</button>
-                    <button class="action-btn" data-action="edit" data-id="${escapeHtml(entry.id)}">✏️</button>
-                    <button class="action-btn quick-rerun" data-action="quickRerun" data-id="${escapeHtml(entry.id)}" title="Execute or Rerun with Parameters">▶️ Run</button>
-                    <button class="action-btn" data-action="copy" data-id="${escapeHtml(entry.id)}">📋 Copy</button>
-                    <button class="action-btn delete" data-action="delete" data-id="${escapeHtml(entry.id)}">🗑️</button>
+                <div class="history-sql" title="${escapeHtml(entry.query)}">${escapeHtml(entry.query)}</div>
+                ${entry.description ? `<div class="history-description">${escapeHtml(entry.description)}</div>` : ''}
+                <div class="history-footer">
+                    <span class="history-timestamp"><span class="stat-date">${escapeHtml(ts.date)}</span> <span class="stat-time">${escapeHtml(ts.time)}</span></span>
+                    <div class="history-actions">
+                        <button class="action-btn primary" data-action="quickRerun" data-id="${escapeHtml(entry.id)}" title="Run query">${iconPlay()}<span>Run</span></button>
+                        <button class="action-btn" data-action="copy" data-id="${escapeHtml(entry.id)}" title="Copy SQL">${iconCopy()}</button>
+                        <button class="action-btn" data-action="edit" data-id="${escapeHtml(entry.id)}" title="Edit">${iconEdit()}</button>
+                        <button class="action-btn ${entry.is_favorite ? 'favorite' : ''}" data-action="favorite" data-id="${escapeHtml(entry.id)}" title="Favorite">${iconStar(entry.is_favorite)}</button>
+                        <button class="action-btn delete" data-action="delete" data-id="${escapeHtml(entry.id)}" title="Delete">${iconTrash()}</button>
+                    </div>
                 </div>
             </div>
-            <div class="history-item-meta">
-                ${entry.connectionName ? `<span>🔌 ${escapeHtml(entry.connectionName)}</span>` : ''}
-                <span>🖥️ ${escapeHtml(entry.host)}</span>
-                <span>🗃️ ${escapeHtml(entry.database)}</span>
-                <span>📁 ${escapeHtml(entry.schema)}</span>
-                ${entry.tags ? `<span class="tags">🏷️ ${escapeHtml(entry.tags)}</span>` : ''}
-            </div>
-            ${entry.description ? `<div class="history-item-description">${escapeHtml(entry.description)}</div>` : ''}
-            <div class="history-item-query" title="${escapeHtml(entry.query)}">${escapeHtml(entry.query)}</div>
         </div>
     `}).join('');
 
@@ -454,14 +476,16 @@ function attachEventListeners(): void {
                 return;
             }
 
-            const tagElement = target.closest('.tags');
+            const tagElement = target.closest('.tag-chip');
             if (!tagElement) {
                 return;
             }
 
-            const tagText = (tagElement.textContent || '').replace('🏷️ ', '').trim();
-            const tags = tagText.split(',').map(tag => tag.trim());
-            postToHost({ type: 'requestTagFilter', tags });
+            const tagText = tagElement.getAttribute('data-tag') || (tagElement.textContent || '').trim();
+            if (!tagText) {
+                return;
+            }
+            postToHost({ type: 'requestTagFilter', tags: [tagText] });
         });
     }
 }
@@ -613,11 +637,11 @@ function renderSavedViews(views: QueryHistorySavedViewDto[]): void {
 
     viewsContainer.innerHTML = `
         <select id="savedViewsSelect" class="saved-views-select">
-            <option value="">📁 Saved Views...</option>
+            <option value="">Saved Views...</option>
             ${options}
         </select>
-        <button id="saveCurrentViewBtn" class="secondary" title="Save current filter">💾 Save</button>
-        <button id="deleteViewBtn" class="secondary" title="Delete selected view">🗑️</button>
+        <button id="saveCurrentViewBtn" class="secondary icon-btn" title="Save current filter">${iconSave()}</button>
+        <button id="deleteViewBtn" class="secondary icon-btn" title="Delete selected view">${iconTrash()}</button>
     `;
 
     const select = /** @type {HTMLSelectElement | null} */ (document.getElementById('savedViewsSelect'));

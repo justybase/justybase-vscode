@@ -823,6 +823,20 @@ describe('evaluateConditions', () => {
     });
 
     describe('text comparison for non-numeric values', () => {
+        it('contains matches compact numeric search against spaced date display', () => {
+            const g = require('../../media/resultPanel/grid.js');
+            expect(callEval(g, [{ type: 'contains', value: '20101228' }], 'and', '2010 12 28', 20101228)).toBe(true);
+            expect(callEval(g, [{ type: 'contains', value: '20101229' }], 'and', '2010 12 28', 20101228)).toBe(false);
+            expect(callEval(g, [{ type: 'equals', value: '20101228' }], 'and', '2010 12 28', 20101228)).toBe(true);
+        });
+
+        it('contains matches compact numeric search against grouped BIGINT display', () => {
+            const g = require('../../media/resultPanel/grid.js');
+            expect(callEval(g, [{ type: 'contains', value: '123456' }], 'and', '123 456', 123456)).toBe(true);
+            expect(callEval(g, [{ type: 'equals', value: '123456' }], 'and', '123 456', 123456)).toBe(true);
+            expect(callEval(g, [{ type: 'greaterThan', value: '123000' }], 'and', '123 456', 123456)).toBe(true);
+        });
+
         it('greaterThan falls back to string comparison', () => {
             const g = require('../../media/resultPanel/grid.js');
             expect(callEval(g, [{ type: 'greaterThan', value: 'apple' }], 'and', 'banana')).toBe(true);

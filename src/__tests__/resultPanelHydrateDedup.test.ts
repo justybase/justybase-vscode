@@ -168,6 +168,25 @@ describe('handleHydrate executingSources dedup', () => {
         expect(mockUpdateLoadingState).toHaveBeenCalled();
     });
 
+    it('applies hydrate when dataVersion changes but payload size matches', () => {
+        const { handleHydrate } = require('../../media/resultPanel/messages.js') as {
+            handleHydrate: (data: Record<string, unknown>) => void;
+        };
+
+        handleHydrate({
+            ...buildHydrateData([]),
+            dataVersion: 1,
+        });
+        mockUpdateLoadingState.mockClear();
+
+        handleHydrate({
+            ...buildHydrateData([]),
+            dataVersion: 2,
+        });
+
+        expect(mockUpdateLoadingState).toHaveBeenCalled();
+    });
+
     it('replaces stale active result rows on first streaming chunk', () => {
         const staleResult = {
             columns: [{ name: 'old_col', type: 'int' }],

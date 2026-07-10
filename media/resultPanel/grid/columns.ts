@@ -1,4 +1,10 @@
 import {
+    endsWithFilterValueSearch,
+    matchesFilterValueSearch,
+    parseFilterNumericValue,
+    startsWithFilterValueSearch,
+} from '../filterValueSort.js';
+import {
     formatCellValue,
     getNumericTypeInfo,
     inferNumericTypeFromRows,
@@ -182,7 +188,10 @@ export function createFilterFn(
                 inferredNumericKind,
                 inferredDateInteger
             }) ?? 'NULL');
-        const numericValue = parseFloat(String(cellValue).replace(/,/g, ''));
+        const parsedNumeric = parseFilterNumericValue(
+            cellValue === null || cellValue === undefined ? 'NULL' : String(cellValue),
+        );
+        const numericValue = parsedNumeric ?? Number.NaN;
 
         if (filterValue && typeof filterValue === 'object' && '_isConditionFilter' in filterValue) {
             const conditionFilter = filterValue as ConditionColumnFilter;
@@ -241,13 +250,13 @@ export function evaluateConditions(
                 case 'isNotEmpty':
                     return cellDateValue !== null;
                 case 'contains':
-                    return !isNull && stringValue.toLowerCase().includes(condValue.toLowerCase());
+                    return !isNull && matchesFilterValueSearch(stringValue, condValue);
                 case 'notContains':
-                    return isNull || !stringValue.toLowerCase().includes(condValue.toLowerCase());
+                    return isNull || !matchesFilterValueSearch(stringValue, condValue);
                 case 'startsWith':
-                    return !isNull && stringValue.toLowerCase().startsWith(condValue.toLowerCase());
+                    return !isNull && startsWithFilterValueSearch(stringValue, condValue);
                 case 'endsWith':
-                    return !isNull && stringValue.toLowerCase().endsWith(condValue.toLowerCase());
+                    return !isNull && endsWithFilterValueSearch(stringValue, condValue);
                 case 'like':
                     if (isNull || !condValue) return false;
                     try {
@@ -263,23 +272,27 @@ export function evaluateConditions(
 
         switch (cond.type) {
             case 'contains':
-                return !isNull && stringValue.toLowerCase().includes(condValue.toLowerCase());
+                return !isNull && matchesFilterValueSearch(stringValue, condValue);
             case 'notContains':
-                return isNull || !stringValue.toLowerCase().includes(condValue.toLowerCase());
-            case 'equals':
-                if (!isNaN(numericValue) && !isNaN(parseFloat(condValue))) {
-                    return numericValue === parseFloat(condValue);
+                return isNull || !matchesFilterValueSearch(stringValue, condValue);
+            case 'equals': {
+                const filterNumeric = parseFilterNumericValue(condValue);
+                if (!isNaN(numericValue) && filterNumeric !== null) {
+                    return numericValue === filterNumeric;
                 }
                 return stringValue.toLowerCase() === condValue.toLowerCase();
-            case 'notEquals':
-                if (!isNaN(numericValue) && !isNaN(parseFloat(condValue))) {
-                    return numericValue !== parseFloat(condValue);
+            }
+            case 'notEquals': {
+                const filterNumeric = parseFilterNumericValue(condValue);
+                if (!isNaN(numericValue) && filterNumeric !== null) {
+                    return numericValue !== filterNumeric;
                 }
                 return stringValue.toLowerCase() !== condValue.toLowerCase();
+            }
             case 'startsWith':
-                return !isNull && stringValue.toLowerCase().startsWith(condValue.toLowerCase());
+                return !isNull && startsWithFilterValueSearch(stringValue, condValue);
             case 'endsWith':
-                return !isNull && stringValue.toLowerCase().endsWith(condValue.toLowerCase());
+                return !isNull && endsWithFilterValueSearch(stringValue, condValue);
             case 'like':
                 if (isNull || !condValue) return false;
                 try {
@@ -292,33 +305,42 @@ export function evaluateConditions(
                 return isNull;
             case 'isNotEmpty':
                 return !isNull;
-            case 'greaterThan':
-                if (!isNaN(numericValue) && !isNaN(parseFloat(condValue))) {
-                    return !isNull && numericValue > parseFloat(condValue);
+            case 'greaterThan': {
+                const filterNumeric = parseFilterNumericValue(condValue);
+                if (!isNaN(numericValue) && filterNumeric !== null) {
+                    return !isNull && numericValue > filterNumeric;
                 }
                 return !isNull && stringValue.toLowerCase() > condValue.toLowerCase();
-            case 'greaterThanOrEqual':
-                if (!isNaN(numericValue) && !isNaN(parseFloat(condValue))) {
-                    return !isNull && numericValue >= parseFloat(condValue);
+            }
+            case 'greaterThanOrEqual': {
+                const filterNumeric = parseFilterNumericValue(condValue);
+                if (!isNaN(numericValue) && filterNumeric !== null) {
+                    return !isNull && numericValue >= filterNumeric;
                 }
                 return !isNull && stringValue.toLowerCase() >= condValue.toLowerCase();
-            case 'lessThan':
-                if (!isNaN(numericValue) && !isNaN(parseFloat(condValue))) {
-                    return !isNull && numericValue < parseFloat(condValue);
+            }
+            case 'lessThan': {
+                const filterNumeric = parseFilterNumericValue(condValue);
+                if (!isNaN(numericValue) && filterNumeric !== null) {
+                    return !isNull && numericValue < filterNumeric;
                 }
                 return !isNull && stringValue.toLowerCase() < condValue.toLowerCase();
-            case 'lessThanOrEqual':
-                if (!isNaN(numericValue) && !isNaN(parseFloat(condValue))) {
-                    return !isNull && numericValue <= parseFloat(condValue);
+            }
+            case 'lessThanOrEqual': {
+                const filterNumeric = parseFilterNumericValue(condValue);
+                if (!isNaN(numericValue) && filterNumeric !== null) {
+                    return !isNull && numericValue <= filterNumeric;
                 }
                 return !isNull && stringValue.toLowerCase() <= condValue.toLowerCase();
-            case 'between':
-                if (!isNaN(numericValue) && !isNaN(parseFloat(condValue)) && !isNaN(parseFloat(condValue2 ?? ''))) {
-                    const min = parseFloat(condValue);
-                    const max = parseFloat(condValue2 ?? '');
+            }
+            case 'between': {
+                const min = parseFilterNumericValue(condValue);
+                const max = parseFilterNumericValue(condValue2 ?? '');
+                if (!isNaN(numericValue) && min !== null && max !== null) {
                     return !isNull && numericValue >= min && numericValue <= max;
                 }
                 return !isNull && stringValue.toLowerCase() >= condValue.toLowerCase() && stringValue.toLowerCase() <= (condValue2 ?? '').toLowerCase();
+            }
             default:
                 return true;
         }

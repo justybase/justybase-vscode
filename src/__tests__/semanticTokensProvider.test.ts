@@ -401,6 +401,76 @@ END_PROC;`;
     expect(findToken(tokens, sql, document, 'OLD_TABLE')?.tokenType).toBe(TABLE_IDX);
   });
 
+  it.each([
+    [
+      'CREATE TABLE',
+      'CREATE TABLE JUST_DATA.ADMIN.TEST2 AS (\nSELECT * FROM DIMDATE\n);',
+      'TEST2',
+    ],
+    [
+      'CREATE TEMP TABLE',
+      'CREATE TEMP TABLE JUST_DATA.ADMIN.TEST_TMP AS (\nSELECT * FROM DIMDATE\n);',
+      'TEST_TMP',
+    ],
+    [
+      'CREATE GLOBAL TEMP TABLE',
+      'CREATE GLOBAL TEMP TABLE JUST_DATA.ADMIN.TEST1 AS (\nSELECT * FROM DIMDATE\n) DISTRIBUTE ON RANDOM;',
+      'TEST1',
+    ],
+  ])(
+    'colors %s CTAS qualified names with database, schema, and table semantic types',
+    (_label, sql, tableName) => {
+      const document = createDocument(sql);
+      const tokens = tokensFor(provider, sql);
+
+      expect(findToken(tokens, sql, document, 'JUST_DATA')?.tokenType).toBe(
+        DATABASE_IDX,
+      );
+      expect(findToken(tokens, sql, document, 'ADMIN')?.tokenType).toBe(
+        SCHEMA_IDX,
+      );
+      expect(findToken(tokens, sql, document, tableName)?.tokenType).toBe(
+        TABLE_IDX,
+      );
+    },
+  );
+
+  it.each([
+    [
+      'GROOM TABLE unqualified',
+      'GROOM TABLE DIMACCOUNT2 VERSIONS;',
+      { table: 'DIMACCOUNT2' },
+    ],
+    [
+      'GROOM TABLE three-part',
+      'GROOM TABLE JUST_DATA.ADMIN.DIMACCOUNT2 VERSIONS;',
+      { database: 'JUST_DATA', schema: 'ADMIN', table: 'DIMACCOUNT2' },
+    ],
+    [
+      'GROOM TABLE database double-dot',
+      'GROOM TABLE JUST_DATA..DIMACCOUNT2 VERSIONS;',
+      { database: 'JUST_DATA', table: 'DIMACCOUNT2' },
+    ],
+  ])(
+    'colors %s qualified names with database, schema, and table semantic types',
+    (_label, sql, names) => {
+      const document = createDocument(sql);
+      const tokens = tokensFor(provider, sql);
+
+      for (const [kind, identifier] of Object.entries(names)) {
+        const expectedType =
+          kind === 'database'
+            ? DATABASE_IDX
+            : kind === 'schema'
+              ? SCHEMA_IDX
+              : TABLE_IDX;
+        expect(findToken(tokens, sql, document, identifier)?.tokenType).toBe(
+          expectedType,
+        );
+      }
+    },
+  );
+
   it('keeps CREATE TABLE database color when an NZPLSQL procedure follows', () => {
     const sql = `CREATE TABLE JUST_DATA.ADMIN.COLOR_CHECK_FACT (
   ID INT NOT NULL,

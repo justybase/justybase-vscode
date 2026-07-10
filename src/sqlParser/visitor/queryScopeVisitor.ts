@@ -72,6 +72,8 @@ const GROUPING_AGGREGATE_FUNCTIONS = new Set([
   "VAR_SAMP",
   "GROUP_CONCAT",
   "GROUP_CONCAT_SORT",
+  "PERCENTILE_CONT",
+  "PERCENTILE_DISC",
 ]);
 
 export function selectStatement(
@@ -112,6 +114,12 @@ export function selectStatement(
   const outputColumns = ctx.selectClause
     ? host.visitAs<ColumnInfo[]>(ctx.selectClause[0])
     : [];
+  if (
+    ctx.selectClause?.[0] &&
+    host.getDuplicateOutputWarningSuppressionDepth() === 0
+  ) {
+    validateDuplicateOutputColumnNames(host, ctx.selectClause[0], outputColumns);
+  }
   host.replaceCurrentSelectOutputAliases(
     new Set(outputColumns.map((c) => c.name.toUpperCase())),
   );
@@ -731,11 +739,19 @@ export function cteDefinition(
     ? inferSimpleStarSubquerySourceTable(host, selectNode)
     : undefined;
 
-  const baseColumns = ctx.withStatement
-    ? host.visitAs<ColumnInfo[]>(ctx.withStatement[0])
-    : selectNode
-      ? host.visitAs<ColumnInfo[]>(selectNode)
-      : [];
+  const previousSuppressionDepth =
+    host.getDuplicateOutputWarningSuppressionDepth();
+  host.setDuplicateOutputWarningSuppressionDepth(previousSuppressionDepth + 1);
+  let baseColumns: ColumnInfo[];
+  try {
+    baseColumns = ctx.withStatement
+      ? host.visitAs<ColumnInfo[]>(ctx.withStatement[0])
+      : selectNode
+        ? host.visitAs<ColumnInfo[]>(selectNode)
+        : [];
+  } finally {
+    host.setDuplicateOutputWarningSuppressionDepth(previousSuppressionDepth);
+  }
   const explicitColumnNames = ctx.cteColumnList
     ? host.visitAs<string[]>(ctx.cteColumnList[0])
     : [];
@@ -793,6 +809,39 @@ export function viewColumnAliasList(
 ): string[] {
   if (!ctx.identifier) return [];
   return ctx.identifier.map((node) => host.visitAs<string>(node));
+}
+
+function validateDuplicateOutputColumnNames(
+  host: SqlVisitorHost,
+  selectClauseNode: CstNode,
+  columns: readonly ColumnInfo[],
+): void {
+  const seen = new Set<string>();
+  const duplicate = columns.find((column) => {
+    const normalized = column.name.toUpperCase();
+    if (seen.has(normalized)) return true;
+    seen.add(normalized);
+    return false;
+  });
+  if (!duplicate) return;
+
+  const selectListNode = selectClauseNode.children?.selectList?.[0];
+  const starNode = host.isCstNode(selectListNode)
+    ? (selectListNode.children?.selectItem as CstNode[] | undefined)
+        ?.map((item) => item.children?.starExpression?.[0])
+        .find((node): node is CstNode => host.isCstNode(node))
+    : undefined;
+  const token = starNode
+    ? host.getFirstTokenFromCst(starNode)
+    : host.getFirstTokenFromCst(selectClauseNode);
+  if (!token) return;
+
+  host.addError(
+    `Projected column name '${duplicate.name.toUpperCase()}' is repeated. Add an explicit alias so every output column name is unique.`,
+    token,
+    "warning",
+    "SQL049",
+  );
 }
 
 function detectMissingFromClause(
@@ -1353,6 +1402,9 @@ function nodeContainsGroupingAggregate(
   node: CstNode,
 ): boolean {
   if (node.name === "functionCall") {
+    if (node.children?.withinGroupClause) {
+      return true;
+    }
     if (node.children?.overClause) {
       return false;
     }

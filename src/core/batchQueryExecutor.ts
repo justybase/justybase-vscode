@@ -47,6 +47,8 @@ function handleBatchQueryFailure(params: {
     outputChannel?: vscode.OutputChannel;
     allResults?: QueryResult[];
     resultCallback?: (results: QueryResult[]) => void;
+    connectionName: string;
+    documentUri?: string;
 }): void {
     const errorMsg = params.err instanceof Error ? params.err.message : String(params.err);
     const durationMs = Date.now() - params.startTime;
@@ -57,6 +59,12 @@ function handleBatchQueryFailure(params: {
     if (params.outputChannel) {
         params.outputChannel.appendLine(`Error in query ${params.queryIndex + 1}: ${errorMsg}`);
     }
+    params.batchOptions.onStatementFailed?.({
+        sql: params.sql,
+        connectionName: params.connectionName,
+        documentUri: params.documentUri,
+        errorMessage: errorMsg,
+    });
 
     const shouldContinue =
         params.batchOptions.continueOnError === true &&
@@ -307,22 +315,6 @@ export async function runQueriesSequentially(
                             logCallback(logMessage);
                         }
 
-                        if (queryEndCallback && statementExecutionId) {
-                            queryEndCallback(statementExecutionId, totalRows, durationMs, 'success');
-                        }
-
-                        logQueryToHistoryAsync(
-                            historyManager,
-                            details.host,
-                            details.database,
-                            statementToExecute,
-                            resolvedConnectionName,
-                            historyTags,
-                            'success',
-                            durationMs,
-                            batchRecordsAffected !== undefined && batchRecordsAffected > 0 ? batchRecordsAffected : totalRows,
-                        );
-
                         if (batchResults && batchResults.length > 0) {
                             for (const rs of batchResults) {
                                 allResults.push({
@@ -332,6 +324,7 @@ export async function runQueriesSequentially(
                                     limitReached: rs.limitReached,
                                     message: rs.columns.length > 0 ? undefined : "Query executed successfully",
                                     sql: statementToExecute,
+                                    refreshSql: statementToExecute,
                                 });
                             }
                         }
@@ -344,6 +337,7 @@ export async function runQueriesSequentially(
                                 limitReached: rs.limitReached,
                                 message: rs.columns.length > 0 ? undefined : "Query executed successfully",
                                 sql: statementToExecute,
+                                refreshSql: statementToExecute,
                             }));
                             resultCallback(queryResults);
                         }
@@ -360,9 +354,32 @@ export async function runQueriesSequentially(
                                 outputChannel,
                                 allResults,
                                 resultCallback,
+                                connectionName: resolvedConnectionName,
+                                documentUri,
                             });
                             break;
                         }
+
+                        await _batchOptions.onStatementSucceeded?.({
+                            sql: statementToExecute,
+                            connectionName: resolvedConnectionName,
+                            documentUri,
+                            connection,
+                        });
+                        if (queryEndCallback && statementExecutionId) {
+                            queryEndCallback(statementExecutionId, totalRows, durationMs, 'success');
+                        }
+                        logQueryToHistoryAsync(
+                            historyManager,
+                            details.host,
+                            details.database,
+                            statementToExecute,
+                            resolvedConnectionName,
+                            historyTags,
+                            'success',
+                            durationMs,
+                            batchRecordsAffected !== undefined && batchRecordsAffected > 0 ? batchRecordsAffected : totalRows,
+                        );
                     }
                 } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
@@ -390,6 +407,8 @@ export async function runQueriesSequentially(
                         outputChannel,
                         allResults,
                         resultCallback,
+                        connectionName: resolvedConnectionName,
+                        documentUri,
                     });
                 }
 
@@ -662,22 +681,6 @@ export async function runQueriesWithStreaming(
                             logCallback(logMessage);
                         }
 
-                        if (queryEndCallback && statementExecutionId) {
-                            queryEndCallback(statementExecutionId, totalRows, durationMs, 'success');
-                        }
-
-                        logQueryToHistoryAsync(
-                            historyManager,
-                            details.host,
-                            details.database,
-                            statementToExecute,
-                            resolvedConnectionName,
-                            historyTags,
-                            'success',
-                            durationMs,
-                            recordsAffected !== undefined && recordsAffected > 0 ? recordsAffected : totalRows,
-                        );
-
                         if (error) {
                             handleBatchQueryFailure({
                                 err: error,
@@ -689,9 +692,31 @@ export async function runQueriesWithStreaming(
                                 queryEndCallback,
                                 outputChannel,
                                 resultCallback: undefined,
+                                connectionName: resolvedConnectionName,
+                                documentUri,
                             });
                             break;
                         }
+                        await _batchOptions.onStatementSucceeded?.({
+                            sql: statementToExecute,
+                            connectionName: resolvedConnectionName,
+                            documentUri,
+                            connection,
+                        });
+                        if (queryEndCallback && statementExecutionId) {
+                            queryEndCallback(statementExecutionId, totalRows, durationMs, 'success');
+                        }
+                        logQueryToHistoryAsync(
+                            historyManager,
+                            details.host,
+                            details.database,
+                            statementToExecute,
+                            resolvedConnectionName,
+                            historyTags,
+                            'success',
+                            durationMs,
+                            recordsAffected !== undefined && recordsAffected > 0 ? recordsAffected : totalRows,
+                        );
                     }
                 } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
@@ -718,6 +743,8 @@ export async function runQueriesWithStreaming(
                         queryEndCallback,
                         outputChannel,
                         resultCallback: undefined,
+                        connectionName: resolvedConnectionName,
+                        documentUri,
                     });
                 }
 

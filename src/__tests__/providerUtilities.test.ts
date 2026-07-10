@@ -432,7 +432,7 @@ WHEN MATCHED THEN UPDATE SET T.ACCOUNTNAME = S.CALENDARQUARTER`;
                 {} as vscode.CancellationToken
             ) as MockCodeAction[];
 
-            expect(actions.length).toBeGreaterThanOrEqual(8);
+            expect(actions.length).toBeGreaterThanOrEqual(7);
             expect(actions.map(action => action.title)).toEqual(
                 expect.arrayContaining([
                     'Add DISTRIBUTE ON RANDOM',
@@ -444,6 +444,7 @@ WHEN MATCHED THEN UPDATE SET T.ACCOUNTNAME = S.CALENDARQUARTER`;
                     'Fix with Copilot'
                 ])
             );
+            expect(actions.filter(action => action.title === 'Fix with Copilot')).toHaveLength(1);
             const preferredTitles = actions.filter(action => action.isPreferred).map(action => action.title);
             expect(preferredTitles).toEqual(
                 expect.arrayContaining([

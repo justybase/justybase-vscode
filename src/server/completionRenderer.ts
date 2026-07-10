@@ -10,8 +10,14 @@ import type { LocalDefinition } from "../providers/types";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
 import { isCompletableLocalDefinition } from "./completionLocalDefinitionUtils";
 import { matchesPrefix } from "./completionRanker";
+import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type { ScopedColumnCandidate } from "./completionTypes";
 import { attachCompletionDescription } from "./completionDescriptionUtils";
+import {
+  buildFunctionCompletionDetail,
+  buildFunctionInlineDescription,
+  buildFunctionSignatureDocumentation,
+} from "./functionCompletionUtils";
 
 /**
  * Completion item rendering helpers that keep construction consistent.
@@ -144,17 +150,27 @@ export function toFunctionItems(
   typedPrefix: string,
   position: Position,
   sqlFunctionNames: readonly string[],
+  sqlFunctionSignatures?: ReadonlyMap<
+    string,
+    readonly DatabaseSqlFunctionSignature[]
+  >,
 ): CompletionItem[] {
   const typedPrefixUpper = typedPrefix.toUpperCase();
   return sqlFunctionNames
     .filter((name) => !typedPrefix || name.startsWith(typedPrefixUpper))
     .map((name) => {
+      const signatures = sqlFunctionSignatures?.get(name);
+      const inlineDescription = buildFunctionInlineDescription(signatures);
       const item: CompletionItem = {
         label: name,
         kind: CompletionItemKind.Function,
-        detail: "SQL Function",
+        detail: buildFunctionCompletionDetail(signatures),
         insertText: `${name}()`,
         sortText: `4_${name}`,
+        documentation: buildFunctionSignatureDocumentation(signatures),
+        labelDetails: inlineDescription
+          ? { description: inlineDescription }
+          : undefined,
       };
       applyPrefixRange(item, position, typedPrefix);
       return item;

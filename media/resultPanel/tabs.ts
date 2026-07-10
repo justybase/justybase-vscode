@@ -8,6 +8,7 @@ import {
 } from './state.js';
 import { applyScrollForResultSet, saveAllGridStates, getGridWrapperForResultSet } from './grid/persistence.js';
 import { updateResultLimitBanner } from './banners.js';
+import { updateRefreshFailureBanner } from './refreshFailureBanner.js';
 import { updateControlsVisibility, syncGlobalFilterInput } from './grid.js';
 import { renderRowCountInfo } from './filter.js';
 import { clearLogs } from './export.js';
@@ -233,9 +234,18 @@ function showContextMenu(e: MouseEvent, index: number): void {
     menu.style.zIndex = '10000';
     menu.style.minWidth = '150px';
 
+    const rs = getResultSets()[index];
+    const canRefresh = Boolean(rs && !rs.isLog && !rs.isError && !rs.isTextContent && typeof rs.refreshSql === 'string' && rs.refreshSql.trim().length > 0);
+
+    if (canRefresh) {
+        const refreshItem = createMenuItem('Refresh This Result', () => {
+            callPanelMethod('refreshResultAt', index);
+        });
+        menu.appendChild(refreshItem);
+    }
+
     // Copilot AI Describe option
     const copilotItem = createMenuItem('✨ Describe data with Copilot AI', () => {
-        const rs = getResultSets()[index];
         if (rs) {
             vscode.postMessage({
                 command: 'describeWithCopilot',
@@ -419,4 +429,6 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
     if (document.body.classList.contains('sidebar-layout')) {
         getResultPanelWindow().renderSidebarSchema?.();
     }
+
+    updateRefreshFailureBanner(index);
 }

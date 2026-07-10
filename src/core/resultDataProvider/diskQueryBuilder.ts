@@ -1,3 +1,10 @@
+import {
+    buildLowerLikePattern,
+    COLUMN_FILTER_COMPARISON_OPERATORS,
+    combineFilterClauses,
+    escapeSqlLikeLiteral,
+    parseFilterNumericParam,
+} from './columnFilterShared';
 import { mapColumnTypeToSqlite, sqliteColumnName } from './netezzaToSqliteType';
 import { isTemporalColumnType } from './temporalColumnTypes';
 import type { DiskColumnConditionSpec, DiskColumnFilterSpec, DiskQuerySpec, DiskSortSpec } from './types';
@@ -7,11 +14,6 @@ export interface BuiltDiskQuery {
     whereParams: unknown[];
     orderBySql: string;
 }
-
-const SQLITE_MIN_INT64 = BigInt('-9223372036854775808');
-const SQLITE_MAX_INT64 = BigInt('9223372036854775807');
-const JS_MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
-const JS_MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
 function isIntegerSqliteType(dataType: string | undefined): boolean {
     return mapColumnTypeToSqlite(dataType) === 'INTEGER';
@@ -34,35 +36,6 @@ function lowerColText(columnIndex: number): string {
     return `LOWER(${castColAsText(columnIndex)})`;
 }
 
-function escapeLikeLiteral(value: string): string {
-    return value.replace(/[%_\\]/g, '\\$&');
-}
-
-function parseNumericParam(value: string, dataType: string | undefined): number | bigint | null {
-    const normalized = value.replace(/,/g, '').trim();
-    if (normalized === '') {
-        return null;
-    }
-
-    if (isIntegerSqliteType(dataType) && /^[+-]?\d+$/.test(normalized)) {
-        try {
-            const parsedBigInt = BigInt(normalized);
-            if (parsedBigInt < SQLITE_MIN_INT64 || parsedBigInt > SQLITE_MAX_INT64) {
-                return null;
-            }
-            if (parsedBigInt >= JS_MIN_SAFE_BIGINT && parsedBigInt <= JS_MAX_SAFE_BIGINT) {
-                return Number(parsedBigInt);
-            }
-            return parsedBigInt;
-        } catch {
-            return null;
-        }
-    }
-
-    const parsed = Number.parseFloat(normalized);
-    return Number.isFinite(parsed) ? parsed : null;
-}
-
 function buildGlobalSearchClause(
     globalSearch: string,
     columnCount: number,
@@ -72,7 +45,7 @@ function buildGlobalSearchClause(
     if (!term) {
         return '';
     }
-    const likePattern = `%${escapeLikeLiteral(term)}%`;
+    const likePattern = `%${escapeSqlLikeLiteral(term)}%`;
     const parts: string[] = [];
     for (let index = 0; index < columnCount; index++) {
         parts.push(`${castColAsText(index)} LIKE ? ESCAPE '\\'`);
@@ -128,25 +101,24 @@ function buildSingleConditionClause(
         case 'isNotEmpty':
             return `(${col} IS NOT NULL AND ${castColAsText(columnIndex)} != '')`;
         case 'contains':
-            params.push(`%${escapeLikeLiteral(value).toLowerCase()}%`);
-            return `${textCol} LIKE ? ESCAPE '\\'`;
         case 'notContains':
-            params.push(`%${escapeLikeLiteral(value).toLowerCase()}%`);
-            return `(${col} IS NULL OR ${textCol} NOT LIKE ? ESCAPE '\\')`;
         case 'startsWith':
-            params.push(`${escapeLikeLiteral(value).toLowerCase()}%`);
+        case 'endsWith': {
+            const pattern = buildLowerLikePattern(condition.type, value);
+            params.push(pattern);
+            if (condition.type === 'notContains') {
+                return `(${col} IS NULL OR ${textCol} NOT LIKE ? ESCAPE '\\')`;
+            }
             return `${textCol} LIKE ? ESCAPE '\\'`;
-        case 'endsWith':
-            params.push(`%${escapeLikeLiteral(value).toLowerCase()}%`);
-            return `${textCol} LIKE ? ESCAPE '\\'`;
+        }
         case 'like': {
-            const pattern = escapeLikeLiteral(value).toLowerCase();
+            const pattern = escapeSqlLikeLiteral(value).toLowerCase();
             params.push(pattern);
             return `${textCol} LIKE ? ESCAPE '\\'`;
         }
         case 'equals':
             if (isNumeric && !isDate) {
-                const numeric = parseNumericParam(value, dataType);
+                const numeric = parseFilterNumericParam(value, { integerOnly: isIntegerSqliteType(dataType) });
                 if (numeric === null) {
                     params.push(value.toLowerCase());
                     return `${textCol} = ?`;
@@ -158,7 +130,7 @@ function buildSingleConditionClause(
             return `${textCol} = ?`;
         case 'notEquals':
             if (isNumeric && !isDate) {
-                const numeric = parseNumericParam(value, dataType);
+                const numeric = parseFilterNumericParam(value, { integerOnly: isIntegerSqliteType(dataType) });
                 if (numeric === null) {
                     params.push(value.toLowerCase());
                     return `(${col} IS NULL OR ${textCol} != ?)`;
@@ -173,16 +145,11 @@ function buildSingleConditionClause(
         case 'lessThan':
         case 'lessThanOrEqual':
         case 'between': {
-            const opMap: Record<string, string> = {
-                greaterThan: '>',
-                greaterThanOrEqual: '>=',
-                lessThan: '<',
-                lessThanOrEqual: '<=',
-            };
             if (condition.type === 'between') {
                 if (isNumeric && !isDate) {
-                    const min = parseNumericParam(value, dataType);
-                    const max = parseNumericParam(value2, dataType);
+                    const integerOnly = isIntegerSqliteType(dataType);
+                    const min = parseFilterNumericParam(value, { integerOnly });
+                    const max = parseFilterNumericParam(value2, { integerOnly });
                     if (min === null || max === null) {
                         params.push(value.toLowerCase(), value2.toLowerCase());
                         return `(${textCol} >= ? AND ${textCol} <= ?)`;
@@ -193,9 +160,9 @@ function buildSingleConditionClause(
                 params.push(value.toLowerCase(), value2.toLowerCase());
                 return `(${textCol} >= ? AND ${textCol} <= ?)`;
             }
-            const op = opMap[condition.type];
+            const op = COLUMN_FILTER_COMPARISON_OPERATORS[condition.type];
             if (isNumeric && !isDate) {
-                const numeric = parseNumericParam(value, dataType);
+                const numeric = parseFilterNumericParam(value, { integerOnly: isIntegerSqliteType(dataType) });
                 if (numeric === null) {
                     params.push(value.toLowerCase());
                     return `${textCol} ${op} ?`;
@@ -223,11 +190,7 @@ function buildColumnConditionFilterClause(
     if (parts.length === 0) {
         return '';
     }
-    if (parts.length === 1) {
-        return parts[0];
-    }
-    const joiner = filter.conditionLogic === 'or' ? ' OR ' : ' AND ';
-    return `(${parts.join(joiner)})`;
+    return combineFilterClauses(parts, filter.conditionLogic);
 }
 
 function buildColumnFilterClause(

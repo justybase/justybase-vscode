@@ -223,7 +223,8 @@ const PRIMARY_EXPORT_FORMATS: ExportFormatOption[] = [
     { id: 'xml', label: 'XML', description: 'Extensible markup language' },
     { id: 'sql', label: 'SQL INSERT', description: 'SQL insert statements' },
     { id: 'markdown', label: 'Markdown', description: 'Markdown table' },
-    { id: 'parquet', label: 'Parquet', description: 'Apache Parquet columnar format' }
+    { id: 'parquet', label: 'Parquet', description: 'Apache Parquet columnar format' },
+    { id: 'xpt', label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5' }
 ];
 
 const PRIMARY_EXPORT_DESTINATIONS: ExportDestinationOption[] = [

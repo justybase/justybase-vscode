@@ -411,13 +411,23 @@ export const BASE_SQL_FUNCTION_SIGNATURES: ReadonlyMap<string, readonly Database
         { name: 'SPLIT_PART', parameters: ['string', 'delimiter', 'field'], description: 'Split string and return part' }
     ]],
     ['TO_DATE', [
-        { name: 'TO_DATE', parameters: ['string', 'format'], description: 'Convert string to date' }
+        {
+            name: 'TO_DATE',
+            parameters: ['value', 'format'],
+            description: 'Convert a value to date using the specified format mask.',
+            example: "SELECT TO_DATE(20260605, 'YYYYMMDD');"
+        }
     ]],
     ['TO_TIMESTAMP', [
         { name: 'TO_TIMESTAMP', parameters: ['string', 'format'], description: 'Convert string to timestamp' }
     ]],
     ['TO_CHAR', [
-        { name: 'TO_CHAR', parameters: ['value', 'format'], description: 'Convert to formatted string' }
+        {
+            name: 'TO_CHAR',
+            parameters: ['value', 'format'],
+            description: 'Convert a value to formatted string using the specified format mask.',
+            example: "SELECT TO_CHAR(CURRENT_DATE, 'YYYYMMDD');"
+        }
     ]],
     ['DATE_PART', [
         { name: 'DATE_PART', parameters: ['field', 'source'], description: 'Extract date part' }

@@ -150,6 +150,7 @@ describe('handleSetActiveSource grid preservation', () => {
                     if (id === 'gridContainer') {
                         return {
                             querySelectorAll: jest.fn(() => [{}, {}]),
+                            querySelector: jest.fn(() => null),
                         };
                     }
                     return null;

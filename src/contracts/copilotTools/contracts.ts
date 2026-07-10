@@ -1379,13 +1379,13 @@ export const ExecuteImportToolContract: ToolContract<IExecuteImportToolInput, st
 export const ExportQueryResultsToolContract: ToolContract<IExportQueryResultsToolInput, string> = {
     name: 'netezza_export_query_results',
     displayName: 'Export Query Results',
-    description: 'Exports query output to CSV/XLSX/XLSB/Parquet',
+    description: 'Exports query output to CSV/XLSX/XLSB/Parquet/XPT',
     toolReferenceName: 'exportQueryResults',
     validateInput: validateExportQueryResultsToolInput,
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: true,
-    tags: ['csv', 'export', 'query', 'xlsb', 'xlsx', 'parquet']
+    tags: ['csv', 'export', 'query', 'xlsb', 'xlsx', 'parquet', 'xpt']
 };
 
 /** CompileProcedureTool Contract */

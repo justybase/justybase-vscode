@@ -23,6 +23,7 @@ import { registerExportToMdCommand } from './commands/exportToMdCommand';
 import { registerImportCommands } from './commands/importCommands';
 import { registerQueryCommands } from './commands/queryCommands';
 import { registerCopilotFeatures } from './activation/copilotRegistration';
+import { showSensitiveCopilotToolNotice } from './activation/sensitiveCopilotToolNotice';
 import { registerSqlLanguageFeatures } from './activation/sqlLanguageRegistration';
 import { getExtensionDocumentParseSession } from './core/extensionDocumentParseSession';
 import { startSqlLanguageClient, stopSqlLanguageClient } from './activation/lspRegistration';
@@ -60,6 +61,7 @@ import { ConnectionAccentDecorationProvider } from './decorations/connectionAcce
 import { Logger, logWithFallback } from './utils/logger';
 import { createPerformanceTimer, formatPerformanceEvent } from './services/perf/performanceEvents';
 import { SQL_AUTHORING_LANGUAGE_IDS } from './utils/sqlLanguage';
+import { TableDdlSynchronizer } from './metadata/tableDdlSynchronizer';
 
 let isExtensionShuttingDown = false;
 let deferredFeatureScheduler: DeferredFeatureScheduler | undefined;
@@ -94,6 +96,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
 
     const { services, metadataCacheInit } = activateCoreServices(context, logger);
     const { connectionManager, metadataCache, schemaProvider } = services;
+    const tableDdlSynchronizer = new TableDdlSynchronizer(
+        context,
+        connectionManager,
+        metadataCache,
+        schemaProvider,
+    );
 
     context.subscriptions.push(...registerStartupCommands({
         context,
@@ -249,11 +257,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         metadataCache,
         schemaProvider,
         schemaTreeView,
+        tableDdlSynchronizer,
     }));
     context.subscriptions.push(...registerExportCommands({ context, connectionManager, outputChannel }));
     context.subscriptions.push(registerExportToMdCommand({ connectionManager, resultPanelProvider }));
     context.subscriptions.push(...registerImportCommands({ context, connectionManager, metadataCache, outputChannel }));
-    context.subscriptions.push(...registerQueryCommands({ context, connectionManager, resultPanelProvider }));
+    context.subscriptions.push(...registerQueryCommands({
+        context,
+        connectionManager,
+        resultPanelProvider,
+        tableDdlSynchronizer,
+    }));
 
     deferredFeatureScheduler = new DeferredFeatureScheduler();
     deferredFeatureScheduler.schedule({
@@ -274,6 +288,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         resultPanelProvider,
         keepConnectionStatusBar,
         getDatabaseList,
+        tableDdlSynchronizer,
     }));
     context.subscriptions.push(...registerSqlConsoleCommands({ context, connectionManager }));
     context.subscriptions.push(...await registerCompatibilityCommandAliases());
@@ -288,6 +303,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         void vscode.window.showWarningMessage(
             'JustyBase AI/Copilot could not be initialized. Some AI functions may not work correctly in this session.',
         );
+    }
+
+    if (!skipDeferredFeatureInit) {
+        void showSensitiveCopilotToolNotice(context).catch((error: unknown) => {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.warn(`Netezza extension: Could not show Copilot security notice: ${errorMessage}`);
+        });
     }
 
     const sqlParserConfig = getExtensionConfiguration('sqlParser');

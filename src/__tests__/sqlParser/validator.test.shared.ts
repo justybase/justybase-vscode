@@ -99,6 +99,12 @@ export const mockTableDefinitions = [
     name: "DIMACCOUNT",
     columns: ["ACCOUNTCODEALTERNATEKEY", "ACCOUNTKEY"],
   },
+  {
+    database: "JUST_DATA",
+    schema: "ADMIN",
+    name: "DIMDATE",
+    columns: ["ACCOUNTKEY", "DATEKEY", "CALENDARQUARTER"],
+  },
 ];
 
 export let validator: SqlValidator;

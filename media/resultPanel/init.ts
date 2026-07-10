@@ -14,6 +14,7 @@ import {
   getRowViewOpen,
   getGlobalFilterState,
   setGlobalFilterState,
+  setAggregationState,
   getIsEditMode,
   setIsEditMode,
   getPendingEdits,
@@ -49,6 +50,7 @@ import {
   populateColumnSearchList,
 } from "./grid.js";
 import { renderRowCountInfo, reorderColumnByDrag, reorderColumnsForPinning } from "./filter.js";
+import { applyDatabaseFilter } from "./databaseFilters.js";
 import { closeRowView, syncRowViewToolbarButton } from "./rowView.js";
 import { refreshDiskQueryWindow } from "./diskBackedGrid.js";
 import {
@@ -1683,10 +1685,6 @@ getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent)
     callPanelMethod('openResultFormattingPanel', { scope: "result" });
     return;
   }
-  if (action === "clear-filters") {
-    callPanelMethod('clearAllFilters');
-    return;
-  }
 
   if (action === "move-to-disk") {
     const sourceUri = getActiveSourceUri();
@@ -1755,9 +1753,21 @@ function updateEditButtonsState(): void {
   const editBtn = getElementById('editToggleBtn');
   const saveBtn = getElementById('saveEditsBtn');
   const discardBtn = getElementById('discardEditsBtn');
+  const refreshBtn = getElementById<HTMLButtonElement>('refreshResultBtn');
+  const clearFiltersBtn = getElementById<HTMLButtonElement>('clearFiltersBtn');
   const rs = getResultSetAt(getActiveGridIndex());
   const isEditable = rs && rs.isEditable;
+  const canRefresh = Boolean(rs && !rs.isLog && !rs.isError && !rs.isTextContent && typeof rs.refreshSql === 'string' && rs.refreshSql.trim().length > 0);
   const inEdit = getIsEditMode();
+
+  if (refreshBtn) {
+    refreshBtn.style.display = canRefresh ? 'inline-flex' : 'none';
+    refreshBtn.disabled = !canRefresh;
+  }
+  if (clearFiltersBtn) {
+    clearFiltersBtn.style.display = canRefresh ? 'inline-flex' : 'none';
+    clearFiltersBtn.disabled = !canRefresh;
+  }
 
   if (editBtn) {
     editBtn.style.display = isEditable ? 'inline-flex' : 'none';
@@ -1770,6 +1780,115 @@ function updateEditButtonsState(): void {
   if (discardBtn) {
     discardBtn.style.display = (isEditable && inEdit) ? 'inline-flex' : 'none';
   }
+}
+
+function findTrailingLimitValue(sql: string | undefined): string | null {
+  if (!sql) return null;
+  const match = /(?:\blimit\s+)(\d+)(\s*;?\s*)$/i.exec(sql);
+  return match ? match[1] : null;
+}
+
+function closeRefreshLimitPanel(): void {
+  document.getElementById('refreshLimitPanel')?.remove();
+}
+
+function postRefreshResult(resultSetIndex: number, limitValue?: string): void {
+  const sourceUri = getActiveSourceUri();
+  if (!sourceUri) {
+    vscode.postMessage({ command: 'info', text: 'No active SQL result source.' });
+    return;
+  }
+
+  vscode.postMessage({
+    command: 'refreshResult',
+    sourceUri,
+    resultSetIndex,
+    ...(limitValue !== undefined ? { limitValue } : {}),
+  });
+}
+
+function showRefreshLimitPanel(resultSetIndex: number, defaultLimit: string): void {
+  closeRefreshLimitPanel();
+
+  const anchor = getElementById('refreshResultBtn');
+  const panel = document.createElement('div');
+  panel.id = 'refreshLimitPanel';
+  panel.className = 'refresh-limit-panel';
+  panel.innerHTML = `
+    <div class="refresh-limit-panel__title">Refresh limit</div>
+    <input class="refresh-limit-panel__input" type="number" min="0" step="1" value="${defaultLimit}" aria-label="Refresh LIMIT value">
+    <div class="refresh-limit-panel__error" aria-live="polite"></div>
+    <div class="refresh-limit-panel__actions">
+      <button type="button" class="refresh-limit-panel__cancel">Cancel</button>
+      <button type="button" class="refresh-limit-panel__run primary">Refresh</button>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  const anchorRect = anchor?.getBoundingClientRect();
+  const panelRect = panel.getBoundingClientRect();
+  const top = anchorRect ? anchorRect.bottom + 6 : 44;
+  const left = anchorRect
+    ? Math.max(8, Math.min(anchorRect.left, window.innerWidth - panelRect.width - 8))
+    : Math.max(8, Math.round((window.innerWidth - panelRect.width) / 2));
+  panel.style.top = `${top}px`;
+  panel.style.left = `${left}px`;
+
+  const input = panel.querySelector<HTMLInputElement>('.refresh-limit-panel__input');
+  const error = panel.querySelector<HTMLElement>('.refresh-limit-panel__error');
+  const run = () => {
+    const value = input?.value.trim() ?? '';
+    if (!/^\d+$/.test(value)) {
+      if (error) error.textContent = 'Enter a non-negative integer.';
+      input?.focus();
+      return;
+    }
+    closeRefreshLimitPanel();
+    postRefreshResult(resultSetIndex, value);
+  };
+
+  panel.querySelector('.refresh-limit-panel__cancel')?.addEventListener('click', closeRefreshLimitPanel);
+  panel.querySelector('.refresh-limit-panel__run')?.addEventListener('click', run);
+  input?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      run();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeRefreshLimitPanel();
+    }
+  });
+
+  setTimeout(() => {
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !panel.contains(target) && target !== anchor) {
+        closeRefreshLimitPanel();
+        document.removeEventListener('mousedown', closeOnOutsideClick);
+      }
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+  }, 0);
+
+  input?.focus();
+  input?.select();
+}
+
+function refreshResultAt(resultSetIndex: number): void {
+  const rs = getResultSetAt(resultSetIndex);
+  if (!rs || !rs.refreshSql || rs.isLog || rs.isError || rs.isTextContent) {
+    vscode.postMessage({ command: 'info', text: 'This result set cannot be refreshed.' });
+    return;
+  }
+
+  const limitValue = findTrailingLimitValue(rs.refreshSql);
+  if (limitValue !== null) {
+    showRefreshLimitPanel(resultSetIndex, limitValue);
+    return;
+  }
+
+  postRefreshResult(resultSetIndex);
 }
 
 // Setup window functions
@@ -1813,20 +1932,33 @@ function setupWindowFunctions(): void {
 
     const activeIndex = getActiveGridIndex();
     const activeResult = getResultSetAt(activeIndex) ?? null;
+    const sourceUri = getActiveSourceUri();
     setGlobalFilterState(
       activeIndex,
       "",
       activeResult ? activeResult.executionTimestamp : undefined,
-      getActiveSourceUri(),
+      sourceUri,
     );
-    // Handle grid view
+    setAggregationState(activeIndex, {}, activeResult?.executionTimestamp, sourceUri);
+
     const activeGrid = getGrid(activeIndex);
     if (activeGrid && activeGrid.tanTable) {
       activeGrid.tanTable.resetColumnFilters();
       activeGrid.tanTable.setGlobalFilter("");
-      if (activeGrid.render) {
-        activeGrid.render();
-      }
+    }
+
+    const hasDatabaseFilter = Boolean(
+      activeResult?.databaseFilterSpec
+      && ((activeResult.databaseFilterSpec.columnFilters?.length ?? 0) > 0
+        || activeResult.databaseFilterSpec.globalSearch?.trim()),
+    );
+    if (sourceUri && hasDatabaseFilter) {
+      void applyDatabaseFilter(sourceUri, activeIndex, undefined);
+      return;
+    }
+
+    if (activeGrid?.render) {
+      activeGrid.render();
     }
   };
   panel.clearLogs = function () {
@@ -1835,6 +1967,10 @@ function setupWindowFunctions(): void {
       sourceUri: getActiveSourceUri(),
     });
   };
+  panel.refreshActiveResult = function () {
+    refreshResultAt(getActiveGridIndex());
+  };
+  panel.refreshResultAt = refreshResultAt;
   panel.refreshRowView = updateRowView;
   panel.copyRowViewAsImage = copyRowViewAsImage;
   panel.copyRowViewAsMarkdown = copyRowViewAsMarkdown;

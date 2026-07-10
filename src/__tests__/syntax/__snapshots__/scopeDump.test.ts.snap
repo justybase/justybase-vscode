@@ -1,0 +1,9 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`scope dump dumps scopes for db..table vs 3-part CREATE TABLE 1`] = `
+"db..table JUST_DATA: source.sql <- meta.create.table-target.netezza <- constant.other.database-name.sql
+db..table TEST2: source.sql <- meta.create.table-target.netezza <- constant.other.table-name.sql
+3-part JUST_DATA: source.sql <- meta.create.table-target.netezza <- constant.other.database-name.sql
+3-part ADMIN: source.sql <- meta.create.table-target.netezza <- constant.other.schema-name.sql
+3-part TEST2: source.sql <- meta.create.table-target.netezza <- constant.other.table-name.sql"
+`;

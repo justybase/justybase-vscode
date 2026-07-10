@@ -126,9 +126,13 @@ export class ResultsHtmlGenerator {
                             <button type="button" class="layout-switcher__btn" data-layout="charts" aria-pressed="false" title="Professional range charts (ECharts)">Charts</button>
                         </div>
                         <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter rows..." onkeyup="onFilterChanged()" aria-label="Filter rows">
-                        <div class="column-search-wrapper">
-                            <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column..." autocomplete="off" oninput="onColumnSearchChanged()" onkeydown="onColumnSearchKeydown(event)" onblur="onColumnSearchBlur()" onfocus="onColumnSearchFocus()" aria-label="Find column">
-                            <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
+                        <div class="column-search-group">
+                            <div class="column-search-wrapper">
+                                <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column..." autocomplete="off" oninput="onColumnSearchChanged()" onkeydown="onColumnSearchKeydown(event)" onblur="onColumnSearchBlur()" onfocus="onColumnSearchFocus()" aria-label="Find column">
+                                <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
+                            </div>
+                            <button type="button" class="btn btn-icon refresh-sql-btn" onclick="refreshActiveResult()" title="Re-run SQL for the active result set in the same source session" id="refreshResultBtn" aria-label="Refresh SQL">${icons.refresh}</button>
+                            <button type="button" class="btn btn-icon clear-filters-btn" onclick="clearAllFilters()" title="Remove all filters and aggregations" id="clearFiltersBtn" aria-label="Clear filters and aggregations">${icons.clear}</button>
                         </div>
                         <div class="split-btn" id="exportSplitBtn">
                             <button class="btn split-btn__primary" onclick="toggleExportPrimaryMenu(event)" title="Export results" aria-haspopup="menu" aria-expanded="false" aria-controls="exportPrimaryMenu">${icons.export} Export</button>
@@ -163,7 +167,6 @@ export class ResultsHtmlGenerator {
                                 <div class="split-btn__menu-item" data-action="view-diff">Diff</div>
                                 <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item" data-action="formatting">Formatting…</div>
-                                <div class="split-btn__menu-item" data-action="clear-filters">Clear all filters</div>
                                 <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">Storage</div>
                                 <div class="split-btn__menu-item" data-action="move-to-disk">Move to disk (SQLite)</div>
@@ -403,6 +406,7 @@ export class ResultsHtmlGenerator {
       sql: `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M8 0C3.6 0 0 1.8 0 4v8c0 2.2 3.6 4 8 4s8-1.8 8-4V4c0-2.2-3.6-4-8-4zm0 2c3.3 0 6 1.3 6 3s-2.7 3-6 3-6-1.3-6-3 2.7-3 6-3zm0 12c-3.3 0-6-1.3-6-3V9c1.6 1.7 4.3 2 6 2s4.4-.3 6-2v2c0 1.7-2.7 3-6 3z"/></svg>`,
       markdown: `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M14.5 2H1.5C.7 2 0 2.7 0 3.5v9C0 13.3.7 14 1.5 14h13c.8 0 1.5-.7 1.5-1.5v-9c0-.8-.7-1.5-1.5-1.5zM3 11V5l2 2 2-2v6H6V7l-1 1-1-1v4H3zm10 0h-2V9h-2v2H7V5h2v2h2V5h2v6z"/></svg>`,
       export: `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M6 3h8v10H6V3zm-1 0H3v10h2V3zm-2-1h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M6 6h8v1H6V6zm0 2h8v1H6V8zm0 2h8v1H6v-1z"/><path d="M10 12L8 14L6 12" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>`, // Custom combo icon
+      refresh: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 21v-5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       duckdbQuery: `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M8 1C4.1 1 1 2.6 1 4.5v7C1 13.4 4.1 15 8 15s7-1.6 7-3.5v-7C15 2.6 11.9 1 8 1zm0 1.5c3.2 0 5.5 1.2 5.5 2S11.2 6.5 8 6.5 2.5 5.3 2.5 4.5 4.8 2.5 8 2.5zm0 11c-3.2 0-5.5-1.2-5.5-2V7c1.2.9 3.2 1.5 5.5 1.5S12.3 7.9 13.5 7v4.5c0 .8-2.3 2-5.5 2z"/><path d="M10.8 8.2a2.8 2.8 0 1 0 1.4 5.2l1.7 1.7.9-.9-1.7-1.7a2.8 2.8 0 0 0-2.3-4.3zm0 1.2a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2z"/></svg>`,
       checkAll: `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M13.485 1.929l1.414 1.414-9.9 9.9-4.243-4.242 1.415-1.415 2.828 2.829z"/></svg>`,
       clear: `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M8 7.293l4.146-4.147.708.708L8.707 8l4.147 4.146-.708.708L8 8.707l-4.146 4.147-.708-.708L7.293 8 3.146 3.854l.708-.708L8 7.293z"/></svg>`,

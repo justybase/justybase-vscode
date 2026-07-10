@@ -24,9 +24,9 @@
         "url": "https://github.com/justybase/justybase-vscode"
     },
     "keywords": [
+        "SQL",
         "oracle",
         "oracledb",
-        "sql",
         "database"
     ],
     "main": "./dist/extension.js",

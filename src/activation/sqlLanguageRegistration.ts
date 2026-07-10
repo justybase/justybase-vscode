@@ -7,6 +7,8 @@ import { registerSqlShortcuts } from '../editors/sqlShortcuts';
 import { MetadataCache } from '../metadataCache';
 import { ConnectionManager } from '../core/connectionManager';
 import { NetezzaParserHoverProvider } from '../providers/parserHoverProvider';
+import { SqlSelectionActionHoverProvider } from '../providers/sqlSelectionActionHoverProvider';
+import { SqlExecutionCodeActionProvider } from '../providers/sqlExecutionCodeActions';
 import {
     getExtensionDocumentParseSession,
     registerExtensionDocumentParseSessionLifecycle,
@@ -127,9 +129,21 @@ export function registerSqlLanguageFeatures(params: SqlLanguageRegistrationParam
                     dataAffordanceResolver,
                     parseSession,
                 )
-            )
+            ),
+            vscode.languages.registerHoverProvider(
+                sqlAuthoringSelector,
+                new SqlSelectionActionHoverProvider(dataAffordanceResolver),
+            ),
         );
     }
+
+    context.subscriptions.push(
+        vscode.languages.registerCodeActionsProvider(
+            sqlAuthoringSelector,
+            new SqlExecutionCodeActionProvider(),
+            { providedCodeActionKinds: SqlExecutionCodeActionProvider.providedCodeActionKinds },
+        ),
+    );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('netezza.lintSql', async () => {

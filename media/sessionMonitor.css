@@ -126,6 +126,12 @@ body.vscode-dark {
     transform: scale(.97);
 }
 
+.btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+    pointer-events: none;
+}
+
 .btn-primary {
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
@@ -150,70 +156,48 @@ body.vscode-dark {
     border-color: var(--rd);
 }
 
-/* ── Loading overlay (blur backdrop, modern card) ── */
-.loading-overlay {
-    position: fixed;
-    inset: 0;
+/* ── Refresh indicator (header corner spinner) ── */
+.refresh-indicator {
     display: none;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.35);
-    z-index: 10020;
-    backdrop-filter: blur(2px);
-    pointer-events: none;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
 }
 
-.loading-overlay.visible {
-    display: flex;
+.refresh-indicator.visible {
+    display: inline-flex;
 }
 
-.loading-card {
-    background: var(--bg);
-    border: 1px solid var(--bd);
-    border-radius: 10px;
-    padding: 28px 40px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-    min-width: 180px;
-    pointer-events: auto;
+.refresh-spinner {
+    width: 16px;
+    height: 16px;
+    animation: refresh-rotate 1.4s linear infinite;
 }
 
-.loading-spinner {
-    width: 36px;
-    height: 36px;
-    animation: loading-rotate 1.4s linear infinite;
-}
-
-.loading-spinner-circle {
+.refresh-spinner-circle {
     width: 100%;
     height: 100%;
+    stroke: color-mix(in srgb, var(--ac), transparent 70%);
 }
 
-.loading-spinner-path {
+.refresh-spinner-path {
     stroke: var(--ac);
     stroke-linecap: round;
     stroke-dasharray: 126;
     stroke-dashoffset: 100;
-    animation: loading-dash 1.4s ease-in-out infinite;
+    animation: refresh-dash 1.4s ease-in-out infinite;
 }
 
-@keyframes loading-rotate {
+@keyframes refresh-rotate {
     to { transform: rotate(360deg); }
 }
 
-@keyframes loading-dash {
+@keyframes refresh-dash {
     0% { stroke-dashoffset: 126; }
     50% { stroke-dashoffset: 30; }
     100% { stroke-dashoffset: 126; }
-}
-
-.loading-text {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--tx);
 }
 
 /* ── Overview strip ── */

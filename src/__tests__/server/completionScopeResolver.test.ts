@@ -27,6 +27,7 @@ function makeScopeRequest(
     databaseKind: "netezza",
     completionKeywords: ["FROM", "WHERE", "GROUP"],
     sqlFunctionNames: ["COUNT", "SUM"],
+    sqlFunctionSignatures: new Map(),
     specialBuiltinValues: ["NULL", "TRUE", "FALSE"],
     ...overrides,
   };

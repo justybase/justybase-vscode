@@ -24,8 +24,8 @@
         "url": "https://github.com/justybase/justybase-vscode"
     },
     "keywords": [
+        "SQL",
         "snowflake",
-        "sql",
         "database",
         "cloud data warehouse"
     ],

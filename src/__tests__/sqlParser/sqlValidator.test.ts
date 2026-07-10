@@ -2531,6 +2531,47 @@ SELECT * FROM TOP_EARNERS LIMIT 10;`);
       );
     });
 
+    it("should validate percentile_cont WITHIN GROUP in grouped query", () => {
+      expectValid(
+        `SELECT d.CALENDARQUARTER
+, percentile_cont(0.4) WITHIN GROUP (ORDER BY D.CALENDARQUARTER) AS fortieth
+FROM JUST_DATA..DIMDATE D GROUP BY d.CALENDARQUARTER;`,
+      );
+    });
+
+    it("should validate percentile_disc WITHIN GROUP in grouped query", () => {
+      expectValid(
+        `SELECT E.DEPARTMENT_ID,
+  percentile_disc(0.5) WITHIN GROUP (ORDER BY E.SALARY) AS median_sal
+FROM TESTDB..EMPLOYEES E
+GROUP BY E.DEPARTMENT_ID;`,
+      );
+    });
+
+    it("should report SQL047 when percentile_cont omits WITHIN GROUP", () => {
+      expectErrorCode(
+        "SELECT percentile_cont(0.4) FROM TESTDB..EMPLOYEES;",
+        "SQL047",
+      );
+    });
+
+    it("should report SQL047 when percentile_cont uses WITHIN GROUP and OVER together", () => {
+      expectErrorCode(
+        "SELECT percentile_cont(0.4) WITHIN GROUP (ORDER BY SALARY) OVER (PARTITION BY DEPARTMENT_ID) FROM TESTDB..EMPLOYEES;",
+        "SQL047",
+      );
+    });
+
+    it("should validate fuzzy and phonetic matching functions", () => {
+      expectValid(
+        `SELECT
+ le_dst('two','tow')
+, dle_dst('two','tow')
+, score_mp(781598358,781596310,1,2,3,4)
+FROM JUST_DATA..DIMDATE;`,
+      );
+    });
+
     it("should validate LAG() window function", () => {
       expectValid(
         "SELECT E.FIRST_NAME, E.SALARY, LAG(E.SALARY, 1, 0) OVER (ORDER BY E.HIRE_DATE) AS PREV_SALARY FROM TESTDB..EMPLOYEES E;",

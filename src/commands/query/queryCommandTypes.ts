@@ -2,11 +2,13 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../../core/connectionManager';
 import { ResultPanelView } from '../../views/resultPanelView';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
+import type { TableDdlSynchronizer } from '../../metadata/tableDdlSynchronizer';
 
 export interface QueryCommandsDependencies {
     context: vscode.ExtensionContext;
     connectionManager: ConnectionManager;
     resultPanelProvider: ResultPanelView;
+    tableDdlSynchronizer?: TableDdlSynchronizer;
 }
 
 /**

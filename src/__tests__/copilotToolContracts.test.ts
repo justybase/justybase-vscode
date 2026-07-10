@@ -3,6 +3,7 @@ import * as path from 'path';
 
 interface ManifestTool {
     name: string;
+    when?: string;
     inputSchema?: {
         properties?: Record<string, unknown>;
     };
@@ -48,6 +49,14 @@ function getManifestTools(): ManifestTool[] {
     return packageJson.contributes?.languageModelTools || [];
 }
 
+function getConfigurationProperties(): Record<string, { default?: unknown }> {
+    const packageJsonPath = path.join(process.cwd(), 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
+        contributes?: { configuration?: { properties?: Record<string, { default?: unknown }> } };
+    };
+    return packageJson.contributes?.configuration?.properties || {};
+}
+
 function getRegisteredToolNames(): string[] {
     const registrationPath = path.join(process.cwd(), 'src/activation/copilotRegistration.ts');
     const registrationSource = fs.readFileSync(registrationPath, 'utf8');
@@ -78,6 +87,20 @@ function getInterfacePropertyNames(relativePath: string): Set<string> {
 }
 
 describe('Copilot tool contracts', () => {
+    it('requires explicit opt-in for tools that return database data', () => {
+        const manifestTools = getManifestTools();
+        const toolsByName = new Map(manifestTools.map(tool => [tool.name, tool]));
+
+        expect(toolsByName.get('netezza_execute_query')?.when)
+            .toBe('config.justybase.copilot.tools.executeQueryEnabled');
+        expect(toolsByName.get('netezza_get_sample_data')?.when)
+            .toBe('config.justybase.copilot.tools.sampleDataEnabled');
+
+        const configurationProperties = getConfigurationProperties();
+        expect(configurationProperties['justybase.copilot.tools.executeQueryEnabled']?.default).toBe(false);
+        expect(configurationProperties['justybase.copilot.tools.sampleDataEnabled']?.default).toBe(false);
+    });
+
     it('keeps manifest tool names in sync with runtime registrations', () => {
         const manifestTools = getManifestTools();
         const manifestNames = manifestTools.map(tool => tool.name).sort();

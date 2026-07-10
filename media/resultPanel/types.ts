@@ -151,13 +151,20 @@ export interface ResultSet {
     editSource?: unknown;
     executionTimestamp?: number;
     sql?: string;
+    refreshSql?: string;
     _savedState?: Record<string, unknown>;
     storageMode?: 'memory' | 'sqlite';
     totalRowCount?: number;
     diskWindowStart?: number;
     diskQuerySpec?: DiskQuerySpec;
+    databaseFilterSpec?: DiskQuerySpec;
     diskFilteredCount?: number;
     diskAggregationCache?: Record<string, string>;
+    refreshFailure?: {
+        message: string;
+        sql?: string;
+        failedAt: number;
+    };
 }
 
 export interface DiskSortSpec {
@@ -259,12 +266,14 @@ export type AggregationFn =
     | 'min'
     | 'max'
     | 'stdev'
+    | 'median'
     | string;
 
 export interface AggregationSelection {
     fn: AggregationFn;
     precision: number | null;
     position: 'top' | 'bottom';
+    scope?: 'visible' | 'database';
 }
 
 export type ColumnAggregationValue = AggregationSelection | AggregationFn;
@@ -392,6 +401,8 @@ export interface ResultPanelGlobals {
     exportAllVisibleToExcel?: () => void;
     pinnedResults?: Array<{ sourceUri?: string; resultSetIndex?: number }>;
     refreshRowView?: () => void;
+    refreshActiveResult?: () => void;
+    refreshResultAt?: (resultSetIndex: number) => void;
     refreshResultsGrid?: () => void;
     sources?: string[];
     pinnedSources?: Set<string>;

@@ -165,7 +165,12 @@ export async function runSmartSequentialQuery(
             resultPanelProvider.logExecutionEnd(executionId, rowCount, status, error);
         };
 
-        const batchOptions: BatchQueryRunOptions = continueOnError
+        const batchOptions: BatchQueryRunOptions = {
+            onStatementSucceeded: event => deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
+            onStatementFailed: event => {
+                deps.tableDdlSynchronizer?.handleExecutionFailure(event.connectionName, event.documentUri);
+            },
+            ...(continueOnError
             ? {
                 continueOnError: true,
                 onQueryError: (queryIndex, sql, errorMessage) => {
@@ -176,7 +181,8 @@ export async function runSmartSequentialQuery(
                     );
                 },
             }
-            : {};
+            : {}),
+        };
 
         const progressTitle = continueOnError
             ? `Executing SQL (continue on error) for ${sourceUri.split(/[\\/]/).pop()}...`
@@ -219,6 +225,7 @@ export async function runSmartSequentialQuery(
                                     queryIndex,
                                     chunk,
                                     fullSql,
+                                    sql,
                                 );
                             },
                             streamingChunkSize,

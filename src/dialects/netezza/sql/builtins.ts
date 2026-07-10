@@ -74,6 +74,8 @@ const NETEZZA_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
     'STRRIGHT',
     'GROUP_CONCAT',
     'GROUP_CONCAT_SORT',
+    'PERCENTILE_CONT',
+    'PERCENTILE_DISC',
     'PROC_ARGUMENT_TYPES',
     'HASH',
     'HASH4',
@@ -96,6 +98,13 @@ const NETEZZA_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
     'URLDECODE',
     'URLENCODE',
     'URLPARSEQUERY',
+    'LE_DST',
+    'DLE_DST',
+    'NYSIIS',
+    'DBL_MP',
+    'PRI_MP',
+    'SEC_MP',
+    'SCORE_MP',
 ]);
 
 const NETEZZA_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>([

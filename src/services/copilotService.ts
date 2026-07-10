@@ -70,6 +70,29 @@ export class CopilotService {
   }
 
   /**
+   * Data-returning tools require an explicit opt-in because their output can
+   * contain sensitive database values.
+   */
+  private isToolEnabledForCopilot(toolName: string): boolean {
+    const protectedToolSettings: Record<string, string> = {
+      netezza_execute_query: 'tools.executeQueryEnabled',
+      netezza_get_sample_data: 'tools.sampleDataEnabled'
+    };
+    const setting = protectedToolSettings[toolName];
+    return !setting || (getExtensionConfiguration('copilot').get<boolean>(setting) ?? false);
+  }
+
+  private getAvailableLanguageModelTools(): vscode.LanguageModelChatTool[] {
+    return vscode.lm.tools
+      .filter(tool => this.isToolEnabledForCopilot(tool.name))
+      .map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema
+      }));
+  }
+
+  /**
    * Shows a message when AI features are disabled
    */
   private showDisabledMessage(): void {
@@ -1488,12 +1511,8 @@ Please:
 
         const messages = [vscode.LanguageModelChatMessage.User(fullPrompt)];
         
-        // Get available tools from vscode.lm.tools and convert to LanguageModelChatTool format
-        const availableTools: vscode.LanguageModelChatTool[] = vscode.lm.tools.map(tool => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema
-        }));
+        // Sensitive data tools are excluded unless explicitly enabled in settings.
+        const availableTools = this.getAvailableLanguageModelTools();
         
         // Pass tools to enable tool usage
         const options: vscode.LanguageModelChatRequestOptions = {

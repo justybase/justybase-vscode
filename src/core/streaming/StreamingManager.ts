@@ -8,6 +8,7 @@ import {
     getEffectiveResultColumnType,
     getResultReaderNumericScale
 } from './resultColumnMetadata';
+import { isConnectionRecoveryError } from '../connectionReadiness';
 
 /**
  * Streaming chunk callback interface for progressive result delivery
@@ -46,6 +47,14 @@ async function closeReaderBestEffort(reader: NzDataReader | undefined, context: 
         await reader.close();
     } catch (closeErr: unknown) {
         logWithFallback('warn', `[StreamingManager] Failed to close reader after ${context}:`, closeErr);
+    }
+}
+
+async function cancelCommandBestEffort(cmd: NzCommand, context: string): Promise<void> {
+    try {
+        await cmd.cancel();
+    } catch (cancelErr: unknown) {
+        logWithFallback('warn', `[StreamingManager] Failed to cancel command after ${context}:`, cancelErr);
     }
 }
 
@@ -385,13 +394,21 @@ export class StreamingManager {
         const alertTimeout = this.setupLongQueryAlert();
 
         let reader: NzDataReader | undefined;
+        let caughtError: Error | undefined;
+        let commandCleanupDone = false;
 
         try {
-            reader = await cmd.executeReader();
+            try {
+                reader = await cmd.executeReader();
+            } catch (executeErr: unknown) {
+                caughtError = executeErr instanceof Error ? executeErr : new Error(String(executeErr));
+                await cancelCommandBestEffort(cmd, 'executeAndFetch executeReader failure');
+                return { results: [], error: caughtError, recordsAffected: cmd._recordsAffected };
+            }
+
             const results: InternalResultSet[] = [];
             const finalRowLimit = maxRows !== undefined ? maxRows : limit;
             let hasMore = true;
-            let caughtError: Error | undefined;
 
             try {
                 do {
@@ -427,6 +444,7 @@ export class StreamingManager {
                                 onDropSession,
                                 true
                             );
+                            commandCleanupDone = true;
                             throw new Error('Query cancelled by user');
                         }
 
@@ -456,6 +474,7 @@ export class StreamingManager {
                                 onDropSession,
                                 true
                             );
+                            commandCleanupDone = true;
                             break;
                         }
                     }
@@ -475,7 +494,21 @@ export class StreamingManager {
 
             return { results, error: caughtError, recordsAffected: cmd._recordsAffected };
         } finally {
-            await closeReaderBestEffort(reader, 'executeAndFetch');
+            if (reader && !commandCleanupDone) {
+                if (caughtError && isConnectionRecoveryError(caughtError)) {
+                    await this.consumeRestAndCancel(
+                        reader,
+                        cmd,
+                        documentUri,
+                        sessionId,
+                        connectionManager,
+                        onDropSession,
+                        true,
+                    );
+                } else {
+                    await closeReaderBestEffort(reader, 'executeAndFetch');
+                }
+            }
             if (alertTimeout) {
                 clearTimeout(alertTimeout);
             }
@@ -515,10 +548,18 @@ export class StreamingManager {
         const alertTimeout = this.setupLongQueryAlert();
 
         let reader: NzDataReader | undefined;
+        let caughtError: Error | undefined;
+        let commandCleanupDone = false;
 
         try {
-            reader = await cmd.executeReader();
-            let caughtError: Error | undefined;
+            try {
+                reader = await cmd.executeReader();
+            } catch (executeErr: unknown) {
+                caughtError = executeErr instanceof Error ? executeErr : new Error(String(executeErr));
+                await cancelCommandBestEffort(cmd, 'executeWithStreaming executeReader failure');
+                return { totalRows: 0, limitReached: false, error: caughtError, recordsAffected: cmd._recordsAffected };
+            }
+
             let totalRows = 0;
             let limitReached = false;
             const finalRowLimit = maxRows !== undefined ? maxRows : limit;
@@ -558,6 +599,7 @@ export class StreamingManager {
                             onDropSession,
                             true
                         );
+                        commandCleanupDone = true;
                         break;
                     }
 
@@ -603,6 +645,7 @@ export class StreamingManager {
                             onDropSession,
                             true
                         );
+                        commandCleanupDone = true;
                         break;
                     }
                 }
@@ -632,7 +675,21 @@ export class StreamingManager {
 
             return { totalRows, limitReached, error: caughtError, recordsAffected: cmd._recordsAffected };
         } finally {
-            await closeReaderBestEffort(reader, 'executeWithStreaming');
+            if (reader && !commandCleanupDone) {
+                if (caughtError && isConnectionRecoveryError(caughtError)) {
+                    await this.consumeRestAndCancel(
+                        reader,
+                        cmd,
+                        documentUri,
+                        sessionId,
+                        connectionManager,
+                        onDropSession,
+                        true,
+                    );
+                } else {
+                    await closeReaderBestEffort(reader, 'executeWithStreaming');
+                }
+            }
             if (alertTimeout) {
                 clearTimeout(alertTimeout);
             }

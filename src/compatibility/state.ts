@@ -37,6 +37,10 @@ export const compatibilityStateKeys = {
         current: 'justybase.gettingStarted.shown',
         legacy: ['netezza.gettingStarted.shown']
     },
+    copilotSensitiveToolsNoticeShown: {
+        current: 'justybase.copilot.sensitiveToolsNoticeShown.v1',
+        legacy: []
+    },
     resultPanelFirstPaintTelemetry: {
         current: 'justybase.resultPanel.firstPaintTelemetry.v1',
         legacy: ['netezza.resultPanel.firstPaintTelemetry.v1']

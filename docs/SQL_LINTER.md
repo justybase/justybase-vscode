@@ -158,6 +158,8 @@ When `netezza.linter.mode` is set to `"advanced"` (default), the linter uses a f
 | **SQL018** | Warning | Unused CTE definition | `WITH cte AS (...) SELECT 1` |
 | **SQL019** | Warning | Unused table alias | `SELECT * FROM my_table t` (without `t.` usage) |
 | **SQL020** | Error | Subquery in FROM/JOIN requires alias | `SELECT * FROM (SELECT 1)` |
+| **SQL047** | Error | Invalid ordered-set aggregate (`PERCENTILE_CONT`/`PERCENTILE_DISC` missing `WITHIN GROUP` or combined with `OVER`) | `SELECT percentile_cont(0.4) FROM t` |
+| **SQL049** | Warning | Repeated projected column name requires an alias | `SELECT * FROM a JOIN b ON 1=1` when both sources contain `ID` |
 
 ### Syntax Error Codes
 

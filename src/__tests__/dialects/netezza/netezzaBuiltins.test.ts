@@ -81,6 +81,16 @@ const stringUtilityFns = [
   "URLPARSEQUERY",
 ] as const;
 
+const fuzzyPhoneticFns = [
+  "LE_DST",
+  "DLE_DST",
+  "NYSIIS",
+  "DBL_MP",
+  "PRI_MP",
+  "SEC_MP",
+  "SCORE_MP",
+] as const;
+
 const miscellaneousFns = [
   "ISFALSE",
   "ISNOTFALSE",
@@ -176,6 +186,13 @@ describe("Netezza builtins", () => {
 
     it.each(stringUtilityFns)(
       "includes Netezza string utility function: %s",
+      (fn) => {
+        expect(NETEZZA_BUILTIN_FUNCTIONS.has(fn)).toBe(true);
+      },
+    );
+
+    it.each(fuzzyPhoneticFns)(
+      "includes Netezza fuzzy/phonetic matching function: %s",
       (fn) => {
         expect(NETEZZA_BUILTIN_FUNCTIONS.has(fn)).toBe(true);
       },

@@ -24,6 +24,7 @@ export const TABLE_CACHE_OBJECT_TYPES = new Set<string>([
   'MATERIALIZED VIEW',
   'SYSTEM VIEW',
   'SYSTEM TABLE',
+  'GLOBAL TEMP TABLE',
 ]);
 
 export function isTableCacheObjectType(objType: string | undefined): boolean {

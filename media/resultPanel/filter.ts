@@ -12,6 +12,7 @@ import {
     getSortedSearchMatchIndices,
 } from './state.js';
 import { formatCellValue, formatSqlIdentifierForInsertion } from './utils.js';
+import { matchesFilterValueSearch, parseFilterNumericValue, sortFilterValues } from './filterValueSort.js';
 import { savePinnedState } from './grid/persistence.js';
 import { openResultFormattingPanel } from './formatting.js';
 import { postHostMessage } from './protocol.js';
@@ -19,6 +20,8 @@ import type {
     AggregationSelection,
     ColumnFilterValue,
     ConditionColumnFilter,
+    DiskColumnFilterSpec,
+    DiskQuerySpec,
     FilterCondition,
     ResultSet,
     TanStackColumn,
@@ -29,6 +32,8 @@ import type {
 import { getResultPanelWindow, getActiveSourceUri, isActiveSourceExecuting } from './types.js';
 import { diskQuerySpecHasFilters } from './diskQueryUtils.js';
 import { queryDiskDistinctValues } from './diskBackedGrid.js';
+import { applyDatabaseFilter, queryDatabaseFilterValues } from './databaseFilters.js';
+import { showInlineErrorWithRetry } from './inlineErrorRetry.js';
 import {
     buildDiskQuerySpecForResultSet,
     getDiskFilteredCount,
@@ -38,10 +43,40 @@ import {
 
 const vscode = { postMessage: postHostMessage };
 
+function findTrailingLimitValue(sql: string | undefined): string | null {
+    if (!sql) return null;
+    const match = /(?:\blimit\s+)(\d+)(\s*;?\s*)$/i.exec(sql);
+    return match ? match[1] : null;
+}
+
 export const FILTER_MAX_UNIQUE_VALUES = 10000;
 
 function isConditionColumnFilter(value: ColumnFilterValue): value is ConditionColumnFilter {
     return Boolean(value && typeof value === 'object' && '_isConditionFilter' in value);
+}
+
+function hasActiveColumnFilter(
+    columnIndex: number,
+    currentFilter: ColumnFilterValue | undefined,
+    resultSet: ResultSet,
+): boolean {
+    const specFilters = [
+        resultSet.databaseFilterSpec?.columnFilters,
+        resultSet.diskQuerySpec?.columnFilters,
+    ];
+    for (const filters of specFilters) {
+        const match = filters?.find((filter) => filter.columnIndex === columnIndex);
+        if (match && (
+            (match.conditions?.length ?? 0) > 0
+            || (match.values?.length ?? 0) > 0
+        )) {
+            return true;
+        }
+    }
+    return Boolean(currentFilter && (
+        (Array.isArray(currentFilter) && currentFilter.length > 0)
+        || (isConditionColumnFilter(currentFilter) && Array.isArray(currentFilter.conditions) && currentFilter.conditions.length > 0)
+    ));
 }
 
 export function isResultSetRowLimitReached(rs: ResultSet | null | undefined): boolean {
@@ -325,10 +360,8 @@ export function createHeaderCellWithFilter(
     filterBtn.title = 'Filter';
 
     const currentFilter = table.getColumn(header.column.id).getFilterValue();
-    const hasActiveFilter = Boolean(currentFilter && (
-        (Array.isArray(currentFilter) && currentFilter.length > 0) ||
-        (isConditionColumnFilter(currentFilter) && Array.isArray(currentFilter.conditions) && currentFilter.conditions.length > 0)
-    ));
+    const parsedColumnIndex = Number.parseInt(header.column.id, 10);
+    const hasActiveFilter = hasActiveColumnFilter(parsedColumnIndex, currentFilter, resultSet);
 
     if (hasActiveFilter) {
         filterBtn.classList.add('active');
@@ -706,6 +739,12 @@ async function showDiskColumnFilterDropdown(
     dropdown.innerHTML = '';
     const { valuesTab, conditionsTab, valuesContent, conditionsContent } = createTabs(dropdown);
 
+    const diskScopeRow = document.createElement('div');
+    diskScopeRow.className = 'filter-dropdown-selection-info';
+    diskScopeRow.style.color = 'var(--vscode-descriptionForeground)';
+    diskScopeRow.textContent = 'Filter scope: Full spilled dataset (disk-backed, local SQLite)';
+    dropdown.insertBefore(diskScopeRow, dropdown.firstChild);
+
     const existingColumnFilter = resultSet.diskQuerySpec?.columnFilters
         ?.find((filter) => filter.columnIndex === columnIndex);
 
@@ -721,10 +760,11 @@ async function showDiskColumnFilterDropdown(
             }) ?? String(raw);
         }) ?? undefined;
 
-    const isNumericColumn = detectNumericColumn(uniqueValues);
+    const sortedUniqueValues = sortFilterValues(uniqueValues, column.columnDef.dataType);
+    const isNumericColumn = detectNumericColumn(sortedUniqueValues);
     const { checkboxes, checkedValues, getFilteredValues, getSelectedCount } = createValuesTabContent(
         valuesContent,
-        uniqueValues,
+        sortedUniqueValues,
         currentFilter,
         valueCounts,
         isNumericColumn,
@@ -768,12 +808,30 @@ async function showDiskColumnFilterDropdown(
     const selectionInfo = document.createElement('div');
     selectionInfo.className = 'filter-dropdown-selection-info';
     const updateSelectionInfo = () => {
-        const count = getSelectedCount();
-        selectionInfo.textContent = count === 0 ? 'No values selected' : `${count} selected`;
+        const selected = getSelectedCount();
+        const total = uniqueValues.length;
+        selectionInfo.classList.remove('filter-selection-warning', 'filter-selection-muted');
+        if (selected === 0) {
+            selectionInfo.textContent = 'No values selected — Apply will remove the filter';
+            selectionInfo.classList.add('filter-selection-warning');
+        } else if (selected === total) {
+            selectionInfo.textContent = `All ${total.toLocaleString()} values selected — no filtering`;
+            selectionInfo.classList.add('filter-selection-muted');
+        } else {
+            selectionInfo.textContent = `${selected.toLocaleString()} of ${total.toLocaleString()} selected — click Apply`;
+        }
     };
     checkboxes.forEach((cb) => cb.addEventListener('change', updateSelectionInfo));
 
-    const actionsContainer = createActionButtons(() => {
+    const hasActiveDiskFilter = hasActiveColumnFilter(columnIndex, undefined, resultSet);
+
+    const removeDiskColumnFilter = () => {
+        setDiskColumnFilterValues(rsIndex, columnIndex, []);
+        setDiskColumnFilterConditions(rsIndex, columnIndex, [], 'and');
+        dropdown.remove();
+    };
+
+    const { container: actionsContainer } = createFilterActionButtons(() => {
         const activeTab = valuesTab.classList.contains('active') ? 'values' : 'conditions';
         if (activeTab === 'values') {
             const filteredValues = getFilteredValues();
@@ -814,10 +872,16 @@ async function showDiskColumnFilterDropdown(
         }
         dropdown.remove();
     }, () => {
-        setDiskColumnFilterValues(rsIndex, columnIndex, []);
-        setDiskColumnFilterConditions(rsIndex, columnIndex, [], 'and');
         dropdown.remove();
+    }, {
+        showRemoveFilter: hasActiveDiskFilter,
+        onRemoveFilter: removeDiskColumnFilter,
     });
+
+    if (hasActiveDiskFilter) {
+        const banner = createFilterActiveBanner(removeDiskColumnFilter);
+        dropdown.insertBefore(banner, dropdown.firstChild);
+    }
 
     dropdown.appendChild(selectionInfo);
     dropdown.appendChild(actionsContainer);
@@ -842,14 +906,69 @@ export function showColumnFilterDropdown(
         void showDiskColumnFilterDropdown(column, anchorElement, rsIndex, resultSet);
         return;
     }
+    const directSql = resultSet?.refreshSql || resultSet?.sql || '';
 
-    const { uniqueValues, valueCounts, uniqueValuesTruncated } = calculateFilterValuesAndCounts(column, table);
-    const currentFilter = column.getFilterValue();
+    let { uniqueValues, valueCounts, uniqueValuesTruncated } = calculateFilterValuesAndCounts(column, table);
+    let currentFilter = column.getFilterValue();
+    const columnIndex = Number.parseInt(column.id, 10);
+    const sourceUri = getActiveSourceUri();
+    const canDatabaseFilter = Boolean(
+        sourceUri
+        && directSql
+        && findTrailingLimitValue(directSql)
+    );
+    let filterMode: 'fetched' | 'database' = resultSet?.databaseFilterSpec ? 'database' : 'fetched';
+    if (!canDatabaseFilter) {
+        filterMode = 'fetched';
+    }
+    const dbRawByDisplay = new Map<string, unknown>();
 
-    const isNumericColumn = detectNumericColumn(uniqueValues);
+    const existingDatabaseColumnFilter = resultSet?.databaseFilterSpec?.columnFilters
+        ?.find((filter) => filter.columnIndex === columnIndex);
+    if (filterMode === 'database' && existingDatabaseColumnFilter) {
+        if (existingDatabaseColumnFilter.conditions) {
+            currentFilter = {
+                _isConditionFilter: true,
+                conditions: existingDatabaseColumnFilter.conditions,
+                logic: existingDatabaseColumnFilter.conditionLogic ?? 'and',
+            };
+        } else if (existingDatabaseColumnFilter.values) {
+            currentFilter = existingDatabaseColumnFilter.values.map((raw) => raw === null || raw === undefined
+                ? 'NULL'
+                : (formatCellValue(raw, column.columnDef.dataType, column.columnDef?.scale, {
+                    columnId: column.id,
+                    inferredNumericKind: column.columnDef?.inferredNumericKind,
+                    inferredDateInteger: column.columnDef?.inferredDateInteger,
+                }) ?? String(raw)));
+        }
+    }
+
+    let isNumericColumn = detectNumericColumn(uniqueValues);
 
     const dropdown = createDropdownContainer(anchorElement, column.columnDef.header);
     const { valuesTab, conditionsTab, valuesContent, conditionsContent } = createTabs(dropdown);
+    const modeRow = document.createElement('div');
+    modeRow.className = 'filter-dropdown-selection-info';
+    modeRow.style.display = canDatabaseFilter ? 'flex' : 'none';
+    modeRow.style.gap = '6px';
+    modeRow.style.alignItems = 'center';
+
+    const modeLabel = document.createElement('span');
+    modeLabel.textContent = 'Filter scope:';
+    modeLabel.style.color = 'var(--vscode-descriptionForeground)';
+    const fetchedBtn = document.createElement('button');
+    fetchedBtn.type = 'button';
+    fetchedBtn.className = 'filter-btn';
+    fetchedBtn.textContent = 'Loaded rows';
+    fetchedBtn.title = 'Filter rows already loaded in the grid (no database round-trip).';
+    const databaseBtn = document.createElement('button');
+    databaseBtn.type = 'button';
+    databaseBtn.className = 'filter-btn';
+    databaseBtn.textContent = 'All rows + LIMIT';
+    databaseBtn.title = 'Run this filter on the database by wrapping the original SQL without LIMIT, then applying the original LIMIT again.';
+    modeRow.appendChild(modeLabel);
+    modeRow.appendChild(fetchedBtn);
+    modeRow.appendChild(databaseBtn);
 
     const originalFilter = currentFilter ? JSON.parse(JSON.stringify(currentFilter)) as ColumnFilterValue : undefined;
     let searchFilterApplied = false;
@@ -928,15 +1047,216 @@ export function showColumnFilterDropdown(
         }
     }
 
-    // Values tab content
-    const { checkboxes, checkedValues, getFilteredValues, getSelectedCount } = createValuesTabContent(
-        valuesContent, uniqueValues, currentFilter, valueCounts, isNumericColumn, applySearchFilter, uniqueValuesTruncated
+    function getValuesTabSearchHandler(): ((searchTerm: string) => void) | undefined {
+        return filterMode === 'database' ? undefined : applySearchFilter;
+    }
+
+    const selectionInfo = document.createElement('div');
+    selectionInfo.className = 'filter-dropdown-selection-info';
+
+    function updateSelectionInfo(): void {
+        const selected = valuesUi.getSelectedCount();
+        const total = valuesUi.getTotalCount();
+        selectionInfo.classList.remove('filter-selection-warning', 'filter-selection-muted');
+        if (selected === 0) {
+            selectionInfo.textContent = 'No values selected — Apply will remove the filter';
+            selectionInfo.classList.add('filter-selection-warning');
+        } else if (selected === total) {
+            selectionInfo.textContent = `All ${total.toLocaleString()} values selected — no filtering`;
+            selectionInfo.classList.add('filter-selection-muted');
+        } else {
+            selectionInfo.textContent = `${selected.toLocaleString()} of ${total.toLocaleString()} selected — click Apply`;
+        }
+    }
+
+    let valuesUi = createValuesTabContent(
+        valuesContent,
+        uniqueValues,
+        currentFilter,
+        valueCounts,
+        isNumericColumn,
+        getValuesTabSearchHandler(),
+        uniqueValuesTruncated,
+        filterMode !== 'database' || Boolean(existingDatabaseColumnFilter),
+        updateSelectionInfo,
     );
 
     // Conditions tab content
     const { conditions, logicOperator } = createConditionsTabContent(
         conditionsContent, isNumericColumn, currentFilter
     );
+
+    function updateModeButtons(): void {
+        fetchedBtn.classList.toggle('primary', filterMode === 'fetched');
+        databaseBtn.classList.toggle('primary', filterMode === 'database');
+    }
+
+    function renderValuesContent(nextCurrentFilter: ColumnFilterValue = currentFilter): void {
+        valuesContent.innerHTML = '';
+        valuesUi = createValuesTabContent(
+            valuesContent,
+            uniqueValues,
+            nextCurrentFilter,
+            valueCounts,
+            isNumericColumn,
+            getValuesTabSearchHandler(),
+            uniqueValuesTruncated,
+            filterMode !== 'database' || Boolean(existingDatabaseColumnFilter),
+            updateSelectionInfo,
+        );
+        updateSelectionInfo();
+    }
+
+    function buildFilterFromUi(): DiskColumnFilterSpec | undefined {
+        const activeTab = valuesTab.classList.contains('active') ? 'values' : 'conditions';
+        if (activeTab === 'values') {
+            const filteredValues = valuesUi.getFilteredValues ? valuesUi.getFilteredValues() : [...uniqueValues];
+            const selectedValues = filteredValues.filter(val => {
+                const checkbox = valuesUi.checkboxes.get(val);
+                return Boolean(checkbox?.checked);
+            });
+            if (selectedValues.length === uniqueValues.length || selectedValues.length === 0) {
+                return undefined;
+            }
+            const rawValues = selectedValues.map((display) => {
+                if (filterMode === 'database' && dbRawByDisplay.has(display)) {
+                    return dbRawByDisplay.get(display) ?? null;
+                }
+                return display === 'NULL' ? null : display;
+            });
+            return { columnIndex, values: rawValues };
+        }
+
+        const validConditions = conditions.filter(c => {
+            if (['isEmpty', 'isNotEmpty'].includes(c.type)) return true;
+            if (c.type === 'between') return c.value !== '' && c.value2 !== '';
+            return c.value !== '';
+        });
+        return validConditions.length > 0
+            ? {
+                columnIndex,
+                conditions: validConditions.map((entry) => ({
+                    type: entry.type,
+                    value: entry.value,
+                    value2: entry.value2,
+                })),
+                conditionLogic: logicOperator,
+            }
+            : undefined;
+    }
+
+    function buildDatabaseFilterSpecFromUi(): DiskQuerySpec | undefined {
+        const existing = resultSet?.databaseFilterSpec ?? {};
+        const filters = [...(existing.columnFilters ?? [])].filter((filter) => filter.columnIndex !== columnIndex);
+        const filter = buildFilterFromUi();
+        if (filter) {
+            filters.push(filter);
+        }
+        const spec: DiskQuerySpec = {
+            globalSearch: existing.globalSearch,
+            columnFilters: filters.length > 0 ? filters : undefined,
+            sorting: existing.sorting,
+        };
+        return (spec.columnFilters?.length ?? 0) > 0 || Boolean(spec.globalSearch?.trim())
+            ? spec
+            : undefined;
+    }
+
+    let databaseValuesLoading = false;
+    let applyBtn: HTMLButtonElement | undefined;
+    let closeBtn: HTMLButtonElement | undefined;
+    let removeFilterBtn: HTMLButtonElement | undefined;
+
+    function setDatabaseValuesLoading(loading: boolean): void {
+        databaseValuesLoading = loading;
+        if (applyBtn) {
+            applyBtn.disabled = loading;
+        }
+        if (closeBtn) {
+            closeBtn.disabled = loading;
+        }
+        if (removeFilterBtn) {
+            removeFilterBtn.disabled = loading;
+        }
+    }
+
+    async function loadDatabaseValues(isRetry = false): Promise<void> {
+        if (!sourceUri || !canDatabaseFilter) {
+            return;
+        }
+        setDatabaseValuesLoading(true);
+        valuesContent.innerHTML = '<div style="padding:12px;opacity:0.8;">Loading database values...</div>';
+        try {
+            const result = await queryDatabaseFilterValues(
+                sourceUri,
+                rsIndex,
+                columnIndex,
+                resultSet?.databaseFilterSpec,
+                isRetry ? { isRetry: true } : undefined,
+            );
+            dbRawByDisplay.clear();
+            uniqueValues = [];
+            valueCounts = new Map<string, number>();
+            for (const entry of result.values) {
+                const display = entry.raw === null || entry.raw === undefined
+                    ? 'NULL'
+                    : (formatCellValue(entry.raw, column.columnDef.dataType, column.columnDef?.scale, {
+                        columnId: column.id,
+                        inferredNumericKind: column.columnDef?.inferredNumericKind,
+                        inferredDateInteger: column.columnDef?.inferredDateInteger,
+                    }) ?? String(entry.raw));
+                uniqueValues.push(display);
+                valueCounts.set(display, entry.count);
+                dbRawByDisplay.set(display, entry.raw ?? null);
+            }
+            uniqueValues = sortFilterValues(uniqueValues, column.columnDef.dataType);
+            uniqueValuesTruncated = result.truncated;
+            isNumericColumn = detectNumericColumn(uniqueValues);
+            renderValuesContent(currentFilter);
+        } catch (error) {
+            showInlineErrorWithRetry(valuesContent, error, () => {
+                void loadDatabaseValues(true);
+            });
+        } finally {
+            setDatabaseValuesLoading(false);
+        }
+    }
+
+    fetchedBtn.onclick = () => {
+        filterMode = 'fetched';
+        dbRawByDisplay.clear();
+        const recalculated = calculateFilterValuesAndCounts(column, table);
+        uniqueValues = recalculated.uniqueValues;
+        valueCounts = recalculated.valueCounts;
+        uniqueValuesTruncated = recalculated.uniqueValuesTruncated;
+        currentFilter = column.getFilterValue();
+        isNumericColumn = detectNumericColumn(uniqueValues);
+        updateModeButtons();
+        renderValuesContent(currentFilter);
+    };
+
+    databaseBtn.onclick = () => {
+        filterMode = 'database';
+        updateModeButtons();
+        if (existingDatabaseColumnFilter?.values) {
+            currentFilter = existingDatabaseColumnFilter.values.map((raw) => raw === null || raw === undefined
+                ? 'NULL'
+                : (formatCellValue(raw, column.columnDef.dataType, column.columnDef?.scale, {
+                    columnId: column.id,
+                    inferredNumericKind: column.columnDef?.inferredNumericKind,
+                    inferredDateInteger: column.columnDef?.inferredDateInteger,
+                }) ?? String(raw)));
+        } else if (existingDatabaseColumnFilter?.conditions) {
+            currentFilter = {
+                _isConditionFilter: true,
+                conditions: existingDatabaseColumnFilter.conditions,
+                logic: existingDatabaseColumnFilter.conditionLogic ?? 'and',
+            };
+        } else {
+            currentFilter = undefined;
+        }
+        void loadDatabaseValues();
+    };
 
     // Tab switching
     const switchTab = (tabName: 'values' | 'conditions') => {
@@ -955,47 +1275,121 @@ export function showColumnFilterDropdown(
     valuesTab.onclick = () => switchTab('values');
     conditionsTab.onclick = () => switchTab('conditions');
 
-    // Selection info row
-    const selectionInfo = document.createElement('div');
-    selectionInfo.className = 'filter-dropdown-selection-info';
+    // Action buttons
+    const applyErrorBanner = document.createElement('div');
+    applyErrorBanner.style.display = 'none';
 
-    function updateSelectionInfo() {
-        const count = getSelectedCount();
-        selectionInfo.textContent = count === 0 ? 'No values selected' :
-                                   `${count} selected`;
+    async function runDatabaseApply(
+        spec: DiskQuerySpec | undefined,
+        isRetry = false,
+    ): Promise<void> {
+        if (!sourceUri || !canDatabaseFilter || databaseValuesLoading) {
+            return;
+        }
+        applyErrorBanner.style.display = 'none';
+        applyErrorBanner.replaceChildren();
+        if (applyBtn) {
+            applyBtn.disabled = true;
+        }
+        if (closeBtn) {
+            closeBtn.disabled = true;
+        }
+        if (removeFilterBtn) {
+            removeFilterBtn.disabled = true;
+        }
+        const previousApplyText = applyBtn?.textContent;
+        if (applyBtn) {
+            applyBtn.textContent = 'Applying...';
+        }
+        try {
+            await applyDatabaseFilter(
+                sourceUri,
+                rsIndex,
+                spec,
+                isRetry ? { isRetry: true } : undefined,
+            );
+            dropdown.remove();
+        } catch (error) {
+            showInlineErrorWithRetry(applyErrorBanner, error, () => {
+                void runDatabaseApply(spec, true);
+            });
+            applyErrorBanner.style.display = 'block';
+        } finally {
+            if (applyBtn) {
+                applyBtn.disabled = false;
+                applyBtn.textContent = previousApplyText ?? 'Apply';
+            }
+            if (closeBtn) {
+                closeBtn.disabled = false;
+            }
+            if (removeFilterBtn) {
+                removeFilterBtn.disabled = false;
+            }
+        }
     }
 
-    // Update selection info when checkboxes change
-    checkboxes.forEach(cb => {
-        cb.addEventListener('change', updateSelectionInfo);
-    });
+    const hasActiveFilter = resultSet
+        ? hasActiveColumnFilter(columnIndex, currentFilter, resultSet)
+        : false;
 
-    // Action buttons
-    const actionsContainer = createActionButtons(() => {
-        applyFilter(column, checkboxes, uniqueValues, conditions, logicOperator, valuesTab, getFilteredValues);
-    }, () => {
+    const removeColumnFilter = () => {
         clearSearchFilter();
-        const searchBox = dropdown.querySelector('.filter-search-input') as HTMLInputElement | null;
-        if (searchBox) searchBox.value = '';
-        checkboxes.forEach(cb => cb.checked = false);
-        checkedValues.clear();
+        if (filterMode === 'database' && canDatabaseFilter && sourceUri) {
+            const existing = resultSet?.databaseFilterSpec ?? {};
+            const filters = [...(existing.columnFilters ?? [])].filter((filter) => filter.columnIndex !== columnIndex);
+            const spec = filters.length > 0 ? { ...existing, columnFilters: filters } : undefined;
+            void runDatabaseApply(spec);
+            return;
+        }
         column.setFilterValue(undefined);
         const grid = getGrid(rsIndex);
-        if (grid && grid.render) {
+        if (grid?.render) {
             grid.render();
         }
         dropdown.remove();
+    };
+
+    const actionButtons = createFilterActionButtons(() => {
+        if (filterMode === 'database' && canDatabaseFilter && sourceUri) {
+            if (databaseValuesLoading) {
+                return;
+            }
+            void runDatabaseApply(buildDatabaseFilterSpecFromUi());
+            return;
+        }
+        applyFilter(column, valuesUi.checkboxes, uniqueValues, conditions, logicOperator, valuesTab, valuesUi.getFilteredValues);
+        dropdown.remove();
+    }, () => {
+        clearSearchFilter();
+        dropdown.remove();
+    }, {
+        showRemoveFilter: hasActiveFilter,
+        onRemoveFilter: removeColumnFilter,
     });
+    const actionsContainer = actionButtons.container;
+    applyBtn = actionButtons.applyBtn;
+    closeBtn = actionButtons.closeBtn;
+    removeFilterBtn = actionButtons.removeFilterBtn;
 
     // valuesContent i conditionsContent są już w contentWrapper (dodane w createTabs)
     // Dodajemy tylko selectionInfo i actionsContainer na dole
+    if (hasActiveFilter) {
+        const banner = createFilterActiveBanner(removeColumnFilter);
+        dropdown.insertBefore(banner, dropdown.firstChild);
+    }
+    dropdown.appendChild(modeRow);
     dropdown.appendChild(selectionInfo);
+    dropdown.appendChild(applyErrorBanner);
     dropdown.appendChild(actionsContainer);
 
     document.body.appendChild(dropdown);
 
     // Initialize selection info
     updateSelectionInfo();
+    updateModeButtons();
+    if (filterMode === 'database') {
+        void loadDatabaseValues();
+    }
 
     // Auto-switch to Conditions tab if there's an existing condition filter
     if (currentFilter && isConditionColumnFilter(currentFilter)) {
@@ -1089,16 +1483,12 @@ function calculateFilterValuesAndCounts(column: TanStackColumn, table: TanStackT
         }
     }
 
-    const uniqueValues = Array.from(valueCounts.keys()).sort();
+    const uniqueValues = sortFilterValues(Array.from(valueCounts.keys()), dataType);
     return { uniqueValues, valueCounts, uniqueValuesTruncated };
 }
 
 function detectNumericColumn(uniqueValues: string[]): boolean {
-    return uniqueValues.some(v => {
-        if (v === 'NULL') return false;
-        const num = parseFloat(String(v).replace(/,/g, ''));
-        return !isNaN(num);
-    });
+    return uniqueValues.some(v => parseFilterNumericValue(v) !== null);
 }
 
 function createDropdownContainer(anchorElement: HTMLElement, _columnHeader: string): HTMLDivElement {
@@ -1215,7 +1605,9 @@ function createValuesTabContent(
     valueCounts: Map<string, number>,
     isNumericColumn: boolean,
     onSearchChange: ((searchTerm: string) => void) | undefined,
-    uniqueValuesTruncated = false
+    uniqueValuesTruncated = false,
+    defaultSelectAll = true,
+    onSelectionChange?: () => void,
 ): {
     checkboxes: Map<string, HTMLInputElement>;
     checkedValues: Set<string>;
@@ -1287,15 +1679,18 @@ function createValuesTabContent(
 
     const selectAllBtn = document.createElement('button');
     selectAllBtn.className = 'filter-selection-btn';
-    selectAllBtn.textContent = '✓ Select All';
+    selectAllBtn.textContent = 'Select all';
+    selectAllBtn.title = 'Check all visible values';
 
     const clearAllBtn = document.createElement('button');
     clearAllBtn.className = 'filter-selection-btn';
-    clearAllBtn.textContent = '✗ Clear All';
+    clearAllBtn.textContent = 'Deselect all';
+    clearAllBtn.title = 'Uncheck all visible values. Click Apply to update the filter.';
 
     const invertBtn = document.createElement('button');
     invertBtn.className = 'filter-selection-btn';
-    invertBtn.textContent = '⇄ Invert';
+    invertBtn.textContent = 'Invert';
+    invertBtn.title = 'Invert the checked state of visible values';
 
     selectionButtons.appendChild(selectAllBtn);
     selectionButtons.appendChild(clearAllBtn);
@@ -1309,12 +1704,24 @@ function createValuesTabContent(
     let checkedValues = new Set<string>();
     if (currentFilter && Array.isArray(currentFilter) && currentFilter.length > 0) {
         currentFilter.forEach(v => checkedValues.add(v));
-    } else {
+    } else if (defaultSelectAll) {
         uniqueValues.forEach(v => checkedValues.add(v));
     }
 
     let filteredValues = [...uniqueValues];
     const checkboxes = new Map<string, HTMLInputElement>();
+
+    const notifySelectionChange = (): void => {
+        onSelectionChange?.();
+    };
+
+    const setValueChecked = (value: string, checked: boolean): void => {
+        if (checked) {
+            checkedValues.add(value);
+        } else {
+            checkedValues.delete(value);
+        }
+    };
 
     function renderValuesList() {
         valuesContainer.innerHTML = '';
@@ -1326,11 +1733,8 @@ function createValuesTabContent(
             checkbox.type = 'checkbox';
             checkbox.checked = checkedValues.has(value);
             checkbox.onchange = () => {
-                if (checkbox.checked) {
-                    checkedValues.add(value);
-                } else {
-                    checkedValues.delete(value);
-                }
+                setValueChecked(value, checkbox.checked);
+                notifySelectionChange();
             };
 
             const label = document.createElement('span');
@@ -1363,10 +1767,8 @@ function createValuesTabContent(
 
     // Event handlers
     searchBox.oninput = () => {
-        const needle = searchBox.value.toLowerCase();
-        filteredValues = uniqueValues.filter(value => {
-            return String(value).toLowerCase().includes(needle);
-        });
+        const needle = searchBox.value;
+        filteredValues = uniqueValues.filter(value => matchesFilterValueSearch(String(value), needle));
         renderValuesList();
         if (onSearchChange) {
             onSearchChange(searchBox.value);
@@ -1376,11 +1778,13 @@ function createValuesTabContent(
     selectAllBtn.onclick = () => {
         filteredValues.forEach(v => checkedValues.add(v));
         renderValuesList();
+        notifySelectionChange();
     };
 
     clearAllBtn.onclick = () => {
         filteredValues.forEach(v => checkedValues.delete(v));
         renderValuesList();
+        notifySelectionChange();
     };
 
     invertBtn.onclick = () => {
@@ -1392,14 +1796,25 @@ function createValuesTabContent(
             }
         });
         renderValuesList();
+        notifySelectionChange();
     };
 
     blanksBtn.onclick = () => {
-        checkboxes.forEach((cb, val) => cb.checked = (val === 'NULL'));
+        checkboxes.forEach((cb, val) => {
+            const checked = val === 'NULL';
+            cb.checked = checked;
+            setValueChecked(val, checked);
+        });
+        notifySelectionChange();
     };
 
     nonBlanksBtn.onclick = () => {
-        checkboxes.forEach((cb, val) => cb.checked = (val !== 'NULL'));
+        checkboxes.forEach((cb, val) => {
+            const checked = val !== 'NULL';
+            cb.checked = checked;
+            setValueChecked(val, checked);
+        });
+        notifySelectionChange();
     };
 
     if (isNumericColumn) {
@@ -1408,24 +1823,32 @@ function createValuesTabContent(
 
         top10Btn?.addEventListener('click', () => {
             const numericValues = uniqueValues
-                .filter(v => v !== 'NULL')
-                .map(v => ({ val: v, num: parseFloat(String(v).replace(/,/g, '')) }))
-                .filter(x => !isNaN(x.num))
+                .map(v => ({ val: v, num: parseFilterNumericValue(v) }))
+                .filter((x): x is { val: string; num: number } => x.num !== null)
                 .sort((a, b) => b.num - a.num)
                 .slice(0, 10)
                 .map(x => x.val);
-            checkboxes.forEach((cb, val) => { cb.checked = numericValues.includes(val); });
+            checkboxes.forEach((cb, val) => {
+                const checked = numericValues.includes(val);
+                cb.checked = checked;
+                setValueChecked(val, checked);
+            });
+            notifySelectionChange();
         });
 
         bottom10Btn?.addEventListener('click', () => {
             const numericValues = uniqueValues
-                .filter(v => v !== 'NULL')
-                .map(v => ({ val: v, num: parseFloat(String(v).replace(/,/g, '')) }))
-                .filter(x => !isNaN(x.num))
+                .map(v => ({ val: v, num: parseFilterNumericValue(v) }))
+                .filter((x): x is { val: string; num: number } => x.num !== null)
                 .sort((a, b) => a.num - b.num)
                 .slice(0, 10)
                 .map(x => x.val);
-            checkboxes.forEach((cb, val) => { cb.checked = numericValues.includes(val); });
+            checkboxes.forEach((cb, val) => {
+                const checked = numericValues.includes(val);
+                cb.checked = checked;
+                setValueChecked(val, checked);
+            });
+            notifySelectionChange();
         });
     }
 
@@ -1434,7 +1857,15 @@ function createValuesTabContent(
         checkedValues,
         renderValuesList,
         getFilteredValues: () => filteredValues,
-        getSelectedCount: () => Array.from(checkboxes.values()).filter(cb => cb.checked).length,
+        getSelectedCount: () => {
+            let count = 0;
+            checkboxes.forEach((checkbox) => {
+                if (checkbox.checked) {
+                    count += 1;
+                }
+            });
+            return count;
+        },
         getTotalCount: () => uniqueValues.length
     };
 }
@@ -1633,24 +2064,82 @@ function createConditionsTabContent(
     return { conditions, logicOperator, renderConditions };
 }
 
-function createActionButtons(onApply: () => void, onClear: () => void): HTMLDivElement {
+function createFilterActiveBanner(onRemoveFilter: () => void | Promise<void>): HTMLDivElement {
+    const banner = document.createElement('div');
+    banner.className = 'filter-active-banner';
+
+    const status = document.createElement('div');
+    status.className = 'filter-active-banner-text';
+    status.innerHTML = '<span class="filter-active-dot" aria-hidden="true"></span> Filter active on this column';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'filter-btn filter-remove-btn';
+    removeBtn.textContent = 'Remove filter';
+    removeBtn.title = 'Clear the filter on this column and show all rows';
+    removeBtn.onclick = (event) => {
+        event.stopPropagation();
+        void Promise.resolve(onRemoveFilter());
+    };
+
+    banner.appendChild(status);
+    banner.appendChild(removeBtn);
+    return banner;
+}
+
+function createFilterActionButtons(
+    onApply: () => void | Promise<void>,
+    onClose: () => void,
+    options: { showRemoveFilter?: boolean; onRemoveFilter?: () => void | Promise<void> } = {},
+): {
+    container: HTMLDivElement;
+    applyBtn: HTMLButtonElement;
+    closeBtn: HTMLButtonElement;
+    removeFilterBtn?: HTMLButtonElement;
+} {
     const actionsContainer = document.createElement('div');
     actionsContainer.className = 'filter-actions';
 
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'filter-btn';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.onclick = onClear;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'filter-btn secondary';
+    closeBtn.textContent = 'Close';
+    closeBtn.title = 'Close without applying changes';
+    closeBtn.onclick = () => {
+        onClose();
+    };
 
     const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
     applyBtn.className = 'filter-btn primary';
     applyBtn.textContent = 'Apply';
-    applyBtn.onclick = onApply;
+    applyBtn.title = 'Apply the current filter selection';
+    applyBtn.onclick = () => {
+        void Promise.resolve(onApply());
+    };
 
-    actionsContainer.appendChild(cancelBtn);
+    actionsContainer.appendChild(closeBtn);
+
+    let removeFilterBtn: HTMLButtonElement | undefined;
+    if (options.showRemoveFilter && options.onRemoveFilter) {
+        const spacer = document.createElement('div');
+        spacer.className = 'filter-actions-spacer';
+        actionsContainer.appendChild(spacer);
+
+        removeFilterBtn = document.createElement('button');
+        removeFilterBtn.type = 'button';
+        removeFilterBtn.className = 'filter-btn filter-remove-btn';
+        removeFilterBtn.textContent = 'Remove filter';
+        removeFilterBtn.title = 'Clear the filter on this column and show all rows';
+        removeFilterBtn.onclick = () => {
+            void Promise.resolve(options.onRemoveFilter!());
+        };
+        actionsContainer.appendChild(removeFilterBtn);
+    }
+
     actionsContainer.appendChild(applyBtn);
 
-    return actionsContainer;
+    return { container: actionsContainer, applyBtn, closeBtn, removeFilterBtn };
 }
 
 function applyFilter(
@@ -1697,10 +2186,19 @@ function applyFilter(
     document.querySelector('.column-filter-dropdown')?.remove();
 }
 
+function isEventInsideDropdownTarget(
+    event: MouseEvent,
+    dropdown: HTMLDivElement,
+    anchorElement: HTMLElement,
+): boolean {
+    const path = event.composedPath();
+    return path.includes(dropdown) || path.includes(anchorElement);
+}
+
 function setupDropdownCloseHandlers(dropdown: HTMLDivElement, anchorElement: HTMLElement): void {
     setTimeout(() => {
         const closeHandler = (e: MouseEvent) => {
-            if (!dropdown.contains(e.target as Node) && !anchorElement.contains(e.target as Node)) {
+            if (!isEventInsideDropdownTarget(e, dropdown, anchorElement)) {
                 dropdown.remove();
                 document.removeEventListener('click', closeHandler);
             }
@@ -1737,7 +2235,8 @@ export function showAggregationDropdown(
         { value: 'avg', label: 'Average', symbol: 'μ', desc: 'Arithmetic mean' },
         { value: 'min', label: 'Minimum', symbol: '↓', desc: 'Smallest value' },
         { value: 'max', label: 'Maximum', symbol: '↑', desc: 'Largest value' },
-        { value: 'stdev', label: 'Std Deviation', symbol: 'σ', desc: 'Standard deviation' }
+        { value: 'stdev', label: 'Std Deviation', symbol: 'σ', desc: 'Standard deviation' },
+        { value: 'median', label: 'Median', symbol: 'M', desc: 'Middle value' }
     ];
 
     // Get current aggregations (objects with fn/precision/position)
@@ -1746,10 +2245,10 @@ export function showAggregationDropdown(
     const columnAggs = currentAggs[column.id];
     if (Array.isArray(columnAggs)) {
         selectedAggs = columnAggs.map(entry => typeof entry === 'string'
-            ? { fn: entry, precision: null, position: 'bottom' as const }
-            : entry);
+                ? { fn: entry, precision: null, position: 'bottom' as const, scope: 'visible' as const }
+                : entry);
     } else if (typeof columnAggs === 'string') {
-        selectedAggs = [{ fn: columnAggs, precision: null, position: 'bottom' }];
+        selectedAggs = [{ fn: columnAggs, precision: null, position: 'bottom', scope: 'visible' }];
     } else if (columnAggs) {
         selectedAggs = [columnAggs];
     } else {
@@ -1908,19 +2407,29 @@ export function showAggregationDropdown(
         mainRow.appendChild(symbolSpan);
         mainRow.appendChild(textContainer);
 
-        // ─── Options row (precision + position, shown when checked) ───
+        // ─── Options (precision, position, scope — shown when checked) ───
         const optionsRow = document.createElement('div');
         optionsRow.style.display = checkbox.checked ? 'flex' : 'none';
-        optionsRow.style.alignItems = 'center';
-        optionsRow.style.padding = '2px 12px 6px 44px'; // indent to align with text
-        optionsRow.style.gap = '8px';
+        optionsRow.style.flexDirection = 'column';
+        optionsRow.style.gap = '6px';
+        optionsRow.style.padding = '2px 12px 8px 44px'; // indent to align with text
         optionsRow.style.fontSize = '11px';
+
+        function createOptionLine(): HTMLDivElement {
+            const line = document.createElement('div');
+            line.style.display = 'flex';
+            line.style.alignItems = 'center';
+            line.style.gap = '8px';
+            line.style.flexWrap = 'nowrap';
+            return line;
+        }
+
+        const optionLabelStyle = 'color: var(--vscode-descriptionForeground); flex-shrink: 0; min-width: 58px;';
 
         // Precision label + input
         const precLabel = document.createElement('span');
         precLabel.textContent = 'Precision:';
-        precLabel.style.color = 'var(--vscode-descriptionForeground)';
-        precLabel.style.flexShrink = '0';
+        precLabel.style.cssText = optionLabelStyle;
 
         const precisionInput = document.createElement('input');
         precisionInput.type = 'number';
@@ -1955,8 +2464,7 @@ export function showAggregationDropdown(
         // Position toggle
         const posLabel = document.createElement('span');
         posLabel.textContent = 'Position:';
-        posLabel.style.color = 'var(--vscode-descriptionForeground)';
-        posLabel.style.flexShrink = '0';
+        posLabel.style.cssText = optionLabelStyle;
 
         const topBtn = document.createElement('button');
         topBtn.textContent = 'Top';
@@ -1976,6 +2484,30 @@ export function showAggregationDropdown(
         bottomBtn.style.border = '1px solid var(--vscode-button-border, var(--vscode-panel-border))';
         bottomBtn.style.fontFamily = 'var(--vscode-font-family)';
 
+        const scopeLabel = document.createElement('span');
+        scopeLabel.textContent = 'Rows:';
+        scopeLabel.style.cssText = optionLabelStyle;
+
+        const visibleBtn = document.createElement('button');
+        visibleBtn.textContent = 'Loaded';
+        visibleBtn.title = 'Calculate over rows loaded locally in this grid';
+        visibleBtn.style.padding = '2px 8px';
+        visibleBtn.style.fontSize = '11px';
+        visibleBtn.style.cursor = 'pointer';
+        visibleBtn.style.borderRadius = '2px';
+        visibleBtn.style.border = '1px solid var(--vscode-button-border, var(--vscode-panel-border))';
+        visibleBtn.style.fontFamily = 'var(--vscode-font-family)';
+
+        const databaseBtn = document.createElement('button');
+        databaseBtn.textContent = 'All';
+        databaseBtn.title = 'Run a database aggregate using this grid SQL without a trailing LIMIT';
+        databaseBtn.style.padding = '2px 8px';
+        databaseBtn.style.fontSize = '11px';
+        databaseBtn.style.cursor = 'pointer';
+        databaseBtn.style.borderRadius = '2px';
+        databaseBtn.style.border = '1px solid var(--vscode-button-border, var(--vscode-panel-border))';
+        databaseBtn.style.fontFamily = 'var(--vscode-font-family)';
+
         // Set initial position style
         function updatePositionButtons(pos: 'top' | 'bottom'): void {
             const activeBg = 'var(--vscode-button-background)';
@@ -1988,18 +2520,31 @@ export function showAggregationDropdown(
             bottomBtn.style.color = pos !== 'top' ? activeFg : inactiveFg;
         }
 
+        function updateScopeButtons(scope: 'visible' | 'database'): void {
+            const activeBg = 'var(--vscode-button-background)';
+            const activeFg = 'var(--vscode-button-foreground)';
+            const inactiveBg = 'transparent';
+            const inactiveFg = 'var(--vscode-foreground)';
+            visibleBtn.style.backgroundColor = scope !== 'database' ? activeBg : inactiveBg;
+            visibleBtn.style.color = scope !== 'database' ? activeFg : inactiveFg;
+            databaseBtn.style.backgroundColor = scope === 'database' ? activeBg : inactiveBg;
+            databaseBtn.style.color = scope === 'database' ? activeFg : inactiveFg;
+        }
+
         if (existing) {
             const obj = toAggObj(existing);
             updatePositionButtons(obj.position || 'bottom');
+            updateScopeButtons(obj.scope === 'database' ? 'database' : 'visible');
         } else {
             updatePositionButtons('bottom');
+            updateScopeButtons('visible');
         }
 
         topBtn.onclick = (e) => {
             e.stopPropagation();
             checkbox.checked = true;
             if (!findSelected(opt.value)) {
-                selectedAggs.push({ fn: opt.value, precision: null, position: 'top' });
+                selectedAggs.push({ fn: opt.value, precision: null, position: 'top', scope: 'visible' });
                 checkbox.dispatchEvent(new Event('change'));
             } else {
                 const idx = findSelectedIndex(opt.value);
@@ -2018,7 +2563,7 @@ export function showAggregationDropdown(
             e.stopPropagation();
             checkbox.checked = true;
             if (!findSelected(opt.value)) {
-                selectedAggs.push({ fn: opt.value, precision: null, position: 'bottom' });
+                selectedAggs.push({ fn: opt.value, precision: null, position: 'bottom', scope: 'visible' });
                 checkbox.dispatchEvent(new Event('change'));
             } else {
                 const idx = findSelectedIndex(opt.value);
@@ -2033,22 +2578,70 @@ export function showAggregationDropdown(
             showHideOptions();
         };
 
-        optionsRow.appendChild(precLabel);
-        optionsRow.appendChild(precisionInput);
-        optionsRow.appendChild(posLabel);
-        optionsRow.appendChild(topBtn);
-        optionsRow.appendChild(bottomBtn);
+        visibleBtn.onclick = (e) => {
+            e.stopPropagation();
+            checkbox.checked = true;
+            if (!findSelected(opt.value)) {
+                selectedAggs.push({ fn: opt.value, precision: null, position: 'bottom', scope: 'visible' });
+                checkbox.dispatchEvent(new Event('change'));
+            } else {
+                const idx = findSelectedIndex(opt.value);
+                if (idx >= 0) {
+                    const obj = toAggObj(selectedAggs[idx]);
+                    obj.scope = 'visible';
+                    selectedAggs[idx] = obj;
+                }
+            }
+            updateScopeButtons('visible');
+            updateSelectionInfo();
+            showHideOptions();
+        };
+
+        databaseBtn.onclick = (e) => {
+            e.stopPropagation();
+            checkbox.checked = true;
+            if (!findSelected(opt.value)) {
+                selectedAggs.push({ fn: opt.value, precision: null, position: 'bottom', scope: 'database' });
+                checkbox.dispatchEvent(new Event('change'));
+            } else {
+                const idx = findSelectedIndex(opt.value);
+                if (idx >= 0) {
+                    const obj = toAggObj(selectedAggs[idx]);
+                    obj.scope = 'database';
+                    selectedAggs[idx] = obj;
+                }
+            }
+            updateScopeButtons('database');
+            updateSelectionInfo();
+            showHideOptions();
+        };
+
+        const precisionLine = createOptionLine();
+        precisionLine.appendChild(precLabel);
+        precisionLine.appendChild(precisionInput);
+
+        const positionLine = createOptionLine();
+        positionLine.appendChild(posLabel);
+        positionLine.appendChild(topBtn);
+        positionLine.appendChild(bottomBtn);
+
+        const scopeLine = createOptionLine();
+        scopeLine.appendChild(scopeLabel);
+        scopeLine.appendChild(visibleBtn);
+        scopeLine.appendChild(databaseBtn);
+
+        optionsRow.appendChild(precisionLine);
+        optionsRow.appendChild(positionLine);
+        optionsRow.appendChild(scopeLine);
 
         item.appendChild(mainRow);
         item.appendChild(optionsRow);
 
         // ─── Events ───
         mainRow.onclick = (e) => {
-            if (e.target !== checkbox && e.target !== precisionInput && e.target !== topBtn && e.target !== bottomBtn) {
-                if (e.target !== labelSpan && e.target !== descSpan) {
-                    checkbox.checked = !checkbox.checked;
-                    checkbox.dispatchEvent(new Event('change'));
-                }
+            if (e.target !== checkbox) {
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event('change'));
             }
         };
 
@@ -2057,7 +2650,7 @@ export function showAggregationDropdown(
         checkbox.onchange = () => {
             if (checkbox.checked) {
                 if (!findSelected(opt.value)) {
-                    selectedAggs.push({ fn: opt.value, precision: null, position: 'bottom' });
+                    selectedAggs.push({ fn: opt.value, precision: null, position: 'bottom', scope: 'visible' });
                 }
             } else {
                 const idx = findSelectedIndex(opt.value);
@@ -2166,7 +2759,7 @@ export function showAggregationDropdown(
     // Close handlers
     setTimeout(() => {
         const closeHandler = (e: MouseEvent) => {
-            if (!dropdown.contains(e.target as Node) && !anchorElement.contains(e.target as Node)) {
+            if (!isEventInsideDropdownTarget(e, dropdown, anchorElement)) {
                 dropdown.remove();
                 document.removeEventListener('click', closeHandler);
             }

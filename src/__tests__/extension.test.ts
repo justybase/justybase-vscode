@@ -101,6 +101,10 @@ jest.mock('vscode', () => ({
     StatusBarAlignment: { Right: 1, Left: 2 },
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    CodeActionKind: {
+        QuickFix: { value: 'quickfix' },
+    },
+    CodeAction: jest.fn().mockImplementation((title: string, kind: unknown) => ({ title, kind })),
     ViewColumn: { One: 1, Two: 2, Three: 3 },
     EventEmitter: jest.fn().mockImplementation(() => ({
         event: jest.fn(),

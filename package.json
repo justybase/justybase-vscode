@@ -25,9 +25,9 @@
     "node": ">=22.0.0"
   },
   "keywords": [
+    "SQL",
     "netezza",
     "IBM PureData System for Analytics",
-    "SQL",
     "nz",
     "database",
     "data warehouse",
@@ -356,6 +356,11 @@
       {
         "command": "netezza.refreshSchema",
         "title": "Refresh Schema",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "netezza.refreshSchemaSelection",
+        "title": "Refresh Selected Metadata",
         "icon": "$(refresh)"
       },
       {
@@ -939,6 +944,7 @@
         "userDescription": "Execute a SQL query on the connected Netezza database and return results",
         "modelDescription": "This tool executes a SQL query on the connected IBM Netezza database and returns the results. Use this when you need to run SQL queries to analyze data, check table contents, or verify query results. The query runs in read-only mode by default for safety. Requires an active database connection.",
         "canBeReferencedInPrompt": true,
+        "when": "config.justybase.copilot.tools.executeQueryEnabled",
         "tags": [
           "sql",
           "database",
@@ -1588,7 +1594,7 @@
         "toolReferenceName": "exportQueryResults",
         "icon": "$(export)",
         "userDescription": "Exports query results to CSV, XLSX, XLSB, or Parquet file",
-        "modelDescription": "Use this tool to export either SQL query results or the active Query Results grid data to csv/xlsx/xlsb/parquet. For SQL mode, provide sql directly, sqlFilePath, or rely on active SQL editor fallback (selection preferred). For results mode, set source='activeResults'. If outputPath is omitted, a temp path is used; Desktop path is recommended for user-friendly output.",
+        "modelDescription": "Use this tool to export either SQL query results or the active Query Results grid data to csv/xlsx/xlsb/parquet/xpt. For SQL mode, provide sql directly, sqlFilePath, or rely on active SQL editor fallback (selection preferred). For results mode, set source='activeResults'. If outputPath is omitted, a temp path is used; Desktop path is recommended for user-friendly output.",
         "canBeReferencedInPrompt": true,
         "tags": [
           "export",
@@ -1596,7 +1602,8 @@
           "csv",
           "xlsx",
           "xlsb",
-          "parquet"
+          "parquet",
+          "xpt"
         ],
         "inputSchema": {
           "type": "object",
@@ -1615,7 +1622,8 @@
                 "csv",
                 "xlsx",
                 "xlsb",
-                "parquet"
+                "parquet",
+                "xpt"
               ],
               "description": "Output format. Default: csv."
             },
@@ -1717,6 +1725,7 @@
         "userDescription": "Gets sample data (first N rows) from a table in the connected Netezza database",
         "modelDescription": "This tool retrieves sample data (first N rows) from a specific table in the connected IBM Netezza database. Use this when you need to see example data from a table. Requires an active database connection.",
         "canBeReferencedInPrompt": true,
+        "when": "config.justybase.copilot.tools.sampleDataEnabled",
         "tags": [
           "sql",
           "database",
@@ -2338,6 +2347,11 @@
       ],
       "view/item/context": [
         {
+          "command": "netezza.refreshSchemaSelection",
+          "when": "view == netezza.schema && justybase.schemaDatabaseKind == netezza && (viewItem == typeGroup:TABLE || viewItem == typeGroup:GLOBAL TEMP TABLE || viewItem == netezza:TABLE || viewItem == netezza:GLOBAL TEMP TABLE)",
+          "group": "inline@0"
+        },
+        {
           "command": "netezza.schema.filter",
           "when": "view == netezza.schema && viewItem == filterInput",
           "group": "inline@1"
@@ -2725,7 +2739,11 @@
           "source.plpgsql",
           "source.mysql",
           "source.oracle"
-        ]
+        ],
+        "tokenTypes": {
+          "meta.create.sql": "other",
+          "entity.name.function.sql": "other"
+        }
       }
     ],
     "colors": [
@@ -2838,7 +2856,7 @@
             "markup.italic"
           ],
           "schema": [
-            "constant.other.table-name.sql"
+            "constant.other.schema-name.sql"
           ],
           "database": [
             "constant.other.database-name.sql"
@@ -2876,7 +2894,7 @@
             "markup.italic"
           ],
           "schema": [
-            "constant.other.table-name.sql"
+            "constant.other.schema-name.sql"
           ],
           "database": [
             "constant.other.database-name.sql"
@@ -2914,7 +2932,7 @@
             "markup.italic"
           ],
           "schema": [
-            "constant.other.table-name.sql"
+            "constant.other.schema-name.sql"
           ],
           "database": [
             "constant.other.database-name.sql"
@@ -3245,6 +3263,66 @@
               }
             },
             {
+              "scope": "meta.create.sql constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#0451A5"
+              }
+            },
+            {
+              "scope": "meta.create.sql constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#0070C1"
+              }
+            },
+            {
+              "scope": "meta.create.sql constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#098658"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#0451A5"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#0070C1"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#098658"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza entity.name.function.sql",
+              "settings": {
+                "foreground": "#0451A5"
+              }
+            },
+            {
+              "scope": "meta.ddl.table-target.netezza constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#0451A5"
+              }
+            },
+            {
+              "scope": "meta.ddl.table-target.netezza constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#0070C1"
+              }
+            },
+            {
+              "scope": "meta.ddl.table-target.netezza constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#098658"
+              }
+            },
+            {
               "scope": "keyword.control.macro.sas.sql",
               "settings": {
                 "foreground": "#AF00DB"
@@ -3291,6 +3369,66 @@
               }
             },
             {
+              "scope": "meta.create.sql constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#569CD6"
+              }
+            },
+            {
+              "scope": "meta.create.sql constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#4FC1FF"
+              }
+            },
+            {
+              "scope": "meta.create.sql constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#4EC9B0"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#569CD6"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#4FC1FF"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#4EC9B0"
+              }
+            },
+            {
+              "scope": "meta.create.table-target.netezza entity.name.function.sql",
+              "settings": {
+                "foreground": "#569CD6"
+              }
+            },
+            {
+              "scope": "meta.ddl.table-target.netezza constant.other.database-name.sql",
+              "settings": {
+                "foreground": "#569CD6"
+              }
+            },
+            {
+              "scope": "meta.ddl.table-target.netezza constant.other.schema-name.sql",
+              "settings": {
+                "foreground": "#4FC1FF"
+              }
+            },
+            {
+              "scope": "meta.ddl.table-target.netezza constant.other.table-name.sql",
+              "settings": {
+                "foreground": "#4EC9B0"
+              }
+            },
+            {
               "scope": "keyword.control.macro.sas.sql",
               "settings": {
                 "foreground": "#C586C0"
@@ -3333,6 +3471,66 @@
             "scope": "constant.other.schema-name.sql",
             "settings": {
               "foreground": "#4FC1FF"
+            }
+          },
+          {
+            "scope": "meta.create.sql constant.other.database-name.sql",
+            "settings": {
+              "foreground": "#569CD6"
+            }
+          },
+          {
+            "scope": "meta.create.sql constant.other.schema-name.sql",
+            "settings": {
+              "foreground": "#4FC1FF"
+            }
+          },
+          {
+            "scope": "meta.create.sql constant.other.table-name.sql",
+            "settings": {
+              "foreground": "#4EC9B0"
+            }
+          },
+          {
+            "scope": "meta.create.table-target.netezza constant.other.database-name.sql",
+            "settings": {
+              "foreground": "#569CD6"
+            }
+          },
+          {
+            "scope": "meta.create.table-target.netezza constant.other.schema-name.sql",
+            "settings": {
+              "foreground": "#4FC1FF"
+            }
+          },
+          {
+            "scope": "meta.create.table-target.netezza constant.other.table-name.sql",
+            "settings": {
+              "foreground": "#4EC9B0"
+            }
+          },
+          {
+            "scope": "meta.create.table-target.netezza entity.name.function.sql",
+            "settings": {
+              "foreground": "#569CD6"
+            }
+          },
+          {
+            "scope": "meta.ddl.table-target.netezza constant.other.database-name.sql",
+            "settings": {
+              "foreground": "#569CD6"
+            }
+          },
+          {
+            "scope": "meta.ddl.table-target.netezza constant.other.schema-name.sql",
+            "settings": {
+              "foreground": "#4FC1FF"
+            }
+          },
+          {
+            "scope": "meta.ddl.table-target.netezza constant.other.table-name.sql",
+            "settings": {
+              "foreground": "#4EC9B0"
             }
           }
         ]
@@ -3487,6 +3685,16 @@
           "type": "boolean",
           "default": true,
           "description": "Show SQL editor hover tooltips for aliases, tables, and columns."
+        },
+        "justybase.sql.showSelectionActionHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run/Export action links when hovering over a non-object part of selected SQL."
+        },
+        "justybase.sql.showSelectionExecutionCodeActions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run/Export actions in the lightbulb menu (Quick Actions) for selected SQL."
         },
         "justybase.sql.showInlineTypeHints": {
           "type": "boolean",
@@ -3691,6 +3899,16 @@
           "type": "boolean",
           "default": true,
           "description": "Enable AI-powered SQL assistance features (Fix SQL, Optimize SQL, Explain SQL, Generate SQL). When disabled, no data will be sent to GitHub Copilot and all AI features will be unavailable."
+        },
+        "justybase.copilot.tools.executeQueryEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow AI agents to run the Execute SQL Query tool. Disabled by default because query results can expose sensitive database data."
+        },
+        "justybase.copilot.tools.sampleDataEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow AI agents to run the Get Sample Data tool. Disabled by default because sample rows can expose sensitive database data."
         },
         "justybase.copilot.skipPrivacyConfirmation": {
           "type": "boolean",

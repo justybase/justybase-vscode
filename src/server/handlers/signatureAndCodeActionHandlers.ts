@@ -3,7 +3,6 @@ import {
   CodeActionKind,
   Command,
   type Connection,
-  MarkupKind,
   SignatureHelp,
   type SignatureHelpParams,
 } from "vscode-languageserver/node";
@@ -16,6 +15,7 @@ import {
   buildTableQualificationCodeActions,
   getDiagnosticSuggestedFix,
 } from "../tableQualificationCodeActions";
+import { buildFunctionSignatureDocumentation } from "../functionCompletionUtils";
 import {
   findFunctionCall,
   getTextBeforeCursor,
@@ -88,10 +88,7 @@ export function registerSignatureHelpHandler(
           return {
             signatures: signatures.map((sig) => ({
               label: `${sig.name}(${sig.parameters.join(", ")})`,
-              documentation: {
-                kind: MarkupKind.Markdown,
-                value: sig.description,
-              },
+              documentation: buildFunctionSignatureDocumentation([sig]),
               parameters: sig.parameters.map((param) => ({
                 label: param as string,
               })),

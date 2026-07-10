@@ -356,33 +356,46 @@ export class SqliteResultStore implements IResultRowSource {
                     );
                     break;
                 }
+                case 'median':
+                    break;
                 default:
                     break;
             }
         }
 
-        if (selectParts.length === 0) {
-            return [];
-        }
-
-        const sql = `SELECT ${selectParts.join(', ')} FROM result_rows${whereClause}`;
-        const statement = prepareValueReadStatement(this._database.prepare(sql));
-        const rawRow = statement.get(...asSqlParams(built.whereParams)) as Record<string, unknown> | undefined;
-        const row = rawRow ? normalizeSqliteRecord(rawRow) : undefined;
-        if (!row) {
-            return [];
+        let row: Record<string, unknown> | undefined;
+        if (selectParts.length > 0) {
+            const sql = `SELECT ${selectParts.join(', ')} FROM result_rows${whereClause}`;
+            const statement = prepareValueReadStatement(this._database.prepare(sql));
+            const rawRow = statement.get(...asSqlParams(built.whereParams)) as Record<string, unknown> | undefined;
+            row = rawRow ? normalizeSqliteRecord(rawRow) : undefined;
         }
 
         const results: DiskAggregationResult[] = [];
+        if (row) {
+            for (const request of requests) {
+                const key = `agg_${request.columnIndex}_${request.fn}`;
+                if (!(key in row)) {
+                    continue;
+                }
+                results.push({
+                    columnIndex: request.columnIndex,
+                    fn: request.fn,
+                    value: row[key] ?? null,
+                });
+            }
+        }
         for (const request of requests) {
-            const key = `agg_${request.columnIndex}_${request.fn}`;
-            if (!(key in row)) {
+            if (request.fn !== 'median' || !this.isValidColumnIndex(request.columnIndex)) {
                 continue;
             }
             results.push({
                 columnIndex: request.columnIndex,
                 fn: request.fn,
-                value: row[key] ?? null,
+                value: this.queryMedianForWhere(
+                    `"${sqliteColumnName(request.columnIndex)}"`,
+                    { sql: built.whereSql, params: built.whereParams },
+                ),
             });
         }
         return results;
@@ -560,6 +573,8 @@ export class SqliteResultStore implements IResultRowSource {
                     );
                     break;
                 }
+                case 'median':
+                    break;
                 default:
                     break;
             }
@@ -651,15 +666,49 @@ export class SqliteResultStore implements IResultRowSource {
         requests: DiskAggregationRequest[],
     ): DiskAggregationResult[] {
         const selectParts = this.buildAggregationSelectParts(requests);
-        if (selectParts.length === 0) {
-            return [];
+        const results: DiskAggregationResult[] = [];
+        if (selectParts.length > 0) {
+            const whereClause = where.sql ? ` WHERE ${where.sql}` : '';
+            const sql = `SELECT ${selectParts.join(', ')} FROM result_rows${whereClause}`;
+            const statement = prepareValueReadStatement(this._database.prepare(sql));
+            const rawRow = statement.get(...asSqlParams(where.params)) as Record<string, unknown> | undefined;
+            const row = rawRow ? normalizeSqliteRecord(rawRow) : undefined;
+            if (row) {
+                results.push(...this.extractAggregationResults(row, requests));
+            }
         }
-        const whereClause = where.sql ? ` WHERE ${where.sql}` : '';
-        const sql = `SELECT ${selectParts.join(', ')} FROM result_rows${whereClause}`;
+        for (const request of requests) {
+            if (request.fn !== 'median' || !this.isValidColumnIndex(request.columnIndex)) {
+                continue;
+            }
+            results.push({
+                columnIndex: request.columnIndex,
+                fn: request.fn,
+                value: this.queryMedianForWhere(`"${sqliteColumnName(request.columnIndex)}"`, where),
+            });
+        }
+        return results;
+    }
+
+    private queryMedianForWhere(
+        columnSql: string,
+        where: { sql: string; params: unknown[] },
+    ): unknown {
+        const whereClause = where.sql ? ` WHERE ${where.sql} AND ${columnSql} IS NOT NULL` : ` WHERE ${columnSql} IS NOT NULL`;
+        const sql = `
+            WITH ordered AS (
+                SELECT ${columnSql} AS value,
+                       ROW_NUMBER() OVER (ORDER BY ${columnSql}) AS rn,
+                       COUNT(*) OVER () AS cnt
+                FROM result_rows${whereClause}
+            )
+            SELECT AVG(value) AS median_value
+            FROM ordered
+            WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2)
+        `;
         const statement = prepareValueReadStatement(this._database.prepare(sql));
-        const rawRow = statement.get(...asSqlParams(where.params)) as Record<string, unknown> | undefined;
-        const row = rawRow ? normalizeSqliteRecord(rawRow) : undefined;
-        return row ? this.extractAggregationResults(row, requests) : [];
+        const row = statement.get(...asSqlParams(where.params)) as { median_value?: unknown } | undefined;
+        return row?.median_value ?? null;
     }
 
     private removeTempDbFiles(): void {

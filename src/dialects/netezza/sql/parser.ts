@@ -361,7 +361,8 @@ export class NetezzaSqlParser extends BaseSqlParser {
       this.OPTION1(() => this.SUBRULE(this.functionArguments));
       this.CONSUME(RParen);
       this.OPTION2(() => this.SUBRULE(this.filterClause));
-      this.OPTION3(() => this.SUBRULE(this.overClause));
+      this.OPTION3(() => this.SUBRULE(this.withinGroupClause));
+      this.OPTION4(() => this.SUBRULE(this.overClause));
     });
 
     this.RULE('sequenceValueExpression', () => {

@@ -40,6 +40,10 @@ SELECT * FROM TMP_SALES;`;
         expect(analysis.cteMaterializationCandidates[0].cteName).toBe('SALES_CTE');
         expect(analysis.cteMaterializationCandidates[0].cteBodyRange.startLine).toBe(1);
 
+        expect(analysis.cteBulkMaterializationCandidates).toHaveLength(1);
+        expect(analysis.cteBulkMaterializationCandidates[0].statementKind).toBe('with_select');
+        expect(analysis.cteBulkMaterializationCandidates[0].hasRecursive).toBe(false);
+
         expect(analysis.tempTableInlineCandidates).toHaveLength(1);
         expect(analysis.tempTableInlineCandidates[0].tempTableName).toBe('TMP_SALES');
         expect(analysis.tempTableInlineCandidates[0].nextStatementKind).toBe('select');

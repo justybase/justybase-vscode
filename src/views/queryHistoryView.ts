@@ -768,12 +768,16 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
         }
     }
 
+    private _getWebviewCsp(webview: vscode.Webview): string {
+        return `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource};`;
+    }
+
     private _getExtendedViewHtml(webview: vscode.Webview, styleUri: vscode.Uri, scriptUri: vscode.Uri, tanstackTableUri: vscode.Uri, tanstackVirtualUri: vscode.Uri): string {
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource};">
+    <meta http-equiv="Content-Security-Policy" content="${this._getWebviewCsp(webview)}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Query History - Extended View</title>
     <link href="${styleUri}" rel="stylesheet">
@@ -785,14 +789,14 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                 <input type="search" id="searchInput" placeholder="Search queries..." />
                 <select id="statusFilter" class="status-filter">
                     <option value="all">All Status</option>
-                    <option value="success">✅ Success</option>
-                    <option value="error">❌ Error</option>
-                    <option value="cancelled">⚠️ Cancelled</option>
+                    <option value="success">Success</option>
+                    <option value="error">Error</option>
+                    <option value="cancelled">Cancelled</option>
                 </select>
                 <span class="stats" id="stats">Loading...</span>
             </div>
             <div class="toolbar-right">
-                <button id="refreshBtn">↻ Refresh</button>
+                <button id="refreshBtn" class="toolbar-btn">Refresh</button>
             </div>
         </div>
         <div class="main-content">
@@ -807,16 +811,16 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                 <div class="details-header">
                     <h3>Entry Details</h3>
                     <div class="details-actions">
-                        <button id="copyQueryBtn" disabled>📋 Copy</button>
-                        <button id="executeQueryBtn" disabled>▶️ Run</button>
-                        <button id="quickRerunBtn" disabled>🔧 Quick Run</button>
-                        <button id="deleteEntryBtn" disabled>🗑️ Delete</button>
-                        <button id="toggleFavoriteBtn" disabled>☆ Favorite</button>
+                        <button id="copyQueryBtn" class="toolbar-btn" disabled>Copy</button>
+                        <button id="executeQueryBtn" class="toolbar-btn primary" disabled>Run</button>
+                        <button id="quickRerunBtn" class="toolbar-btn" disabled>Quick Run</button>
+                        <button id="deleteEntryBtn" class="toolbar-btn delete" disabled>Delete</button>
+                        <button id="toggleFavoriteBtn" class="toolbar-btn" disabled>Favorite</button>
                     </div>
                 </div>
                 <div id="detailsContent" class="details-content">
                     <div class="empty-details">
-                        <div class="empty-details-icon">📋</div>
+                        <div class="empty-details-icon">—</div>
                         <div>Select an entry to view details</div>
                     </div>
                 </div>
@@ -832,7 +836,6 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview): string {
-        // Get URIs for external resources
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'queryHistory.css'));
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'queryHistory.js'));
 
@@ -840,7 +843,7 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource};">
+    <meta http-equiv="Content-Security-Policy" content="${this._getWebviewCsp(webview)}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Query History</title>
     <link href="${styleUri}" rel="stylesheet">
@@ -852,17 +855,16 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
             <span class="stats" id="stats">Loading...</span>
         </div>
         <div class="toolbar-buttons">
-            <button class="secondary" id="showAllBtn">📜 All</button>
-            <button class="secondary" id="showFavoritesBtn">⭐ Favorites</button>
-            <button class="secondary" id="showExtendedViewBtn">🔍 Extended View</button>
-            <button class="secondary" id="exportBtn">📥 Export</button>
-            <button class="secondary" id="refreshBtn">↻ Refresh</button>
-            <button class="secondary" id="clearAllBtn">🗑️ Clear All</button>
+            <button class="secondary" id="showAllBtn">All</button>
+            <button class="secondary" id="showFavoritesBtn">Favorites</button>
+            <button class="secondary" id="showExtendedViewBtn">Extended</button>
+            <button class="secondary" id="exportBtn">Export</button>
+            <button class="secondary" id="refreshBtn">Refresh</button>
+            <button class="secondary" id="clearAllBtn">Clear</button>
         </div>
     </div>
     <div class="history-container" id="historyContainer">
         <div class="empty-state">
-            <div class="empty-state-icon">📜</div>
             <div>No query history yet</div>
         </div>
     </div>

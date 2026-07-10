@@ -1,4 +1,5 @@
 import { CompletionItem, Position } from "vscode-languageserver/node";
+import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import { SqlLexer } from "../sqlParser";
 import { toFunctionItems, toKeywordItems, toSpecialValueItems } from "./completionRenderer";
 
@@ -14,11 +15,20 @@ export function buildExpressionFunctionItems(
   typedPrefix: string,
   position: Position,
   sqlFunctionNames: readonly string[],
+  sqlFunctionSignatures?: ReadonlyMap<
+    string,
+    readonly DatabaseSqlFunctionSignature[]
+  >,
 ): CompletionItem[] {
   if (!shouldSuggestFunctions(statementPrefix, typedPrefix)) {
     return [];
   }
-  return toFunctionItems(typedPrefix, position, sqlFunctionNames);
+  return toFunctionItems(
+    typedPrefix,
+    position,
+    sqlFunctionNames,
+    sqlFunctionSignatures,
+  );
 }
 
 export function buildExpressionSpecialValueItems(

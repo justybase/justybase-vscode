@@ -1,6 +1,7 @@
 import { CstNode, type IToken } from "chevrotain";
 import type { ColumnInfo, TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
+import { addTableQualificationWarningFromQualifiedName } from "./queryScopeVisitor";
 
 export function visitCommandTail(
   host: SqlVisitorHost,
@@ -199,6 +200,17 @@ export function groomStatement(
   validateQualifiedTableCommand(host, ctx);
 }
 
+export function generateStatisticsStatement(
+  host: SqlVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.qualifiedName) {
+    for (const qualifiedNameNode of ctx.qualifiedName) {
+      validateAndQualifyTableReference(host, qualifiedNameNode);
+    }
+  }
+}
+
 export function columnDefinitionList(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
@@ -314,24 +326,40 @@ function validateQualifiedTableCommand(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
-  const schemaProvider = host.getSchemaProvider();
-  if (ctx.qualifiedName && schemaProvider) {
-    const nameInfo = host.visitAs<{
-      name: string;
-      schema?: string;
-      database?: string;
-    }>(ctx.qualifiedName[0]);
-    const isQualified = !!(nameInfo.database || nameInfo.schema);
-    if (isQualified) {
-      const table: TableInfo = {
-        name: nameInfo.name,
-        database: nameInfo.database,
-        schema: nameInfo.schema,
-        isCte: false,
-        isTempTable: false,
-        columns: [],
-      };
-      host.validateTableExists(table, ctx.qualifiedName[0]);
-    }
+  if (ctx.qualifiedName?.[0]) {
+    validateAndQualifyTableReference(host, ctx.qualifiedName[0]);
   }
+}
+
+function validateAndQualifyTableReference(
+  host: SqlVisitorHost,
+  qualifiedNameNode: CstNode,
+): void {
+  const schemaProvider = host.getSchemaProvider();
+  if (!schemaProvider) {
+    return;
+  }
+
+  const nameInfo = host.visitAs<{
+    name: string;
+    schema?: string;
+    database?: string;
+  }>(qualifiedNameNode);
+  const isQualified = !!(nameInfo.database || nameInfo.schema);
+  if (isQualified) {
+    const table: TableInfo = {
+      name: nameInfo.name,
+      database: nameInfo.database,
+      schema: nameInfo.schema,
+      isCte: false,
+      isTempTable: false,
+      columns: [],
+    };
+    host.validateTableExists(table, qualifiedNameNode);
+  }
+  addTableQualificationWarningFromQualifiedName(
+    host,
+    nameInfo,
+    qualifiedNameNode,
+  );
 }

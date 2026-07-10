@@ -4,6 +4,164 @@
   "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block), L:source.tsql - (string.quoted | comment.line | comment.block), L:source.pgsql - (string.quoted | comment.line | comment.block), L:source.plpgsql - (string.quoted | comment.line | comment.block), L:source.mysql - (string.quoted | comment.line | comment.block), L:source.oracle - (string.quoted | comment.line | comment.block)",
   "patterns": [
     {
+      "comment": "─── P0: CREATE TABLE target — begin/end region for full qualified name (fixes db..table vs built-in meta.create.sql) ──",
+      "begin": "(?i)(?m)(?<!^\\s*--[^\\n]*)(\\bCREATE\\b)(?:\\s+(OR\\s+REPLACE))?(?:\\s+(GLOBAL))?(?:\\s+(TEMP(?:ORARY)?))?\\s+(\\bTABLE\\b)(?:\\s+(IF\\s+NOT\\s+EXISTS))?\\s+",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.ddl.netezza"
+        },
+        "2": {
+          "name": "keyword.other.ddl.netezza"
+        },
+        "3": {
+          "name": "storage.modifier.netezza"
+        },
+        "4": {
+          "name": "storage.modifier.netezza"
+        },
+        "5": {
+          "name": "keyword.other.ddl.netezza"
+        },
+        "6": {
+          "name": "keyword.other.ddl.netezza"
+        }
+      },
+      "end": "(?=\\s+AS\\b|\\s*\\()",
+      "contentName": "meta.create.table-target.netezza",
+      "patterns": [
+        {
+          "comment": "P0.1: database.schema.table",
+          "captures": {
+            "1": {
+              "name": "constant.other.database-name.sql"
+            },
+            "2": {
+              "name": "constant.other.schema-name.sql"
+            },
+            "3": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+        },
+        {
+          "comment": "P0.2: database..table (Netezza notation)",
+          "captures": {
+            "1": {
+              "name": "constant.other.database-name.sql"
+            },
+            "2": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\.\\.(\\w+)\\b"
+        },
+        {
+          "comment": "P0.3: schema.table",
+          "captures": {
+            "1": {
+              "name": "constant.other.schema-name.sql"
+            },
+            "2": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\.(\\w+)\\b"
+        },
+        {
+          "comment": "P0.4: single unqualified table name",
+          "captures": {
+            "1": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\b"
+        }
+      ]
+    },
+    {
+      "comment": "─── P0d: fallback single unqualified CREATE TABLE name when begin/end capture scopes are not applied ──",
+      "captures": {
+        "1": {
+          "name": "constant.other.table-name.sql"
+        }
+      },
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\bCREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:GLOBAL\\s+)?(?:TEMP(?:ORARY)?\\s+)?TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?)(\\w+)\\b(?!\\.)"
+    },
+    {
+      "comment": "─── P0g: GROOM TABLE target — begin/end region for qualified table name ──",
+      "begin": "(?i)(?m)(?<!^\\s*--[^\\n]*)(\\bGROOM\\b)\\s+(\\bTABLE\\b)\\s+",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.ddl.netezza"
+        },
+        "2": {
+          "name": "keyword.other.ddl.netezza"
+        }
+      },
+      "end": "(?=\\s+(?:VERSIONS|RECORDS|PAGES|RECLAIM)\\b|\\s*;)",
+      "contentName": "meta.ddl.table-target.netezza",
+      "patterns": [
+        {
+          "comment": "P0g.1: database.schema.table",
+          "captures": {
+            "1": {
+              "name": "constant.other.database-name.sql"
+            },
+            "2": {
+              "name": "constant.other.schema-name.sql"
+            },
+            "3": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+        },
+        {
+          "comment": "P0g.2: database..table (Netezza notation)",
+          "captures": {
+            "1": {
+              "name": "constant.other.database-name.sql"
+            },
+            "2": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\.\\.(\\w+)\\b"
+        },
+        {
+          "comment": "P0g.3: schema.table",
+          "captures": {
+            "1": {
+              "name": "constant.other.schema-name.sql"
+            },
+            "2": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\.(\\w+)\\b"
+        },
+        {
+          "comment": "P0g.4: single unqualified table name",
+          "captures": {
+            "1": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "^\\s*(\\w+)\\b"
+        }
+      ]
+    },
+    {
+      "comment": "─── P0gd: fallback single unqualified GROOM TABLE name when begin/end capture scopes are not applied ──",
+      "captures": {
+        "1": {
+          "name": "constant.other.table-name.sql"
+        }
+      },
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\bGROOM\\s+TABLE\\s+)(\\w+)\\b(?!\\.)"
+    },
+    {
       "comment": "Line guard (?m)(?<!^--). Block comments are excluded by injectionSelector per source target.",
       "name": "constant.language.netezza",
       "begin": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\bCURRENT_(?:TIMEZONE|SID|DB|TX_SCHEMA|DATE|TIME(?:STAMP)?|USER|CATALOG|SCHEMA)\\b",
@@ -121,7 +279,7 @@
     },
     {
       "comment": "─── P9: Window frame ─── keyword.other ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GROUPS|FILTER|EXCLUDE|TIES)\\b",
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GROUPS|FILTER|WITHIN|EXCLUDE|TIES)\\b",
       "name": "keyword.other.netezza"
     },
     {
@@ -195,7 +353,7 @@
           "name": "constant.other.table-name.sql"
         }
       },
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW|DROP|ALTER|TRUNCATE)\\s+)(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW|DROP|ALTER|TRUNCATE|GROOM)\\s+)(\\w+)\\.(\\w+)\\.(\\w+)\\b"
     },
     {
       "comment": "─── P17b: SCHEMA.TABLE in FROM/JOIN only — schema + table; alias.column handled by semantic tokens ──",
@@ -209,5 +367,20 @@
       },
       "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\b(?:FROM|JOIN)\\s+)(\\w+)\\.(\\w+)\\b"
     }
-  ]
+  ],
+  "injections": {
+    "L:meta.create.sql - (comment | string.quoted)": {
+      "patterns": [
+        {
+          "comment": "Fallback: recolor CREATE TABLE first identifier when .. continues outside meta.create span",
+          "captures": {
+            "1": {
+              "name": "constant.other.database-name.sql"
+            }
+          },
+          "match": "(?i)(?<=\\btable\\s+)(\\w+)\\b(?=\\s*\\.\\.)"
+        }
+      ]
+    }
+  }
 }

@@ -7,9 +7,11 @@ import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { ScopedColumnCandidate } from "../server/completionTypes";
 import {
   filterMetadataItems,
+  toFunctionItems,
   toMetadataColumnItem,
   toScopedColumnItems,
 } from "../server/completionRenderer";
+import { NETEZZA_FUNCTION_SIGNATURES } from "../dialects/netezza/sql/signatures";
 
 describe("completionRenderer — documentation regression guard", () => {
   const position = Position.create(0, 10);
@@ -192,6 +194,57 @@ describe("completionRenderer — documentation regression guard", () => {
         '"lower_table"',
       );
       expect(items.find((item) => item.label === "ORDERS")?.insertText).toBe("ORDERS");
+    });
+  });
+
+  describe("toFunctionItems", () => {
+    it("uses signature detail and documentation when available", () => {
+      const items = toFunctionItems(
+        "DLE",
+        position,
+        ["DLE_DST", "COUNT"],
+        NETEZZA_FUNCTION_SIGNATURES,
+      );
+      const dleDst = items.find((item) => item.label === "DLE_DST");
+
+      expect(dleDst?.detail).toBe("DLE_DST(string1, string2)");
+      expect(dleDst?.documentation).toEqual(
+        expect.objectContaining({
+          kind: "markdown",
+          value: expect.stringContaining("SELECT dle_dst('two', 'tow')"),
+        }),
+      );
+      expect(dleDst?.labelDetails?.description).toContain(
+        "Damerau-Levenshtein edit distance",
+      );
+    });
+
+    it("uses base signature detail for functions with registry entries", () => {
+      const items = toFunctionItems(
+        "COA",
+        position,
+        ["COALESCE"],
+        NETEZZA_FUNCTION_SIGNATURES,
+      );
+      expect(items[0].detail).toBe("COALESCE(value1, value2, ...)");
+    });
+
+    it("includes both TO_CHAR examples from merged Netezza signatures", () => {
+      const items = toFunctionItems(
+        "TO_CHAR",
+        position,
+        ["TO_CHAR"],
+        NETEZZA_FUNCTION_SIGNATURES,
+      );
+      const documentation = items[0].documentation as { value?: string } | undefined;
+      expect(documentation?.value).toContain("TO_CHAR(CURRENT_DATE, 'YYYYMMDD')");
+      expect(documentation?.value).toContain("TO_CHAR(CURRENT_DATE, 'YYYYMMDD')::INT");
+    });
+
+    it("falls back to generic SQL Function detail without signatures", () => {
+      const items = toFunctionItems("COA", position, ["COALESCE"]);
+      expect(items[0].detail).toBe("SQL Function");
+      expect(items[0].documentation).toBeUndefined();
     });
   });
 });

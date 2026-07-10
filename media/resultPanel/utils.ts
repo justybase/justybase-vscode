@@ -1,3 +1,5 @@
+/// <reference path="./webview-globals.d.ts" />
+
 // Utils module - Utility functions for result panel
 import {
     getResultFormattingPayload,
@@ -976,7 +978,7 @@ export function escapeCsvValue(value: unknown, separator = ','): string {
 /**
  * Validate required libraries are loaded
  */
-export function validateRequiredLibraries(): { TableCore: typeof TableCore } | null {
+export function validateRequiredLibraries(): { TableCore: TableCoreModule } | null {
     if (typeof TableCore === 'undefined') {
         showError('TableCore is not defined. The TanStack Table library might not have loaded.');
         return null;

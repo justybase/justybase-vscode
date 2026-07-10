@@ -8,6 +8,7 @@ import { exportQueryToXlsb, exportStructuredToXlsb } from '../../../export/xlsbE
 import { exportCsvToXlsx, exportStructuredToXlsx } from '../../../export/xlsxExporter';
 import { exportResultSetToFile } from '../../../export/resultExporter';
 import { exportStructuredToParquet, exportQueryToParquet } from '../../../export/parquetExporter';
+import { exportQueryToXpt, exportStructuredToXpt } from '../../../export/xptExporter';
 import { importDataForConnection } from '../../../import/importDispatcher';
 import { createTabularDataImporter } from '../../../import/tabularDataImporter';
 import { ConnectionDetails, ResultSet } from '../../../types';
@@ -290,6 +291,16 @@ export class CopilotImportExportTools {
                     if (!exportResult.success) {
                         throw new Error(exportResult.message);
                     }
+                } else if (normalizedFormat === 'xpt') {
+                    const exportResult = await exportStructuredToXpt([{
+                        columns: resultSet.columns,
+                        rows: resultSet.data,
+                        sql: resultSet.sql,
+                        name: resultSet.name || 'Query Results'
+                    }], resolvedOutputPath, false);
+                    if (!exportResult.success) {
+                        throw new Error(exportResult.message);
+                    }
                 } else {
                     const exportResult = await exportStructuredToXlsx([{
                         columns: resultSet.columns,
@@ -381,6 +392,18 @@ export class CopilotImportExportTools {
                 if (!result.success) {
                     throw new Error(result.message);
                 }
+            } else if (normalizedFormat === 'xpt') {
+                const result = await exportQueryToXpt(
+                    connectionDetails,
+                    queryToExport,
+                    resolvedOutputPath,
+                    false,
+                    undefined,
+                    timeoutSeconds
+                );
+                if (!result.success) {
+                    throw new Error(result.message);
+                }
             } else {
                 tempCsvPath = path.join(os.tmpdir(), `netezza_export_${Date.now()}_${Math.floor(Math.random() * 1000)}.csv`);
                 await exportToCsv(connectionDetails, queryToExport, tempCsvPath, undefined, timeoutSeconds);
@@ -442,15 +465,15 @@ export class CopilotImportExportTools {
         }
     }
 
-    private normalizeExportFormat(format?: string): 'csv' | 'xlsx' | 'xlsb' | 'parquet' {
+    private normalizeExportFormat(format?: string): 'csv' | 'xlsx' | 'xlsb' | 'parquet' | 'xpt' {
         const normalized = (format || 'csv').toLowerCase();
-        if (normalized === 'xlsx' || normalized === 'xlsb' || normalized === 'csv' || normalized === 'parquet') {
+        if (normalized === 'xlsx' || normalized === 'xlsb' || normalized === 'csv' || normalized === 'parquet' || normalized === 'xpt') {
             return normalized;
         }
         return 'csv';
     }
 
-    private resolveExportPath(outputPath: string | undefined, format: 'csv' | 'xlsx' | 'xlsb' | 'parquet'): string {
+    private resolveExportPath(outputPath: string | undefined, format: 'csv' | 'xlsx' | 'xlsb' | 'parquet' | 'xpt'): string {
         const defaultName = `netezza_export_${new Date().toISOString().replace(/[:.]/g, '-')}.${format}`;
         const desktopPath = path.join(os.homedir(), 'Desktop');
         if (!outputPath || outputPath.trim().length === 0) {
@@ -464,7 +487,7 @@ export class CopilotImportExportTools {
         return trimmed;
     }
 
-    private getDesktopExportSuggestion(format: 'csv' | 'xlsx' | 'xlsb' | 'parquet'): string {
+    private getDesktopExportSuggestion(format: 'csv' | 'xlsx' | 'xlsb' | 'parquet' | 'xpt'): string {
         return path.join(os.homedir(), 'Desktop', `netezza_export_*.${format}`);
     }
 }

@@ -277,11 +277,14 @@ function findMatchingParen(sql: string, openParenOffset: number): number {
     return -1;
 }
 
-function buildOverClauseRanges(sql: string): Array<{ start: number; end: number }> {
+function buildParenthesizedClauseRanges(
+    sql: string,
+    openerPattern: RegExp,
+): Array<{ start: number; end: number }> {
     const ranges: Array<{ start: number; end: number }> = [];
-    const overMatches = findPatternMatches(sql, /\bOVER\s*\(/gi);
+    const openerMatches = findPatternMatches(sql, openerPattern);
 
-    for (const match of overMatches) {
+    for (const match of openerMatches) {
         const openParenOffset = match.index + match[0].lastIndexOf('(');
         const closeParenOffset = findMatchingParen(sql, openParenOffset);
         if (closeParenOffset > openParenOffset) {
@@ -292,11 +295,19 @@ function buildOverClauseRanges(sql: string): Array<{ start: number; end: number 
     return ranges;
 }
 
-function isInsideOverClause(
+function buildOverClauseRanges(sql: string): Array<{ start: number; end: number }> {
+    return buildParenthesizedClauseRanges(sql, /\bOVER\s*\(/gi);
+}
+
+function buildWithinGroupClauseRanges(sql: string): Array<{ start: number; end: number }> {
+    return buildParenthesizedClauseRanges(sql, /\bWITHIN\s+GROUP\s*\(/gi);
+}
+
+function isInsideExcludedOrderByContext(
     offset: number,
-    overClauseRanges: ReadonlyArray<{ start: number; end: number }>,
+    excludedRanges: ReadonlyArray<{ start: number; end: number }>,
 ): boolean {
-    return overClauseRanges.some((range) => offset > range.start && offset < range.end);
+    return excludedRanges.some((range) => offset > range.start && offset < range.end);
 }
 
 export const ruleNZ006: LintRule = {
@@ -308,10 +319,13 @@ export const ruleNZ006: LintRule = {
         const issues: LintIssue[] = [];
         const pattern = /\bORDER\s+BY\b/gi;
         const matches = findPatternMatches(sql, pattern);
-        const overClauseRanges = buildOverClauseRanges(sql);
+        const excludedOrderByRanges = [
+            ...buildOverClauseRanges(sql),
+            ...buildWithinGroupClauseRanges(sql),
+        ];
 
         for (const match of matches) {
-            if (isInsideOverClause(match.index, overClauseRanges)) {
+            if (isInsideExcludedOrderByContext(match.index, excludedOrderByRanges)) {
                 continue;
             }
 
@@ -356,7 +370,7 @@ export const ruleNZ007: LintRule = {
             'DROP', 'ALTER', 'TABLE', 'VIEW', 'INDEX', 'ORDER', 'BY', 'GROUP',
             'HAVING', 'UNION', 'ALL', 'DISTINCT', 'AS', 'SET', 'VALUES', 'NULL',
             'NOT', 'IN', 'BETWEEN', 'LIKE', 'IS', 'EXISTS', 'CASE', 'WHEN',
-            'THEN', 'ELSE', 'END', 'LIMIT', 'OFFSET'];
+            'THEN', 'ELSE', 'END', 'LIMIT', 'OFFSET', 'TRUNCATE'];
 
         let upperCount = 0;
         let lowerCount = 0;
