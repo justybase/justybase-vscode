@@ -2,7 +2,7 @@
     "name": "justybaselite-duckdb",
     "displayName": "JustyBase DuckDB Support",
     "description": "Optional DuckDB Support for JustyBase Core",
-    "version": "3.15.0",
+    "version": "3.15.1",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
