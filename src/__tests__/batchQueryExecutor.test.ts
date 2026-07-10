@@ -262,11 +262,11 @@ describe('batchQueryExecutor', () => {
             );
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
-            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1');
-            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2');
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1;');
+            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2;');
         });
 
-        it('executes each statement from an expanded macro branch sequentially', async () => {
+        it('executes an expanded macro branch as one payload', async () => {
             mockExecuteAndFetch.mockResolvedValue({
                 results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
                 error: null,
@@ -282,9 +282,32 @@ describe('batchQueryExecutor', () => {
                 'file:///test.sql',
             );
 
-            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
-            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1');
-            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2');
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('\n  SELECT 1;\n  SELECT 2;\n');
+        });
+
+        it('executes a Netezza procedure as one unchanged payload', async () => {
+            const procedure = `CREATE OR REPLACE PROCEDURE JUST_DATA.ADMIN.CUSTOMER_DOTNET()
+RETURNS INTEGER
+EXECUTE AS OWNER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+ BEGIN RAISE NOTICE 'The customer name is alpha'; RAISE NOTICE 'The customer location is beta'; END;
+END_PROC;`;
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [], rows: [], limitReached: false }],
+                error: null,
+            });
+
+            await runQueriesSequentially(
+                mockContext,
+                [procedure],
+                mockConnManager,
+                'file:///test.sql',
+            );
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe(procedure);
         });
 
         it('should continue executing later queries when continueOnError is enabled', async () => {
@@ -642,6 +665,25 @@ describe('batchQueryExecutor', () => {
             );
         });
 
+        it('does not retry a macro branch after a broken connection', async () => {
+            const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+            (isConnectionBrokenError as jest.Mock).mockReturnValueOnce(true);
+            mockExecuteAndFetch.mockRejectedValue(new Error('Connection lost'));
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                [`%IF 1 = 1 %THEN %DO;
+  INSERT INTO audit_log VALUES (1);
+  UPDATE customer SET active = 1;
+%END;`],
+                mockConnManager,
+                'file:///test.sql',
+            )).rejects.toThrow('Connection lost');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
         it('should handle batchError from executeAndFetch', async () => {
             mockExecuteAndFetch.mockResolvedValue({
                 results: [{ columns: [], rows: [], limitReached: false }],
@@ -797,7 +839,7 @@ describe('batchQueryExecutor', () => {
             expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(1);
         });
 
-        it('streams each statement from an expanded macro branch separately', async () => {
+        it('streams an expanded macro branch as one payload', async () => {
             mockExecuteWithStreaming.mockResolvedValue({
                 totalRows: 1,
                 limitReached: false,
@@ -815,9 +857,8 @@ describe('batchQueryExecutor', () => {
                 'file:///test.sql',
             );
 
-            expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(2);
-            expect(mockExecuteWithStreaming.mock.calls[0]?.[1]).toBe('SELECT 1');
-            expect(mockExecuteWithStreaming.mock.calls[1]?.[1]).toBe('SELECT 2');
+            expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(1);
+            expect(mockExecuteWithStreaming.mock.calls[0]?.[1]).toBe('\n  SELECT 1;\n  SELECT 2;\n');
         });
 
         it('should throw when no connection selected', async () => {

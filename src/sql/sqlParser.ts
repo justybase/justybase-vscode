@@ -37,6 +37,10 @@ export class SqlParser {
             }
         }
 
+        if (/\bBEGIN_PROC\b/i.test(text)) {
+            return this.splitStatementsWithProtectedProcedureBodies(text).map(statement => statement.sql);
+        }
+
         return this.splitStatementsLegacy(text);
     }
 
@@ -52,7 +56,40 @@ export class SqlParser {
             }
         }
 
+        if (/\bBEGIN_PROC\b/i.test(text)) {
+            return this.splitStatementsWithProtectedProcedureBodies(text);
+        }
+
         return this.splitStatementsWithPositionsLegacy(text);
+    }
+
+    private static splitStatementsWithProtectedProcedureBodies(
+        text: string,
+    ): { sql: string; startOffset: number; endOffset: number }[] {
+        const semicolonOffsets = this.collectSemicolonOffsetsLegacy(text);
+        const statements: { sql: string; startOffset: number; endOffset: number }[] = [];
+        let segmentStart = 0;
+
+        for (const semicolonOffset of semicolonOffsets) {
+            const statementStart = this.findFirstNonWhitespace(text, segmentStart, semicolonOffset);
+            if (statementStart !== null) {
+                const sql = text.substring(segmentStart, semicolonOffset).trim();
+                if (sql) {
+                    statements.push({ sql, startOffset: statementStart, endOffset: semicolonOffset });
+                }
+            }
+            segmentStart = semicolonOffset + 1;
+        }
+
+        const statementStart = this.findFirstNonWhitespace(text, segmentStart, text.length);
+        if (statementStart !== null) {
+            const sql = text.substring(segmentStart).trim();
+            if (sql) {
+                statements.push({ sql, startOffset: statementStart, endOffset: text.length });
+            }
+        }
+
+        return statements;
     }
 
     /**
@@ -241,7 +278,10 @@ export class SqlParser {
             }
         }
 
-        return this.filterMacroBlockSemicolonOffsets(text, semicolonOffsets);
+        return this.filterProcedureBlockSemicolonOffsets(
+            text,
+            this.filterMacroBlockSemicolonOffsets(text, semicolonOffsets),
+        );
     }
 
     private static collectSemicolonOffsetsLegacy(text: string): number[] {
@@ -285,7 +325,91 @@ export class SqlParser {
             }
         }
 
-        return this.filterMacroBlockSemicolonOffsets(text, semicolonOffsets);
+        return this.filterProcedureBlockSemicolonOffsets(
+            text,
+            this.filterMacroBlockSemicolonOffsets(text, semicolonOffsets),
+        );
+    }
+
+    /**
+     * BEGIN_PROC/END_PROC delimit a Netezza procedure body whose internal
+     * semicolons are part of the CREATE PROCEDURE statement.
+     */
+    private static filterProcedureBlockSemicolonOffsets(
+        text: string,
+        semicolonOffsets: number[],
+    ): number[] {
+        if (!/\bBEGIN_PROC\b/i.test(text)) {
+            return semicolonOffsets;
+        }
+
+        const semicolonSet = new Set(semicolonOffsets);
+        const filtered: number[] = [];
+        let procedureDepth = 0;
+        let inSingleQuote = false;
+        let inDoubleQuote = false;
+        let inLineComment = false;
+        let inBlockComment = false;
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const nextChar = i + 1 < text.length ? text[i + 1] : '';
+
+            if (inLineComment) {
+                if (char === '\n') inLineComment = false;
+                continue;
+            }
+            if (inBlockComment) {
+                if (char === '*' && nextChar === '/') {
+                    inBlockComment = false;
+                    i++;
+                }
+                continue;
+            }
+            if (inSingleQuote) {
+                if (char === "'" && nextChar === "'") {
+                    i++;
+                } else if (char === "'") {
+                    inSingleQuote = false;
+                }
+                continue;
+            }
+            if (inDoubleQuote) {
+                if (char === '"' && nextChar === '"') {
+                    i++;
+                } else if (char === '"') {
+                    inDoubleQuote = false;
+                }
+                continue;
+            }
+
+            if (char === '-' && nextChar === '-') {
+                inLineComment = true;
+                i++;
+            } else if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                i++;
+            } else if (char === "'") {
+                inSingleQuote = true;
+            } else if (char === '"') {
+                inDoubleQuote = true;
+            } else if (/[A-Za-z_]/.test(char)) {
+                const wordStart = i;
+                while (i + 1 < text.length && /[A-Za-z0-9_$]/.test(text[i + 1])) {
+                    i++;
+                }
+                const word = text.slice(wordStart, i + 1).toUpperCase();
+                if (word === 'BEGIN_PROC') {
+                    procedureDepth++;
+                } else if (word === 'END_PROC' && procedureDepth > 0) {
+                    procedureDepth--;
+                }
+            } else if (char === ';' && semicolonSet.has(i) && procedureDepth === 0) {
+                filtered.push(i);
+            }
+        }
+
+        return filtered;
     }
 
     private static filterMacroBlockSemicolonOffsets(text: string, semicolonOffsets: number[]): number[] {

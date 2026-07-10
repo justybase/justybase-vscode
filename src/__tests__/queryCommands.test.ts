@@ -604,6 +604,50 @@ describe('commands/queryCommands', () => {
             expect(vscode.commands.executeCommand).toHaveBeenCalledWith('netezza.results.focus');
         });
 
+        it('should keep Smart Run statement splitting before execution', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider,
+            };
+            registerQueryCommands(deps);
+            (SqlParser.splitStatements as jest.Mock).mockReturnValue(['SELECT 1', 'SELECT 2']);
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.runQuery'
+            )?.[1];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    uri: { toString: () => 'file:///test.sql' },
+                    getText: jest.fn(() => 'SELECT 1; SELECT 2;'),
+                },
+                selection: { isEmpty: false },
+            };
+
+            await handler();
+
+            expect(SqlParser.splitStatements).toHaveBeenCalledWith('SELECT 1; SELECT 2;');
+            expect(runQueriesWithStreaming).toHaveBeenCalledWith(
+                mockContext,
+                ['SELECT 1', 'SELECT 2'],
+                expect.anything(),
+                'file:///test.sql',
+                expect.any(Function),
+                expect.any(Function),
+                expect.any(Number),
+                undefined,
+                false,
+                undefined,
+                expect.any(Function),
+                expect.any(Function),
+                undefined,
+                0,
+                undefined,
+                expect.any(Object),
+            );
+        });
+
         it('should ignore duplicate runQuery while the same tab is already running', async () => {
             const deps: QueryCommandsDependencies = {
                 context: mockContext,
@@ -879,6 +923,9 @@ describe('commands/queryCommands', () => {
 
             await handler();
             expect(runQueriesSequentially).toHaveBeenCalled();
+            expect((runQueriesSequentially as jest.Mock).mock.calls[0]?.[15]).toEqual(
+                expect.objectContaining({ retryOnBrokenConnection: false }),
+            );
             expect(mockResultPanelProvider.finalizeExecution).toHaveBeenCalled();
         });
 

@@ -466,6 +466,7 @@ export function registerQueryCommands(
                             undefined,
                             [],
                             {
+                                retryOnBrokenConnection: false,
                                 onStatementSucceeded: event =>
                                     deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
                                 onStatementFailed: event => {

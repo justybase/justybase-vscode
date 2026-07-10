@@ -15,7 +15,6 @@ import {
     logMacroPreprocessResult,
 } from "./variableUtils";
 import { promptForVariableValues } from "./variableResolver";
-import { SqlParser } from "../sql/sqlParser";
 import {
     MacroEnvironment,
     MacroPreprocessor,
@@ -75,6 +74,7 @@ export type BatchExecutionStatus =
 
 export interface BatchQueryRunOptions {
     continueOnError?: boolean;
+    retryOnBrokenConnection?: boolean;
     onQueryError?: (queryIndex: number, sql: string, errorMessage: string) => void;
     onStatementSucceeded?: (event: {
         sql: string;
@@ -256,6 +256,30 @@ export async function prepareQueryForExecution(
     queryExecutor?: MacroQueryExecutor,
     macroContext: MacroPreprocessorContext = {},
 ): Promise<string> {
+    return (await prepareQueryForExecutionWithMetadata(
+        query,
+        resolvedVars,
+        logCallback,
+        queryExecutor,
+        macroContext,
+    )).sql;
+}
+
+export interface PreparedQueryExecution {
+    sql: string;
+    hasMacroBranch: boolean;
+}
+
+/**
+ * Prepare a query and retain execution-safety metadata from macro processing.
+ */
+export async function prepareQueryForExecutionWithMetadata(
+    query: string,
+    resolvedVars: Record<string, string>,
+    logCallback?: (message: string) => void,
+    queryExecutor?: MacroQueryExecutor,
+    macroContext: MacroPreprocessorContext = {},
+): Promise<PreparedQueryExecution> {
     const environment = new MacroEnvironment(resolvedVars);
     const result = await new MacroPreprocessor().processScript(query, {
         environment,
@@ -269,16 +293,10 @@ export async function prepareQueryForExecution(
     });
     Object.assign(resolvedVars, result.variables);
     logMacroPreprocessResult(result, logCallback);
-    return result.sql;
-}
-
-/**
- * Split macro-expanded SQL into individual statements for execution.
- * Pre-split batches keep inner %DO semicolons together until expansion;
- * after preprocessing, each statement should run (and stream) separately.
- */
-export function splitExpandedMacroStatements(sql: string): string[] {
-    return SqlParser.splitStatements(sql).filter(statement => statement.trim().length > 0);
+    return {
+        sql: result.sql,
+        hasMacroBranch: result.scriptEvents?.some(event => event.type === 'branch') === true,
+    };
 }
 
 export function createMacroFileReadContext(

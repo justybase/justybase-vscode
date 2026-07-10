@@ -259,20 +259,15 @@ describe('singleQueryExecutor', () => {
             );
         });
 
-        it('executes each statement from an expanded macro branch separately', async () => {
+        it('executes an expanded macro branch as one unchanged payload', async () => {
             const { resolveQueryVariablesWithValues } = require('../core/variableResolver');
             (resolveQueryVariablesWithValues as jest.Mock).mockResolvedValueOnce(
                 'SELECT 1;\nSELECT 2;',
             );
-            mockExecuteAndFetch
-                .mockResolvedValueOnce({
-                    results: [{ columns: [{ name: 'a' }], rows: [[1]], limitReached: false }],
-                    error: null,
-                })
-                .mockResolvedValueOnce({
-                    results: [{ columns: [{ name: 'b' }], rows: [[2]], limitReached: false }],
-                    error: null,
-                });
+            mockExecuteAndFetch.mockResolvedValueOnce({
+                results: [{ columns: [{ name: 'a' }], rows: [[1]], limitReached: false }],
+                error: null,
+            });
 
             const result = await runQueryRaw({
                 context: mockContext,
@@ -284,11 +279,10 @@ describe('singleQueryExecutor', () => {
                 documentUri: 'file:///test.sql',
             });
 
-            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
-            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1');
-            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 2');
-            expect(result.data).toEqual([[2]]);
-            expect(result.sql).toBe('SELECT 2');
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('SELECT 1;\nSELECT 2;');
+            expect(result.data).toEqual([[1]]);
+            expect(result.sql).toBe('SELECT 1;\nSELECT 2;');
             expect(result.expandedSql).toBe('SELECT 1;\nSELECT 2;');
         });
 

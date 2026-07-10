@@ -33,20 +33,16 @@ export interface QueryResult {
   message?: string;
   limitReached?: boolean;
   /**
-   * SQL text associated with this result. For single-query execution after macro
-   * expansion, this is the last executed statement when multiple statements
-   * were run sequentially; otherwise the sole executed statement.
+   * SQL payload associated with this result.
    */
   sql?: string;
   /**
-   * Direct SQL used to re-run this specific result set. Unlike `sql` or
-   * `expandedSql`, this intentionally excludes earlier script/setup statements.
+   * Direct SQL payload used to re-run this result.
    */
   refreshSql?: string;
   /**
-   * Full macro-expanded SQL before statement splitting. Present when
-   * {@link executeRawQuery} preprocesses directives; use this when callers need
-   * the entire expanded script rather than the last executed statement.
+   * Full macro-expanded SQL passed to the driver. Present when
+   * {@link executeRawQuery} preprocesses directives.
    */
   expandedSql?: string;
   isLog?: boolean;

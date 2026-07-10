@@ -105,7 +105,6 @@ import {
     executeMacroExport,
     createMacroFileReadContext,
     prepareQueryForExecution,
-    splitExpandedMacroStatements,
     logQueryToHistoryAsync,
     handleBatchRetry,
     handleBatchError,
@@ -681,22 +680,6 @@ describe("queryBatchExecutor", () => {
                     "conn",
                 ),
             ).not.toThrow();
-        });
-    });
-
-    // -----------------------------------------------------------------------
-    // splitExpandedMacroStatements
-    // -----------------------------------------------------------------------
-    describe("splitExpandedMacroStatements", () => {
-        it("splits multi-statement expanded macro SQL", () => {
-            expect(splitExpandedMacroStatements("SELECT 1; SELECT 2;")).toEqual([
-                "SELECT 1",
-                "SELECT 2",
-            ]);
-        });
-
-        it("returns a single statement unchanged", () => {
-            expect(splitExpandedMacroStatements("SELECT 1")).toEqual(["SELECT 1"]);
         });
     });
 
