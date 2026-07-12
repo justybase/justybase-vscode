@@ -18,6 +18,7 @@ import { QueryCommandsDependencies } from './queryCommandTypes';
 import { formatQualifiedObjectName, formatQualifiedObjectPathForDisplay } from '../../utils/identifierUtils';
 import {
     confirmSafeExecute,
+    confirmSafeExecuteForExpandedQuery,
     handleExecutionCompletion
 } from './queryCommandSafety';
 import {
@@ -370,6 +371,13 @@ export function registerQueryCommands(
                 const statementsForSafeExecute = SqlParser.splitStatements(text).filter(
                     q => q.trim().length > 0
                 );
+                if (
+                    !(await confirmSafeExecute(
+                        statementsForSafeExecute.length > 0 ? statementsForSafeExecute : [text]
+                    ))
+                ) {
+                    return;
+                }
                 runBatchTimer = createPerformanceTimer('query.run_batch', {
                     payloadSize: text.length
                 });
@@ -437,7 +445,7 @@ export function registerQueryCommands(
                             [],
                             {
                                 retryOnBrokenConnection: false,
-                                confirmSafeExecute: sql => confirmSafeExecute([sql]),
+                                confirmSafeExecute: sql => confirmSafeExecuteForExpandedQuery([text], sql),
                                 onStatementSucceeded: event =>
                                     deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
                                 onStatementFailed: event => {

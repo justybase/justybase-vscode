@@ -23,6 +23,23 @@ export function stripLeadingComments(sql: string): string {
         .trimStart();
 }
 
+function expandSafetyQueries(queries: string[]): string[] {
+    return queries.flatMap(query => {
+        const statements = SqlParser.splitStatements(query).filter(statement => statement.trim().length > 0);
+        const queryText = query.trim();
+        const splitMatchesSource = statements.some(statement => queryText.includes(statement.trim()));
+        return statements.length > 0 && splitMatchesSource ? statements : [query];
+    });
+}
+
+function countRiskyStatements(queries: string[]): Map<RiskyStatement['type'], number> {
+    const counts = new Map<RiskyStatement['type'], number>();
+    for (const statement of detectRiskyStatements(expandSafetyQueries(queries))) {
+        counts.set(statement.type, (counts.get(statement.type) ?? 0) + 1);
+    }
+    return counts;
+}
+
 /**
  * Detects risky SQL statements (DELETE/UPDATE without WHERE, TRUNCATE)
  * Pure function - easily testable without dependencies
@@ -78,11 +95,7 @@ export async function confirmSafeExecuteWithDeps(
         return true;
     }
 
-    const expandedQueries = queries.flatMap(query => {
-        const statements = SqlParser.splitStatements(query).filter(statement => statement.trim().length > 0);
-        return statements.length > 0 ? statements : [query];
-    });
-    const risky = detectRiskyStatements(expandedQueries);
+    const risky = detectRiskyStatements(expandSafetyQueries(queries));
     if (risky.length === 0) {
         return true;
     }
@@ -106,6 +119,25 @@ export async function confirmSafeExecuteWithDeps(
  */
 export async function confirmSafeExecute(queries: string[]): Promise<boolean> {
     return confirmSafeExecuteWithDeps(queries, new DefaultConfigurationProvider(), new DefaultUIService());
+}
+
+/**
+ * Confirm risks introduced while preprocessing a query, without prompting a
+ * second time for a risk already confirmed in the original source.
+ */
+export async function confirmSafeExecuteForExpandedQuery(
+    sourceQueries: string[],
+    expandedQuery: string,
+): Promise<boolean> {
+    const sourceRiskCounts = countRiskyStatements(sourceQueries);
+    const expandedRiskCounts = countRiskyStatements([expandedQuery]);
+    const introducedRisk = [...expandedRiskCounts].some(([type, count]) =>
+        count > (sourceRiskCounts.get(type) ?? 0),
+    );
+    if (!introducedRisk) {
+        return true;
+    }
+    return confirmSafeExecute([expandedQuery]);
 }
 
 /**
