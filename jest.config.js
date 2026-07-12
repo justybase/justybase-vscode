@@ -22,14 +22,12 @@ module.exports = {
       "ts-jest",
       {
         tsconfig: "tsconfig.media.json",
-        isolatedModules: true,
       },
     ],
     "^.+\\.ts$": [
       "ts-jest",
       {
         tsconfig: "tsconfig.json",
-        isolatedModules: true,
       },
     ],
     // Chevrotain (+ its deps) are ESM; transform them to CJS for Jest.

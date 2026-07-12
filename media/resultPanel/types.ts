@@ -142,6 +142,7 @@ export interface ResultSet {
     name?: string;
     columns: ResultSetColumn[];
     data: unknown[][];
+    message?: string;
     limitReached?: boolean;
     isLog?: boolean;
     isError?: boolean;
@@ -427,6 +428,13 @@ export interface ResultPanelGlobals {
     onDragOverGroup?: (event: DragEvent) => void;
     onDragLeaveGroup?: (event: DragEvent) => void;
     toggleRowView?: () => void;
+    toggleDatabaseGroupingPanel?: () => void;
+    closeDatabaseGroupingPanel?: () => void;
+    __toggleDatabaseGroupingPanel?: () => void;
+    __clearGroupingConfig?: () => void;
+    __runGroupingQuery?: () => void;
+    __exportActiveGridAsXlsb?: () => void;
+    exportActiveGridAsXlsb?: () => void;
     toggleExportSplitMenu?: (event: Event) => void;
     toggleExportPrimaryMenu?: (event?: Event) => void;
     toggleToolbarMoreMenu?: (event: Event) => void;

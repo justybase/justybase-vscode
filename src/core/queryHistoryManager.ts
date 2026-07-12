@@ -3,7 +3,7 @@ import { HistoryStorage } from './history/historyStorage';
 import { QueryHistoryEntry, QueryExecutionStatus, StorageData, SavedFilterView, HistoryFilter, QuickRerunConfig, QueryParameter } from './history/types';
 
 // Re-export for backward compatibility
-export { QueryHistoryEntry, QueryExecutionStatus, SavedFilterView, HistoryFilter, QuickRerunConfig, QueryParameter };
+export type { QueryHistoryEntry, QueryExecutionStatus, SavedFilterView, HistoryFilter, QuickRerunConfig, QueryParameter };
 
 export class QueryHistoryManager {
     private static readonly STORAGE_KEY = 'queryHistory';

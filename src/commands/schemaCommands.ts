@@ -17,4 +17,5 @@
  * - schema/index.ts - Module re-exports
  */
 
-export { registerSchemaCommands, SchemaCommandsDependencies } from './schema';
+export { registerSchemaCommands } from './schema';
+export type { SchemaCommandsDependencies } from './schema';

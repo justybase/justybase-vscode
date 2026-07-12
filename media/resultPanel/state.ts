@@ -513,6 +513,17 @@ export function getRowViewOpen(): boolean {
     return isRowViewOpen;
 }
 
+// Database Grouping Panel state
+export let isGroupingPanelOpen = false;
+
+export function setGroupingPanelOpen(open: boolean): void {
+    isGroupingPanelOpen = open;
+}
+
+export function getGroupingPanelOpen(): boolean {
+    return isGroupingPanelOpen;
+}
+
 // Pinned columns state functions
 export function getPinnedColumnsState(
     rsIndex: number,

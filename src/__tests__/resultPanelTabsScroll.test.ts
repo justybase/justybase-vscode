@@ -82,7 +82,9 @@ jest.mock('../../media/resultPanel/analysis.js', () => ({
 }));
 
 jest.mock('../../media/resultPanel/protocol.js', () => ({
-    postHostMessage: jest.fn()
+    postHostMessage: jest.fn(),
+    getHostState: jest.fn(),
+    setHostState: jest.fn(),
 }));
 
 jest.mock('../../media/resultPanel/filter.js', () => ({

@@ -1726,5 +1726,5 @@ Please:
 }
 
 // Re-export types and tools for consumers (e.g. extension.ts)
-export { CopilotContext, TableReference, WorkspaceTableProfile, UpsertWorkspaceTableProfileInput } from './copilot';
+export type { CopilotContext, TableReference, WorkspaceTableProfile, UpsertWorkspaceTableProfileInput } from './copilot';
 export * from './copilotTools';

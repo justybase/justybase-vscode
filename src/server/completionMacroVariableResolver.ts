@@ -117,6 +117,30 @@ function buildPercentMacroCompletions(
     },
     sortText: "0_%sqllist",
   }, {
+    label: "%python script.py [args...]",
+    kind: CompletionItemKind.Snippet,
+    detail: "Execute Python script macro",
+    documentation:
+      "Runs a Python script during preprocessing and substitutes stdout. Supports &variable resolution in script path and args.",
+    insertTextFormat: InsertTextFormat.Snippet,
+    textEdit: {
+      range,
+      newText: "python ${1:script.py} ${2:--arg1 --arg2}",
+    },
+    sortText: "0_%python",
+  }, {
+    label: "%do; ... %end;",
+    kind: CompletionItemKind.Snippet,
+    detail: "SAS-like %DO block",
+    documentation:
+      "Starts a %DO block that executes unconditionally. Must be closed with %END;.",
+    insertTextFormat: InsertTextFormat.Snippet,
+    textEdit: {
+      range,
+      newText: "do;\n    ${1:-- statements}\n%end;",
+    },
+    sortText: "0_%do",
+  }, {
     label: "%export(format, file, query);",
     kind: CompletionItemKind.Snippet,
     detail: "Export SQL macro",

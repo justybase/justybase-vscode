@@ -8,10 +8,12 @@ import type {
   DatabaseCapabilities,
 } from "@justybase/contracts";
 
-export {
+export type {
   DatabaseConnection,
   DatabaseCommand,
   DatabaseDataReader,
+} from "@justybase/contracts";
+export {
   DEFAULT_DATABASE_KIND,
   DATABASE_KIND_DISPLAY_NAMES,
   SUPPORTED_DATABASE_KINDS,

@@ -14,7 +14,6 @@ import {
 } from '../core/queryRunner';
 import { SqlParser } from '../sql/sqlParser';
 import { parseExplainOutput } from '../views/explainPlanView';
-import { buildExecCommand } from '../utils/shellUtils';
 import { clearQueryExecutionGateForTests } from '../commands/query/queryExecutionGate';
 
 // Mock vscode module
@@ -95,7 +94,6 @@ jest.mock('../views/explainPlanView', () => ({
 
 // Mock shellUtils
 jest.mock('../utils/shellUtils', () => ({
-    buildExecCommand: jest.fn((py, script, args) => `${py} ${script} ${args.join(' ')}`)
 }));
 
 // Mock internal SQL formatter
@@ -536,42 +534,6 @@ describe('commands/queryCommands', () => {
 
             await handler();
             expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No SQL statement found at cursor');
-        });
-
-        it('should run python script via terminal for runQuery', async () => {
-            const deps: QueryCommandsDependencies = {
-                context: mockContext,
-                connectionManager: mockConnectionManager,
-                resultPanelProvider: mockResultPanelProvider
-            };
-            registerQueryCommands(deps);
-            const terminal = { show: jest.fn(), sendText: jest.fn() };
-            (vscode.window.createTerminal as jest.Mock).mockReturnValue(terminal);
-            (SqlParser.splitStatements as jest.Mock).mockReturnValue(['python test.py --flag']);
-
-            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-                call => call[0] === 'netezza.runQuery'
-            )?.[1];
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (vscode.window as any).activeTextEditor = {
-                document: {
-                    uri: { toString: () => 'file:///test.sql' },
-                    getText: jest.fn(() => 'python test.py --flag')
-                },
-                selection: {
-                    isEmpty: false
-                }
-            };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ((vscode.window as any).activeTextEditor.document.getText as jest.Mock).mockImplementation((_range?: unknown) =>
-                'python test.py --flag'
-            );
-
-            await handler();
-            expect(buildExecCommand).toHaveBeenCalledWith('python', 'test.py', ['--flag']);
-            expect(terminal.show).toHaveBeenCalled();
-            expect(terminal.sendText).toHaveBeenCalled();
         });
 
         it('should execute streaming query flow and finalize', async () => {

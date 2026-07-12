@@ -27,6 +27,8 @@ import {
   isRowMarkedForDelete,
   setGlobalDragState,
   getGlobalDragState,
+  setGroupingPanelOpen,
+  getGroupingPanelOpen,
 } from "./state.js";
 import { debounce, showError } from "./utils.js";
 import {
@@ -101,6 +103,7 @@ import {
   exportAllResultSetsToExcel,
   exportToMdFile,
 } from "./export.js";
+import { executeDatabaseGrouping } from './databaseGrouping.js';
 import { postHostMessage, getHostState, setHostState } from './protocol.js';
 import { prepareDiskFilterWindow } from './diskBackedGrid.js';
 import { asHtml, getElementById } from './dom.js';
@@ -478,11 +481,100 @@ export function onGlobalFilterChanged(): void {
   debouncedSearch(value);
 }
 
+/**
+ * Toggle the database grouping panel on the right side.
+ */
+export function toggleDatabaseGroupingPanel(): void {
+  const isOpen = getGroupingPanelOpen();
+  const newOpen = !isOpen;
+  setGroupingPanelOpen(newOpen);
+  const panel = getElementById("databaseGroupingPanel");
+  const barBtn = getElementById("groupingBarBtn");
+  if (panel) {
+    panel.classList.toggle("visible", newOpen);
+  }
+  if (barBtn) {
+    barBtn.classList.toggle("active", newOpen);
+    barBtn.setAttribute("aria-pressed", newOpen ? "true" : "false");
+  }
+  // If opening grouping panel, close row view
+  if (newOpen && getRowViewOpen()) {
+    closeRowView();
+  }
+  if (newOpen) {
+    ensureGroupingContext();
+  }
+}
+
+/**
+ * Close the database grouping panel.
+ */
+export function closeDatabaseGroupingPanel(): void {
+  if (!getGroupingPanelOpen()) {
+    return;
+  }
+  setGroupingPanelOpen(false);
+  const panel = getElementById("databaseGroupingPanel");
+  const barBtn = getElementById("groupingBarBtn");
+  if (panel) {
+    panel.classList.remove("visible");
+  }
+  if (barBtn) {
+    barBtn.classList.remove("active");
+    barBtn.setAttribute("aria-pressed", "false");
+  }
+}
+
+function setupGroupingPanelResize(): void {
+  const panel = getElementById('databaseGroupingPanel');
+  const handle = getElementById('groupingResizeHandle');
+  if (!panel || !handle) return;
+
+  const resizeBy = (delta: number): void => {
+    const currentWidth = panel.getBoundingClientRect().width;
+    const maxWidth = Math.max(280, window.innerWidth - 220);
+    panel.style.width = `${Math.max(280, Math.min(maxWidth, currentWidth + delta))}px`;
+  };
+
+  handle.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = panel.getBoundingClientRect().width;
+    handle.setPointerCapture(event.pointerId);
+    const onMove = (moveEvent: PointerEvent) => {
+      const maxWidth = Math.max(280, window.innerWidth - 220);
+      panel.style.width = `${Math.max(280, Math.min(maxWidth, startWidth + startX - moveEvent.clientX))}px`;
+    };
+    const onEnd = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onEnd);
+      handle.removeEventListener('pointercancel', onEnd);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onEnd);
+    handle.addEventListener('pointercancel', onEnd);
+  });
+  handle.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      resizeBy(24);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      resizeBy(-24);
+    }
+  });
+}
+
 // Row view functions
 export function toggleRowView(): void {
   if (getRowViewOpen()) {
     closeRowView();
     return;
+  }
+
+  // If opening row view, close grouping panel
+  if (getGroupingPanelOpen()) {
+    closeDatabaseGroupingPanel();
   }
 
   setRowViewOpen(true);
@@ -792,6 +884,40 @@ export function init(): void {
     // Setup handlers
     setupGlobalKeyboardShortcuts();
     setupStreamingMessageHandler();
+    // Wire database grouping panel drag & drop
+    const groupingDropZone = getElementById('groupingDropZone');
+    if (groupingDropZone) {
+        groupingDropZone.addEventListener('dragover', onDbGroupDragOver);
+        groupingDropZone.addEventListener('dragleave', onDbGroupDragLeave);
+        groupingDropZone.addEventListener('drop', onDbGroupDrop);
+    }
+    setupGroupingPanelResize();
+    // Wire "Add Function" button
+    const addFnBtn = getElementById('addGroupingFnBtn');
+    if (addFnBtn) {
+        addFnBtn.addEventListener('click', () => showGroupingFnConfigPopup(addFnBtn));
+    }
+    // Render initial function chips (default: COUNT)
+    renderDbGroupingFunctions();
+    // Render initial grouping chips (empty state with "+ Add Column" button)
+    renderDbGroupingChips();
+    // Wire SQL copy button delegation for grouping results
+    const resultsArea = getElementById('groupingResultsArea');
+    if (resultsArea) {
+        resultsArea.addEventListener('click', (e) => {
+            const target = asHtml(e.target);
+            if (target?.classList.contains('grouping-sql-copy')) {
+                const sql = target.dataset.sql || '';
+                navigator.clipboard.writeText(sql).then(() => {
+                    const origText = target.textContent;
+                    target.textContent = '✓ Copied!';
+                    setTimeout(() => { target.textContent = origText; }, 2000);
+                }).catch(() => {
+                    vscode.postMessage({ command: 'info', text: 'Failed to copy SQL to clipboard' });
+                });
+            }
+        });
+    }
     subscribeRunningUiRefresh(() => {
       updateExecutionStatusBanner();
     });
@@ -1608,6 +1734,859 @@ export function onColumnSearchFocus(): void {
   renderColumnSearchDropdown("");
 }
 
+// ======================================================
+// Database Grouping Panel — Column Configuration State
+// ======================================================
+
+interface DbGroupConfigColumn {
+    columnIndex: number;
+    columnName: string;
+}
+
+interface DbGroupConfigFunction {
+    fn: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'countDistinct' | 'median';
+    columnIndex?: number;
+    columnName?: string;
+}
+
+let _dbGroupColumns: DbGroupConfigColumn[] = [];
+let _dbGroupFunctions: DbGroupConfigFunction[] = [{ fn: 'count' }];
+let _dbGroupingContextKey: string | undefined;
+
+const GROUPING_FN_LABELS: Record<string, string> = {
+    count: 'COUNT(*)',
+    countDistinct: 'COUNT(DISTINCT)',
+    sum: 'SUM',
+    avg: 'AVG',
+    min: 'MIN',
+    max: 'MAX',
+    median: 'MEDIAN',
+};
+
+function ensureGroupingContext(): void {
+    const sourceUri = getActiveSourceUri();
+    const contextKey = sourceUri ? `${sourceUri}:${getActiveGridIndex()}` : undefined;
+    if (_dbGroupingContextKey === contextKey) return;
+    _dbGroupingContextKey = contextKey;
+    _dbGroupColumns = [];
+    _dbGroupFunctions = [{ fn: 'count' }];
+    renderDbGroupingFunctions();
+    renderDbGroupingChips();
+    const resultsArea = getElementById('groupingResultsArea');
+    if (resultsArea) {
+        resultsArea.replaceChildren();
+        const placeholder = document.createElement('div');
+        placeholder.className = 'no-results';
+        placeholder.textContent = 'Drag columns and run grouping';
+        resultsArea.appendChild(placeholder);
+    }
+}
+
+function renderDbGroupingChips(): void {
+    const container = getElementById('groupingChipsContainer');
+    const dropZone = getElementById('groupingDropZone');
+    const clearBtn = getElementById('clearGroupingBtn') as HTMLButtonElement | null;
+    const runBtn = getElementById('runGroupingBtn') as HTMLButtonElement | null;
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (_dbGroupColumns.length === 0) {
+        container.style.display = 'none';
+        if (dropZone) {
+            dropZone.classList.remove('has-chips');
+            // Show the "+ Add Column" button when no columns added
+            let addBtn = dropZone.querySelector('.grouping-add-column-btn') as HTMLButtonElement | null;
+            if (!addBtn) {
+                addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'grouping-add-column-btn';
+                addBtn.innerHTML = '＋ Add Column';
+                addBtn.title = 'Select a column to group by';
+                addBtn.addEventListener('click', () => showGroupingColumnPicker(addBtn!));
+                // Insert after the drop-hint
+                const hint = dropZone.querySelector('.drop-hint');
+                if (hint && hint.nextSibling) {
+                    dropZone.insertBefore(addBtn, hint.nextSibling);
+                } else {
+                    dropZone.appendChild(addBtn);
+                }
+            }
+        }
+        if (clearBtn) clearBtn.disabled = true;
+        if (runBtn) runBtn.disabled = true;
+        return;
+    }
+
+    container.style.display = 'flex';
+    if (dropZone) {
+        dropZone.classList.add('has-chips');
+        // Remove the "+ Add Column" button (chips visible instead)
+        const addBtn = dropZone.querySelector('.grouping-add-column-btn');
+        if (addBtn) addBtn.remove();
+    }
+    if (clearBtn) clearBtn.disabled = false;
+    if (runBtn) runBtn.disabled = false;
+
+    _dbGroupColumns.forEach((col, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'group-chip';
+        chip.draggable = true;
+        chip.dataset.colIndex = String(col.columnIndex);
+        chip.dataset.colName = col.columnName;
+
+        const label = document.createElement('span');
+        label.textContent = col.columnName;
+        chip.appendChild(label);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'chip-remove';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'Remove from grouping';
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _dbGroupColumns.splice(idx, 1);
+            renderDbGroupingChips();
+        });
+        chip.appendChild(removeBtn);
+
+        // Allow reordering chips via drag
+        chip.addEventListener('dragstart', (e) => {
+            const dt = e.dataTransfer;
+            if (!dt) return;
+            dt.setData('application/x-justybase-group-chip', 'true');
+            dt.setData('text/plain', col.columnName);
+            dt.setData('colIndex', String(col.columnIndex));
+            dt.effectAllowed = 'move';
+            chip.classList.add('dragging');
+        });
+        chip.addEventListener('dragend', () => {
+            chip.classList.remove('dragging');
+        });
+        chip.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        });
+        chip.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const draggedIndex = e.dataTransfer?.getData('colIndex');
+            if (draggedIndex && Number(draggedIndex) !== col.columnIndex) {
+                const fromIdx = _dbGroupColumns.findIndex(c => String(c.columnIndex) === draggedIndex);
+                if (fromIdx >= 0) {
+                    const [moved] = _dbGroupColumns.splice(fromIdx, 1);
+                    const toIdx = fromIdx < idx ? idx - 1 : idx;
+                    _dbGroupColumns.splice(toIdx, 0, moved);
+                    renderDbGroupingChips();
+                }
+            }
+        });
+
+        container.appendChild(chip);
+    });
+}
+
+function onDbGroupDragOver(event: DragEvent): void {
+    event.preventDefault();
+    const dt = event.dataTransfer;
+    if (!dt) return;
+    // getData() is unavailable in dragover in Chromium webviews. Inspect the
+    // advertised MIME types here and parse the payload only in the drop event.
+    const types = Array.from(dt.types);
+    const isColumn = types.includes('application/x-justybase-result-column');
+    const isChip = types.includes('application/x-justybase-group-chip');
+    if (isColumn || isChip) {
+        dt.dropEffect = isColumn ? 'copy' : 'move';
+        const dropZone = getElementById('groupingDropZone');
+        if (dropZone) dropZone.classList.add('drag-over');
+    } else {
+        dt.dropEffect = 'none';
+    }
+}
+
+function onDbGroupDragLeave(event: DragEvent): void {
+    const dropZone = getElementById('groupingDropZone');
+    if (dropZone && event.relatedTarget instanceof Node && !dropZone.contains(event.relatedTarget)) {
+        dropZone.classList.remove('drag-over');
+    }
+}
+
+function onDbGroupDrop(event: DragEvent): void {
+    event.preventDefault();
+    const dropZone = getElementById('groupingDropZone');
+    if (dropZone) dropZone.classList.remove('drag-over');
+
+    const dt = event.dataTransfer;
+    if (!dt) return;
+
+    const payload = dt.getData('application/x-justybase-result-column');
+    if (payload) {
+        let column: { columnIndex: number; columnName: string };
+        try {
+            column = JSON.parse(payload) as { columnIndex: number; columnName: string };
+        } catch {
+            return;
+        }
+        const { columnIndex: colIndex, columnName: colName } = column;
+        if (!Number.isInteger(colIndex) || !colName) return;
+
+        // Check if already added
+        if (_dbGroupColumns.some(c => c.columnIndex === colIndex)) return;
+
+        _dbGroupColumns.push({
+            columnIndex: colIndex,
+            columnName: colName,
+        });
+        renderDbGroupingChips();
+    }
+    // dbGroupChip reordering is handled per-chip
+}
+
+/**
+ * Show a popup to pick a column to add to the grouping config.
+ */
+function showGroupingColumnPicker(anchorEl: HTMLElement): void {
+    // Close any existing column picker
+    const existing = document.querySelector('.grouping-col-picker-popup') as HTMLElement | null;
+    if (existing) existing.remove();
+
+    // Get available columns from the current result set
+    const rsCols = (() => {
+        const idx = getActiveGridIndex();
+        const rs = getResultSetAt(idx);
+        if (!rs || !rs.columns) return [];
+        return rs.columns.map((c, i) => ({ index: i, name: c.name || `Column ${i}`, type: c.type || '' }));
+    })();
+
+    // Filter out already-added columns
+    const available = rsCols.filter(c => !_dbGroupColumns.some(gc => gc.columnIndex === c.index));
+
+    if (available.length === 0) {
+        // All columns already added — show a brief tooltip-like message
+        const existingMsg = document.querySelector('.grouping-col-picker-msg');
+        if (existingMsg) existingMsg.remove();
+
+        const msg = document.createElement('div');
+        msg.className = 'grouping-col-picker-msg';
+        msg.textContent = 'All columns already added';
+        document.body.appendChild(msg);
+
+        const rect = anchorEl.getBoundingClientRect();
+        msg.style.top = `${rect.bottom + 4}px`;
+        msg.style.left = `${rect.left}px`;
+
+        setTimeout(() => { msg.remove(); }, 1500);
+        return;
+    }
+
+    const popup = document.createElement('div');
+    popup.className = 'grouping-col-picker-popup';
+
+    popup.innerHTML = `
+        <div class="config-title">Group By Column</div>
+        <div class="grouping-col-picker-list">
+            ${available.map(c => `
+                <div class="grouping-col-picker-item" data-index="${c.index}" data-name="${c.name}">
+                    <span class="col-name">${c.name}</span>
+                    <span class="col-type">${c.type || '…'}</span>
+                </div>
+            `).join('')}
+        </div>
+        <div class="config-actions" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--vscode-panel-border);">
+            <button type="button" class="grouping-col-picker-cancel">Cancel</button>
+        </div>
+    `;
+
+    document.body.appendChild(popup);
+
+    // Position below the anchor
+    const anchorRect = anchorEl.getBoundingClientRect();
+    const popupRect = popup.getBoundingClientRect();
+    popup.style.top = `${anchorRect.bottom + 4}px`;
+    popup.style.left = `${Math.max(4, Math.min(anchorRect.left, window.innerWidth - popupRect.width - 4))}px`;
+
+    // Wire column clicks
+    popup.querySelectorAll('.grouping-col-picker-item').forEach(item => {
+        const htmlItem = item as HTMLElement;
+        htmlItem.addEventListener('click', () => {
+            const colIndex = parseInt(htmlItem.dataset.index || '0', 10);
+            const colName = htmlItem.dataset.name || `Column ${colIndex}`;
+
+            // Add to grouping columns
+            _dbGroupColumns.push({ columnIndex: colIndex, columnName: colName });
+            popup.remove();
+            renderDbGroupingChips();
+        });
+        // Hover effect
+        htmlItem.addEventListener('mouseenter', () => {
+            htmlItem.style.backgroundColor = 'var(--vscode-list-hoverBackground)';
+        });
+        htmlItem.addEventListener('mouseleave', () => {
+            htmlItem.style.backgroundColor = '';
+        });
+    });
+
+    // Cancel button
+    const cancelBtn = popup.querySelector('.grouping-col-picker-cancel') as HTMLElement | null;
+    cancelBtn?.addEventListener('click', () => popup.remove());
+
+    // Close on click outside
+    const closeOnOutsideClick = (e: MouseEvent) => {
+        const target = e.target;
+        if (target instanceof Node && !popup.contains(target) && target !== anchorEl) {
+            popup.remove();
+            document.removeEventListener('mousedown', closeOnOutsideClick);
+        }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeOnOutsideClick), 0);
+}
+
+/**
+ * Render the function chips in the functions area.
+ */
+function renderDbGroupingFunctions(): void {
+    const container = getElementById('groupingFnChipsContainer');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    _dbGroupFunctions.forEach((fn, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'function-chip';
+
+        const label = document.createElement('span');
+        const baseLabel = GROUPING_FN_LABELS[fn.fn] || fn.fn.toUpperCase();
+        if (fn.fn === 'count') {
+            label.textContent = 'COUNT(*)';  // count is always on all rows
+        } else if (fn.columnName) {
+            label.textContent = `${baseLabel}(${fn.columnName})`;
+        } else {
+            label.textContent = `${baseLabel}(…)`;
+        }
+        chip.appendChild(label);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'fn-remove';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'Remove function';
+        removeBtn.addEventListener('click', () => {
+            _dbGroupFunctions.splice(idx, 1);
+            // Let array be empty — SQL builder auto-adds COUNT(*) as fallback
+            renderDbGroupingFunctions();
+        });
+        chip.appendChild(removeBtn);
+
+        container.appendChild(chip);
+    });
+}
+
+/**
+ * Show the function configuration popup near the "Add Function" button.
+ */
+function showGroupingFnConfigPopup(anchorEl: HTMLElement): void {
+    // Close any existing popup
+    const existing = document.querySelector('.grouping-fn-config-popup') as HTMLElement | null;
+    if (existing) existing.remove();
+
+    // Get available columns for target column selector
+    const rsCols = (() => {
+        const idx = getActiveGridIndex();
+        const rs = getResultSetAt(idx);
+        if (!rs || !rs.columns) return [];
+        return rs.columns.map((c, i) => ({ index: i, name: c.name || `Column ${i}`, type: c.type || '' }));
+    })();
+
+    const popup = document.createElement('div');
+    popup.className = 'grouping-fn-config-popup';
+
+    popup.innerHTML = `
+        <div class="config-title">Add Aggregation Function</div>
+        <div class="config-row">
+            <label>Function</label>
+            <select id="fnTypeSelect">
+                <option value="count">COUNT(*)</option>
+                <option value="countDistinct">COUNT(DISTINCT)</option>
+                <option value="sum" selected>SUM</option>
+                <option value="avg">AVG</option>
+                <option value="min">MIN</option>
+                <option value="max">MAX</option>
+                <option value="median">MEDIAN</option>
+            </select>
+        </div>
+        <div class="config-row" id="fnColumnRow">
+            <label>Column</label>
+            <select id="fnColumnSelect">
+                ${rsCols.map(c => `<option value="${c.index}">${c.name} (${c.type || '…'})</option>`).join('')}
+                ${rsCols.length === 0 ? '<option value="-1">No columns available</option>' : ''}
+            </select>
+        </div>
+        <div class="config-actions">
+            <button type="button" id="fnConfigCancel">Cancel</button>
+            <button type="button" id="fnConfigAdd" class="primary">Add</button>
+        </div>
+    `;
+
+    document.body.appendChild(popup);
+
+    // Position the popup below the anchor button
+    const anchorRect = anchorEl.getBoundingClientRect();
+    const popupRect = popup.getBoundingClientRect();
+    popup.style.top = `${anchorRect.bottom + 4}px`;
+    popup.style.left = `${Math.max(4, Math.min(anchorRect.left, window.innerWidth - popupRect.width - 4))}px`;
+
+    // Wire function type selector to show/hide column selector
+    const fnSelect = popup.querySelector('#fnTypeSelect') as HTMLSelectElement | null;
+    const colRow = popup.querySelector('#fnColumnRow') as HTMLElement | null;
+    const colSelect = popup.querySelector('#fnColumnSelect') as HTMLSelectElement | null;
+
+    const updateColumnVisibility = () => {
+        if (!fnSelect || !colRow) return;
+        const val = fnSelect.value;
+        // COUNT doesn't need a column; all others do
+        if (val === 'count') {
+            colRow.style.display = 'none';
+        } else {
+            colRow.style.display = 'flex';
+        }
+    };
+
+    fnSelect?.addEventListener('change', updateColumnVisibility);
+    updateColumnVisibility();
+
+    // Add button handler
+    const addBtn = popup.querySelector('#fnConfigAdd') as HTMLElement | null;
+    addBtn?.addEventListener('click', () => {
+        if (!fnSelect) return;
+        const selectedFn = fnSelect.value as DbGroupConfigFunction['fn'];
+
+        if (selectedFn === 'count') {
+            // Remove existing default COUNT if present, then add count
+            _dbGroupFunctions = _dbGroupFunctions.filter(f => f.fn !== 'count');
+            _dbGroupFunctions.push({ fn: 'count' });
+        } else {
+            const colIdx = colSelect ? parseInt(colSelect.value, 10) : undefined;
+            const colName = colIdx !== undefined && colIdx >= 0
+                ? (rsCols.find(c => c.index === colIdx)?.name || `Column ${colIdx}`)
+                : undefined;
+
+            // Avoid exact duplicate (same fn + same column)
+            const duplicate = _dbGroupFunctions.some(f => f.fn === selectedFn && f.columnIndex === colIdx);
+            if (!duplicate) {
+                _dbGroupFunctions.push({
+                    fn: selectedFn,
+                    columnIndex: colIdx,
+                    columnName: colName,
+                });
+            }
+        }
+
+        popup.remove();
+        renderDbGroupingFunctions();
+    });
+
+    // Cancel button handler
+    const cancelBtn = popup.querySelector('#fnConfigCancel') as HTMLElement | null;
+    cancelBtn?.addEventListener('click', () => popup.remove());
+
+    // Close popup when clicking outside
+    const closeOnOutsideClick = (e: MouseEvent) => {
+        const target = e.target;
+        if (target instanceof Node && !popup.contains(target) && target !== anchorEl) {
+            popup.remove();
+            document.removeEventListener('mousedown', closeOnOutsideClick);
+        }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeOnOutsideClick), 0);
+}
+
+/** Clear the grouping configuration and reset the panel. */
+export function clearGroupingConfig(): void {
+    _dbGroupColumns = [];
+    _dbGroupFunctions = [{ fn: 'count' }];
+    renderDbGroupingFunctions();
+    // Clear results too
+    const resultsArea = getElementById('groupingResultsArea');
+    if (resultsArea) {
+        resultsArea.innerHTML = `
+            <div class="no-results">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 5h18M3 12h18M3 19h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <div>Drag columns and run grouping</div>
+            </div>`;
+    }
+    renderDbGroupingChips();
+}
+
+/** Build the grouping request config from current state. */
+function _buildGroupingRequest() {
+    const limitControl = getElementById<HTMLSelectElement>('groupingLimitSelect');
+    const selectedLimit = limitControl?.value ?? 'source';
+    const limit: number | null | undefined = selectedLimit === 'source'
+        ? undefined
+        : selectedLimit === 'unlimited'
+            ? null
+            : Number.parseInt(selectedLimit, 10);
+    return {
+        groupByColumns: _dbGroupColumns.map(c => ({
+            columnIndex: c.columnIndex,
+            columnName: c.columnName,
+        })),
+        functions: _dbGroupFunctions.map(fn => ({
+            fn: fn.fn,
+            columnIndex: fn.columnIndex,
+            alias: fn.columnName ? `${fn.fn.toUpperCase()}_${fn.columnName}` : undefined,
+        })),
+        limit,
+    };
+}
+
+/** Execute the grouping query on the database. */
+export async function runGroupingQuery(): Promise<void> {
+    ensureGroupingContext();
+    if (_dbGroupColumns.length === 0) return;
+
+    const resultsArea = getElementById('groupingResultsArea');
+    if (!resultsArea) return;
+
+    try {
+        // 1. Build the request
+        const request = _buildGroupingRequest();
+
+        // A dedicated SVG avoids inheriting text-spinner styles from other views.
+        const loading = document.createElement('div');
+        loading.className = 'grouping-query-loading';
+        loading.setAttribute('role', 'status');
+        const spinner = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        spinner.setAttribute('class', 'grouping-progress-indicator');
+        spinner.setAttribute('viewBox', '0 0 24 24');
+        spinner.setAttribute('aria-hidden', 'true');
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', '12');
+        circle.setAttribute('cy', '12');
+        circle.setAttribute('r', '9');
+        spinner.appendChild(circle);
+        const label = document.createElement('span');
+        label.textContent = 'Running grouping query…';
+        loading.append(spinner, label);
+        resultsArea.replaceChildren(loading);
+
+        // Execute the grouping query immediately; generated SQL remains copyable with the result.
+        const result = await executeDatabaseGrouping(request);
+
+        renderGroupingResults(result);
+    } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const error = document.createElement('div');
+        error.className = 'grouping-error';
+        error.textContent = `⚠ ${errorMsg}`;
+        resultsArea.replaceChildren(error);
+    }
+}
+
+interface GroupingQueryResult {
+    columns: Array<{ name: string; type?: string; kind?: 'group' | 'count' | 'percentage' | 'aggregate' }>;
+    rows: unknown[][];
+    totalRows: number;
+    truncated?: boolean;
+    sql: string;
+}
+
+function groupingClipboardText(result: GroupingQueryResult): string {
+    const escapeCell = (value: unknown): string => {
+        const text = value === null || value === undefined ? '' : String(value);
+        return /[\t\r\n"]/u.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    return [
+        result.columns.map(column => escapeCell(column.name)).join('\t'),
+        ...result.rows.map(row => result.columns.map((_, index) => escapeCell(row[index])).join('\t')),
+    ].join('\n');
+}
+
+function groupingXlsbData(result: GroupingQueryResult): Array<{
+    columns: Array<{ name: string; type?: string }>;
+    rows: unknown[][];
+    sql: string;
+    name: string;
+    isActive: boolean;
+}> {
+    return [{
+        columns: result.columns.map(column => ({ name: column.name, type: column.type })),
+        rows: result.rows,
+        sql: result.sql,
+        name: 'Grouped results',
+        isActive: true,
+    }];
+}
+
+interface GroupingGridRow {
+    sourceIndex: number;
+    values: unknown[];
+}
+
+interface GroupingTableCell {
+    column: { id: string };
+    getValue(): unknown;
+}
+
+interface GroupingTableRow {
+    id: string;
+    original: GroupingGridRow;
+    getVisibleCells(): GroupingTableCell[];
+}
+
+interface GroupingTableHeader {
+    isPlaceholder: boolean;
+    column: {
+        id: string;
+        columnDef: { header: string };
+        getIsSorted(): false | 'asc' | 'desc';
+        toggleSorting(desc?: boolean): void;
+    };
+}
+
+interface GroupingTanStackTable {
+    getHeaderGroups(): Array<{ headers: GroupingTableHeader[] }>;
+    getRowModel(): { rows: GroupingTableRow[] };
+}
+
+function appendGroupingTableCell(
+    td: HTMLTableCellElement,
+    column: GroupingQueryResult['columns'][number],
+    cell: unknown,
+): void {
+    if (column.kind === 'percentage' || column.name.toLowerCase().startsWith('percent')) {
+        const percentage = Number(cell);
+        if (Number.isFinite(percentage)) {
+            td.className = 'pct-cell';
+            const content = document.createElement('div');
+            content.className = 'pct-bar-container';
+            const bar = document.createElement('div');
+            bar.className = 'pct-bar';
+            bar.style.width = `${Math.max(Math.min(percentage, 100), 2)}%`;
+            const label = document.createElement('span');
+            label.textContent = `${percentage.toFixed(1)}%`;
+            content.append(bar, label);
+            td.appendChild(content);
+            return;
+        }
+    }
+    if (cell === null || cell === undefined) {
+        const nullValue = document.createElement('span');
+        nullValue.className = 'null-value';
+        nullValue.textContent = 'NULL';
+        td.appendChild(nullValue);
+        return;
+    }
+    const value = String(cell);
+    td.title = value;
+    td.textContent = value;
+}
+
+function renderGroupingTanStackGrid(
+    result: GroupingQueryResult,
+    selectedRowIds: Set<string>,
+    onSelectionChanged: () => void,
+): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'grouping-grid-wrapper';
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute('aria-label', 'Grouped query results');
+    const tableElement = document.createElement('table');
+    tableElement.className = 'grouping-table grouping-tanstack-table';
+    const thead = tableElement.createTHead();
+    const tbody = tableElement.createTBody();
+    wrapper.appendChild(tableElement);
+
+    const data: GroupingGridRow[] = result.rows.map((values, sourceIndex) => ({ sourceIndex, values }));
+    let sorting: Array<{ id: string; desc: boolean }> = [];
+    let table: GroupingTanStackTable;
+    const renderRows = (): void => {
+        thead.replaceChildren();
+        tbody.replaceChildren();
+        const headerRow = thead.insertRow();
+        const selectHeader = document.createElement('th');
+        selectHeader.className = 'grouping-select-column';
+        const selectAll = document.createElement('input');
+        selectAll.type = 'checkbox';
+        const visibleRows = table.getRowModel().rows;
+        selectAll.checked = visibleRows.length > 0 && visibleRows.every(row => selectedRowIds.has(row.id));
+        selectAll.indeterminate = visibleRows.some(row => selectedRowIds.has(row.id)) && !selectAll.checked;
+        selectAll.title = 'Select visible rows';
+        selectAll.addEventListener('change', () => {
+            visibleRows.forEach(row => {
+                if (selectAll.checked) selectedRowIds.add(row.id);
+                else selectedRowIds.delete(row.id);
+            });
+            onSelectionChanged();
+            renderRows();
+        });
+        selectHeader.appendChild(selectAll);
+        headerRow.appendChild(selectHeader);
+        table.getHeaderGroups().forEach(headerGroup => {
+            headerGroup.headers.forEach(header => {
+                if (header.isPlaceholder) return;
+                const th = document.createElement('th');
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'grouping-sort-button';
+                const sorted = header.column.getIsSorted();
+                button.textContent = `${header.column.columnDef.header}${sorted === 'asc' ? ' ↑' : sorted === 'desc' ? ' ↓' : ''}`;
+                button.title = `Sort by ${header.column.columnDef.header}`;
+                button.addEventListener('click', () => header.column.toggleSorting());
+                th.appendChild(button);
+                headerRow.appendChild(th);
+            });
+        });
+        table.getRowModel().rows.forEach(row => {
+            const tr = tbody.insertRow();
+            tr.classList.toggle('is-selected', selectedRowIds.has(row.id));
+            const selectCell = tr.insertCell();
+            selectCell.className = 'grouping-select-column';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = selectedRowIds.has(row.id);
+            checkbox.setAttribute('aria-label', `Select group ${row.original.sourceIndex + 1}`);
+            checkbox.addEventListener('click', event => event.stopPropagation());
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) selectedRowIds.add(row.id);
+                else selectedRowIds.delete(row.id);
+                onSelectionChanged();
+                renderRows();
+            });
+            selectCell.appendChild(checkbox);
+            row.getVisibleCells().forEach(cell => {
+                const td = tr.insertCell();
+                appendGroupingTableCell(td, result.columns[Number.parseInt(cell.column.id, 10)], cell.getValue());
+            });
+            tr.addEventListener('click', event => {
+                if ((event.target as HTMLElement).closest('input, button')) return;
+                const wasSelected = selectedRowIds.has(row.id);
+                if (!event.ctrlKey && !event.metaKey) {
+                    selectedRowIds.clear();
+                    if (!wasSelected) selectedRowIds.add(row.id);
+                } else if (wasSelected) {
+                    selectedRowIds.delete(row.id);
+                } else {
+                    selectedRowIds.add(row.id);
+                }
+                onSelectionChanged();
+                renderRows();
+            });
+        });
+    };
+    table = TableCore.createTable({
+        data: data as unknown as unknown[][],
+        columns: result.columns.map((column, index) => ({
+            id: String(index),
+            header: column.name,
+            accessorFn: (row: GroupingGridRow) => row.values[index],
+            sortingFn: (rowA: { getValue(id: string): unknown }, rowB: { getValue(id: string): unknown }, columnId: string) => {
+                const a = rowA.getValue(columnId);
+                const b = rowB.getValue(columnId);
+                if (typeof a === 'number' && typeof b === 'number') return a - b;
+                return String(a ?? '').localeCompare(String(b ?? ''), undefined, { numeric: true, sensitivity: 'base' });
+            },
+        })),
+        state: {
+            get sorting() { return sorting; },
+            globalFilter: '',
+            grouping: [],
+            expanded: {},
+            columnOrder: [],
+            columnFilters: [],
+            columnPinning: { left: [], right: [] },
+            columnVisibility: {},
+        },
+        onSortingChange: updater => {
+            sorting = typeof updater === 'function' ? updater(sorting) as typeof sorting : updater as typeof sorting;
+            renderRows();
+        },
+        getCoreRowModel: TableCore.getCoreRowModel(),
+        getSortedRowModel: TableCore.getSortedRowModel(),
+        getFilteredRowModel: TableCore.getFilteredRowModel(),
+        getGroupedRowModel: TableCore.getGroupedRowModel(),
+        getExpandedRowModel: TableCore.getExpandedRowModel(),
+    }) as GroupingTanStackTable;
+    wrapper.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && selectedRowIds.size > 0) {
+            event.preventDefault();
+            const selected = result.rows.filter((_, index) => selectedRowIds.has(String(index)));
+            postHostMessage({ command: 'copyToClipboard', text: groupingClipboardText({ ...result, rows: selected }) });
+        }
+    });
+    renderRows();
+    return wrapper;
+}
+
+function renderGroupingResults(result: GroupingQueryResult): void {
+    const resultsArea = getElementById('groupingResultsArea');
+    if (!resultsArea) return;
+
+    resultsArea.replaceChildren();
+
+    const summary = document.createElement('div');
+    summary.className = 'grouping-summary';
+    const count = document.createElement('span');
+    const selectedRowIds = new Set<string>();
+    const selectedResult = (): GroupingQueryResult => {
+        if (selectedRowIds.size === 0) return result;
+        return { ...result, rows: result.rows.filter((_, index) => selectedRowIds.has(String(index))) };
+    };
+    const updateSummary = (): void => {
+        const base = result.truncated
+            ? `Groups: first ${result.totalRows.toLocaleString()} shown (truncated)`
+            : `Groups: ${result.totalRows.toLocaleString()}`;
+        count.textContent = selectedRowIds.size > 0 ? `${base} · selected: ${selectedRowIds.size}` : base;
+    };
+    updateSummary();
+    summary.appendChild(count);
+    const actions = document.createElement('div');
+    actions.className = 'grouping-result-actions';
+    const copyData = document.createElement('button');
+    copyData.type = 'button';
+    copyData.className = 'grouping-action-btn';
+    copyData.title = 'Copy grouped table as tab-separated values';
+    copyData.setAttribute('aria-label', copyData.title);
+    copyData.textContent = 'Copy';
+    copyData.addEventListener('click', () => {
+        postHostMessage({ command: 'copyToClipboard', text: groupingClipboardText(selectedResult()) });
+    });
+    actions.appendChild(copyData);
+    const copyExcel = document.createElement('button');
+    copyExcel.type = 'button';
+    copyExcel.className = 'grouping-action-btn';
+    copyExcel.title = 'Copy grouped table for Microsoft Excel';
+    copyExcel.setAttribute('aria-label', copyExcel.title);
+    copyExcel.textContent = 'Copy MS Excel';
+    copyExcel.addEventListener('click', () => {
+        postHostMessage({ command: 'copyAsExcel', data: groupingXlsbData(selectedResult()), sql: result.sql });
+    });
+    actions.appendChild(copyExcel);
+    const exportExcel = document.createElement('button');
+    exportExcel.type = 'button';
+    exportExcel.className = 'grouping-action-btn';
+    exportExcel.title = 'Export grouped table to Microsoft Excel';
+    exportExcel.setAttribute('aria-label', exportExcel.title);
+    exportExcel.textContent = 'Excel';
+    exportExcel.addEventListener('click', () => {
+        postHostMessage({ command: 'openInExcel', data: groupingXlsbData(selectedResult()), sql: result.sql });
+    });
+    actions.appendChild(exportExcel);
+    summary.appendChild(actions);
+    resultsArea.appendChild(summary);
+
+    if (!result.rows?.length) {
+        const empty = document.createElement('div');
+        empty.className = 'no-results';
+        empty.textContent = 'No groups returned';
+        resultsArea.appendChild(empty);
+        return;
+    }
+
+    resultsArea.appendChild(renderGroupingTanStackGrid(result, selectedRowIds, updateSummary));
+}
+
 // Close dropdown on any click outside
 document.addEventListener("mousedown", (e) => {
   const target = e.target instanceof Node ? e.target : null;
@@ -1903,7 +2882,15 @@ function setupWindowFunctions(): void {
   panel.onDragLeaveGroup = onDragLeaveGroup;
   panel.clearGroupDropTargets = clearGroupDropTargets;
   panel.toggleRowView = toggleRowView;
+  panel.toggleDatabaseGroupingPanel = toggleDatabaseGroupingPanel;
+  panel.closeDatabaseGroupingPanel = closeDatabaseGroupingPanel;
   panel.openInExcel = openInExcel;
+  // Expose grouping panel functions for inline script bridge
+  panel.__toggleDatabaseGroupingPanel = toggleDatabaseGroupingPanel;
+  panel.__clearGroupingConfig = clearGroupingConfig;
+  panel.__runGroupingQuery = runGroupingQuery;
+  panel.__exportActiveGridAsXlsb = exportAllVisibleToExcel;
+  panel.exportActiveGridAsXlsb = exportAllVisibleToExcel;
   panel.openInExcelXlsx = openInExcelXlsx;
   panel.openInFilePreview = openInFilePreview;
   panel.copyAsExcel = copyAsExcel;

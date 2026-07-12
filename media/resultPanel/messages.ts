@@ -36,6 +36,7 @@ import { syncDiskStreamingRowCount } from './diskQuerySpec.js';
 import { syncAnalysisView } from './analysis.js';
 import { updateResultLimitBanner } from './banners.js';
 import { handleDatabaseAggregationResult, clearAllDatabaseAggregationPending } from './databaseAggregations.js';
+import { handleDatabaseGroupingResult, handleDatabaseGroupingPreviewResult } from './databaseGrouping.js';
 import { handleDatabaseFilterValuesResult, handleDatabaseFilterApplyResult, clearAllDatabaseFilterPending } from './databaseFilters.js';
 import { updateAllRefreshFailureBanners } from './refreshFailureBanner.js';
 import {
@@ -444,6 +445,27 @@ export function setupStreamingMessageHandler(): void {
                     requestId: number;
                     sourceUri?: string;
                     resultSetIndex?: number;
+                    error?: string;
+                });
+                break;
+            case 'databaseGroupingResult':
+                handleDatabaseGroupingResult(message as {
+                    requestId: number;
+                    sourceUri?: string;
+                    resultSetIndex?: number;
+                    columns?: import('./types.js').ResultSetColumn[];
+                    rows?: unknown[][];
+                    totalRows?: number;
+                    truncated?: boolean;
+                    sql?: string;
+                    error?: string;
+                });
+                break;
+
+            case 'databaseGroupingPreviewResult':
+                handleDatabaseGroupingPreviewResult(message as {
+                    requestId: number;
+                    sql?: string;
                     error?: string;
                 });
                 break;

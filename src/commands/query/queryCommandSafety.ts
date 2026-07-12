@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { SqlParser } from '../../sql/sqlParser';
 import {
     ConfigurationProvider,
     DefaultConfigurationProvider,
@@ -54,40 +55,6 @@ export function detectRiskyStatements(queries: string[]): RiskyStatement[] {
 }
 
 /**
- * Checks if a single query is a Python script invocation
- * Pure function - easily testable
- * @param query - SQL query to check
- * @returns Object indicating if it's a Python script and parsed tokens
- */
-export function detectPythonScript(query: string): { isPython: boolean; pythonPath?: string; script?: string; args?: string[] } {
-    const tokens = query.trim().split(/\s+/);
-    const first = tokens[0] || '';
-
-    const isPythonExec =
-        /python(\.exe)?$/i.test(first) &&
-        tokens.length >= 2 &&
-        tokens[1].toLowerCase().endsWith('.py');
-    const isScriptDirect = first.toLowerCase().endsWith('.py');
-
-    if (isPythonExec) {
-        return {
-            isPython: true,
-            pythonPath: tokens[0],
-            script: tokens[1],
-            args: tokens.slice(2)
-        };
-    } else if (isScriptDirect) {
-        return {
-            isPython: true,
-            script: first,
-            args: tokens.slice(1)
-        };
-    }
-
-    return { isPython: false };
-}
-
-/**
  * Creates the confirmation message for risky statements
  * Pure function - easily testable
  * @param riskyTypes - Array of risky statement types
@@ -111,7 +78,11 @@ export async function confirmSafeExecuteWithDeps(
         return true;
     }
 
-    const risky = detectRiskyStatements(queries);
+    const expandedQueries = queries.flatMap(query => {
+        const statements = SqlParser.splitStatements(query).filter(statement => statement.trim().length > 0);
+        return statements.length > 0 ? statements : [query];
+    });
+    const risky = detectRiskyStatements(expandedQueries);
     if (risky.length === 0) {
         return true;
     }

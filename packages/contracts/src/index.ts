@@ -1,6 +1,6 @@
 export type { DatabaseKind, DatabaseCapabilities, DatabaseDialect, DatabaseSqlAuthoring } from './database';
 export { DEFAULT_DATABASE_KIND, DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, createDatabaseCapabilities, createDatabaseDialectTraits } from './database';
-export { DatabaseConnection, DatabaseCommand, DatabaseDataReader } from './database';
+export type { DatabaseConnection, DatabaseCommand, DatabaseDataReader } from './database';
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor } from './database';
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue } from './database';
 export type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions } from './database';

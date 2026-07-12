@@ -20,10 +20,12 @@ export interface ExportMetadata {
     rowIndices?: number[];
     columnIds?: string[];
     formatting?: ExportFormattingMetadata;
+    rowScope?: 'loaded' | 'all';
 }
 
 export interface ExcelExportMetadata {
     sourceUri: string;
+    rowScope?: 'loaded' | 'all';
     results: {
         resultSetIndex: number;
         rowIndices: number[];

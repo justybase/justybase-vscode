@@ -394,6 +394,20 @@ SELECT 2;`;
             expect(plain[1]).toContain('THIS IS SKIPPED;');
             expect(plain[2]).toBe('SELECT 2');
         });
+
+        it('keeps standalone %DO blocks together', () => {
+            const sql = `%DO;
+  SELECT 1;
+%END;
+SELECT 2;`;
+
+            expect(SqlParser.splitStatements(sql)).toEqual([
+                '%DO;\n  SELECT 1;\n%END',
+                'SELECT 2',
+            ]);
+            expect(SqlParser.splitStatements('%DO; SELECT 1; %END;')).toEqual([
+                '%DO; SELECT 1; %END',
+            ]);
+        });
     });
 });
-

@@ -59,7 +59,7 @@ import {
 import * as prefetchDelegation from './prefetchDelegation';
 
 export type { CacheStatsSnapshot, CacheLayer } from '../cacheStats';
-export { PerKeyEntry, CacheType, DatabaseMetadata } from '../types';
+export type { PerKeyEntry, CacheType, DatabaseMetadata } from '../types';
 
 export class MetadataCache implements MetadataPrefetchTarget {
   private readonly _store: MetadataStore;

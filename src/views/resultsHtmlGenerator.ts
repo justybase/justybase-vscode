@@ -85,6 +85,7 @@ export class ResultsHtmlGenerator {
             </div>
             <div id="resultLimitBanner" class="result-limit-banner" style="display: none;" role="status" aria-live="polite"></div>
             
+
             <div id="loadingOverlay" class="loading-overlay">
                 <div class="loading-card">
                     <div class="loading-spinner">
@@ -101,24 +102,6 @@ export class ResultsHtmlGenerator {
                 </div>
             </div>
             <div class="layout-wrapper" id="layoutWrapper">
-                <div class="layout-sidebar" id="layoutSidebar">
-                    <div class="sidebar-section" id="sidebarSchemaSection">
-                        <div class="sidebar-section-title">SCHEMA</div>
-                        <div id="sidebarSchemaList" class="sidebar-schema-list"></div>
-                    </div>
-                    <div class="sidebar-section" id="sidebarGroupSection">
-                        <div class="sidebar-section-title">GROUP BY — DRAG # HANDLE</div>
-                        <div id="sidebarGroupDropZone" class="sidebar-group-dropzone" ondragover="onDragOverGroup(event)" ondragleave="onDragLeaveGroup(event)" ondrop="onDropGroup(event)">
-                            <span class="sidebar-group-hint">Drag columns here from headers or SCHEMA</span>
-                        </div>
-                        <button class="btn sidebar-group-clear" onclick="clearAllGrouping()">✕ Clear grouping</button>
-                        <div class="sidebar-group-tip">
-                            <strong>Tip:</strong> Reorder or show/hide columns in SCHEMA, or drag them to GROUP BY.
-                        </div>
-                    </div>
-
-                </div>
-                <div class="layout-content">
                     <div class="controls">
                         <div class="layout-switcher" id="layoutSwitcher" role="radiogroup" aria-label="Result layout">
                             <button type="button" class="layout-switcher__btn active" data-layout="table" aria-pressed="true" title="Standard table layout">Table</button>
@@ -139,10 +122,7 @@ export class ResultsHtmlGenerator {
                             <button class="btn split-btn__arrow" onclick="toggleExportSplitMenu(event)" title="More export options" aria-label="More export options">▾</button>
                             <div class="split-btn__menu export-primary-menu" id="exportPrimaryMenu" style="display:none" role="menu" aria-label="Export format"></div>
                             <div class="split-btn__menu" id="exportSplitMenu" style="display:none" onclick="handleExportSplitMenuClick(event)">
-                                <div class="split-btn__menu-item" data-action="current-view">Export current view</div>
-                                <div class="split-btn__menu-item" data-action="all-rows">Export all rows</div>
-                                <div class="split-btn__menu-separator"></div>
-                                <div class="split-btn__menu-item" data-action="excel">Excel (.xlsb)</div>
+                                <div class="split-btn__menu-item" data-action="excel">fast xlsb export</div>
                                 <div class="split-btn__menu-item" data-action="markdown">Markdown (.md)</div>
                                 <div class="split-btn__menu-item" data-action="json">JSON</div>
                                 <div class="split-btn__menu-item" data-action="csv">CSV</div>
@@ -156,6 +136,7 @@ export class ResultsHtmlGenerator {
                                 <div class="split-btn__menu-item" data-action="query-duckdb">Query Locally</div>
                             </div>
                         </div>
+                        <button type="button" class="btn btn-icon" onclick="exportActiveGridAsXlsb()" title="Fast XLSB export of the active data grid" aria-label="Export active data grid as XLSB">${icons.excel}</button>
                         <button class="btn" onclick="toggleColumnVisibilityDropdown()" title="Show/hide columns" id="columnVisibilityBtn" aria-label="Show or hide columns">${icons.eye} Columns</button>
                         <button class="btn" onclick="toggleRowView()" title="Row details and comparison (select 1–10 rows)" id="rowViewBtn" aria-label="Toggle row view" aria-pressed="false">${icons.rowView} Row View</button>
 
@@ -199,14 +180,31 @@ export class ResultsHtmlGenerator {
                         <span id="rowCountInfo" class="row-count-info" aria-live="polite"></span>
                     </div>
 
-                    <div id="groupingPanel" class="grouping-panel" ondragover="onDragOverGroup(event)" ondragleave="onDragLeaveGroup(event)" ondrop="onDropGroup(event)">
-                        <span class="drag-hint">Drag headers here to group</span>
+                    <div class="layout-body">
+                    <div class="layout-sidebar" id="layoutSidebar">
+                        <div class="sidebar-section" id="sidebarSchemaSection">
+                            <div class="sidebar-section-title">SCHEMA</div>
+                            <div id="sidebarSchemaList" class="sidebar-schema-list"></div>
+                        </div>
+                        <div class="sidebar-section" id="sidebarGroupSection">
+                            <div class="sidebar-section-title">GROUP BY — DRAG # HANDLE</div>
+                            <div id="sidebarGroupDropZone" class="sidebar-group-dropzone" ondragover="onDragOverGroup(event)" ondragleave="onDragLeaveGroup(event)" ondrop="onDropGroup(event)">
+                                <span class="sidebar-group-hint">Drag columns here from headers or SCHEMA</span>
+                            </div>
+                            <button class="btn sidebar-group-clear" onclick="clearAllGrouping()">✕ Clear grouping</button>
+                            <div class="sidebar-group-tip">
+                                <strong>Tip:</strong> Reorder or show/hide columns in SCHEMA, or drag them to GROUP BY.
+                            </div>
+                        </div>
                     </div>
+                    <div class="layout-content">
+                        <div id="groupingPanel" class="grouping-panel" ondragover="onDragOverGroup(event)" ondragleave="onDragLeaveGroup(event)" ondrop="onDropGroup(event)">
+                            <span class="drag-hint">Drag headers here to group</span>
+                        </div>
 
-                    <div id="mainSplitView" class="main-split-view">
+                        <div id="mainSplitView" class="main-split-view">
                         <div id="gridContainer"></div>
-                        <div id="analysisContainer" class="analysis-container" style="display: none;"></div>
-                    <div id="rowViewPanel" class="row-view-panel">
+                        <div id="analysisContainer" class="analysis-container" style="display: none;"></div>                        <div id="rowViewPanel" class="row-view-panel">
                         <div class="row-view-header">
                             <span>Row Details &amp; Comparison</span>
                             <div class="row-view-header-actions">
@@ -225,6 +223,58 @@ export class ResultsHtmlGenerator {
                             <div class="row-view-placeholder">Select 1 to 10 rows to view details or compare</div>
                         </div>
                     </div>
+                        <div id="databaseGroupingPanel" class="database-grouping-panel">
+                            <div id="groupingResizeHandle" class="grouping-resize-handle" role="separator" tabindex="0" aria-label="Resize grouping panel" aria-orientation="vertical"></div>
+                            <div class="grouping-panel-header">
+                                <span>Database Grouping</span>
+                                <div class="header-actions">
+                                    <button type="button" onclick="toggleDatabaseGroupingPanel()" class="close-btn" title="Close grouping panel">✕</button>
+                                </div>
+                            </div>
+                            <div class="grouping-drop-zone" id="groupingDropZone">
+                                <div class="drop-hint">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 5h18M3 12h18M3 19h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                    <div>Drag columns here to group</div>
+                                </div>
+                                <div class="group-chips" id="groupingChipsContainer"></div>
+                            </div>
+                            <div class="grouping-functions-area" id="groupingFunctionsArea">
+                                <div class="functions-title">FUNCTIONS</div>
+                                <div class="function-chips" id="groupingFnChipsContainer"></div>
+                                <button type="button" class="add-function-btn" id="addGroupingFnBtn">＋ Add Function</button>
+                            </div>
+                            <div class="grouping-limit-area">
+                                <label for="groupingLimitSelect">Grouped rows</label>
+                                <select id="groupingLimitSelect" title="Limit rows returned by the grouped query">
+                                    <option value="source">Source query limit</option>
+                                    <option value="100">100</option>
+                                    <option value="500">500</option>
+                                    <option value="1000">1,000</option>
+                                    <option value="10000">10,000</option>
+                                    <option value="unlimited">Unlimited</option>
+                                </select>
+                            </div>
+                            <div class="grouping-actions">
+                                <button type="button" class="secondary" onclick="clearGroupingConfig()" id="clearGroupingBtn" disabled>Clear</button>
+                                <button type="button" onclick="runGroupingQuery()" id="runGroupingBtn" disabled>Run Grouping</button>
+                            </div>
+                            <div class="grouping-results" id="groupingResultsArea">
+                                <div class="no-results">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 5h18M3 12h18M3 19h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                    <div>Drag columns and run grouping</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="result-panel-right-bar" id="resultPanelRightBar">
+                            <button type="button" class="bar-btn" onclick="toggleRowView()" id="rowViewBarBtn" title="Row Details &amp; Comparison">
+                                <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M1 3h14v1H1V3zm0 4h8v1H1V7zm0 4h6v1H1v-1zM11 3h4v10h-4V3zm1 1v8h2V4h-2z"/></svg>
+                                <span class="tooltip">Row View</span>
+                            </button>
+                            <button type="button" class="bar-btn" onclick="toggleDatabaseGroupingPanel()" id="groupingBarBtn" title="Database Grouping">
+                                <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M1 2h14v3H1V2zm0 5h14v3H1V7zm0 5h14v3H1v-3z"/><rect x="4" y="5" width="8" height="9" rx="1" fill="currentColor" opacity="0.3"/></svg>
+                                <span class="tooltip">Database Grouping</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -311,6 +361,26 @@ export class ResultsHtmlGenerator {
                     var grid = window.grids && window.grids[window.activeGridIndex || 0];
                     if (grid && grid.tanTable) {
                         grid.tanTable.setGrouping([]);
+                    }
+                };
+                window.toggleDatabaseGroupingPanel = function() {
+                    if (typeof window.__toggleDatabaseGroupingPanel === 'function') {
+                        window.__toggleDatabaseGroupingPanel();
+                    }
+                };
+                window.clearGroupingConfig = function() {
+                    if (typeof window.__clearGroupingConfig === 'function') {
+                        window.__clearGroupingConfig();
+                    }
+                };
+                window.runGroupingQuery = function() {
+                    if (typeof window.__runGroupingQuery === 'function') {
+                        window.__runGroupingQuery();
+                    }
+                };
+                window.exportActiveGridAsXlsb = function() {
+                    if (typeof window.__exportActiveGridAsXlsb === 'function') {
+                        window.__exportActiveGridAsXlsb();
                     }
                 };
                 window.setLayoutMode = function(mode) {

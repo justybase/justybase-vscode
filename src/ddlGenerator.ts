@@ -2,7 +2,7 @@ import type { ConnectionDetails } from './types';
 import type { BatchDDLOptions, BatchDDLResult, DDLResult } from './ddl';
 import { getRequiredDatabaseDdlProvider } from './core/connectionFactory';
 
-export {
+export type {
     BatchDDLOptions,
     BatchDDLResult,
     ColumnInfo,
@@ -10,6 +10,8 @@ export {
     ExternalTableInfo,
     KeyInfo,
     ProcedureInfo,
+} from './ddl';
+export {
     buildTableDDLFromCache,
     generateExternalTableDDL,
     generateProcedureDDL,

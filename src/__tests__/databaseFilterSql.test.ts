@@ -98,4 +98,138 @@ describe('databaseFilterSql', () => {
         expect(sql).toContain('t."DATEKEY" > 20101228');
         expect(sql).not.toContain("'2010 12 28'");
     });
+
+    describe('temporal column filtering', () => {
+        const tsColumns = [
+            { name: 'ID', type: 'INT4' },
+            { name: 'TS_COL', type: 'TIMESTAMP' },
+            { name: 'TS_TZ_COL', type: 'TIMESTAMPTZ' },
+            { name: 'DATE_COL', type: 'DATE' },
+            { name: 'TIME_COL', type: 'TIME' },
+        ];
+
+        it('converts ISO 8601 TIMESTAMP value to space-separated literal', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{ columnIndex: 1, values: ['2005-01-03T00:00:00.000Z'] }],
+                },
+            );
+            expect(sql).toContain("t.\"TS_COL\" IN ('2005-01-03 00:00:00')");
+            expect(sql).not.toContain("'2005-01-03T00:00:00.000Z'");
+        });
+
+        it('converts ISO 8601 TIMESTAMPTZ value to space-separated literal', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{ columnIndex: 2, values: ['2005-01-03T00:00:00.000Z'] }],
+                },
+            );
+            expect(sql).toContain("t.\"TS_TZ_COL\" IN ('2005-01-03 00:00:00')");
+            expect(sql).not.toContain("'2005-01-03T00:00:00.000Z'");
+        });
+
+        it('converts ISO 8601 DATE value to date-only literal', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{ columnIndex: 3, values: ['2005-01-03T00:00:00.000Z'] }],
+                },
+            );
+            expect(sql).toContain("t.\"DATE_COL\" IN ('2005-01-03 00:00:00')");
+            expect(sql).not.toContain("'2005-01-03T00:00:00.000Z'");
+        });
+
+        it('preserves already-correct space-separated timestamp literals', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{ columnIndex: 1, values: ['2005-01-03 12:30:00'] }],
+                },
+            );
+            expect(sql).toContain("t.\"TS_COL\" IN ('2005-01-03 12:30:00')");
+        });
+
+        it('handles null temporal values', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{ columnIndex: 1, values: ['2005-01-03T00:00:00.000Z', null] }],
+                },
+            );
+            expect(sql).toContain("t.\"TS_COL\" IN ('2005-01-03 00:00:00')");
+            expect(sql).toContain('t."TS_COL" IS NULL');
+        });
+
+        it('uses native comparison for TIMESTAMP greaterThan condition', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{
+                        columnIndex: 1,
+                        conditions: [{ type: 'greaterThan', value: '2005-01-03T00:00:00.000Z' }],
+                        conditionLogic: 'and',
+                    }],
+                },
+            );
+            expect(sql).toContain("t.\"TS_COL\" > '2005-01-03 00:00:00'");
+            expect(sql).not.toContain('CAST(t."TS_COL" AS VARCHAR(64000))');
+        });
+
+        it('uses native comparison for TIMESTAMP between condition', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{
+                        columnIndex: 1,
+                        conditions: [{ type: 'between', value: '2005-01-03T00:00:00.000Z', value2: '2005-01-03T12:00:00.000Z' }],
+                        conditionLogic: 'and',
+                    }],
+                },
+            );
+            expect(sql).toContain("t.\"TS_COL\" >= '2005-01-03 00:00:00'");
+            expect(sql).toContain("t.\"TS_COL\" <= '2005-01-03 12:00:00'");
+            expect(sql).not.toContain('CAST(t."TS_COL" AS VARCHAR(64000))');
+        });
+
+        it('uses native comparison for TIMESTAMP equals condition', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{
+                        columnIndex: 1,
+                        conditions: [{ type: 'equals', value: '2005-01-03T00:00:00.000Z' }],
+                        conditionLogic: 'and',
+                    }],
+                },
+            );
+            expect(sql).toContain("t.\"TS_COL\" = '2005-01-03 00:00:00'");
+            expect(sql).not.toContain('CAST(t."TS_COL" AS VARCHAR(64000))');
+        });
+
+        it('uses native comparison for DATE equals condition', () => {
+            const sql = buildDatabaseFilteredSql(
+                'SELECT * FROM T LIMIT 10',
+                tsColumns,
+                {
+                    columnFilters: [{
+                        columnIndex: 3,
+                        conditions: [{ type: 'equals', value: '2005-01-03T00:00:00.000Z' }],
+                        conditionLogic: 'and',
+                    }],
+                },
+            );
+            expect(sql).toContain("t.\"DATE_COL\" = '2005-01-03 00:00:00'");
+            expect(sql).not.toContain('CAST(t."DATE_COL" AS VARCHAR(64000))');
+        });
+    });
 });

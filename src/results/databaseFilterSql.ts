@@ -51,11 +51,26 @@ function isTemporalType(dataType: string | undefined): boolean {
     return isTemporalSqlColumnType(dataType);
 }
 
+function formatTemporalLiteral(value: unknown): string {
+    if (value instanceof Date) {
+        return value.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+    }
+    if (typeof value === 'string') {
+        return value
+            .replace('T', ' ')
+            .replace(/\.\d{3}Z$/, '');
+    }
+    return String(value);
+}
+
 function literalForColumn(value: unknown, column: ColumnDefinition): string {
     if (value === null || value === undefined) {
         return 'NULL';
     }
-    if (isNumericType(column.type) && !isTemporalType(column.type)) {
+    if (isTemporalType(column.type)) {
+        return quoteStringLiteral(formatTemporalLiteral(value));
+    }
+    if (isNumericType(column.type)) {
         const numeric = formatFilterNumericLiteral(value);
         if (numeric !== undefined) {
             return numeric;
@@ -131,11 +146,11 @@ function buildSingleConditionClause(
         case 'like':
             return `${textCol} LIKE ${quoteStringLiteral(escapeSqlLikeLiteral(value).toLowerCase())} ESCAPE '\\'`;
         case 'equals':
-            return isNumericType(column.type) && !isTemporalType(column.type)
+            return isNumericType(column.type) || isTemporalType(column.type)
                 ? `${col} = ${comparisonLiteral(value)}`
                 : `${textCol} = ${textLiteral(value)}`;
         case 'notEquals':
-            return isNumericType(column.type) && !isTemporalType(column.type)
+            return isNumericType(column.type) || isTemporalType(column.type)
                 ? `(${col} IS NULL OR ${col} != ${comparisonLiteral(value)})`
                 : `(${col} IS NULL OR ${textCol} != ${textLiteral(value)})`;
         case 'greaterThan':
@@ -143,12 +158,12 @@ function buildSingleConditionClause(
         case 'lessThan':
         case 'lessThanOrEqual': {
             const op = COLUMN_FILTER_COMPARISON_OPERATORS[condition.type];
-            return isNumericType(column.type) && !isTemporalType(column.type)
+            return isNumericType(column.type) || isTemporalType(column.type)
                 ? `${col} ${op} ${comparisonLiteral(value)}`
                 : `${textCol} ${op} ${textLiteral(value)}`;
         }
         case 'between':
-            return isNumericType(column.type) && !isTemporalType(column.type)
+            return isNumericType(column.type) || isTemporalType(column.type)
                 ? `(${col} >= ${comparisonLiteral(value)} AND ${col} <= ${comparisonLiteral(value2)})`
                 : `(${textCol} >= ${textLiteral(value)} AND ${textCol} <= ${textLiteral(value2)})`;
         default:

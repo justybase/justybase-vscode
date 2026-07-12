@@ -10,6 +10,7 @@ import { computeRefreshDurationP95 } from '../metadata/cacheStats';
 import { SchemaProvider } from '../providers/schemaProvider';
 import { ResultPanelView } from '../views/resultPanelView';
 import { LoginPanel } from '../views/loginPanel';
+import { SettingsView } from '../views/settingsView';
 import { SqlParser } from '../sql/sqlParser';
 import { EditDataProvider, EditDataItem } from '../views/editDataProvider';
 import { EtlDesignerView } from '../views/etlDesignerView';
@@ -30,6 +31,7 @@ import { getExtensionConfiguration } from '../compatibility/configuration';
 import type { QueryFlowNode } from '../sqlParser';
 import type { TableDdlSynchronizer } from '../metadata/tableDdlSynchronizer';
 import type { BatchQueryRunOptions } from '../core/queryRunner';
+import { confirmSafeExecute } from './query/queryCommandSafety';
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -67,7 +69,7 @@ export function registerStartupCommands(ctx: StartupCommandsContext): vscode.Dis
             LoginPanel.createNew(context.extensionUri, connectionManager);
         }),
         vscode.commands.registerCommand('netezza.openSettings', () => {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'justybase');
+            SettingsView.createOrShow(context.extensionUri, context);
         }),
         vscode.commands.registerCommand('netezza.toggleCodeLens', async () => {
             const config = vscode.workspace.getConfiguration('justybase');
@@ -101,6 +103,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
     } = ctx;
 
     const ddlBatchOptions: BatchQueryRunOptions = {
+        confirmSafeExecute: sql => confirmSafeExecute([sql]),
         onStatementSucceeded: event => tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
         onStatementFailed: event => {
             tableDdlSynchronizer?.handleExecutionFailure(event.connectionName, event.documentUri);

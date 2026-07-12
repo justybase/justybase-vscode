@@ -69,6 +69,87 @@ SELECT '&x' AS literal, &x AS value -- &x comment
         expect(log).toHaveBeenCalledWith('value=1');
     });
 
+    it('executes %python and substitutes stdout', async () => {
+        const pythonExecutor = jest.fn().mockResolvedValue({
+            stdout: 'SELECT 42 AS answer;',
+            stderr: '',
+            exitCode: 0,
+        });
+
+        const result = await new MacroPreprocessor().processScript(
+            '%let script = build.py;\n%python &script --mode test; ',
+            {},
+            { pythonExecutor },
+        );
+
+        expect(pythonExecutor).toHaveBeenCalledWith('build.py', ['--mode', 'test']);
+        expect(result.sql).toBe('SELECT 42 AS answer;');
+        expect(result.scriptEvents).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'python' }),
+        ]));
+    });
+
+    it('keeps braced macro variables together in %python arguments', async () => {
+        const pythonExecutor = jest.fn().mockResolvedValue({
+            stdout: 'SELECT 1;',
+            stderr: '',
+            exitCode: 0,
+        });
+
+        await new MacroPreprocessor().processScript(
+            '%let value = alpha beta;\n%python script.py ${ value };',
+            {},
+            { pythonExecutor },
+        );
+
+        expect(pythonExecutor).toHaveBeenCalledWith('script.py', ['alpha beta']);
+    });
+
+    it('reports failed %python execution', async () => {
+        await expect(new MacroPreprocessor().processScript(
+            '%python broken.py;',
+            {},
+            { pythonExecutor: jest.fn().mockResolvedValue({ stdout: '', stderr: 'boom', exitCode: 2 }) },
+        )).rejects.toThrow('%PYTHON script failed with exit code 2: boom');
+    });
+
+    it('processes unconditional %DO blocks without emitting their %END directives', async () => {
+        const script = `%DO;
+  SELECT 1 AS first_value;
+  %DO;
+    SELECT 2 AS nested_value;
+  %END;
+%END;`;
+
+        const asyncResult = await new MacroPreprocessor().processScript(script);
+        const syncResult = new MacroPreprocessor().processScriptSync(script);
+
+        expect(asyncResult.sql).toContain('SELECT 1 AS first_value;');
+        expect(asyncResult.sql).not.toContain('%END');
+        expect(syncResult.sql).toContain('SELECT 2 AS nested_value;');
+        expect(syncResult.sql).not.toContain('%END');
+    });
+
+    it('supports standalone %DO blocks nested in %IF branches', async () => {
+        const script = `%IF 1 = 1 %THEN %DO;
+  %DO;
+    SELECT 1 AS nested_value;
+  %END;
+%END;`;
+
+        const asyncResult = await new MacroPreprocessor().processScript(script);
+        const syncResult = new MacroPreprocessor().processScriptSync(script);
+
+        expect(asyncResult.sql.trim()).toBe('SELECT 1 AS nested_value;');
+        expect(syncResult.sql.trim()).toBe('SELECT 1 AS nested_value;');
+    });
+
+    it('recognizes a same-line %END after the block SQL', async () => {
+        const result = await new MacroPreprocessor().processScript('%do; SELECT 1; %end;');
+
+        expect(result.sql.trim()).toBe('SELECT 1;');
+    });
+
     it('expands %sql as first row and first column from the query result', async () => {
         const query = jest.fn().mockResolvedValue({ rows: [[100]] });
 

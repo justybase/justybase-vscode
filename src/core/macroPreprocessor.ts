@@ -11,11 +11,23 @@ export interface MacroPreprocessorOptions {
     resolvePutMessages?: boolean;
 }
 
+export interface MacroPythonExecutionResult {
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+}
+
+export type MacroPythonExecutor = (
+    script: string,
+    args: string[],
+) => Promise<MacroPythonExecutionResult>;
+
 export interface MacroPreprocessorContext {
     log?: (message: string) => void | Promise<void>;
     prompt?: (variables: Set<string>) => Promise<Record<string, string>>;
     query?: MacroQueryExecutor;
     exporter?: MacroExportExecutor;
+    pythonExecutor?: MacroPythonExecutor;
     readFile?: (
         path: string,
         fromSource?: string,
@@ -26,7 +38,7 @@ export interface MacroPreprocessorContext {
 }
 
 export interface MacroScriptEvent {
-    type: 'put' | 'export' | 'include' | 'branch' | 'error' | 'statement';
+    type: 'put' | 'export' | 'include' | 'branch' | 'error' | 'statement' | 'python';
     message: string;
     sourceName?: string;
     line?: number;
@@ -104,6 +116,8 @@ type MacroDirective =
     | { kind: 'put'; message: string; end: number }
     | { kind: 'export'; payload: string; end: number }
     | { kind: 'include'; path: string; end: number }
+    | { kind: 'python'; script: string; args: string[]; end: number }
+    | { kind: 'do'; end: number }
     | { kind: 'if'; condition: string; end: number }
     | { kind: 'else'; end: number }
     | { kind: 'end'; end: number };
@@ -123,6 +137,11 @@ interface IfBlockRange {
     thenEnd: number;
     elseStart?: number;
     elseEnd?: number;
+    end: number;
+}
+
+interface DoBlockRange {
+    bodyEnd: number;
     end: number;
 }
 
@@ -344,6 +363,23 @@ export class MacroPreprocessor {
                             }
                         } else if (directive.kind === 'include') {
                             throw new Error('%INCLUDE requires an async file read context');
+                        } else if (directive.kind === 'python') {
+                            if (state.replaceVariables) {
+                                throw new Error('%PYTHON requires an async execution context');
+                            }
+                        } else if (directive.kind === 'do') {
+                            const block = findDoBlock(script, directive.end);
+                            const blockText = script.slice(directive.end, block.bodyEnd);
+                            remaining += this.processScriptBody(
+                                blockText,
+                                state,
+                                sourceName,
+                                blockDepth + 1,
+                            );
+                            offset = skipDirectiveTrailingWhitespace(script, block.end);
+                            atLineStart = isAtLineStart(script, offset);
+                            allowChainedDirective = true;
+                            continue;
                         } else if (directive.kind === 'if') {
                             const block = findIfBlock(script, directive.end, blockDepth);
                             const condition = this.resolveDirectiveText(
@@ -540,6 +576,74 @@ export class MacroPreprocessor {
                                 blockDepth,
                                 [...includeStack, included.path],
                             );
+                        } else if (directive.kind === 'python') {
+                            if (state.replaceVariables) {
+                                if (!state.context.pythonExecutor) {
+                                    throw new Error('%PYTHON requires a python execution context');
+                                }
+                                const resolvedScript = await this.resolveDirectiveTextAsync(
+                                    directive.script,
+                                    state.environment,
+                                    state.unresolved,
+                                    state.replaceVariables,
+                                    state.context,
+                                );
+                                const resolvedArgs = await Promise.all(
+                                    directive.args.map((arg) =>
+                                        this.resolveDirectiveTextAsync(
+                                            arg,
+                                            state.environment,
+                                            state.unresolved,
+                                            state.replaceVariables,
+                                            state.context,
+                                        ),
+                                    ),
+                                );
+                                const result = await state.context.pythonExecutor(resolvedScript, resolvedArgs);
+                                if (result.exitCode !== 0) {
+                                    throw new Error(`%PYTHON script failed with exit code ${result.exitCode}: ${result.stderr}`);
+                                }
+                                pushScriptEvent(
+                                    state,
+                                    'python',
+                                    `>>> %PYTHON: executed ${resolvedScript} (exit ${result.exitCode})`,
+                                    sourceName,
+                                    script,
+                                    offset,
+                                );
+                                remaining += result.stdout;
+                            } else {
+                                await this.resolveDirectiveTextAsync(
+                                    directive.script,
+                                    state.environment,
+                                    state.unresolved,
+                                    false,
+                                    state.context,
+                                );
+                                for (const arg of directive.args) {
+                                    await this.resolveDirectiveTextAsync(
+                                        arg,
+                                        state.environment,
+                                        state.unresolved,
+                                        false,
+                                        state.context,
+                                    );
+                                }
+                            }
+                        } else if (directive.kind === 'do') {
+                            const block = findDoBlock(script, directive.end);
+                            const blockText = script.slice(directive.end, block.bodyEnd);
+                            remaining += await this.processScriptBodyAsync(
+                                blockText,
+                                state,
+                                sourceName,
+                                blockDepth + 1,
+                                includeStack,
+                            );
+                            offset = skipDirectiveTrailingWhitespace(script, block.end);
+                            atLineStart = isAtLineStart(script, offset);
+                            allowChainedDirective = true;
+                            continue;
                         } else if (directive.kind === 'if') {
                             const block = findIfBlock(script, directive.end, blockDepth);
                             const condition = await this.resolveDirectiveTextAsync(
@@ -1092,6 +1196,34 @@ function readDirectiveAt(script: string, offset: number): MacroDirective | undef
         };
     }
 
+    const pythonMatch = text.match(/^%python\s+/i);
+    if (pythonMatch) {
+        const payloadStart = directiveStart + pythonMatch[0].length;
+        const payload = readDirectivePayload(script, payloadStart);
+        const payloadText = payload.text.trim();
+        if (!payloadText) {
+            throw new Error('%PYTHON requires a script path');
+        }
+        // Parse script path and optional arguments
+        const parts = splitPythonDirectiveArguments(payloadText);
+        const scriptPath = parts[0];
+        const args = parts.slice(1);
+        return {
+            kind: 'python',
+            script: scriptPath,
+            args,
+            end: payload.end,
+        };
+    }
+
+    const doMatch = text.match(/^%do\s*;?/i);
+    if (doMatch) {
+        return {
+            kind: 'do',
+            end: directiveStart + doMatch[0].length,
+        };
+    }
+
     return undefined;
 }
 
@@ -1112,7 +1244,7 @@ function findIfBlock(
             const directiveStart = skipHorizontalWhitespace(script, offset);
             const directive = readDirectiveAt(script, offset);
             if (directive) {
-                if (directive.kind === 'if') {
+                if (directive.kind === 'if' || directive.kind === 'do') {
                     nestedDepth++;
                 } else if (directive.kind === 'end') {
                     if (nestedDepth === 0) {
@@ -1141,11 +1273,112 @@ function findIfBlock(
 
         const char = script[offset];
         offset++;
-        allowChainedDirective = false;
+        allowChainedDirective = char === ';';
         atLineStart = updateLineStartState(atLineStart, char);
     }
 
     throw new Error(`Missing %END for %IF block at depth ${blockDepth + 1}`);
+}
+
+function splitPythonDirectiveArguments(payload: string): string[] {
+    const args: string[] = [];
+    let current = '';
+    let quote: "'" | '"' | undefined;
+    let macroBraceDepth = 0;
+
+    const pushCurrent = () => {
+        if (current.length > 0) {
+            args.push(current);
+            current = '';
+        }
+    };
+
+    for (let index = 0; index < payload.length; index++) {
+        const char = payload[index];
+
+        if (quote) {
+            if (char === quote) {
+                if (payload[index + 1] === quote) {
+                    current += char;
+                    index++;
+                } else {
+                    quote = undefined;
+                }
+            } else {
+                current += char;
+            }
+            continue;
+        }
+
+        if (char === "'" || char === '"') {
+            quote = char;
+            continue;
+        }
+
+        if (char === '$' && payload[index + 1] === '{') {
+            current += '${';
+            macroBraceDepth++;
+            index++;
+            continue;
+        }
+
+        if (char === '}' && macroBraceDepth > 0) {
+            current += char;
+            macroBraceDepth--;
+            continue;
+        }
+
+        if (/\s/.test(char) && macroBraceDepth === 0) {
+            pushCurrent();
+            continue;
+        }
+
+        current += char;
+    }
+
+    pushCurrent();
+    return args;
+}
+
+function findDoBlock(
+    script: string,
+    bodyStart: number,
+): DoBlockRange {
+    let offset = bodyStart;
+    let nestedDepth = 0;
+    let atLineStart = isAtLineStart(script, offset);
+    let allowChainedDirective = true;
+
+    while (offset < script.length) {
+        if (atLineStart || allowChainedDirective) {
+            const directiveStart = skipHorizontalWhitespace(script, offset);
+            const directive = readDirectiveAt(script, offset);
+            if (directive) {
+                if (directive.kind === 'if' || directive.kind === 'do') {
+                    nestedDepth++;
+                } else if (directive.kind === 'end') {
+                    if (nestedDepth === 0) {
+                        return {
+                            bodyEnd: directiveStart,
+                            end: directive.end,
+                        };
+                    }
+                    nestedDepth--;
+                }
+                offset = directive.end;
+                atLineStart = isAtLineStart(script, offset);
+                allowChainedDirective = true;
+                continue;
+            }
+        }
+
+        const char = script[offset];
+        offset++;
+        allowChainedDirective = char === ';';
+        atLineStart = updateLineStartState(atLineStart, char);
+    }
+
+    throw new Error(`Missing %END for %DO block`);
 }
 
 interface ParsedMacroExportPayload {

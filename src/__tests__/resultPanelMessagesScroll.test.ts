@@ -301,6 +301,23 @@ describe('messages.js scroll functions', () => {
                 scrollLeft: 30
             });
         });
+
+        it('does not restore a previous execution scroll position for a new result', () => {
+            const state = require('../../media/resultPanel/state.js');
+            state.getScrollStateFromGlobalCache.mockReturnValue(null);
+
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({
+                [`${testSource}:0:old-execution`]: { scrollTop: 9_999, scrollLeft: 0 }
+            });
+
+            (global.window as unknown as {
+                resultSets: Array<{ executionTimestamp: number; isLog: boolean; data: unknown[][] }>;
+            }).resultSets[0].executionTimestamp = 2000;
+
+            const { resolveScrollStateForResultSet } = require('../../media/resultPanel/grid/persistence.js');
+            expect(resolveScrollStateForResultSet(0, testSource)).toBeNull();
+        });
     });
 
     // ── findScrollStateBySource ───────────────────────────────────

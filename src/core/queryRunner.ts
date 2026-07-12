@@ -10,12 +10,12 @@
  */
 
 // Re-export common types
-export { QueryResult } from "../types";
+export type { QueryResult } from "../types";
 export type { StreamingChunk } from "./streaming";
 
 // Re-export utilities used outside of core
+export type { OutputLogger } from "./queryRunnerUtils";
 export {
-  OutputLogger,
   normalizeUriKey,
   isConnectionBrokenError,
   disposeSharedOutputChannel,
@@ -32,8 +32,8 @@ export {
 } from "./queryCancellation";
 
 // Re-export single query execution functions
+export type { RunQueryRawOptions } from "./singleQueryExecutor";
 export {
-  RunQueryRawOptions,
   isRunQueryRawOptions,
   runQueryRaw,
   executeRawQuery,

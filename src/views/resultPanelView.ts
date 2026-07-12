@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
+import * as path from 'path';
 import { encode } from '@msgpack/msgpack';
 import type {
     ResultPanelInboundMessage,
@@ -8,7 +10,13 @@ import type {
 import type { ConnectionManager } from '../core/connectionManager';
 import { ResultStateManager } from '../state/resultStateManager';
 import { ExportManager } from '../export/exportManager';
-import { ResultPanelMessageHandler, MessageHandlerCallbacks, SelectionStats, SaveEditsRequest } from './resultPanelMessageHandler';
+import {
+    ResultPanelMessageHandler,
+    MessageHandlerCallbacks,
+    SelectionStats,
+    SaveEditsRequest,
+    AllRowsExportRequest,
+} from './resultPanelMessageHandler';
 import { ResultsHtmlGenerator, ViewScriptUris } from './resultsHtmlGenerator';
 import { DuckDbResultBridge } from '../services/duckdbResultBridge';
 import { ResultSet } from '../types';
@@ -42,13 +50,19 @@ import {
     ALL_ROWS_FILTER_VALUES_TIMEOUT_SECONDS,
     resolveAllRowsOperationTimeout,
 } from '../results/allRowsOperationTimeouts';
-import { findTrailingLimitClause, replaceTrailingLimitValue } from '../results/refreshSqlLimit';
+import { findTrailingLimitClause, removeTrailingLimitClause, replaceTrailingLimitValue } from '../results/refreshSqlLimit';
+import { exportQueryToStreamFile, type QueryStreamExportFormat } from '../export/queryStreamExporter';
 import {
     buildDatabaseAggregationSql,
     DatabaseAggregationRequest,
     DatabaseAggregationResult,
 } from '../results/databaseAggregationSql';
 import {
+    buildDatabaseGroupingSql,
+    type DatabaseGroupingRequest,
+} from '../results/databaseGroupingSql';
+import {
+    buildDatabaseWhereSql,
     buildDatabaseDistinctValuesSql,
     buildDatabaseFilteredSql,
 } from '../results/databaseFilterSql';
@@ -125,7 +139,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             },
             onSaveEdits: request => this._handleSaveEdits(request, connectionManager),
             onGetWebviewUri: uri => this._view ? String(this._view.webview.asWebviewUri(uri)) : String(uri),
-            onRefreshResult: (sourceUri, resultSetIndex, limitValue) => this._handleRefreshResult(sourceUri, resultSetIndex, limitValue),
+            onRefreshResult: (sourceUri, resultSetIndex, limitValue, removeLimit) =>
+                this._handleRefreshResult(sourceUri, resultSetIndex, limitValue, removeLimit),
+            onExportAllRows: request => this._handleAllRowsExport(request),
             onRequestDatabaseAggregations: (sourceUri, resultSetIndex, aggregations, timeoutSeconds, isRetry) =>
                 this._handleDatabaseAggregations(sourceUri, resultSetIndex, aggregations, timeoutSeconds, isRetry),
             onRequestDatabaseFilterValues: (sourceUri, resultSetIndex, columnIndex, querySpec, timeoutSeconds, isRetry) =>
@@ -136,6 +152,10 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 this._stateManager.clearResultSetRefreshFailure(sourceUri, resultSetIndex);
                 this._updateWebview();
             },
+            onRequestDatabaseGrouping: (sourceUri, resultSetIndex, grouping, timeoutSeconds) =>
+                this._handleDatabaseGrouping(sourceUri, resultSetIndex, grouping, timeoutSeconds),
+            onPreviewDatabaseGrouping: (sourceUri, resultSetIndex, grouping) =>
+                this._previewDatabaseGrouping(sourceUri, resultSetIndex, grouping),
         };
 
         this._messageHandler = new ResultPanelMessageHandler(
@@ -450,28 +470,136 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
     }
 
-    private async _handleRefreshResult(sourceUri: string, resultSetIndex: number, limitValue?: string): Promise<void> {
+    private async _handleAllRowsExport(request: AllRowsExportRequest): Promise<void> {
+        if (!this._context || !this._connectionManager) {
+            vscode.window.showErrorMessage('ALL rows export is not available in this view.');
+            return;
+        }
+
+        const resultSet = this._stateManager.resultsMap.get(request.sourceUri)?.[request.resultSetIndex];
+        const refreshSql = resultSet?.refreshSql?.trim();
+        if (!resultSet || !refreshSql || !findTrailingLimitClause(refreshSql)) {
+            vscode.window.showErrorMessage('This result set does not have SQL with a trailing LIMIT to export.');
+            return;
+        }
+
+        const formatMap: Record<string, { format: QueryStreamExportFormat; extension: string; label: string }> = {
+            csv: { format: 'csv', extension: 'csv', label: 'CSV' },
+            'csv.gz': { format: 'csv.gz', extension: 'csv.gz', label: 'CSV.GZ' },
+            'csv.zst': { format: 'csv.zst', extension: 'csv.zst', label: 'CSV.ZST' },
+            json: { format: 'json', extension: 'json', label: 'JSON' },
+            xml: { format: 'xml', extension: 'xml', label: 'XML' },
+            sql: { format: 'sql', extension: 'sql', label: 'SQL' },
+            markdown: { format: 'markdown', extension: 'md', label: 'Markdown' },
+            excel: { format: 'xlsb', extension: 'xlsb', label: 'Excel (XLSB)' },
+            xlsx: { format: 'xlsx', extension: 'xlsx', label: 'Excel (XLSX)' },
+        };
+        const exportFormat = formatMap[request.format];
+        if (!exportFormat) {
+            vscode.window.showWarningMessage(`Streaming ALL rows export is not yet available for ${request.format}.`);
+            return;
+        }
+
+        let destination = request.destination;
+        if (destination === 'clipboard') {
+            vscode.window.showWarningMessage('ALL rows cannot be copied to the clipboard safely. The export will be saved as a temporary file instead.');
+            destination = 'temp';
+        }
+
+        let outputPath: string;
+        if (destination === 'file') {
+            const uri = await vscode.window.showSaveDialog({
+                filters: { [`${exportFormat.label} Files`]: [exportFormat.extension] },
+                saveLabel: 'Export ALL rows',
+            });
+            if (!uri) return;
+            outputPath = uri.fsPath;
+        } else {
+            outputPath = path.join(os.tmpdir(), `netezza_all_rows_${Date.now()}.${exportFormat.extension}`);
+        }
+
+        const baseSql = removeTrailingLimitClause(refreshSql).trim().replace(/;\s*$/, '');
+        const filterSql = buildDatabaseWhereSql(resultSet.databaseFilterSpec, resultSet.columns);
+        const query = filterSql
+            ? `SELECT *\nFROM (\n${baseSql}\n) t\nWHERE ${filterSql}`
+            : baseSql;
+        const columnIndices = request.columnIds
+            ?.map(columnId => Number.parseInt(columnId, 10))
+            .filter(columnIndex => Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < resultSet.columns.length);
+        const connectionName = this._resolveConnectionForSource(request.sourceUri);
+
+        try {
+            await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: `Exporting ALL rows to ${exportFormat.label}...`,
+                cancellable: true,
+            },
+            async (progress, cancellationToken) => {
+                await ensurePersistentConnectionReadyForQuery(
+                    this._connectionManager!,
+                    request.sourceUri,
+                    connectionName,
+                );
+                const { connection } = await getConnectionForDocument(
+                    this._connectionManager!,
+                    connectionName,
+                    true,
+                    request.sourceUri,
+                );
+                await exportQueryToStreamFile({
+                    connection,
+                    query,
+                    filePath: outputPath,
+                    format: exportFormat.format,
+                    columnIndices,
+                    sql: query,
+                    timeoutSeconds: vscode.workspace.getConfiguration('justybase.query').get<number>('executionTimeout', 1800),
+                    cancellationToken,
+                    progress: message => progress.report({ message }),
+                });
+            },
+            );
+
+            if (destination === 'open') {
+                await vscode.env.openExternal(vscode.Uri.file(outputPath));
+            } else if (destination === 'temp') {
+                await vscode.env.clipboard.writeText(outputPath);
+            }
+            vscode.window.showInformationMessage(`ALL rows exported to ${outputPath}`);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`ALL rows export failed: ${message}`);
+        }
+    }
+
+    private async _handleRefreshResult(
+        sourceUri: string,
+        resultSetIndex: number,
+        limitValue?: string,
+        removeLimit: boolean = false,
+    ): Promise<boolean> {
         if (!this._context || !this._connectionManager) {
             vscode.window.showErrorMessage('Result refresh is not available in this view.');
-            return;
+            return false;
         }
 
         if (this._stateManager.executingSources.has(sourceUri)) {
             vscode.window.showWarningMessage('A query is already running for this SQL Results source.');
-            return;
+            return false;
         }
 
         const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
         const refreshSql = resultSet?.refreshSql?.trim();
         if (!resultSet || !refreshSql || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
             vscode.window.showWarningMessage('This result set does not have refresh SQL.');
-            return;
+            return false;
         }
 
         const preservedFilterSpec = resultSet.databaseFilterSpec;
-        const baseRefreshSql = this._resolveRefreshSqlLimit(refreshSql, limitValue);
+        const baseRefreshSql = this._resolveRefreshSqlLimit(refreshSql, limitValue, removeLimit);
         if (!baseRefreshSql) {
-            return;
+            return false;
         }
         const sqlToExecute = preservedFilterSpec
             && ((preservedFilterSpec.columnFilters?.length ?? 0) > 0 || preservedFilterSpec.globalSearch?.trim())
@@ -484,12 +612,12 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             || undefined;
         if (!connectionName) {
             vscode.window.showErrorMessage('No database connection. Please connect first.');
-            return;
+            return false;
         }
 
         if (!this._stateManager.startResultRefresh(sourceUri, resultSetIndex)) {
             vscode.window.showWarningMessage('This result set cannot be refreshed.');
-            return;
+            return false;
         }
 
         this.setActiveSource(sourceUri);
@@ -514,6 +642,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 connectionName,
                 documentUri: sourceUri,
                 logCallback: message => this.log(sourceUri, message),
+                // An explicit ALL-rows export bypasses the normal preview row cap;
+                // the SQL LIMIT has already been removed above.
+                ...(removeLimit ? { maxRows: Number.MAX_SAFE_INTEGER } : {}),
             });
 
             const nextResultSet: ResultSet = {
@@ -530,6 +661,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 nextResultSet.totalRowCount ?? nextResultSet.data.length,
                 'success',
             );
+            return true;
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
             this._stateManager.setResultSetRefreshFailure(sourceUri, resultSetIndex, {
@@ -538,6 +670,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             });
             this.logExecutionEnd(executionId, 0, 'error', message);
             vscode.window.showErrorMessage(`Refresh failed: ${message}`);
+            return false;
         } finally {
             this._stateManager.finalizeResultRefresh(sourceUri, resultSetIndex);
             this._updateWebview();
@@ -556,7 +689,15 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
     }
 
-    private _resolveRefreshSqlLimit(refreshSql: string, limitValue?: string): string | undefined {
+    private _resolveRefreshSqlLimit(
+        refreshSql: string,
+        limitValue?: string,
+        removeLimit: boolean = false,
+    ): string | undefined {
+        if (removeLimit) {
+            return removeTrailingLimitClause(refreshSql);
+        }
+
         if (limitValue === undefined) {
             return refreshSql;
         }
@@ -684,6 +825,114 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             executionTimestamp: Date.now(),
         };
         this._stateManager.replaceResultSet(sourceUri, resultSetIndex, nextResultSet);
+    }
+
+    private async _previewDatabaseGrouping(
+        sourceUri: string,
+        resultSetIndex: number,
+        grouping: DatabaseGroupingRequest,
+    ): Promise<string> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Database grouping is not available in this view.');
+        }
+
+        const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSet || !resultSql || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
+            throw new Error('This result set does not have refresh SQL for grouping.');
+        }
+
+        const connectionName = this._resolveConnectionForSource(sourceUri);
+
+        const built = buildDatabaseGroupingSql(
+            resultSql,
+            resultSet.columns,
+            grouping,
+            { databaseKind: this._connectionManager.getConnectionDatabaseKind(connectionName) },
+        );
+
+        return built.sql;
+    }
+
+    private async _handleDatabaseGrouping(
+        sourceUri: string,
+        resultSetIndex: number,
+        grouping: DatabaseGroupingRequest,
+        timeoutSeconds?: number,
+    ): Promise<{
+        columns: Array<{ name: string; type?: string; kind?: 'group' | 'count' | 'percentage' | 'aggregate'; sourceColumnIndex?: number; fn?: string }>;
+        rows: unknown[][];
+        totalRows: number;
+        truncated?: boolean;
+        sql: string;
+    }> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Database grouping is not available in this view.');
+        }
+
+        const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSet || !resultSql || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
+            throw new Error('This result set does not have refresh SQL for grouping.');
+        }
+
+        const connectionName = this._resolveConnectionForSource(sourceUri);
+
+        const built = buildDatabaseGroupingSql(
+            resultSql,
+            resultSet.columns,
+            grouping,
+            { databaseKind: this._connectionManager.getConnectionDatabaseKind(connectionName) },
+        );
+
+        const queryResult = await runQueryRaw({
+            context: this._context,
+            query: built.sql,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName,
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            maxRows: 10001,
+            isUserQuery: false,
+            timeoutSeconds: resolveAllRowsOperationTimeout(
+                300, // grouping queries may scan and aggregate large result sets
+                timeoutSeconds,
+                false, // isRetry
+            ),
+        });
+
+        const MAX_GROUPING_ROWS = 10000;
+        const truncated = queryResult.data.length > MAX_GROUPING_ROWS;
+        const safeRows = truncated ? queryResult.data.slice(0, MAX_GROUPING_ROWS) : queryResult.data;
+
+        // Build columns with metadata so webview can distinguish group/count/percentage columns
+        const resultColumns = built.columnMetadata.map((meta, idx) => {
+            const col = queryResult.columns[idx];
+            return {
+                name: col?.name ?? `Col${idx}`,
+                type: col?.type ?? 'string',
+                kind: meta.kind,
+                sourceColumnIndex: meta.sourceColumnIndex,
+                fn: meta.fn,
+            };
+        });
+
+        return {
+            columns: resultColumns,
+            rows: safeRows,
+            totalRows: safeRows.length,
+            truncated,
+            sql: built.sql,
+        };
+    }
+
+    /**
+     * Group the SQL that produced the currently displayed result. This keeps a
+     * server-side filter wrapper intact instead of re-applying its filter spec.
+     */
+    private _resolveGroupingResultSql(resultSet: ResultSet | undefined): string {
+        return (resultSet?.sql || resultSet?.refreshSql || '').trim();
     }
 
     private async _handleDatabaseAggregations(

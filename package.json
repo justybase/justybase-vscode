@@ -2335,6 +2335,11 @@
           "group": "navigation@5.5"
         },
         {
+          "command": "netezza.openSettings",
+          "when": "view == netezza.schema",
+          "group": "navigation@10"
+        },
+        {
           "command": "netezza.openEtlDesigner",
           "when": "view == netezza.schema",
           "group": "navigation@6"

@@ -100,7 +100,11 @@ export function resolveScrollStateForResultSet(
         return exactState;
     }
 
-    if (source) {
+    // A result with an execution timestamp is a fresh, identifiable result set.
+    // Do not reuse a scroll position found under the same source/index but a
+    // different timestamp: that can place a newly executed query at the end
+    // of the previous result set.
+    if (source && rs?.executionTimestamp === undefined) {
         const found = findScrollStateBySource(source, rsIndex);
         if (found) {
             return asScrollState(found) ?? null;

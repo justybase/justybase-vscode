@@ -54,6 +54,8 @@ describe('result panel error view', () => {
         dataset: Record<string, string>;
         children: MockElement[];
         appendChild: jest.Mock<MockElement, [MockElement]>;
+        append: (...nodes: Array<MockElement | string>) => void;
+        setAttribute: (name: string, value: string) => void;
         onclick?: () => void;
     }
 
@@ -71,6 +73,16 @@ describe('result panel error view', () => {
                 element.children.push(child);
                 return child;
             }),
+            append: (...nodes: Array<MockElement | string>) => {
+                for (const node of nodes) {
+                    if (typeof node === 'string') {
+                        element.textContent += node;
+                    } else {
+                        element.children.push(node);
+                    }
+                }
+            },
+            setAttribute: jest.fn(),
             onclick: undefined as undefined | (() => void)
         };
 

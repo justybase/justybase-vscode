@@ -6,10 +6,9 @@ import {
     BatchQueryRunOptions,
 } from '../../core/queryRunner';
 import { SqlParser } from '../../sql/sqlParser';
-import { buildExecCommand } from '../../utils/shellUtils';
 import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
 import { QueryCommandsDependencies } from './queryCommandTypes';
-import { confirmSafeExecute, detectPythonScript, handleExecutionCompletion } from './queryCommandSafety';
+import { confirmSafeExecute, handleExecutionCompletion } from './queryCommandSafety';
 import { toPerfErrorCode } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { tryAcquireQueryExecution } from './queryExecutionGate';
@@ -106,31 +105,6 @@ export async function runSmartSequentialQuery(
         queriesForError = queries;
         const continueOnError = options.continueOnError === true;
 
-        const single = queries.length === 1 ? queries[0].trim() : null;
-        if (single) {
-            const scriptDetection = detectPythonScript(single);
-            if (scriptDetection.isPython && scriptDetection.script) {
-                const config = getExtensionConfiguration();
-                const pythonPath = config.get<string>('pythonPath') || 'python';
-                const python = scriptDetection.pythonPath || pythonPath;
-                const cmd = buildExecCommand(
-                    python,
-                    scriptDetection.script,
-                    scriptDetection.args || [],
-                );
-
-                const term = vscode.window.createTerminal({ name: 'JustyBase: Script' });
-                term.show(true);
-                term.sendText(cmd, true);
-                vscode.window.showInformationMessage(`Running script: ${cmd}`);
-                return;
-            }
-        }
-
-        if (!(await confirmSafeExecute(queries))) {
-            return;
-        }
-
         runQueryTimer = createPerformanceTimer(
             continueOnError ? 'query.run_continue_on_error' : 'query.run',
             {
@@ -166,6 +140,7 @@ export async function runSmartSequentialQuery(
         };
 
         const batchOptions: BatchQueryRunOptions = {
+            confirmSafeExecute: sql => confirmSafeExecute([sql]),
             onStatementSucceeded: event => deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
             onStatementFailed: event => {
                 deps.tableDdlSynchronizer?.handleExecutionFailure(event.connectionName, event.documentUri);

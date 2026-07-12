@@ -482,6 +482,18 @@ JOIN JUST_DATA.ADMIN.DEPARTMENT B`;
   });
 
   describe("SQL049: repeated projected column names", () => {
+    it("should not warn when SELECT * expands a CTE referenced through an alias", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(`WITH CTE1 AS (
+  SELECT 1 AS COL1 FROM JUST_DATA.ADMIN.DIMDATE
+)
+SELECT * FROM CTE1 CC
+WHERE CC.COL1 > 0;`);
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some((item) => item.code === "SQL049")).toBe(false);
+    });
+
     it("should warn when SELECT * expands colliding CTE column names", () => {
       const validator = new SqlValidator();
       const sql = `WITH CTE1 AS (

@@ -102,6 +102,7 @@ export type {
 export type {
     ResultPanelExecutionState,
     ResultPanelExportFormat,
+    ResultPanelExportRowScope,
     ResultPanelHostToWebviewMessage,
     ResultPanelHydrationMetricsPayload,
     ResultPanelInboundMessage,

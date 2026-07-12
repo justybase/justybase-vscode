@@ -20,6 +20,8 @@ Distinct from other extensions, JustyBase includes a **custom Node.js-based Nete
 
 JustyBase is built **first and foremost for Netezza**. Optional database packs reuse the same VS Code shell (connections, schema browser, results grid, import/export) but should be treated as companion runtimes — install the matching extension, connect, and expect **reduced SQL editor intelligence** compared to Netezza.
 
+Netezza SQL files support SAS-like preprocessing macros, including `%let`, `%if/%do/%end`, `%export`, `%include`, and `%python` (which substitutes a Python script's standard output).
+
 ## Features
 
 <img src="https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/general_01.png" alt="General Overview" width="700">

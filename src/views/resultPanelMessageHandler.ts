@@ -6,7 +6,8 @@ import type {
     ResultPanelInboundMessage,
     ResultPanelOutboundMessage,
     ResultPanelHydrationMetricsPayload,
-    SelectionStatsPayload
+    SelectionStatsPayload,
+    ResultPanelExportRowScope,
 } from '../contracts/webviews';
 import { ResultStateManager } from '../state/resultStateManager';
 import { ExportManager } from '../export/exportManager';
@@ -25,10 +26,14 @@ import type {
     DatabaseAggregationRequest,
     DatabaseAggregationResult,
 } from '../results/databaseAggregationSql';
+import type {
+    DatabaseGroupingRequest as DatabaseGroupingRequestType,
+} from '../results/databaseGroupingSql';
 import { diskQuerySpecIsActive } from '../core/resultDataProvider/types';
 import { bucketizePayloadSize, formatPerformanceEvent } from '../services/perf/performanceEvents';
 import type { ResultSet } from '../types';
 import { getLogger } from '../utils/logger';
+import { findTrailingLimitClause } from '../results/refreshSqlLimit';
 
 export interface EditChange {
     rowIndex: number;
@@ -44,6 +49,14 @@ export interface SaveEditsRequest {
     deleteRowIndices?: number[];
 }
 
+export interface AllRowsExportRequest {
+    sourceUri: string;
+    resultSetIndex: number;
+    format: string;
+    destination: string;
+    columnIds?: string[];
+}
+
 export interface MessageHandlerCallbacks {
     onUpdateWebview: () => void;
     onPostMessage: (message: ResultPanelOutboundMessage) => void;
@@ -52,7 +65,13 @@ export interface MessageHandlerCallbacks {
     onRecordHydrationMetrics?: (metrics: ResultPanelHydrationMetricsPayload) => void;
     onSaveEdits?: (request: SaveEditsRequest) => Promise<{ success: boolean; message: string }>;
     onGetWebviewUri?: (uri: vscode.Uri) => string;
-    onRefreshResult?: (sourceUri: string, resultSetIndex: number, limitValue?: string) => Promise<void>;
+    onRefreshResult?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        limitValue?: string,
+        removeLimit?: boolean,
+    ) => Promise<boolean | void>;
+    onExportAllRows?: (request: AllRowsExportRequest) => Promise<void>;
     onRequestDatabaseAggregations?: (
         sourceUri: string,
         resultSetIndex: number,
@@ -76,9 +95,65 @@ export interface MessageHandlerCallbacks {
         isRetry?: boolean,
     ) => Promise<void>;
     onClearRefreshFailure?: (sourceUri: string, resultSetIndex: number) => void;
+    onRequestDatabaseGrouping?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        grouping: DatabaseGroupingRequestType,
+        timeoutSeconds?: number,
+    ) => Promise<{
+        columns: Array<{ name: string; type?: string; kind?: 'group' | 'count' | 'percentage' | 'aggregate'; sourceColumnIndex?: number; fn?: string }>;
+        rows: unknown[][];
+        totalRows: number;
+        truncated?: boolean;
+        sql: string;
+    }>;
+    onPreviewDatabaseGrouping?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        grouping: DatabaseGroupingRequestType,
+    ) => Promise<string>;
 }
 
 export type SelectionStats = SelectionStatsPayload;
+
+interface ExportResultReference {
+    sourceUri: string;
+    resultSetIndex: number;
+}
+
+interface ExportScopeChoice {
+    id: 'loaded' | 'all';
+    label: string;
+    description: string;
+}
+
+interface MarkdownExportData {
+    sourceUri: string;
+    mdDocument: string;
+    resultSetIndices?: number[];
+    __exportAllRows?: boolean;
+}
+
+function dataAsExportMetadata(data: unknown): {
+    sourceUri: string;
+    resultSetIndex: number;
+    columnIds?: string[];
+    rowScope?: ResultPanelExportRowScope;
+} | undefined {
+    if (!data || typeof data !== 'object') return undefined;
+    const record = data as Record<string, unknown>;
+    if (typeof record.sourceUri !== 'string' || typeof record.resultSetIndex !== 'number') {
+        return undefined;
+    }
+    return {
+        sourceUri: record.sourceUri,
+        resultSetIndex: record.resultSetIndex,
+        columnIds: Array.isArray(record.columnIds)
+            ? record.columnIds.filter((columnId): columnId is string => typeof columnId === 'string')
+            : undefined,
+        rowScope: record.rowScope === 'loaded' || record.rowScope === 'all' ? record.rowScope : undefined,
+    };
+}
 
 export class ResultPanelMessageHandler {
     private readonly _encoder = new MessagePackEncoder();
@@ -118,6 +193,29 @@ export class ResultPanelMessageHandler {
                 this._callbacks.onRecordHydrationMetrics?.(message.metrics);
                 return;
 
+            case 'requestDatabaseGrouping':
+                void this._handleDatabaseGrouping(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.grouping,
+                    message.timeoutSeconds,
+                );
+                return;
+
+            case 'previewDatabaseGrouping':
+                void this._handlePreviewDatabaseGrouping(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.grouping,
+                );
+                return;
+
+            case 'cancelDatabaseGrouping':
+                // Currently no-op; could extend to cancel pending queries
+                return;
+
             case 'describeWithCopilot':
                 vscode.commands.executeCommand('netezza.describeDataWithCopilot', message.data, message.sql);
                 return;
@@ -127,15 +225,32 @@ export class ResultPanelMessageHandler {
                 return;
 
             case 'initiateExport':
-                this._exportManager.initiateExport(message.data);
+                this._runExportWithScope(message.data, data => this._exportManager.initiateExport(data));
                 return;
 
             case 'initiateExportWithSelection':
-                void this._exportManager.initiateExportWithSelection(
-                    message.data,
+                if (message.rowScope === 'all' && this._hasTrailingLimit({
+                    sourceUri: message.data.sourceUri,
+                    resultSetIndex: message.data.resultSetIndex,
+                })) {
+                    if (!this._callbacks.onExportAllRows) {
+                        vscode.window.showErrorMessage('ALL rows export is not available in this view.');
+                        return;
+                    }
+                    void this._callbacks.onExportAllRows({
+                        sourceUri: message.data.sourceUri,
+                        resultSetIndex: message.data.resultSetIndex,
+                        format: message.format,
+                        destination: message.destination,
+                        columnIds: message.data.columnIds,
+                    });
+                    return;
+                }
+                this._runExportWithScope(message.data, data => this._exportManager.initiateExportWithSelection(
+                    data,
                     message.format,
-                    message.destination
-                );
+                    message.destination,
+                ), message.rowScope);
                 return;
 
             case 'queryLocallyDuckDB':
@@ -147,61 +262,69 @@ export class ResultPanelMessageHandler {
                 return;
 
             case 'exportCsv':
-                this._exportManager.exportCsv(message.data);
+                if (this._startAllRowsExport(dataAsExportMetadata(message.data), 'csv', 'file')) return;
+                this._runExportWithScope(message.data, data => this._exportManager.exportCsv(data));
                 return;
 
             case 'openInExcel':
-                this._exportManager.openInExcel(message.data, message.sql);
+                this._runExportWithScope(message.data, data => this._exportManager.openInExcel(data, message.sql));
                 return;
 
             case 'openInFilePreview':
-                this._exportManager.openInFilePreview(message.data, message.sql);
+                this._runExportWithScope(message.data, data => this._exportManager.openInFilePreview(data, message.sql));
                 return;
 
             case 'copyAsExcel':
-                this._exportManager.copyAsExcel(message.data, message.sql);
+                this._runExportWithScope(message.data, data => this._exportManager.copyAsExcel(data, message.sql));
                 return;
 
             case 'openInExcelXlsx':
-                this._exportManager.openInExcelXlsx(message.data, message.sql);
+                this._runExportWithScope(message.data, data => this._exportManager.openInExcelXlsx(data, message.sql));
                 return;
 
             case 'exportAllResultSetsToExcel':
-                this._exportManager.exportAllResultSetsToExcel(message.data);
+                this._runExportWithScope(message.data, data => this._exportManager.exportAllResultSetsToExcel(data));
                 return;
 
             case 'exportJson':
-                this._exportManager.exportJson(message.data);
+                if (this._startAllRowsExport(dataAsExportMetadata(message.data), 'json', 'file')) return;
+                this._runExportWithScope(message.data, data => this._exportManager.exportJson(data));
                 return;
 
             case 'exportXml':
-                this._exportManager.exportXml(message.data);
+                if (this._startAllRowsExport(dataAsExportMetadata(message.data), 'xml', 'file')) return;
+                this._runExportWithScope(message.data, data => this._exportManager.exportXml(data));
                 return;
 
             case 'exportSqlInsert':
-                this._exportManager.exportSqlInsert(message.data);
+                if (this._startAllRowsExport(dataAsExportMetadata(message.data), 'sql', 'file')) return;
+                this._runExportWithScope(message.data, data => this._exportManager.exportSqlInsert(data));
                 return;
 
             case 'exportMarkdown':
-                this._exportManager.exportMarkdown(message.data);
+                if (this._startAllRowsExport(dataAsExportMetadata(message.data), 'markdown', 'file')) return;
+                this._runExportWithScope(message.data, data => this._exportManager.exportMarkdown(data));
                 return;
 
             case 'exportParquet':
-                this._exportManager.exportParquet(message.data);
+                if (this._startAllRowsExport(dataAsExportMetadata(message.data), 'parquet', 'file')) return;
+                this._runExportWithScope(message.data, data => this._exportManager.exportParquet(data));
                 return;
 
             case 'exportToMdFile':
-                this._handleExportToMdFile(message.data);
+                this._runExportWithScope(message.data, data => this._handleExportToMdFile(data));
                 return;
 
             case 'export':
-                this._exportManager.handleExport({
-                    format: message.format,
+                this._runExportWithScope({
                     sourceUri: message.sourceUri,
                     resultSetIndex: message.resultSetIndex,
                     rowIndices: message.rowIndices,
-                    columnIds: message.columnIds
-                });
+                    columnIds: message.columnIds,
+                }, data => this._exportManager.handleExport({
+                    format: message.format,
+                    ...data,
+                }));
                 return;
 
             case 'switchSource':
@@ -386,6 +509,137 @@ export class ResultPanelMessageHandler {
                 });
                 return;
         }
+    }
+
+    private _runExportWithScope<T>(
+        data: T,
+        exportAction: (data: T) => Promise<void> | void,
+        requestedScope?: ResultPanelExportRowScope,
+    ): void {
+        const limitedResults = this._getExportResultReferences(data)
+            .filter(reference => this._hasTrailingLimit(reference));
+
+        if (limitedResults.length === 0) {
+            void exportAction(data);
+            return;
+        }
+
+        const dataScope = this._getExportRowScope(data);
+        const selectedScope = requestedScope ?? dataScope;
+        const scopePromise = selectedScope
+            ? this._applyExportScope(selectedScope)
+            : this._chooseExportScope();
+        void scopePromise.then(shouldExport => {
+            if (shouldExport) {
+                void exportAction(data);
+            }
+        });
+    }
+
+    private _startAllRowsExport(
+        data: { sourceUri: string; resultSetIndex: number; columnIds?: string[]; rowScope?: ResultPanelExportRowScope } | undefined,
+        format: string,
+        destination: string,
+    ): boolean {
+        if (!data || data.rowScope !== 'all' || !this._hasTrailingLimit(data)) {
+            return false;
+        }
+        if (!this._callbacks.onExportAllRows) {
+            vscode.window.showErrorMessage('ALL rows export is not available in this view.');
+            return true;
+        }
+        void this._callbacks.onExportAllRows({
+            sourceUri: data.sourceUri,
+            resultSetIndex: data.resultSetIndex,
+            format,
+            destination,
+            columnIds: data.columnIds,
+        });
+        return true;
+    }
+
+    private _getExportResultReferences(data: unknown): ExportResultReference[] {
+        if (!data || typeof data !== 'object') {
+            return [];
+        }
+
+        const record = data as Record<string, unknown>;
+        const sourceUri = typeof record.sourceUri === 'string' ? record.sourceUri : undefined;
+        if (!sourceUri) {
+            return [];
+        }
+
+        const results = record.results;
+        if (Array.isArray(results)) {
+            return results.flatMap(result => {
+                if (!result || typeof result !== 'object') {
+                    return [];
+                }
+                const resultSetIndex = (result as Record<string, unknown>).resultSetIndex;
+                return typeof resultSetIndex === 'number'
+                    ? [{ sourceUri, resultSetIndex }]
+                    : [];
+            });
+        }
+
+        const resultSetIndices = record.resultSetIndices;
+        if (Array.isArray(resultSetIndices)) {
+            return resultSetIndices
+                .filter((resultSetIndex): resultSetIndex is number => typeof resultSetIndex === 'number')
+                .map(resultSetIndex => ({ sourceUri, resultSetIndex }));
+        }
+
+        const resultSetIndex = record.resultSetIndex;
+        return typeof resultSetIndex === 'number'
+            ? [{ sourceUri, resultSetIndex }]
+            : [];
+    }
+
+    private _hasTrailingLimit(reference: ExportResultReference): boolean {
+        const resultSet = this._stateManager.resultsMap.get(reference.sourceUri)?.[reference.resultSetIndex];
+        if (!resultSet || resultSet.isLog || resultSet.isError || resultSet.isTextContent) {
+            return false;
+        }
+        return Boolean(findTrailingLimitClause((resultSet.refreshSql || resultSet.sql || '').trim()));
+    }
+
+    private _getExportRowScope(data: unknown): ResultPanelExportRowScope | undefined {
+        if (!data || typeof data !== 'object') return undefined;
+        const rowScope = (data as Record<string, unknown>).rowScope;
+        return rowScope === 'loaded' || rowScope === 'all' ? rowScope : undefined;
+    }
+
+    private async _chooseExportScope(): Promise<boolean> {
+        const choice = await vscode.window.showQuickPick<ExportScopeChoice>(
+            [
+                {
+                    id: 'loaded',
+                    label: 'Loaded rows',
+                    description: 'Export only the rows currently loaded in SQL Results.',
+                },
+                {
+                    id: 'all',
+                    label: 'ALL rows',
+                    description: 'Re-run SQL without LIMIT, then export all returned rows.',
+                },
+            ],
+            {
+                title: 'Choose rows to export',
+                placeHolder: 'This SQL contains LIMIT. Choose the export scope.',
+            },
+        );
+
+        if (!choice) return false;
+        return this._applyExportScope(choice.id);
+    }
+
+    private async _applyExportScope(scope: ResultPanelExportRowScope): Promise<boolean> {
+        if (scope === 'loaded') {
+            return true;
+        }
+
+        vscode.window.showWarningMessage('Use the export wizard to stream ALL rows directly to a file.');
+        return false;
     }
 
     private _resolveDiskResultSet(sourceUri: string, resultSetIndex: number) {
@@ -683,6 +937,94 @@ export class ResultPanelMessageHandler {
     private _handleSwitchSource(sourceUri: string): void {
         this._stateManager.setActiveSource(sourceUri);
         this._callbacks.onUpdateWebview();
+    }
+
+    private async _handlePreviewDatabaseGrouping(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        grouping: DatabaseGroupingRequestType,
+    ): Promise<void> {
+        if (!this._callbacks.onPreviewDatabaseGrouping) {
+            this._callbacks.onPostMessage({
+                command: 'databaseGroupingPreviewResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: 'Database grouping preview is not available in this context.',
+            });
+            return;
+        }
+
+        try {
+            const sql = await this._callbacks.onPreviewDatabaseGrouping(
+                sourceUri,
+                resultSetIndex,
+                grouping,
+            );
+            this._callbacks.onPostMessage({
+                command: 'databaseGroupingPreviewResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                sql,
+            });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'databaseGroupingPreviewResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handleDatabaseGrouping(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        grouping: DatabaseGroupingRequestType,
+        timeoutSeconds?: number,
+    ): Promise<void> {
+        if (!this._callbacks.onRequestDatabaseGrouping) {
+            this._callbacks.onPostMessage({
+                command: 'databaseGroupingResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: 'Database grouping is not available in this context.',
+            });
+            return;
+        }
+
+        try {
+            const result = await this._callbacks.onRequestDatabaseGrouping(
+                sourceUri,
+                resultSetIndex,
+                grouping,
+                timeoutSeconds,
+            );
+            this._callbacks.onPostMessage({
+                command: 'databaseGroupingResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                columns: result.columns,
+                rows: this._encoder.sanitizeForMessagePack(result.rows) as unknown[][],
+                totalRows: result.totalRows,
+                truncated: result.truncated,
+                sql: result.sql,
+            });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'databaseGroupingResult',
+                sourceUri,
+                resultSetIndex,
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     private _handleSwitchToPinnedResult(resultId: string): void {
@@ -1069,7 +1411,49 @@ export class ResultPanelMessageHandler {
         }
     }
 
-    private async _handleExportToMdFile(data: { sourceUri: string; mdDocument: string }): Promise<void> {
+    private _buildMarkdownDocument(sourceUri: string, resultSetIndices?: number[]): string {
+        const resultSets = this._stateManager.resultsMap.get(sourceUri) ?? [];
+        const selectedResultSets = resultSetIndices
+            ? resultSetIndices
+                .map(index => resultSets[index])
+                .filter((resultSet): resultSet is ResultSet => Boolean(resultSet))
+            : resultSets;
+        const dataResults = selectedResultSets.filter(
+            resultSet => !resultSet.isLog && !resultSet.isError && !resultSet.isTextContent && resultSet.data.length > 0,
+        );
+
+        let mdDocument = '# SQL Export\n\n';
+        for (let index = 0; index < dataResults.length; index += 1) {
+            const resultSet = dataResults[index];
+            mdDocument += `## Query ${index + 1}\n\n`;
+            mdDocument += '```sql\n' + (resultSet.sql || '') + '\n```\n\n';
+            mdDocument += '### Results\n\n';
+
+            const headers = resultSet.columns.map(column => String(column.name || ''));
+            mdDocument += '| ' + headers.join(' | ') + ' |\n';
+            mdDocument += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
+            const maxRows = Math.min(resultSet.data.length, 1000);
+            for (let rowIndex = 0; rowIndex < maxRows; rowIndex += 1) {
+                const row = resultSet.data[rowIndex];
+                const cells = headers.map((_header, columnIndex) => {
+                    const value = row[columnIndex];
+                    if (value === null || value === undefined) return 'NULL';
+                    return String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+                });
+                mdDocument += '| ' + cells.join(' | ') + ' |\n';
+            }
+            if (resultSet.data.length > 1000) {
+                mdDocument += `\n*Table truncated: ${resultSet.data.length} total rows, showing first 1000*\n`;
+            }
+            mdDocument += '\n---\n\n';
+        }
+        return mdDocument;
+    }
+
+    private async _handleExportToMdFile(data: MarkdownExportData): Promise<void> {
+        const mdDocument = data.__exportAllRows
+            ? this._buildMarkdownDocument(data.sourceUri, data.resultSetIndices)
+            : data.mdDocument;
         const choice = await vscode.window.showQuickPick(
             [
                 { label: '$(file-symlink-file) Save to temp file', description: 'Auto-save and open immediately', value: 'temp' as const },
@@ -1099,7 +1483,7 @@ export class ResultPanelMessageHandler {
         const dateStr = now.toLocaleDateString('pl-PL', { year: 'numeric', month: '2-digit', day: '2-digit' });
         const timeStr = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         const header = `**Generated:** ${dateStr} ${timeStr}\n\n---\n\n`;
-        const fullDocument = header + data.mdDocument.replace(/^# SQL Export\n\n/, '');
+        const fullDocument = header + mdDocument.replace(/^# SQL Export\n\n/, '');
 
         await vscode.workspace.fs.writeFile(uri, Buffer.from(fullDocument, 'utf8'));
         this._stateManager.addTextContentResult(data.sourceUri, fullDocument, 'MD Export');

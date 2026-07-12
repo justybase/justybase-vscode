@@ -352,8 +352,10 @@ export class FavoritesManager {
 
     public async addSqlSnippet(label: string, sqlContent: string, parentId?: string): Promise<string> {
         if (!this.initialized) this.initialize();
+        if (this.cache.some(f => f.type === 'sql' && f.label.toLowerCase() === label.toLowerCase())) {
+            throw new Error(`Snippet "${label}" already exists`);
+        }
         const id = crypto.randomUUID();
-        // create parent "Queries" folder if not specified and not exists? Let's keep it simple and just drop where requested.
         const snippet: SchemaFavorite = {
             id,
             type: 'sql',
@@ -368,6 +370,22 @@ export class FavoritesManager {
         this.saveFavoritesToRepository();
         this._onDidChangeFavorites.fire();
         return id;
+    }
+
+    public async updateSnippet(id: string, label: string, sqlContent: string): Promise<boolean> {
+        if (!this.initialized) this.initialize();
+        const index = this.cache.findIndex(f => f.id === id && f.type === 'sql');
+        if (index === -1) return false;
+        if (this.cache.some(f => f.id !== id && f.type === 'sql' && f.label.toLowerCase() === label.toLowerCase())) {
+            return false;
+        }
+        this.cache[index].label = label;
+        this.cache[index].sqlContent = sqlContent;
+        this.cache[index].timestamp = Date.now();
+        await this.context.globalState.update(FavoritesManager.STORAGE_KEY, this.cache);
+        this.saveFavoritesToRepository();
+        this._onDidChangeFavorites.fire();
+        return true;
     }
 
     public async updateNote(id: string, note?: string): Promise<void> {

@@ -6,6 +6,7 @@ import type { DatabaseAggregationRequest, DatabaseAggregationResult } from '../.
 import type { ResultFormattingPayload, ResultFormattingUpdateRequest } from '../../results/resultFormattingTypes';
 
 export type ResultPanelExportFormat = 'csv' | 'json' | 'xml' | 'sql' | 'markdown';
+export type ResultPanelExportRowScope = 'loaded' | 'all';
 
 // ============================================================================
 // Result Panel — Inbound (Webview → Extension Host)
@@ -17,7 +18,13 @@ export type ResultPanelInboundMessage =
     | { command: 'describeWithCopilot'; data: unknown; sql?: string }
     | { command: 'fixSqlError'; errorMessage: string; sql: string }
     | { command: 'initiateExport'; data: ExportMetadata }
-    | { command: 'initiateExportWithSelection'; data: ExportMetadata; format: string; destination: string }
+    | {
+        command: 'initiateExportWithSelection';
+        data: ExportMetadata;
+        format: string;
+        destination: string;
+        rowScope?: ResultPanelExportRowScope;
+      }
     | { command: 'queryLocallyDuckDB'; data: ExportMetadata }
     | { command: 'exportCsv'; data: string | ExportMetadata }
     | { command: 'openInExcel'; data: unknown; sql?: string }
@@ -28,7 +35,10 @@ export type ResultPanelInboundMessage =
     | { command: 'exportXml'; data: string | ExportMetadata }
     | { command: 'exportSqlInsert'; data: string | ExportMetadata }
     | { command: 'exportMarkdown'; data: string | ExportMetadata }
-    | { command: 'exportToMdFile'; data: { sourceUri: string; mdDocument: string } }
+    | {
+        command: 'exportToMdFile';
+        data: { sourceUri: string; mdDocument: string; resultSetIndices?: number[]; rowScope?: ResultPanelExportRowScope };
+      }
     | {
         command: 'export';
         format: ResultPanelExportFormat;

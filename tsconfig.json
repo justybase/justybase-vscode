@@ -8,6 +8,7 @@
     "types": ["jest", "node"],
     "sourceMap": true,
     "rootDir": ".",
+    "isolatedModules": true,
     "paths": {
       "@justybase/contracts": ["./packages/contracts/src"],
       "@justybase/contracts/*": ["./packages/contracts/src/*"],

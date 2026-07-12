@@ -17,7 +17,6 @@ export {
 export {
     stripLeadingComments,
     detectRiskyStatements,
-    detectPythonScript,
     formatRiskyStatementMessage,
     confirmSafeExecuteWithDeps,
     handleExecutionCompletionWithDeps

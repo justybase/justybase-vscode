@@ -18,7 +18,7 @@ import { createSkippedResult } from './utils/resultFactory';
 /**
  * Re-export ExecutionContext for backward compatibility
  */
-export { ExecutionContext } from './interfaces';
+export type { ExecutionContext } from './interfaces';
 export type { ITaskExecutor as TaskExecutor } from './interfaces';
 
 /**

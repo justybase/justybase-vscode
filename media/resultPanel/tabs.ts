@@ -13,6 +13,7 @@ import { updateControlsVisibility, syncGlobalFilterInput } from './grid.js';
 import { renderRowCountInfo } from './filter.js';
 import { clearLogs } from './export.js';
 import { syncAnalysisView } from './analysis.js';
+import { extractKeyNetezzaErrorInfo } from './grid/alternateViews.js';
 import { postHostMessage } from './protocol.js';
 import { getElementById, asHtml } from './dom.js';
 import {
@@ -92,7 +93,9 @@ function createResultStatusBadge(rs: ResultSet | null | undefined): HTMLSpanElem
     if (rs.isError) {
         badge.classList.add('state-error');
         badge.textContent = 'Error';
-        badge.title = 'This result set contains an execution error.';
+        badge.title = rs.message
+            ? extractKeyNetezzaErrorInfo(rs.message)
+            : 'This result set contains an execution error.';
         return badge;
     }
 

@@ -637,6 +637,13 @@ body.vscode-dark {
     border-radius: 3px;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
+    -moz-appearance: textfield;
+}
+
+.refresh-limit-panel__input::-webkit-outer-spin-button,
+.refresh-limit-panel__input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 .refresh-limit-panel__error {
@@ -862,6 +869,18 @@ body.vscode-dark {
 }
 
 /* Controls */
+.layout-switcher {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    padding: 2px;
+    gap: 1px;
+    border-radius: 6px;
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+    background: color-mix(in srgb, var(--vscode-editor-background), rgba(127, 127, 127, 0.1));
+    margin-right: 2px;
+}
+
 .controls {
     padding: 6px 8px;
     background-color: var(--vscode-editor-background);
@@ -873,18 +892,6 @@ body.vscode-dark {
     align-items: center;
     align-content: flex-start;
     flex-shrink: 0;
-}
-
-.layout-switcher {
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    padding: 2px;
-    gap: 1px;
-    border-radius: 6px;
-    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-    background: color-mix(in srgb, var(--vscode-editor-background), rgba(127, 127, 127, 0.1));
-    margin-right: 2px;
 }
 
 .layout-switcher .layout-switcher__btn {
@@ -941,6 +948,31 @@ body.vscode-dark {
     min-width: 64px;
     justify-content: center;
     font-weight: 500;
+}
+.view-mode-group {
+    display: inline-flex;
+    align-items: center;
+}
+.view-mode-select {
+    appearance: auto;
+    background: transparent;
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, rgba(128,128,128,.25)));
+    border-radius: 5px;
+    padding: 2px 6px;
+    height: 24px;
+    font-family: var(--justybase-results-grid-font-family, var(--vscode-font-family));
+    font-size: 11px;
+    line-height: 16px;
+    cursor: pointer;
+}
+.view-mode-select:hover {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+.view-mode-select option {
+    background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+    color: var(--vscode-dropdown-foreground, var(--vscode-editor-foreground));
 }
 .view-mode-select-hidden {
     position: absolute;
@@ -1940,6 +1972,8 @@ tfoot {
     left: 0;
     z-index: 10050;
     min-width: 220px;
+    max-height: min(420px, calc(100vh - 80px));
+    overflow-y: auto;
     background: var(--vscode-dropdown-background, var(--vscode-editor-background));
     border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
     border-radius: 5px;
@@ -3242,7 +3276,7 @@ tfoot .aggregation-row td.pinned-cell {
    SIDEBAR LAYOUT
    ============================================ */
 
-/* Layout wrapper — contains sidebar + content */
+/* Layout wrapper — contains controls + layout-body */
 .layout-wrapper {
     display: flex;
     flex-direction: column;
@@ -3251,7 +3285,16 @@ tfoot .aggregation-row td.pinned-cell {
     min-height: 0;
 }
 
-body.sidebar-layout .layout-wrapper {
+/* Layout body — contains sidebar + content, row in sidebar mode */
+.layout-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+}
+
+body.sidebar-layout .layout-body {
     flex-direction: row;
 }
 

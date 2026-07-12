@@ -563,6 +563,46 @@ describe('ResultPanelMessageHandler', () => {
             initiateExportWithSelection.mockRestore();
         });
 
+        it('should use the scope selected in the export wizard without opening a host picker', async () => {
+            const resultSet = stateManager.resultsMap.get('file:///test.sql')?.[0];
+            if (!resultSet) {
+                throw new Error('Expected test result set');
+            }
+            resultSet.sql = 'SELECT * FROM test LIMIT 2';
+            resultSet.refreshSql = resultSet.sql;
+
+            const onExportAllRows = jest.fn().mockResolvedValue(undefined);
+            callbacks.onExportAllRows = onExportAllRows;
+            const initiateExportWithSelection = jest
+                .spyOn(exportManager, 'initiateExportWithSelection')
+                .mockResolvedValue(undefined);
+
+            handler.handleMessage({
+                command: 'initiateExportWithSelection',
+                data: {
+                    sourceUri: 'file:///test.sql',
+                    resultSetIndex: 0,
+                    rowIndices: [0],
+                    columnIds: ['0'],
+                },
+                format: 'csv',
+                destination: 'file',
+                rowScope: 'all',
+            });
+            await new Promise<void>(resolve => setImmediate(resolve));
+
+            expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+            expect(onExportAllRows).toHaveBeenCalledWith({
+                sourceUri: 'file:///test.sql',
+                resultSetIndex: 0,
+                format: 'csv',
+                destination: 'file',
+                columnIds: ['0'],
+            });
+            expect(initiateExportWithSelection).not.toHaveBeenCalled();
+            initiateExportWithSelection.mockRestore();
+        });
+
         it('should handle exportCsv with metadata', async () => {
             const exportData = {
                 sourceUri: 'file:///test.sql',
@@ -575,6 +615,38 @@ describe('ResultPanelMessageHandler', () => {
             await handler.handleMessage({ command: 'exportCsv', data: exportData });
 
             expect(vscode.window.showSaveDialog).toHaveBeenCalled();
+        });
+
+        it('should stream ALL rows through the export callback without refreshing the grid', async () => {
+            const resultSet = stateManager.resultsMap.get('file:///test.sql')?.[0];
+            if (!resultSet) {
+                throw new Error('Expected test result set');
+            }
+            resultSet.sql = 'SELECT * FROM test LIMIT 2';
+            resultSet.refreshSql = resultSet.sql;
+
+            const onExportAllRows = jest.fn().mockResolvedValue(undefined);
+            callbacks.onExportAllRows = onExportAllRows;
+            const exportCsv = jest.spyOn(exportManager, 'exportCsv').mockResolvedValue(undefined);
+
+            const exportData = {
+                sourceUri: 'file:///test.sql',
+                resultSetIndex: 0,
+                rowIndices: [0],
+                columnIds: ['0'],
+            };
+            handler.handleMessage({ command: 'exportCsv', data: { ...exportData, rowScope: 'all' } });
+            await new Promise<void>(resolve => setImmediate(resolve));
+
+            expect(onExportAllRows).toHaveBeenCalledWith({
+                sourceUri: 'file:///test.sql',
+                resultSetIndex: 0,
+                format: 'csv',
+                destination: 'file',
+                columnIds: ['0'],
+            });
+            expect(exportCsv).not.toHaveBeenCalled();
+            exportCsv.mockRestore();
         });
 
         it('should handle exportJson with metadata', async () => {

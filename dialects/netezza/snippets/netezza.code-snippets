@@ -87,49 +87,49 @@
         "description": "MERGE statement template"
     },
     "CREATE TABLE": {
-        "prefix": "nzcreatetable",
+        "prefix": ["nzcreatetable", "CREATE TABLE"],
         "body": [
-            "CREATE TABLE ${1:schema}.${2:table_name} (",
-            "    ${3:id} INTEGER NOT NULL,",
-            "    ${4:name} VARCHAR(${5:100}),",
-            "    ${6:created_at} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
-            "    PRIMARY KEY (${7:id})",
+            "CREATE TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE_NAME} (",
+            "    ${4:id} INTEGER NOT NULL,",
+            "    ${5:name} VARCHAR(${6:100}),",
+            "    ${7:created_at} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
+            "    PRIMARY KEY (${8:id})",
             ")",
-            "DISTRIBUTE ON (${8:id});"
+            "DISTRIBUTE ON (${9:id});"
         ],
         "description": "CREATE TABLE with columns and distribution"
     },
     "CREATE_GLOBAL_TEMP_TABLE":{
-        "prefix": "nzcreateglobaltemptable",
+        "prefix": ["nzcreateglobaltemptable", "CREATE GLOBAL TEMP TABLE"],
         "body": [
-            "CREATE GLOBAL TEMP TABLE ${1:schema}.${2:table_name} (",
-            "    ${3:id} INTEGER NOT NULL,",
-            "    ${4:name} VARCHAR(${5:100}),",
-            "    ${6:created_at} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
-            "    PRIMARY KEY (${7:id})",
+            "CREATE GLOBAL TEMP TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE_NAME} (",
+            "    ${4:id} INTEGER NOT NULL,",
+            "    ${5:name} VARCHAR(${6:100}),",
+            "    ${7:created_at} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
+            "    PRIMARY KEY (${8:id})",
             ")",
-            "DISTRIBUTE ON (${8:id});"
+            "DISTRIBUTE ON (${9:id});"
         ],
         "description": "CREATE GLOBAL TEMP TABLE with columns and distribution"
     },
     "CREATE TABLE AS SELECT": {
-        "prefix": "nzcreatetableas",
+        "prefix": ["nzcreatetableas", "CREATE TABLE"],
         "body": [
-            "CREATE TABLE ${1:schema}.${2:new_table} AS",
-            "SELECT ${3:*}",
-            "FROM ${4:source_schema}.${5:source_table}",
-            "WHERE ${6:1=1}",
-            "DISTRIBUTE ON (${7:column});"
+            "CREATE TABLE ${1:DB}.${2:SCHEMA}.${3:NEW_TABLE} AS",
+            "SELECT ${4:*}",
+            "FROM ${5:SOURCE_SCHEMA}.${6:SOURCE_TABLE}",
+            "WHERE ${7:1=1}",
+            "DISTRIBUTE ON (${8:column});"
         ],
         "description": "CREATE TABLE AS SELECT (CTAS)"
     },
     "CREATE VIEW": {
-        "prefix": "nzcreateview",
+        "prefix": ["nzcreateview", "CREATE OR REPLACE VIEW"],
         "body": [
-            "CREATE OR REPLACE VIEW ${1:schema}.${2:view_name} AS",
-            "SELECT ${3:column1}, ${4:column2}",
-            "FROM ${5:schema}.${6:table}",
-            "WHERE ${7:condition};"
+            "CREATE OR REPLACE VIEW ${1:DB}.${2:SCHEMA}.${3:VIEW_NAME} AS",
+            "SELECT ${4:column1}, ${5:column2}",
+            "FROM ${6:SOURCE_SCHEMA}.${7:SOURCE_TABLE}",
+            "WHERE ${8:condition};"
         ],
         "description": "CREATE VIEW template"
     },
@@ -158,44 +158,44 @@
         "description": "ALTER TABLE DROP COLUMN"
     },
     "DROP TABLE": {
-        "prefix": "nzdroptable",
+        "prefix": ["nzdroptable", "DROP TABLE"],
         "body": [
-            "DROP TABLE IF EXISTS ${1:schema}.${2:table};"
+            "DROP TABLE IF EXISTS ${1:DB}.${2:SCHEMA}.${3:TABLE};"
         ],
         "description": "DROP TABLE IF EXISTS"
     },
     "DROP VIEW": {
         "prefix": "nzdropview",
         "body": [
-            "DROP VIEW IF EXISTS ${1:schema}.${2:view};"
+            "DROP VIEW IF EXISTS ${1:DB}.${2:SCHEMA}.${3:VIEW};"
         ],
         "description": "DROP VIEW IF EXISTS"
     },
     "CREATE SYNONYM": {
         "prefix": "nzcreatesynonym",
         "body": [
-            "CREATE SYNONYM ${1:database}.${2:schema}.${3:synonym_name} FOR ${4:target_schema}.${5:target_object};"
+            "CREATE SYNONYM ${1:DB}.${2:SCHEMA}.${3:SYNONYM_NAME} FOR ${4:TARGET_SCHEMA}.${5:TARGET_OBJECT};"
         ],
         "description": "CREATE SYNONYM for an object"
     },
     "DROP SYNONYM": {
         "prefix": "nzdropsynonym",
         "body": [
-            "DROP SYNONYM ${1:database}.${2:schema}.${3:synonym_name};"
+            "DROP SYNONYM ${1:DB}.${2:SCHEMA}.${3:SYNONYM_NAME};"
         ],
         "description": "DROP SYNONYM"
     },
     "GROOM TABLE": {
-        "prefix": "nzgroom",
+        "prefix": ["nzgroom", "GROOM TABLE"],
         "body": [
-            "GROOM TABLE ${1:schema}.${2:table} VERSIONS;"
+            "GROOM TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE} VERSIONS;"
         ],
         "description": "GROOM TABLE to reclaim deleted row space"
     },
     "GROOM TABLE RECORDS ALL": {
         "prefix": "nzgroomall",
         "body": [
-            "GROOM TABLE ${1:schema}.${2:table} RECORDS ALL;"
+            "GROOM TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE} RECORDS ALL;"
         ],
         "description": "GROOM TABLE with full reorganization"
     },
@@ -290,25 +290,50 @@
         ],
         "description": "SAS-like macro INCLUDE directive"
     },
-    "NZPLSQL Stored Procedure": {
-        "prefix": "nzprocedure",
+    "Macro PYTHON": {
+        "prefix": "nzmacropython",
         "body": [
-            "CREATE OR REPLACE PROCEDURE ${1:database}.${2:schema}.${3:procedure_name} (",
-            "    ${4:p_param1} ${5:INTEGER}",
-            ")",
-            "RETURNS ${6:INTEGER}",
+            "%python ${1:script.py} ${2:--arg1 --arg2}"
+        ],
+        "description": "SAS-like macro PYTHON directive to execute Python script"
+    },
+    "Macro DO Block": {
+        "prefix": "nzmacrodoblock",
+        "body": [
+            "%DO;",
+            "    ${1:SELECT 1;}",
+            "%END;"
+        ],
+        "description": "SAS-like macro DO block (standalone, must be closed with %END)"
+    },
+    "Macro EXPORT": {
+        "prefix": "nzmacroexport",
+        "body": [
+            "%export(format='${1:xlsx}', file='${2:/tmp/results.xlsx}', sheet='${3:Query Results}', query=(",
+            "  ${4:SELECT * FROM table}",
+            "), overwrite=${5:false});"
+        ],
+        "description": "SAS-like macro EXPORT directive to export query results"
+    },
+    "NZPLSQL Stored Procedure": {
+        "prefix": ["nzprocedure", "CREATE OR REPLACE PROCEDURE"],
+        "body": [
+            "CREATE OR REPLACE PROCEDURE ${1:DB}.${2:SCHEMA}.${3:PROCEDURE_NAME}(${4:INT4})",
+            "RETURNS ${5:INT4}",
+            "EXECUTE AS OWNER",
             "LANGUAGE NZPLSQL AS",
             "BEGIN_PROC",
-            "    DECLARE",
-            "        v_result ${7:INTEGER} := 0;",
-            "    BEGIN",
-            "        ${8:-- Your logic here}",
-            "        ",
-            "        RETURN v_result;",
-            "    EXCEPTION",
-            "        WHEN OTHERS THEN",
-            "            RAISE EXCEPTION 'Error: %', SQLERRM;",
-            "    END;",
+            "DECLARE",
+            "    arg1 ALIAS FOR $1;",
+            "    v_result ${6:INT4} := 0;",
+            "BEGIN",
+            "    ${7:-- Your logic here}",
+            "    ",
+            "    RETURN v_result;",
+            "EXCEPTION",
+            "    WHEN OTHERS THEN",
+            "        RAISE EXCEPTION 'Error: %', SQLERRM;",
+            "END;",
             "END_PROC;"
         ],
         "description": "Complete NZPLSQL stored procedure skeleton"
@@ -360,12 +385,12 @@
     "NZPLSQL REFTABLE procedure": {
         "prefix": "nzreftableproc",
         "body": [
-            "CREATE OR REPLACE PROCEDURE ${1:schema}.${2:proc_name} ()",
-            "RETURNS REFTABLE(${3:schema}.${4:table_name})",
+            "CREATE OR REPLACE PROCEDURE ${1:DB}.${2:SCHEMA}.${3:PROC_NAME} ()",
+            "RETURNS REFTABLE(${4:DB}.${5:SCHEMA}.${6:TABLE_NAME})",
             "LANGUAGE NZPLSQL AS",
             "BEGIN_PROC",
             "BEGIN",
-            "    RETURN ${5:-- query returning table};",
+            "    RETURN ${7:-- query returning table};",
             "END;",
             "END_PROC;"
         ],
@@ -438,7 +463,7 @@
     "NZPLSQL Variable declaration": {
         "prefix": "nzvar",
         "body": [
-            "${1:v_name} ${2:INTEGER} := ${3:0};"
+            "${1:v_name} ${2:INT4} := ${3:0};"
         ],
         "description": "Variable declaration with initialization"
     },
@@ -648,5 +673,86 @@
             ");"
         ],
         "description": "NOT EXISTS subquery"
+    },
+    "CREATE TABLE AS DISTRIBUTE ON RANDOM": {
+        "prefix": ["nzctasrandom", "CREATE TABLE"],
+        "body": [
+            "CREATE TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE_NAME} AS",
+            "(",
+            "    ${4:SELECT ...}",
+            ")",
+            "DISTRIBUTE ON RANDOM;"
+        ],
+        "description": "CREATE TABLE AS with subquery and DISTRIBUTE ON RANDOM"
+    },
+    "CREATE TEMP TABLE AS DISTRIBUTE ON RANDOM": {
+        "prefix": ["nztemptableas", "CREATE TEMP TABLE"],
+        "body": [
+            "CREATE TEMP TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE_NAME} AS",
+            "(",
+            "    ${4:SELECT ...}",
+            ")",
+            "DISTRIBUTE ON RANDOM;"
+        ],
+        "description": "CREATE TEMP TABLE AS with subquery and DISTRIBUTE ON RANDOM"
+    },
+    "CREATE GLOBAL TEMP TABLE AS DISTRIBUTE ON RANDOM": {
+        "prefix": ["nzglobaltemptableasctas", "CREATE GLOBAL TEMP TABLE"],
+        "body": [
+            "CREATE GLOBAL TEMP TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE_NAME} AS",
+            "(",
+            "    ${4:SELECT ...}",
+            ")",
+            "DISTRIBUTE ON RANDOM;"
+        ],
+        "description": "CREATE GLOBAL TEMP TABLE AS with subquery and DISTRIBUTE ON RANDOM"
+    },
+    "DROP TABLE (simple)": {
+        "prefix": ["nzdroptablesimple", "DROP TABLE"],
+        "body": [
+            "DROP TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE_NAME} IF EXISTS;"
+        ],
+        "description": "DROP TABLE IF EXISTS (simple, no schema)"
+    },
+    "DROP TABLE no IF EXISTS": {
+        "prefix": ["nzdropnocheck", "DROP TABLE"],
+        "body": [
+            "DROP TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE_NAME};"
+        ],
+        "description": "DROP TABLE without IF EXISTS"
+    },
+    "GROOM TABLE RECLAIM BACKUPSET NONE": {
+        "prefix": ["nzgroomreclaim", "GROOM TABLE"],
+        "body": [
+            "GROOM TABLE ${1:DB}.${2:SCHEMA}.${3:TABLE} RECLAIM BACKUPSET NONE;"
+        ],
+        "description": "GROOM TABLE to reclaim disk space"
+    },
+    "CREATE OR REPLACE PROCEDURE (simple)": {
+        "prefix": ["nzprocsimple", "CREATE OR REPLACE PROCEDURE"],
+        "body": [
+            "CREATE OR REPLACE PROCEDURE ${1:DB}.${2:SCHEMA}.${3:PROCEDURE_NAME}(${4:INT4})",
+            "RETURNS ${5:INT4}",
+            "EXECUTE AS OWNER",
+            "LANGUAGE NZPLSQL AS",
+            "BEGIN_PROC",
+            "DECLARE",
+            "    arg1 ALIAS FOR $1;",
+            "BEGIN",
+            "    ${6:-- body}",
+            "END;",
+            "END_PROC;"
+        ],
+        "description": "Simple CREATE OR REPLACE PROCEDURE skeleton"
+    },
+    "CREATE OR REPLACE VIEW (simple)": {
+        "prefix": ["nzviewsimple", "CREATE OR REPLACE VIEW"],
+        "body": [
+            "CREATE OR REPLACE VIEW ${1:DB}.${2:SCHEMA}.${3:VIEW_NAME} AS",
+            "SELECT ${4:*}",
+            "FROM ${5:SOURCE_SCHEMA}.${6:SOURCE_TABLE}",
+            "WHERE ${7:1=1};"
+        ],
+        "description": "Simple CREATE OR REPLACE VIEW"
     }
 }

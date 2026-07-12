@@ -6,7 +6,6 @@
 import {
     stripLeadingComments,
     detectRiskyStatements,
-    detectPythonScript,
     formatRiskyStatementMessage,
     confirmSafeExecuteWithDeps
 } from '../commands/queryCommands';
@@ -122,51 +121,6 @@ describe('queryCommands pure functions', () => {
             const result = detectRiskyStatements(queries);
 
             expect(result).toHaveLength(3);
-        });
-    });
-
-    describe('detectPythonScript', () => {
-        it('should detect python script execution', () => {
-            const result = detectPythonScript('python script.py --arg1 --arg2');
-
-            expect(result.isPython).toBe(true);
-            expect(result.pythonPath).toBe('python');
-            expect(result.script).toBe('script.py');
-            expect(result.args).toEqual(['--arg1', '--arg2']);
-        });
-
-        it('should detect python.exe on Windows', () => {
-            const result = detectPythonScript('python.exe script.py');
-
-            expect(result.isPython).toBe(true);
-            expect(result.pythonPath).toBe('python.exe');
-            expect(result.script).toBe('script.py');
-        });
-
-        it('should detect direct .py script', () => {
-            const result = detectPythonScript('script.py --arg1');
-
-            expect(result.isPython).toBe(true);
-            expect(result.script).toBe('script.py');
-            expect(result.args).toEqual(['--arg1']);
-        });
-
-        it('should not detect regular SQL as Python', () => {
-            const result = detectPythonScript('SELECT * FROM users');
-
-            expect(result.isPython).toBe(false);
-        });
-
-        it('should not detect python without .py file', () => {
-            const result = detectPythonScript('python --version');
-
-            expect(result.isPython).toBe(false);
-        });
-
-        it('should handle empty string', () => {
-            const result = detectPythonScript('');
-
-            expect(result.isPython).toBe(false);
         });
     });
 

@@ -1,0 +1,599 @@
+/* Database Grouping Panel Styles */
+
+/* Toggle button on the right side toolbar */
+.grouping-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.grouping-toggle-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.grouping-toggle-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background);
+}
+
+.grouping-toggle-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Main grouping panel container */
+.database-grouping-panel {
+    position: relative;
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    border-left: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-sideBar-background);
+    color: var(--vscode-sideBar-foreground);
+    font-size: 12px;
+    min-width: 280px;
+    max-width: 420px;
+    overflow: hidden;
+}
+
+.database-grouping-panel.visible {
+    display: flex;
+}
+
+/* Panel header */
+.database-grouping-panel .grouping-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--vscode-sideBarTitle-foreground);
+    flex-shrink: 0;
+}
+
+.database-grouping-panel .grouping-panel-header .header-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.database-grouping-panel .grouping-panel-header .header-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 2px;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.15s ease;
+}
+
+.database-grouping-panel .grouping-panel-header .header-actions button:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.database-grouping-panel .grouping-panel-header .header-actions button.close-btn {
+    color: var(--vscode-errorForeground);
+}
+
+/* Drop zone for dragging columns */
+.database-grouping-panel .grouping-drop-zone {
+    flex-shrink: 0;
+    min-height: 60px;
+    padding: 12px;
+    border: 2px dashed var(--vscode-panel-border);
+    border-radius: 4px;
+    margin: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    cursor: default;
+}
+
+.database-grouping-panel .grouping-drop-zone.drag-over {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.database-grouping-panel .grouping-drop-zone .drop-hint {
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+}
+
+.database-grouping-panel .grouping-drop-zone .drop-hint svg {
+    width: 24px;
+    height: 24px;
+    opacity: 0.4;
+    margin-bottom: 4px;
+}
+
+/* Group by column chips inside drop zone */
+.database-grouping-panel .grouping-drop-zone .group-chips {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.database-grouping-panel .grouping-drop-zone .group-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: move;
+    user-select: none;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.database-grouping-panel .grouping-drop-zone .group-chip:hover {
+    background: var(--vscode-list-hoverBackground);
+    color: var(--vscode-foreground);
+}
+
+.database-grouping-panel .grouping-drop-zone .group-chip .chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 12px;
+    opacity: 0.6;
+    padding: 0;
+    border-radius: 2px;
+}
+
+.database-grouping-panel .grouping-drop-zone .group-chip .chip-remove:hover {
+    opacity: 1;
+    background: rgba(255, 0, 0, 0.2);
+}
+
+.database-grouping-panel .grouping-drop-zone.drag-over .group-chip {
+    pointer-events: none;
+}
+
+/* Functions configuration area */
+.database-grouping-panel .grouping-functions-area {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    flex-shrink: 0;
+}
+
+.database-grouping-panel .grouping-functions-area .functions-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    margin-bottom: 4px;
+}
+
+.database-grouping-panel .grouping-functions-area .function-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.database-grouping-panel .grouping-functions-area .function-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--vscode-foreground);
+    cursor: default;
+}
+
+.database-grouping-panel .grouping-functions-area .function-chip .fn-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 10px;
+    opacity: 0.5;
+    padding: 0;
+}
+
+.database-grouping-panel .grouping-functions-area .function-chip .fn-remove:hover {
+    opacity: 1;
+}
+
+.database-grouping-panel .grouping-functions-area .add-function-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    border: 1px dashed var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    cursor: pointer;
+    font-size: 10px;
+    transition: all 0.15s ease;
+}
+
+.database-grouping-panel .grouping-functions-area .add-function-btn:hover {
+    border-color: var(--vscode-focusBorder);
+    color: var(--vscode-foreground);
+}
+
+/* Action buttons (Run, Clear, etc.) */
+.database-grouping-panel .grouping-actions {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    flex-shrink: 0;
+}
+
+.database-grouping-panel .grouping-actions button {
+    flex: 1;
+    padding: 5px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.database-grouping-panel .grouping-actions button:hover:not(:disabled) {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.database-grouping-panel .grouping-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.database-grouping-panel .grouping-actions button.secondary {
+    background: transparent;
+    color: var(--vscode-foreground);
+}
+
+.database-grouping-panel .grouping-actions button.secondary:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.database-grouping-panel .grouping-actions button.danger {
+    color: var(--vscode-errorForeground);
+    border-color: var(--vscode-errorForeground);
+}
+
+/* Results area */
+.database-grouping-panel .grouping-results {
+    flex: 1;
+    overflow: auto;
+    padding: 4px;
+}
+
+.database-grouping-panel .grouping-results .no-results {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    text-align: center;
+    padding: 20px;
+}
+
+.database-grouping-panel .grouping-results .no-results svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.3;
+    margin-bottom: 8px;
+}
+
+.database-grouping-panel .grouping-results .grouping-summary {
+    display: flex;
+    align-items: center;
+    padding: 4px 6px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    border-bottom: 1px solid var(--vscode-panel-border);
+    gap: 8px;
+}
+
+.database-grouping-panel .grouping-results .grouping-summary .group-count {
+    font-weight: 600;
+    color: var(--vscode-foreground);
+}
+
+/* Result mini table */
+.database-grouping-panel .grouping-results .grouping-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.database-grouping-panel .grouping-results .grouping-table th {
+    position: sticky;
+    top: 0;
+    background: var(--vscode-sideBar-background);
+    padding: 4px 6px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    white-space: nowrap;
+    z-index: 1;
+    cursor: pointer;
+    user-select: none;
+}
+
+.database-grouping-panel .grouping-results .grouping-table th:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.database-grouping-panel .grouping-results .grouping-table th .sort-arrow {
+    margin-left: 3px;
+    font-size: 9px;
+    opacity: 0.5;
+}
+
+.database-grouping-panel .grouping-results .grouping-table th .sort-arrow.active {
+    opacity: 1;
+}
+
+.database-grouping-panel .grouping-results .grouping-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+}
+
+.database-grouping-panel .grouping-results .grouping-table tr:hover td {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.database-grouping-panel .grouping-results .grouping-table .pct-cell {
+    font-family: var(--vscode-editor-font-family, monospace);
+    text-align: right;
+}
+
+.database-grouping-panel .grouping-results .grouping-table .pct-bar-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.database-grouping-panel .grouping-results .grouping-table .pct-bar {
+    height: 8px;
+    background: var(--vscode-progressBar-background);
+    border-radius: 2px;
+    min-width: 2px;
+    transition: width 0.3s ease;
+}
+
+.database-grouping-panel .grouping-results .grouping-table .pct-bar.dark {
+    background: var(--vscode-badge-background);
+}
+
+/* Loading state */
+.database-grouping-panel .grouping-results .loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    gap: 8px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+}
+
+.database-grouping-panel .grouping-results .loading-spinner .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--vscode-panel-border);
+    border-top-color: var(--vscode-progressBar-background);
+    border-radius: 50%;
+    animation: grouping-spin 0.8s linear infinite;
+}
+
+@keyframes grouping-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Error state */
+.database-grouping-panel .grouping-results .grouping-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px;
+    margin: 4px;
+    background: var(--vscode-inputValidation-errorBackground);
+    border: 1px solid var(--vscode-inputValidation-errorBorder);
+    border-radius: 3px;
+    color: var(--vscode-errorForeground);
+    font-size: 11px;
+}
+
+.database-grouping-panel .grouping-results .grouping-error .error-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+/* Function configuration popup */
+.grouping-fn-config-popup {
+    position: fixed;
+    z-index: 10001;
+    background: var(--vscode-dropdown-background);
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    padding: 10px;
+    min-width: 200px;
+    max-width: 280px;
+}
+
+.grouping-fn-config-popup .config-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--vscode-foreground);
+}
+
+.grouping-fn-config-popup .config-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.grouping-fn-config-popup .config-row label {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    min-width: 60px;
+}
+
+.grouping-fn-config-popup .config-row select,
+.grouping-fn-config-popup .config-row input {
+    flex: 1;
+    padding: 3px 6px;
+    border: 1px solid var(--vscode-dropdown-border);
+    border-radius: 2px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-size: 11px;
+}
+
+.grouping-fn-config-popup .config-actions {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.grouping-fn-config-popup .config-actions button {
+    padding: 4px 10px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.grouping-fn-config-popup .config-actions button.primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background);
+}
+
+.grouping-fn-config-popup .config-actions button.primary:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+/* Right side panel bar (thin strip with buttons) */
+.result-panel-right-bar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    border-left: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-sideBar-background);
+    width: 36px;
+    flex-shrink: 0;
+}
+
+.result-panel-right-bar .bar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.result-panel-right-bar .bar-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+    border-color: var(--vscode-panel-border);
+}
+
+.result-panel-right-bar .bar-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.result-panel-right-bar .bar-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.result-panel-right-bar .bar-btn .tooltip {
+    position: absolute;
+    right: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--vscode-editorWidget-background);
+    border: 1px solid var(--vscode-editorWidget-border);
+    color: var(--vscode-editorWidget-foreground);
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+    display: none;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.result-panel-right-bar .bar-btn:hover .tooltip {
+    display: block;
+}

@@ -12,14 +12,12 @@ import {
 import { DuckDbResultBridge } from '../../services/duckdbResultBridge';
 import { SqlParser } from '../../sql/sqlParser';
 import { formatSql } from '../../services/sqlFormatter';
-import { buildExecCommand } from '../../utils/shellUtils';
 import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
 import type { ViewTableDataCommandArgs } from '../../providers/sqlDataAffordanceResolver';
 import { QueryCommandsDependencies } from './queryCommandTypes';
 import { formatQualifiedObjectName, formatQualifiedObjectPathForDisplay } from '../../utils/identifierUtils';
 import {
     confirmSafeExecute,
-    detectPythonScript,
     handleExecutionCompletion
 } from './queryCommandSafety';
 import {
@@ -369,37 +367,9 @@ export function registerQueryCommands(
                     return;
                 }
 
-                // Check for Python script
-                const scriptDetection = detectPythonScript(text.trim());
-                if (scriptDetection.isPython && scriptDetection.script) {
-                    const config = getExtensionConfiguration();
-                    const pythonPath = config.get<string>('pythonPath') || 'python';
-
-                    const python = scriptDetection.pythonPath || pythonPath;
-                    const cmd = buildExecCommand(
-                        python,
-                        scriptDetection.script,
-                        scriptDetection.args || []
-                    );
-
-                    const term = vscode.window.createTerminal({ name: 'JustyBase: Script' });
-                    term.show(true);
-                    term.sendText(cmd, true);
-                    vscode.window.showInformationMessage(`Running script: ${cmd}`);
-                    return;
-                }
-
                 const statementsForSafeExecute = SqlParser.splitStatements(text).filter(
                     q => q.trim().length > 0
                 );
-                if (
-                    !(await confirmSafeExecute(
-                        statementsForSafeExecute.length > 0 ? statementsForSafeExecute : [text]
-                    ))
-                ) {
-                    return;
-                }
-
                 runBatchTimer = createPerformanceTimer('query.run_batch', {
                     payloadSize: text.length
                 });
@@ -467,6 +437,7 @@ export function registerQueryCommands(
                             [],
                             {
                                 retryOnBrokenConnection: false,
+                                confirmSafeExecute: sql => confirmSafeExecute([sql]),
                                 onStatementSucceeded: event =>
                                     deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
                                 onStatementFailed: event => {

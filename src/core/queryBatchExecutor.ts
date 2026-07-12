@@ -24,6 +24,7 @@ import {
     type MacroQueryExecutor,
     type MacroQueryExecutionResult,
 } from "./macroPreprocessor";
+import { createMacroPythonExecutor } from "./macroPythonExecutor";
 import { NzConnection } from "../types";
 import type { DatabaseConnection } from "../contracts/database";
 import { streamingManager } from "./queryCancellation";
@@ -75,6 +76,8 @@ export type BatchExecutionStatus =
 export interface BatchQueryRunOptions {
     continueOnError?: boolean;
     retryOnBrokenConnection?: boolean;
+    /** Confirm the fully expanded SQL immediately before database execution. */
+    confirmSafeExecute?: (sql: string) => Promise<boolean>;
     onQueryError?: (queryIndex: number, sql: string, errorMessage: string) => void;
     onStatementSucceeded?: (event: {
         sql: string;
@@ -287,6 +290,7 @@ export async function prepareQueryForExecutionWithMetadata(
     }, {
         ...macroContext,
         query: queryExecutor ?? macroContext.query,
+        pythonExecutor: macroContext.pythonExecutor ?? createMacroPythonExecutor(),
         exporter: queryExecutor
             ? request => executeMacroExport(request, queryExecutor, logCallback)
             : macroContext.exporter,

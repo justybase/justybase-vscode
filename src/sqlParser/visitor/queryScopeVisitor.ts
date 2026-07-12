@@ -669,7 +669,11 @@ export function starExpression(
   }
 
   const columns: ColumnInfo[] = [];
-  host.getScopeBuilder().getAllVisibleTables().forEach((table) => {
+  // An unqualified star expands only the relations in this SELECT's FROM
+  // clause. Parent scopes remain visible for correlated expressions, but are
+  // not projected by this query. This also prevents a CTE definition in a
+  // parent scope from being expanded alongside its aliased FROM reference.
+  host.getScopeBuilder().getCurrentScopeTables().forEach((table) => {
     columns.push(...table.columns.map((col) => ({ ...col })));
   });
   return columns;

@@ -247,6 +247,55 @@ export function appendLogRows(rsIndex: number, rows: LogRow[]): void {
 }
 
 
+export function extractKeyNetezzaErrorInfo(fullMessage: string): string {
+    // Strip common wrapper prefixes added by the extension host.
+    // Some errors may have nested prefixes (e.g. "Error: ERROR: ..." without "Netezza Error")
+    // so we strip iteratively until no more known prefixes remain.
+    const knownPrefixes = [
+        /^Error:\s*Netezza\s+Error:\s*/i,
+        /^Netezza\s+Error:\s*/i,
+        /^ERROR:\s*/i,
+    ];
+    let msg = fullMessage.trim();
+    let prev: string;
+    do {
+        prev = msg;
+        for (const re of knownPrefixes) {
+            msg = msg.replace(re, '');
+        }
+        msg = msg.trim();
+    } while (msg !== prev);
+
+    if (!msg) {
+        return fullMessage;
+    }
+
+    // Pattern A: Syntax errors where the SQL is quoted after ERROR:
+    //   ERROR: 'SQL TEXT...'
+    //   error
+    //   ^ found X (at char N) expecting Y
+    // After stripping prefixes the message starts with 'SQL...'
+    const firstQuoteIdx = msg.indexOf("'");
+    if (firstQuoteIdx === 0) {
+        const closingQuoteIdx = msg.indexOf("'", 1);
+        if (closingQuoteIdx > firstQuoteIdx) {
+            const afterQuote = msg.substring(closingQuoteIdx + 1).trim();
+            // Remove trailing "error" and "^" marker lines
+            const cleaned = afterQuote
+                .replace(/^error\s*/i, '')
+                .replace(/^\^+\s*/, '')
+                .trim();
+            if (cleaned) {
+                return cleaned;
+            }
+        }
+    }
+
+    // Pattern B: Something like "relation does not exist ..." — already clean
+    // after stripping prefixes. Return as-is.
+    return msg;
+}
+
 export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, container: HTMLElement): void {
     const wrapper = document.createElement('div');
     wrapper.className = 'grid-wrapper error-wrapper' + (rsIndex === getActiveGridIndex() ? ' active' : '');
@@ -259,12 +308,47 @@ export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, contai
 
     const title = document.createElement('div');
     title.className = 'error-title';
-    title.textContent = 'SQL Execution Error';
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'error-icon';
+    iconSpan.textContent = '!';
+    iconSpan.setAttribute('aria-hidden', 'true');
+    title.appendChild(iconSpan);
+    title.append('SQL Execution Error');
     errorDiv.appendChild(title);
 
-    const msg = document.createElement('div');
-    msg.textContent = rs.message || 'Unknown error occurred.';
-    errorDiv.appendChild(msg);
+    const fullMessage = rs.message || 'Unknown error occurred.';
+    const simplifiedMessage = extractKeyNetezzaErrorInfo(fullMessage);
+
+    // Key fragment — shown prominently at the top
+    const summary = document.createElement('div');
+    summary.className = 'error-summary';
+    summary.textContent = simplifiedMessage;
+    errorDiv.appendChild(summary);
+
+    // Full details — collapsible, shown on demand
+    const isDifferent = simplifiedMessage !== fullMessage;
+    if (isDifferent) {
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'error-details-toggle';
+        toggleBtn.type = 'button';
+        toggleBtn.innerHTML = '<span class="arrow">▶</span> Show full error details';
+        toggleBtn.onclick = () => {
+            const details = errorDiv.querySelector('.error-details') as HTMLElement | null;
+            if (!details) return;
+            const isVisible = details.classList.toggle('visible');
+            toggleBtn.innerHTML = isVisible
+                ? '<span class="arrow open">▶</span> Hide full error details'
+                : '<span class="arrow">▶</span> Show full error details';
+            toggleBtn.setAttribute('aria-expanded', String(isVisible));
+        };
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        errorDiv.appendChild(toggleBtn);
+
+        const details = document.createElement('div');
+        details.className = 'error-details';
+        details.textContent = fullMessage;
+        errorDiv.appendChild(details);
+    }
 
     const recoveryHint = document.createElement('div');
     recoveryHint.className = 'error-recovery-hint';

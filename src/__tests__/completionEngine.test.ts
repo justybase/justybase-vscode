@@ -1556,6 +1556,8 @@ SELECT \${|`,
       const sqlItem = items.find((item) => item.label === "%sql(SELECT ...)");
       const sqlListItem = items.find((item) => item.label === "%sqllist(SELECT ...)");
       const exportItem = items.find((item) => item.label === "%export(format, file, query);");
+      const pythonItem = items.find((item) => item.label === "%python script.py [args...]");
+      const doItem = items.find((item) => item.label === "%do; ... %end;");
 
       expect(letItem).toBeDefined();
       expect(letItem?.kind).toBe(CompletionItemKind.Snippet);
@@ -1566,6 +1568,10 @@ SELECT \${|`,
       expect(sqlListItem?.textEdit?.newText).toBe("sqllist(SELECT ${1:column} FROM ${2:table})");
       expect(exportItem?.kind).toBe(CompletionItemKind.Snippet);
       expect(exportItem?.textEdit?.newText).toContain("export(format='${1:xlsx}'");
+      expect(pythonItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(pythonItem?.textEdit?.newText).toContain("python ${1:script.py}");
+      expect(doItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(doItem?.textEdit?.newText).toContain("do;\n");
     });
 
     it("returns inline macro variable completions after ampersand trigger", async () => {

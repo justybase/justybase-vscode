@@ -13,8 +13,13 @@ import type {
     DatabaseAggregationRequest,
     DatabaseAggregationResult,
 } from '../../results/databaseAggregationSql';
+import type {
+    DatabaseGroupingRequest,
+    DatabaseGroupingResultColumn,
+} from '../../results/databaseGroupingSql';
 
 export type ResultPanelExportFormat = 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'xml' | 'sql' | 'markdown' | 'parquet';
+export type ResultPanelExportRowScope = 'loaded' | 'all';
 
 export type ResultPanelExecutionState =
     | 'idle'
@@ -67,7 +72,13 @@ export type ResultPanelWebviewToHostMessage =
     | { command: 'describeWithCopilot'; data: unknown; sql?: string }
     | { command: 'fixSqlError'; errorMessage: string; sql: string }
     | { command: 'initiateExport'; data: ExportMetadata }
-    | { command: 'initiateExportWithSelection'; data: ExportMetadata; format: string; destination: string }
+    | {
+        command: 'initiateExportWithSelection';
+        data: ExportMetadata;
+        format: string;
+        destination: string;
+        rowScope?: ResultPanelExportRowScope;
+      }
     | { command: 'queryLocallyDuckDB'; data: ExportMetadata }
     | { command: 'exportCsv'; data: string | ExportMetadata }
     | { command: 'openInExcel'; data: unknown; sql?: string }
@@ -80,7 +91,10 @@ export type ResultPanelWebviewToHostMessage =
     | { command: 'exportSqlInsert'; data: string | ExportMetadata }
     | { command: 'exportMarkdown'; data: string | ExportMetadata }
     | { command: 'exportParquet'; data: string | ExportMetadata }
-    | { command: 'exportToMdFile'; data: { sourceUri: string; mdDocument: string } }
+    | {
+        command: 'exportToMdFile';
+        data: { sourceUri: string; mdDocument: string; resultSetIndices?: number[]; rowScope?: ResultPanelExportRowScope };
+      }
     | {
         command: 'export';
         format: ResultPanelExportFormat;
@@ -176,7 +190,23 @@ export type ResultPanelWebviewToHostMessage =
         groupPath?: DiskGroupPathItem[];
     }
     | { command: 'moveToDisk'; sourceUri: string; resultSetIndex: number }
-    | { command: 'moveAllToDisk'; sourceUri: string };
+    | { command: 'moveAllToDisk'; sourceUri: string }
+    | {
+        command: 'requestDatabaseGrouping';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        grouping: DatabaseGroupingRequest;
+        timeoutSeconds?: number;
+    }
+    | { command: 'cancelDatabaseGrouping'; sourceUri: string; resultSetIndex: number; requestId: number }
+    | {
+        command: 'previewDatabaseGrouping';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        grouping: DatabaseGroupingRequest;
+    };
 
 export type ResultPanelHostToWebviewMessage =
   | { command: 'hydrate'; data: ResultPanelViewData }
@@ -288,6 +318,26 @@ export type ResultPanelHostToWebviewMessage =
         resultSetIndex: number;
         requestId: number;
         error?: string;
+    }
+    | {
+        command: 'databaseGroupingResult';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        columns?: DatabaseGroupingResultColumn[];
+        rows?: unknown[][];
+        totalRows?: number;
+        truncated?: boolean;
+        sql?: string;
+        error?: string;
+    }
+    | {
+        command: 'databaseGroupingPreviewResult';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        sql?: string;
+        error?: string;
     };
 
 export type ResultPanelInboundMessage = ResultPanelWebviewToHostMessage;
@@ -348,7 +398,10 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'requestRows',
   'diskQuery',
   'moveToDisk',
-  'moveAllToDisk'
+  'moveAllToDisk',
+  'requestDatabaseGrouping',
+  'cancelDatabaseGrouping',
+  'previewDatabaseGrouping'
 ] as const satisfies readonly ResultPanelWebviewToHostMessage['command'][];
 
 export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
@@ -371,7 +424,9 @@ export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
   'diskQueryResult',
   'databaseAggregationResult',
   'databaseFilterValuesResult',
-  'databaseFilterApplyResult'
+  'databaseFilterApplyResult',
+  'databaseGroupingResult',
+  'databaseGroupingPreviewResult'
 ] as const satisfies readonly ResultPanelHostToWebviewMessage['command'][];
 
 export const RESULT_PANEL_INBOUND_COMMANDS = RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS;

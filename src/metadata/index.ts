@@ -5,7 +5,8 @@
 
 export * from './types';
 export * from './helpers';
-export { CachePrefetcher, QueryRunnerFn } from './prefetch';
+export { CachePrefetcher } from './prefetch';
+export type { QueryRunnerFn } from './prefetch';
 export { searchCache } from './search';
 
 // Netezza system queries centralization

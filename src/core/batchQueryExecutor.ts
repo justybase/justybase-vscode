@@ -236,6 +236,11 @@ export async function runQueriesSequentially(
                         continue;
                     }
 
+                    if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute))) {
+                        logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
+                        return allResults;
+                    }
+
                     if (queryStartCallback && !executionId) {
                         executionId = queryStartCallback(i, queryToExecute, resolvedConnectionName);
                         currentExecutionId = executionId;
@@ -564,6 +569,11 @@ export async function runQueriesWithStreaming(
                     if (queryToExecute.trim().length === 0) {
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: variable directive only.`);
                         continue;
+                    }
+
+                    if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute))) {
+                        logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
+                        return;
                     }
 
                     if (queryStartCallback && !executionId) {

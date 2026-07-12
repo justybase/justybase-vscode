@@ -2,8 +2,8 @@
  * Backward-compatible barrel re-export for metadata cache.
  */
 
-export {
-  MetadataCache,
+export { MetadataCache } from './metadata/cache/MetadataCache';
+export type {
   DatabaseMetadata,
   PerKeyEntry,
   CacheType,

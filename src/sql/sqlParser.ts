@@ -413,7 +413,7 @@ export class SqlParser {
     }
 
     private static filterMacroBlockSemicolonOffsets(text: string, semicolonOffsets: number[]): number[] {
-        if (!/%(?:if|else|end)\b/i.test(text)) {
+        if (!/%(?:if|else|do|end)\b/i.test(text)) {
             return semicolonOffsets;
         }
 
@@ -423,6 +423,10 @@ export class SqlParser {
         for (const offset of semicolonOffsets) {
             const directive = this.readMacroDirectiveBeforeSemicolon(text, offset);
             if (directive === 'if') {
+                macroBlockDepth++;
+                continue;
+            }
+            if (directive === 'do') {
                 macroBlockDepth++;
                 continue;
             }
@@ -447,7 +451,7 @@ export class SqlParser {
     private static readMacroDirectiveBeforeSemicolon(
         text: string,
         semicolonOffset: number,
-    ): 'if' | 'else' | 'end' | undefined {
+    ): 'if' | 'else' | 'do' | 'end' | undefined {
         let lineStart = semicolonOffset;
         while (lineStart > 0 && text[lineStart - 1] !== '\n' && text[lineStart - 1] !== '\r') {
             lineStart--;
@@ -457,11 +461,14 @@ export class SqlParser {
         if (/^%if\b[\s\S]*\s+%then\s+%do$/i.test(linePrefix)) {
             return 'if';
         }
-        if (/^%else\s+%do$/i.test(linePrefix)) {
+        if (/(?:^|;)\s*%else\s+%do\s*$/i.test(linePrefix)) {
             return 'else';
         }
-        if (/^%end$/i.test(linePrefix)) {
+        if (/(?:^|;)\s*%end\s*$/i.test(linePrefix)) {
             return 'end';
+        }
+        if (/(?:^|;)\s*%do\s*$/i.test(linePrefix)) {
+            return 'do';
         }
         return undefined;
     }
@@ -613,6 +620,12 @@ export class SqlParser {
                         i++;
                         continue;
                     }
+                    if (directive === 'do') {
+                        macroBlockDepth++;
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
                     if (directive === 'else' && macroBlockDepth > 0) {
                         currentStatement += char;
                         i++;
@@ -704,6 +717,12 @@ export class SqlParser {
                 } else if (char === ';') {
                     const directive = this.readMacroDirectiveBeforeSemicolon(text, i);
                     if (directive === 'if') {
+                        macroBlockDepth++;
+                        currentStatement += char;
+                        i++;
+                        continue;
+                    }
+                    if (directive === 'do') {
                         macroBlockDepth++;
                         currentStatement += char;
                         i++;

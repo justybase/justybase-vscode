@@ -126,6 +126,20 @@ describe("sqlParser/parsingRuntime", () => {
     expect(result.cst).toBeDefined();
   });
 
+  it("sanitizes %python and standalone %do directives before parsing", () => {
+    const result = parseSqlStatements({
+      sql: `%python script.py --value 1;
+%do;
+SELECT 1;
+%end;`,
+      runtime: NETEZZA_SQL_PARSING_RUNTIME,
+    });
+
+    expect(result.lexResult.errors).toHaveLength(0);
+    expect(result.actionableParserErrors).toHaveLength(0);
+    expect(result.cst).toBeDefined();
+  });
+
   it("does not treat macro markers inside strings or comments as syntax", () => {
     const result = parseSqlStatements({
       sql: "SELECT '&x' AS literal -- &comment\n;",
@@ -206,6 +220,24 @@ SELECT 1;`,
   %PUT skipped invalid branch;
 %END;
 SELECT 1;`,
+      runtime: NETEZZA_SQL_PARSING_RUNTIME,
+    });
+
+    expect(result.lexResult.errors).toHaveLength(0);
+    expect(result.actionableParserErrors).toHaveLength(0);
+    expect(result.cst).toBeDefined();
+  });
+
+  it("keeps standalone %DO nesting inside an %IF branch", () => {
+    const result = parseSqlStatements({
+      sql: `%IF 1 = 1 %THEN %DO;
+  %DO;
+    SELECT 1;
+  %END;
+%ELSE %DO;
+  THIS IS NOT VALID SQL;
+%END;
+SELECT 2;`,
       runtime: NETEZZA_SQL_PARSING_RUNTIME,
     });
 

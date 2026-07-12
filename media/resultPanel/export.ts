@@ -42,11 +42,13 @@ interface ResultSetExportMetadata {
     name: string;
     isActive: boolean;
     formatting?: ReturnType<typeof getCurrentExportFormattingMetadata>;
+    rowScope?: ExportRowScope;
 }
 
 interface AllGridsExportPayload {
     sourceUri: string | undefined;
     results: ResultSetExportMetadata[];
+    rowScope?: ExportRowScope;
 }
 
 interface ViewExportMetadata {
@@ -55,6 +57,7 @@ interface ViewExportMetadata {
     rowIndices: number[];
     columnIds: string[];
     formatting: ReturnType<typeof getCurrentExportFormattingMetadata>;
+    rowScope?: ExportRowScope;
 }
 
 interface ExportDragState {
@@ -162,34 +165,26 @@ export function openInExcel(): void {
     const data = getAllGridsExportData();
     if (!data || data.results.length === 0) return;
 
-    vscode.postMessage({
-        command: 'openInExcel',
-        data: data
-    });
+    vscode.postMessage({ command: 'openInExcel', data });
 }
 
 export function openInFilePreview(): void {
     const data = getAllGridsExportData();
     if (!data || data.results.length === 0) return;
 
-    vscode.postMessage({
-        command: 'openInFilePreview',
-        data: data
-    });
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'openInFilePreview', data: scopedData }));
 }
 
 export function openInExcelXlsx(): void {
     const data = getAllGridsExportData();
     if (!data || data.results.length === 0) return;
 
-    vscode.postMessage({
-        command: 'info',
-        text: 'Starting Excel (XLSX) export...'
-    });
-
-    vscode.postMessage({
-        command: 'openInExcelXlsx',
-        data: data
+    postExportWithScope(data, scopedData => {
+        vscode.postMessage({
+            command: 'info',
+            text: 'Starting Excel (XLSX) export...'
+        });
+        vscode.postMessage({ command: 'openInExcelXlsx', data: scopedData });
     });
 }
 
@@ -197,20 +192,14 @@ export function copyAsExcel(): void {
     const data = getAllGridsExportData();
     if (!data || data.results.length === 0) return;
 
-    vscode.postMessage({
-        command: 'copyAsExcel',
-        data: data
-    });
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'copyAsExcel', data: scopedData }));
 }
 
 export function exportToCsv(): void {
     const payload = buildFullGridExportPayload();
     if (!payload) return;
 
-    vscode.postMessage({
-        command: 'exportCsv',
-        data: payload
-    });
+    postExportWithScope(payload, data => vscode.postMessage({ command: 'exportCsv', data }));
 }
 
 const PRIMARY_EXPORT_FORMATS: ExportFormatOption[] = [
@@ -240,6 +229,8 @@ const PRIMARY_EXPORT_DESTINATIONS: ExportDestinationOption[] = [
 ];
 
 let pendingPrimaryExportFormat: string | null = null;
+type ExportRowScope = 'loaded' | 'all';
+let pendingPrimaryExportScope: ExportRowScope | null = null;
 
 export function collectCurrentViewExportMetadata(): ViewExportMetadata | null {
     return buildFullGridExportPayload();
@@ -268,10 +259,63 @@ function closeExportPrimaryMenu(): void {
         menu.style.display = 'none';
     }
     pendingPrimaryExportFormat = null;
+    pendingPrimaryExportScope = null;
     const exportBtn = document.querySelector('#exportSplitBtn .split-btn__primary');
     if (exportBtn) {
         exportBtn.setAttribute('aria-expanded', 'false');
     }
+}
+
+function showStandaloneExportScope(onSelected: (scope: ExportRowScope) => void): void {
+    const menu = getElementById('exportPrimaryMenu');
+    if (!menu) return;
+
+    closeExportSplitMenu();
+    menu.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'export-menu-header export-menu-header--with-back';
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'export-menu-back';
+    cancelButton.textContent = 'Cancel';
+    cancelButton.onclick = (event) => {
+        event.stopPropagation();
+        closeExportPrimaryMenu();
+    };
+    header.appendChild(cancelButton);
+    const title = document.createElement('span');
+    title.className = 'export-menu-header__title';
+    title.textContent = 'Rows to export';
+    header.appendChild(title);
+    menu.appendChild(header);
+
+    const select = (scope: ExportRowScope) => {
+        closeExportPrimaryMenu();
+        onSelected(scope);
+    };
+    menu.appendChild(createExportMenuItem(
+        'Loaded rows',
+        'Export only the rows currently loaded in SQL Results.',
+        () => select('loaded'),
+    ));
+    menu.appendChild(createExportMenuItem(
+        'ALL rows',
+        'Re-run SQL without LIMIT, then export all returned rows.',
+        () => select('all'),
+    ));
+    menu.style.display = 'block';
+}
+
+function postExportWithScope<T extends object>(
+    data: T,
+    post: (data: T & { rowScope?: ExportRowScope }) => void,
+): void {
+    if (!activeResultHasTrailingLimit()) {
+        post(data);
+        return;
+    }
+    showStandaloneExportScope(scope => post({ ...data, rowScope: scope }));
 }
 
 function closeExportSplitMenu(): void {
@@ -329,7 +373,7 @@ function renderExportPrimaryFormatMenu(): void {
     });
 }
 
-function renderExportPrimaryDestinationMenu(formatId: string): void {
+function renderExportPrimaryDestinationMenu(formatId: string, rowScope: ExportRowScope = 'loaded'): void {
     const format = PRIMARY_EXPORT_FORMATS.find(item => item.id === formatId);
     const menu = getElementById('exportPrimaryMenu');
     if (!menu || !format) {
@@ -338,6 +382,7 @@ function renderExportPrimaryDestinationMenu(formatId: string): void {
 
     menu.innerHTML = '';
     pendingPrimaryExportFormat = formatId;
+    pendingPrimaryExportScope = rowScope;
 
     const header = document.createElement('div');
     header.className = 'export-menu-header export-menu-header--with-back';
@@ -366,11 +411,61 @@ function renderExportPrimaryDestinationMenu(formatId: string): void {
 }
 
 function onPrimaryExportFormatSelected(formatId: string): void {
+    if (activeResultHasTrailingLimit()) {
+        renderExportPrimaryScopeMenu(formatId);
+        return;
+    }
     renderExportPrimaryDestinationMenu(formatId);
+}
+
+function activeResultHasTrailingLimit(): boolean {
+    const refreshSql = getResultSetAt(getActiveGridIndex())?.refreshSql?.trim();
+    if (!refreshSql) return false;
+    return /\blimit(?:\s+(?:\/\*[\s\S]*?\*\/\s*)*|\/\*[\s\S]*?\*\/\s*)(\d+)(\s*;?\s*)$/i.test(refreshSql);
+}
+
+function renderExportPrimaryScopeMenu(formatId: string): void {
+    const menu = getElementById('exportPrimaryMenu');
+    if (!menu) return;
+
+    menu.innerHTML = '';
+    pendingPrimaryExportFormat = formatId;
+    pendingPrimaryExportScope = null;
+
+    const header = document.createElement('div');
+    header.className = 'export-menu-header export-menu-header--with-back';
+
+    const backButton = document.createElement('button');
+    backButton.type = 'button';
+    backButton.className = 'export-menu-back';
+    backButton.textContent = 'Back';
+    backButton.onclick = (event) => {
+        event.stopPropagation();
+        renderExportPrimaryFormatMenu();
+    };
+    header.appendChild(backButton);
+
+    const title = document.createElement('span');
+    title.className = 'export-menu-header__title';
+    title.textContent = 'Rows to export';
+    header.appendChild(title);
+    menu.appendChild(header);
+
+    menu.appendChild(createExportMenuItem(
+        'Loaded rows',
+        'Export only the rows currently loaded in SQL Results.',
+        () => renderExportPrimaryDestinationMenu(formatId, 'loaded'),
+    ));
+    menu.appendChild(createExportMenuItem(
+        'ALL rows',
+        'Re-run SQL without LIMIT, then export all returned rows.',
+        () => renderExportPrimaryDestinationMenu(formatId, 'all'),
+    ));
 }
 
 function submitPrimaryExportSelection(formatId: string, destinationId: string): void {
     const exportData = collectCurrentViewExportMetadata();
+    const rowScope = pendingPrimaryExportScope ?? 'loaded';
     closeExportPrimaryMenu();
     closeExportSplitMenu();
 
@@ -382,7 +477,8 @@ function submitPrimaryExportSelection(formatId: string, destinationId: string): 
         command: 'initiateExportWithSelection',
         data: exportData,
         format: formatId,
-        destination: destinationId
+        destination: destinationId,
+        rowScope,
     });
 }
 
@@ -461,40 +557,28 @@ export function exportToJson(): void {
     const payload = buildFullGridExportPayload();
     if (!payload) return;
 
-    vscode.postMessage({
-        command: 'exportJson',
-        data: payload
-    });
+    postExportWithScope(payload, data => vscode.postMessage({ command: 'exportJson', data }));
 }
 
 export function exportToXml(): void {
     const payload = buildFullGridExportPayload();
     if (!payload) return;
 
-    vscode.postMessage({
-        command: 'exportXml',
-        data: payload
-    });
+    postExportWithScope(payload, data => vscode.postMessage({ command: 'exportXml', data }));
 }
 
 export function exportToSqlInsert(): void {
     const payload = buildFullGridExportPayload();
     if (!payload) return;
 
-    vscode.postMessage({
-        command: 'exportSqlInsert',
-        data: payload
-    });
+    postExportWithScope(payload, data => vscode.postMessage({ command: 'exportSqlInsert', data }));
 }
 
 export function exportToMarkdown(): void {
     const payload = buildFullGridExportPayload();
     if (!payload) return;
 
-    vscode.postMessage({
-        command: 'exportMarkdown',
-        data: payload
-    });
+    postExportWithScope(payload, data => vscode.postMessage({ command: 'exportMarkdown', data }));
 }
 
 // Drag and drop handlers for grouping panel
@@ -644,9 +728,7 @@ export function exportAllVisibleToExcel(): void {
 
     const selection = getFullGridExportIndices(grid.tanTable);
 
-    vscode.postMessage({
-        command: 'openInExcel',
-        data: {
+    const data = {
             sourceUri: getActiveSourceUri(),
             results: [{
                 resultSetIndex: getActiveGridIndex(),
@@ -655,8 +737,8 @@ export function exportAllVisibleToExcel(): void {
                 name: getResultSetAt(getActiveGridIndex())?.name || `Result ${getActiveGridIndex() + 1}`,
                 isActive: true
             }]
-        }
-    });
+    };
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'openInExcel', data: scopedData }));
 }
 
 // Export functions that export only selection
@@ -682,16 +764,14 @@ export function exportSelectionToCsv(): void {
 
     const selection = getSelectedIndices(table, rows, allVisibleColumnIds);
 
-    vscode.postMessage({
-        command: 'exportCsv',
-        data: {
+    const data = {
             sourceUri: getActiveSourceUri(),
             resultSetIndex: getActiveGridIndex(),
             rowIndices: selection.rowIndices,
             columnIds: selection.columnIds,
             formatting: getCurrentExportFormattingMetadata()
-        }
-    });
+    };
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'exportCsv', data: scopedData }));
 }
 
 export function exportSelectionToJson(): void {
@@ -716,16 +796,14 @@ export function exportSelectionToJson(): void {
 
     const selection = getSelectedIndices(table, rows, allVisibleColumnIds);
 
-    vscode.postMessage({
-        command: 'exportJson',
-        data: {
+    const data = {
             sourceUri: getActiveSourceUri(),
             resultSetIndex: getActiveGridIndex(),
             rowIndices: selection.rowIndices,
             columnIds: selection.columnIds,
             formatting: getCurrentExportFormattingMetadata()
-        }
-    });
+    };
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'exportJson', data: scopedData }));
 }
 
 export function exportSelectionToExcel(): void {
@@ -750,9 +828,7 @@ export function exportSelectionToExcel(): void {
 
     const selection = getSelectedIndices(table, rows, allVisibleColumnIds);
 
-    vscode.postMessage({
-        command: 'openInExcel',
-        data: {
+    const data = {
             sourceUri: getActiveSourceUri(),
             results: [{
                 resultSetIndex: getActiveGridIndex(),
@@ -761,8 +837,8 @@ export function exportSelectionToExcel(): void {
                 name: getResultSetAt(getActiveGridIndex())?.name || `Result ${getActiveGridIndex() + 1}`,
                 isActive: true
             }]
-        }
-    });
+    };
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'openInExcel', data: scopedData }));
 }
 
 /**
@@ -773,10 +849,7 @@ export function exportToParquet(): void {
     const payload = buildFullGridExportPayload();
     if (!payload) return;
 
-    vscode.postMessage({
-        command: 'exportParquet',
-        data: payload
-    });
+    postExportWithScope(payload, data => vscode.postMessage({ command: 'exportParquet', data }));
 }
 
 export function exportToMdFile(): void {
@@ -833,13 +906,12 @@ export function exportToMdFile(): void {
         mdDocument += '\n---\n\n';
     }
 
-    vscode.postMessage({
-        command: 'exportToMdFile',
-        data: {
-            sourceUri: getActiveSourceUri(),
-            mdDocument: mdDocument
-        }
-    });
+    const data = {
+        sourceUri: getActiveSourceUri(),
+        mdDocument,
+        resultSetIndices: dataResults.map(resultSet => resultSets.indexOf(resultSet)),
+    };
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'exportToMdFile', data: scopedData }));
 }
 
 /**
@@ -897,11 +969,9 @@ export function exportAllResultSetsToExcel(): void {
         return;
     }
 
-    vscode.postMessage({
-        command: 'exportAllResultSetsToExcel',
-        data: {
+    const data = {
             sourceUri: getActiveSourceUri(),
             results: results
-        }
-    });
+    };
+    postExportWithScope(data, scopedData => vscode.postMessage({ command: 'exportAllResultSetsToExcel', data: scopedData }));
 }
