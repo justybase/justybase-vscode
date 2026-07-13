@@ -54,12 +54,21 @@ describe('Selection Stats Status Bar', () => {
             expect(mockStatusBarItem.hide).toHaveBeenCalled();
         });
 
-        it('should hide status bar when cell count exceeds 100', () => {
-            const stats = { cellCount: 101, type: 'mixed' as const, count: 101, distinctCount: 101 };
+        it('should show a calculating state while full-column statistics are pending', () => {
+            updateSelectionStatsStatusBar(mockStatusBarItem, { state: 'calculating' });
+
+            expect(mockStatusBarItem.text).toBe('$(sync~spin) Calculating…');
+            expect(mockStatusBarItem.tooltip).toBe('Calculating selection statistics');
+            expect(mockStatusBarItem.show).toHaveBeenCalled();
+        });
+
+        it('should show status bar when a full column exceeds 100 cells', () => {
+            const stats = { cellCount: 10_000, type: 'mixed' as const, count: 10_000, distinctCount: 101 };
 
             updateSelectionStatsStatusBar(mockStatusBarItem, stats);
 
-            expect(mockStatusBarItem.hide).toHaveBeenCalled();
+            expect(mockStatusBarItem.text).toBe('#10 000 Distinct=101');
+            expect(mockStatusBarItem.show).toHaveBeenCalled();
         });
 
         it('should show status bar with numeric stats when all cells are numeric', () => {

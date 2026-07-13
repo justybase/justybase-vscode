@@ -23,6 +23,12 @@ export interface SelectionStatsPayload {
     max?: string | number;
 }
 
+export interface SelectionStatsCalculatingPayload {
+    state: 'calculating';
+}
+
+export type SelectionStatsUpdatePayload = SelectionStatsPayload | SelectionStatsCalculatingPayload;
+
 /** Subset of webview → host commands used by migrated TS modules. */
 export type ResultPanelWebviewToHostMessage =
     | { command: 'focusView' }

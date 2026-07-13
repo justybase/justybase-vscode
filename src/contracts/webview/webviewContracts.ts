@@ -70,7 +70,7 @@ export type ResultPanelInboundMessage =
     | { command: 'setContext'; key: string; value: unknown }
     | { command: 'clearLogs'; sourceUri: string }
     | { command: 'switchResultSet'; sourceUri: string; resultSetIndex: number }
-    | { command: 'selectionStatsChanged'; stats: SelectionStatsPayload | null }
+    | { command: 'selectionStatsChanged'; stats: SelectionStatsUpdatePayload | null }
     | { command: 'insertCellContent'; text: string; dataType?: string; sqlText?: string }
     | ({ command: 'updateResultFormatting' } & ResultFormattingUpdateRequest)
     | { command: 'saveEdits'; sourceUri: string; resultSetIndex: number; editSource: unknown; edits: unknown[]; deleteRowIndices?: number[] }
@@ -87,6 +87,12 @@ export interface SelectionStatsPayload {
     min?: string | number;
     max?: string | number;
 }
+
+export interface SelectionStatsCalculatingPayload {
+    state: 'calculating';
+}
+
+export type SelectionStatsUpdatePayload = SelectionStatsPayload | SelectionStatsCalculatingPayload;
 
 export interface ResultPanelHydrationMetricsPayload {
     durationMs: number;

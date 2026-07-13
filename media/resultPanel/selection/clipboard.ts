@@ -274,6 +274,9 @@ export interface ClipboardRowResolver {
     resolveRowValues?: (virtualRowIndex: number) => unknown[] | undefined;
     fetchRowValues?: (virtualRowIndex: number) => Promise<unknown[] | undefined>;
     fetchAllRowValues?: () => Promise<unknown[][]>;
+    /** True when the TanStack model holds only the current disk-backed window. */
+    isDiskBacked?: boolean;
+    queryAggregations?: (aggregations: Array<{ columnIndex: number; fn: string }>) => Promise<Array<{ columnIndex: number; fn: string; value: unknown }>>;
 }
 
 function getRawValueFromRowArray(rowValues: unknown[], columnId: string): unknown {

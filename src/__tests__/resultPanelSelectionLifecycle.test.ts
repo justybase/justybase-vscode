@@ -410,4 +410,148 @@ describe('result panel selection lifecycle', () => {
         expect(virtualizedRow.children[1].classList.contains('selected-cell')).toBe(false);
         expect(handlers.hasSelection()).toBe(true);
     });
+
+    it('calculates header column statistics from all rows, not only rendered rows', async () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { postHostMessage } = require('../../media/resultPanel/protocol.js');
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: {
+                wrappers: FakeWrapper[];
+                documentMock: { activeWrapper: FakeWrapper | null };
+            };
+        }).__selectionTestState;
+
+        const renderedRow = new FakeRow(0, [
+            new FakeCell('1', ['row-number-cell']),
+            new FakeCell('1'),
+        ]);
+        const wrapper = new FakeWrapper([renderedRow]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+
+        const values = [1, 2, 3, 4];
+        const tableApi = {
+            getAllColumns: () => [],
+            getRowModel: () => ({ rows: values.map(value => ({ getValue: () => value })) }),
+            getFilteredRowModel: () => ({ rows: values.map(value => ({ getValue: () => value })) }),
+            getVisibleLeafColumns: () => [{ id: '0', columnDef: { header: 'col' } }],
+        };
+
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1) as unknown as {
+            selectColumn: (columnIndex: number) => void;
+        };
+        handlers.selectColumn(0);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(postHostMessage).toHaveBeenLastCalledWith({
+            command: 'selectionStatsChanged',
+            stats: {
+                cellCount: 4,
+                type: 'numeric',
+                count: 4,
+                distinctCount: 4,
+                sum: 10,
+                min: 1,
+                max: 4,
+            },
+        });
+    });
+
+    it('uses one host aggregation request for a disk-backed full-column selection', async () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { postHostMessage } = require('../../media/resultPanel/protocol.js');
+        const { getNumericTypeInfo } = require('../../media/resultPanel/utils.js');
+        getNumericTypeInfo.mockReturnValue({ isNumeric: true });
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: { wrappers: FakeWrapper[]; documentMock: { activeWrapper: FakeWrapper | null } };
+        }).__selectionTestState;
+        const row = new FakeRow(0, [new FakeCell('1', ['row-number-cell']), new FakeCell('1')]);
+        const wrapper = new FakeWrapper([row]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+        const queryAggregations = jest.fn(() => Promise.resolve([
+            { columnIndex: 0, fn: 'count', value: 1_000_000 },
+            { columnIndex: 0, fn: 'countDistinct', value: 500_000 },
+            { columnIndex: 0, fn: 'sum', value: 42 },
+            { columnIndex: 0, fn: 'min', value: -1 },
+            { columnIndex: 0, fn: 'max', value: 10 },
+        ]));
+        const tableApi = {
+            getAllColumns: () => [], getRowModel: () => ({ rows: [] }), getFilteredRowModel: () => ({ rows: [] }),
+            getVisibleLeafColumns: () => [{ id: '0', columnDef: { header: 'col', dataType: 'integer' } }],
+        };
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1, {
+            isDiskBacked: true, queryAggregations,
+        }) as unknown as { selectColumn: (columnIndex: number) => void };
+
+        handlers.selectColumn(0);
+        await Promise.resolve();
+
+        expect(queryAggregations).toHaveBeenCalledTimes(1);
+        expect(postHostMessage).toHaveBeenLastCalledWith({
+            command: 'selectionStatsChanged',
+            stats: { cellCount: 1_000_000, type: 'numeric', count: 1_000_000, distinctCount: 500_000, sum: 42, min: -1, max: 10 },
+        });
+    });
+
+    it('uses inferred column metadata for disk-backed statistics', async () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { postHostMessage } = require('../../media/resultPanel/protocol.js');
+        const { getNumericTypeInfo } = require('../../media/resultPanel/utils.js');
+        getNumericTypeInfo.mockReturnValue({ isNumeric: false });
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: { wrappers: FakeWrapper[]; documentMock: { activeWrapper: FakeWrapper | null } };
+        }).__selectionTestState;
+        const row = new FakeRow(0, [new FakeCell('1', ['row-number-cell']), new FakeCell('20240101')]);
+        const wrapper = new FakeWrapper([row]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+        const queryAggregations = jest.fn(() => Promise.resolve([
+            { columnIndex: 0, fn: 'count', value: 2 },
+            { columnIndex: 0, fn: 'countDistinct', value: 2 },
+            { columnIndex: 0, fn: 'sum', value: 4_048_020 },
+            { columnIndex: 0, fn: 'min', value: 20240101 },
+            { columnIndex: 0, fn: 'max', value: 20240102 },
+        ]));
+        const tableApi = {
+            getAllColumns: () => [], getRowModel: () => ({ rows: [] }), getFilteredRowModel: () => ({ rows: [] }),
+            getVisibleLeafColumns: () => [{ id: '0', columnDef: { header: 'col', dataType: '__inferred_integer__', inferredDateInteger: true } }],
+        };
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1, {
+            isDiskBacked: true, queryAggregations,
+        }) as unknown as { selectColumn: (columnIndex: number) => void };
+
+        handlers.selectColumn(0);
+        await Promise.resolve();
+
+        expect(postHostMessage).toHaveBeenLastCalledWith({
+            command: 'selectionStatsChanged',
+            stats: { cellCount: 2, type: 'date', count: 2, distinctCount: 2, min: '20240101', max: '20240102' },
+        });
+    });
+
+    it('clears calculating statistics when the selection handler is destroyed', () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { postHostMessage } = require('../../media/resultPanel/protocol.js');
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: { wrappers: FakeWrapper[]; documentMock: { activeWrapper: FakeWrapper | null } };
+        }).__selectionTestState;
+        const row = new FakeRow(0, [new FakeCell('1', ['row-number-cell']), new FakeCell('1')]);
+        const wrapper = new FakeWrapper([row]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+        const tableApi = {
+            getAllColumns: () => [], getRowModel: () => ({ rows: [] }), getFilteredRowModel: () => ({ rows: [] }),
+            getVisibleLeafColumns: () => [{ id: '0', columnDef: { header: 'col' } }],
+        };
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1) as unknown as {
+            selectColumn: (columnIndex: number) => void;
+            destroy: () => void;
+        };
+
+        handlers.selectColumn(0);
+        handlers.destroy();
+
+        expect(postHostMessage).toHaveBeenLastCalledWith({ command: 'selectionStatsChanged', stats: null });
+    });
 });

@@ -7,6 +7,7 @@ import type {
     ResultPanelOutboundMessage,
     ResultPanelHydrationMetricsPayload,
     SelectionStatsPayload,
+    SelectionStatsUpdatePayload,
     ResultPanelExportRowScope,
 } from '../contracts/webviews';
 import { ResultStateManager } from '../state/resultStateManager';
@@ -64,7 +65,7 @@ export interface MessageHandlerCallbacks {
     onForceHydrate: () => void;
     onLogRowsApplied?: (sourceUri: string, executionTimestamp: number, totalRows: number) => void;
     onRequestLogSync?: (sourceUri: string, executionTimestamp: number | undefined, currentRows: number) => void;
-    onSelectionStatsChanged?: (stats: SelectionStats | null) => void;
+    onSelectionStatsChanged?: (stats: SelectionStatsUpdatePayload | null) => void;
     onRecordHydrationMetrics?: (metrics: ResultPanelHydrationMetricsPayload) => void;
     onSaveEdits?: (request: SaveEditsRequest) => Promise<{ success: boolean; message: string }>;
     onGetWebviewUri?: (uri: vscode.Uri) => string;
@@ -949,7 +950,7 @@ export class ResultPanelMessageHandler {
         }
     }
 
-    public setSelectionStatsCallback(callback: (stats: SelectionStats | null) => void) {
+    public setSelectionStatsCallback(callback: (stats: SelectionStatsUpdatePayload | null) => void) {
         this._callbacks.onSelectionStatsChanged = callback;
     }
 

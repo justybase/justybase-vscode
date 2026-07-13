@@ -109,7 +109,8 @@ export type {
     ResultPanelOutboundMessage,
     ResultPanelViewData,
     ResultPanelWebviewToHostMessage,
-    SelectionStatsPayload
+    SelectionStatsPayload,
+    SelectionStatsUpdatePayload
 } from './resultPanelContracts';
 
 export type {

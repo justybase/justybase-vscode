@@ -50,6 +50,7 @@ import {
     createContextMenuItem,
     createChartRangeSubmenuItem,
 } from './selection/contextMenu.js';
+import { createSelectionStatsProcessor, type SelectionStatsProcessor } from './selection/statsWorker.js';
 
 const vscode = { postMessage: postHostMessage };
 
@@ -66,8 +67,14 @@ export function setupCellSelectionEvents(
     let startRow: number | null = null;
     let endRow: number | null = null;
     let selectedCells = new Set<string>();
+    // A column selection covers the complete current row model, including rows
+    // outside the DOM window maintained by the virtualizer.
+    let selectedColumnIndex: number | null = null;
     let isAllSelected = false;
     let isDestroyed = false;
+    let selectionStatsRequestVersion = 0;
+    let selectionStatsProcessor: SelectionStatsProcessor | null = null;
+    let selectedColumnFilterKey: string | null = null;
 
     // Selection rectangle overlay matching TableV2 style
     const selRect = document.createElement('div');
@@ -158,6 +165,9 @@ export function setupCellSelectionEvents(
     }
 
     function reapplySelectionBorders() {
+        if (selectedColumnIndex !== null) {
+            return;
+        }
         if (selectedCells.size === 0) return;
 
         selectedCells.forEach(cellId => {
@@ -225,7 +235,12 @@ export function setupCellSelectionEvents(
     }
 
     function _internalClearSelection() {
+        selectionStatsRequestVersion++;
+        selectionStatsProcessor?.dispose();
+        selectionStatsProcessor = null;
+        selectedColumnFilterKey = null;
         isAllSelected = false;
+        selectedColumnIndex = null;
         selRect.style.display = 'none';
         wrapper.querySelectorAll('.anchor-cell').forEach(el => el.classList.remove('anchor-cell'));
         // Clear every visible selected cell — not only selectedCells entries. After Ctrl+A,
@@ -359,20 +374,190 @@ export function setupCellSelectionEvents(
         };
     }
 
+    function postSelectionStats(stats: SelectionStats | null, requestVersion: number): void {
+        if (requestVersion !== selectionStatsRequestVersion) {
+            return;
+        }
+        vscode.postMessage({
+            command: 'selectionStatsChanged',
+            stats
+        });
+    }
+
+    function postSelectionStatsCalculating(requestVersion: number): void {
+        if (requestVersion !== selectionStatsRequestVersion) return;
+        vscode.postMessage({ command: 'selectionStatsChanged', stats: { state: 'calculating' } });
+    }
+
+    function calculateSelectionStats(values: unknown[]): SelectionStats {
+        const numericValues: number[] = [];
+        const dateValues: string[] = [];
+        const textValues: string[] = [];
+
+        values.forEach(value => {
+            if (value === null || value === undefined) {
+                return;
+            }
+
+            const text = String(value).trim();
+            if (text === '' || text === 'NULL' || text === 'null') {
+                return;
+            }
+
+            const cleanText = text.replace(/[\s\u00A0]/g, '');
+            const standardText = cleanText.replace(',', '.');
+            const num = typeof value === 'number' ? value : parseFloat(standardText);
+            if (Number.isFinite(num) && /^-?\d*\.?\d+$/.test(standardText)) {
+                numericValues.push(num);
+            }
+
+            if (text.match(/^\d{4}-\d{2}-\d{2}/) || text.match(/^\d{2}\/\d{2}\/\d{4}/)) {
+                dateValues.push(text);
+            } else if (!/^-?\d*\.?\d+$/.test(standardText)) {
+                textValues.push(text);
+            }
+        });
+
+        const allValues = [...numericValues, ...dateValues, ...textValues];
+        const distinctValues = new Set(allValues);
+        if (numericValues.length > 0 && dateValues.length === 0 && textValues.length === 0) {
+            return {
+                cellCount: allValues.length,
+                type: 'numeric',
+                count: numericValues.length,
+                distinctCount: distinctValues.size,
+                sum: numericValues.reduce((a, b) => a + b, 0),
+                min: Math.min(...numericValues),
+                max: Math.max(...numericValues)
+            };
+        }
+        if (dateValues.length > 0 && numericValues.length === 0 && textValues.length === 0) {
+            const sortedDates = [...dateValues].sort();
+            return {
+                cellCount: allValues.length,
+                type: 'date',
+                count: dateValues.length,
+                distinctCount: distinctValues.size,
+                min: sortedDates[0],
+                max: sortedDates[sortedDates.length - 1]
+            };
+        }
+        if (textValues.length > 0 && numericValues.length === 0 && dateValues.length === 0) {
+            return {
+                cellCount: allValues.length,
+                type: 'text',
+                count: textValues.length,
+                distinctCount: distinctValues.size
+            };
+        }
+        return {
+            cellCount: allValues.length,
+            type: 'mixed',
+            count: allValues.length,
+            distinctCount: distinctValues.size
+        };
+    }
+
+    function getDiskColumnStats(column: TanStackColumn, values: Array<{ fn: string; value: unknown }>): SelectionStats {
+        const aggregate = (fn: string): unknown => values.find(value => value.fn === fn)?.value;
+        const count = Number(aggregate('count') ?? 0);
+        const distinctCount = Number(aggregate('countDistinct') ?? 0);
+        const columnDef = column.columnDef;
+        const isInferredDate = columnDef.inferredDateInteger === true;
+        const isInferredNumeric = columnDef.inferredNumericKind === 'decimal'
+            || columnDef.inferredNumericKind === 'integer'
+            || columnDef.dataType === '__inferred_decimal__'
+            || columnDef.dataType === '__inferred_integer__';
+        const { isNumeric } = getNumericTypeInfo(columnDef.dataType);
+        if (!isInferredDate && (isNumeric || isInferredNumeric)) {
+            return { cellCount: count, type: 'numeric', count, distinctCount, sum: Number(aggregate('sum') ?? 0), min: Number(aggregate('min') ?? 0), max: Number(aggregate('max') ?? 0) };
+        }
+        if (isInferredDate || isTemporalType(columnDef.dataType)) {
+            return { cellCount: count, type: 'date', count, distinctCount, min: String(aggregate('min') ?? ''), max: String(aggregate('max') ?? '') };
+        }
+        return { cellCount: count, type: 'text', count, distinctCount };
+    }
+
+    function getSelectedColumnFilterKey(): string {
+        const state = table.getState?.() ?? {};
+        return JSON.stringify({
+            columnFilters: state.columnFilters ?? [],
+            globalFilter: state.globalFilter ?? '',
+        });
+    }
+
+    function sendMemoryColumnStats(column: TanStackColumn, requestVersion: number): void {
+        const rows = table.getFilteredRowModel().rows;
+        const chunkSize = 2_000;
+        let offset = 0;
+        selectionStatsProcessor?.dispose();
+        selectionStatsProcessor = createSelectionStatsProcessor(
+            stats => {
+                selectionStatsProcessor = null;
+                postSelectionStats(stats, requestVersion);
+            },
+            () => {
+                selectionStatsProcessor = null;
+                postSelectionStats(null, requestVersion);
+            },
+        );
+        const processNextChunk = (): void => {
+            if (requestVersion !== selectionStatsRequestVersion || !selectionStatsProcessor) return;
+            const chunk = rows.slice(offset, offset + chunkSize).map(row => row.getValue(column.id));
+            offset += chunk.length;
+            selectionStatsProcessor.add(chunk);
+            if (offset < rows.length) {
+                setTimeout(processNextChunk, 0);
+            } else {
+                selectionStatsProcessor.complete();
+            }
+        };
+        setTimeout(processNextChunk, 0);
+    }
+
+    function sendSelectedColumnStats(columnIndex: number, requestVersion: number): void {
+        const column = getVisibleColumns()[columnIndex];
+        if (!column) {
+            postSelectionStats(null, requestVersion);
+            return;
+        }
+
+        selectedColumnFilterKey = getSelectedColumnFilterKey();
+
+        postSelectionStatsCalculating(requestVersion);
+        if (clipboardResolver?.isDiskBacked) {
+            const columnIndexForAggregate = Number.parseInt(column.id, 10);
+            if (!Number.isInteger(columnIndexForAggregate) || !clipboardResolver.queryAggregations) {
+                postSelectionStats(null, requestVersion);
+                return;
+            }
+            void clipboardResolver.queryAggregations([
+                { columnIndex: columnIndexForAggregate, fn: 'count' },
+                { columnIndex: columnIndexForAggregate, fn: 'countDistinct' },
+                { columnIndex: columnIndexForAggregate, fn: 'sum' },
+                { columnIndex: columnIndexForAggregate, fn: 'min' },
+                { columnIndex: columnIndexForAggregate, fn: 'max' },
+            ]).then(results => {
+                postSelectionStats(getDiskColumnStats(column, results), requestVersion);
+            }, () => postSelectionStats(null, requestVersion));
+            return;
+        }
+        sendMemoryColumnStats(column, requestVersion);
+    }
+
     function sendSelectionStats() {
+        const requestVersion = ++selectionStatsRequestVersion;
+        if (selectedColumnIndex !== null) {
+            sendSelectedColumnStats(selectedColumnIndex, requestVersion);
+            return;
+        }
         if (selectedCells.size === 0) {
-            vscode.postMessage({
-                command: 'selectionStatsChanged',
-                stats: null
-            });
+            postSelectionStats(null, requestVersion);
             return;
         }
 
         if (selectedCells.size > 100) {
-            vscode.postMessage({
-                command: 'selectionStatsChanged',
-                stats: null
-            });
+            postSelectionStats(null, requestVersion);
             return;
         }
 
@@ -382,90 +567,11 @@ export function setupCellSelectionEvents(
         }).sort((a, b) => a.row - b.row || a.col - b.col);
 
         if (cellArray.length === 0) {
-            vscode.postMessage({
-                command: 'selectionStatsChanged',
-                stats: null
-            });
+            postSelectionStats(null, requestVersion);
             return;
         }
-
-        const numericValues: number[] = [];
-        const dateValues: string[] = [];
-        const textValues: string[] = [];
-
-        cellArray.forEach(cell => {
-            const cellElement = queryCell(cell.cellId);
-            if (cellElement) {
-                const text = cellElement.textContent.trim();
-                
-                if (text === '' || text === 'NULL' || text === 'null') {
-                    return;
-                }
-
-                const cleanText = text.replace(/[\s\u00A0]/g, '');
-                
-                // Allow comma as decimal separator for locale formats by replacing it with dot for parsing
-                const standardText = cleanText.replace(',', '.');
-                
-                const num = parseFloat(standardText);
-                if (!isNaN(num) && /^-?\d*\.?\d+$/.test(standardText)) {
-                    numericValues.push(num);
-                }
-
-                if (text.match(/^\d{4}-\d{2}-\d{2}/) || text.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-                    dateValues.push(text);
-                } else if (!/^-?\d*\.?\d+$/.test(standardText)) {
-                    textValues.push(text);
-                }
-            }
-        });
-
-        const allValues = [...numericValues, ...dateValues, ...textValues];
-        const distinctValues = new Set(allValues);
-        
-        let stats: SelectionStats = {
-            cellCount: allValues.length,
-            type: 'mixed',
-            count: allValues.length,
-            distinctCount: distinctValues.size
-        };
-
-        if (numericValues.length > 0 && dateValues.length === 0 && textValues.length === 0) {
-            const sum = numericValues.reduce((a, b) => a + b, 0);
-            const min = Math.min(...numericValues);
-            const max = Math.max(...numericValues);
-            stats = {
-                cellCount: allValues.length,
-                type: 'numeric',
-                count: numericValues.length,
-                distinctCount: distinctValues.size,
-                sum: sum,
-                min: min,
-                max: max
-            };
-        } else if (dateValues.length > 0 && numericValues.length === 0 && textValues.length === 0) {
-            const sortedDates = [...dateValues].sort();
-            stats = {
-                cellCount: allValues.length,
-                type: 'date',
-                count: dateValues.length,
-                distinctCount: distinctValues.size,
-                min: sortedDates[0],
-                max: sortedDates[sortedDates.length - 1]
-            };
-        } else if (textValues.length > 0 && numericValues.length === 0 && dateValues.length === 0) {
-            stats = {
-                cellCount: allValues.length,
-                type: 'text',
-                count: textValues.length,
-                distinctCount: distinctValues.size
-            };
-        }
-
-        vscode.postMessage({
-            command: 'selectionStatsChanged',
-            stats: stats
-        });
+        const values = cellArray.map(cell => queryCell(cell.cellId)?.textContent ?? null);
+        postSelectionStats(calculateSelectionStats(values), requestVersion);
     }
 
     function addCellIds() {
@@ -486,7 +592,7 @@ export function setupCellSelectionEvents(
                     if (dataCellIndex >= 0) {
                         const cellId = `${rowIndex}-${dataCellIndex}`;
                         (td as HTMLElement).dataset.cellId = cellId;
-                        if (isAllSelected || selectedCells.has(cellId)) {
+                        if (isAllSelected || selectedColumnIndex === dataCellIndex || selectedCells.has(cellId)) {
                             td.classList.add('selected-cell');
                         } else {
                             td.classList.remove('selected-cell');
@@ -1395,6 +1501,12 @@ function performSelectAll() {
     function onTableRowsRendered() {
         addCellIds();
         reapplySelectionBorders();
+        if (selectedColumnIndex !== null) {
+            const currentFilterKey = getSelectedColumnFilterKey();
+            if (currentFilterKey !== selectedColumnFilterKey) {
+                sendSelectionStats();
+            }
+        }
     }
 
     // Initial setup
@@ -1403,20 +1515,21 @@ function performSelectAll() {
     function selectColumn(columnIndex: number): void {
         // Clear previous selection first
         _internalClearSelection();
+        selectedColumnIndex = columnIndex;
 
         // Select all cells in the column
         const rows = wrapper.querySelectorAll('tbody tr[data-index]');
         rows.forEach(tr => {
             const rowIndex = (tr as HTMLElement).dataset.index;
             const cellId = `${rowIndex}-${columnIndex}`;
-            const cell = tr.querySelector(`td[data-cell-id="${cellId}"]`);
+            const cell = queryCell(cellId);
             if (cell) {
                 cell.classList.add('selected-cell');
                 selectedCells.add(cellId);
             }
         });
 
-        setSelectionContexts(selectedCells.size > 0);
+        setSelectionContexts(selectedColumnIndex !== null || selectedCells.size > 0);
 
         sendSelectionStats();
         notifySelectionChanged();
@@ -1523,7 +1636,7 @@ function performSelectAll() {
         clearSelection: clearSelection,
 
         hasSelection: function () {
-            return selectedCells.size > 0;
+            return selectedColumnIndex !== null || selectedCells.size > 0;
         },
 
         selectColumn: selectColumn,
@@ -1535,9 +1648,15 @@ function performSelectAll() {
                 return;
             }
 
+            const shouldClearSelectionStats = selectedColumnIndex !== null && isCurrentActiveWrapper();
             isDestroyed = true;
+            selectionStatsRequestVersion++;
+            selectionStatsProcessor?.dispose();
+            selectionStatsProcessor = null;
+            if (shouldClearSelectionStats) {
+                vscode.postMessage({ command: 'selectionStatsChanged', stats: null });
+            }
             document.removeEventListener('keydown', handleDocumentKeydown, true);
         }
     };
 }
-

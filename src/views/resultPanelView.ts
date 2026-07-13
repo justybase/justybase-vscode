@@ -201,7 +201,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         });
     }
 
-    public setSelectionStatsCallback(callback: (stats: SelectionStats | null) => void) {
+    public setSelectionStatsCallback(callback: (stats: SelectionStats | { state: 'calculating' } | null) => void) {
         this._messageHandler.setSelectionStatsCallback(callback);
     }
 

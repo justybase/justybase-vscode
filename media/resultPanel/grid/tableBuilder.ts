@@ -2121,6 +2121,8 @@ export function createResultSetGrid(
     setupEditModeDelegation();
 
     const clipboardResolver: ClipboardRowResolver = {
+        isDiskBacked: rs.storageMode === 'sqlite',
+        queryAggregations: (aggregations) => queryDiskAggregations(rsIndex, aggregations),
         resolveRowValues: (virtualIndex: number) => {
             const liveRs = getResultSetAt(rsIndex);
             if (liveRs?.storageMode === 'sqlite' && tableState.grouping.length > 0) {

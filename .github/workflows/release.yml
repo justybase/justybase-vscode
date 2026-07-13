@@ -22,7 +22,7 @@ on:
         required: false
         type: string
       draft:
-        description: "Create a draft GitHub Release. Draft releases do not trigger Marketplace publishing until manually published."
+        description: "Create a draft GitHub Release. VSIX assets are still attached, but Marketplace publishing is skipped."
         required: true
         default: true
         type: boolean
@@ -207,8 +207,9 @@ jobs:
             echo '- Draft release: `${{ github.event.inputs.draft }}`'
             echo '- Pre-release: `${{ github.event.inputs.prerelease }}`'
             echo ''
-            echo 'If draft=false, selected extensions are automatically published to Marketplace.'
-            echo 'If draft=true, no publishing occurs. Run Publish Marketplace workflow manually after publishing the draft.'
+            echo 'Selected VSIX files are built and attached to this GitHub Release in the next job.'
+            echo 'If draft=false, they are then published to Marketplace.'
+            echo 'If draft=true, Marketplace publishing is skipped.'
           } >> "$GITHUB_STEP_SUMMARY"
 
   resolve-publish-targets:
@@ -243,9 +244,9 @@ jobs:
           [ "$SNOWFLAKE" = "true" ] && targets+=("snowflake")
           IFS=','; echo "targets=${targets[*]}" >> "$GITHUB_OUTPUT"
 
-  publish-extensions:
-    name: Publish selected extensions to Marketplace
-    if: ${{ github.event.inputs.draft == 'false' && needs.resolve-publish-targets.outputs.publish_targets != '' }}
+  build-attach-and-publish:
+    name: Build and attach selected VSIX files
+    if: ${{ needs.resolve-publish-targets.outputs.publish_targets != '' }}
     needs:
       - prepare-release
       - resolve-publish-targets
@@ -253,4 +254,5 @@ jobs:
     with:
       release_tag: ${{ needs.prepare-release.outputs.release_tag }}
       publish_targets: ${{ needs.resolve-publish-targets.outputs.publish_targets }}
+      publish_marketplace: ${{ github.event.inputs.draft == 'false' }}
     secrets: inherit

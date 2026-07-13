@@ -203,9 +203,15 @@ function formatNumber(num: number): string {
  */
 export function updateSelectionStatsStatusBar(
     statusBarItem: vscode.StatusBarItem,
-    stats?: { cellCount: number; type: 'numeric' | 'date' | 'text' | 'mixed'; count?: number; distinctCount?: number; sum?: number; min?: string | number; max?: string | number } | null
+    stats?: { cellCount: number; type: 'numeric' | 'date' | 'text' | 'mixed'; count?: number; distinctCount?: number; sum?: number; min?: string | number; max?: string | number } | { state: 'calculating' } | null
 ): void {
-    if (!stats || stats.cellCount === 0 || stats.cellCount > 100) {
+    if (stats && 'state' in stats) {
+        statusBarItem.text = '$(sync~spin) Calculating…';
+        statusBarItem.tooltip = 'Calculating selection statistics';
+        statusBarItem.show();
+        return;
+    }
+    if (!stats || stats.cellCount === 0) {
         statusBarItem.hide();
         return;
     }

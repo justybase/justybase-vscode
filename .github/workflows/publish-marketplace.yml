@@ -12,6 +12,11 @@ on:
         required: false
         default: core
         type: string
+      publish_marketplace:
+        description: "Publish attached VSIX files to Visual Studio Code Marketplace."
+        required: false
+        default: true
+        type: boolean
   workflow_dispatch:
     inputs:
       release_tag:
@@ -63,9 +68,14 @@ on:
         required: true
         default: false
         type: boolean
+      publish_marketplace:
+        description: "Publish attached VSIX files to Visual Studio Code Marketplace."
+        required: true
+        default: true
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -550,8 +560,8 @@ jobs:
           path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
           retention-days: 1
 
-  publish-marketplace:
-    name: Publish selected VSIX files to Marketplace
+  attach-release-assets:
+    name: Attach VSIX files to GitHub Release
     needs:
       - validate-release
       - quality-gate
@@ -569,6 +579,55 @@ jobs:
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
       && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download packaged VSIX files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Attach VSIX files to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          mapfile -t vsix_files < <(find artifacts -maxdepth 1 -type f -name '*.vsix' -print | sort)
+
+          if [ "${#vsix_files[@]}" -eq 0 ]; then
+            echo 'No VSIX files were produced.' >&2
+            exit 1
+          fi
+
+          printf 'Attaching %s VSIX file(s) to release %s:\n' "${#vsix_files[@]}" "$RELEASE_TAG"
+          printf ' - %s\n' "${vsix_files[@]}"
+          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" --clobber
+
+  publish-marketplace:
+    name: Publish selected VSIX files to Marketplace
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+      - build-main
+      - build-db2
+      - build-duckdb
+      - build-optional
+      - attach-release-assets
+    if: |
+      always()
+      && inputs.publish_marketplace == true
+      && needs.validate-release.result == 'success'
+      && needs.quality-gate.result == 'success'
+      && needs.test-gate.result == 'success'
+      && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
+      && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
+      && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
+      && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
+      && needs.attach-release-assets.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
