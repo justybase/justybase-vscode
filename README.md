@@ -348,6 +348,19 @@ See [docs/snowflake.md](docs/snowflake.md) for setup, development, security guid
     - Click **Connect** (or edit User Settings).
     - Enter `Host`, `User`, `Password`, and `Database`.
 
+### Manual installation from VSIX
+
+If the Visual Studio Marketplace is temporarily unavailable (for example, it returns an HTTP 429 rate-limit error), you can install a release package manually:
+
+1. Open the project's [GitHub Releases](https://github.com/justybase/justybase-vscode/releases) page.
+2. Open the required release and, under **Assets**, download `justybaselite-netezza-<version>.vsix` when it is provided.
+3. In VS Code, open the Extensions view (`Ctrl+Shift+X`), select the `...` menu, then choose **Install from VSIX...**.
+4. Select the downloaded `.vsix` file and reload VS Code when prompted.
+
+You can also run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`). Manual installation does not provide automatic Marketplace updates; repeat these steps with a newer VSIX release when an update is needed.
+
+> The `Source code (zip)` and `Source code (tar.gz)` files shown by GitHub are source archives, not installable VS Code extensions. Download the `.vsix` file specifically. If a release does not contain a `.vsix` asset, it cannot yet be used for manual installation.
+
 ## Keyboard Shortcuts
 
 | Shortcut            | Action                            |

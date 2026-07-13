@@ -604,7 +604,9 @@ jobs:
 
           printf 'Attaching %s VSIX file(s) to release %s:\n' "${#vsix_files[@]}" "$RELEASE_TAG"
           printf ' - %s\n' "${vsix_files[@]}"
-          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" --clobber
+          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
 
   publish-marketplace:
     name: Publish selected VSIX files to Marketplace
