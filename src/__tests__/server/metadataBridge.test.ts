@@ -43,6 +43,20 @@ describe("MetadataBridge list cache", () => {
     bridge = new MetadataBridge(sendRequest);
   });
 
+  it("scopes external invalidation to documents using the changed connection", async () => {
+    const documentA = "file:///connection-a.sql";
+    const documentB = "file:///connection-b.sql";
+    sendRequest.mockImplementation(async (params) => ({
+      connectionName: params.documentUri === documentA ? "A" : "B",
+    }));
+
+    await bridge.getContext(documentA);
+    await bridge.getContext(documentB);
+
+    expect(bridge.clearConnection("A")).toEqual([documentA]);
+    expect(bridge.clearConnection("B")).toEqual([documentB]);
+  });
+
   // =========================================================================
   // Block A: Cache hit/miss — podstawowe
   // =========================================================================

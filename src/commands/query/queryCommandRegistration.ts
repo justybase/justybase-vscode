@@ -445,7 +445,8 @@ export function registerQueryCommands(
                             [],
                             {
                                 retryOnBrokenConnection: false,
-                                confirmSafeExecute: sql => confirmSafeExecuteForExpandedQuery([text], sql),
+                                confirmSafeExecute: (sql, _queryIndex) =>
+                                    confirmSafeExecuteForExpandedQuery([text], sql),
                                 onStatementSucceeded: event =>
                                     deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
                                 onStatementFailed: event => {

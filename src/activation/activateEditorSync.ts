@@ -4,6 +4,7 @@ import type { ConnectionAccentDecorationProvider } from '../decorations/connecti
 import type { ConnectionManager } from '../core/connectionManager';
 import type { ResultPanelView } from '../views/resultPanelView';
 import type { MetadataPrefetchCoordinator } from './MetadataPrefetchCoordinator';
+import { setContextIfChanged } from '../services/contextKeyService';
 
 function isResultSyncSqlDocument(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
     if (!doc?.uri || typeof doc.languageId !== 'string') {
@@ -41,7 +42,7 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
     } = params;
 
     const clearPrimedResultCopyContext = (): void => {
-        void vscode.commands.executeCommand('setContext', 'netezza.resultsCopyPrimed', false);
+        setContextIfChanged('netezza.resultsCopyPrimed', false);
     };
 
     const syncResultPanelSourceWithEditor = (editor: vscode.TextEditor | undefined) => {
@@ -60,8 +61,8 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         clearPrimedResultCopyContext();
     };
     const clearResultPanelFocusContexts = () => {
-        void vscode.commands.executeCommand('setContext', 'netezza.resultsFocused', false);
-        void vscode.commands.executeCommand('setContext', 'netezza.resultsInputFocused', false);
+        setContextIfChanged('netezza.resultsFocused', false);
+        setContextIfChanged('netezza.resultsInputFocused', false);
     };
 
     context.subscriptions.push(

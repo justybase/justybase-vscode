@@ -43,6 +43,11 @@ export interface DocumentContextChangedParams {
   documentUri: string;
 }
 
+/** Optional connection scope keeps legacy parameter-less invalidation valid. */
+export interface MetadataCacheInvalidatedParams {
+  connectionName?: string;
+}
+
 export interface MetadataObjectItem {
   name: string;
   database?: string;

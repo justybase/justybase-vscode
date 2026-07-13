@@ -170,4 +170,28 @@ describe('startSqlLanguageClient', () => {
             NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION
         );
     });
+
+    it('preserves the connection scope for cross-window metadata refresh', async () => {
+        const { startSqlLanguageClient } = await import('../activation/lspRegistration');
+        const context = {
+            asAbsolutePath: jest.fn((value: string) => value),
+            subscriptions: []
+        } as unknown as vscode.ExtensionContext;
+        let externalRefreshListener: ((connectionName: string) => void) | undefined;
+        const metadataCache = {
+            onDidInvalidate: jest.fn(() => ({ dispose: jest.fn() })),
+            onDidExternalRefresh: jest.fn((listener: (connectionName: string) => void) => {
+                externalRefreshListener = listener;
+                return { dispose: jest.fn() };
+            })
+        } as unknown as MetadataCache;
+
+        await startSqlLanguageClient(context, metadataCache, createConnectionManager());
+        externalRefreshListener?.('connection-a');
+
+        expect(mockSendNotification).toHaveBeenCalledWith(
+            NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
+            { connectionName: 'connection-a' }
+        );
+    });
 });

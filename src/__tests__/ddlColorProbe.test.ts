@@ -38,7 +38,9 @@ function semanticTypeAt(sql: string, id: string, provider: NetezzaSemanticTokens
       return new vscode.Position(b.length - 1, b[b.length - 1].length);
     },
   };
-  const sem = decodeSemantic(provider.provideDocumentSemanticTokens(document as vscode.TextDocument, {} as vscode.CancellationToken).data);
+  const semanticResult = provider.provideDocumentSemanticTokens(document as vscode.TextDocument, {} as vscode.CancellationToken);
+  if (semanticResult instanceof Promise) throw new Error('Expected synchronous semantic tokens in tests');
+  const sem = decodeSemantic(semanticResult.data);
   return sem.find((t) => t.line === line && t.char === char && t.length === id.length)?.type;
 }
 

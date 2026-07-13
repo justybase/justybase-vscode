@@ -770,7 +770,7 @@ describe('extension.ts', () => {
             expect(providerInstance?.setActiveSource).toHaveBeenCalledWith('file:///focused.sql');
         });
 
-        it('should clear primed result copy when active editor focus returns', async () => {
+        it('should not resend already-cleared result contexts when editor focus returns', async () => {
             await activate(mockContext);
 
             const { window, commands } = jest.requireMock('vscode');
@@ -789,9 +789,9 @@ describe('extension.ts', () => {
             const activeEditorCallbacks = (window.onDidChangeActiveTextEditor as jest.Mock).mock.calls.map(call => call[0]);
             activeEditorCallbacks.forEach((callback: (editor: unknown) => void) => callback(mockEditor));
 
-            expect(commands.executeCommand).toHaveBeenCalledWith('setContext', 'netezza.resultsCopyPrimed', false);
-            expect(commands.executeCommand).toHaveBeenCalledWith('setContext', 'netezza.resultsFocused', false);
-            expect(commands.executeCommand).toHaveBeenCalledWith('setContext', 'netezza.resultsInputFocused', false);
+            expect(commands.executeCommand).not.toHaveBeenCalledWith('setContext', 'netezza.resultsCopyPrimed', false);
+            expect(commands.executeCommand).not.toHaveBeenCalledWith('setContext', 'netezza.resultsFocused', false);
+            expect(commands.executeCommand).not.toHaveBeenCalledWith('setContext', 'netezza.resultsInputFocused', false);
         });
     });
 

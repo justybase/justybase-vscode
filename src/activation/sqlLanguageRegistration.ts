@@ -108,14 +108,17 @@ export function registerSqlLanguageFeatures(params: SqlLanguageRegistrationParam
         metadataCache.onDidInvalidate(() => {
             semanticTokensProvider.refresh();
         }),
-        metadataCache.onDidExternalRefresh(() => {
-            semanticTokensProvider.refresh();
+        metadataCache.onDidExternalRefresh((connectionName) => {
+            semanticTokensProvider.refresh(connectionName);
         }),
-        connectionManager.onDidChangeDocumentConnection(() => {
-            semanticTokensProvider.refresh();
+        vscode.workspace.onDidCloseTextDocument((document) => {
+            semanticTokensProvider.releaseDocument(document.uri.toString());
         }),
-        connectionManager.onDidChangeDocumentDatabase(() => {
-            semanticTokensProvider.refresh();
+        connectionManager.onDidChangeDocumentConnection((documentUri) => {
+            semanticTokensProvider.invalidateDocument(documentUri);
+        }),
+        connectionManager.onDidChangeDocumentDatabase((documentUri) => {
+            semanticTokensProvider.invalidateDocument(documentUri);
         })
     );
 

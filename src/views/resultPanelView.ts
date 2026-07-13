@@ -23,6 +23,7 @@ import { ResultSet } from '../types';
 import { detectEditSource } from '../results/editSourceDetector';
 import { MessagePackEncoder } from '../core/streaming';
 import { diskBackedStoreRegistry } from '../core/resultDataProvider/diskBackedStoreRegistry';
+import { setContextIfChanged } from '../services/contextKeyService';
 import {
     DISK_BACKED_FIRST_PAGE_SIZE,
     DISK_BACKED_STREAMING_PREVIEW_ROWS,
@@ -75,6 +76,11 @@ interface HydratePayloadMetrics {
     executingSourceCount: number;
 }
 
+interface LogSyncCursor {
+    executionTimestamp: number;
+    totalRows: number;
+}
+
 const DEFAULT_RESULTS_GRID_FONT_FAMILY = "Menlo, Monaco, Consolas, 'Courier New', monospace";
 
 export class ResultPanelView implements vscode.WebviewViewProvider {
@@ -94,17 +100,20 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     private _viewDisposables: vscode.Disposable[] = [];
     private _formattingStore?: ResultFormattingSettingsStore;
     private _performanceStore?: ResultPanelPerformanceStore;
+    private _acknowledgedLogRows = new Map<string, LogSyncCursor>();
+    private _logSyncRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private _logSyncRetryAttempts = new Map<string, number>();
     /** Last row count posted to webview per streaming result set (pre-insert throttling). */
     private _streamingRowCountLastReported = new Map<string, number>();
     private readonly _context?: vscode.ExtensionContext;
     private readonly _connectionManager?: ConnectionManager;
 
     private _setResultsFocusContext(focused: boolean): void {
-        void vscode.commands.executeCommand('setContext', 'netezza.resultsFocused', focused);
+        setContextIfChanged('netezza.resultsFocused', focused);
     }
 
     private _setResultsInputFocusContext(focused: boolean): void {
-        void vscode.commands.executeCommand('setContext', 'netezza.resultsInputFocused', focused);
+        setContextIfChanged('netezza.resultsInputFocused', focused);
     }
 
     private _clearResultsFocusContexts(): void {
@@ -133,6 +142,10 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             onUpdateWebview: () => this._updateWebview(),
             onPostMessage: msg => this._postMessageToWebview(msg),
             onForceHydrate: () => this._forceHydrate(),
+            onLogRowsApplied: (sourceUri, executionTimestamp, totalRows) =>
+                this._handleLogRowsApplied(sourceUri, executionTimestamp, totalRows),
+            onRequestLogSync: (sourceUri, executionTimestamp, currentRows) =>
+                this._handleLogSyncRequest(sourceUri, executionTimestamp, currentRows),
             onSelectionStatsChanged: undefined,
             onRecordHydrationMetrics: metrics => {
                 void this._performanceStore?.recordFirstPaint(metrics);
@@ -259,6 +272,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
         const viewDisposeDisposable = webviewView.onDidDispose(() => {
             if (this._view === webviewView) {
+                this._clearAllLogSyncRetryTimers();
                 this._isViewReady = false;
                 this._view = undefined;
                 this._htmlGenerator = undefined;
@@ -276,6 +290,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._stateChangeDisposable = undefined;
         this._configurationChangeDisposable?.dispose();
         this._configurationChangeDisposable = undefined;
+        this._clearAllLogSyncRetryTimers();
         this._view = undefined;
         this._htmlGenerator = undefined;
         this._clearResultsFocusContexts();
@@ -377,8 +392,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._syncActiveSourceWithFocusedEditor();
         const update = this._stateManager.log(sourceUri, message);
         if (update && this._stateManager.activeSourceUri === sourceUri) {
-            const outboundMessage: ResultPanelOutboundMessage = { ...update, sourceUri };
-            this._postMessageToWebview(outboundMessage);
+            this._postLogUpdate(update);
         } else if (!update && this._stateManager.activeSourceUri === sourceUri) {
             this._updateWebview();
         }
@@ -395,8 +409,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._syncActiveSourceWithFocusedEditor();
         const { id, incrementalUpdate } = this._stateManager.logExecutionStart(sourceUri, sql, connectionName);
         if (incrementalUpdate && this._stateManager.activeSourceUri === sourceUri) {
-            const outboundMessage: ResultPanelOutboundMessage = { ...incrementalUpdate, sourceUri };
-            this._postMessageToWebview(outboundMessage);
+            this._postLogUpdate(incrementalUpdate);
         }
         return id;
     }
@@ -417,7 +430,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._syncActiveSourceWithFocusedEditor();
         const update = this._stateManager.logExecutionEnd(executionId, rowCount, status, errorMessage);
         if (update && update.sourceUri && update.sourceUri === this._stateManager.activeSourceUri) {
-            this._postMessageToWebview(update);
+            this._postLogUpdate(update);
         } else if (!update && this._stateManager.activeSourceUri) {
             this._updateWebview();
         }
@@ -1254,10 +1267,135 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         disposables.forEach(disposable => disposable.dispose());
     }
 
-    private _postMessageToWebview(message: ResultPanelOutboundMessage) {
+    private _postMessageToWebview(message: ResultPanelOutboundMessage): Thenable<boolean> | undefined {
         if (this._view) {
-            void this._view.webview.postMessage(message);
+            return this._view.webview.postMessage(message);
         }
+        return undefined;
+    }
+
+    private _postLogUpdate(message: Extract<ResultPanelOutboundMessage, { command: 'appendRows' }>): void {
+        const sourceUri = message.sourceUri;
+        if (!sourceUri || message.isLog !== true) {
+            return;
+        }
+
+        this._logSyncRetryAttempts.set(sourceUri, 0);
+        const posted = this._postMessageToWebview(message);
+        if (posted) {
+            posted.then(delivered => {
+                if (!delivered) {
+                    this._stateManager.markStale(sourceUri);
+                }
+            }, () => {
+                this._stateManager.markStale(sourceUri);
+            });
+        } else {
+            this._stateManager.markStale(sourceUri);
+        }
+        this._scheduleLogSyncRetry(sourceUri);
+    }
+
+    private _handleLogRowsApplied(
+        sourceUri: string,
+        executionTimestamp: number,
+        totalRows: number,
+    ): void {
+        const current = this._acknowledgedLogRows.get(sourceUri);
+        if (
+            !current
+            || current.executionTimestamp !== executionTimestamp
+            || totalRows > current.totalRows
+        ) {
+            this._acknowledgedLogRows.set(sourceUri, { executionTimestamp, totalRows });
+        }
+
+        const expected = this._stateManager.getLogSyncUpdate(sourceUri, 0);
+        if (
+            expected
+            && expected.logExecutionTimestamp === executionTimestamp
+            && totalRows >= expected.totalRows
+        ) {
+            this._clearLogSyncRetryTimer(sourceUri);
+            this._logSyncRetryAttempts.delete(sourceUri);
+        } else {
+            this._scheduleLogSyncRetry(sourceUri);
+        }
+    }
+
+    private _handleLogSyncRequest(
+        sourceUri: string,
+        executionTimestamp: number | undefined,
+        currentRows: number,
+    ): void {
+        const latest = this._stateManager.getLogSyncUpdate(sourceUri, 0);
+        if (!latest || this._stateManager.activeSourceUri !== sourceUri) {
+            return;
+        }
+        const fromRow = executionTimestamp === latest.logExecutionTimestamp ? currentRows : 0;
+        const update = this._stateManager.getLogSyncUpdate(sourceUri, fromRow);
+        if (update) {
+            this._postMessageToWebview(update);
+            this._scheduleLogSyncRetry(sourceUri);
+        }
+    }
+
+    private _scheduleLogSyncRetry(sourceUri: string): void {
+        this._clearLogSyncRetryTimer(sourceUri);
+        if (!this._view || !this._isViewReady || this._view.visible !== true) {
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            this._logSyncRetryTimers.delete(sourceUri);
+            const latest = this._stateManager.getLogSyncUpdate(sourceUri, 0);
+            if (!latest || this._stateManager.activeSourceUri !== sourceUri) {
+                return;
+            }
+
+            const acknowledged = this._acknowledgedLogRows.get(sourceUri);
+            if (
+                acknowledged
+                && acknowledged.executionTimestamp === latest.logExecutionTimestamp
+                && acknowledged.totalRows >= latest.totalRows
+            ) {
+                this._logSyncRetryAttempts.delete(sourceUri);
+                return;
+            }
+
+            const attempts = (this._logSyncRetryAttempts.get(sourceUri) ?? 0) + 1;
+            this._logSyncRetryAttempts.set(sourceUri, attempts);
+            if (attempts > 3) {
+                this._stateManager.markStale(sourceUri);
+                this._forceHydrate();
+                return;
+            }
+
+            const fromRow = acknowledged?.executionTimestamp === latest.logExecutionTimestamp
+                ? acknowledged.totalRows
+                : 0;
+            const update = this._stateManager.getLogSyncUpdate(sourceUri, fromRow);
+            if (update) {
+                this._postMessageToWebview(update);
+                this._scheduleLogSyncRetry(sourceUri);
+            }
+        }, 250);
+        this._logSyncRetryTimers.set(sourceUri, timer);
+    }
+
+    private _clearLogSyncRetryTimer(sourceUri: string): void {
+        const timer = this._logSyncRetryTimers.get(sourceUri);
+        if (timer) {
+            clearTimeout(timer);
+            this._logSyncRetryTimers.delete(sourceUri);
+        }
+    }
+
+    private _clearAllLogSyncRetryTimers(): void {
+        for (const timer of this._logSyncRetryTimers.values()) {
+            clearTimeout(timer);
+        }
+        this._logSyncRetryTimers.clear();
     }
 
     private _revealViewForExecution() {

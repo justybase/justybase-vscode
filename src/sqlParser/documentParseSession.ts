@@ -1,9 +1,11 @@
+import type { CstNode } from "chevrotain";
 import type { DatabaseKind } from "../contracts/database";
 import { simpleHash } from "../providers/parsers/hashUtils";
 import {
   buildSemanticScopeFromParseResult,
   type ParserSemanticScope,
 } from "../providers/parsers/parserSqlContext";
+import type { DatabaseSqlValidationProfile } from "../sql/authoring/types";
 import { isIgnorableTrailingDotParserError } from "./parserErrorUtils";
 import {
   parseSqlStatements,
@@ -11,16 +13,13 @@ import {
   type SqlParsingRuntime,
   type SqlStatementsParseResult,
 } from "./parsingRuntime";
-import type { DatabaseSqlValidationProfile } from "../sql/authoring/types";
-import type { CstNode } from "chevrotain";
 import {
   resolveSqlRenameSymbol,
   type SqlRenameResolution,
 } from "./symbols";
 
-const MAX_PARSE_ENTRIES = 32;
-const MAX_SCOPE_ENTRIES = 256;
-const MAX_IN_FLIGHT = 16;
+const MAX_SCOPE_ENTRIES_PER_DOCUMENT = 16;
+const MAX_IN_FLIGHT_DOCUMENTS = 16;
 
 export interface DocumentParseRequest {
   documentUri: string;
@@ -31,50 +30,64 @@ export interface DocumentParseRequest {
   runtime?: SqlParsingRuntime;
 }
 
-interface CachedParseEntry {
+interface DocumentBinding {
+  documentVersion: number;
+  contentHash: string;
+}
+
+interface CachedParseEntry extends DocumentBinding {
+  parseKey: string;
   parseResult: SqlStatementsParseResult;
-  createdAtMs: number;
 }
 
-interface CachedScopeEntry {
-  scope: ParserSemanticScope;
-  createdAtMs: number;
+interface InFlightParse {
+  parseKey: string;
+  promise: Promise<SqlStatementsParseResult>;
 }
 
+/**
+ * Shares one full parse for the current version of each open document.
+ * Older CSTs are discarded as soon as the URI is rebound to new content.
+ */
 export class DocumentParseSession {
   private readonly parseCache = new Map<string, CachedParseEntry>();
-  private readonly scopeCache = new Map<string, CachedScopeEntry>();
-  private readonly inFlight = new Map<
-    string,
-    Promise<SqlStatementsParseResult>
-  >();
-  private readonly documentBindings = new Map<
-    string,
-    { documentVersion: number; contentHash: string }
-  >();
+  private readonly scopeCache = new Map<string, Map<string, ParserSemanticScope>>();
+  private readonly inFlight = new Map<string, InFlightParse>();
+  private readonly documentBindings = new Map<string, DocumentBinding>();
   private parseCacheHits = 0;
   private parseCacheMisses = 0;
 
-  /**
-   * Records the latest document version and content hash for the URI.
-   * Parse and scope caches key on SHA-1 content hash (`buildParseCacheKey`),
-   * not on `documentVersion` alone — identical sql across versions reuses
-   * the same parse entry. Scope entries are invalidated implicitly when
-   * content changes because the parse cache key changes.
-   */
   bindDocumentVersion(
     documentUri: string,
     documentVersion: number,
     sql: string,
   ): void {
-    this.documentBindings.set(documentUri, {
-      documentVersion,
-      contentHash: simpleHash(sql),
-    });
+    const next = { documentVersion, contentHash: simpleHash(sql) };
+    const current = this.documentBindings.get(documentUri);
+    if (current && documentVersion < current.documentVersion) {
+      return;
+    }
+    if (
+      current?.documentVersion === next.documentVersion &&
+      current?.contentHash === next.contentHash
+    ) {
+      return;
+    }
+    if (current?.contentHash === next.contentHash) {
+      this.documentBindings.set(documentUri, next);
+      return;
+    }
+
+    this.documentBindings.set(documentUri, next);
+    this.parseCache.delete(documentUri);
+    this.scopeCache.delete(documentUri);
   }
 
   invalidateDocument(documentUri: string): void {
     this.documentBindings.delete(documentUri);
+    this.parseCache.delete(documentUri);
+    this.scopeCache.delete(documentUri);
+    this.inFlight.delete(documentUri);
   }
 
   clear(): void {
@@ -87,76 +100,88 @@ export class DocumentParseSession {
   }
 
   getParseCacheStats(): { hits: number; misses: number } {
+    return { hits: this.parseCacheHits, misses: this.parseCacheMisses };
+  }
+
+  /** Exposed for cache-bound regression tests and diagnostics. */
+  getCacheSizes(): { parses: number; scopes: number; documents: number } {
+    let scopes = 0;
+    for (const entries of this.scopeCache.values()) {
+      scopes += entries.size;
+    }
     return {
-      hits: this.parseCacheHits,
-      misses: this.parseCacheMisses,
+      parses: this.parseCache.size,
+      scopes,
+      documents: this.documentBindings.size,
     };
   }
 
   getParseResult(request: DocumentParseRequest): SqlStatementsParseResult {
     this.syncDocumentBinding(request);
-    const cacheKey = this.buildParseCacheKey(request);
-    const cached = this.parseCache.get(cacheKey);
-    if (cached) {
+    const parseKey = this.buildParseKey(request);
+    const cached = this.parseCache.get(request.documentUri);
+    if (cached?.parseKey === parseKey) {
       this.parseCacheHits += 1;
-      this.touchParseEntry(cacheKey, cached);
       return cached.parseResult;
     }
-
-    return this.parseAndStore(request, cacheKey);
+    return this.parseAndStore(request, parseKey);
   }
 
   async getParseResultAsync(
     request: DocumentParseRequest,
   ): Promise<SqlStatementsParseResult> {
     this.syncDocumentBinding(request);
-    const cacheKey = this.buildParseCacheKey(request);
-    const cached = this.parseCache.get(cacheKey);
-    if (cached) {
+    const parseKey = this.buildParseKey(request);
+    const cached = this.parseCache.get(request.documentUri);
+    if (cached?.parseKey === parseKey) {
       this.parseCacheHits += 1;
-      this.touchParseEntry(cacheKey, cached);
       return cached.parseResult;
     }
 
-    let inflight = this.inFlight.get(cacheKey);
-    if (!inflight) {
-      while (this.inFlight.size >= MAX_IN_FLIGHT) {
-        await Promise.race(this.inFlight.values());
-      }
-
-      inflight = Promise.resolve().then(() => {
-        const cachedAfterSchedule = this.parseCache.get(cacheKey);
-        if (cachedAfterSchedule) {
-          this.parseCacheHits += 1;
-          this.touchParseEntry(cacheKey, cachedAfterSchedule);
-          return cachedAfterSchedule.parseResult;
-        }
-        return this.parseAndStore(request, cacheKey);
-      });
-
-      this.inFlight.set(cacheKey, inflight);
-      void inflight.finally(() => {
-        if (this.inFlight.get(cacheKey) === inflight) {
-          this.inFlight.delete(cacheKey);
-        }
-      });
+    const existing = this.inFlight.get(request.documentUri);
+    if (existing?.parseKey === parseKey) {
+      return existing.promise;
     }
 
-    return inflight;
+    if (!this.isCurrentBinding(request)) {
+      return this.parseAndStore(request, parseKey);
+    }
+
+    while (this.inFlight.size >= MAX_IN_FLIGHT_DOCUMENTS) {
+      await Promise.race(
+        Array.from(this.inFlight.values(), (entry) => entry.promise),
+      );
+    }
+
+    const promise = Promise.resolve().then(() => {
+      const cachedAfterSchedule = this.parseCache.get(request.documentUri);
+      if (cachedAfterSchedule?.parseKey === parseKey) {
+        this.parseCacheHits += 1;
+        return cachedAfterSchedule.parseResult;
+      }
+      return this.parseAndStore(request, parseKey);
+    });
+    this.inFlight.set(request.documentUri, { parseKey, promise });
+    void promise.finally(() => {
+      if (this.inFlight.get(request.documentUri)?.promise === promise) {
+        this.inFlight.delete(request.documentUri);
+      }
+    });
+    return promise;
   }
 
   getSemanticScope(
     request: DocumentParseRequest & { cursorOffset?: number },
   ): ParserSemanticScope {
-    const parseCacheKey = this.buildParseCacheKey(request);
-    const scopeCacheKey = this.buildScopeCacheKey(
-      parseCacheKey,
-      request.cursorOffset,
-    );
-    const cachedScope = this.scopeCache.get(scopeCacheKey);
-    if (cachedScope) {
-      this.touchScopeEntry(scopeCacheKey, cachedScope);
-      return cachedScope.scope;
+    this.syncDocumentBinding(request);
+    const parseKey = this.buildParseKey(request);
+    const scopeKey = `${parseKey}|offset:${request.cursorOffset ?? -1}`;
+    const entries = this.scopeCache.get(request.documentUri);
+    const cached = entries?.get(scopeKey);
+    if (cached) {
+      entries!.delete(scopeKey);
+      entries!.set(scopeKey, cached);
+      return cached;
     }
 
     const parseResult = this.getParseResult(request);
@@ -166,7 +191,9 @@ export class DocumentParseSession {
       request.cursorOffset,
       request.databaseKind,
     );
-    this.storeScopeEntry(scopeCacheKey, scope);
+    if (this.isCurrentBinding(request)) {
+      this.storeScope(request.documentUri, scopeKey, scope);
+    }
     return scope;
   }
 
@@ -174,10 +201,9 @@ export class DocumentParseSession {
     request: DocumentParseRequest,
     statementIndex: number,
   ): CstNode | undefined {
-    const parseResult = this.getParseResult(request);
-    return parseResult.cst?.children?.statement?.[statementIndex] as
-      | CstNode
-      | undefined;
+    return this.getParseResult(request).cst?.children?.statement?.[
+      statementIndex
+    ] as CstNode | undefined;
   }
 
   async getStatementCstAsync(
@@ -192,17 +218,10 @@ export class DocumentParseSession {
 
   private parseAndStore(
     request: DocumentParseRequest,
-    cacheKey: string,
+    parseKey: string,
   ): SqlStatementsParseResult {
     this.parseCacheMisses += 1;
-
-    const runtime =
-      request.runtime ??
-      resolveSqlParsingRuntime({
-        validationProfile: request.validationProfile,
-        databaseKind: request.databaseKind,
-      });
-
+    const runtime = this.resolveRuntime(request);
     const parseResult = parseSqlStatements({
       sql: request.sql,
       runtime,
@@ -211,7 +230,15 @@ export class DocumentParseSession {
       ignoreParserError: isIgnorableTrailingDotParserError,
     });
 
-    this.storeParseEntry(cacheKey, parseResult);
+    // A queued parse may finish after a newer version has rebound this URI.
+    if (this.isCurrentBinding(request)) {
+      this.parseCache.set(request.documentUri, {
+        documentVersion: request.documentVersion,
+        contentHash: simpleHash(request.sql),
+        parseKey,
+        parseResult,
+      });
+    }
     return parseResult;
   }
 
@@ -223,76 +250,44 @@ export class DocumentParseSession {
     );
   }
 
-  private buildParseCacheKey(request: DocumentParseRequest): string {
-    const runtime =
+  private isCurrentBinding(request: DocumentParseRequest): boolean {
+    const binding = this.documentBindings.get(request.documentUri);
+    return (
+      binding?.documentVersion === request.documentVersion &&
+      binding.contentHash === simpleHash(request.sql)
+    );
+  }
+
+  private resolveRuntime(request: DocumentParseRequest): SqlParsingRuntime {
+    return (
       request.runtime ??
       resolveSqlParsingRuntime({
         validationProfile: request.validationProfile,
         databaseKind: request.databaseKind,
-      });
-    const contentHash = simpleHash(request.sql);
-    return `${runtime.id}|${contentHash}`;
+      })
+    );
   }
 
-  private buildScopeCacheKey(
-    parseCacheKey: string,
-    cursorOffset?: number,
-  ): string {
-    return `${parseCacheKey}|offset:${cursorOffset ?? -1}`;
+  private buildParseKey(request: DocumentParseRequest): string {
+    return `${this.resolveRuntime(request).id}|${simpleHash(request.sql)}`;
   }
 
-  private storeParseEntry(
-    cacheKey: string,
-    parseResult: SqlStatementsParseResult,
-  ): void {
-    this.evictParseEntriesIfNeeded();
-    this.parseCache.set(cacheKey, {
-      parseResult,
-      createdAtMs: Date.now(),
-    });
-  }
-
-  private storeScopeEntry(
-    cacheKey: string,
+  private storeScope(
+    documentUri: string,
+    scopeKey: string,
     scope: ParserSemanticScope,
   ): void {
-    this.evictScopeEntriesIfNeeded();
-    this.scopeCache.set(cacheKey, {
-      scope,
-      createdAtMs: Date.now(),
-    });
-  }
-
-  private touchParseEntry(cacheKey: string, entry: CachedParseEntry): void {
-    entry.createdAtMs = Date.now();
-    this.parseCache.delete(cacheKey);
-    this.parseCache.set(cacheKey, entry);
-  }
-
-  private touchScopeEntry(cacheKey: string, entry: CachedScopeEntry): void {
-    entry.createdAtMs = Date.now();
-    this.scopeCache.delete(cacheKey);
-    this.scopeCache.set(cacheKey, entry);
-  }
-
-  private evictParseEntriesIfNeeded(): void {
-    while (this.parseCache.size >= MAX_PARSE_ENTRIES) {
-      const oldestKey = this.parseCache.keys().next().value;
-      if (oldestKey === undefined) {
-        break;
-      }
-      this.parseCache.delete(oldestKey);
+    let entries = this.scopeCache.get(documentUri);
+    if (!entries) {
+      entries = new Map();
+      this.scopeCache.set(documentUri, entries);
     }
-  }
-
-  private evictScopeEntriesIfNeeded(): void {
-    while (this.scopeCache.size >= MAX_SCOPE_ENTRIES) {
-      const oldestKey = this.scopeCache.keys().next().value;
-      if (oldestKey === undefined) {
-        break;
-      }
-      this.scopeCache.delete(oldestKey);
+    while (entries.size >= MAX_SCOPE_ENTRIES_PER_DOCUMENT) {
+      const oldestKey = entries.keys().next().value;
+      if (oldestKey === undefined) break;
+      entries.delete(oldestKey);
     }
+    entries.set(scopeKey, scope);
   }
 }
 
@@ -301,11 +296,10 @@ export function resolveSqlRenameSymbolWithSession(
   request: DocumentParseRequest,
   offset: number,
 ): SqlRenameResolution | undefined {
-  const parseResult = session.getParseResult(request);
   return resolveSqlRenameSymbol(
     request.sql,
     offset,
     request.databaseKind,
-    parseResult,
+    session.getParseResult(request),
   );
 }

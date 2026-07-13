@@ -140,6 +140,7 @@ export function applyScrollForResultSet(
     options: {
         sourceUri?: string | null;
         autoBottomLogs?: boolean;
+        forceBottomLogs?: boolean;
         verifyAfterFrame?: boolean;
         preferScrollAnchor?: boolean;
     } = {},
@@ -158,7 +159,9 @@ export function applyScrollForResultSet(
         && scrollState
         && applyScrollAnchorForGrid(rsIndex, scrollState);
 
-    if (!usedAnchor && hasRestorableScroll) {
+    if (options.forceBottomLogs && isConsole) {
+        scrollTarget.scrollTop = scrollTarget.scrollHeight;
+    } else if (!usedAnchor && hasRestorableScroll) {
         applyScrollStateToTarget(scrollTarget, scrollState);
     } else if (!usedAnchor && options.autoBottomLogs && isConsole) {
         scrollTarget.scrollTop = scrollTarget.scrollHeight;
@@ -180,7 +183,9 @@ export function applyScrollForResultSet(
                 && frameState
                 && applyScrollAnchorForGrid(rsIndex, frameState);
 
-            if (!usedFrameAnchor && hasFrameRestorableScroll) {
+            if (options.forceBottomLogs && isFrameConsole) {
+                frameTarget.scrollTop = frameTarget.scrollHeight;
+            } else if (!usedFrameAnchor && hasFrameRestorableScroll) {
                 applyScrollStateToTarget(frameTarget, frameState);
             } else if (!usedFrameAnchor && options.autoBottomLogs && isFrameConsole) {
                 frameTarget.scrollTop = frameTarget.scrollHeight;

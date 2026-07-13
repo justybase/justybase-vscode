@@ -236,7 +236,7 @@ export async function runQueriesSequentially(
                         continue;
                     }
 
-                    if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute))) {
+                    if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute, i))) {
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
                         return allResults;
                     }
@@ -571,7 +571,7 @@ export async function runQueriesWithStreaming(
                         continue;
                     }
 
-                    if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute))) {
+                    if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute, i))) {
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
                         return;
                     }

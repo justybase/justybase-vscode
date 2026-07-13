@@ -137,12 +137,19 @@ function tokensFor(
   sql: string,
 ): ReturnType<typeof decodeSemanticTokens> {
   const document = createDocument(sql);
-  return decodeSemanticTokens(
-    provider.provideDocumentSemanticTokens(
-      document,
-      new vscode.CancellationTokenSource().token,
-    ).data,
+  const result = provider.provideDocumentSemanticTokens(
+    document,
+    new vscode.CancellationTokenSource().token,
   );
+  if (result instanceof Promise) throw new Error('Expected synchronous semantic tokens in tests');
+  return decodeSemanticTokens(result.data);
+}
+
+function requireSemanticTokens(
+  result: vscode.SemanticTokens | Promise<vscode.SemanticTokens>,
+): vscode.SemanticTokens {
+  if (result instanceof Promise) throw new Error('Expected synchronous semantic tokens in tests');
+  return result;
 }
 
 describe('NetezzaSemanticTokensProvider', () => {
@@ -194,7 +201,7 @@ describe('NetezzaSemanticTokensProvider', () => {
       document,
       new vscode.CancellationTokenSource().token,
     );
-    const tokens = decodeSemanticTokens(semanticTokens.data);
+    const tokens = decodeSemanticTokens(requireSemanticTokens(semanticTokens).data);
     expect(tokens.length).toBeGreaterThan(0);
 
     const aliasInSelect = findToken(tokens, sql, document, 'ALIAS_TABELI');
@@ -217,10 +224,10 @@ describe('NetezzaSemanticTokensProvider', () => {
     const document = createDocument(sql);
 
     const tokens = decodeSemanticTokens(
-      provider.provideDocumentSemanticTokens(
+      requireSemanticTokens(provider.provideDocumentSemanticTokens(
         document,
         new vscode.CancellationTokenSource().token,
-      ).data,
+      )).data,
     );
 
     expect(findToken(tokens, sql, document, 'JUST_DATA')?.tokenType).toBe(DATABASE_IDX);
@@ -232,10 +239,10 @@ describe('NetezzaSemanticTokensProvider', () => {
     const updateSql = 'UPDATE t SET col = 1 WHERE t.id > 0';
     const updateDoc = createDocument(updateSql);
     const updateTokens = decodeSemanticTokens(
-      provider.provideDocumentSemanticTokens(
+      requireSemanticTokens(provider.provideDocumentSemanticTokens(
         updateDoc,
         new vscode.CancellationTokenSource().token,
-      ).data,
+      )).data,
     );
 
     expect(findToken(updateTokens, updateSql, updateDoc, 't', 0)?.tokenType).toBe(ALIAS_IDX);
@@ -245,10 +252,10 @@ describe('NetezzaSemanticTokensProvider', () => {
     const deleteSql = "DELETE FROM ADMIN.ORDERS o WHERE o.status = 'X'";
     const deleteDoc = createDocument(deleteSql);
     const deleteTokens = decodeSemanticTokens(
-      provider.provideDocumentSemanticTokens(
+      requireSemanticTokens(provider.provideDocumentSemanticTokens(
         deleteDoc,
         new vscode.CancellationTokenSource().token,
-      ).data,
+      )).data,
     );
 
     expect(findToken(deleteTokens, deleteSql, deleteDoc, 'ADMIN')?.tokenType).toBe(SCHEMA_IDX);
@@ -271,10 +278,10 @@ END;
 END_PROC;`;
     const document = createDocument(sql);
     const tokens = decodeSemanticTokens(
-      provider.provideDocumentSemanticTokens(
+      requireSemanticTokens(provider.provideDocumentSemanticTokens(
         document,
         new vscode.CancellationTokenSource().token,
-      ).data,
+      )).data,
     );
 
     expect(findToken(tokens, sql, document, 'p')?.tokenType).toBe(TABLE_IDX);

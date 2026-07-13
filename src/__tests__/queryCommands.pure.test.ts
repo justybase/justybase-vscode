@@ -7,10 +7,32 @@ import {
     stripLeadingComments,
     detectRiskyStatements,
     formatRiskyStatementMessage,
-    confirmSafeExecuteWithDeps
+    confirmSafeExecuteWithDeps,
+    createExpandedQuerySafetyChecker
 } from '../commands/queryCommands';
 
 describe('queryCommands pure functions', () => {
+    describe('createExpandedQuerySafetyChecker', () => {
+        it('detects an introduced risk even when another source query has the same risk type', async () => {
+            const confirm = jest.fn().mockResolvedValue(true);
+            const check = createExpandedQuerySafetyChecker(
+                ['DELETE FROM explicit_table', '%INCLUDE unsafe.sql'],
+                confirm,
+            );
+
+            await expect(check('DELETE FROM included_table', 1)).resolves.toBe(true);
+            expect(confirm).toHaveBeenCalledWith(['DELETE FROM included_table']);
+        });
+
+        it('does not reconfirm a risk already present in the corresponding source query', async () => {
+            const confirm = jest.fn().mockResolvedValue(true);
+            const check = createExpandedQuerySafetyChecker(['DELETE FROM explicit_table'], confirm);
+
+            await expect(check('DELETE FROM explicit_table', 0)).resolves.toBe(true);
+            expect(confirm).not.toHaveBeenCalled();
+        });
+    });
+
     describe('stripLeadingComments', () => {
         it('should remove single-line comments at the beginning', () => {
             const sql = '-- This is a comment\nSELECT * FROM users';

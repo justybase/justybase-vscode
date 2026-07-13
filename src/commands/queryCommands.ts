@@ -19,6 +19,7 @@ export {
     detectRiskyStatements,
     formatRiskyStatementMessage,
     confirmSafeExecuteWithDeps,
+    createExpandedQuerySafetyChecker,
     handleExecutionCompletionWithDeps
 } from './query/queryCommandSafety';
 

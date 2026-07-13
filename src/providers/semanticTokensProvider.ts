@@ -17,6 +17,25 @@ import type { MetadataCache } from "../metadataCache";
 import type { ConnectionManager } from "../core/connectionManager";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import { isOffsetInSqlComment } from "../sql/sqlSourceScan";
+import { LARGE_SCRIPT_CHAR_THRESHOLD } from "../sqlParser/validationConfig";
+import { simpleHash } from "./parsers/hashUtils";
+import { tryGetLogger } from "../utils/logger";
+
+const SEMANTIC_TOKEN_DEBOUNCE_MS = 150;
+const SLOW_SEMANTIC_TOKEN_MS = 100;
+
+interface SemanticTokenCacheEntry {
+  identity: string;
+  tokens: vscode.SemanticTokens;
+}
+
+interface PendingSemanticRequest {
+  identity: string;
+  startedAt: number;
+  timer: ReturnType<typeof setTimeout>;
+  promise: Promise<vscode.SemanticTokens>;
+  resolve: (tokens: vscode.SemanticTokens) => void;
+}
 
 const LEGEND = new vscode.SemanticTokensLegend(
   [
@@ -162,36 +181,197 @@ export class NetezzaSemanticTokensProvider
 {
   private readonly _onDidChangeSemanticTokens = new vscode.EventEmitter<void>();
   readonly onDidChangeSemanticTokens = this._onDidChangeSemanticTokens.event;
+  private readonly tokenCache = new Map<string, SemanticTokenCacheEntry>();
+  private readonly pendingRequests = new Map<string, PendingSemanticRequest>();
+  private readonly connectionEpochs = new Map<string, number>();
+  private globalMetadataEpoch = 0;
 
   constructor(
     private readonly metadataCache?: MetadataCache,
     private readonly connectionManager?: ConnectionManager,
     private readonly parseSession?: DocumentParseSession,
+    private readonly debounceMs = process.env.NODE_ENV === "test"
+      ? 0
+      : SEMANTIC_TOKEN_DEBOUNCE_MS,
   ) {}
 
   getLegend(): vscode.SemanticTokensLegend {
     return LEGEND;
   }
 
-  refresh(): void {
+  refresh(connectionName?: string): void {
+    if (connectionName) {
+      const key = connectionName.toUpperCase();
+      this.connectionEpochs.set(key, (this.connectionEpochs.get(key) ?? 0) + 1);
+    } else {
+      this.globalMetadataEpoch += 1;
+      this.tokenCache.clear();
+    }
     this._onDidChangeSemanticTokens.fire();
   }
 
+  invalidateDocument(documentUri: string): void {
+    this.cancelPending(documentUri, "document-context-changed");
+    this.tokenCache.delete(documentUri);
+    this._onDidChangeSemanticTokens.fire();
+  }
+
+  releaseDocument(documentUri: string): void {
+    this.cancelPending(documentUri, "document-closed");
+    this.tokenCache.delete(documentUri);
+  }
+
   dispose(): void {
+    for (const documentUri of this.pendingRequests.keys()) {
+      this.cancelPending(documentUri, "provider-disposed");
+    }
+    this.tokenCache.clear();
     this._onDidChangeSemanticTokens.dispose();
   }
 
   provideDocumentSemanticTokens(
     document: vscode.TextDocument,
-    _token: vscode.CancellationToken,
-  ): vscode.SemanticTokens {
+    token: vscode.CancellationToken,
+  ): vscode.SemanticTokens | Promise<vscode.SemanticTokens> {
     const text = document.getText();
+    const documentUri = document.uri.toString();
+    const connectionName = this.connectionManager?.getConnectionForExecution(
+      documentUri,
+    );
+    const identity = this.buildTokenIdentity(
+      document.version,
+      text,
+      connectionName,
+    );
+
+    if (token.isCancellationRequested) {
+      return this.emptyTokens();
+    }
+
+    const cached = this.tokenCache.get(documentUri);
+    if (cached?.identity === identity) {
+      return cached.tokens;
+    }
+
+    if (this.debounceMs <= 0) {
+      return this.computeTokens(
+        document,
+        text,
+        token,
+        identity,
+        connectionName,
+        false,
+      );
+    }
+
+    const pending = this.pendingRequests.get(documentUri);
+    if (pending) {
+      this.cancelPending(documentUri, "superseded");
+    }
+
+    let resolveRequest!: (tokens: vscode.SemanticTokens) => void;
+    const promise = new Promise<vscode.SemanticTokens>((resolve) => {
+      resolveRequest = resolve;
+    });
+    const startedAt = performance.now();
+    const timer = setTimeout(() => {
+      const current = this.pendingRequests.get(documentUri);
+      if (current?.identity !== identity || token.isCancellationRequested) {
+        this.cancelPending(documentUri, "cancelled-before-tokenize");
+        return;
+      }
+      this.pendingRequests.delete(documentUri);
+      resolveRequest(
+        this.computeTokens(
+          document,
+          text,
+          token,
+          identity,
+          connectionName,
+          false,
+        ),
+      );
+    }, this.debounceMs);
+    this.pendingRequests.set(documentUri, {
+      identity,
+      startedAt,
+      timer,
+      promise,
+      resolve: resolveRequest,
+    });
+    return promise;
+  }
+
+  private computeTokens(
+    document: vscode.TextDocument,
+    text: string,
+    token: vscode.CancellationToken,
+    identity: string,
+    connectionName: string | undefined,
+    cacheHit: boolean,
+    startedAt = performance.now(),
+  ): vscode.SemanticTokens {
+    const documentUri = document.uri.toString();
 
     try {
-      return this.tokenize(text, document);
-    } catch {
-      return new vscode.SemanticTokens(new Uint32Array(0));
+      const tokens = this.tokenize(text, document, token);
+      const cancelled = token.isCancellationRequested;
+      if (!cancelled && this.buildTokenIdentity(document.version, text, connectionName) === identity) {
+        this.tokenCache.set(documentUri, { identity, tokens });
+      }
+      this.logSlowPath(document, text.length, startedAt, cacheHit, cancelled);
+      return cancelled ? this.emptyTokens() : tokens;
+    } catch (error: unknown) {
+      this.logSlowPath(document, text.length, startedAt, cacheHit, true, error);
+      return this.emptyTokens();
     }
+  }
+
+  private buildTokenIdentity(
+    documentVersion: number,
+    text: string,
+    connectionName?: string,
+  ): string {
+    const connectionKey = connectionName?.toUpperCase() ?? "";
+    const connectionEpoch = this.connectionEpochs.get(connectionKey) ?? 0;
+    return `${documentVersion}|${simpleHash(text)}|${this.globalMetadataEpoch}|${connectionKey}|${connectionEpoch}`;
+  }
+
+  private cancelPending(documentUri: string, reason: string): void {
+    const pending = this.pendingRequests.get(documentUri);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingRequests.delete(documentUri);
+    pending.resolve(this.emptyTokens());
+    const durationMs = performance.now() - pending.startedAt;
+    if (durationMs >= SLOW_SEMANTIC_TOKEN_MS) {
+      tryGetLogger()?.warn(
+        `[SemanticTokens] slow cancelled request uri=${documentUri} durationMs=${durationMs.toFixed(1)} reason=${reason}`,
+      );
+    }
+  }
+
+  private emptyTokens(): vscode.SemanticTokens {
+    return new vscode.SemanticTokens(new Uint32Array(0));
+  }
+
+  private logSlowPath(
+    document: vscode.TextDocument,
+    length: number,
+    startedAt: number,
+    cacheHit: boolean,
+    cancelled: boolean,
+    error?: unknown,
+  ): void {
+    const durationMs = performance.now() - startedAt;
+    if (durationMs < SLOW_SEMANTIC_TOKEN_MS) return;
+    const memory = process.memoryUsage();
+    const suffix = error
+      ? ` error=${error instanceof Error ? error.message : String(error)}`
+      : "";
+    tryGetLogger()?.warn(
+      `[SemanticTokens] slow uri=${document.uri.toString()} version=${document.version} length=${length} durationMs=${durationMs.toFixed(1)} cache=${cacheHit ? "hit" : "miss"} cancelled=${cancelled} heapUsed=${memory.heapUsed} rss=${memory.rss}${suffix}`,
+    );
   }
 
   private resolveEffectiveDatabase(
@@ -267,7 +447,9 @@ export class NetezzaSemanticTokensProvider
   private tokenize(
     text: string,
     document: vscode.TextDocument,
+    cancellationToken: vscode.CancellationToken,
   ): vscode.SemanticTokens {
+    if (cancellationToken.isCancellationRequested) return this.emptyTokens();
     const lexResult = SqlLexer.tokenize(text);
     const builder = new vscode.SemanticTokensBuilder(LEGEND);
 
@@ -276,48 +458,66 @@ export class NetezzaSemanticTokensProvider
       documentUri,
     );
 
-    const scope = this.resolveDocumentScope(document, text, databaseKind);
-
-    const identifierRoles = collectIdentifierOccurrencesFromScope(scope);
+    if (cancellationToken.isCancellationRequested) return this.emptyTokens();
+    const useParser = text.length <= LARGE_SCRIPT_CHAR_THRESHOLD;
+    const scope = useParser
+      ? this.resolveDocumentScope(document, text, databaseKind)
+      : undefined;
+    const identifierRoles = scope
+      ? collectIdentifierOccurrencesFromScope(scope)
+      : new Map<number, { role: IdentifierSemanticRole }>();
     const aliasNames = new Set<string>();
     let columnNames = new Set<string>();
 
-    try {
-      const bindingsForColoring =
-        scope.globalAliasBindings.size > 0
-          ? scope.globalAliasBindings
-          : scope.preferredAliasBindings;
+    if (scope) {
+      try {
+        const bindingsForColoring =
+          scope.globalAliasBindings.size > 0
+            ? scope.globalAliasBindings
+            : scope.preferredAliasBindings;
 
-      bindingsForColoring.forEach((binding, key) => {
-        if (key !== binding.table.toUpperCase()) {
-          aliasNames.add(key);
-        }
-      });
+        bindingsForColoring.forEach((binding, key) => {
+          if (key !== binding.table.toUpperCase()) {
+            aliasNames.add(key);
+          }
+        });
 
-      if (
-        this.metadataCache &&
-        this.connectionManager &&
-        bindingsForColoring.size > 0
-      ) {
-        const connectionName = this.connectionManager.getConnectionForExecution(documentUri);
-        if (connectionName) {
-          const effectiveDatabase = this.resolveEffectiveDatabase(documentUri, connectionName);
-          columnNames = this.collectColumnNames(
-            bindingsForColoring,
-            connectionName,
-            this.metadataCache,
-            effectiveDatabase,
-            databaseKind,
-          );
+        if (
+          this.metadataCache &&
+          this.connectionManager &&
+          bindingsForColoring.size > 0
+        ) {
+          const connectionName =
+            this.connectionManager.getConnectionForExecution(documentUri);
+          if (connectionName) {
+            const effectiveDatabase = this.resolveEffectiveDatabase(
+              documentUri,
+              connectionName,
+            );
+            columnNames = this.collectColumnNames(
+              bindingsForColoring,
+              connectionName,
+              this.metadataCache,
+              effectiveDatabase,
+              databaseKind,
+            );
+          }
         }
+      } catch {
+        // Metadata lookup failed — proceed with CST map and lexer fallback only
       }
-    } catch {
-      // Parser failed — proceed with CST map and lexer fallback only
     }
 
     let previousTokenWasAlias = false;
 
-    for (const token of lexResult.tokens) {
+    for (let tokenIndex = 0; tokenIndex < lexResult.tokens.length; tokenIndex++) {
+      if (
+        tokenIndex % 256 === 0 &&
+        cancellationToken.isCancellationRequested
+      ) {
+        return this.emptyTokens();
+      }
+      const token = lexResult.tokens[tokenIndex];
       const tokenTypeName = token.tokenType.name;
       const startOffset = token.startOffset;
       const image = token.image;

@@ -67,6 +67,8 @@ export interface ResultPanelViewData {
 
 export type ResultPanelWebviewToHostMessage =
   | { command: 'ready' }
+  | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
+  | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
   | { command: 'selectAll' }
   | { command: 'reportHydrationMetrics'; metrics: ResultPanelHydrationMetricsPayload }
     | { command: 'describeWithCopilot'; data: unknown; sql?: string }
@@ -235,6 +237,10 @@ export type ResultPanelHostToWebviewMessage =
         isLastChunk: boolean;
         limitReached: boolean;
         isLog?: boolean;
+        /** Log-only cursor used to detect gaps and make retries idempotent. */
+        fromRow?: number;
+        /** Identifies the current log execution when isLog is true. */
+        logExecutionTimestamp?: number;
         isFirstChunk?: boolean;
         columns?: { name: string; type?: string; scale?: number }[];
         sql?: string;
@@ -345,6 +351,8 @@ export type ResultPanelOutboundMessage = ResultPanelHostToWebviewMessage;
 
 export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'ready',
+  'logRowsApplied',
+  'requestLogSync',
   'selectAll',
   'reportHydrationMetrics',
   'describeWithCopilot',

@@ -14,6 +14,8 @@ export type ResultPanelExportRowScope = 'loaded' | 'all';
 
 export type ResultPanelInboundMessage =
     | { command: 'ready' }
+    | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
+    | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
     | { command: 'reportHydrationMetrics'; metrics: ResultPanelHydrationMetricsPayload }
     | { command: 'describeWithCopilot'; data: unknown; sql?: string }
     | { command: 'fixSqlError'; errorMessage: string; sql: string }
@@ -128,6 +130,8 @@ export type ResultPanelOutboundMessage =
         isLastChunk: boolean;
         limitReached: boolean;
         isLog?: boolean;
+        fromRow?: number;
+        logExecutionTimestamp?: number;
         isFirstChunk?: boolean;
         columns?: { name: string; type?: string; scale?: number }[];
         sql?: string;
@@ -287,6 +291,8 @@ export type LoginPanelOutboundMessage = {
 
 export const RESULT_PANEL_INBOUND_COMMANDS = [
     'ready',
+    'logRowsApplied',
+    'requestLogSync',
     'reportHydrationMetrics',
     'describeWithCopilot',
     'fixSqlError',

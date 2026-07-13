@@ -32,6 +32,7 @@ export class QueryHistoryManager {
     private storage: HistoryStorage;
     private saveDebounceTimer: NodeJS.Timeout | undefined = undefined;
     private pendingSave = false; // Track if there's a pending save
+    private flushPromise: Promise<void> | undefined;
 
     private _onDidAddEntry = new vscode.EventEmitter<QueryHistoryEntry>();
     public readonly onDidAddEntry = this._onDidAddEntry.event;
@@ -93,6 +94,32 @@ export class QueryHistoryManager {
     }
 
     private async flushToArchive(): Promise<void> {
+        const flushThreshold = QueryHistoryManager.ACTIVE_LIMIT + QueryHistoryManager.BATCH_ARCHIVE_SIZE;
+
+        while (true) {
+            let activeFlush = this.flushPromise;
+            if (!activeFlush) {
+                activeFlush = this.flushToArchiveInternal();
+                this.flushPromise = activeFlush;
+            }
+
+            try {
+                await activeFlush;
+            } finally {
+                if (this.flushPromise === activeFlush) {
+                    this.flushPromise = undefined;
+                }
+            }
+
+            // Entries can arrive while the shared flush is awaiting disk I/O.
+            // Re-run before resolving callers if that burst crossed the threshold again.
+            if (this.cache.length < flushThreshold) {
+                return;
+            }
+        }
+    }
+
+    private async flushToArchiveInternal(): Promise<void> {
         try {
             const excessCount = this.cache.length - QueryHistoryManager.ACTIVE_LIMIT;
             if (excessCount <= 0) return;

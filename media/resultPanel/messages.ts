@@ -30,7 +30,7 @@ import {
 } from './state.js';
 import { showError } from './utils.js';
 import { renderDocIndicator, renderResultSetTabs, switchToResultSet, updateLogsTabSpinner } from './tabs.js';
-import { renderGrids, updateLoadingState, appendLogRows, updateControlsVisibility, syncGlobalFilterInput } from './grid.js';
+import { renderGrids, updateLoadingState, appendLogRows, replaceLogRows, updateControlsVisibility, syncGlobalFilterInput } from './grid.js';
 import { updateRowCountInfo, applyRowLimitReachedFlag, renderRowCountInfo } from './filter.js';
 import { syncDiskStreamingRowCount } from './diskQuerySpec.js';
 import { syncAnalysisView } from './analysis.js';
@@ -202,6 +202,20 @@ function syncExecutionChrome(): void {
     updateLoadingState();
     updateExecutionStatusBanner();
     updateResultLimitBanner();
+}
+
+function acknowledgeCurrentLogRows(): void {
+    const sourceUri = getActiveSourceUri();
+    const logResultSet = getResultSets().find(resultSet => resultSet?.isLog);
+    if (!sourceUri || !logResultSet) {
+        return;
+    }
+    postHostMessage({
+        command: 'logRowsApplied',
+        sourceUri,
+        executionTimestamp: logResultSet.executionTimestamp ?? 0,
+        totalRows: logResultSet.data.length,
+    });
 }
 
 export function inferExecutionState(): ResultPanelExecutionState {
@@ -878,6 +892,7 @@ export function handleHydrate(data: HydrateData): void {
                 setPreserveScrollDuringHydrate(false);
             });
         }
+        acknowledgeCurrentLogRows();
         resetEditSession();
         callPanelMethod('updateEditButtons');
     } catch (e: unknown) {
@@ -916,6 +931,8 @@ export function handleAppendRows(message: Record<string, unknown>): void {
     const isLog = message.isLog as boolean | undefined;
     const isFirstChunk = message.isFirstChunk === true;
     const sourceUri = message.sourceUri as string | undefined;
+    const fromRow = message.fromRow as number | undefined;
+    const logExecutionTimestamp = message.logExecutionTimestamp as number | undefined;
 
     let rowBatch: unknown[][] = [];
     if (Array.isArray(rows)) {
@@ -999,11 +1016,78 @@ export function handleAppendRows(message: Record<string, unknown>): void {
         const rowBatchRows = rowBatch;
 
         if (isLog || rs.isLog) {
-            rs.data.push(...rowBatchRows);
-            appendLogRows(resultSetIndex, rowBatchRows as LogRow[]);
+            const currentRows = rs.data.length;
+            const currentExecutionTimestamp = rs.executionTimestamp ?? 0;
+            const hasExecutionMismatch = typeof logExecutionTimestamp === 'number'
+                && currentExecutionTimestamp !== logExecutionTimestamp;
+
+            if (hasExecutionMismatch && fromRow !== 0) {
+                if (sourceUri) {
+                    postHostMessage({
+                        command: 'requestLogSync',
+                        sourceUri,
+                        executionTimestamp: currentExecutionTimestamp,
+                        currentRows,
+                    });
+                }
+                return;
+            }
+
+            if (typeof fromRow === 'number' && !hasExecutionMismatch) {
+                if (currentRows < fromRow) {
+                    if (sourceUri) {
+                        postHostMessage({
+                            command: 'requestLogSync',
+                            sourceUri,
+                            executionTimestamp: currentExecutionTimestamp,
+                            currentRows,
+                        });
+                    }
+                    return;
+                }
+                if (currentRows >= (totalRows ?? 0)) {
+                    if (sourceUri && typeof logExecutionTimestamp === 'number') {
+                        postHostMessage({
+                            command: 'logRowsApplied',
+                            sourceUri,
+                            executionTimestamp: logExecutionTimestamp,
+                            totalRows: currentRows,
+                        });
+                    }
+                    return;
+                }
+                if (currentRows !== fromRow) {
+                    if (sourceUri) {
+                        postHostMessage({
+                            command: 'requestLogSync',
+                            sourceUri,
+                            executionTimestamp: currentExecutionTimestamp,
+                            currentRows,
+                        });
+                    }
+                    return;
+                }
+            }
+
+            if (hasExecutionMismatch) {
+                rs.data = [...rowBatchRows];
+                rs.executionTimestamp = logExecutionTimestamp;
+                replaceLogRows(resultSetIndex, rowBatchRows as LogRow[]);
+            } else {
+                rs.data.push(...rowBatchRows);
+                appendLogRows(resultSetIndex, rowBatchRows as LogRow[]);
+            }
             applyRowLimitReachedFlag(rs, limitReached === true);
             updateExecutionStatusBanner();
             updateLoadingState();
+            if (sourceUri && typeof logExecutionTimestamp === 'number') {
+                postHostMessage({
+                    command: 'logRowsApplied',
+                    sourceUri,
+                    executionTimestamp: logExecutionTimestamp,
+                    totalRows: rs.data.length,
+                });
+            }
             return;
         }
 

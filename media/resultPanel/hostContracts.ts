@@ -26,6 +26,8 @@ export interface SelectionStatsPayload {
 /** Subset of webview → host commands used by migrated TS modules. */
 export type ResultPanelWebviewToHostMessage =
     | { command: 'focusView' }
+    | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
+    | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
     | { command: 'describeWithCopilot'; data: unknown[]; sql: string }
     | { command: 'closeResult'; sourceUri: string; resultSetIndex: number }
     | { command: 'closeAllResults'; sourceUri: string }

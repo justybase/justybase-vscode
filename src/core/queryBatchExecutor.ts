@@ -77,7 +77,7 @@ export interface BatchQueryRunOptions {
     continueOnError?: boolean;
     retryOnBrokenConnection?: boolean;
     /** Confirm the fully expanded SQL immediately before database execution. */
-    confirmSafeExecute?: (sql: string) => Promise<boolean>;
+    confirmSafeExecute?: (sql: string, queryIndex: number) => Promise<boolean>;
     onQueryError?: (queryIndex: number, sql: string, errorMessage: string) => void;
     onStatementSucceeded?: (event: {
         sql: string;

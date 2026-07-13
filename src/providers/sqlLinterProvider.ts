@@ -208,6 +208,7 @@ export class SqlLinterProvider {
     document: vscode.TextDocument,
     onDemand: boolean = false,
   ): Promise<LintIssue[]> {
+    const startedAt = performance.now();
     if (!this.shouldRunExtensionHostLint(document) && !onDemand) {
       this.diagnosticCollection.delete(document.uri);
       this.clearCacheForUri(document.uri);
@@ -234,6 +235,7 @@ export class SqlLinterProvider {
     const cached = this.lintResultCache.get(cacheKey);
     if (cached) {
       this.diagnosticCollection.set(document.uri, cached.diagnostics);
+      this.logSlowLint(document, startedAt, true, false);
       return cached.issues;
     }
 
@@ -249,6 +251,7 @@ export class SqlLinterProvider {
     const diagnostics = this.issuesToDiagnostics(document, issues);
 
     if (!this.isCurrentDocumentVersion(document.uri, documentVersion)) {
+      this.logSlowLint(document, startedAt, false, true);
       return [];
     }
 
@@ -259,7 +262,22 @@ export class SqlLinterProvider {
       diagnostics,
       issues,
     });
+    this.logSlowLint(document, startedAt, false, false);
     return issues;
+  }
+
+  private logSlowLint(
+    document: vscode.TextDocument,
+    startedAt: number,
+    cacheHit: boolean,
+    cancelled: boolean,
+  ): void {
+    const durationMs = performance.now() - startedAt;
+    if (durationMs < 100) return;
+    const memory = process.memoryUsage();
+    Logger.tryGetInstance()?.warn(
+      `[SqlLinter] slow uri=${document.uri.toString()} version=${document.version} length=${document.getText().length} durationMs=${durationMs.toFixed(1)} cache=${cacheHit ? "hit" : "miss"} cancelled=${cancelled} heapUsed=${memory.heapUsed} rss=${memory.rss}`,
+    );
   }
 
   private scheduleLint(document: vscode.TextDocument): void {

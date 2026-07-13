@@ -212,6 +212,7 @@ export async function onExternalCacheUpdate(
   }
 
   for (const connectionName of connectionNames) {
+    const refreshStartedAt = performance.now();
     if (deps.hasConnectionPrefetchInProgress(connectionName)) {
       continue;
     }
@@ -284,6 +285,14 @@ export async function onExternalCacheUpdate(
     deps.prefetcher.markAllObjectsPrefetchTriggered(connectionName);
 
     deps.onExternalRefresh(connectionName);
+
+    const durationMs = performance.now() - refreshStartedAt;
+    if (durationMs >= 100) {
+      const memory = process.memoryUsage();
+      Logger.getInstance().warn(
+        `[MetadataCache] slow external refresh connection=${connectionName} durationMs=${durationMs.toFixed(1)} heapUsed=${memory.heapUsed} rss=${memory.rss}`,
+      );
+    }
 
     Logger.getInstance().info(
       `[MetadataCache] External update applied for ${connectionName}`,

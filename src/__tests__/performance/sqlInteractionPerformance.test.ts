@@ -147,6 +147,174 @@ describe('SQL interaction performance', () => {
         spy.mockRestore();
       }
     });
+
+    it('coalesces 300 rapid document versions and publishes only the latest', async () => {
+      jest.useFakeTimers();
+      const spy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
+      const session = new DocumentParseSession();
+      const provider = new NetezzaSemanticTokensProvider(
+        undefined,
+        undefined,
+        session,
+        150,
+      );
+      const requests: Array<Promise<vscode.SemanticTokens>> = [];
+
+      try {
+        for (let version = 1; version <= 300; version++) {
+          const sql = `${SAMPLE_SQL}\n-- edit ${version}`;
+          const base = createLargeSqlDocument(sql, 'file:///semantic-burst.sql');
+          const document = { ...base, version } as vscode.TextDocument;
+          requests.push(Promise.resolve(provider.provideDocumentSemanticTokens(
+            document,
+            { isCancellationRequested: false } as vscode.CancellationToken,
+          )));
+        }
+
+        jest.advanceTimersByTime(150);
+        const results = await Promise.all(requests);
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(results.slice(0, -1).every((result) => result.data.length === 0)).toBe(true);
+        expect(results[results.length - 1]?.data.length).toBeGreaterThan(0);
+        expect(session.getCacheSizes().parses).toBe(1);
+      } finally {
+        provider.dispose();
+        spy.mockRestore();
+        jest.useRealTimers();
+      }
+    });
+
+    it('restarts same-version pending work after the previous caller is cancelled', async () => {
+      jest.useFakeTimers();
+      const spy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
+      const provider = new NetezzaSemanticTokensProvider(
+        undefined,
+        undefined,
+        new DocumentParseSession(),
+        150,
+      );
+      const document = createLargeSqlDocument(
+        SAMPLE_SQL,
+        'file:///semantic-cancelled-replacement.sql',
+      );
+      const firstToken = { isCancellationRequested: false };
+      const replacementToken = { isCancellationRequested: false };
+
+      try {
+        const firstRequest = Promise.resolve(
+          provider.provideDocumentSemanticTokens(
+            document,
+            firstToken as vscode.CancellationToken,
+          ),
+        );
+        firstToken.isCancellationRequested = true;
+        const replacementRequest = Promise.resolve(
+          provider.provideDocumentSemanticTokens(
+            document,
+            replacementToken as vscode.CancellationToken,
+          ),
+        );
+
+        jest.advanceTimersByTime(150);
+        const [firstResult, replacementResult] = await Promise.all([
+          firstRequest,
+          replacementRequest,
+        ]);
+
+        expect(firstResult.data.length).toBe(0);
+        expect(replacementResult.data.length).toBeGreaterThan(0);
+        expect(spy).toHaveBeenCalledTimes(1);
+      } finally {
+        provider.dispose();
+        spy.mockRestore();
+        jest.useRealTimers();
+      }
+    });
+
+    it('uses lexer-only coloring above the large-script threshold', () => {
+      const spy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
+      const provider = new NetezzaSemanticTokensProvider(
+        undefined,
+        undefined,
+        new DocumentParseSession(),
+        0,
+      );
+      const sql = `SELECT builtin_col FROM source_table;\n${'-- padding\n'.repeat(16_000)}`;
+      const document = createLargeSqlDocument(sql, 'file:///semantic-large.sql');
+
+      try {
+        const result = provider.provideDocumentSemanticTokens(
+          document,
+          { isCancellationRequested: false } as vscode.CancellationToken,
+        );
+        expect(result).not.toBeInstanceOf(Promise);
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        provider.dispose();
+        spy.mockRestore();
+      }
+    });
+
+    it('does not recompute documents on unaffected metadata connections', () => {
+      const session = new DocumentParseSession();
+      const connectionManager = {
+        getConnectionForExecution: jest.fn((uri: string) =>
+          uri.includes('connection-a') ? 'A' : 'B'),
+        getExecutionDatabaseKind: jest.fn(() => 'netezza'),
+      } as unknown as ConnectionManager;
+      const provider = new NetezzaSemanticTokensProvider(
+        undefined,
+        connectionManager,
+        session,
+        0,
+      );
+      const documentA = createLargeSqlDocument(SAMPLE_SQL, 'file:///connection-a.sql');
+      const documentB = createLargeSqlDocument(SAMPLE_SQL, 'file:///connection-b.sql');
+      const token = { isCancellationRequested: false } as vscode.CancellationToken;
+
+      try {
+        const initialA = provider.provideDocumentSemanticTokens(documentA, token);
+        const initialB = provider.provideDocumentSemanticTokens(documentB, token);
+
+        provider.refresh('A');
+        const refreshedA = provider.provideDocumentSemanticTokens(documentA, token);
+        const refreshedB = provider.provideDocumentSemanticTokens(documentB, token);
+
+        expect(refreshedA).not.toBe(initialA);
+        expect(refreshedB).toBe(initialB);
+      } finally {
+        provider.dispose();
+      }
+    });
+  });
+
+  describe('parse cache bounds', () => {
+    it('retains only the current parse and sixteen scopes per active document', () => {
+      const session = new DocumentParseSession();
+      const uri = 'file:///changing-document.sql';
+      for (let version = 1; version <= 300; version++) {
+        const sql = `SELECT ${version} AS value;`;
+        session.getParseResult({ documentUri: uri, documentVersion: version, sql });
+      }
+
+      const currentSql = 'SELECT value FROM source_table;';
+      for (let offset = 0; offset < 40; offset++) {
+        session.getSemanticScope({
+          documentUri: uri,
+          documentVersion: 301,
+          sql: currentSql,
+          cursorOffset: Math.min(offset, currentSql.length),
+        });
+      }
+
+      expect(session.getCacheSizes()).toEqual({
+        parses: 1,
+        scopes: 16,
+        documents: 1,
+      });
+      session.invalidateDocument(uri);
+      expect(session.getCacheSizes()).toEqual({ parses: 0, scopes: 0, documents: 0 });
+    });
   });
 
   describe('shared extension parse session', () => {

@@ -229,21 +229,36 @@ export function appendLogRows(rsIndex: number, rows: LogRow[]): void {
         return;
     }
 
-    // Check if auto-scroll should happen BEFORE appending
-    const isHidden = consoleView.clientHeight === 0;
-    const distanceToBottom = consoleView.scrollHeight - consoleView.scrollTop - consoleView.clientHeight;
-    const shouldScroll = isHidden || distanceToBottom <= 50;
-
     rows.forEach(row => {
         const line = createLogLineElement(row);
         consoleView.appendChild(line);
     });
 
-    if (shouldScroll) {
+    const shouldFollowLatest = rsIndex === getActiveGridIndex()
+        && (getResultPanelWindow().executingSources?.has(getActiveSourceUri() ?? '') ?? false);
+    if (shouldFollowLatest) {
+        consoleView.scrollTop = consoleView.scrollHeight;
         requestAnimationFrame(() => {
             consoleView.scrollTop = consoleView.scrollHeight;
         });
     }
+}
+
+export function replaceLogRows(rsIndex: number, rows: LogRow[]): void {
+    if (!ensureLogConsoleRendered(rsIndex)) {
+        return;
+    }
+    const wrapper = document.querySelector(`.grid-wrapper[data-index="${rsIndex}"].console-wrapper`);
+    const consoleView = wrapper?.querySelector('.console-view');
+    if (!consoleView) {
+        return;
+    }
+    consoleView.innerHTML = '';
+    rows.forEach(row => consoleView.appendChild(createLogLineElement(row)));
+    consoleView.scrollTop = consoleView.scrollHeight;
+    requestAnimationFrame(() => {
+        consoleView.scrollTop = consoleView.scrollHeight;
+    });
 }
 
 

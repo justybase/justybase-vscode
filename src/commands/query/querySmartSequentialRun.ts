@@ -10,7 +10,7 @@ import { createPerformanceTimer, formatPerformanceEvent } from '../../services/p
 import { QueryCommandsDependencies } from './queryCommandTypes';
 import {
     confirmSafeExecute,
-    confirmSafeExecuteForExpandedQuery,
+    createExpandedQuerySafetyChecker,
     handleExecutionCompletion,
 } from './queryCommandSafety';
 import { toPerfErrorCode } from './queryCommandTuning';
@@ -147,8 +147,10 @@ export async function runSmartSequentialQuery(
             resultPanelProvider.logExecutionEnd(executionId, rowCount, status, error);
         };
 
+        const confirmExpandedQuery = createExpandedQuerySafetyChecker(queries);
+
         const batchOptions: BatchQueryRunOptions = {
-            confirmSafeExecute: sql => confirmSafeExecuteForExpandedQuery(queries, sql),
+            confirmSafeExecute: confirmExpandedQuery,
             onStatementSucceeded: event => deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
             onStatementFailed: event => {
                 deps.tableDdlSynchronizer?.handleExecutionFailure(event.connectionName, event.documentUri);

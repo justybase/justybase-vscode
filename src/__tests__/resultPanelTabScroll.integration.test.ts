@@ -80,6 +80,8 @@ function createConsoleWrapper(rsIndex: number, scrollTop = 0) {
         scrollLeft: 0,
         scrollHeight: 8000,
         clientHeight: 400,
+        style: {},
+        classList: { contains: jest.fn(() => false) },
     };
     return {
         scrollTop: 0,
@@ -151,6 +153,7 @@ describe('Result ↔ Logs tab scroll integration', () => {
             value: {
                 requestAnimationFrame: (cb: FrameRequestCallback) => { cb(0); return 0; },
                 activeSource: testSource,
+                executingSources: new Set<string>(),
                 resultSets: [
                     { executionTimestamp: 1000, isLog: false, data: [[1]] },
                     { executionTimestamp: 1001, isLog: true, data: [[1]] },
@@ -226,6 +229,23 @@ describe('Result ↔ Logs tab scroll integration', () => {
 
         expect(dataWrapper.scrollTop).not.toBe(7600);
         expect(dataWrapper.scrollTop).toBe(2500);
+    });
+
+    it('forces active Logs to the latest row while execution is running', () => {
+        const win = global.window as unknown as { executingSources: Set<string> };
+        win.executingSources.add(testSource);
+        logsWrapper._consoleView.scrollTop = 100;
+        (global as { __scrollCache?: Record<string, Record<number, unknown>> }).__scrollCache = {
+            [testSource]: {
+                1: { scrollTop: 100, scrollLeft: 0, timestamp: 1001 },
+            },
+        };
+
+        const { switchToResultSet } = require('../../media/resultPanel/tabs.js');
+        switchToResultSet(1);
+        jest.advanceTimersByTime(50);
+
+        expect(logsWrapper._consoleView.scrollTop).toBe(logsWrapper._consoleView.scrollHeight);
     });
 
     it('preserves Result scroll when render would reset scroll position', () => {

@@ -97,7 +97,7 @@ export function createLargeSqlDocument(
 export function benchmarkSync(
   fn: () => void,
   iterations = 3,
-  warmup = 1,
+  warmup = 0,
 ): { avgMs: number; maxMs: number } {
   for (let i = 0; i < warmup; i++) {
     fn();

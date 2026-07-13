@@ -16,6 +16,7 @@ import {
   NETEZZA_GET_METADATA_REQUEST,
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
   type DocumentContextChangedParams,
+  type MetadataCacheInvalidatedParams,
   type MetadataResponse,
 } from "../lsp/protocol";
 import { LspCompletionEngine } from "./completionEngine";
@@ -120,14 +121,26 @@ connection.onNotification(
   },
 );
 
-connection.onNotification(NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION, () => {
-  metadataBridge.clearAll();
-  documentValidationSession.clear();
-  for (const document of documents.all()) {
-    diagnosticsHandler.scheduleDiagnostics(document);
-  }
-  requestInlayHintRefresh(connection);
-});
+connection.onNotification(
+  NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
+  (params?: MetadataCacheInvalidatedParams) => {
+    const affectedUris = params?.connectionName
+      ? new Set(metadataBridge.clearConnection(params.connectionName))
+      : undefined;
+    if (!affectedUris) {
+      metadataBridge.clearAll();
+      documentValidationSession.clear();
+    }
+    for (const document of documents.all()) {
+      if (affectedUris && !affectedUris.has(document.uri)) {
+        continue;
+      }
+      documentValidationSession.invalidateDocument(document.uri);
+      diagnosticsHandler.scheduleDiagnostics(document);
+    }
+    requestInlayHintRefresh(connection);
+  },
+);
 
 registerCompletionHandler({ connection, documents, completionEngine });
 registerHoverHandler({

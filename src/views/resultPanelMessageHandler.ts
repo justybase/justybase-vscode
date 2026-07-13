@@ -13,6 +13,7 @@ import { ResultStateManager } from '../state/resultStateManager';
 import { ExportManager } from '../export/exportManager';
 import { DuckDbResultBridge } from '../services/duckdbResultBridge';
 import { MessagePackEncoder } from '../core/streaming';
+import { setContextIfChanged } from '../services/contextKeyService';
 import { ResultFormattingSettingsStore } from '../results/resultFormattingSettingsStore';
 import { ResultFormattingUpdateRequest } from '../results/resultFormattingTypes';
 import type {
@@ -61,6 +62,8 @@ export interface MessageHandlerCallbacks {
     onUpdateWebview: () => void;
     onPostMessage: (message: ResultPanelOutboundMessage) => void;
     onForceHydrate: () => void;
+    onLogRowsApplied?: (sourceUri: string, executionTimestamp: number, totalRows: number) => void;
+    onRequestLogSync?: (sourceUri: string, executionTimestamp: number | undefined, currentRows: number) => void;
     onSelectionStatsChanged?: (stats: SelectionStats | null) => void;
     onRecordHydrationMetrics?: (metrics: ResultPanelHydrationMetricsPayload) => void;
     onSaveEdits?: (request: SaveEditsRequest) => Promise<{ success: boolean; message: string }>;
@@ -170,6 +173,22 @@ export class ResultPanelMessageHandler {
         switch (message.command) {
             case 'ready':
                 this._callbacks.onForceHydrate();
+                return;
+
+            case 'logRowsApplied':
+                this._callbacks.onLogRowsApplied?.(
+                    message.sourceUri,
+                    message.executionTimestamp,
+                    message.totalRows,
+                );
+                return;
+
+            case 'requestLogSync':
+                this._callbacks.onRequestLogSync?.(
+                    message.sourceUri,
+                    message.executionTimestamp,
+                    message.currentRows,
+                );
                 return;
 
             case 'selectAll':
@@ -436,7 +455,7 @@ export class ResultPanelMessageHandler {
                 return;
 
             case 'setContext':
-                vscode.commands.executeCommand('setContext', message.key, message.value);
+                setContextIfChanged(message.key, message.value);
                 return;
 
             case 'clearLogs':

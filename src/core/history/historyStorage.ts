@@ -13,22 +13,41 @@ const COMPRESSION_LEVEL = 6;
 const MAX_ARCHIVE_SIZE_FOR_COUNT = 50 * 1024 * 1024; // 50MB
 const MAX_ARCHIVE_AGE_DAYS = 730; // 2 years (2 lata)
 
+interface ArchiveMetadata {
+    version: number;
+    entryCount: number;
+    archiveSizeBytes: number;
+    archiveMtimeMs: number;
+    updatedAt: number;
+}
+
+interface ArchiveStatsSnapshot {
+    archivedEntries: number;
+    archiveSizeMB: number;
+    archiveSizeBytes: number;
+    archiveMtimeMs: number;
+}
+
 export class HistoryStorage {
     private readonly historyFilePath: string;
     private readonly archiveFilePath: string;
     private readonly historyJsonPath: string;
     private readonly archiveJsonPath: string;
+    private readonly archiveMetadataPath: string;
     private static readonly STORAGE_VERSION = 1;
     private writeQueue: Promise<void> = Promise.resolve();
     private archiveQueue: Promise<void> = Promise.resolve();
     private migrationPromise: Promise<QueryHistoryEntry[] | null> | null = null;
     private archiveMigrationPromise: Promise<QueryHistoryEntry[] | null> | null = null;
+    private archiveStatsPromise: Promise<ArchiveStatsSnapshot> | null = null;
+    private archiveStatsCache: ArchiveStatsSnapshot | null = null;
 
     constructor(private storagePath: string) {
         this.historyFilePath = path.join(storagePath, 'query-history.msgpack.gz');
         this.archiveFilePath = path.join(storagePath, 'query-history-archive.msgpack.gz');
         this.historyJsonPath = path.join(storagePath, 'query-history.json');
         this.archiveJsonPath = path.join(storagePath, 'query-history-archive.json');
+        this.archiveMetadataPath = path.join(storagePath, 'query-history-archive.meta.json');
         this.ensureDirectory();
     }
 
@@ -135,10 +154,113 @@ export class HistoryStorage {
             const encoded = encode(data);
             const compressed = await gzipAsync(Buffer.from(encoded), { level: COMPRESSION_LEVEL });
             await this.writeAtomic(this.archiveFilePath, compressed);
+            this.invalidateArchiveStats();
+            try {
+                const stats = await fs.promises.stat(this.archiveFilePath);
+                await this.writeArchiveMetadata(data.entries.length, stats);
+            } catch (metadataError) {
+                console.warn('[HistoryStorage] Archive saved but metadata update failed:', metadataError);
+            }
         } catch (error) {
             console.error('[HistoryStorage] Error writing compressed archive:', error);
             throw error;
         }
+    }
+
+    private invalidateArchiveStats(): void {
+        this.archiveStatsCache = null;
+        this.archiveStatsPromise = null;
+    }
+
+    private async writeArchiveMetadata(entryCount: number, stats: fs.Stats): Promise<void> {
+        const metadata: ArchiveMetadata = {
+            version: HistoryStorage.STORAGE_VERSION,
+            entryCount,
+            archiveSizeBytes: stats.size,
+            archiveMtimeMs: stats.mtimeMs,
+            updatedAt: Date.now(),
+        };
+        await this.writeAtomic(this.archiveMetadataPath, Buffer.from(JSON.stringify(metadata), 'utf8'));
+        this.archiveStatsCache = {
+            archivedEntries: entryCount,
+            archiveSizeMB: parseFloat((stats.size / (1024 * 1024)).toFixed(2)),
+            archiveSizeBytes: stats.size,
+            archiveMtimeMs: stats.mtimeMs,
+        };
+    }
+
+    private async readArchiveMetadata(stats: fs.Stats): Promise<ArchiveMetadata | null> {
+        try {
+            const raw = await fs.promises.readFile(this.archiveMetadataPath, 'utf8');
+            const parsed = JSON.parse(raw) as Partial<ArchiveMetadata>;
+            if (
+                parsed.version !== HistoryStorage.STORAGE_VERSION
+                || typeof parsed.entryCount !== 'number'
+                || parsed.archiveSizeBytes !== stats.size
+                || parsed.archiveMtimeMs !== stats.mtimeMs
+            ) {
+                return null;
+            }
+            return parsed as ArchiveMetadata;
+        } catch {
+            return null;
+        }
+    }
+
+    private async loadArchiveStats(): Promise<ArchiveStatsSnapshot> {
+        const exists = await this.fileExists(this.archiveFilePath);
+        if (!exists) {
+            return {
+                archivedEntries: 0,
+                archiveSizeMB: 0,
+                archiveSizeBytes: 0,
+                archiveMtimeMs: 0,
+            };
+        }
+
+        const stats = await fs.promises.stat(this.archiveFilePath);
+        const cached = this.archiveStatsCache;
+        if (
+            cached
+            && cached.archiveSizeBytes === stats.size
+            && cached.archiveMtimeMs === stats.mtimeMs
+        ) {
+            return cached;
+        }
+
+        const metadata = await this.readArchiveMetadata(stats);
+        let archivedEntries: number;
+        if (metadata) {
+            archivedEntries = metadata.entryCount;
+        } else if (stats.size < MAX_ARCHIVE_SIZE_FOR_COUNT) {
+            const entries = await this.getArchiveEntries();
+            archivedEntries = entries.length;
+            try {
+                await this.writeArchiveMetadata(archivedEntries, stats);
+            } catch (metadataError) {
+                console.warn('[HistoryStorage] Unable to backfill archive metadata:', metadataError);
+            }
+        } else {
+            archivedEntries = -1;
+        }
+
+        const snapshot: ArchiveStatsSnapshot = {
+            archivedEntries,
+            archiveSizeMB: parseFloat((stats.size / (1024 * 1024)).toFixed(2)),
+            archiveSizeBytes: stats.size,
+            archiveMtimeMs: stats.mtimeMs,
+        };
+        this.archiveStatsCache = snapshot;
+        return snapshot;
+    }
+
+    private getArchiveStats(): Promise<ArchiveStatsSnapshot> {
+        if (!this.archiveStatsPromise) {
+            this.archiveStatsPromise = this.loadArchiveStats().finally(() => {
+                this.archiveStatsPromise = null;
+            });
+        }
+        return this.archiveStatsPromise;
     }
 
     private async readArchiveCompressed(): Promise<StorageData | null> {
@@ -428,7 +550,8 @@ export class HistoryStorage {
             this.historyFilePath.replace('.msgpack.gz', '.msgpack'),
             this.archiveFilePath.replace('.msgpack.gz', '.msgpack'),
             this.historyJsonPath,
-            this.archiveJsonPath
+            this.archiveJsonPath,
+            this.archiveMetadataPath,
         ];
 
         for (const filePath of filesToDelete) {
@@ -445,6 +568,7 @@ export class HistoryStorage {
         // Reset migration promises
         this.migrationPromise = null;
         this.archiveMigrationPromise = null;
+        this.invalidateArchiveStats();
     }
 
     public async clearArchiveOnly(): Promise<void> {
@@ -454,7 +578,8 @@ export class HistoryStorage {
         const filesToDelete = [
             this.archiveFilePath,
             this.archiveFilePath.replace('.msgpack.gz', '.msgpack'),
-            this.archiveJsonPath
+            this.archiveJsonPath,
+            this.archiveMetadataPath,
         ];
 
         for (const filePath of filesToDelete) {
@@ -470,6 +595,7 @@ export class HistoryStorage {
 
         // Reset archive migration promise
         this.archiveMigrationPromise = null;
+        this.invalidateArchiveStats();
     }
 
     public async getStats(activeCount: number): Promise<HistoryStats> {
@@ -486,35 +612,25 @@ export class HistoryStorage {
         }
 
         // Archive file size and entry count
-        let archivedEntries = 0;
-        let archiveSizeMB = 0;
-
+        let archiveStats: ArchiveStatsSnapshot = {
+            archivedEntries: 0,
+            archiveSizeMB: 0,
+            archiveSizeBytes: 0,
+            archiveMtimeMs: 0,
+        };
         try {
-            const exists = await this.fileExists(this.archiveFilePath);
-            if (exists) {
-                const stats = await fs.promises.stat(this.archiveFilePath);
-                archiveSizeMB = parseFloat((stats.size / (1024 * 1024)).toFixed(2));
-
-                // Only count entries if file is not too large (to avoid long load times)
-                if (stats.size < MAX_ARCHIVE_SIZE_FOR_COUNT) {
-                    const entries = await this.getArchiveEntries();
-                    archivedEntries = entries.length;
-                } else {
-                    // For very large archives, return -1 to indicate unknown count
-                    archivedEntries = -1;
-                }
-            }
+            archiveStats = await this.getArchiveStats();
         } catch (e) {
             console.warn('[HistoryStorage] Error getting archive file stats:', e);
         }
 
         return {
             activeEntries: activeCount,
-            archivedEntries: archivedEntries === -1 ? -1 : archivedEntries,
-            totalEntries: archivedEntries === -1 ? activeCount : activeCount + archivedEntries,
+            archivedEntries: archiveStats.archivedEntries,
+            totalEntries: archiveStats.archivedEntries === -1 ? activeCount : activeCount + archiveStats.archivedEntries,
             activeFileSizeMB: activeSizeMB,
-            archiveFileSizeMB: archiveSizeMB,
-            totalFileSizeMB: parseFloat((activeSizeMB + archiveSizeMB).toFixed(2))
+            archiveFileSizeMB: archiveStats.archiveSizeMB,
+            totalFileSizeMB: parseFloat((activeSizeMB + archiveStats.archiveSizeMB).toFixed(2))
         };
     }
 

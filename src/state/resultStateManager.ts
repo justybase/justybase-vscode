@@ -57,10 +57,12 @@ interface AppendRowsMessage {
 
 interface LogAppendMessage {
     command: 'appendRows';
-    sourceUri?: string;
+    sourceUri: string;
     resultSetIndex: number;
     rows: [string, string][];
     totalRows: number;
+    fromRow: number;
+    logExecutionTimestamp: number;
     isLastChunk: boolean;
     limitReached: boolean;
     isLog: true;
@@ -434,15 +436,19 @@ export class ResultStateManager {
             const logResultSet = results[logResultSetIndex];
             const timestamp = new Date().toLocaleTimeString();
             const row: [string, string] = [timestamp, message];
+            const fromRow = logResultSet.data.length;
 
             logResultSet.data.push(row);
             this._incrementDataVersion(sourceUri);
 
             return {
                 command: 'appendRows',
+                sourceUri,
                 resultSetIndex: logResultSetIndex,
                 rows: [row],
                 totalRows: logResultSet.data.length,
+                fromRow,
+                logExecutionTimestamp: logResultSet.executionTimestamp ?? 0,
                 isLastChunk: false,
                 limitReached: false,
                 isLog: true
@@ -499,15 +505,19 @@ export class ResultStateManager {
                 // Format: [time] ▶ RUNNING: [sql truncated] | [connection]
                 const logMessage = `▶ RUNNING: ${truncatedSql} | ${connectionName}`;
                 const row: [string, string] = [timestamp, logMessage];
+                const fromRow = logResultSet.data.length;
 
                 logResultSet.data.push(row);
                 this._incrementDataVersion(sourceUri);
 
                 incrementalUpdate = {
                     command: 'appendRows',
+                    sourceUri,
                     resultSetIndex: logResultSetIndex,
                     rows: [row],
                     totalRows: logResultSet.data.length,
+                    fromRow,
+                    logExecutionTimestamp: logResultSet.executionTimestamp ?? 0,
                     isLastChunk: false,
                     limitReached: false,
                     isLog: true
@@ -585,6 +595,7 @@ export class ResultStateManager {
                         }
 
                         const row: [string, string] = [timestamp, logMessage];
+                        const fromRow = logResultSet.data.length;
                         logResultSet.data.push(row);
                         this._incrementDataVersion(sourceUri);
 
@@ -601,6 +612,8 @@ export class ResultStateManager {
                             resultSetIndex: logResultSetIndex,
                             rows: [row],
                             totalRows: logResultSet.data.length,
+                            fromRow,
+                            logExecutionTimestamp: logResultSet.executionTimestamp ?? 0,
                             isLastChunk: false,
                             limitReached: false,
                             isLog: true
@@ -612,6 +625,30 @@ export class ResultStateManager {
             }
         }
         return undefined;
+    }
+
+    /** Build an authoritative log delta for webview gap recovery. */
+    public getLogSyncUpdate(sourceUri: string, fromRow: number): LogAppendMessage | undefined {
+        const results = this._resultsMap.get(sourceUri);
+        const resultSetIndex = results?.findIndex(result => result.isLog) ?? -1;
+        if (!results || resultSetIndex < 0) {
+            return undefined;
+        }
+
+        const logResultSet = results[resultSetIndex];
+        const safeFromRow = Math.max(0, Math.min(fromRow, logResultSet.data.length));
+        return {
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex,
+            rows: logResultSet.data.slice(safeFromRow) as [string, string][],
+            totalRows: logResultSet.data.length,
+            fromRow: safeFromRow,
+            logExecutionTimestamp: logResultSet.executionTimestamp ?? 0,
+            isLastChunk: false,
+            limitReached: false,
+            isLog: true,
+        };
     }
 
     /**

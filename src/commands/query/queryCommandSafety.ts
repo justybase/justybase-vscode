@@ -141,6 +141,26 @@ export async function confirmSafeExecuteForExpandedQuery(
 }
 
 /**
+ * Creates a per-run expanded-query safety check. Source risks are parsed once,
+ * then each expanded statement is compared with its corresponding source.
+ */
+export function createExpandedQuerySafetyChecker(
+    sourceQueries: string[],
+    confirm: (queries: string[]) => Promise<boolean> = confirmSafeExecute,
+): (expandedQuery: string, queryIndex: number) => Promise<boolean> {
+    const sourceRiskCounts = sourceQueries.map(query => countRiskyStatements([query]));
+
+    return async (expandedQuery: string, queryIndex: number): Promise<boolean> => {
+        const expandedRiskCounts = countRiskyStatements([expandedQuery]);
+        const matchingSourceCounts = sourceRiskCounts[queryIndex] ?? new Map<RiskyStatement['type'], number>();
+        const introducedRisk = [...expandedRiskCounts].some(([type, count]) =>
+            count > (matchingSourceCounts.get(type) ?? 0),
+        );
+        return introducedRisk ? confirm([expandedQuery]) : true;
+    };
+}
+
+/**
  * Handles post-execution completion flow
  * Uses dependency injection for testability
  */

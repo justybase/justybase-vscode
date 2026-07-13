@@ -256,6 +256,26 @@ describe('ResultStateManager', () => {
     });
 
     describe('structured execution logging', () => {
+        it('builds an authoritative log delta for gap recovery', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            const before = manager.resultsMap.get(sourceUri)![0].data.length;
+
+            const start = manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+            manager.logExecutionEnd(start.id, 1, 'success');
+
+            const delta = manager.getLogSyncUpdate(sourceUri, before);
+            expect(delta).toEqual(expect.objectContaining({
+                command: 'appendRows',
+                sourceUri,
+                fromRow: before,
+                totalRows: before + 2,
+                isLog: true,
+            }));
+            expect(delta?.rows).toHaveLength(2);
+            expect(delta?.logExecutionTimestamp).toBeGreaterThan(0);
+        });
+
         it('should append a structured retrying entry', () => {
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);

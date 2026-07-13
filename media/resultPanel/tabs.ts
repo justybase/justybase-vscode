@@ -386,6 +386,7 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
         applyScrollForResultSet(index, {
             sourceUri: source,
             autoBottomLogs: true,
+            forceBottomLogs: getResultSetAt(index)?.isLog === true && isActiveSourceExecuting(),
         });
         const sourceUri = source;
         const rsIdx = index;
@@ -395,6 +396,7 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
                 applyScrollForResultSet(rsIdx, {
                     sourceUri,
                     autoBottomLogs: true,
+                    forceBottomLogs: getResultSetAt(rsIdx)?.isLog === true && isActiveSourceExecuting(),
                 });
             } finally {
                 if (maskScrollRestore && targetWrapper) {

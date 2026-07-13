@@ -17,6 +17,7 @@ export {
     createTextContentView,
     createLogLineElement,
     appendLogRows,
+    replaceLogRows,
     createErrorView,
     hasPreviewableResultData,
     dismissLoadingOverlay,

@@ -119,7 +119,40 @@ describe('ResultPanelView Scroll Preservation', () => {
     });
 
     afterEach(() => {
+        provider.dispose();
         consoleLogSpy.mockRestore();
+    });
+
+    it('resends authoritative log rows when the webview reports a gap', () => {
+        const sourceUri = 'file:///path/to/log-sync.sql';
+        provider.startExecution(sourceUri);
+        provider.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+        postedMessages = [];
+
+        const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0];
+        messageHandler({
+            command: 'requestLogSync',
+            sourceUri,
+            executionTimestamp: 0,
+            currentRows: 0,
+        });
+
+        const syncMessage = postedMessages.find(message => message.command === 'appendRows') as
+            | ((typeof postedMessages)[number] & {
+                fromRow?: number;
+                totalRows?: number;
+                isLog?: boolean;
+                logExecutionTimestamp?: number;
+            })
+            | undefined;
+        expect(syncMessage).toEqual(expect.objectContaining({
+            command: 'appendRows',
+            sourceUri,
+            fromRow: 0,
+            isLog: true,
+        }));
+        expect(syncMessage?.totalRows).toBeGreaterThan(0);
+        expect(syncMessage?.logExecutionTimestamp).toBeGreaterThan(0);
     });
 
     describe('source switching and scroll preservation', () => {
@@ -806,9 +839,14 @@ describe('ResultPanelView Scroll Preservation', () => {
 
         it('should clear result focus contexts when webview reports blur', () => {
             const { commands } = jest.requireMock('vscode');
-            (commands.executeCommand as jest.Mock).mockClear();
-
             const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0];
+            messageHandler({ command: 'webviewFocused' });
+            messageHandler({
+                command: 'setContext',
+                key: 'netezza.resultsInputFocused',
+                value: true,
+            });
+            (commands.executeCommand as jest.Mock).mockClear();
             messageHandler({ command: 'webviewBlurred' });
 
             expect(commands.executeCommand).toHaveBeenCalledWith('setContext', 'netezza.resultsFocused', false);

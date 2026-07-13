@@ -66,7 +66,8 @@ const mockUpdateLoadingState = jest.fn();
 jest.mock('../../media/resultPanel/grid.js', () => ({
     renderGrids: jest.fn(),
     updateLoadingState: (...args: unknown[]) => mockUpdateLoadingState(...args),
-    appendLogRows: jest.fn()
+    appendLogRows: jest.fn(),
+    replaceLogRows: jest.fn()
 }));
 
 jest.mock('../../media/resultPanel/filter.js', () => ({
@@ -234,6 +235,82 @@ describe('handleHydrate executingSources dedup', () => {
             executionTimestamp: 20,
             sql: 'select 42'
         }));
+    });
+
+    it('requests a log resync when an incremental row arrives with a gap', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }],
+            data: [['10:00', 'existing']],
+            executionTimestamp: 9,
+            isLog: true,
+            name: 'Logs',
+        }];
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        const { handleAppendRows } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+        };
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 0,
+            rows: [['10:01', 'missing predecessor']],
+            fromRow: 3,
+            totalRows: 4,
+            logExecutionTimestamp: 9,
+            isLog: true,
+            isLastChunk: false,
+            limitReached: false,
+        });
+
+        expect(win.resultSets[0].data).toHaveLength(1);
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestLogSync',
+            sourceUri,
+            executionTimestamp: 9,
+            currentRows: 1,
+        });
+    });
+
+    it('replaces stale log rows and acknowledges an authoritative execution sync', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }],
+            data: [['10:00', 'old execution']],
+            executionTimestamp: 9,
+            isLog: true,
+            name: 'Logs',
+        }];
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        const grid = require('../../media/resultPanel/grid.js') as { replaceLogRows: jest.Mock };
+        const { handleAppendRows } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+        };
+        const rows = [['10:02', '--- New Execution Started ---'], ['10:02', '▶ RUNNING: SELECT 1']];
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 0,
+            rows,
+            fromRow: 0,
+            totalRows: 2,
+            logExecutionTimestamp: 10,
+            isLog: true,
+            isLastChunk: false,
+            limitReached: false,
+        });
+
+        expect(win.resultSets[0].data).toEqual(rows);
+        expect(win.resultSets[0].executionTimestamp).toBe(10);
+        expect(grid.replaceLogRows).toHaveBeenCalledWith(0, rows);
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'logRowsApplied',
+            sourceUri,
+            executionTimestamp: 10,
+            totalRows: 2,
+        });
     });
 
     it('refreshes table data with a new array reference for streamed row batches', () => {

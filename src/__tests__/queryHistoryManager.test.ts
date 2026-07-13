@@ -171,6 +171,40 @@ describe('QueryHistoryManager', () => {
         expect(mockStorage.appendToArchive).toHaveBeenCalledTimes(1);
     });
 
+    it('flushes again when concurrent entries refill the cache during disk I/O', async () => {
+        const initialEntries = Array.from({ length: 999 }, (_v, index) =>
+            createEntry({ id: `initial-${index}`, timestamp: Date.now() - index })
+        );
+        mockStorage.loadActive.mockResolvedValue(initialEntries);
+
+        let releaseFirstSave: (() => void) | undefined;
+        const firstSaveBlocked = new Promise<void>(resolve => {
+            releaseFirstSave = resolve;
+        });
+        mockStorage.saveActive
+            .mockImplementationOnce(() => firstSaveBlocked)
+            .mockResolvedValue(undefined);
+
+        const manager = new QueryHistoryManager(createContext());
+        await manager.getHistory();
+
+        const firstAdd = manager.addEntry('host', 'db', 'schema', 'SELECT first');
+        await Promise.resolve();
+        expect(mockStorage.saveActive).toHaveBeenCalledTimes(1);
+
+        const burstAdds = Array.from({ length: 100 }, (_v, index) =>
+            manager.addEntry('host', 'db', 'schema', `SELECT burst_${index}`)
+        );
+        releaseFirstSave?.();
+        await Promise.all([firstAdd, ...burstAdds]);
+
+        const history = await manager.getHistory();
+        expect(history).toHaveLength(900);
+        expect(mockStorage.saveActive).toHaveBeenCalledTimes(2);
+        expect(mockStorage.appendToArchive).toHaveBeenCalledTimes(2);
+        expect(mockStorage.appendToArchive.mock.calls.flatMap(call => call[0])).toHaveLength(200);
+    });
+
     it('supports pagination with limit and offset', async () => {
         const entries = [
             createEntry({ id: 'e1', query: 'Q1' }),

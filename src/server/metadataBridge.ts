@@ -577,6 +577,28 @@ export class MetadataBridge {
     this.qualificationCache.clear();
   }
 
+  /** Clears cached metadata only for documents bound to one connection. */
+  clearConnection(connectionName: string): string[] {
+    const normalized = connectionName.toUpperCase();
+    const documentUris = Array.from(
+      this.documentConnectionNames.entries(),
+      ([documentUri, name]) => ({ documentUri, name }),
+    )
+      .filter(({ name }) => name.toUpperCase() === normalized)
+      .map(({ documentUri }) => documentUri);
+
+    const tablePrefix = `${normalized}|`;
+    for (const cacheKey of this.tableInfoCache.keys()) {
+      if (cacheKey.toUpperCase().startsWith(tablePrefix)) {
+        this.tableInfoCache.delete(cacheKey);
+      }
+    }
+    for (const documentUri of documentUris) {
+      this.clearDocument(documentUri);
+    }
+    return documentUris;
+  }
+
   // ========================================================================
   // Private helpers
   // ========================================================================

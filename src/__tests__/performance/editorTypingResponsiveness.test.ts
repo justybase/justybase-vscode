@@ -286,11 +286,10 @@ describe('Editor typing responsiveness', () => {
     });
 
     // ---------------------------------------------------------------------
-    // 3. Simulated typing: STREAM_LENGTH single-character edits, each
-    //    followed by a cursor-move lookup. We measure the *first*
-    //    edit (cold cache) and the *steady state* (warm cache) separately.
+    // 3. Cursor lookup stream after one parse. Typing debounce behavior is
+    //    covered separately below with genuinely changing text and versions.
     // ---------------------------------------------------------------------
-    it('per-keystroke cursor lookup stays within budget', () => {
+    it('warm cursor lookup stays within budget', () => {
       const warmupOffset = Math.floor(fixture.charCount / 2);
       SqlParser.getStatementAtPosition(fixture.sql, warmupOffset, documentKey);
 
@@ -309,6 +308,34 @@ describe('Editor typing responsiveness', () => {
       expect(s.avgMs).toBeLessThan(budget.avgMs);
       // Tail must stay under the per-event budget.
       expect(s.maxMs).toBeLessThan(budget.perEventMs);
+    });
+
+    it('rapid edits parse only the final changed text after debounce', () => {
+      let editedSql = fixture.sql;
+      let version = 1;
+      for (let edit = 0; edit < STREAM_LENGTH; edit++) {
+        editedSql += edit % 2 === 0 ? ' ' : '\n';
+        version += 1;
+      }
+
+      const tokenizeSpy = jest.spyOn(SqlLexer, 'tokenize');
+      try {
+        const latestDocumentKey = {
+          documentId: `file:///typing-${fixtureKey}.sql`,
+          version,
+        };
+        SqlParser.getStatementAtPosition(
+          editedSql,
+          Math.min(fixture.charCount, editedSql.length - 1),
+          latestDocumentKey,
+        );
+
+        expect(version).toBe(STREAM_LENGTH + 1);
+        expect(editedSql).not.toBe(fixture.sql);
+        expect(tokenizeSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        tokenizeSpy.mockRestore();
+      }
     });
 
     // ---------------------------------------------------------------------

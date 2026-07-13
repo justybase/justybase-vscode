@@ -96,6 +96,41 @@ describe('HistoryStorage', () => {
         expect(finalArchive).toHaveLength(2);
     });
 
+    it('uses archive metadata for repeated and concurrent stats reads', async () => {
+        await storage.appendToArchive([sampleEntry]);
+        const archiveReadSpy = jest.spyOn(storage, 'getArchiveEntries');
+
+        const [first, second, third] = await Promise.all([
+            storage.getStats(3),
+            storage.getStats(3),
+            storage.getStats(3),
+        ]);
+
+        expect(first.archivedEntries).toBe(1);
+        expect(second.archivedEntries).toBe(1);
+        expect(third.archivedEntries).toBe(1);
+        expect(archiveReadSpy).not.toHaveBeenCalled();
+        expect(fs.existsSync(path.join(storagePath, 'query-history-archive.meta.json'))).toBe(true);
+    });
+
+    it('backfills missing archive metadata only once', async () => {
+        await storage.appendToArchive([sampleEntry]);
+        const metadataPath = path.join(storagePath, 'query-history-archive.meta.json');
+        fs.unlinkSync(metadataPath);
+
+        const restartedStorage = new HistoryStorage(storagePath);
+        const archiveReadSpy = jest.spyOn(restartedStorage, 'getArchiveEntries');
+        const [first, second] = await Promise.all([
+            restartedStorage.getStats(0),
+            restartedStorage.getStats(0),
+        ]);
+
+        expect(first.archivedEntries).toBe(1);
+        expect(second.archivedEntries).toBe(1);
+        expect(archiveReadSpy).toHaveBeenCalledTimes(1);
+        expect(fs.existsSync(metadataPath)).toBe(true);
+    });
+
     it('should handle corrupted files gracefully', async () => {
         const msgpackPath = path.join(storagePath, 'query-history.msgpack.gz');
         fs.writeFileSync(msgpackPath, Buffer.from('not a valid gzip/msgpack file'));

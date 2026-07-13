@@ -24,6 +24,7 @@ import {
   NETEZZA_GET_METADATA_REQUEST,
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
   type DocumentContextChangedParams,
+  type MetadataCacheInvalidatedParams,
   type MetadataColumnItem,
   type MetadataContextResponse,
   type MetadataObjectItem,
@@ -174,8 +175,11 @@ export async function startSqlLanguageClient(
       metadataCache.onDidInvalidate(() => {
         client.sendNotification(NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION);
       }),
-      metadataCache.onDidExternalRefresh(() => {
-        client.sendNotification(NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION);
+      metadataCache.onDidExternalRefresh((connectionName) => {
+        client.sendNotification(
+          NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
+          { connectionName } satisfies MetadataCacheInvalidatedParams,
+        );
       }),
     );
 

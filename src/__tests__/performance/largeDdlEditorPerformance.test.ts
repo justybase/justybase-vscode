@@ -208,6 +208,7 @@ function registerProviderBudgetTests(
         document,
         { isCancellationRequested: false } as vscode.CancellationToken,
       );
+      if (tokens instanceof Promise) throw new Error('Expected synchronous semantic tokens in tests');
       expect(tokens.data.length).toBeGreaterThan(0);
     });
     expect(maxMs).toBeLessThan(budgets.semanticTokensMs);
