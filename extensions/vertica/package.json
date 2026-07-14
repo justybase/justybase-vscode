@@ -2,7 +2,7 @@
     "name": "justybase-vertica",
     "displayName": "JustyBase Vertica Support",
     "description": "Optional Vertica Support for JustyBase Core",
-    "version": "3.16.4",
+    "version": "3.16.5",
     "publisher": "justybase",
     "license": "Apache-2.0",
     "icon": "icon.png",
