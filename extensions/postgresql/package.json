@@ -1,5 +1,5 @@
 {
-    "name": "justybaselite-postgresql",
+    "name": "justybase-postgresql",
     "displayName": "JustyBase PostgreSQL Support",
     "description": "Optional PostgreSQL Support for JustyBase Core",
     "version": "3.16.4",
@@ -34,7 +34,7 @@
         "onStartupFinished"
     ],
     "extensionDependencies": [
-        "justybase.justybaselite-netezza"
+        "justybase.justybase-netezza"
     ],
     "scripts": {
         "build": "node esbuild.postgresql.js --production",

@@ -75,12 +75,12 @@ jobs:
         if: steps.detect.outputs.present == 'true'
         run: >
           npm run package:${{ matrix.id }} --
-          --out justybaselite-${{ matrix.id }}.vsix
+          --out justybase-${{ matrix.id }}.vsix
 
       - name: Upload VSIX artifact
         if: steps.detect.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: justybaselite-${{ matrix.id }}
-          path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}.vsix
+          name: vsix-${{ matrix.id }}
+          path: extensions/${{ matrix.id }}/justybase-${{ matrix.id }}.vsix
           retention-days: 1

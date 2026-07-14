@@ -316,13 +316,13 @@ jobs:
         run: npm run build
 
       - name: Package main VSIX
-        run: npm run package -- --out justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+        run: npm run package -- --out justybase-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
 
       - name: Upload main VSIX artifact
         uses: actions/upload-artifact@v4
         with:
           name: vsix-main
-          path: justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+          path: justybase-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
           retention-days: 1
 
   build-db2:
@@ -396,7 +396,7 @@ jobs:
         run: >
           npm run package --
           --target ${{ matrix.target }}
-          --out justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          --out justybase-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
 
       - name: Verify packaged runtime files
         shell: bash
@@ -404,7 +404,7 @@ jobs:
           python - <<'PY'
           import zipfile
 
-          vsix_path = 'extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
+          vsix_path = 'extensions/db2/justybase-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
           expected_driver = '${{ matrix.expected_driver }}'
 
           with zipfile.ZipFile(vsix_path, 'r') as archive:
@@ -425,7 +425,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vsix-db2-${{ matrix.target }}
-          path: extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          path: extensions/db2/justybase-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
           retention-days: 1
 
   build-duckdb:
@@ -479,7 +479,7 @@ jobs:
         run: >
           npm run package:duckdb --
           --target ${{ matrix.target }}
-          --out justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          --out justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
 
       - name: Verify packaged DuckDB runtime files
         shell: bash
@@ -487,7 +487,7 @@ jobs:
           python - <<'PY'
           import zipfile
 
-          vsix_path = 'extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
+          vsix_path = 'extensions/duckdb/justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
           expected_binding = 'node_modules/${{ matrix.expected_binding_package }}/duckdb.node'
 
           with zipfile.ZipFile(vsix_path, 'r') as archive:
@@ -508,7 +508,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vsix-duckdb-${{ matrix.target }}
-          path: extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          path: extensions/duckdb/justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
           retention-days: 1
 
   build-optional:
@@ -551,13 +551,13 @@ jobs:
       - name: Package extension VSIX
         run: >
           npm run package:${{ matrix.id }} --
-          --out justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
+          --out justybase-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
 
       - name: Upload extension VSIX artifact
         uses: actions/upload-artifact@v4
         with:
           name: vsix-${{ matrix.id }}
-          path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
+          path: extensions/${{ matrix.id }}/justybase-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
           retention-days: 1
 
   attach-release-assets:
@@ -602,9 +602,23 @@ jobs:
             exit 1
           fi
 
+          release_version="${RELEASE_TAG#v}"
+          bundle_path="artifacts/justybase-vsix-${release_version}.zip"
+          python3 - "$bundle_path" "${vsix_files[@]}" <<'PY'
+          import os
+          import sys
+          import zipfile
+
+          bundle_path, *vsix_files = sys.argv[1:]
+          with zipfile.ZipFile(bundle_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              for vsix_path in vsix_files:
+                  archive.write(vsix_path, arcname=os.path.basename(vsix_path))
+          PY
+
           printf 'Attaching %s VSIX file(s) to release %s:\n' "${#vsix_files[@]}" "$RELEASE_TAG"
           printf ' - %s\n' "${vsix_files[@]}"
-          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" \
+          printf ' - %s (combined archive)\n' "$bundle_path"
+          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" "$bundle_path" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
@@ -669,7 +683,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: >
           vsce publish
-          --packagePath artifacts/justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+          --packagePath artifacts/justybase-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
           -p "$VSCE_PAT"
 
       - name: Publish DB2 extensions
@@ -680,7 +694,7 @@ jobs:
         run: |
           for target in win32-x64 linux-x64 darwin-arm64; do
             vsce publish \
-              --packagePath "artifacts/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
+              --packagePath "artifacts/justybase-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
               -p "$VSCE_PAT"
           done
 
@@ -692,7 +706,7 @@ jobs:
         run: |
           for target in win32-x64 linux-x64 darwin-arm64; do
             vsce publish \
-              --packagePath "artifacts/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
+              --packagePath "artifacts/justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
               -p "$VSCE_PAT"
           done
 
@@ -706,7 +720,7 @@ jobs:
         run: |
           IFS=',' read -ra targets <<< "$OPTIONAL_TARGETS"
           for target in "${targets[@]}"; do
-            package_path="artifacts/justybaselite-${target}-${RELEASE_VERSION}.vsix"
+            package_path="artifacts/justybase-${target}-${RELEASE_VERSION}.vsix"
             if [ ! -f "$package_path" ]; then
               echo "Missing package for ${target}: $package_path" >&2
               exit 1

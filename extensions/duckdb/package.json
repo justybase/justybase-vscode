@@ -1,5 +1,5 @@
 {
-    "name": "justybaselite-duckdb",
+    "name": "justybase-duckdb",
     "displayName": "JustyBase DuckDB Support",
     "description": "Optional DuckDB Support for JustyBase Core",
     "version": "3.16.4",
@@ -34,7 +34,7 @@
         "onStartupFinished"
     ],
     "extensionDependencies": [
-        "justybase.justybaselite-netezza"
+        "justybase.justybase-netezza"
     ],
     "scripts": {
         "build": "node esbuild.duckdb.js --production",

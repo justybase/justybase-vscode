@@ -61,14 +61,14 @@ jobs:
 
       - name: Package DB2 VSIX
         working-directory: extensions/db2
-        run: npm run package -- --out justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
+        run: npm run package -- --out justybase-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
 
       - name: Verify packaged runtime files
         shell: bash
         run: |
           python - <<'PY'
           import zipfile
-          vsix_path = 'extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix'
+          vsix_path = 'extensions/db2/justybase-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix'
           expected_driver = '${{ matrix.expected_driver }}'
           with zipfile.ZipFile(vsix_path, 'r') as z:
               names = z.namelist()
@@ -84,6 +84,6 @@ jobs:
       - name: Upload DB2 VSIX artifact
         uses: actions/upload-artifact@v5
         with:
-          name: justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}
-          path: extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
+          name: justybase-db2-${{ matrix.platform }}-${{ matrix.arch }}
+          path: extensions/db2/justybase-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
           retention-days: 1

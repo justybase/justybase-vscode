@@ -41,7 +41,7 @@ interface JustyBaseLiteApi {
     registerDatabaseDialect(dialect: DatabaseDialect): DatabaseDialect;
 }
 
-const CORE_EXTENSION_ID = 'justybase.justybaselite-netezza';
+const CORE_EXTENSION_ID = 'justybase.justybase-netezza';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const coreExtension = vscode.extensions.getExtension<JustyBaseLiteApi>(CORE_EXTENSION_ID);

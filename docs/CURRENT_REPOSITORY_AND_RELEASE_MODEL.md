@@ -5,7 +5,7 @@ This repository is the source, build, release, and public distribution repositor
 ## Marketplace identity
 
 1. The active Visual Studio Marketplace publisher is `justybase`.
-2. The core extension ID is `justybase.justybaselite-netezza`.
+2. The core extension ID is `justybase.justybase-netezza`.
 3. Optional database extensions depend on that core extension ID and use the same publisher.
 4. The former publisher, `krzysztof-d`, is a legacy identity that is not managed or updated from this repository. Its extension ID cannot be transferred to the new publisher, and its users do not receive automatic updates to the new extension ID.
 

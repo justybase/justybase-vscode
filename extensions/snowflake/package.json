@@ -1,5 +1,5 @@
 {
-    "name": "justybaselite-snowflake",
+    "name": "justybase-snowflake",
     "displayName": "JustyBase Snowflake Support",
     "description": "Optional Snowflake Support for JustyBase Core",
     "version": "3.16.4",
@@ -34,7 +34,7 @@
         "onStartupFinished"
     ],
     "extensionDependencies": [
-        "justybase.justybaselite-netezza"
+        "justybase.justybase-netezza"
     ],
     "scripts": {
         "build": "node esbuild.snowflake.js --production",
