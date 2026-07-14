@@ -46,11 +46,10 @@ git push origin main
 - Creates tag `vX.X.X`
 - Creates GitHub Release (draft)
 
-#### 6. Publish (if draft=true)
+#### 6. Publish packages after a draft rehearsal
 
-- Review the GitHub Release
-- If everything OK → click "Publish"
-- This automatically triggers `Publish Marketplace Extensions`
+- Review and, if appropriate, publish the GitHub Release
+- Run **Publish Marketplace Extensions** manually for the same tag and select the intended packages
 
 ## Process diagram
 
@@ -88,7 +87,7 @@ The workflow:
 
 If the workflow creates a published release (`draft=false`), it now directly runs the existing `Publish Marketplace Extensions` workflow as a reusable workflow for that tag. This avoids relying on a second GitHub Actions trigger from a release created by `github-actions[bot]`.
 
-If you create a draft release (`draft=true`) and later click **Publish** in the GitHub UI, the same `Publish Marketplace Extensions` workflow still starts automatically from the release event and publishes the core VSIX plus any optional extension VSIX packages produced for that tag.
+When `draft=true`, the workflow builds and attaches the selected VSIX files to the draft GitHub Release, but it does not publish to Marketplace. After reviewing the draft, run **Publish Marketplace Extensions** manually with the same release tag and the desired targets.
 
 ## Recommended usage
 
@@ -138,7 +137,7 @@ Use `release_type=exact` only when you must publish a specific version such as `
 
 If you created a draft release only for testing, you can:
 
-- publish the draft later to trigger Marketplace publishing, or
+- publish the draft and then run **Publish Marketplace Extensions** manually for the same tag, or
 - delete the draft release and delete the tag if it was only a rehearsal
 
 ## Troubleshooting

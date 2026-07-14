@@ -3,7 +3,7 @@
     "displayName": "JustyBase DuckDB Support",
     "description": "Optional DuckDB Support for JustyBase Core",
     "version": "3.16.3",
-    "publisher": "krzysztof-d",
+    "publisher": "justybase",
     "license": "Apache-2.0",
     "icon": "icon.png",
     "engines": {
@@ -34,7 +34,7 @@
         "onStartupFinished"
     ],
     "extensionDependencies": [
-        "krzysztof-d.justybaselite-netezza"
+        "justybase.justybaselite-netezza"
     ],
     "scripts": {
         "build": "node esbuild.duckdb.js --production",

@@ -11,7 +11,14 @@
 A powerful, **Zero Config** VS Code extension for working with IBM Netezza / PureData System for Analytics databases.
 Distinct from other extensions, JustyBase includes a **custom Node.js-based Netezza driver** provided by `@justybase/netezza-driver`, eliminating the need to install or configure IBM ODBC drivers. Just install and connect!
 
-> **Marketplace unavailable?** If the Visual Studio Marketplace temporarily returns an HTTP 429 rate-limit error, install the extension manually from a `.vsix` package: open the project's [GitHub Releases](https://github.com/justybase/justybase-vscode/releases), download `justybaselite-netezza-<version>.vsix` from **Assets**, then in VS Code run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`). Do not download `Source code (zip)` or `Source code (tar.gz)` — they are not installable extensions. Manual installation does not receive automatic Marketplace updates. A release can be installed manually only when it includes a `.vsix` asset.
+> **Publisher migration:** The active core extension is `justybase.justybaselite-netezza`. The former `krzysztof-d.justybaselite-netezza` extension ID is separate from the new publisher; Marketplace cannot transfer it or update it to the new extension ID. Install the `justybase` extension explicitly; install optional database packages from the same `justybase` publisher.
+
+## Quick start
+
+1. Install **JustyBase Core (NetezzaSQL)** from the VS Code Extensions view.
+2. Open the **Netezza** view in the Activity Bar and select **Connect**.
+3. Enter the server host, user, password, and database, then open or create a `.sql` file.
+4. Run the current statement or selection with `Ctrl+Enter` / `F5`.
 
 ### Database support model
 
@@ -342,14 +349,6 @@ Install the Snowflake support package to enable:
 
 See [docs/snowflake.md](docs/snowflake.md) for setup, development, security guidance, and opt-in live testing.
 
-## Setup
-
-1.  **Install**: Search for "JustyBase Core" in the VS Code Marketplace and install.
-2.  **Connect**:
-    - Click the **Netezza** icon in the Activity Bar.
-    - Click **Connect** (or edit User Settings).
-    - Enter `Host`, `User`, `Password`, and `Database`.
-
 ## Keyboard Shortcuts
 
 | Shortcut            | Action                            |
@@ -358,7 +357,14 @@ See [docs/snowflake.md](docs/snowflake.md) for setup, development, security guid
 | `Ctrl+Shift+Enter`  | Run Query Batch                   |
 | `Ctrl+Shift+L`      | Lint SQL (On-Demand)              |
 
-## For Contributors
+### Marketplace troubleshooting
+
+If the Visual Studio Marketplace is temporarily unavailable (for example, it returns an HTTP 429 rate-limit error), install the extension manually from a `.vsix` package. Open the project's [GitHub Releases](https://github.com/justybase/justybase-vscode/releases), download `justybaselite-netezza-<version>.vsix` from **Assets**, then in VS Code run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`). Do not download `Source code (zip)` or `Source code (tar.gz)` — they are not installable extensions. Manual installation does not receive automatic Marketplace updates.
+
+<details>
+<summary>For contributors and maintainers</summary>
+
+This section is for building, testing, packaging, and releasing the extension. Database users can skip it.
 
 Optional database support now lives in sibling packages under `extensions\`. Today that includes `extensions\db2`, `extensions\duckdb`, `extensions\oracle`, `extensions\postgresql`, `extensions\mssql`, `extensions\mysql`, and `extensions\snowflake` when those optional packages are present in the checkout. Db2 and DuckDB are distributed separately because their runtimes include platform-specific native components and should not be bundled into the core Netezza/SQLite VSIX.
 
@@ -499,9 +505,11 @@ Versioning for releases is centralized through the `npm run version:*` commands.
 
 `npm run version:check` validates that every present managed package is aligned, and the release pipeline uses the same check before publishing.
 
-Marketplace publication is handled by the repository release pipeline. It runs for GitHub `release.published` events, so publishing happens when you manually publish a GitHub Release, not on pushes, pull requests, or generic workflow dispatches. The pipeline publishes the core VSIX plus any optional extension VSIX artifacts that were built for the tagged checkout. Configure the `VSCE_PAT` repository secret with a Visual Studio Marketplace personal access token before using it.
+Marketplace publication and manual VSIX release steps are documented in [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md). Configure the `VSCE_PAT` repository secret only when publishing automatically from GitHub Actions.
 
 The repository includes combined debug targets for Db2, DuckDB, Oracle, PostgreSQL, MySQL, Snowflake, and an all-optional profile that load the selected extension development paths into the same Extension Development Host. The drivers are loaded lazily, so the F5 session can start before the database package is installed; a real connection still requires the matching `npm run install:*` step for that optional extension.
+
+</details>
 
 ## License
 
