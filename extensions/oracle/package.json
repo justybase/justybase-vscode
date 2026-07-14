@@ -2,7 +2,7 @@
     "name": "justybase-oracle",
     "displayName": "Oracle Tools (justybase)",
     "description": "Optional Oracle support for Netezza SQL Tools (justybase) using node-oracledb thin mode",
-    "version": "3.16.5",
+    "version": "3.16.6",
     "publisher": "justybase",
     "license": "Apache-2.0",
     "icon": "icon.png",

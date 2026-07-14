@@ -2,7 +2,7 @@
     "name": "justybase-duckdb",
     "displayName": "DuckDB Tools (justybase)",
     "description": "Optional DuckDB support for Netezza SQL Tools (justybase)",
-    "version": "3.16.5",
+    "version": "3.16.6",
     "publisher": "justybase",
     "license": "Apache-2.0",
     "icon": "icon.png",
