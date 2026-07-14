@@ -1,6 +1,6 @@
 {
   "name": "@justybase/contracts",
-  "version": "3.16.3",
+  "version": "3.16.4",
   "description": "Shared type definitions and interfaces for JustyBase extensions",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
