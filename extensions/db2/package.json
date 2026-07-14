@@ -1,7 +1,7 @@
 {
   "name": "justybase-db2",
-  "displayName": "JustyBase Db2 Support",
-  "description": "Optional Db2 Support for JustyBase Core",
+  "displayName": "Db2 Tools (justybase)",
+  "description": "Optional Db2 support for Netezza SQL Tools (justybase)",
   "version": "3.16.5",
   "publisher": "justybase",
   "license": "Apache-2.0",

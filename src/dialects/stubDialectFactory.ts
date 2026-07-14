@@ -24,7 +24,7 @@ export function createStubDialect(
     defaultPort?: number,
     options: StubDialectOptions = {},
 ): DatabaseDialect {
-    const extensionName = options.extensionDisplayName ?? `JustyBase ${displayName} Support`;
+    const extensionName = options.extensionDisplayName ?? `${displayName} Tools (justybase)`;
     const installHint = `Install the optional "${extensionName}" extension to use ${displayName} connections.`;
 
     const connectionFormOptions: StandardConnectionFieldOptions = {

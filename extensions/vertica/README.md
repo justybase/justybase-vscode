@@ -1,4 +1,4 @@
-# JustyBase Vertica Support
+# Vertica Tools (justybase)
 
 Optional Vertica runtime support for the JustyBase core VS Code extension.
 

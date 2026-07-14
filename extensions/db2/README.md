@@ -1,19 +1,19 @@
-# JustyBase Db2 Support
+# Db2 Tools (justybase)
 
 
-Optional Db2 Support for JustyBase Core.
+Optional Db2 support for Netezza SQL Tools (justybase).
 
-This extension adds the `Db2 LUW` dialect to the JustyBase Core extension and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `Db2 LUW` dialect to Netezza SQL Tools (justybase) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase Core`
+- Install the core extension first: `Netezza SQL Tools (justybase)`
 - VS Code Desktop
 - Network access to your Db2 LUW server
 
 ## Supported Platforms
 
-`JustyBase Db2 Support` is built and packaged per target platform:
+`Db2 Tools (justybase)` is built and packaged per target platform:
 
 - Windows (`win32-x64`)
 - Linux (`linux-x64`)
@@ -41,10 +41,10 @@ Each platform requires its own DB2 VSIX artifact because `ibm_db` and `clidriver
 
 Marketplace or manual VSIX installation should end with both extensions installed:
 
-1. Install `JustyBase Core`
-2. Install `JustyBase Db2 Support`
+1. Install `Netezza SQL Tools (justybase)`
+2. Install `Db2 Tools (justybase)`
 
-`JustyBase Db2 Support` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`Db2 Tools (justybase)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
 
 ## Development Notes
 

@@ -1,7 +1,7 @@
 {
     "name": "justybase-mysql",
-    "displayName": "JustyBase MySQL Support",
-    "description": "Optional MySQL Support for JustyBase Core",
+    "displayName": "MySQL Tools (justybase)",
+    "description": "Optional MySQL support for Netezza SQL Tools (justybase)",
     "version": "3.16.5",
     "publisher": "justybase",
     "license": "Apache-2.0",

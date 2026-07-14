@@ -1,19 +1,19 @@
-# JustyBase Oracle Support
+# Oracle Tools (justybase)
 
-Optional Oracle Support for JustyBase Core.
+Optional Oracle support for Netezza SQL Tools (justybase).
 
-This extension adds the `Oracle` dialect to the JustyBase Core extension and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `Oracle` dialect to Netezza SQL Tools (justybase) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase Core`
+- Install the core extension first: `Netezza SQL Tools (justybase)`
 - VS Code Desktop
 - Oracle Database 12.1 or later
 - Network access to your Oracle service
 
 ## Runtime Model
 
-`JustyBase Oracle Support` uses `node-oracledb` in **thin mode** by default:
+`Oracle Tools (justybase)` uses `node-oracledb` in **thin mode** by default:
 
 - No Oracle Client installation is required for the baseline runtime path
 - Standard Easy Connect strings (`host:port/service`) work out of the box
@@ -46,10 +46,10 @@ This extension adds the `Oracle` dialect to the JustyBase Core extension and int
 
 Marketplace or manual VSIX installation should end with both extensions installed:
 
-1. Install `JustyBase Core`
-2. Install `JustyBase Oracle Support`
+1. Install `Netezza SQL Tools (justybase)`
+2. Install `Oracle Tools (justybase)`
 
-`JustyBase Oracle Support` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`Oracle Tools (justybase)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
 
 ## Development Notes
 

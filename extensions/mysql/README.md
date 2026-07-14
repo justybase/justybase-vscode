@@ -1,12 +1,12 @@
-# JustyBase MySQL Support
+# MySQL Tools (justybase)
 
-Optional MySQL Support for JustyBase Core.
+Optional MySQL support for Netezza SQL Tools (justybase).
 
-This extension adds the `MySQL` dialect to the JustyBase Core extension and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `MySQL` dialect to Netezza SQL Tools (justybase) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase Core`
+- Install the core extension first: `Netezza SQL Tools (justybase)`
 - VS Code Desktop
 - Network access to your MySQL instance
 
@@ -28,10 +28,10 @@ This extension adds the `MySQL` dialect to the JustyBase Core extension and inte
 
 Marketplace or manual VSIX installation should end with both extensions installed:
 
-1. Install `JustyBase Core`
-2. Install `JustyBase MySQL Support`
+1. Install `Netezza SQL Tools (justybase)`
+2. Install `MySQL Tools (justybase)`
 
-`JustyBase MySQL Support` can declare `extensionDependencies` on the core extension so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`MySQL Tools (justybase)` can declare `extensionDependencies` on the core extension so VS Code can resolve the dependency automatically in Marketplace scenarios.
 
 ## Development Notes
 

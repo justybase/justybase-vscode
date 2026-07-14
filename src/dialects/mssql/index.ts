@@ -1,7 +1,7 @@
 import { createStubDialect } from '../stubDialectFactory';
 
 export const mssqlDialect = createStubDialect('mssql', 'MS SQL Server', 1433, {
-    extensionDisplayName: 'JustyBase MS SQL Server Support',
+    extensionDisplayName: 'MSSQL Tools (justybase)',
     connectionFormOptions: {
         databasePlaceholder: 'Database name',
         userPlaceholder: 'SQL Server user',

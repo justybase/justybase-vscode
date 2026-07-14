@@ -27,10 +27,15 @@ import {
 } from "./sqlAuthoringRegistry";
 
 const BUILTIN_DIALECTS = new Set<DatabaseKind>(["netezza", "sqlite"]);
+const OPTIONAL_EXTENSION_NAMES: Partial<Record<DatabaseKind, string>> = {
+  mssql: "MSSQL",
+};
 
 function createInstallHint(kind: DatabaseKind): string {
-  const displayName = DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind;
-  return `Install the optional "JustyBase ${displayName} Support" extension to use ${displayName} connections.`;
+  const connectionDisplayName = DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind;
+  const extensionDisplayName =
+    OPTIONAL_EXTENSION_NAMES[kind] ?? DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind;
+  return `Install the optional "${extensionDisplayName} Tools (justybase)" extension to use ${connectionDisplayName} connections.`;
 }
 
 export function resolveConnectionDatabaseKind(

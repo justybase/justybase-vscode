@@ -15,7 +15,7 @@ Distinct from other extensions, JustyBase includes a **custom Node.js-based Nete
 
 ## Quick start
 
-1. Install **JustyBase Core (NetezzaSQL)** from the VS Code Extensions view.
+1. Install **JustyBase Netezza SQL Tools (justybase)** from the VS Code Extensions view.
 2. Open the **Netezza** view in the Activity Bar and select **Connect**.
 3. Enter the server host, user, password, and database, then open or create a `.sql` file.
 4. Run the current statement or selection with `Ctrl+Enter` / `F5`.

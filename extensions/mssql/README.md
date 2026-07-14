@@ -1,12 +1,12 @@
-# JustyBase MS SQL Server Support
+# MSSQL Tools (justybase)
 
-Optional Microsoft SQL Server Support for JustyBase Core.
+Optional Microsoft SQL Server support for Netezza SQL Tools (justybase).
 
-This extension adds the `MSSQL` dialect to the JustyBase Core extension and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `MSSQL` dialect to Netezza SQL Tools (justybase) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase Core`
+- Install the core extension first: `Netezza SQL Tools (justybase)`
 - VS Code Desktop
 - Network access to your Microsoft SQL Server instance
 
@@ -28,10 +28,10 @@ This extension adds the `MSSQL` dialect to the JustyBase Core extension and inte
 
 Marketplace or manual VSIX installation should end with both extensions installed:
 
-1. Install `JustyBase Core`
-2. Install `JustyBase MS SQL Server Support`
+1. Install `Netezza SQL Tools (justybase)`
+2. Install `MSSQL Tools (justybase)`
 
-`JustyBase MS SQL Server Support` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`MSSQL Tools (justybase)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
 
 ## Development Notes
 
