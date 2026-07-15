@@ -2,7 +2,7 @@
     "name": "justybase-vertica",
     "displayName": "Vertica Tools (justybase)",
     "description": "Optional Vertica support for Netezza SQL Tools (justybase)",
-    "version": "3.16.6",
+    "version": "3.16.7",
     "publisher": "justybase",
     "license": "Apache-2.0",
     "icon": "icon.png",
