@@ -2,7 +2,7 @@
     "name": "justybase-postgresql",
     "displayName": "PostgreSQL Tools (justybase)",
     "description": "Optional PostgreSQL support for Netezza SQL Tools (justybase)",
-    "version": "3.16.7",
+    "version": "3.16.8",
     "publisher": "justybase",
     "license": "Apache-2.0",
     "icon": "icon.png",

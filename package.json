@@ -2,7 +2,7 @@
   "name": "justybase-netezza",
   "displayName": "Netezza SQL Tools (justybase)",
   "description": "Core Netezza extension with built-in SQLite and optional DuckDB, Db2, Oracle, PostgreSQL, Snowflake, MS SQL Server, and MySQL support",
-  "version": "3.16.7",
+  "version": "3.16.8",
   "workspaces": [
     "packages/*"
   ],
