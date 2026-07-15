@@ -1,5 +1,5 @@
 
-import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import * as vscode from 'vscode';
 import { ResultPanelView } from '../../views/resultPanelView';
 
@@ -141,6 +141,10 @@ describe('ResultPanelView Integration', () => {
         messageHandler({ command: 'ready' });
     });
 
+    afterEach(() => {
+        provider.dispose();
+    });
+
     test('should switch content when active source changes', () => {
         const uriA = 'file:///path/to/A.sql';
         const uriB = 'file:///path/to/B.sql';
@@ -213,6 +217,8 @@ describe('ResultPanelView Integration', () => {
         expect(JSON.parse(hydrateMessage!.data.activeSourceJson)).toBe(pendingSourceUri);
         expect(hydrateMessage!.data.activeResultSetIndex).toBe(0);
         expect(JSON.parse(hydrateMessage!.data.executingSourcesJson)).toContain(pendingSourceUri);
+
+        pendingProvider.dispose();
     });
 
     test('should reload webview html when results grid font configuration changes', () => {

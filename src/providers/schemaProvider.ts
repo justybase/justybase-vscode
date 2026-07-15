@@ -1561,6 +1561,19 @@ export class SchemaProvider
     async getChildren(element?: SchemaItem): Promise<SchemaItem[]> {
         await this.connectionManager.ensureFullyLoaded();
 
+        if (element?.connectionName) {
+            const cacheWithReadiness = this.metadataCache as MetadataCache & {
+                whenConnectionMetadataReady?: (name: string) => Promise<void>;
+            };
+            if (typeof cacheWithReadiness.whenConnectionMetadataReady === 'function') {
+                await cacheWithReadiness.whenConnectionMetadataReady(element.connectionName);
+            } else {
+                // Keep lightweight test doubles and older embedders compatible
+                // while the concrete MetadataCache uses the startup barrier.
+                await this.metadataCache.whenConnectionMetadataHydrated?.(element.connectionName);
+            }
+        }
+
         if (!element) {
             // Root: Filter item + Server Instances
             const t0 = performance.now();

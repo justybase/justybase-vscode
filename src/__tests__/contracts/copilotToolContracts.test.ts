@@ -11,9 +11,7 @@ import {
     SchemaToolContract,
     ColumnsToolContract,
     TablesToolContract,
-    ExecuteQueryToolContract,
     SearchSchemaToolContract,
-    ExportQueryResultsToolContract,
     FavoritesToolContract,
     ValidateSqlToolContract,
     ValidateSqlOnDatabaseToolContract,
@@ -59,7 +57,7 @@ describe('AI-01: Copilot Tool Contracts', () => {
         });
 
         it('should have exactly 29 tools registered', () => {
-            expect(ToolContractRegistry.size).toBe(29);
+            expect(ToolContractRegistry.size).toBe(manifestTools.length);
         });
     });
 
@@ -180,24 +178,7 @@ describe('AI-01: Copilot Tool Contracts', () => {
             expect(emptyResult.success).toBe(true);
         });
 
-        it('should validate ExecuteQueryTool input correctly', () => {
-            const contract = ExecuteQueryToolContract;
 
-            // Valid input
-            const validInput = { sql: 'SELECT 1', database: 'test', maxRows: 100 };
-            const validResult = contract.validateInput(validInput);
-            expect(validResult.success).toBe(true);
-
-            // Missing required SQL
-            const invalidInput = { database: 'test' };
-            const invalidResult = contract.validateInput(invalidInput);
-            expect(invalidResult.success).toBe(false);
-
-            // Invalid SQL (no keywords)
-            const badSqlInput = { sql: 'not valid sql' };
-            const badSqlResult = contract.validateInput(badSqlInput);
-            expect(badSqlResult.success).toBe(false);
-        });
 
         it('should validate SearchSchemaTool input using manifest keys', () => {
             const contract = SearchSchemaToolContract;
@@ -216,17 +197,7 @@ describe('AI-01: Copilot Tool Contracts', () => {
             expect(invalidResult.success).toBe(false);
         });
 
-        it('should validate ExportQueryResultsTool optional format and timeoutSeconds', () => {
-            const contract = ExportQueryResultsToolContract;
 
-            const validInput = { source: 'sql', timeoutSeconds: 120 };
-            const validResult = contract.validateInput(validInput);
-            expect(validResult.success).toBe(true);
-            if (validResult.success) {
-                expect(validResult.data.format).toBe('csv');
-                expect(validResult.data.timeoutSeconds).toBe(120);
-            }
-        });
 
         it('should validate FavoritesTool supported modes and profileNames', () => {
             const contract = FavoritesToolContract;
@@ -349,9 +320,9 @@ describe('AI-01: Copilot Tool Contracts', () => {
             expect(hasToolContract('non_existent_tool')).toBe(false);
         });
 
-        it('getAllToolContracts should return all 26 contracts', () => {
+        it('getAllToolContracts should return the allowed contracts', () => {
             const contracts = getAllToolContracts();
-            expect(contracts).toHaveLength(29);
+            expect(contracts).toHaveLength(22);
         });
     });
 
@@ -393,7 +364,7 @@ describe('AI-01: Copilot Tool Contracts', () => {
             const connectionTools = [
                 'netezza_get_sql_schema',
                 'netezza_get_columns',
-                'netezza_execute_query',
+                'netezza_get_tables',
                 'netezza_explain_plan'
             ];
 

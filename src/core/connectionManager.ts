@@ -304,6 +304,15 @@ export class ConnectionManager {
         this._metadataCache = metadataCache;
     }
 
+    getSchemaForConnection(connectionName: string): string | null {
+        const details = this._connections[connectionName];
+        return this.resolveEffectiveSchemaFromDetails(
+            connectionName,
+            details?.database,
+            details,
+        );
+    }
+
     private async loadConnections() {
         // Active connection name already loaded in constructor from globalState
 

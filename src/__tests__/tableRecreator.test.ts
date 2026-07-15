@@ -413,6 +413,30 @@ describe("tableRecreator", () => {
       expect(mockConnection.close).toHaveBeenCalled();
     });
 
+    it("should quote an owner name containing a dot", async () => {
+      const mockConnection = createMockConnection();
+      mockNzConnectionConstructor.mockReturnValue(mockConnection);
+
+      getColumnsMock.mockResolvedValue([
+        { name: "ID", fullTypeName: "INTEGER", notNull: true, defaultValue: null, description: null },
+      ]);
+      getDistributionInfoMock.mockResolvedValue([]);
+      getOrganizeInfoMock.mockResolvedValue([]);
+      getKeysInfoMock.mockResolvedValue(new Map());
+      getTableCommentMock.mockResolvedValue(null);
+      getTableOwnerMock.mockResolvedValue("a.user");
+      quoteNameIfNeededMock.mockImplementation((name: string) =>
+        /^[A-Z_][A-Z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`,
+      );
+
+      const result = await generateRecreateTableScript(
+        connectionDetails, "TESTDB", "TESTSCHEMA", "TESTTABLE", undefined,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.sqlScript).toContain('OWNER TO "a.user";');
+    });
+
     it("should use custom new table name when provided", async () => {
       const mockConnection = createMockConnection();
       mockNzConnectionConstructor.mockReturnValue(mockConnection);

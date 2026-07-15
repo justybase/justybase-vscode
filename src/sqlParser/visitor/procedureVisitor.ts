@@ -9,6 +9,7 @@ import {
 } from "../procedure/procedureStringBody";
 import { unquoteIdentifier } from "../../utils/identifierUtils";
 import type { DatabaseSqlValidationProfile } from "../../sql/authoring/types";
+import type { ScopeBuilder } from "./scopeBuilder";
 
 export interface ProcedureVisitorHost {
   addError(
@@ -31,6 +32,7 @@ export interface ProcedureVisitorHost {
   getStringBodyOffsetShift(): number;
   setStringBodyOffsetShift(value: number): void;
   getValidationProfile(): DatabaseSqlValidationProfile;
+  getScopeBuilder(): ScopeBuilder;
   addScriptCreatedProcedure(name: string): void;
   formatRelationName(
     database: string | undefined,
@@ -121,6 +123,7 @@ export function createProcedureStatement(
 ): void {
   const prev = host.getInProcedureContext();
   host.setInProcedureContext(true);
+  host.getScopeBuilder().enterScope();
   const scope = new ProcedureScopeBuilder();
   host.setProcedureScope(scope);
 
@@ -159,6 +162,7 @@ export function createProcedureStatement(
   }
 
   host.setProcedureScope(null);
+  host.getScopeBuilder().exitScope();
   host.setInProcedureContext(prev);
 }
 

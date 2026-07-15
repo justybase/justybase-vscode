@@ -1231,6 +1231,96 @@ GROUP BY D.DATEKEY, D.DAYNUMBEROFWEEK, D.ENGLISHDAYNAMEOFWEEK`,
   });
 
   describe("SQL006 table existence validation", () => {
+    it("recognizes a qualified table created earlier as an INSERT target", () => {
+      const schema = createMockSchemaProvider([
+        {
+          database: "JUST_DATA",
+          schema: "ADMIN",
+          name: "TABLE_A",
+          columns: ["COL_1_A", "COL_2_A"],
+        },
+      ]);
+      const validator = new SqlValidator(schema);
+      const result = validator.validate(`CREATE TABLE JUST_DATA.ADMIN.TMP_VXFEFNNOMV
+(
+  COL_1_A INTEGER,
+  COL_2_A INTEGER
+)
+DISTRIBUTE ON RANDOM;
+INSERT INTO JUST_DATA.ADMIN.TMP_VXFEFNNOMV
+SELECT * FROM JUST_DATA.ADMIN.TABLE_A;`);
+
+      expect(result.errors.some((e) => e.code === "SQL006")).toBe(false);
+    });
+
+    it("recognizes a CTAS table in later statements only", () => {
+      const schema = createMockSchemaProvider([]);
+      const validator = new SqlValidator(schema);
+      const afterCreate = validator.validate(`CREATE TABLE JUST_DATA.ADMIN.CTAS_RESULT AS
+SELECT 1 AS ID
+DISTRIBUTE ON RANDOM;
+INSERT INTO JUST_DATA.ADMIN.CTAS_RESULT SELECT 2;`);
+      const beforeCreate = validator.validate(`INSERT INTO JUST_DATA.ADMIN.CTAS_RESULT SELECT 2;
+CREATE TABLE JUST_DATA.ADMIN.CTAS_RESULT AS
+SELECT 1 AS ID
+DISTRIBUTE ON RANDOM;`);
+
+      expect(afterCreate.errors.some((e) => e.code === "SQL006")).toBe(false);
+      expect(beforeCreate.errors.some((e) => e.code === "SQL006")).toBe(true);
+    });
+
+    it("does not treat an earlier missing reference as a created table", () => {
+      const validator = new SqlValidator(createMockSchemaProvider([]));
+      const result = validator.validate(`SELECT * FROM JUST_DATA.ADMIN.MISSING_TABLE;
+INSERT INTO JUST_DATA.ADMIN.MISSING_TABLE SELECT 1;`);
+
+      expect(result.errors.filter((e) => e.code === "SQL006")).toHaveLength(2);
+    });
+
+    it("keeps created views in scope and removes them after DROP VIEW", () => {
+      const validator = new SqlValidator(createMockSchemaProvider([]));
+      const result = validator.validate(`CREATE VIEW JUST_DATA.ADMIN.V1 AS SELECT 1 AS ID;
+SELECT ID FROM JUST_DATA.ADMIN.V1;
+DROP VIEW JUST_DATA.ADMIN.V1;
+SELECT ID FROM JUST_DATA.ADMIN.V1;`);
+
+      expect(result.errors.filter((e) => e.code === "SQL006")).toHaveLength(1);
+    });
+
+    it("removes a created table from scope after DROP TABLE", () => {
+      const validator = new SqlValidator(createMockSchemaProvider([]));
+      const result = validator.validate(`CREATE TABLE JUST_DATA.ADMIN.T1 (ID INT4);
+DROP TABLE JUST_DATA.ADMIN.T1;
+INSERT INTO JUST_DATA.ADMIN.T1 SELECT 1;`);
+
+      expect(result.errors.filter((e) => e.code === "SQL006")).toHaveLength(1);
+    });
+
+    it("does not expose procedure-body DDL to later outer statements", () => {
+      const validator = new SqlValidator(createMockSchemaProvider([]));
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE JUST_DATA.ADMIN.P1()
+RETURNS INT4
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  CREATE TABLE JUST_DATA.ADMIN.PROC_TABLE (ID INT4);
+  RETURN 1;
+END;
+END_PROC;
+INSERT INTO JUST_DATA.ADMIN.PROC_TABLE SELECT 1;`);
+
+      expect(result.errors.filter((e) => e.code === "SQL006")).toHaveLength(1);
+    });
+
+    it("validates a CTAS source before registering its target", () => {
+      const validator = new SqlValidator(createMockSchemaProvider([]));
+      const result = validator.validate(`CREATE TABLE JUST_DATA.ADMIN.NEW_TABLE AS
+SELECT * FROM JUST_DATA.ADMIN.NEW_TABLE
+DISTRIBUTE ON RANDOM;`);
+
+      expect(result.errors.filter((e) => e.code === "SQL006")).toHaveLength(1);
+    });
+
     it("should report SQL006 for qualified non-existent table (DB..TABLE)", () => {
       const schema = createMockSchemaProvider([
         {

@@ -1,6 +1,3 @@
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { CopilotToolsHandler } from '../services/copilot/CopilotToolsHandler';
 import { CopilotExplainTuningTools } from '../services/copilot/tools/CopilotExplainTuningTools';
 import { runQuery, runQueryRaw, runExplainQuery, queryResultToRows } from '../core/queryRunner';
@@ -11,7 +8,6 @@ import {
 import { generateDDL } from '../ddlGenerator';
 import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
 import { importDataToNetezza, NetezzaImporter } from '../import/dataImporter';
-import { importDataToPostgreSql } from '../import/postgresqlImporter';
 import { exportToCsv } from '../export/csvExporter';
 import { exportQueryToXlsb, exportStructuredToXlsb } from '../export/xlsbExporter';
 import { exportCsvToXlsx, exportStructuredToXlsx } from '../export/xlsxExporter';
@@ -189,31 +185,7 @@ describe('services/copilot/CopilotToolsHandler', () => {
         handler = new CopilotToolsHandler(connectionManager, {} as never);
     });
 
-    it('should query tables, columns and sample data', async () => {
-        (runQuery as jest.Mock).mockImplementation(async () => {
-            return 'ok';
-        });
-        expect(await handler.getTablesFromDatabase('DB1', 'admin')).toBe('ok');
-        
-        (runQueryRaw as jest.Mock).mockResolvedValueOnce({
-            columns: [
-                { name: 'DBNAME' },
-                { name: 'SCHEMA' },
-                { name: 'TABLENAME' },
-                { name: 'ATTNAME' },
-                { name: 'FORMAT_TYPE' },
-                { name: 'ATTNUM' },
-                { name: 'DESCRIPTION' },
-                { name: 'IS_PK' },
-                { name: 'IS_FK' }
-            ],
-            data: [['DB', 'SC', 'TABLE', 'COL1', 'INT', 1, '', 0, 0]]
-        });
-        expect(await handler.getColumnsForTables(['db.sc.table'])).toContain('TABLE');
-        
-        (runQuery as jest.Mock).mockResolvedValueOnce('ok');
-        expect(await handler.getSampleData('DB1.ADMIN.T', undefined, 10)).toBe('ok');
-    });
+
 
     it('should query tables with cross-database syntax', async () => {
         (runQuery as jest.Mock).mockResolvedValue('OWNER|TABLENAME|TYPE\nADMIN|MYTABLE|TABLE');
@@ -471,47 +443,9 @@ describe('services/copilot/CopilotToolsHandler', () => {
         expect(mockConn.close).toHaveBeenCalled();
     });
 
-    it('should validate select execution and explain plan', async () => {
-        (runQuery as jest.Mock).mockResolvedValue('rows');
-        (runExplainQuery as jest.Mock).mockResolvedValue('plan');
-        await expect(handler.executeSelectQuery('DELETE FROM T', 10)).rejects.toThrow('Only SELECT queries are allowed.');
-        expect(await handler.executeSelectQuery('SELECT * FROM T', 5)).toBe('rows');
-        expect(await handler.getExplainPlan('SELECT * FROM T', true)).toBe('plan');
-        expect(runExplainQuery).toHaveBeenCalledWith(expect.anything(), 'EXPLAIN VERBOSE SELECT * FROM T', 'conn1', connectionManager, undefined);
-    });
 
-    it('should honor provided database scope for execute, explain and sample data', async () => {
-        const mockReader = {
-            read: jest.fn().mockResolvedValue(false),
-            close: jest.fn().mockResolvedValue(undefined)
-        };
-        const mockConnection = {
-            close: jest.fn().mockResolvedValue(undefined),
-            on: jest.fn((_event: string, listener: (message: unknown) => void) => listener({ message: 'plan-db' })),
-            removeListener: jest.fn(),
-            createCommand: jest.fn().mockReturnValue({
-                executeReader: jest.fn().mockResolvedValue(mockReader)
-            })
-        };
 
-        (createConnectionFromDetails as jest.Mock).mockResolvedValue(mockConnection);
-        (executeQueryHelper as jest.Mock).mockResolvedValue([{ ID: 1 }]);
 
-        const queryResult = await handler.executeSelectQuery('SELECT * FROM T', 5, 'DB2');
-        const sampleResult = await handler.getSampleData('ADMIN.T', 'DB2', 3);
-        const explainResult = await handler.getExplainPlan('SELECT * FROM T', false, 'DB2');
-
-        expect(createConnectionFromDetails).toHaveBeenCalledWith(
-            expect.objectContaining({ database: 'DB1' }),
-            'DB2'
-        );
-        expect(runQuery).not.toHaveBeenCalled();
-        expect(runExplainQuery).not.toHaveBeenCalled();
-        expect(queryResult).toContain('"ID": 1');
-        expect(sampleResult).toContain('"ID": 1');
-        expect(explainResult).toContain('plan-db');
-        expect(mockConnection.close).toHaveBeenCalled();
-    });
 
     it('should pass database scope to validateSqlOnDatabase', async () => {
         const explainSpy = jest.spyOn(handler, 'getExplainPlan').mockResolvedValue('plan');
@@ -548,24 +482,7 @@ describe('services/copilot/CopilotToolsHandler', () => {
         await expect(handler.getDatabases()).rejects.toThrow('Failed to fetch databases');
     });
 
-    it('should return deep table stats report with skew analysis', async () => {
-        const conn = { close: jest.fn().mockResolvedValue(undefined) };
-        (createConnectionFromDetails as jest.Mock).mockResolvedValue(conn);
-        (executeQueryHelper as jest.Mock)
-            .mockResolvedValueOnce([{ DIST_KEY: 'ID', OWNER: 'ADMIN' }])
-            .mockResolvedValueOnce([{ ROW_COUNT: 1000 }])
-            .mockResolvedValueOnce([
-                { ROW_COUNT: 100 },
-                { ROW_COUNT: 120 }
-            ]);
 
-        const result = await handler.getTableStats('ADMIN.MYTAB', 'DB1', 'deep');
-        expect(result).toContain('Table Statistics');
-        expect(result).toContain('**Mode:** deep');
-        expect(result).toContain('Row Count');
-        expect(result).toContain('Data distribution looks balanced');
-        expect(conn.close).toHaveBeenCalled();
-    });
 
     it('should generate structured tuning advice payload', async () => {
         const explainReader = {
@@ -878,107 +795,11 @@ END_PROC;
         );
     });
 
-    it('should inspect/propose import and execute dry-run import', async () => {
-        const sourceFilePath = path.join(os.tmpdir(), `copilot-tools-handler-${Date.now()}.csv`);
-        fs.writeFileSync(sourceFilePath, 'ID,NAME\n1,A');
 
-        const inspectResult = await handler.inspectImportFile(sourceFilePath, 3);
-        expect(inspectResult).toContain('summary:');
-        expect(NetezzaImporter).toHaveBeenCalledWith(sourceFilePath, 'COPILOT_IMPORT_PREVIEW', undefined);
 
-        const mappingResult = await handler.proposeImportMapping(sourceFilePath, 'DB1.ADMIN.T_IMPORT');
-        expect(mappingResult).toContain('proposedCreateTableSql');
 
-        const dryRunResult = await handler.executeImport(sourceFilePath, 'DB1.ADMIN.T_IMPORT', true, 120);
-        expect(dryRunResult).toContain('Dry-run completed');
 
-        fs.unlinkSync(sourceFilePath);
-    });
 
-    it('should execute import and export query results in csv format', async () => {
-        const sourceFilePath = path.join(os.tmpdir(), `copilot-tools-handler-exec-${Date.now()}.csv`);
-        fs.writeFileSync(sourceFilePath, 'ID,NAME\n1,A');
-        (importDataToNetezza as jest.Mock).mockResolvedValue({
-            success: true,
-            message: 'ok',
-            details: { rowsInserted: 1 }
-        });
-        (exportToCsv as jest.Mock).mockImplementation(
-            async (_conn: unknown, _sql: string, filePath: string) => {
-                fs.writeFileSync(filePath, 'ID,NAME\n1,A\n');
-            }
-        );
-        (exportQueryToXlsb as jest.Mock).mockResolvedValue({ success: true, message: 'ok' });
-        (exportCsvToXlsx as jest.Mock).mockResolvedValue({ success: true, message: 'ok' });
 
-        const importResult = await handler.executeImport(sourceFilePath, 'DB1.ADMIN.T_IMPORT', false, 120);
-        expect(importResult).toContain('Import completed');
-        expect(importDataToNetezza).toHaveBeenCalled();
 
-        const exportPath = path.join(os.tmpdir(), `copilot-tools-handler-export-${Date.now()}.csv`);
-        const exportResult = await handler.exportQueryResults('SELECT 1', 'csv', exportPath, 30);
-        expect(exportResult).toContain('Export completed');
-        expect(exportToCsv).toHaveBeenCalled();
-
-        fs.unlinkSync(sourceFilePath);
-        if (fs.existsSync(exportPath)) {
-            fs.unlinkSync(exportPath);
-        }
-    });
-
-    it('should route executeImport to PostgreSQL importer for postgresql connections', async () => {
-        const sourceFilePath = path.join(os.tmpdir(), `copilot-tools-handler-pg-${Date.now()}.csv`);
-        fs.writeFileSync(sourceFilePath, 'ID,NAME\n1,A');
-        connectionManager.getConnectionDatabaseKind = jest.fn(() => 'postgresql');
-        connectionManager.getConnection = jest.fn().mockResolvedValue({
-            name: 'pg-conn',
-            host: 'localhost',
-            database: 'warehouse',
-            user: 'postgres',
-            password: 'password',
-            dbType: 'postgresql'
-        });
-        (importDataToPostgreSql as jest.Mock).mockResolvedValue({
-            success: true,
-            message: 'ok',
-            details: { rowsInserted: 1 }
-        });
-
-        const importResult = await handler.executeImport(sourceFilePath, 'warehouse.public.t_import', false, 120);
-
-        expect(importResult).toContain('Import completed');
-        expect(importDataToPostgreSql).toHaveBeenCalledWith(
-            sourceFilePath,
-            'warehouse.public.t_import',
-            expect.objectContaining({ dbType: 'postgresql' }),
-            undefined,
-            120,
-            undefined
-        );
-        expect(importDataToNetezza).not.toHaveBeenCalled();
-
-        fs.unlinkSync(sourceFilePath);
-    });
-
-    it('should export active results grid when source is activeResults', async () => {
-        const exportPath = path.join(os.tmpdir(), `copilot-tools-handler-active-results-${Date.now()}.csv`);
-        const resultPanelProvider = {
-            getActiveSource: jest.fn().mockReturnValue('file:///test.sql'),
-            getResultsForSource: jest.fn().mockReturnValue([
-                {
-                    columns: [{ name: 'ID', type: 'INT4' }],
-                    data: [[1], [2]],
-                    isLog: false,
-                    sql: 'SELECT ID FROM T'
-                }
-            ])
-        };
-        const handlerWithResults = new CopilotToolsHandler(connectionManager, {} as never, resultPanelProvider as never);
-
-        const exportResult = await handlerWithResults.exportQueryResults(undefined, 'csv', exportPath, undefined, 'activeResults');
-        expect(exportResult).toContain('Exported active Netezza Results set');
-        expect(fs.existsSync(exportPath)).toBe(true);
-
-        fs.unlinkSync(exportPath);
-    });
 });

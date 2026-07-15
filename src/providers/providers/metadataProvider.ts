@@ -63,6 +63,20 @@ export class MetadataProvider {
         return getDatabaseMetadataProvider(this.getConnectionDatabaseKind(connectionName));
     }
 
+    private async waitForConnectionMetadataReady(connectionName: string): Promise<void> {
+        const cacheWithReadiness = this.metadataCache as MetadataCache & {
+            whenConnectionMetadataReady?: (name: string) => Promise<void>;
+        };
+        if (typeof cacheWithReadiness.whenConnectionMetadataReady === 'function') {
+            await cacheWithReadiness.whenConnectionMetadataReady(connectionName);
+            return;
+        }
+
+        // Keep lightweight test doubles and older embedders compatible while
+        // the concrete MetadataCache uses the stronger startup barrier.
+        await this.metadataCache.whenConnectionMetadataHydrated?.(connectionName);
+    }
+
     /**
      * Get all databases for a connection
      */
@@ -70,6 +84,7 @@ export class MetadataProvider {
         if (!connectionName) return [];
 
         await this.connectionManager.ensureFullyLoaded();
+        await this.waitForConnectionMetadataReady(connectionName);
         const cached = this.metadataCache.getDatabases(connectionName);
         if (cached) {
             return cached.map((item) => {
@@ -112,6 +127,7 @@ export class MetadataProvider {
         if (!connectionName) return [];
 
         await this.connectionManager.ensureFullyLoaded();
+        await this.waitForConnectionMetadataReady(connectionName);
         const cached = this.metadataCache.getSchemas(connectionName, dbName);
         if (cached) {
             return cached.map((item) => {
@@ -177,7 +193,7 @@ export class MetadataProvider {
         if (!connectionName) return [];
 
         await this.connectionManager.ensureFullyLoaded();
-        await this.metadataCache.whenConnectionMetadataHydrated?.(connectionName);
+        await this.waitForConnectionMetadataReady(connectionName);
         const cacheKey = buildSchemaCacheKey(dbName, schemaName);
 
         const cached = getTablesForScope(
@@ -285,6 +301,7 @@ export class MetadataProvider {
         if (!connectionName) return [];
 
         await this.connectionManager.ensureFullyLoaded();
+        await this.waitForConnectionMetadataReady(connectionName);
         const cacheKey = buildSchemaCacheKey(dbName, schemaName);
         const cached = getTablesForScope(
             this.metadataCache,
@@ -412,6 +429,7 @@ export class MetadataProvider {
         if (!connectionName) return [];
 
         await this.connectionManager.ensureFullyLoaded();
+        await this.waitForConnectionMetadataReady(connectionName);
         const cacheKey = buildSchemaCacheKey(dbName, schemaName);
         const cached = schemaName
             ? this.metadataCache.getProcedures(connectionName, cacheKey)
@@ -556,7 +574,7 @@ export class MetadataProvider {
 
         try {
             await this.connectionManager.ensureFullyLoaded();
-            await this.metadataCache.whenConnectionMetadataHydrated?.(connectionName);
+            await this.waitForConnectionMetadataReady(connectionName);
             const metadataProvider = this.tryGetMetadataProvider(connectionName);
             const mirroredSystemCatalog = metadataProvider?.mirroredSystemCatalog;
             const shouldMirrorSystemCatalog = !normalizedSchemaName && mirroredSystemCatalog?.isMirroredObjectName(normalizedTableName) === true;

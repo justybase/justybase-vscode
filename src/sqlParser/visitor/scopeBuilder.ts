@@ -50,6 +50,23 @@ export class ScopeBuilder {
         return undefined
     }
 
+    removeTable(table: TableInfo): void {
+        const key = (table.alias || table.name).toUpperCase()
+        const known = this.currentScope.tables.get(key)
+        if (!known) return
+
+        const matchesQualifier = (requested?: string, existing?: string): boolean =>
+            requested === undefined ||
+            (existing !== undefined && requested.toUpperCase() === existing.toUpperCase())
+
+        if (
+            matchesQualifier(table.database, known.database) &&
+            matchesQualifier(table.schema, known.schema)
+        ) {
+            this.currentScope.tables.delete(key)
+        }
+    }
+
     addCte(cte: CteInfo): void {
         this.currentScope.ctes.set(cte.name.toUpperCase(), cte)
     }

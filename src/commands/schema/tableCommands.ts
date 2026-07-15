@@ -9,6 +9,7 @@ import { runQuery } from '../../core/queryRunner';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getFullName, requireConnection, executeWithProgress, escapeSqlString, isValidIdentifier } from './helpers';
 import { TableDesignerView } from '../../views/tableDesignerView';
+import { formatIdentifierForSql } from '../../utils/identifierUtils';
 
 /**
  * Register table modification commands
@@ -660,7 +661,9 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
                 if (!newOwner) return;
 
-                const sql = `ALTER TABLE ${fullName} OWNER TO ${newOwner.trim()};`;
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                const cleanOwner = formatIdentifierForSql(newOwner.trim(), databaseKind);
+                const sql = `ALTER TABLE ${fullName} OWNER TO ${cleanOwner};`;
 
                 try {
                     if (!await requireConnection(connectionManager)) return;

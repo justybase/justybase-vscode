@@ -18,6 +18,9 @@ export interface DdlVisitorHost {
   visitAs<T>(node: CstNode): T;
   getFirstTokenFromCst(node: CstNode): IToken | undefined;
   getScopeBuilder(): ScopeBuilder;
+  addScriptCreatedTable(table: TableInfo): void;
+  removeScriptCreatedTable(table: TableInfo): void;
+  getInProcedureContext(): boolean;
   getSchemaProvider(): SchemaProvider | undefined;
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void;
   isDropTargetTableLike(): boolean;
@@ -64,7 +67,6 @@ export function createTableStatement(
       columns: [],
     };
 
-    host.getScopeBuilder().addTable(createdTable);
   }
 
   if (ctx.withStatement) {
@@ -93,6 +95,13 @@ export function createTableStatement(
   if (ctx.organizeClause) {
     host.visit(ctx.organizeClause[0]);
   }
+
+  if (createdTable) {
+    host.getScopeBuilder().addTable(createdTable);
+    if (!host.getInProcedureContext()) {
+      host.addScriptCreatedTable(createdTable);
+    }
+  }
 }
 
 export function createExternalTableStatement(
@@ -115,7 +124,6 @@ export function createExternalTableStatement(
       isTempTable: false,
       columns: [],
     };
-    host.getScopeBuilder().addTable(createdTable);
   }
 
   if (ctx.columnDefinitionList) {
@@ -134,6 +142,13 @@ export function createExternalTableStatement(
   }
   if (ctx.withStatement) {
     host.visit(ctx.withStatement[0]);
+  }
+
+  if (createdTable) {
+    host.getScopeBuilder().addTable(createdTable);
+    if (!host.getInProcedureContext()) {
+      host.addScriptCreatedTable(createdTable);
+    }
   }
 }
 
@@ -169,27 +184,27 @@ export function dropTarget(
   host: DdlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
-  if (
-    ctx.qualifiedName &&
-    host.isDropTargetTableLike() &&
-    host.getSchemaProvider()
-  ) {
+  if (ctx.qualifiedName && host.isDropTargetTableLike()) {
     const nameInfo = host.visitAs<{
       name: string;
       schema?: string;
       database?: string;
     }>(ctx.qualifiedName[0]);
+    const table: TableInfo = {
+      name: nameInfo.name,
+      database: nameInfo.database,
+      schema: nameInfo.schema,
+      isCte: false,
+      isTempTable: false,
+      columns: [],
+    };
     const isQualified = !!(nameInfo.database || nameInfo.schema);
-    if (isQualified) {
-      const table: TableInfo = {
-        name: nameInfo.name,
-        database: nameInfo.database,
-        schema: nameInfo.schema,
-        isCte: false,
-        isTempTable: false,
-        columns: [],
-      };
+    if (isQualified && host.getSchemaProvider()) {
       host.validateTableExists(table, ctx.qualifiedName[0] as CstNode);
+    }
+    if (!host.getInProcedureContext()) {
+      host.removeScriptCreatedTable(table);
+      host.getScopeBuilder().removeTable(table);
     }
     addTableQualificationWarningFromQualifiedName(
       host as unknown as SqlVisitorHost,

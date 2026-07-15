@@ -1,7 +1,7 @@
 /**
  * Tests for MetadataDiskIndexWatcher — cross-window cache sync.
  *
- * These tests use a temporary directory and write real v2 index files
+ * These tests use a temporary directory and write real v3 index files
  * to verify change detection, initial sync, and lifecycle.
  */
 
@@ -9,22 +9,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { MetadataDiskIndexWatcher } from '../metadata/diskStorage/metadataDiskWatcher';
 import {
-    createEmptyV2Index,
-    type V2DiskIndex,
+    createEmptyV3Index,
+    type V3DiskIndex,
 } from '../metadata/diskStorage/metadataDiskTypes';
-import { getV2IndexPath, getCacheV2Dir } from '../metadata/diskStorage/metadataDiskPaths';
+import { getV3IndexPath, getCacheV3Dir } from '../metadata/diskStorage/metadataDiskPaths';
 
 // Helper to write a compressed index file (simplified — just write JSON, not gzip)
-function writeIndex(storageDir: string, index: V2DiskIndex): void {
-    const v2Dir = getCacheV2Dir(storageDir);
-    if (!fs.existsSync(v2Dir)) {
-        fs.mkdirSync(v2Dir, { recursive: true });
+function writeIndex(storageDir: string, index: V3DiskIndex): void {
+    const v3Dir = getCacheV3Dir(storageDir);
+    if (!fs.existsSync(v3Dir)) {
+        fs.mkdirSync(v3Dir, { recursive: true });
     }
-    fs.writeFileSync(getV2IndexPath(storageDir), JSON.stringify(index), 'utf8');
+    fs.writeFileSync(getV3IndexPath(storageDir), JSON.stringify(index), 'utf8');
 }
 
-function createIndex(connections: Record<string, number>): V2DiskIndex {
-    const index = createEmptyV2Index();
+function createIndex(connections: Record<string, number>): V3DiskIndex {
+    const index = createEmptyV3Index();
     for (const [name, prefetchCompletedAt] of Object.entries(connections)) {
         index.connections[name] = {
             prefetchCompletedAt,
@@ -102,7 +102,7 @@ describe('MetadataDiskIndexWatcher', () => {
             expect(updatedConnections).toEqual([]);
 
             // Simulate another window writing a connection
-            const laterIndex = createEmptyV2Index();
+            const laterIndex = createEmptyV3Index();
             laterIndex.connections.conn1 = {
                 prefetchCompletedAt: now,
                 connectionFingerprint: 'fp',
@@ -201,11 +201,11 @@ describe('MetadataDiskIndexWatcher', () => {
         });
 
         it('should handle corrupted index file gracefully', async () => {
-            const v2Dir = getCacheV2Dir(tmpDir);
-            if (!fs.existsSync(v2Dir)) {
-                fs.mkdirSync(v2Dir, { recursive: true });
+            const v3Dir = getCacheV3Dir(tmpDir);
+            if (!fs.existsSync(v3Dir)) {
+                fs.mkdirSync(v3Dir, { recursive: true });
             }
-            fs.writeFileSync(getV2IndexPath(tmpDir), 'not-valid-json', 'utf8');
+            fs.writeFileSync(getV3IndexPath(tmpDir), 'not-valid-json', 'utf8');
 
             watcher = new MetadataDiskIndexWatcher(tmpDir, onUpdated, onError);
             await watcher.start();
@@ -216,7 +216,7 @@ describe('MetadataDiskIndexWatcher', () => {
         });
 
         it('should handle index with wrong schema version', async () => {
-            const badIndex = createEmptyV2Index();
+            const badIndex = createEmptyV3Index();
             badIndex.schemaVersion = 999;
             badIndex.connections.conn1 = {
                 prefetchCompletedAt: Date.now(),

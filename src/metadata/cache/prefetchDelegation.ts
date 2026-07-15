@@ -5,6 +5,7 @@
 import type { QueryRunnerRawFn } from '../prefetch';
 import type { CachePrefetcher } from '../prefetch';
 import type { MetadataDiskStorage } from '../diskStorage';
+import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
 import { Logger } from '../../utils/logger';
 import type { MetadataStore } from './MetadataStore';
 
@@ -72,22 +73,21 @@ export function isConnectionPrefetchFresh(
 export async function tryAcquirePrefetchLock(
   deps: PrefetchDelegationDeps,
   connectionName: string,
-): Promise<boolean> {
+): Promise<PrefetchLease | undefined> {
   if (!deps.isDiskPersistenceEnabled() || !deps.diskStorage) {
-    return true;
+    return { connectionName, generation: 0, fence: 0 };
   }
-  const acquired = await deps.diskStorage.lock.acquireLock(connectionName);
-  if (acquired) {
+  const lease = await deps.diskStorage.acquirePrefetchLease(connectionName);
+  if (lease) {
     Logger.getInstance().debug(
       `[MetadataDisk] lock: acquired for ${connectionName}`,
     );
-    deps.diskStorage.lock.startHeartbeat(connectionName);
   } else {
     Logger.getInstance().info(
       `[MetadataDisk] lock: skipped for ${connectionName} (another instance prefetching)`,
     );
   }
-  return acquired;
+  return lease;
 }
 
 export function hasConnectionPrefetchInProgress(
@@ -99,9 +99,9 @@ export function hasConnectionPrefetchInProgress(
 
 export async function releasePrefetchLock(
   deps: PrefetchDelegationDeps,
-  connectionName: string,
+  lease: PrefetchLease | undefined,
 ): Promise<void> {
-  await deps.diskStorage?.lock.releaseLock(connectionName);
+  await deps.diskStorage?.releasePrefetchLease(lease);
 }
 
 export function triggerConnectionPrefetch(

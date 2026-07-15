@@ -126,6 +126,7 @@ describe('ResultPanelMessageHandler', () => {
     });
 
     afterEach(() => {
+        stateManager.dispose();
         consoleLogSpy.mockRestore();
     });
 

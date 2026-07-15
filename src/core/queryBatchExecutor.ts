@@ -560,12 +560,19 @@ export function logQueryToHistoryAsync(
     durationMs?: number,
     rowsAffected?: number,
     errorMessage?: string,
+    schema?: string,
+    dbType?: string,
 ): void {
+    const resolvedSchema = schema && schema.length > 0
+        ? schema
+        : dbType === 'netezza'
+            ? 'ADMIN'
+            : 'unknown';
     historyManager
         .addEntry(
             host,
             database,
-            "unknown",
+            resolvedSchema,
             query,
             connectionName,
             tags,

@@ -4,7 +4,6 @@ export interface ITableStatsToolParameters {
     tableName?: string;
     table?: string;
     database?: string;
-    mode?: 'quick' | 'deep';
 }
 
 export class TableStatsTool implements vscode.LanguageModelTool<ITableStatsToolParameters> {
@@ -16,14 +15,14 @@ export class TableStatsTool implements vscode.LanguageModelTool<ITableStatsToolP
     ): Promise<vscode.PreparedToolInvocation> {
         const tableName = options.input.tableName || options.input.table || 'unknown';
         const dbInfo = options.input.database ? ` in ${options.input.database}` : '';
-        const mode = options.input.mode === 'deep' ? 'deep' : 'quick';
+        const mode = 'quick';
 
         return {
             invocationMessage: `Getting ${mode} statistics for ${tableName}${dbInfo}...`,
             confirmationMessages: {
                 title: 'Get Table Statistics',
                 message: new vscode.MarkdownString(
-                    `Fetch ${mode} statistics (distribution/skew${mode === 'deep' ? ' + exact row count' : ''}) for **${tableName}**${dbInfo}?`
+                    `Fetch catalog-based ${mode} statistics for **${tableName}**${dbInfo}?`
                 )
             }
         };
@@ -36,13 +35,11 @@ export class TableStatsTool implements vscode.LanguageModelTool<ITableStatsToolP
         try {
             const tableName = options.input.tableName || options.input.table;
             const { database } = options.input;
-            const mode = options.input.mode === 'deep' ? 'deep' : 'quick';
-
             if (!tableName) {
                 throw new Error('Table name is required.');
             }
 
-            const result = await this.copilotService.getTableStats(tableName, database, mode);
+            const result = await this.copilotService.getTableStats(tableName, database);
 
             return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result)]);
         } catch (e) {

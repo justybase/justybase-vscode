@@ -125,8 +125,9 @@ export async function generateRecreateTableScript(
 
         // RESTORE OWNER
         if (owner) {
+            const cleanOwner = ddlProvider.quoteNameIfNeeded(owner);
             lines.push(`-- 5. Restore Owner`);
-            lines.push(`ALTER TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName} OWNER TO ${owner};`);
+            lines.push(`ALTER TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName} OWNER TO ${cleanOwner};`);
             lines.push('');
         }
 
@@ -164,12 +165,15 @@ export async function generateRecreateTableScript(
                     const cleanPkColumns = keyInfo.pkColumns
                         .filter(col => col)
                         .map(col => ddlProvider.quoteNameIfNeeded(col));
-                    if (cleanPkColumns.length > 0) {
+                    if (cleanPkColumns.length > 0 && keyInfo.pkDatabase && keyInfo.pkSchema && keyInfo.pkRelation) {
+                        const cleanPkDatabase = ddlProvider.quoteNameIfNeeded(keyInfo.pkDatabase);
+                        const cleanPkSchema = ddlProvider.quoteNameIfNeeded(keyInfo.pkSchema);
+                        const cleanPkRelation = ddlProvider.quoteNameIfNeeded(keyInfo.pkRelation);
                         constraintSql =
                             `ALTER TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName} ` +
                             `ADD CONSTRAINT ${cleanKeyName} ${keyInfo.type} ` +
                             `(${cleanColumns.join(', ')}) ` +
-                            `REFERENCES ${keyInfo.pkDatabase}.${keyInfo.pkSchema}.${keyInfo.pkRelation} ` +
+                            `REFERENCES ${cleanPkDatabase}.${cleanPkSchema}.${cleanPkRelation} ` +
                             `(${cleanPkColumns.join(', ')}) ` +
                             `ON DELETE ${keyInfo.deleteType} ON UPDATE ${keyInfo.updateType};`;
                     }

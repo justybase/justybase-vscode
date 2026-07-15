@@ -165,7 +165,29 @@ Without these flags, `getViews` may show **“Fetching views…”** even when t
 
 ### Disk layout reminder
 
-- Metadata index: `globalStorage/metadata-cache-v2/index.json`
+- Metadata index: `globalStorage/metadata-cache-v3/index.json.gz`
+
+### Multi-window disk protocol (v3)
+
+The disk cache uses an independent `metadata-cache-v3` directory. v2 is never
+loaded, migrated, or removed, so an older extension process cannot share
+payloads with v3.
+
+The v3 index is the source of truth and contains a global `generation`, a
+monotonic `revision`, and `nextFence`. A prefetch receives a connection lease,
+the generation observed at acquisition, and a fence token allocated under the
+global writer lease. Checkpoints and the final snapshot commit only while that
+lease is valid. A commit is rejected when its generation is old or its fence is
+older than the connection's committed fence.
+
+Locks have random owner and lease identifiers. Their lock record is immutable;
+heartbeat files are unique to the lease. Consequently a former owner cannot
+renew, delete, or overwrite a lock acquired after expiry.
+
+`clearCache()` is global: it increments the generation and commits an empty
+index under the global writer lease. It does not remove another process's
+locks. Windows observing the generation change clear RAM, invalidate LSP data,
+and discard in-flight hydration. Disposal does not write an all-RAM snapshot.
 - Per connection: metadata JSON + optional `DB.columns.json.gz` per database with column layers
 
 ## Regression tests

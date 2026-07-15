@@ -140,7 +140,7 @@ async function hydrateConnectionMetadataFromDisk(
 
   const hydrateStartMs = Date.now();
   try {
-    const index = await deps.diskStorage.readV2Index();
+    const index = await deps.diskStorage.readV3Index();
     if (!deps.isCacheGenerationCurrent(generation)) {
       return;
     }
@@ -219,7 +219,7 @@ export async function onExternalCacheUpdate(
 
     const generation = deps.state.cacheGeneration;
 
-    const index = await deps.diskStorage.readV2Index();
+    const index = await deps.diskStorage.readV3Index();
     if (!deps.isCacheGenerationCurrent(generation)) {
       return;
     }

@@ -79,7 +79,6 @@ export function createViewStatement(
       columns: [],
     };
 
-    host.getScopeBuilder().addTable(createdView);
   }
 
   if (ctx.withStatement) {
@@ -106,6 +105,10 @@ export function createViewStatement(
 
   if (createdView) {
     createdView.columns = columns;
+    host.getScopeBuilder().addTable(createdView);
+    if (!host.getInProcedureContext()) {
+      host.addScriptCreatedTable(createdView);
+    }
   }
 }
 

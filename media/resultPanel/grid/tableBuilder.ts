@@ -649,20 +649,6 @@ export function createResultSetGrid(
             headerGroup.headers.forEach((header: TanStackHeader) => {
                 const th = createHeaderCellWithFilter(header, rs, tanTable, rsIndex, scheduleRender);
 
-                // Make header draggable so it can be dropped into the database grouping panel
-                th.draggable = true;
-                th.addEventListener('dragstart', (dragEvent: DragEvent) => {
-                    const dt = dragEvent.dataTransfer;
-                    if (!dt) return;
-                    const colName = header.column.columnDef.header || `Col ${header.column.id}`;
-                    dt.setData('text/plain', colName);
-                    dt.setData('application/x-justybase-result-column', JSON.stringify({
-                        columnIndex: Number.parseInt(header.column.id, 10),
-                        columnName: colName,
-                    }));
-                    dt.effectAllowed = 'copy';
-                });
-
                 // Vertical sticky is handled by thead (position: sticky; top: 0)
 
                 // For pinned columns, set left position (horizontal pinning during horizontal scroll)

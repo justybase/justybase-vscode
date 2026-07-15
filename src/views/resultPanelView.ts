@@ -290,6 +290,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._stateChangeDisposable = undefined;
         this._configurationChangeDisposable?.dispose();
         this._configurationChangeDisposable = undefined;
+        this._stateManager.dispose();
         this._clearAllLogSyncRetryTimers();
         this._view = undefined;
         this._htmlGenerator = undefined;

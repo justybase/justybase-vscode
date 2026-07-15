@@ -511,6 +511,10 @@ export function createHeaderCellWithFilter(
         dataTransfer.setData('type', 'column');
         dataTransfer.setData('columnId', header.column.id);
         dataTransfer.setData('columnName', header.column.columnDef.header);
+        dataTransfer.setData('application/x-justybase-result-column', JSON.stringify({
+            columnIndex: Number.parseInt(header.column.id, 10),
+            columnName: header.column.columnDef.header,
+        }));
         dataTransfer.effectAllowed = 'copyMove';
         th.classList.add('dragging');
         setGlobalDragState({ isDragging: true, dragType: 'column', draggedItem: header.column.id });

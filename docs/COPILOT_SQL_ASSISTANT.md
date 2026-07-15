@@ -1,4 +1,6 @@
- # Copilot SQL Assistant
+# Copilot SQL Assistant
+
+> **AI database-execution policy:** Copilot does not execute SQL, retrieve sample rows, import/export data, compile or run procedures, or run diagnostic queries. It may inspect metadata/DDL and use `EXPLAIN` only for one `SELECT` or `WITH ... SELECT` statement. Run database operations manually with the regular extension commands.
  
  ## ⚠️ Privacy & Data Security
  

@@ -89,6 +89,20 @@ function handleBatchQueryFailure(params: {
 
 export type { BatchQueryRunOptions } from "./queryBatchExecutor";
 
+async function resolveBatchHistorySchema(
+    connManager: ConnectionManager,
+    connectionName: string,
+    documentUri?: string,
+): Promise<string | undefined> {
+    if (documentUri && typeof connManager.getEffectiveSchema === 'function') {
+        return await connManager.getEffectiveSchema(documentUri) ?? undefined;
+    }
+    if (typeof connManager.getSchemaForConnection === 'function') {
+        return connManager.getSchemaForConnection(connectionName) ?? undefined;
+    }
+    return undefined;
+}
+
 /**
  * Cooperatively yield after each statement so VS Code can process UI/editor
  * focus changes even when many statements finish almost instantly.
@@ -167,6 +181,11 @@ export async function runQueriesSequentially(
         if (!details) {
             throw new Error(`Connection '${resolvedConnectionName}' not found`);
         }
+        const historySchema = await resolveBatchHistorySchema(
+            connManager,
+            resolvedConnectionName,
+            documentUri,
+        );
 
         logBatch(outputChannel, logCallback, `Using connection: ${resolvedConnectionName}`);
         logBatch(outputChannel, logCallback, "Connecting to database...");
@@ -343,6 +362,9 @@ export async function runQueriesSequentially(
                         'success',
                         durationMs,
                         batchRecordsAffected !== undefined && batchRecordsAffected > 0 ? batchRecordsAffected : totalRows,
+                        undefined,
+                        historySchema,
+                        details.dbType,
                     );
                 } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
@@ -358,6 +380,8 @@ export async function runQueriesSequentially(
                         Date.now() - startTime,
                         undefined,
                         errMsg,
+                        historySchema,
+                        details.dbType,
                     );
                     handleBatchQueryFailure({
                         err,
@@ -505,6 +529,11 @@ export async function runQueriesWithStreaming(
         if (!details) {
             throw new Error(`Connection '${resolvedConnectionName}' not found`);
         }
+        const historySchema = await resolveBatchHistorySchema(
+            connManager,
+            resolvedConnectionName,
+            documentUri,
+        );
 
         const { connection, shouldCloseConnection } =
             await getConnectionForDocument(
@@ -650,6 +679,9 @@ export async function runQueriesWithStreaming(
                         'success',
                         durationMs,
                         recordsAffected !== undefined && recordsAffected > 0 ? recordsAffected : totalRows,
+                        undefined,
+                        historySchema,
+                        details.dbType,
                     );
                 } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
@@ -665,6 +697,8 @@ export async function runQueriesWithStreaming(
                         Date.now() - startTime,
                         undefined,
                         errMsg,
+                        historySchema,
+                        details.dbType,
                     );
                     handleBatchQueryFailure({
                         err,

@@ -315,6 +315,37 @@ describe("tableCommands", () => {
     });
   });
 
+  describe("changeOwner command", () => {
+    it("quotes an owner name containing a dot", async () => {
+      const { runQuery } = require("../core/queryRunner");
+      registerTableCommands(mockDeps);
+
+      const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+      const changeOwnerCmd = calls.find(
+        (call: any[]) => call[0] === "netezza.changeOwner",
+      );
+      const handler = changeOwnerCmd[1] as any;
+      const mockItem: SchemaItemData = {
+        label: "TEST_TABLE",
+        dbName: "TESTDB",
+        schema: "ADMIN",
+        objType: "TABLE",
+        connectionName: "test-conn",
+      };
+      (vscode.window.showInputBox as jest.Mock).mockResolvedValueOnce("a.user");
+
+      await handler(mockItem);
+
+      expect(runQuery).toHaveBeenCalledWith(
+        mockContext,
+        'ALTER TABLE TESTDB.ADMIN.TEST_TABLE OWNER TO "a.user";',
+        true,
+        "test-conn",
+        mockConnectionManager,
+      );
+    });
+  });
+
   describe("addTableComment command", () => {
     it("should prompt for comment and execute SQL", async () => {
       registerTableCommands(mockDeps);

@@ -1,7 +1,7 @@
 /**
  * Cross-window metadata cache sync via file-system watch + polling.
  *
- * Polls the v2 index file periodically (backstop) and uses fs.watch (accelerator)
+ * Polls the v3 index file periodically (backstop) and uses fs.watch (accelerator)
  * to detect when another VS Code window has finished a metadata prefetch.
  * Reports only connections whose `prefetchCompletedAt` has advanced.
  *
@@ -14,11 +14,11 @@
 import * as fs from 'fs';
 import { gunzip } from 'zlib';
 import { promisify } from 'util';
-import { getCacheV2Dir, getV2IndexPath, V2_INDEX_FILE_NAME } from './metadataDiskPaths';
+import { getCacheV3Dir, getV3IndexPath, V2_INDEX_FILE_NAME } from './metadataDiskPaths';
 import {
-    CACHE_SCHEMA_VERSION,
-    isV2DiskIndex,
-    type V2DiskIndex,
+    CACHE_V3_SCHEMA_VERSION,
+    isV3DiskIndex,
+    type V3DiskIndex,
 } from './metadataDiskTypes';
 
 const gunzipAsync = promisify(gunzip);
@@ -34,11 +34,13 @@ export class MetadataDiskIndexWatcher {
     private _active = false;
     /** Set to true after the first initial sync completes so new connections are reported. */
     private _initialSyncDone = false;
+    private knownGeneration: number | undefined;
 
     constructor(
         private readonly storageDir: string,
         private readonly onConnectionsUpdated: (connectionNames: string[]) => void,
         private readonly onError?: (error: Error) => void,
+        private readonly onGenerationChanged?: () => void,
     ) {}
 
     get active(): boolean {
@@ -99,13 +101,13 @@ export class MetadataDiskIndexWatcher {
     // ─── Native fs.watch (best-effort accelerator) ──────────────
 
     private startNativeWatch(): void {
-        const v2Dir = getCacheV2Dir(this.storageDir);
+        const v3Dir = getCacheV3Dir(this.storageDir);
         try {
             // Ensure the directory exists so fs.watch doesn't fail immediately.
-            if (!fs.existsSync(v2Dir)) {
-                fs.mkdirSync(v2Dir, { recursive: true });
+            if (!fs.existsSync(v3Dir)) {
+                fs.mkdirSync(v3Dir, { recursive: true });
             }
-            this.fsWatcher = fs.watch(v2Dir, (_eventType, filename) => {
+            this.fsWatcher = fs.watch(v3Dir, (_eventType, filename) => {
                 // filename may be null on some platforms (e.g., Linux w/ non-recursive watch).
                 if (!this._active) return;
                 if (!filename || filename === V2_INDEX_FILE_NAME) {
@@ -129,7 +131,7 @@ export class MetadataDiskIndexWatcher {
     // ─── Change detection ──────────────────────────────────────
 
     /**
-     * Read the v2 index from disk and compare against known timestamps.
+     * Read the v3 index from disk and compare against known timestamps.
      * Returns the list of connection names whose `prefetchCompletedAt` has advanced.
      */
     async checkForChanges(): Promise<string[]> {
@@ -137,10 +139,20 @@ export class MetadataDiskIndexWatcher {
             return [];
         }
 
-        const index = await this.readV2Index();
+        const index = await this.readV3Index();
         if (!index) {
+            if (this.knownGeneration !== undefined) {
+                this.knownGeneration = undefined;
+                this.knownTimestamps.clear();
+                this.onGenerationChanged?.();
+            }
             return [];
         }
+        if (this.knownGeneration !== undefined && index.generation !== this.knownGeneration) {
+            this.knownTimestamps.clear();
+            this.onGenerationChanged?.();
+        }
+        this.knownGeneration = index.generation;
 
         const changed: string[] = [];
 
@@ -174,16 +186,18 @@ export class MetadataDiskIndexWatcher {
     // ─── Index I/O ─────────────────────────────────────────────
 
     private async syncKnownTimestamps(): Promise<void> {
-        const index = await this.readV2Index();
+        const index = await this.readV3Index();
         if (!index) return;
+
+        this.knownGeneration = index.generation;
 
         for (const [name, entry] of Object.entries(index.connections)) {
             this.knownTimestamps.set(name, entry.prefetchCompletedAt);
         }
     }
 
-    private async readV2Index(): Promise<V2DiskIndex | null> {
-        const indexPath = getV2IndexPath(this.storageDir);
+    private async readV3Index(): Promise<V3DiskIndex | null> {
+        const indexPath = getV3IndexPath(this.storageDir);
         let raw: Buffer;
         try {
             raw = await fs.promises.readFile(indexPath);
@@ -201,10 +215,10 @@ export class MetadataDiskIndexWatcher {
                 ? (await gunzipAsync(raw)).toString('utf8')
                 : raw.toString('utf8');
             const parsed: unknown = JSON.parse(jsonText);
-            if (!isV2DiskIndex(parsed)) {
+            if (!isV3DiskIndex(parsed)) {
                 return null;
             }
-            if (parsed.schemaVersion !== CACHE_SCHEMA_VERSION) {
+            if (parsed.schemaVersion !== CACHE_V3_SCHEMA_VERSION) {
                 return null;
             }
             return parsed;

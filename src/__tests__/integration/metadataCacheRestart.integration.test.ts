@@ -245,6 +245,46 @@ describe('SchemaProvider.getChildren after disk restart', () => {
         );
     }
 
+    it('waits for disk initialization before expanding a type group', async () => {
+        const cache1 = createMetadataCache(tempDir);
+        populateSmallCatalog(cache1);
+        await cache1.dispose();
+
+        const restarted = createMetadataCache(tempDir);
+        const diskStorage = restarted['_diskStorage'] as {
+            loadAllConnectionManifests: () => Promise<unknown>;
+        };
+        const loadManifests = diskStorage.loadAllConnectionManifests.bind(diskStorage);
+        let releaseDiskRead!: () => void;
+        const diskReadGate = new Promise<void>((resolve) => {
+            releaseDiskRead = resolve;
+        });
+        jest.spyOn(diskStorage, 'loadAllConnectionManifests').mockImplementation(async () => {
+            await diskReadGate;
+            return loadManifests();
+        });
+
+        const initPromise = restarted.initialize();
+        const schemaProvider = createSchemaProvider(restarted);
+        let requestSettled = false;
+        const childrenPromise = schemaProvider.getChildren(
+            createTypeGroupSchemaItem('TABLE', SMALL_DB, RESTART_CONN),
+        ).then((children) => {
+            requestSettled = true;
+            return children;
+        });
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(requestSettled).toBe(false);
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+
+        releaseDiskRead();
+        const [children] = await Promise.all([childrenPromise, initPromise]);
+
+        expect(children.length).toBeGreaterThan(0);
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+    });
+
     it('expands table columns from disk after restart without SQL', async () => {
         const cache1 = createMetadataCache(tempDir);
         populateSmallCatalog(cache1);
@@ -322,6 +362,48 @@ describe('SchemaProvider.getChildren after disk restart', () => {
         );
 
         const schemas = await provider.getSchemas(RESTART_CONN, SMALL_DB);
+
+        expect(schemas.map((item) => item.label)).toEqual([SCHEMA]);
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+    });
+
+    it('waits for disk initialization before treating a startup cache as missing', async () => {
+        const cache1 = createMetadataCache(tempDir);
+        populateSmallCatalog(cache1);
+        await cache1.dispose();
+
+        const restarted = createMetadataCache(tempDir);
+        const diskStorage = restarted['_diskStorage'] as {
+            loadAllConnectionManifests: () => Promise<unknown>;
+        };
+        const loadManifests = diskStorage.loadAllConnectionManifests.bind(diskStorage);
+        let releaseDiskRead!: () => void;
+        const diskReadGate = new Promise<void>((resolve) => {
+            releaseDiskRead = resolve;
+        });
+        jest.spyOn(diskStorage, 'loadAllConnectionManifests').mockImplementation(async () => {
+            await diskReadGate;
+            return loadManifests();
+        });
+
+        const initPromise = restarted.initialize();
+        const provider = new MetadataProvider(
+            createMockExtensionContext(tempDir),
+            restarted,
+            createMockConnectionManager(),
+        );
+        let requestSettled = false;
+        const schemasPromise = provider.getSchemas(RESTART_CONN, SMALL_DB).then((schemas) => {
+            requestSettled = true;
+            return schemas;
+        });
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(requestSettled).toBe(false);
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+
+        releaseDiskRead();
+        const [schemas] = await Promise.all([schemasPromise, initPromise]);
 
         expect(schemas.map((item) => item.label)).toEqual([SCHEMA]);
         expect(runQueryRawMock).not.toHaveBeenCalled();

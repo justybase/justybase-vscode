@@ -6,6 +6,8 @@ import * as path from 'path';
 import { sanitizeConnectionNameForLock } from './metadataDiskLock';
 
 export const CACHE_V2_DIR_NAME = 'metadata-cache-v2';
+/** Independent v3 root: v2 can remain in use by an older extension safely. */
+export const CACHE_V3_DIR_NAME = 'metadata-cache-v3';
 export const LEGACY_CACHE_FILE_NAME = 'metadata-cache-v1.json.gz';
 export const V2_INDEX_FILE_NAME = 'index.json.gz';
 export const V2_METADATA_FILE_NAME = 'metadata.json.gz';
@@ -37,6 +39,14 @@ export function getCacheV2Dir(storageDir: string): string {
     return path.join(storageDir, CACHE_V2_DIR_NAME);
 }
 
+export function getCacheV3Dir(storageDir: string): string {
+    return path.join(storageDir, CACHE_V3_DIR_NAME);
+}
+
+export function getV3IndexPath(storageDir: string): string {
+    return path.join(getCacheV3Dir(storageDir), V2_INDEX_FILE_NAME);
+}
+
 export function getV2IndexPath(storageDir: string): string {
     return path.join(getCacheV2Dir(storageDir), V2_INDEX_FILE_NAME);
 }
@@ -44,13 +54,22 @@ export function getV2IndexPath(storageDir: string): string {
 export function getConnectionDir(storageDir: string, connectionName: string): string {
     return path.join(getCacheV2Dir(storageDir), sanitizeConnectionNameForLock(connectionName));
 }
+export function getV3ConnectionDir(storageDir: string, connectionName: string): string {
+    return path.join(getCacheV3Dir(storageDir), sanitizeConnectionNameForLock(connectionName));
+}
 
 export function getConnectionMetadataPath(storageDir: string, connectionName: string): string {
     return path.join(getConnectionDir(storageDir, connectionName), V2_METADATA_FILE_NAME);
 }
+export function getV3ConnectionMetadataPath(storageDir: string, connectionName: string): string {
+    return path.join(getV3ConnectionDir(storageDir, connectionName), V2_METADATA_FILE_NAME);
+}
 
 export function getConnectionManifestPath(storageDir: string, connectionName: string): string {
     return path.join(getConnectionDir(storageDir, connectionName), V3_MANIFEST_FILE_NAME);
+}
+export function getV3ConnectionManifestPath(storageDir: string, connectionName: string): string {
+    return path.join(getV3ConnectionDir(storageDir, connectionName), V3_MANIFEST_FILE_NAME);
 }
 
 export function getColumnFilePath(
@@ -63,6 +82,9 @@ export function getColumnFilePath(
         getConnectionDir(storageDir, connectionName),
         `${segment}${V2_COLUMNS_FILE_SUFFIX}`,
     );
+}
+export function getV3ColumnFilePath(storageDir: string, connectionName: string, databaseName: string): string {
+    return path.join(getV3ConnectionDir(storageDir, connectionName), `${encodeDatabaseFileSegment(databaseName)}${V2_COLUMNS_FILE_SUFFIX}`);
 }
 
 /** Legacy sanitized path for column files written before base64url encoding. */

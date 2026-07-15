@@ -4,7 +4,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import * as vscode from 'vscode';
 import { MetadataCache } from '../metadataCache';
-import { CACHE_V2_DIR_NAME, getColumnFilePath, getV2IndexPath } from '../metadata/diskStorage/metadataDiskPaths';
+import { CACHE_V3_DIR_NAME, getV3ColumnFilePath, getV3IndexPath } from '../metadata/diskStorage/metadataDiskPaths';
 import { encodeColumnLayers } from '../metadata/diskStorage/metadataColumnCodec';
 import { Logger } from '../utils/logger';
 
@@ -73,9 +73,43 @@ describe('MetadataCache disk persistence integration', () => {
         cache.setTypeGroups(connectionName, 'DB1', ['TABLE']);
     }
 
+    async function persistFull(connectionName: string): Promise<void> {
+        const lease = await cache.tryAcquirePrefetchLock(connectionName);
+        expect(lease).toBeDefined();
+        try {
+            await cache.saveConnectionToDiskAfterPrefetch(connectionName, false, lease!);
+        } finally {
+            await cache.releasePrefetchLock(lease);
+        }
+    }
+
+    it('releases locks and local resources when the final disk save fails', async () => {
+        const diskStorage = cache['_diskStorage']!;
+        const saveError = new Error('disk unavailable');
+        jest.spyOn(diskStorage, 'saveAll').mockRejectedValue(saveError);
+        const releaseSpy = jest.spyOn(diskStorage.lock, 'releaseAllOwned')
+            .mockResolvedValue(undefined);
+        const progressDisposeSpy = jest.spyOn(
+            cache['_onDidPrefetchProgress'],
+            'dispose',
+        );
+        const warnSpy = jest.spyOn(Logger.getInstance(), 'warn')
+            .mockImplementation(() => undefined);
+
+        await expect(cache.dispose()).resolves.toBeUndefined();
+
+        expect(releaseSpy).toHaveBeenCalledTimes(1);
+        expect(progressDisposeSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+            '[MetadataCache] Failed to save cache on dispose',
+            saveError,
+        );
+    });
+
     it('should load from disk on initialize and restore fresh prefetch state', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -99,6 +133,7 @@ describe('MetadataCache disk persistence integration', () => {
     it('should resolve initialize after manifest load while full metadata hydrates in background', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -159,6 +194,7 @@ describe('MetadataCache disk persistence integration', () => {
     it('should eagerly preload columns from disk on initialize when diskPersistence is enabled', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -179,6 +215,7 @@ describe('MetadataCache disk persistence integration', () => {
     it('should resolve findObjectWithType after disk hydrate without prefetch', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -209,6 +246,7 @@ describe('MetadataCache disk persistence integration', () => {
     it('should rebuild lookup indexes after onExternalCacheUpdate', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -258,6 +296,7 @@ describe('MetadataCache disk persistence integration', () => {
     it('should resolve on-disk column files case-insensitively', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -276,9 +315,10 @@ describe('MetadataCache disk persistence integration', () => {
     it('should clear prefetch freshness when a column file is missing on disk', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
-        const columnPath = getColumnFilePath(tempDir, 'NZ', 'DB1');
+        const columnPath = getV3ColumnFilePath(tempDir, 'NZ', 'DB1');
         fs.unlinkSync(columnPath);
 
         const cache2 = new MetadataCache(
@@ -301,6 +341,7 @@ describe('MetadataCache disk persistence integration', () => {
     it('should discard in-flight column disk load after clearCache', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -353,6 +394,7 @@ describe('MetadataCache disk persistence integration', () => {
         });
 
         populateFull('NZ');
+        await persistFull('NZ');
         await cache.dispose();
 
         const cache2 = new MetadataCache(
@@ -365,13 +407,17 @@ describe('MetadataCache disk persistence integration', () => {
 
     it('should clear memory and disk on clearCache (E12)', async () => {
         populateFull('NZ');
+        await persistFull('NZ');
         await cache.dispose();
-        expect(fs.existsSync(path.join(tempDir, CACHE_V2_DIR_NAME))).toBe(true);
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(true);
+        expect(fs.existsSync(path.join(tempDir, CACHE_V3_DIR_NAME))).toBe(true);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(true);
 
         await cache.clearCache();
         expect(cache.getDatabases('NZ')).toBeUndefined();
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(false);
+        const index = await cache['_diskStorage']!.readV3Index();
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(true);
+        expect(index?.generation).toBeGreaterThan(1);
+        expect(index?.connections).toEqual({});
     });
 
     it('should verify stages complete only when all layers present', () => {

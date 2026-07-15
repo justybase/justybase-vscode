@@ -12,10 +12,6 @@ import {
     IColumnsToolParameters,
     TablesTool,
     ITablesToolParameters,
-    ExecuteQueryTool,
-    IExecuteQueryToolParameters,
-    SampleDataTool,
-    ISampleDataToolParameters,
     ExplainPlanTool,
     IExplainPlanToolParameters,
     SearchSchemaTool,
@@ -275,115 +271,9 @@ describe('Copilot Tools', () => {
         });
     });
 
-    describe('ExecuteQueryTool', () => {
-        let tool: ExecuteQueryTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
 
-        beforeEach(() => {
-            tool = new ExecuteQueryTool(mockCopilotService as any);
-        });
 
-        describe('prepareInvocation', () => {
-            it('should prepare invocation with SQL preview', async () => {
-                const options = {
-                    input: { sql: 'SELECT * FROM users WHERE id = 1', maxRows: 50 }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<IExecuteQueryToolParameters>;
 
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('50');
-                expect(result.confirmationMessages?.title).toBe('Execute SQL Query');
-            });
-        });
-
-        describe('invoke', () => {
-            it('should execute query and return results', async () => {
-                const queryResult = 'id,name\n1,John\n2,Jane';
-                mockCopilotService.executeSelectQuery.mockResolvedValue(queryResult);
-
-                const options = {
-                    input: { sql: 'SELECT * FROM users', maxRows: 100 }
-                } as vscode.LanguageModelToolInvocationOptions<IExecuteQueryToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.executeSelectQuery).toHaveBeenCalledWith('SELECT * FROM users', 100, undefined);
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should execute query in provided database scope', async () => {
-                const queryResult = 'id,name\n1,John\n2,Jane';
-                mockCopilotService.executeSelectQuery.mockResolvedValue(queryResult);
-
-                const options = {
-                    input: { sql: 'SELECT * FROM users', maxRows: 100, database: 'MYDB' }
-                } as vscode.LanguageModelToolInvocationOptions<IExecuteQueryToolParameters>;
-
-                await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.executeSelectQuery).toHaveBeenCalledWith('SELECT * FROM users', 100, 'MYDB');
-            });
-
-            it('should throw error when SQL is missing', async () => {
-                const options = {
-                    input: { sql: '' }
-                } as vscode.LanguageModelToolInvocationOptions<IExecuteQueryToolParameters>;
-
-                await expect(tool.invoke(options, mockToken)).rejects.toThrow('SQL query is required');
-            });
-        });
-    });
-
-    describe('SampleDataTool', () => {
-        let tool: SampleDataTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new SampleDataTool(mockCopilotService as any);
-        });
-
-        describe('prepareInvocation', () => {
-            it('should prepare invocation with table name', async () => {
-                const options = {
-                    input: { table: 'users', database: 'mydb', sampleSize: 5 }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<ISampleDataToolParameters>;
-
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('users');
-                expect(result.invocationMessage).toContain('5');
-            });
-        });
-
-        describe('invoke', () => {
-            it('should fetch sample data', async () => {
-                const sampleData = 'id,name\n1,John\n2,Jane\n3,Bob';
-                mockCopilotService.getSampleData.mockResolvedValue(sampleData);
-
-                const options = {
-                    input: { table: 'users', database: 'mydb', sampleSize: 10 }
-                } as vscode.LanguageModelToolInvocationOptions<ISampleDataToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getSampleData).toHaveBeenCalledWith('users', 'mydb', 10);
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should use default sample size', async () => {
-                const sampleData = 'Sample data';
-                mockCopilotService.getSampleData.mockResolvedValue(sampleData);
-
-                const options = {
-                    input: { table: 'users' }
-                } as vscode.LanguageModelToolInvocationOptions<ISampleDataToolParameters>;
-
-                await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getSampleData).toHaveBeenCalledWith('users', undefined, 10);
-            });
-        });
-    });
 
     describe('ExplainPlanTool', () => {
         let tool: ExplainPlanTool;
@@ -492,7 +382,7 @@ describe('Copilot Tools', () => {
 
                 const result = await tool.invoke(options, mockToken);
 
-                expect(mockCopilotService.getTableStats).toHaveBeenCalledWith('users', 'mydb', 'quick');
+                expect(mockCopilotService.getTableStats).toHaveBeenCalledWith('users', 'mydb');
                 expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
             });
         });

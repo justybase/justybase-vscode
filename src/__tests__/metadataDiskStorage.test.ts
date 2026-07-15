@@ -6,12 +6,12 @@ import * as vscode from 'vscode';
 import { MetadataCache } from '../metadataCache';
 import { computeConnectionFingerprint } from '../metadata/diskStorage/connectionFingerprint';
 import {
-    getCacheV2Dir,
-    getColumnFilePath,
-    getConnectionManifestPath,
+    getCacheV3Dir,
+    getV3ColumnFilePath,
+    getV3ConnectionManifestPath,
     getLegacySanitizedColumnFilePath,
-    getConnectionMetadataPath,
-    getV2IndexPath,
+    getV3ConnectionMetadataPath,
+    getV3IndexPath,
     LEGACY_CACHE_FILE_NAME,
 } from '../metadata/diskStorage/metadataDiskPaths';
 import { MetadataDiskStorage } from '../metadata/diskStorage/metadataDiskStorage';
@@ -108,10 +108,10 @@ describe('MetadataDiskStorage', () => {
         populateCache('conn1');
         await storage.saveConnection(cache, 'conn1', Date.now());
 
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(true);
-        expect(fs.existsSync(getConnectionManifestPath(tempDir, 'conn1'))).toBe(true);
-        expect(fs.existsSync(getConnectionMetadataPath(tempDir, 'conn1'))).toBe(true);
-        expect(fs.existsSync(getColumnFilePath(tempDir, 'conn1', 'DB1'))).toBe(true);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(true);
+        expect(fs.existsSync(getV3ConnectionManifestPath(tempDir, 'conn1'))).toBe(true);
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'conn1'))).toBe(true);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB1'))).toBe(true);
 
         const manifestLoaded = await storage.loadAllConnectionManifests();
         expect(manifestLoaded.get('conn1')?.database.data).toEqual([
@@ -119,7 +119,7 @@ describe('MetadataDiskStorage', () => {
         ]);
         expect(manifestLoaded.get('conn1')?.hasManifestFile).toBe(true);
 
-        const metadataBytes = fs.readFileSync(getConnectionMetadataPath(tempDir, 'conn1'));
+        const metadataBytes = fs.readFileSync(getV3ConnectionMetadataPath(tempDir, 'conn1'));
         expect(metadataBytes[0]).toBe(0x1f);
         expect(metadataBytes[1]).toBe(0x8b);
 
@@ -153,7 +153,7 @@ describe('MetadataDiskStorage', () => {
         await storage.saveConnection(cache, 'conn1', Date.now());
 
         const { gunzipSync } = require('zlib');
-        const raw = gunzipSync(fs.readFileSync(getColumnFilePath(tempDir, 'conn1', 'DB1')));
+        const raw = gunzipSync(fs.readFileSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB1')));
         const parsed = JSON.parse(raw.toString('utf8'));
         expect(parsed.schemaVersion).toBe(COLUMN_FILE_SCHEMA_VERSION);
         expect(parsed.layers['DB1.S1.T1']).toBeDefined();
@@ -177,7 +177,7 @@ describe('MetadataDiskStorage', () => {
             columnDatabases: ['UNCOMMITTED_DB'],
         };
         fs.writeFileSync(
-            getConnectionManifestPath(tempDir, 'conn1'),
+            getV3ConnectionManifestPath(tempDir, 'conn1'),
             gzipSync(Buffer.from(JSON.stringify(uncommittedManifest))),
         );
 
@@ -190,7 +190,7 @@ describe('MetadataDiskStorage', () => {
         expect(manifest?.columnDatabases).toEqual(['DB1']);
     });
 
-    it('should load legacy v2 expanded column files', async () => {
+    it('should ignore v2 payloads', async () => {
         populateCache('conn1');
         const v2ColumnFile = {
             schemaVersion: CACHE_SCHEMA_VERSION,
@@ -217,7 +217,9 @@ describe('MetadataDiskStorage', () => {
             typeGroup: { DB1: { timestamp: 1, data: ['TABLE'] } },
         };
         const { gzipSync: gzip } = require('zlib');
-        await storage['writeGzipJson'](getConnectionMetadataPath(tempDir, 'conn1'), metadata);
+        // Deliberately place a complete v2-style payload in the legacy root.
+        const legacyMetadataPath = path.join(tempDir, 'metadata-cache-v2', 'conn1', 'metadata.json.gz');
+        await storage['writeGzipJson'](legacyMetadataPath, metadata);
         const index = {
             schemaVersion: CACHE_SCHEMA_VERSION,
             writtenAt: Date.now(),
@@ -229,18 +231,18 @@ describe('MetadataDiskStorage', () => {
                 },
             },
         };
-        fs.writeFileSync(getV2IndexPath(tempDir), gzip(Buffer.from(JSON.stringify(index))));
+        fs.writeFileSync(path.join(tempDir, 'metadata-cache-v2', 'index.json.gz'), gzip(Buffer.from(JSON.stringify(index))));
 
         const loaded = await storage.loadAllConnections();
-        expect(loaded.get('conn1')?.column['DB1.S1.T1']?.data[0].ATTNAME).toBe('C1');
+        expect(loaded.get('conn1')).toBeUndefined();
     });
 
     it('should write separate column files per database', async () => {
         populateTwoDatabases('conn1');
         await storage.saveConnection(cache, 'conn1', Date.now());
 
-        expect(fs.existsSync(getColumnFilePath(tempDir, 'conn1', 'DB1'))).toBe(true);
-        expect(fs.existsSync(getColumnFilePath(tempDir, 'conn1', 'DB2'))).toBe(true);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB1'))).toBe(true);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB2'))).toBe(true);
 
         const loaded = await storage.loadAllConnections();
         const conn = loaded.get('conn1');
@@ -274,8 +276,8 @@ describe('MetadataDiskStorage', () => {
 
         await storage.saveConnection(cache, 'conn1', Date.now());
 
-        const pathA = getColumnFilePath(tempDir, 'conn1', 'PROD:1');
-        const pathB = getColumnFilePath(tempDir, 'conn1', 'PROD_1');
+        const pathA = getV3ColumnFilePath(tempDir, 'conn1', 'PROD:1');
+        const pathB = getV3ColumnFilePath(tempDir, 'conn1', 'PROD_1');
         expect(pathA).not.toBe(pathB);
         expect(fs.existsSync(pathA)).toBe(true);
         expect(fs.existsSync(pathB)).toBe(true);
@@ -285,20 +287,33 @@ describe('MetadataDiskStorage', () => {
         expect(loaded.get('conn1')?.column['PROD_1.S1.T2']?.data[0].ATTNAME).toBe('C2');
     });
 
-    it('should debounce scheduled saves and flush on demand', async () => {
+    it('does not persist a debounced snapshot without a prefetch lease', async () => {
         jest.useFakeTimers();
         populateCache('conn1');
 
         storage.scheduleSave(cache, 'conn1', Date.now());
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(false);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(false);
 
         await jest.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
         await storage.whenWriteQueueIdle();
 
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(true);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(false);
     });
 
-    it('should migrate legacy v1 monolith to v2 layout', async () => {
+    it('re-queues a dirty connection when another flush temporarily holds its lease', async () => {
+        jest.useFakeTimers();
+        populateCache('conn1');
+        const acquireLease = jest.spyOn(storage, 'acquirePrefetchLease').mockResolvedValue(undefined);
+
+        storage.scheduleSave(cache, 'conn1', Date.now());
+        await storage.flushPendingWrites();
+
+        expect(acquireLease).toHaveBeenCalledWith('conn1');
+        expect(storage['dirtyConnections'].has('conn1')).toBe(true);
+        jest.clearAllTimers();
+    });
+
+    it('leaves legacy v1 data untouched', async () => {
         const legacy = createEmptySerializedCache();
         legacy.connections.conn1 = {
             prefetchCompletedAt: Date.now(),
@@ -317,15 +332,15 @@ describe('MetadataDiskStorage', () => {
         );
 
         await storage.migrateLegacyIfNeeded();
-        expect(fs.existsSync(path.join(tempDir, LEGACY_CACHE_FILE_NAME))).toBe(false);
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(true);
+        expect(fs.existsSync(path.join(tempDir, LEGACY_CACHE_FILE_NAME))).toBe(true);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(false);
 
         const loaded = await storage.loadAllConnections();
-        expect(loaded.get('conn1')?.column['DB1.S1.T1']).toBeDefined();
+        expect(loaded.get('conn1')).toBeUndefined();
     });
 
     it('should reject corrupted gzip (E1)', async () => {
-        fs.writeFileSync(getV2IndexPath(tempDir), Buffer.from('not-gzip-json'));
+        fs.writeFileSync(getV3IndexPath(tempDir), Buffer.from('not-gzip-json'));
         const loaded = await storage.loadAllConnections();
         expect(loaded.size).toBe(0);
     });
@@ -349,13 +364,13 @@ describe('MetadataDiskStorage', () => {
             gzipSync(Buffer.from(JSON.stringify(bad))),
         );
         await storage.migrateLegacyIfNeeded();
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(false);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(false);
     });
 
     it('should cleanup tmp file on init (E3)', async () => {
-        fs.writeFileSync(`${getV2IndexPath(tempDir)}.tmp`, 'partial');
+        fs.writeFileSync(`${getV3IndexPath(tempDir)}.tmp`, 'partial');
         await storage.cleanupTempFile();
-        expect(fs.existsSync(`${getV2IndexPath(tempDir)}.tmp`)).toBe(false);
+        expect(fs.existsSync(`${getV3IndexPath(tempDir)}.tmp`)).toBe(false);
     });
 
     it('should skip fingerprint mismatch on load (E5)', async () => {
@@ -420,9 +435,12 @@ describe('MetadataDiskStorage', () => {
     });
 
     it('should reject when save lock cannot be acquired after retries', async () => {
-        jest.setTimeout(15_000); // tolerate 3 × 1s retry delays
         const lockSpy = jest.spyOn(storage.lock, 'acquireLock').mockResolvedValue(false);
         const warnSpy = jest.spyOn(Logger.getInstance(), 'warn').mockImplementation(() => {});
+        const sleepSpy = jest.spyOn(
+            storage as unknown as { sleep: (ms: number) => Promise<void> },
+            'sleep',
+        ).mockResolvedValue(undefined);
 
         // Each retry attempt needs 2 Date.now() calls:
         //   call 1: deadline = Date.now() + SAVE_LOCK_WAIT_MS
@@ -453,11 +471,12 @@ describe('MetadataDiskStorage', () => {
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Save lock timeout (attempt 3/4)'));
 
         lockSpy.mockRestore();
+        sleepSpy.mockRestore();
         nowSpy.mockRestore();
         warnSpy.mockRestore();
     });
 
-    it('should not recreate cache file when clear runs after a pending save', async () => {
+    it('advances generation when clear runs after a pending save', async () => {
         populateCache('conn1');
 
         await Promise.all([
@@ -465,8 +484,9 @@ describe('MetadataDiskStorage', () => {
             storage.deleteCacheFile(),
         ]);
 
-        expect(fs.existsSync(getCacheV2Dir(tempDir))).toBe(true);
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(false);
+        expect(fs.existsSync(getCacheV3Dir(tempDir))).toBe(true);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(true);
+        expect((await storage.readV3Index())?.generation).toBeGreaterThan(1);
     });
 
     it('should evict oldest when more than 10 connections (E13)', async () => {
@@ -514,12 +534,12 @@ describe('MetadataDiskStorage', () => {
         expect(index.connections.conn1).toBeDefined();
     });
 
-    it('should delete cache files', async () => {
+    it('resets generation and removes payload files', async () => {
         populateCache('conn1');
         await storage.saveConnection(cache, 'conn1', Date.now());
         await storage.deleteCacheFile();
-        expect(fs.existsSync(getV2IndexPath(tempDir))).toBe(false);
-        expect(fs.existsSync(getConnectionMetadataPath(tempDir, 'conn1'))).toBe(false);
+        expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(true);
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'conn1'))).toBe(false);
     });
 
     it('legacy loadSerialized still reads v1 file', async () => {
@@ -564,6 +584,7 @@ describe('MetadataDiskStorage', () => {
             populateCache('conn1');
             await expect(storage.saveConnection(cache, 'conn1', Date.now())).rejects.toThrow('no space');
             expect(storage.isSessionDisabled()).toBe(true);
+            expect(storage.lock.hasOwnedLock('conn1')).toBe(false);
         } finally {
             writeFile.mockRestore();
         }

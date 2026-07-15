@@ -46,20 +46,6 @@ export interface ITablesToolInput {
     schema?: string;
 }
 
-/** ExecuteQueryTool input */
-export interface IExecuteQueryToolInput {
-    sql: string;
-    database?: string;
-    maxRows?: number;
-}
-
-/** SampleDataTool input */
-export interface ISampleDataToolInput {
-    tableName: string;
-    database?: string;
-    limit?: number;
-}
-
 /** ExplainPlanTool input */
 export interface IExplainPlanToolInput {
     sql: string;
@@ -193,43 +179,6 @@ export interface IProposeImportMappingToolInput {
     targetTable: string;
 }
 
-/** ExecuteImportTool input */
-export interface IExecuteImportToolInput {
-    filePath: string;
-    targetTable: string;
-    dryRun?: boolean;
-    timeoutSeconds?: number;
-}
-
-/** ExportQueryResultsTool input */
-export interface IExportQueryResultsToolInput {
-    sql?: string;
-    sqlFilePath?: string;
-    format?: 'csv' | 'xlsx' | 'xlsb' | 'parquet';
-    outputPath?: string;
-    timeoutSeconds?: number;
-    source?: 'sql' | 'activeResults';
-}
-
-/** CompileProcedureTool input */
-export interface ICompileProcedureToolInput {
-    sql: string;
-    database?: string;
-}
-
-/** ExecuteProcedureTool input */
-export interface IExecuteProcedureToolInput {
-    procedureName: string;
-    arguments?: string;
-    database?: string;
-}
-
-/** RunDiagnosticQueriesTool input */
-export interface IRunDiagnosticQueriesToolInput {
-    queries: string[];
-    database?: string;
-}
-
 /**
  * ============================================
  * VALIDATION FUNCTIONS
@@ -301,65 +250,7 @@ function validateTablesToolInput(input: unknown): ValidationResult<ITablesToolIn
     };
 }
 
-/** Validates ExecuteQueryTool input */
-function validateExecuteQueryToolInput(input: unknown): ValidationResult<IExecuteQueryToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
-    }
-    const obj = input as Record<string, unknown>;
-    const sqlResult = sqlString(obj.sql, 'sql');
-    const databaseResult = optionalString(obj.database, 'database');
-    const maxRowsResult = optionalNumber(obj.maxRows, 'maxRows');
 
-    const errors = [
-        ...(sqlResult.success ? [] : sqlResult.errors),
-        ...(databaseResult.success ? [] : databaseResult.errors),
-        ...(maxRowsResult.success ? [] : maxRowsResult.errors)
-    ];
-
-    if (errors.length > 0) {
-        return { success: false, errors };
-    }
-
-    return {
-        success: true,
-        data: {
-            sql: (sqlResult as { success: true; data: string }).data,
-            database: (databaseResult as { success: true; data: string | undefined }).data,
-            maxRows: (maxRowsResult as { success: true; data: number | undefined }).data
-        }
-    };
-}
-
-/** Validates SampleDataTool input */
-function validateSampleDataToolInput(input: unknown): ValidationResult<ISampleDataToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
-    }
-    const obj = input as Record<string, unknown>;
-    const tableNameResult = netezzaObjectName(obj.tableName, 'tableName');
-    const databaseResult = optionalString(obj.database, 'database');
-    const limitResult = optionalNumber(obj.limit, 'limit');
-
-    const errors = [
-        ...(tableNameResult.success ? [] : tableNameResult.errors),
-        ...(databaseResult.success ? [] : databaseResult.errors),
-        ...(limitResult.success ? [] : limitResult.errors)
-    ];
-
-    if (errors.length > 0) {
-        return { success: false, errors };
-    }
-
-    return {
-        success: true,
-        data: {
-            tableName: (tableNameResult as { success: true; data: string }).data,
-            database: (databaseResult as { success: true; data: string | undefined }).data,
-            limit: (limitResult as { success: true; data: number | undefined }).data
-        }
-    };
-}
 
 /** Validates ExplainPlanTool input */
 function validateExplainPlanToolInput(input: unknown): ValidationResult<IExplainPlanToolInput> {
@@ -792,81 +683,7 @@ function validateProposeImportMappingToolInput(input: unknown): ValidationResult
     };
 }
 
-/** Validates ExecuteImportTool input */
-function validateExecuteImportToolInput(input: unknown): ValidationResult<IExecuteImportToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
-    }
-    const obj = input as Record<string, unknown>;
-    const filePathResult = requiredString(obj.filePath, 'filePath');
-    const targetTableResult = requiredString(obj.targetTable, 'targetTable');
-    const dryRunResult = optionalBoolean(obj.dryRun, 'dryRun');
-    const timeoutSecondsResult = optionalNumber(obj.timeoutSeconds, 'timeoutSeconds');
 
-    const errors = [
-        ...(filePathResult.success ? [] : filePathResult.errors),
-        ...(targetTableResult.success ? [] : targetTableResult.errors),
-        ...(dryRunResult.success ? [] : dryRunResult.errors),
-        ...(timeoutSecondsResult.success ? [] : timeoutSecondsResult.errors)
-    ];
-
-    if (errors.length > 0) {
-        return { success: false, errors };
-    }
-
-    return {
-        success: true,
-        data: {
-            filePath: (filePathResult as { success: true; data: string }).data,
-            targetTable: (targetTableResult as { success: true; data: string }).data,
-            dryRun: (dryRunResult as { success: true; data: boolean | undefined }).data,
-            timeoutSeconds: (timeoutSecondsResult as { success: true; data: number | undefined }).data
-        }
-    };
-}
-
-/** Validates ExportQueryResultsTool input */
-function validateExportQueryResultsToolInput(input: unknown): ValidationResult<IExportQueryResultsToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
-    }
-    const obj = input as Record<string, unknown>;
-    const sqlResult = optionalString(obj.sql, 'sql');
-    const sqlFilePathResult = optionalString(obj.sqlFilePath, 'sqlFilePath');
-    const formatResult = obj.format !== undefined
-        ? enumValidator(['csv', 'xlsx', 'xlsb', 'parquet'] as const, obj.format, 'format')
-        : { success: true as const, data: 'csv' as const };
-    const outputPathResult = optionalString(obj.outputPath, 'outputPath');
-    const timeoutSecondsResult = optionalNumber(obj.timeoutSeconds, 'timeoutSeconds');
-    const sourceResult = obj.source !== undefined
-        ? enumValidator(['sql', 'activeResults'] as const, obj.source, 'source')
-        : { success: true as const, data: 'sql' as const };
-
-    const errors = [
-        ...(sqlResult.success ? [] : sqlResult.errors),
-        ...(sqlFilePathResult.success ? [] : sqlFilePathResult.errors),
-        ...(formatResult.success ? [] : formatResult.errors),
-        ...(outputPathResult.success ? [] : outputPathResult.errors),
-        ...(timeoutSecondsResult.success ? [] : timeoutSecondsResult.errors),
-        ...(sourceResult.success ? [] : sourceResult.errors)
-    ];
-
-    if (errors.length > 0) {
-        return { success: false, errors };
-    }
-
-    return {
-        success: true,
-        data: {
-            sql: (sqlResult as { success: true; data: string | undefined }).data,
-            sqlFilePath: (sqlFilePathResult as { success: true; data: string | undefined }).data,
-            format: (formatResult as { success: true; data: 'csv' | 'xlsx' | 'xlsb' | 'parquet' }).data,
-            outputPath: (outputPathResult as { success: true; data: string | undefined }).data,
-            timeoutSeconds: (timeoutSecondsResult as { success: true; data: number | undefined }).data,
-            source: (sourceResult as { success: true; data: 'sql' | 'activeResults' }).data
-        }
-    };
-}
 
 /** Validates DependenciesTool input */
 function validateDependenciesToolInput(input: unknown): ValidationResult<IDependenciesToolInput> {
@@ -899,95 +716,8 @@ function validateDependenciesToolInput(input: unknown): ValidationResult<IDepend
     };
 }
 
-/** Validates CompileProcedureTool input */
-function validateCompileProcedureToolInput(input: unknown): ValidationResult<ICompileProcedureToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
-    }
-    const obj = input as Record<string, unknown>;
-    const sqlResult = sqlString(obj.sql, 'sql');
-    const databaseResult = optionalString(obj.database, 'database');
 
-    const errors = [
-        ...(sqlResult.success ? [] : sqlResult.errors),
-        ...(databaseResult.success ? [] : databaseResult.errors)
-    ];
 
-    if (errors.length > 0) {
-        return { success: false, errors };
-    }
-
-    return {
-        success: true,
-        data: {
-            sql: (sqlResult as { success: true; data: string }).data,
-            database: (databaseResult as { success: true; data: string | undefined }).data
-        }
-    };
-}
-
-/** Validates ExecuteProcedureTool input */
-function validateExecuteProcedureToolInput(input: unknown): ValidationResult<IExecuteProcedureToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
-    }
-    const obj = input as Record<string, unknown>;
-    const procedureNameResult = netezzaObjectName(obj.procedureName, 'procedureName');
-    const argumentsResult = optionalString(obj.arguments, 'arguments');
-    const databaseResult = optionalString(obj.database, 'database');
-
-    const errors = [
-        ...(procedureNameResult.success ? [] : procedureNameResult.errors),
-        ...(argumentsResult.success ? [] : argumentsResult.errors),
-        ...(databaseResult.success ? [] : databaseResult.errors)
-    ];
-
-    if (errors.length > 0) {
-        return { success: false, errors };
-    }
-
-    return {
-        success: true,
-        data: {
-            procedureName: (procedureNameResult as { success: true; data: string }).data,
-            arguments: (argumentsResult as { success: true; data: string | undefined }).data,
-            database: (databaseResult as { success: true; data: string | undefined }).data
-        }
-    };
-}
-
-/** Validates RunDiagnosticQueriesTool input */
-function validateRunDiagnosticQueriesToolInput(input: unknown): ValidationResult<IRunDiagnosticQueriesToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
-    }
-    const obj = input as Record<string, unknown>;
-    const queriesResult = requiredStringArray(obj.queries, 'queries');
-    const databaseResult = optionalString(obj.database, 'database');
-
-    const errors = [
-        ...(queriesResult.success ? [] : queriesResult.errors),
-        ...(databaseResult.success ? [] : databaseResult.errors)
-    ];
-
-    if (errors.length > 0) {
-        return { success: false, errors };
-    }
-
-    return {
-        success: true,
-        data: {
-            queries: (queriesResult as { success: true; data: string[] }).data,
-            database: (databaseResult as { success: true; data: string | undefined }).data
-        }
-    };
-}
-
-/**
- * ============================================
- * OUTPUT VALIDATION
- * ============================================
- */
 
 /** Validates ToolOutput structure */
 function validateToolOutput<T>(output: unknown): ValidationResult<ToolOutput<T>> {
@@ -1089,31 +819,7 @@ export const TablesToolContract: ToolContract<ITablesToolInput, string> = {
     tags: ['sql', 'database', 'tables', 'netezza', 'metadata']
 };
 
-/** ExecuteQueryTool Contract */
-export const ExecuteQueryToolContract: ToolContract<IExecuteQueryToolInput, string> = {
-    name: 'netezza_execute_query',
-    displayName: 'Execute SQL Query',
-    description: 'Execute a SQL query on the connected Netezza database and return results',
-    toolReferenceName: 'executeQuery',
-    validateInput: validateExecuteQueryToolInput,
-    validateOutput: validateToolOutput,
-    errorCodes: commonErrorCodes,
-    requiresConnection: true,
-    tags: ['sql', 'database', 'query', 'netezza', 'execute']
-};
 
-/** SampleDataTool Contract */
-export const SampleDataToolContract: ToolContract<ISampleDataToolInput, string> = {
-    name: 'netezza_get_sample_data',
-    displayName: 'Get Sample Data',
-    description: 'Gets sample rows from a table to understand data patterns',
-    toolReferenceName: 'getSampleData',
-    validateInput: validateSampleDataToolInput,
-    validateOutput: validateToolOutput,
-    errorCodes: commonErrorCodes,
-    requiresConnection: true,
-    tags: ['data', 'database', 'netezza', 'sample', 'sql']
-};
 
 /** ExplainPlanTool Contract */
 export const ExplainPlanToolContract: ToolContract<IExplainPlanToolInput, string> = {
@@ -1362,84 +1068,16 @@ export const ProposeImportMappingToolContract: ToolContract<IProposeImportMappin
     tags: ['ddl', 'import', 'mapping', 'netezza', 'schema']
 };
 
-/** ExecuteImportTool Contract */
-export const ExecuteImportToolContract: ToolContract<IExecuteImportToolInput, string> = {
-    name: 'netezza_execute_import',
-    displayName: 'Execute Import',
-    description: 'Runs import dry-run or executes import with audit',
-    toolReferenceName: 'executeImport',
-    validateInput: validateExecuteImportToolInput,
-    validateOutput: validateToolOutput,
-    errorCodes: commonErrorCodes,
-    requiresConnection: true,
-    tags: ['audit', 'dry-run', 'execution', 'import', 'netezza']
-};
 
-/** ExportQueryResultsTool Contract */
-export const ExportQueryResultsToolContract: ToolContract<IExportQueryResultsToolInput, string> = {
-    name: 'netezza_export_query_results',
-    displayName: 'Export Query Results',
-    description: 'Exports query output to CSV/XLSX/XLSB/Parquet/XPT',
-    toolReferenceName: 'exportQueryResults',
-    validateInput: validateExportQueryResultsToolInput,
-    validateOutput: validateToolOutput,
-    errorCodes: commonErrorCodes,
-    requiresConnection: true,
-    tags: ['csv', 'export', 'query', 'xlsb', 'xlsx', 'parquet', 'xpt']
-};
 
-/** CompileProcedureTool Contract */
-export const CompileProcedureToolContract: ToolContract<ICompileProcedureToolInput, string> = {
-    name: 'netezza_compile_procedure',
-    displayName: 'Compile Procedure',
-    description: 'Executes CREATE OR REPLACE PROCEDURE DDL to compile a stored procedure. Returns SUCCESS or FAILED with error details. Use this after modifying procedure code to verify syntax is valid. If compilation fails, use the error message to guide fixes. Before starting work on a procedure, ask the user for diagnostic SQL queries that define success conditions.',
-    toolReferenceName: 'compileProcedure',
-    validateInput: validateCompileProcedureToolInput,
-    validateOutput: validateToolOutput,
-    errorCodes: commonErrorCodes,
-    requiresConnection: true,
-    tags: ['compile', 'ddl', 'netezza', 'procedure', 'compile']
-};
 
-/** ExecuteProcedureTool Contract */
-export const ExecuteProcedureToolContract: ToolContract<IExecuteProcedureToolInput, string> = {
-    name: 'netezza_execute_procedure',
-    displayName: 'Execute Procedure (CALL)',
-    description: 'Executes a stored procedure via CALL statement. Returns execution status (SUCCESS/FAILED) and any error details. Use this to test-run a compiled procedure. Does NOT return result data - use execute_query after this if you need to verify side effects.',
-    toolReferenceName: 'executeProcedure',
-    validateInput: validateExecuteProcedureToolInput,
-    validateOutput: validateToolOutput,
-    errorCodes: commonErrorCodes,
-    requiresConnection: true,
-    tags: ['call', 'execution', 'netezza', 'procedure']
-};
 
-/** RunDiagnosticQueriesTool Contract */
-export const RunDiagnosticQueriesToolContract: ToolContract<IRunDiagnosticQueriesToolInput, string> = {
-    name: 'netezza_run_diagnostic_queries',
-    displayName: 'Run Diagnostic Queries',
-    description: 'Runs a list of diagnostic SQL queries to validate procedure correctness. Each query result is reported as PASS or FAIL. Use this after each compile attempt to check if the procedure meets success criteria. BEFORE starting work, ask the user: "Do you have diagnostic SQL queries to validate correctness?" The user may provide one or more queries. Pass them to this tool after each compile/execute iteration. If any diagnostic fails, analyze the results and fix the procedure accordingly.',
-    toolReferenceName: 'runDiagnosticQueries',
-    validateInput: validateRunDiagnosticQueriesToolInput,
-    validateOutput: validateToolOutput,
-    errorCodes: commonErrorCodes,
-    requiresConnection: true,
-    tags: ['diagnostic', 'netezza', 'procedure', 'validation']
-};
-
-/**
- * ============================================
- * CONTRACT REGISTRY
- * ============================================
- */
 
 /** Registry wszystkich kontraktów */
 export const ToolContractRegistry: Map<string, ToolContract<unknown, unknown>> = new Map([
     [SchemaToolContract.name, SchemaToolContract],
     [ColumnsToolContract.name, ColumnsToolContract],
     [TablesToolContract.name, TablesToolContract],
-    [ExecuteQueryToolContract.name, ExecuteQueryToolContract],
-    [SampleDataToolContract.name, SampleDataToolContract],
     [ExplainPlanToolContract.name, ExplainPlanToolContract],
     [TuningAdviceToolContract.name, TuningAdviceToolContract],
     [SearchSchemaToolContract.name, SearchSchemaToolContract],
@@ -1458,12 +1096,7 @@ export const ToolContractRegistry: Map<string, ToolContract<unknown, unknown>> =
     [GetCommentsToolContract.name, GetCommentsToolContract],
     [FavoritesToolContract.name, FavoritesToolContract],
     [InspectImportFileToolContract.name, InspectImportFileToolContract],
-    [ProposeImportMappingToolContract.name, ProposeImportMappingToolContract],
-    [ExecuteImportToolContract.name, ExecuteImportToolContract],
-    [ExportQueryResultsToolContract.name, ExportQueryResultsToolContract],
-    [CompileProcedureToolContract.name, CompileProcedureToolContract],
-    [ExecuteProcedureToolContract.name, ExecuteProcedureToolContract],
-    [RunDiagnosticQueriesToolContract.name, RunDiagnosticQueriesToolContract]
+    [ProposeImportMappingToolContract.name, ProposeImportMappingToolContract],
 ]);
 
 /** Pobiera kontrakt po nazwie */

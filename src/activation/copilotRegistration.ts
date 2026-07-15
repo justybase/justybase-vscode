@@ -4,8 +4,6 @@ import {
     SchemaTool,
     ColumnsTool,
     TablesTool,
-    ExecuteQueryTool,
-    SampleDataTool,
     ExplainPlanTool,
     TuningAdviceTool,
     SearchSchemaTool,
@@ -16,8 +14,6 @@ import {
     GetSqlDiagnosticsTool,
     InspectImportFileTool,
     ProposeImportMappingTool,
-    ExecuteImportTool,
-    ExportQueryResultsTool,
     DatabasesTool,
     SchemasTool,
     ProceduresTool,
@@ -26,12 +22,10 @@ import {
     FindTableLocationsTool,
     GetCommentsTool,
     FavoritesTool,
-    GetDDLTool,
-    CompileProcedureTool,
-    ExecuteProcedureTool,
-    RunDiagnosticQueriesTool
+    GetDDLTool
 } from '../services/copilotService';
 import { withContractEnforcement } from '../services/copilotTools/contractEnforcedTool';
+import { isAiToolAllowed } from '../services/copilotTools/aiToolPolicy';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
 import { ResultPanelView } from '../views/resultPanelView';
@@ -150,8 +144,6 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
         { name: 'netezza_get_sql_schema', register: () => registerToolWithContract('netezza_get_sql_schema', new SchemaTool(copilotService)) },
         { name: 'netezza_get_columns', register: () => registerToolWithContract('netezza_get_columns', new ColumnsTool(copilotService)) },
         { name: 'netezza_get_tables', register: () => registerToolWithContract('netezza_get_tables', new TablesTool(copilotService)) },
-        { name: 'netezza_execute_query', register: () => registerToolWithContract('netezza_execute_query', new ExecuteQueryTool(copilotService)) },
-        { name: 'netezza_get_sample_data', register: () => registerToolWithContract('netezza_get_sample_data', new SampleDataTool(copilotService)) },
         { name: 'netezza_explain_plan', register: () => registerToolWithContract('netezza_explain_plan', new ExplainPlanTool(copilotService)) },
         { name: 'netezza_get_tuning_advice', register: () => registerToolWithContract('netezza_get_tuning_advice', new TuningAdviceTool(copilotService)) },
         { name: 'netezza_search_schema', register: () => registerToolWithContract('netezza_search_schema', new SearchSchemaTool(copilotService)) },
@@ -162,8 +154,6 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
         { name: 'netezza_get_sql_diagnostics', register: () => registerToolWithContract('netezza_get_sql_diagnostics', new GetSqlDiagnosticsTool(copilotService)) },
         { name: 'netezza_inspect_import_file', register: () => registerToolWithContract('netezza_inspect_import_file', new InspectImportFileTool(copilotService)) },
         { name: 'netezza_propose_import_mapping', register: () => registerToolWithContract('netezza_propose_import_mapping', new ProposeImportMappingTool(copilotService)) },
-        { name: 'netezza_execute_import', register: () => registerToolWithContract('netezza_execute_import', new ExecuteImportTool(copilotService)) },
-        { name: 'netezza_export_query_results', register: () => registerToolWithContract('netezza_export_query_results', new ExportQueryResultsTool(copilotService)) },
         { name: 'netezza_get_databases', register: () => registerToolWithContract('netezza_get_databases', new DatabasesTool(copilotService)) },
         { name: 'netezza_get_schemas', register: () => registerToolWithContract('netezza_get_schemas', new SchemasTool(copilotService)) },
         { name: 'netezza_get_procedures', register: () => registerToolWithContract('netezza_get_procedures', new ProceduresTool(copilotService)) },
@@ -172,14 +162,11 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
         { name: 'netezza_find_table_locations', register: () => registerToolWithContract('netezza_find_table_locations', new FindTableLocationsTool(copilotService)) },
         { name: 'netezza_get_comments', register: () => registerToolWithContract('netezza_get_comments', new GetCommentsTool(copilotService)) },
         { name: 'netezza_get_favorites', register: () => registerToolWithContract('netezza_get_favorites', new FavoritesTool(copilotService)) },
-        { name: 'netezza_get_ddl', register: () => registerToolWithContract('netezza_get_ddl', new GetDDLTool(copilotService)) },
-        { name: 'netezza_compile_procedure', register: () => registerToolWithContract('netezza_compile_procedure', new CompileProcedureTool(copilotService)) },
-        { name: 'netezza_execute_procedure', register: () => registerToolWithContract('netezza_execute_procedure', new ExecuteProcedureTool(copilotService)) },
-        { name: 'netezza_run_diagnostic_queries', register: () => registerToolWithContract('netezza_run_diagnostic_queries', new RunDiagnosticQueriesTool(copilotService)) }
+        { name: 'netezza_get_ddl', register: () => registerToolWithContract('netezza_get_ddl', new GetDDLTool(copilotService)) }
     ];
     let hasToolRegistrationFailure = false;
 
-    for (const toolRegistration of toolRegistrations) {
+    for (const toolRegistration of toolRegistrations.filter(tool => isAiToolAllowed(tool.name))) {
         try {
             context.subscriptions.push(toolRegistration.register());
         } catch {

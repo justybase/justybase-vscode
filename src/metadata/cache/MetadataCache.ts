@@ -138,6 +138,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
               `[MetadataDisk] Watcher error: ${error.message}`,
             );
           },
+          () => this.resetLocalCacheAfterExternalGeneration(),
         );
       }
     }
@@ -272,7 +273,35 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   async whenConnectionMetadataHydrated(connectionName: string): Promise<void> {
+    // The hydrate promise is registered during disk initialization. Waiting
+    // for initialization first prevents an early caller from observing an
+    // absent promise and incorrectly proceeding with a live-cache miss.
+    await this.whenDiskReady();
     await this._diskLifecycleState.metadataHydratePromises.get(connectionName);
+  }
+
+  /**
+   * Wait until the disk cache has discovered all connection hydrations and
+   * the requested connection has finished hydrating. Callers must use this
+   * barrier before deciding that a metadata layer is missing and querying the
+   * live database.
+   *
+   * Disk initialization failures are intentionally non-fatal here. In that
+   * case the caller may still use the existing live-database fallback, but it
+   * must not race disk initialization and make a false cache-miss decision.
+   */
+  async whenConnectionMetadataReady(connectionName: string): Promise<void> {
+    try {
+      await this.whenDiskReady();
+    } catch (error: unknown) {
+      Logger.tryGetInstance()?.warn(
+        `[MetadataCache] Disk cache initialization failed before metadata read for ${connectionName}; allowing live fallback`,
+        error,
+      );
+      return;
+    }
+
+    await this.whenConnectionMetadataHydrated(connectionName);
   }
 
   hasColumnsOnDisk(connectionName: string, databaseName: string): boolean {
@@ -350,33 +379,37 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   async dispose(): Promise<void> {
-    if (this._diskWatcher) {
-      this._diskWatcher.stop();
-    }
+    try {
+      this._diskWatcher?.stop();
 
-    if (this.isDiskPersistenceEnabled() && this._diskStorage) {
-      await this._diskStorage.lock.releaseAllOwned();
-      try {
-        await this._diskStorage.saveAll(
-          this,
-          this.prefetcher.getConnectionPrefetchTimestamps(),
-        );
-      } catch (error: unknown) {
-        Logger.getInstance().warn(
-          '[MetadataCache] Failed to save cache on dispose',
-          error,
-        );
-      } finally {
-        await this._diskStorage.lock.releaseAllOwned();
-        await this._diskStorage.lock.deleteAllLockFiles();
+      if (this.isDiskPersistenceEnabled() && this._diskStorage) {
+        try {
+          const prefetchTimestamps =
+            this.prefetcher.getConnectionPrefetchTimestamps();
+          await this._diskStorage.saveAll(this, prefetchTimestamps);
+        } catch (error: unknown) {
+          Logger.getInstance().warn(
+            '[MetadataCache] Failed to save cache on dispose',
+            error,
+          );
+        } finally {
+          try {
+            await this._diskStorage.lock.releaseAllOwned();
+          } catch (error: unknown) {
+            Logger.getInstance().warn(
+              '[MetadataCache] Failed to release cache locks on dispose',
+              error,
+            );
+          }
+        }
       }
+    } finally {
+      this._onDidPrefetchProgress.dispose();
+      this._onDidInvalidate.dispose();
+      this._onDidNeedColumnRecovery.dispose();
+      this._onDidExternalRefresh.dispose();
+      this._stats.clearAll();
     }
-
-    this._onDidPrefetchProgress.dispose();
-    this._onDidInvalidate.dispose();
-    this._onDidNeedColumnRecovery.dispose();
-    this._onDidExternalRefresh.dispose();
-    this._stats.clearAll();
   }
 
   async clearCache(): Promise<void> {
@@ -387,6 +420,19 @@ export class MetadataCache implements MetadataPrefetchTarget {
     Logger.getInstance().info(
       `[MetadataCache] Clearing all caches (${entryCount} entries across all maps)`,
     );
+    this.clearLocalMetadataState();
+    if (this.isDiskPersistenceEnabled() && this._diskStorage) {
+      await this._diskStorage.resetGeneration();
+    }
+  }
+
+  private resetLocalCacheAfterExternalGeneration(): void {
+    this._diskLifecycleState.cacheGeneration++;
+    this._columnLoaderState.cacheGeneration = this._diskLifecycleState.cacheGeneration;
+    this.clearLocalMetadataState();
+  }
+
+  private clearLocalMetadataState(): void {
     this._store.clearLayerMaps();
     this._columnLoaderState.columnsOnDisk.clear();
     this._columnLoaderState.columnsLoadedDatabases.clear();
@@ -402,10 +448,6 @@ export class MetadataCache implements MetadataPrefetchTarget {
     this.prefetcher.reset();
     this._stats.clearAll();
     this._onDidInvalidate.fire();
-
-    if (this.isDiskPersistenceEnabled() && this._diskStorage) {
-      await this._diskStorage.deleteCacheFile();
-    }
   }
 
   getDatabases(connectionName: string): DatabaseMetadata[] | undefined {
@@ -883,7 +925,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     );
   }
 
-  async tryAcquirePrefetchLock(connectionName: string): Promise<boolean> {
+  async tryAcquirePrefetchLock(connectionName: string): Promise<import('../diskStorage/metadataDiskStorage').PrefetchLease | undefined> {
     return prefetchDelegation.tryAcquirePrefetchLock(
       this.prefetchDeps,
       connectionName,
@@ -897,10 +939,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
     );
   }
 
-  async releasePrefetchLock(connectionName: string): Promise<void> {
+  async releasePrefetchLock(lease: import('../diskStorage/metadataDiskStorage').PrefetchLease | undefined): Promise<void> {
     return prefetchDelegation.releasePrefetchLock(
       this.prefetchDeps,
-      connectionName,
+      lease,
     );
   }
 
@@ -989,7 +1031,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     return true;
   }
 
-  async checkpointSave(connectionName: string): Promise<void> {
+  async checkpointSave(connectionName: string, lease?: import('../diskStorage/metadataDiskStorage').PrefetchLease): Promise<void> {
     if (!this.isDiskPersistenceEnabled() || !this._diskStorage) {
       return;
     }
@@ -1000,7 +1042,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       this,
       connectionName,
       prefetchCompletedAt,
-      { isComplete: false },
+      { isComplete: false, lease },
     );
     Logger.getInstance().debug(
       `[MetadataCache] Checkpoint saved for ${connectionName}`,
@@ -1010,6 +1052,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   async saveConnectionToDiskAfterPrefetch(
     connectionName: string,
     hadError: boolean,
+    lease: import('../diskStorage/metadataDiskStorage').PrefetchLease,
   ): Promise<void> {
     if (
       hadError
@@ -1030,11 +1073,11 @@ export class MetadataCache implements MetadataPrefetchTarget {
       this.prefetcher.getConnectionPrefetchTimestamp(connectionName) ??
       Date.now();
     this._diskWatcher?.markConnection(connectionName, prefetchCompletedAt);
-    this._diskStorage.scheduleSave(
+    await this._diskStorage.saveConnection(
       this,
       connectionName,
       prefetchCompletedAt,
-      { isComplete: true },
+      { isComplete: true, lease },
     );
   }
 

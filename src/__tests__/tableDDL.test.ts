@@ -181,7 +181,7 @@ describe('ddl/tableDDL', () => {
                 columns: ['PARENT_ID'],
                 pkDatabase: 'MYDB',
                 pkSchema: 'ADMIN',
-                pkRelation: 'PARENT_TABLE',
+                pkRelation: 'PARENT.TABLE',
                 pkColumns: ['ID'],
                 updateType: 'NO ACTION',
                 deleteType: 'CASCADE'
@@ -199,7 +199,7 @@ describe('ddl/tableDDL', () => {
             );
 
             expect(result).toContain('FOREIGN KEY (PARENT_ID)');
-            expect(result).toContain('REFERENCES MYDB.ADMIN.PARENT_TABLE (ID)');
+            expect(result).toContain('REFERENCES MYDB.ADMIN."PARENT.TABLE" (ID)');
             expect(result).toContain('ON DELETE CASCADE');
             expect(result).toContain('ON UPDATE NO ACTION');
         });

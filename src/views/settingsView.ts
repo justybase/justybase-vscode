@@ -733,22 +733,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 defaultValue: 'Explain what this Netezza SQL query does:'
             },
             {
-                id: 'copilot-execute-query',
-                label: 'Allow Query Execution',
-                description: 'Enable the Execute SQL Query tool for AI copilot (runs queries on your database)',
-                type: 'toggle',
-                configKey: 'copilot.tools.executeQueryEnabled',
-                defaultValue: false
-            },
-            {
-                id: 'copilot-sample-data',
-                label: 'Allow Sample Data',
-                description: 'Enable the Get Sample Data tool for AI copilot',
-                type: 'toggle',
-                configKey: 'copilot.tools.sampleDataEnabled',
-                defaultValue: false
-            },
-            {
                 id: 'copilot-request-timeout',
                 label: 'Request Timeout (ms)',
                 description: 'Timeout for Copilot API requests (5000–300000 ms)',

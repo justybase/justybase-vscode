@@ -13,7 +13,6 @@ const TOOL_FILE_BY_NAME: Record<string, string> = {
     netezza_get_sql_schema: 'src/services/copilotTools/schemaTool.ts',
     netezza_get_columns: 'src/services/copilotTools/columnsTool.ts',
     netezza_get_tables: 'src/services/copilotTools/tablesTool.ts',
-    netezza_execute_query: 'src/services/copilotTools/executeQueryTool.ts',
     netezza_get_databases: 'src/services/copilotTools/databasesTool.ts',
     netezza_get_schemas: 'src/services/copilotTools/schemasTool.ts',
     netezza_get_views: 'src/services/copilotTools/viewsTool.ts',
@@ -31,14 +30,8 @@ const TOOL_FILE_BY_NAME: Record<string, string> = {
     netezza_get_sql_diagnostics: 'src/services/copilotTools/getSqlDiagnosticsTool.ts',
     netezza_inspect_import_file: 'src/services/copilotTools/inspectImportFileTool.ts',
     netezza_propose_import_mapping: 'src/services/copilotTools/proposeImportMappingTool.ts',
-    netezza_execute_import: 'src/services/copilotTools/executeImportTool.ts',
-    netezza_export_query_results: 'src/services/copilotTools/exportQueryResultsTool.ts',
     netezza_explain_plan: 'src/services/copilotTools/explainPlanTool.ts',
-    netezza_get_tuning_advice: 'src/services/copilotTools/tuningAdviceTool.ts',
-    netezza_get_sample_data: 'src/services/copilotTools/sampleDataTool.ts',
-    netezza_compile_procedure: 'src/services/copilotTools/compileProcedureTool.ts',
-    netezza_execute_procedure: 'src/services/copilotTools/executeProcedureTool.ts',
-    netezza_run_diagnostic_queries: 'src/services/copilotTools/runDiagnosticQueriesTool.ts'
+    netezza_get_tuning_advice: 'src/services/copilotTools/tuningAdviceTool.ts'
 };
 
 function getManifestTools(): ManifestTool[] {
@@ -87,18 +80,18 @@ function getInterfacePropertyNames(relativePath: string): Set<string> {
 }
 
 describe('Copilot tool contracts', () => {
-    it('requires explicit opt-in for tools that return database data', () => {
+    it('does not expose retired AI SQL execution tools or their settings', () => {
         const manifestTools = getManifestTools();
         const toolsByName = new Map(manifestTools.map(tool => [tool.name, tool]));
 
-        expect(toolsByName.get('netezza_execute_query')?.when)
-            .toBe('config.justybase.copilot.tools.executeQueryEnabled');
-        expect(toolsByName.get('netezza_get_sample_data')?.when)
-            .toBe('config.justybase.copilot.tools.sampleDataEnabled');
-
         const configurationProperties = getConfigurationProperties();
-        expect(configurationProperties['justybase.copilot.tools.executeQueryEnabled']?.default).toBe(false);
-        expect(configurationProperties['justybase.copilot.tools.sampleDataEnabled']?.default).toBe(false);
+        for (const name of [
+            'netezza_execute_query', 'netezza_get_sample_data', 'netezza_execute_import',
+            'netezza_export_query_results', 'netezza_compile_procedure',
+            'netezza_execute_procedure', 'netezza_run_diagnostic_queries'
+        ]) expect(toolsByName.has(name)).toBe(false);
+        expect(configurationProperties['justybase.copilot.tools.executeQueryEnabled']).toBeUndefined();
+        expect(configurationProperties['justybase.copilot.tools.sampleDataEnabled']).toBeUndefined();
     });
 
     it('keeps manifest tool names in sync with runtime registrations', () => {

@@ -42,12 +42,10 @@ Netezza SQL files support SAS-like preprocessing macros, including `%let`, `%if/
 📖 Read the full Copilot documentation: [Copilot SQL Assistant](docs/COPILOT_SQL_ASSISTANT.md)
 
 - **Chat Participant `@sql-copilot`**: Interactive conversations with full database context directly in Copilot Chat. Use commands like `/schema`, `/optimize`, `/fix`, `/explain`, `/best-practices`.
-- **Language Model Tools**: 20+ automated tools that Copilot can use to autonomously query your database:
+- **Language Model Tools**: metadata, DDL, local validation, file inspection, and planner-only tools. AI never executes SQL, imports, exports, or procedures:
     - `#schema` - Get table DDL for tables in current SQL
     - `#getColumns` - Get column definitions for specific tables
     - `#getTables` - List all tables in a database
-    - `#executeQuery` - Run SELECT queries (read-only)
-    - `#sampleData` - Get sample rows from a table
     - `#explainPlan` - Get query execution plan
     - `#searchSchema` - Find tables/columns by pattern
     - `#tableStats` - Get row count, skew, distribution info
@@ -58,12 +56,7 @@ Netezza SQL files support SAS-like preprocessing macros, including `%let`, `%if/
     - `#getSqlDiagnostics` - Read SQL diagnostics with SQL/NZ/NZP codes
     - `#inspectImportFile` - Inspect source file and infer import schema/preview
     - `#proposeImportMapping` - Propose source-to-target import mapping and CREATE SQL
-    - `#executeImport` - Run import dry-run or execute import with audit details
-    - `#exportQueryResults` - Export SQL query output or active Results grid to CSV/XLSX/XLSB/Parquet
-    - `#compileProcedure` - Compile a stored procedure (CREATE OR REPLACE DDL execution)
-    - `#executeProcedure` - Execute a stored procedure (CALL statement)
-    - `#runDiagnosticQueries` - Run diagnostic SQL queries to validate procedure correctness
-- **Procedure Compilation & Diagnostics**: Copilot can now autonomously compile stored procedures, fix syntax errors using database exception messages, and validate correctness through user-provided diagnostic SQL queries — all in multi-iteration cycles. 📖 [Procedure Compilation Guide](docs/PROCEDURE_COMPILATION.md)
+- **Procedure workflow**: Copilot can analyze and validate procedure source locally; compile and run it manually using the regular extension commands. 📖 [Procedure workflow](docs/PROCEDURE_COMPILATION.md)
 - **Copilot Table Profiles View**: Curate important tables in a dedicated explorer view (`Copilot Table Profiles`), add usage notes, and mark profiles for auto-include or one-time include in the next Copilot request.
 - **Auto Mode**: Apply suggested fixes or optimizations using the built-in diff editor (modal review dialog). Options: Apply Changes, Apply & Close Diff, Discard.
 - **Interactive Mode**: Open Copilot Chat for a back-and-forth discussion; suggestions stay in Chat unless you explicitly apply them with `/edit`.
@@ -81,7 +74,7 @@ Key data transmitted:
 
 - SQL code and queries
 - Database schema information (DDL)
-- Table statistics and sample data (when explicitly requested)
+- Catalog table statistics and DDL metadata (when requested)
 - Query history (for context - limited to 5 most recent queries, truncated to 180 characters each)
 
 **Privacy confirmation dialogs** appear before sending data to AI. You can configure this behavior in settings: `justybase.copilot.skipPrivacyConfirmation`

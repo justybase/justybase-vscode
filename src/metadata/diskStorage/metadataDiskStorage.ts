@@ -10,7 +10,6 @@ import type { ConnectionManager } from '../../core/connectionManager';
 import type { MetadataCache } from '../../metadataCache';
 import { Logger } from '../../utils/logger';
 import { compressJsonToGzip } from './metadataDiskCompress';
-import { encodeColumnLayers } from './metadataColumnCodec';
 import { yieldToEventLoop } from '../hydrateScheduler';
 import { computeFingerprintFromConnectionDetails } from './connectionFingerprint';
 import {
@@ -21,28 +20,27 @@ import {
     serializeColumnsByDatabase,
     serializeConnectionMetadataFromCache,
 } from './metadataDiskSerializer';
-import { MetadataDiskLock } from './metadataDiskLock';
+import { MetadataDiskLock, type DiskLease } from './metadataDiskLock';
 import {
     databaseFileSegmentFromColumnFileName,
-    extractDatabaseFromLayerKey,
-    getCacheV2Dir,
-    getColumnFilePath,
-    getConnectionDir,
-    getConnectionManifestPath,
-    getConnectionMetadataPath,
-    getLegacySanitizedColumnFilePath,
-    getV2IndexPath,
+    getCacheV3Dir,
+    getV3ColumnFilePath,
+    getV3ConnectionDir,
+    getV3ConnectionManifestPath,
+    getV3ConnectionMetadataPath,
+    getV3IndexPath,
     isActiveColumnFileEntry,
     LEGACY_CACHE_FILE_NAME,
 } from './metadataDiskPaths';
 import {
     CACHE_FILE_NAME,
     CACHE_SCHEMA_VERSION,
+    CACHE_V3_SCHEMA_VERSION,
     COLUMN_FILE_SCHEMA_VERSION,
-    createEmptyV2Index,
+    createEmptyV3Index,
     isSerializedCache,
     isSerializedColumnFile,
-    isV2DiskIndex,
+    isV3DiskIndex,
     LEGACY_CACHE_SCHEMA_VERSION,
     METADATA_MANIFEST_SCHEMA_VERSION,
     MAX_FILE_WARN_BYTES,
@@ -56,8 +54,8 @@ import {
     type SerializedConnectionMetadata,
     type LoadedConnectionManifest,
     type LoadedConnectionMetadata,
-    type V2ConnectionIndexEntry,
-    type V2DiskIndex,
+    type V3ConnectionIndexEntry,
+    type V3DiskIndex,
 } from './metadataDiskTypes';
 
 const gunzipAsync = promisify(gunzip);
@@ -76,6 +74,15 @@ interface PendingSaveState {
 
 export interface MetadataDiskSaveOptions {
     isComplete?: boolean;
+    lease?: PrefetchLease;
+}
+
+/** Lease carried from prefetch start through every durable checkpoint/commit. */
+export interface PrefetchLease {
+    connectionName: string;
+    generation: number;
+    fence: number;
+    diskLease?: DiskLease;
 }
 
 export interface DiskLoadResult {
@@ -86,7 +93,6 @@ export interface DiskLoadResult {
 export class MetadataDiskStorage {
     private writeQueue: Promise<void> = Promise.resolve();
     private sessionDisabled = false;
-    private inMemoryIndex: V2DiskIndex | null = null;
     private dirtyConnections = new Set<string>();
     private pendingSave: PendingSaveState | null = null;
     private debounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -97,7 +103,7 @@ export class MetadataDiskStorage {
         private readonly storageDir: string,
         private readonly connectionManager?: ConnectionManager,
     ) {
-        this.lock = new MetadataDiskLock(storageDir);
+        this.lock = new MetadataDiskLock(getCacheV3Dir(storageDir));
         this.ensureDirectory();
     }
 
@@ -128,9 +134,9 @@ export class MetadataDiskStorage {
             if (!fs.existsSync(this.storageDir)) {
                 fs.mkdirSync(this.storageDir, { recursive: true });
             }
-            const v2Dir = getCacheV2Dir(this.storageDir);
-            if (!fs.existsSync(v2Dir)) {
-                fs.mkdirSync(v2Dir, { recursive: true });
+            const v3Dir = getCacheV3Dir(this.storageDir);
+            if (!fs.existsSync(v3Dir)) {
+                fs.mkdirSync(v3Dir, { recursive: true });
             }
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
@@ -141,7 +147,7 @@ export class MetadataDiskStorage {
     async cleanupTempFile(): Promise<void> {
         const tmpCandidates = [
             this.getTempFilePath(this.getLegacyCacheFilePath()),
-            this.getTempFilePath(getV2IndexPath(this.storageDir)),
+            this.getTempFilePath(getV3IndexPath(this.storageDir)),
         ];
         for (const tmpPath of tmpCandidates) {
             try {
@@ -205,31 +211,33 @@ export class MetadataDiskStorage {
         );
     }
 
-    /** Read the v2 index file from disk. Returns null if not found or invalid. */
-    async readV2Index(): Promise<V2DiskIndex | null> {
-        return this.loadV2IndexFromDisk();
+    /** Read the v3 index file from disk. */
+    async readV3Index(): Promise<V3DiskIndex | null> {
+        return this.loadV3IndexFromDisk();
     }
+    /** @deprecated Compatibility alias; the v3 index is returned. */
+    async readV2Index(): Promise<V3DiskIndex | null> { return this.readV3Index(); }
 
-    private async loadV2IndexFromDisk(): Promise<V2DiskIndex | null> {
-        const index = await this.readGzipJson(getV2IndexPath(this.storageDir), isV2DiskIndex);
+    private async loadV3IndexFromDisk(): Promise<V3DiskIndex | null> {
+        const index = await this.readGzipJson(getV3IndexPath(this.storageDir), isV3DiskIndex);
         if (!index) {
             return null;
         }
-        if (index.schemaVersion !== CACHE_SCHEMA_VERSION) {
+        if (index.schemaVersion !== CACHE_V3_SCHEMA_VERSION) {
             Logger.getInstance().warn(
-                `[MetadataDisk] v2 index schema mismatch: file=${index.schemaVersion}, expected=${CACHE_SCHEMA_VERSION}`,
+                `[MetadataDisk] v3 index schema mismatch: file=${index.schemaVersion}, expected=${CACHE_V3_SCHEMA_VERSION}`,
             );
             return null;
         }
         return index;
     }
 
-    private async ensureInMemoryIndex(): Promise<V2DiskIndex> {
-        if (this.inMemoryIndex) {
-            return this.inMemoryIndex;
-        }
-        this.inMemoryIndex = (await this.loadV2IndexFromDisk()) ?? createEmptyV2Index();
-        return this.inMemoryIndex;
+    private async readCurrentIndex(): Promise<V3DiskIndex> {
+        const index = (await this.loadV3IndexFromDisk()) ?? createEmptyV3Index();
+        index.generation ??= 1;
+        index.revision ??= 0;
+        index.nextFence ??= 1;
+        return index;
     }
 
     /** @deprecated Legacy v1 monolith loader — used for migration tests only. */
@@ -256,49 +264,13 @@ export class MetadataDiskStorage {
     }
 
     async migrateLegacyIfNeeded(): Promise<void> {
-        const legacyPath = this.getLegacyCacheFilePath();
-        if (!fs.existsSync(legacyPath)) {
-            return;
-        }
-
-        const legacy = await this.loadSerialized();
-        if (!legacy) {
-            try {
-                await fs.promises.unlink(legacyPath);
-            } catch {
-                // Best-effort
-            }
-            return;
-        }
-
-        Logger.getInstance().info('[MetadataDisk] Migrating legacy v1 cache to v2 layout');
-        const index = await this.ensureInMemoryIndex();
-        for (const [connectionName, connData] of Object.entries(legacy.connections)) {
-            if (!isConnectionCacheComplete(connData)) {
-                continue;
-            }
-            await this.writeConnectionV2(connectionName, connData);
-            index.connections[connectionName] = {
-                prefetchCompletedAt: connData.prefetchCompletedAt,
-                connectionFingerprint: connData.connectionFingerprint,
-                columnDatabases: [...serializeColumnsByDatabaseFromConnection(connData).keys()],
-            };
-        }
-        index.writtenAt = Date.now();
-        await this.writeGzipJson(getV2IndexPath(this.storageDir), index);
-        this.inMemoryIndex = index;
-
-        try {
-            await fs.promises.unlink(legacyPath);
-        } catch {
-            // Best-effort
-        }
+        return;
     }
 
     private async loadConnectionMetadata(
         connectionName: string,
     ): Promise<SerializedConnectionMetadata | null> {
-        const metadataPath = getConnectionMetadataPath(this.storageDir, connectionName);
+        const metadataPath = getV3ConnectionMetadataPath(this.storageDir, connectionName);
         const parsed = await this.readGzipJson(
             metadataPath,
             (value): value is SerializedConnectionMetadata => {
@@ -322,7 +294,7 @@ export class MetadataDiskStorage {
     private async loadConnectionManifest(
         connectionName: string,
     ): Promise<SerializedConnectionManifest | null> {
-        const manifestPath = getConnectionManifestPath(this.storageDir, connectionName);
+        const manifestPath = getV3ConnectionManifestPath(this.storageDir, connectionName);
         const parsed = await this.readGzipJson(
             manifestPath,
             (value): value is SerializedConnectionManifest => {
@@ -361,22 +333,13 @@ export class MetadataDiskStorage {
         connectionName: string,
         databaseName: string,
     ): Promise<SerializedColumnFile | null> {
-        const columnPath = getColumnFilePath(this.storageDir, connectionName, databaseName);
-        let columnFile = await this.loadColumnFile(columnPath);
-        if (!columnFile) {
-            const legacyPath = getLegacySanitizedColumnFilePath(
-                this.storageDir,
-                connectionName,
-                databaseName,
-            );
-            columnFile = await this.loadColumnFile(legacyPath);
-        }
-        return columnFile;
+        const columnPath = getV3ColumnFilePath(this.storageDir, connectionName, databaseName);
+        return this.loadColumnFile(columnPath);
     }
 
     async loadConnectionMetadataOnly(
         connectionName: string,
-        indexEntry: V2ConnectionIndexEntry,
+        indexEntry: V3ConnectionIndexEntry,
     ): Promise<LoadedConnectionMetadata | null> {
         const metadata = await this.loadConnectionMetadata(connectionName);
         if (!metadata || !isConnectionMetadataComplete(metadata)) {
@@ -390,7 +353,7 @@ export class MetadataDiskStorage {
 
     async loadAllConnectionsMetadataOnly(): Promise<Map<string, LoadedConnectionMetadata>> {
         await this.migrateLegacyIfNeeded();
-        const index = await this.loadV2IndexFromDisk();
+        const index = await this.loadV3IndexFromDisk();
         if (!index) {
             return new Map();
         }
@@ -407,7 +370,7 @@ export class MetadataDiskStorage {
 
     async loadAllConnectionManifests(): Promise<Map<string, LoadedConnectionManifest>> {
         await this.migrateLegacyIfNeeded();
-        const index = await this.loadV2IndexFromDisk();
+        const index = await this.loadV3IndexFromDisk();
         if (!index) {
             return new Map();
         }
@@ -449,7 +412,7 @@ export class MetadataDiskStorage {
 
     private async loadConnectionFull(
         connectionName: string,
-        indexEntry: V2ConnectionIndexEntry,
+        indexEntry: V3ConnectionIndexEntry,
     ): Promise<SerializedConnectionCache | null> {
         const metadata = await this.loadConnectionMetadata(connectionName);
         if (!metadata || !isConnectionMetadataComplete(metadata)) {
@@ -473,7 +436,7 @@ export class MetadataDiskStorage {
 
     async loadAllConnections(): Promise<Map<string, SerializedConnectionCache>> {
         await this.migrateLegacyIfNeeded();
-        const index = await this.loadV2IndexFromDisk();
+        const index = await this.loadV3IndexFromDisk();
         if (!index) {
             return new Map();
         }
@@ -507,7 +470,7 @@ export class MetadataDiskStorage {
         return names;
     }
 
-    applyEvictionToIndex(index: V2DiskIndex): void {
+    applyEvictionToIndex(index: V3DiskIndex): void {
         const now = Date.now();
         const knownNames = this.getKnownConnectionNames();
 
@@ -566,12 +529,13 @@ export class MetadataDiskStorage {
             const deadline = Date.now() + SAVE_LOCK_WAIT_MS;
             /* eslint-disable no-constant-condition */
             do {
-                if (await this.lock.acquireLock(SAVE_LOCK_NAME)) {
+                const lease = await this.lock.acquireLock(SAVE_LOCK_NAME);
+                if (lease) {
                     try {
                         await operation();
                         return;
                     } finally {
-                        await this.lock.releaseLock(SAVE_LOCK_NAME);
+                        await this.lock.releaseLock(lease);
                     }
                 }
                 if (Date.now() >= deadline) {
@@ -614,6 +578,56 @@ export class MetadataDiskStorage {
 
     async whenWriteQueueIdle(): Promise<void> {
         await this.writeQueue;
+    }
+
+    /** Acquire a per-connection lease and allocate its fence atomically. */
+    async acquirePrefetchLease(connectionName: string): Promise<PrefetchLease | undefined> {
+        if (this.sessionDisabled) return undefined;
+        const diskLease = await this.lock.acquireLock(connectionName);
+        if (!diskLease) return undefined;
+        this.lock.startHeartbeat(diskLease);
+        try {
+            let result: PrefetchLease | undefined;
+            await this.enqueueWrite(() => this.withSaveLock(async () => {
+                const index = await this.readCurrentIndex();
+                const fence = index.nextFence!++;
+                const entry = index.connections[connectionName];
+                index.connections[connectionName] = entry
+                    ? { ...entry, prefetchStartedAt: Date.now() }
+                    : {
+                        prefetchCompletedAt: 0, connectionFingerprint: '', columnDatabases: [],
+                        isComplete: false, committedFence: 0, prefetchStartedAt: Date.now(),
+                    };
+                index.writtenAt = Date.now();
+                index.revision!++;
+                await this.writeGzipJson(getV3IndexPath(this.storageDir), index);
+                result = { connectionName, generation: index.generation!, fence, diskLease };
+            }));
+            if (!result) await this.lock.releaseLock(diskLease);
+            return result;
+        } catch (error) {
+            await this.lock.releaseLock(diskLease);
+            throw error;
+        }
+    }
+
+    async releasePrefetchLease(lease: PrefetchLease | undefined): Promise<void> {
+        if (lease?.diskLease) await this.lock.releaseLock(lease.diskLease);
+    }
+
+    /** Global clear: advances generation so any in-flight lease becomes stale. */
+    async resetGeneration(): Promise<void> {
+        this.clearDebounceTimer(); this.dirtyConnections.clear(); this.pendingSave = null;
+        await this.enqueueWrite(() => this.withSaveLock(async () => {
+            const old = await this.readCurrentIndex();
+            const next = createEmptyV3Index(old.generation! + 1, old.revision! + 1);
+            await this.writeGzipJson(getV3IndexPath(this.storageDir), next);
+            // Payload removal deliberately does not touch lock files.
+            const root = getCacheV3Dir(this.storageDir);
+            const entries = await fs.promises.readdir(root).catch(() => [] as string[]);
+            await Promise.all(entries.filter(name => name !== path.basename(getV3IndexPath(this.storageDir)) && !name.includes('.lock')).map(name =>
+                fs.promises.rm(path.join(root, name), { recursive: true, force: true }).catch(() => undefined)));
+        }));
     }
 
     scheduleSave(
@@ -660,41 +674,73 @@ export class MetadataDiskStorage {
         const completeness = new Map(this.pendingSave.completeness);
         this.dirtyConnections.clear();
 
-        await this.enqueueWrite(() => this.withSaveLock(async () => {
-                const index = await this.ensureInMemoryIndex();
+        // Acquire transient leases upfront — must happen outside
+        // enqueueWrite to avoid deadlock with acquirePrefetchLease's own
+        // enqueueWrite call.
+        const transientLeases: { connectionName: string; lease: PrefetchLease }[] = [];
+        const deferredConnections: string[] = [];
+        try {
+            for (const connectionName of connections) {
+                const fingerprint = this.resolveConnectionFingerprint(connectionName);
+                if (!fingerprint) continue;
+                const lease = await this.acquirePrefetchLease(connectionName);
+                if (lease) {
+                    transientLeases.push({ connectionName, lease });
+                } else {
+                    // Another flush may be committing this connection. Keep this
+                    // snapshot dirty so an update made during that commit is not lost.
+                    deferredConnections.push(connectionName);
+                }
+            }
+            if (deferredConnections.length > 0) {
+                for (const connectionName of deferredConnections) {
+                    this.dirtyConnections.add(connectionName);
+                }
+                if (this.debounceTimer === undefined) {
+                    this.debounceTimer = setTimeout(() => {
+                        void this.flushPendingWrites().catch((error: unknown) => {
+                            const message = error instanceof Error ? error.message : String(error);
+                            Logger.getInstance().warn(`[MetadataDisk] Deferred flush failed: ${message}`);
+                        });
+                    }, SAVE_DEBOUNCE_MS);
+                }
+            }
+            if (transientLeases.length === 0) return;
+
+            await this.enqueueWrite(() => this.withSaveLock(async () => {
+                const index = await this.readCurrentIndex();
                 let savedAny = false;
 
-                for (const connectionName of connections) {
-                    const fingerprint = this.resolveConnectionFingerprint(connectionName);
+                for (const { connectionName, lease } of transientLeases) {
                     const prefetchCompletedAt = prefetchTimestamps.get(connectionName) ?? Date.now();
                     const isComplete = completeness.get(connectionName) ?? true;
-                    if (!fingerprint) {
-                        continue;
-                    }
+                    const fingerprint = this.resolveConnectionFingerprint(connectionName);
+                    if (!fingerprint) continue;
                     const saved = await this.saveConnectionV2(
                         metadataCache,
                         connectionName,
                         fingerprint,
                         prefetchCompletedAt,
                         index,
-                        { isComplete },
+                        { isComplete, lease },
                     );
-                    if (saved) {
-                        savedAny = true;
-                    }
+                    if (saved) savedAny = true;
                 }
 
                 if (savedAny) {
-                    index.schemaVersion = CACHE_SCHEMA_VERSION;
+                    index.schemaVersion = CACHE_V3_SCHEMA_VERSION;
                     index.writtenAt = Date.now();
+                    index.revision!++;
                     this.applyEvictionToIndex(index);
-                    await this.writeGzipJson(getV2IndexPath(this.storageDir), index);
-                    this.inMemoryIndex = index;
+                    await this.writeGzipJson(getV3IndexPath(this.storageDir), index);
                     Logger.getInstance().info(
-                        `[MetadataDisk] flush: ${connections.length} connection(s)`,
+                        `[MetadataDisk] flush: ${transientLeases.length} connection(s)`,
                     );
                 }
             }));
+        } finally {
+            await Promise.all(transientLeases.map(({ lease }) => this.releasePrefetchLease(lease)));
+        }
     }
 
     async saveConnection(
@@ -703,40 +749,31 @@ export class MetadataDiskStorage {
         prefetchCompletedAt: number,
         options?: MetadataDiskSaveOptions,
     ): Promise<void> {
-        this.scheduleSave(metadataCache, connectionName, prefetchCompletedAt, options);
-        await this.flushPendingWrites();
-    }
-
-    private async writeConnectionV2(
-        connectionName: string,
-        connData: SerializedConnectionCache,
-    ): Promise<void> {
-        const metadata: SerializedConnectionMetadata = {
-            prefetchCompletedAt: connData.prefetchCompletedAt,
-            connectionFingerprint: connData.connectionFingerprint,
-            database: connData.database,
-            schema: connData.schema,
-            table: connData.table,
-            procedure: connData.procedure,
-            typeGroup: connData.typeGroup,
-        };
-        await this.writeGzipJson(
-            getConnectionMetadataPath(this.storageDir, connectionName),
-            metadata,
-        );
-
-        const columnFiles = serializeColumnsByDatabaseFromConnection(connData);
-        for (const [dbName, columnFile] of columnFiles) {
-            await this.writeGzipJson(
-                getColumnFilePath(this.storageDir, connectionName, dbName),
-                columnFile,
-            );
+        let saveOptions = options;
+        let transientLease: PrefetchLease | undefined;
+        if (!saveOptions?.lease) {
+            transientLease = await this.acquirePrefetchLease(connectionName);
+            if (!transientLease) return;
+            saveOptions = { ...saveOptions, lease: transientLease };
         }
-        await this.writeConnectionManifest(
-            connectionName,
-            metadata,
-            [...columnFiles.keys()],
-        );
+        try {
+            await this.enqueueWrite(() => this.withSaveLock(async () => {
+                const index = await this.readCurrentIndex();
+                const saved = await this.saveConnectionV2(
+                    metadataCache, connectionName,
+                    this.resolveConnectionFingerprint(connectionName) ?? '',
+                    prefetchCompletedAt, index, saveOptions,
+                );
+                if (saved) {
+                    index.writtenAt = Date.now();
+                    index.revision!++;
+                    this.applyEvictionToIndex(index);
+                    await this.writeGzipJson(getV3IndexPath(this.storageDir), index);
+                }
+            }));
+        } finally {
+            if (transientLease) await this.releasePrefetchLease(transientLease);
+        }
     }
 
     private async saveConnectionV2(
@@ -744,9 +781,21 @@ export class MetadataDiskStorage {
         connectionName: string,
         fingerprint: string,
         prefetchCompletedAt: number,
-        index: V2DiskIndex,
+        index: V3DiskIndex,
         options?: MetadataDiskSaveOptions,
     ): Promise<boolean> {
+        const lease = options?.lease;
+        if (!lease || lease.connectionName !== connectionName) {
+            return false;
+        }
+        const current = index.connections[connectionName];
+        if (lease.generation !== index.generation || lease.fence < (current?.committedFence ?? 0)) {
+            Logger.getInstance().debug(`[MetadataDisk] rejected stale snapshot for ${connectionName}`);
+            return false;
+        }
+        if (lease.diskLease && !await this.lock.hasLease(lease.diskLease)) {
+            return false;
+        }
         const metadata = serializeConnectionMetadataFromCache(
             metadataCache,
             connectionName,
@@ -761,13 +810,13 @@ export class MetadataDiskStorage {
         const columnDatabases = [...columnFiles.keys()];
 
         await this.writeGzipJson(
-            getConnectionMetadataPath(this.storageDir, connectionName),
+            getV3ConnectionMetadataPath(this.storageDir, connectionName),
             metadata,
         );
 
         for (const [dbName, columnFile] of columnFiles) {
             await this.writeGzipJson(
-                getColumnFilePath(this.storageDir, connectionName, dbName),
+                getV3ColumnFilePath(this.storageDir, connectionName, dbName),
                 columnFile,
             );
         }
@@ -781,6 +830,8 @@ export class MetadataDiskStorage {
             connectionFingerprint: fingerprint,
             columnDatabases,
             isComplete,
+            committedFence: lease.fence,
+            prefetchStartedAt: current?.prefetchStartedAt,
         };
         Logger.getInstance().info(
             `[MetadataDisk] save: ${connectionName} (${columnDatabases.length} DB column file(s))`,
@@ -803,7 +854,7 @@ export class MetadataDiskStorage {
             isComplete,
         };
         await this.writeGzipJson(
-            getConnectionManifestPath(this.storageDir, connectionName),
+            getV3ConnectionManifestPath(this.storageDir, connectionName),
             manifest,
         );
     }
@@ -812,7 +863,7 @@ export class MetadataDiskStorage {
         connectionName: string,
         activeDatabases: string[],
     ): Promise<void> {
-        const connDir = getConnectionDir(this.storageDir, connectionName);
+        const connDir = getV3ConnectionDir(this.storageDir, connectionName);
         let entries: string[];
         try {
             entries = await fs.promises.readdir(connDir);
@@ -835,7 +886,7 @@ export class MetadataDiskStorage {
 
     private async removeConnectionDirs(connectionNames: string[]): Promise<void> {
         for (const connectionName of connectionNames) {
-            const connDir = getConnectionDir(this.storageDir, connectionName);
+            const connDir = getV3ConnectionDir(this.storageDir, connectionName);
             try {
                 await fs.promises.rm(connDir, { recursive: true, force: true });
             } catch {
@@ -870,29 +921,7 @@ export class MetadataDiskStorage {
     }
 
     async deleteCacheFile(): Promise<void> {
-        this.clearDebounceTimer();
-        this.dirtyConnections.clear();
-        this.pendingSave = null;
-        this.inMemoryIndex = null;
-
-        try {
-            await this.enqueueWrite(() => this.withSaveLock(async () => {
-                const legacyPath = this.getLegacyCacheFilePath();
-                try {
-                    await fs.promises.unlink(legacyPath);
-                } catch {
-                    // File may not exist
-                }
-                try {
-                    await fs.promises.rm(getCacheV2Dir(this.storageDir), { recursive: true, force: true });
-                } catch {
-                    // Directory may not exist
-                }
-                this.ensureDirectory();
-            }));
-        } finally {
-            await this.lock.deleteAllLockFiles();
-        }
+        await this.resetGeneration();
     }
 
     filterLoadableConnections(
@@ -1007,25 +1036,4 @@ export class MetadataDiskStorage {
 
         return { loadable, freshTimestamps };
     }
-}
-
-function serializeColumnsByDatabaseFromConnection(
-    connData: SerializedConnectionCache,
-): Map<string, SerializedColumnFile> {
-    const byDatabase = new Map<string, Record<string, SerializedConnectionCache['column'][string]>>();
-    for (const [layerKey, entry] of Object.entries(connData.column)) {
-        const dbName = extractDatabaseFromLayerKey(layerKey);
-        let dbColumns = byDatabase.get(dbName);
-        if (!dbColumns) {
-            dbColumns = {};
-            byDatabase.set(dbName, dbColumns);
-        }
-        dbColumns[layerKey] = entry;
-    }
-
-    const result = new Map<string, SerializedColumnFile>();
-    for (const [database, column] of byDatabase) {
-        result.set(database, encodeColumnLayers(database, column));
-    }
-    return result;
 }

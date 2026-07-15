@@ -7,9 +7,8 @@ import {
     collectExplainHotspotNextActions
 } from '../../tuning/explainPlanSemanticAnalyzer';
 import { TableReferenceExtractor } from '../TableReferenceExtractor';
+import { buildSafeExplainSql } from '../../copilotTools/aiSqlSafety';
 import { CopilotToolRuntime } from './copilotToolRuntime';
-
-type TableStatsMode = 'quick' | 'deep';
 
 interface ResolvedTableReference {
     database: string;
@@ -23,27 +22,17 @@ interface CopilotExplainTuningToolsDeps {
     connectionManager: ConnectionManager;
     context: vscode.ExtensionContext;
     runtime: CopilotToolRuntime;
-    getTableStats: (tableName: string, database?: string, mode?: TableStatsMode) => Promise<string>;
+    getTableStats: (tableName: string, database?: string) => Promise<string>;
 }
 
 export class CopilotExplainTuningTools {
     constructor(private readonly deps: CopilotExplainTuningToolsDeps) { }
 
-    private buildExplainSql(sql: string, verbose: boolean): string {
-        let explainSql = sql.trim();
-        if (!explainSql.toUpperCase().startsWith('EXPLAIN')) {
-            explainSql = `EXPLAIN ${verbose ? 'VERBOSE ' : ''}${explainSql}`;
-        } else if (verbose && !explainSql.toUpperCase().includes('VERBOSE')) {
-            explainSql = explainSql.replace(/^EXPLAIN/i, 'EXPLAIN VERBOSE');
-        }
-        return explainSql;
-    }
-
     async getExplainPlan(sql: string, verbose: boolean, database?: string): Promise<string> {
         const activeConn = this.deps.connectionManager.getActiveConnectionName();
         if (!activeConn) throw new Error('No active connection');
 
-        const explainSql = this.buildExplainSql(sql, verbose);
+        const explainSql = buildSafeExplainSql(sql, verbose);
 
         const scopedDatabase = this.deps.runtime.normalizeScopeDatabase(database);
         const plan = scopedDatabase
@@ -54,7 +43,7 @@ export class CopilotExplainTuningTools {
 
     async getExplainPlanAnalysis(sql: string, verbose: boolean, database?: string): Promise<string> {
         const normalizedSql = sql.trim();
-        const explainSql = this.buildExplainSql(normalizedSql, verbose);
+        const explainSql = buildSafeExplainSql(normalizedSql, verbose);
         const plan = await this.getExplainPlan(normalizedSql, verbose, database);
         const analysis = analyzeExplainPlanSemantic(plan);
 
@@ -169,22 +158,17 @@ export class CopilotExplainTuningTools {
         }
 
         const errors: string[] = [];
-        let sqlToAnalyze = sqlResolution.sql.trim();
+        const sqlToAnalyze = sqlResolution.sql.trim();
 
-        if (sqlToAnalyze.toUpperCase().startsWith('EXPLAIN')) {
-            sqlToAnalyze = sqlToAnalyze.replace(/^EXPLAIN\s+(?:VERBOSE\s+)?/i, '').trim();
-        }
-
-        const statementCandidates = sqlToAnalyze
-            .split(';')
-            .map(statement => statement.trim())
-            .filter(statement => statement.length > 0);
-
-        if (statementCandidates.length > 1) {
-            errors.push('Multiple SQL statements detected; only the first statement was analyzed.');
-        }
-        if (statementCandidates.length > 0) {
-            sqlToAnalyze = statementCandidates[0];
+        try {
+            buildSafeExplainSql(sqlToAnalyze, true);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return this.deps.runtime.formatStructuredToolResponse({
+                summary: 'Tuning analysis accepts only a planner-safe SELECT statement.',
+                errors: [message],
+                nextActions: ['Provide exactly one SELECT or WITH ... SELECT statement without EXPLAIN.']
+            });
         }
 
         let explainPlanText = '';
@@ -206,7 +190,7 @@ export class CopilotExplainTuningTools {
         const tableStatsReports: string[] = [];
         const tableTargets: string[] = [];
         for (const ref of resolvedRefs.resolved) {
-            const tableStatsText = await this.deps.getTableStats(ref.tableArgument, ref.database, 'quick');
+            const tableStatsText = await this.deps.getTableStats(ref.tableArgument, ref.database);
             if (
                 tableStatsText.startsWith('Error ') ||
                 tableStatsText.includes('No active database connection') ||

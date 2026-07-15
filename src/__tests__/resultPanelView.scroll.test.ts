@@ -59,6 +59,7 @@ jest.mock(
 
 describe('ResultPanelView Scroll Preservation', () => {
     let provider: ResultPanelView;
+    let providers: ResultPanelView[];
     let mockExtensionUri: vscode.Uri;
     let postedMessages: Array<{ command: string; data?: unknown; sourceUri?: string; activeResultSetIndex?: number }>;
     let consoleLogSpy: jest.SpiedFunction<typeof console.log>;
@@ -82,6 +83,7 @@ describe('ResultPanelView Scroll Preservation', () => {
         consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
         mockExtensionUri = { toString: () => 'extension-uri' } as vscode.Uri;
         provider = new ResultPanelView(mockExtensionUri);
+        providers = [provider];
 
         postedMessages = [];
         mockWebview = {
@@ -119,7 +121,7 @@ describe('ResultPanelView Scroll Preservation', () => {
     });
 
     afterEach(() => {
-        provider.dispose();
+        providers.forEach((view) => view.dispose());
         consoleLogSpy.mockRestore();
     });
 
@@ -769,6 +771,7 @@ describe('ResultPanelView Scroll Preservation', () => {
         it('should not trigger forceHydrate when view is not ready', () => {
             // Create new provider without simulating ready message
             const freshProvider = new ResultPanelView(mockExtensionUri);
+            providers.push(freshProvider);
             const freshMockWebview = {
                 webview: {
                     options: {},
@@ -822,6 +825,7 @@ describe('ResultPanelView Scroll Preservation', () => {
         it('should not throw when webview is not available', () => {
             // Create provider without resolving webview
             const freshProvider = new ResultPanelView(mockExtensionUri);
+            providers.push(freshProvider);
 
             expect(() => freshProvider.triggerCopySelection()).not.toThrow();
         });
@@ -866,6 +870,7 @@ describe('ResultPanelView Scroll Preservation', () => {
 
         it('should not throw when webview is not available', () => {
             const freshProvider = new ResultPanelView(mockExtensionUri);
+            providers.push(freshProvider);
 
             expect(() => freshProvider.triggerSelectAll()).not.toThrow();
         });

@@ -14,6 +14,8 @@ import type {
 export const LEGACY_CACHE_SCHEMA_VERSION = 1;
 /** Per-file schema version for v2 metadata blobs and v2 expanded column blobs */
 export const CACHE_SCHEMA_VERSION = 2;
+/** Global index schema for the generation/fence protocol. */
+export const CACHE_V3_SCHEMA_VERSION = 3;
 /** Small startup manifest schema version for progressive metadata hydration. */
 export const METADATA_MANIFEST_SCHEMA_VERSION = 3;
 /** Dictionary-encoded column file schema version */
@@ -109,6 +111,33 @@ export interface V2ConnectionIndexEntry {
     connectionFingerprint: string;
     columnDatabases: string[];
     isComplete?: boolean;
+}
+
+export interface V3ConnectionIndexEntry extends V2ConnectionIndexEntry {
+    committedFence?: number;
+    prefetchStartedAt?: number;
+}
+
+export interface V3DiskIndex {
+    schemaVersion: number;
+    writtenAt: number;
+    generation?: number;
+    revision?: number;
+    nextFence?: number;
+    connections: Record<string, V3ConnectionIndexEntry>;
+}
+
+export function createEmptyV3Index(generation = 1, revision = 0): V3DiskIndex {
+    return { schemaVersion: CACHE_V3_SCHEMA_VERSION, writtenAt: Date.now(), generation, revision, nextFence: 1, connections: {} };
+}
+
+export function isV3DiskIndex(value: unknown): value is V3DiskIndex {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as Record<string, unknown>;
+    return obj.schemaVersion === CACHE_V3_SCHEMA_VERSION
+        && typeof obj.writtenAt === 'number' && typeof obj.generation === 'number'
+        && typeof obj.revision === 'number' && typeof obj.nextFence === 'number'
+        && obj.connections !== null && typeof obj.connections === 'object';
 }
 
 /** Metadata loaded from disk without column layers (lazy column load). */

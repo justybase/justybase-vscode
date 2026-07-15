@@ -10,6 +10,7 @@ import type {
   TableMetadata,
 } from '../types';
 import type { MetadataStorageReader } from './MetadataStorageReader';
+import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
 
 export interface MetadataPrefetchTarget extends MetadataStorageReader {
   isDatabaseDead(connectionName: string, dbName: string | undefined): boolean;
@@ -48,13 +49,13 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   whenDiskReady(): Promise<void>;
   isConnectionMetadataHydrating(connectionName: string): boolean;
   whenConnectionMetadataHydrated(connectionName: string): Promise<void>;
-  tryAcquirePrefetchLock(connectionName: string): Promise<boolean>;
-  releasePrefetchLock(connectionName: string): Promise<void>;
+  tryAcquirePrefetchLock(connectionName: string): Promise<PrefetchLease | undefined>;
+  releasePrefetchLock(lease: PrefetchLease | undefined): Promise<void>;
   isDiskPersistenceEnabled(): boolean;
   verifyStagesComplete(connectionName: string): boolean;
   saveConnectionToDiskAfterPrefetch(
     connectionName: string,
-    hasError: boolean,
+    hasError: boolean, lease: PrefetchLease,
   ): Promise<void>;
   getDatabases(connectionName: string): DatabaseMetadata[] | undefined;
   setDatabases(connectionName: string, data: DatabaseMetadata[]): void;
@@ -83,5 +84,5 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   getTypeGroups(connectionName: string, dbName: string): string[] | undefined;
   hasCachedTypeGroups(connectionName: string, dbName: string): boolean;
   setTypeGroups(connectionName: string, dbName: string, types: string[]): void;
-  checkpointSave(connectionName: string): Promise<void>;
+  checkpointSave(connectionName: string, lease?: PrefetchLease): Promise<void>;
 }

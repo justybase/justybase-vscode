@@ -103,9 +103,10 @@ export async function logQueryToHistory(
             return;
         }
 
-        const currentSchema = 'schema' in details && typeof details.schema === 'string' && details.schema.length > 0
-            ? details.schema
-            : 'UNKNOWN';
+        // Keep this tolerant of lightweight ConnectionManager test doubles and
+        // older integrations that do not expose the optional resolver yet.
+        const currentSchema = connManager.getSchemaForConnection?.(resolvedConnectionName)
+            || (typeof details.schema === 'string' && details.schema.length > 0 ? details.schema : 'UNKNOWN');
 
         const historyManager = QueryHistoryManager.getInstance(context);
         const tags = documentUri && isSqlConsoleDocument(context, documentUri)

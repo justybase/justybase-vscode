@@ -521,7 +521,8 @@ export class CachePrefetcher {
             }
         }
 
-        if (!await this.cache.tryAcquirePrefetchLock(connectionName)) {
+        const prefetchLease = await this.cache.tryAcquirePrefetchLock(connectionName);
+        if (!prefetchLease) {
             return;
         }
 
@@ -539,7 +540,7 @@ export class CachePrefetcher {
                 message: 'Starting metadata refresh...'
             });
         } catch (e) {
-            await this.cache.releasePrefetchLock(connectionName);
+            await this.cache.releasePrefetchLock(prefetchLease);
             this.connectionPrefetchInProgress.delete(connectionName);
             throw e;
         }
@@ -549,7 +550,7 @@ export class CachePrefetcher {
         const prefetchStartMs = Date.now();
 
         try {
-            await this.executeConnectionPrefetch(connectionName, runQueryFn, isPrefetchStale);
+            await this.executeConnectionPrefetch(connectionName, runQueryFn, isPrefetchStale, prefetchLease);
             prefetchSucceeded = true;
         } catch (e) {
             hasError = true;
@@ -593,7 +594,7 @@ export class CachePrefetcher {
             ) {
                 this.connectionPrefetchTriggered.set(connectionName, Date.now());
                 try {
-                    await this.cache.saveConnectionToDiskAfterPrefetch(connectionName, hasError);
+                    await this.cache.saveConnectionToDiskAfterPrefetch(connectionName, hasError, prefetchLease);
                 } catch (error: unknown) {
                     Logger.getInstance().warn(
                         `[CachePrefetcher] Failed to persist metadata cache for ${connectionName}:`,
@@ -602,7 +603,7 @@ export class CachePrefetcher {
                 }
             }
 
-            await this.cache.releasePrefetchLock(connectionName);
+            await this.cache.releasePrefetchLock(prefetchLease);
         }
     }
 
@@ -610,6 +611,7 @@ export class CachePrefetcher {
         connectionName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
+        prefetchLease: import('./diskStorage/metadataDiskStorage').PrefetchLease,
     ): Promise<void> {
         const prefetchStartOverall = Date.now();
         const log = Logger.getInstance();
@@ -667,7 +669,7 @@ export class CachePrefetcher {
         const stage2Duration = Date.now() - stage2Start;
         log.debug(`[CachePrefetcher] [TIMING] Stage 2/5 SCHEMAS: ${stage2Duration}ms`);
         // Phase 4 checkpoint: databases + schemas saved
-        await this.checkpointAfterStage(connectionName);
+        await this.checkpointAfterStage(connectionName, prefetchLease);
 
         // 3. Fetch all tables and views (reuse prefetchAllObjects with skipIfCached)
         this.emitProgress({
@@ -687,7 +689,7 @@ export class CachePrefetcher {
             message: 'Tables and views loaded'
         });
         // Phase 4 checkpoint: databases + schemas + tables/views saved
-        await this.checkpointAfterStage(connectionName);
+        await this.checkpointAfterStage(connectionName, prefetchLease);
 
         // 4. Fetch procedures per database (bounded concurrency)
         const stage4Start = Date.now();
@@ -709,7 +711,7 @@ export class CachePrefetcher {
         const stage4Duration = Date.now() - stage4Start;
         log.debug(`[CachePrefetcher] [TIMING] Stage 4/5 PROCEDURES: ${stage4Duration}ms`);
         // Phase 4 checkpoint: databases + schemas + tables/views + procedures saved
-        await this.checkpointAfterStage(connectionName);
+        await this.checkpointAfterStage(connectionName, prefetchLease);
 
         // 5. Fetch columns in batches
         this.emitProgress({
@@ -1107,14 +1109,14 @@ export class CachePrefetcher {
      * excessive disk writes during fast stages.
      * Phase 4: checkpointing — incremental disk save during long prefetch.
      */
-    private async checkpointAfterStage(connectionName: string): Promise<void> {
+    private async checkpointAfterStage(connectionName: string, prefetchLease: import('./diskStorage/metadataDiskStorage').PrefetchLease): Promise<void> {
         const lastTime = this.lastCheckpointTime.get(connectionName) ?? 0;
         if (Date.now() - lastTime < CachePrefetcher.CHECKPOINT_THROTTLE_MS) {
             return;
         }
         this.lastCheckpointTime.set(connectionName, Date.now());
         try {
-            await this.cache.checkpointSave(connectionName);
+            await this.cache.checkpointSave(connectionName, prefetchLease);
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
             Logger.getInstance().warn(

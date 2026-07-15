@@ -153,6 +153,22 @@ SELECT ID, NAME FROM MY_TEMP;`;
     expect(result.errors.some((error) => error.code === "SQL006")).toBe(false);
   });
 
+  it("seeds script-created views for dirty statement validation", () => {
+    const sql = `CREATE VIEW TESTDB.PUBLIC.V1 AS SELECT 1 AS ID;
+SELECT ID FROM TESTDB.PUBLIC.V1;`;
+    const index = buildStatementIndex(sql);
+    const validator = new SqlValidator(createMockSchemaProvider([]));
+
+    const result = validator.validateIncrementalFromStatements(
+      sql,
+      index.statements,
+      [1],
+      new Map([[0, []]]),
+    );
+
+    expect(result.errors.some((error) => error.code === "SQL006")).toBe(false);
+  });
+
   it("removes dropped script tables from scope seed for downstream validation", () => {
     const sql = `CREATE TABLE TESTDB.PUBLIC.T1 AS (SELECT 1 AS ID);
 DROP TABLE TESTDB.PUBLIC.T1;

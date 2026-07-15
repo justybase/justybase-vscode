@@ -30,6 +30,7 @@ export function activateExplorerViews(
     const fileSearchProvider = new FileSearchProvider(context.extensionUri);
 
     context.subscriptions.push(
+        resultPanelProvider,
         vscode.window.registerWebviewViewProvider(ResultPanelView.viewType, resultPanelProvider, {
             webviewOptions: { retainContextWhenHidden: true },
         }),

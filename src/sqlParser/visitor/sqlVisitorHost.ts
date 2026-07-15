@@ -35,6 +35,7 @@ export interface SqlVisitorHost {
     boundaryRules?: ReadonlySet<string>,
   ): CstNode | undefined;
   getScopeBuilder(): ScopeBuilder;
+  addScriptCreatedTable(table: TableInfo): void;
   getSchemaProvider(): SchemaProvider | undefined;
   getValidationProfile(): DatabaseSqlValidationProfile;
   getProcedureScope(): ProcedureScopeBuilder | null;

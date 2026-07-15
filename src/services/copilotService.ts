@@ -33,6 +33,7 @@ import {
 import { CopilotToolsHandler } from './copilot/CopilotToolsHandler';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import { logWithFallback } from '../utils/logger';
+import { isAiToolAllowed } from './copilotTools/aiToolPolicy';
 
 interface RewriteValidationCheck {
     hasBlockingErrors: boolean;
@@ -69,22 +70,9 @@ export class CopilotService {
     return config.get<boolean>('enabled') ?? true;
   }
 
-  /**
-   * Data-returning tools require an explicit opt-in because their output can
-   * contain sensitive database values.
-   */
-  private isToolEnabledForCopilot(toolName: string): boolean {
-    const protectedToolSettings: Record<string, string> = {
-      netezza_execute_query: 'tools.executeQueryEnabled',
-      netezza_get_sample_data: 'tools.sampleDataEnabled'
-    };
-    const setting = protectedToolSettings[toolName];
-    return !setting || (getExtensionConfiguration('copilot').get<boolean>(setting) ?? false);
-  }
-
   private getAvailableLanguageModelTools(): vscode.LanguageModelChatTool[] {
     return vscode.lm.tools
-      .filter(tool => this.isToolEnabledForCopilot(tool.name))
+      .filter(tool => isAiToolAllowed(tool.name))
       .map(tool => ({
         name: tool.name,
         description: tool.description,
@@ -997,10 +985,6 @@ Please:
         return this.toolsHandler.getColumnsForTables(tables, database);
     }
 
-    public async executeSelectQuery(sql: string, maxRows: number, database?: string): Promise<string> {
-        return this.toolsHandler.executeSelectQuery(sql, maxRows, database);
-    }
-
     public async getExplainPlan(sql: string, verbose: boolean, database?: string): Promise<string> {
         return this.toolsHandler.getExplainPlan(sql, verbose, database);
     }
@@ -1018,16 +1002,12 @@ Please:
         return copilotContext.ddlContext;
     }
 
-    public async getSampleData(table: string, database: string | undefined, sampleSize: number): Promise<string> {
-        return this.toolsHandler.getSampleData(table, database, sampleSize);
-    }
-
     public async tableStats(table: string): Promise<string> {
         return this.toolsHandler.tableStats(table);
     }
 
-    public async getTableStats(table: string, database?: string, mode: 'quick' | 'deep' = 'quick'): Promise<string> {
-        return this.toolsHandler.getTableStats(table, database, mode);
+    public async getTableStats(table: string, database?: string): Promise<string> {
+        return this.toolsHandler.getTableStats(table, database);
     }
 
     public async getTuningAdvice(
@@ -1112,40 +1092,8 @@ Please:
         return this.toolsHandler.inspectImportFile(filePath, sampleRows);
     }
 
-    public async compileProcedure(sql: string, database?: string): Promise<string> {
-        return this.toolsHandler.compileProcedure(sql, database);
-    }
-
-    public async executeProcedure(procedureName: string, args?: string, database?: string): Promise<string> {
-        return this.toolsHandler.executeProcedure(procedureName, args, database);
-    }
-
-    public async runDiagnosticQueries(queries: string[], database?: string): Promise<string> {
-        return this.toolsHandler.runDiagnosticQueries(queries, database);
-    }
-
     public async proposeImportMapping(filePath: string, targetTable: string): Promise<string> {
         return this.toolsHandler.proposeImportMapping(filePath, targetTable);
-    }
-
-    public async executeImport(
-        filePath: string,
-        targetTable: string,
-        dryRun: boolean = true,
-        timeoutSeconds?: number
-    ): Promise<string> {
-        return this.toolsHandler.executeImport(filePath, targetTable, dryRun, timeoutSeconds);
-    }
-
-    public async exportQueryResults(
-        sql?: string,
-        format?: string,
-        outputPath?: string,
-        timeoutSeconds?: number,
-        source?: 'sql' | 'activeResults',
-        sqlFilePath?: string
-    ): Promise<string> {
-        return this.toolsHandler.exportQueryResults(sql, format, outputPath, timeoutSeconds, source, sqlFilePath);
     }
 
     public async getWorkspaceTableProfiles(): Promise<WorkspaceTableProfile[]> {
@@ -1663,6 +1611,9 @@ Please:
             const toolResults = await Promise.all(
                 toolCallParts.map(async toolCall => {
                     try {
+                        if (!isAiToolAllowed(toolCall.name)) {
+                            throw new Error(`AI tool '${toolCall.name}' is not allowed by the SQL execution policy.`);
+                        }
                         const toolResult = await vscode.lm.invokeTool(
                             toolCall.name,
                             {

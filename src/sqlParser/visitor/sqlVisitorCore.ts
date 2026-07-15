@@ -91,6 +91,7 @@ export class SqlVisitor
   private scriptCreatedProcedureSeed = new Set<string>();
   private scriptCreatedProcedures = new Set<string>();
   private scriptCreatedTableSeed: TableInfo[] = [];
+  private scriptCreatedTables: TableInfo[] = [];
   private selectOutputAliasesStack: Array<Set<string>> = [];
   // Tracks aliases defined earlier in the current SELECT list (for Netezza alias reuse in select items)
   private selectListAliasesSoFar: Set<string> = new Set();
@@ -136,6 +137,10 @@ export class SqlVisitor
       ...table,
       columns: table.columns.map((column) => ({ ...column })),
     }));
+    this.scriptCreatedTables = this.scriptCreatedTableSeed.map((table) => ({
+      ...table,
+      columns: table.columns.map((column) => ({ ...column })),
+    }));
   }
 
   getScriptCreatedProcedureNames(): string[] {
@@ -143,13 +148,30 @@ export class SqlVisitor
   }
 
   getScriptScopeTables(): TableInfo[] {
-    return this.scopeBuilder
-      .getAllVisibleTables()
-      .filter((table) => !table.isCte)
-      .map((table) => ({
-        ...table,
-        columns: table.columns.map((column) => ({ ...column })),
-      }));
+    return this.scriptCreatedTables.map((table) => ({
+      ...table,
+      columns: table.columns.map((column) => ({ ...column })),
+    }));
+  }
+
+  addScriptCreatedTable(table: TableInfo): void {
+    this.scriptCreatedTables.push(table);
+  }
+
+  removeScriptCreatedTable(table: TableInfo): void {
+    const matchesQualifier = (
+      dropped: string | undefined,
+      known: string | undefined,
+    ): boolean =>
+      dropped === undefined ||
+      (known !== undefined && dropped.toUpperCase() === known.toUpperCase());
+
+    this.scriptCreatedTables = this.scriptCreatedTables.filter(
+      (knownTable) =>
+        knownTable.name.toUpperCase() !== table.name.toUpperCase() ||
+        !matchesQualifier(table.database, knownTable.database) ||
+        !matchesQualifier(table.schema, knownTable.schema),
+    );
   }
 
   getScopeBuilder(): ScopeBuilder {
@@ -289,6 +311,26 @@ export class SqlVisitor
 
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void {
     if (!this.schemaProvider) return;
+
+    const matchesScriptTable = this.scriptCreatedTables.some((knownTable) => {
+      if (knownTable.name.toUpperCase() !== table.name.toUpperCase()) {
+        return false;
+      }
+
+      const matchesQualifier = (
+        requested: string | undefined,
+        known: string | undefined,
+      ): boolean =>
+        requested === undefined ||
+        (known !== undefined &&
+          requested.toUpperCase() === known.toUpperCase());
+
+      return (
+        matchesQualifier(table.database, knownTable.database) &&
+        matchesQualifier(table.schema, knownTable.schema)
+      );
+    });
+    if (matchesScriptTable) return;
 
     // SchemaProvider implementations may return "true" when existence is unknown (e.g. cache not loaded).
     if (
@@ -608,6 +650,10 @@ export class SqlVisitor
     this.scopeBuilder.reset();
     this.errors = [];
     this.scriptCreatedProcedures = new Set(this.scriptCreatedProcedureSeed);
+    this.scriptCreatedTables = this.scriptCreatedTableSeed.map((table) => ({
+      ...table,
+      columns: table.columns.map((column) => ({ ...column })),
+    }));
     for (const table of this.scriptCreatedTableSeed) {
       this.scopeBuilder.addTable({
         ...table,

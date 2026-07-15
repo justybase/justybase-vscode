@@ -937,39 +937,6 @@
         }
       },
       {
-        "name": "netezza_execute_query",
-        "displayName": "Execute SQL Query",
-        "toolReferenceName": "executeQuery",
-        "icon": "$(play)",
-        "userDescription": "Execute a SQL query on the connected Netezza database and return results",
-        "modelDescription": "This tool executes a SQL query on the connected IBM Netezza database and returns the results. Use this when you need to run SQL queries to analyze data, check table contents, or verify query results. The query runs in read-only mode by default for safety. Requires an active database connection.",
-        "canBeReferencedInPrompt": true,
-        "when": "config.justybase.copilot.tools.executeQueryEnabled",
-        "tags": [
-          "sql",
-          "database",
-          "query",
-          "netezza",
-          "execute"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "sql": {
-              "type": "string",
-              "description": "SQL query to execute"
-            },
-            "database": {
-              "type": "string",
-              "description": "Optional database name to use. If not specified, uses the current database."
-            }
-          },
-          "required": [
-            "sql"
-          ]
-        }
-      },
-      {
         "name": "netezza_get_databases",
         "displayName": "Get Databases List",
         "toolReferenceName": "getDatabases",
@@ -1155,14 +1122,6 @@
             "database": {
               "type": "string",
               "description": "Database name. Required when table name doesn't include database prefix."
-            },
-            "mode": {
-              "type": "string",
-              "enum": [
-                "quick",
-                "deep"
-              ],
-              "description": "Statistics mode. 'quick' uses catalog estimates (low-cost). 'deep' runs exact COUNT(*) + DATASLICE skew scan (higher-cost). Default: quick."
             }
           },
           "required": [
@@ -1547,107 +1506,6 @@
         }
       },
       {
-        "name": "netezza_execute_import",
-        "displayName": "Execute Import",
-        "toolReferenceName": "executeImport",
-        "icon": "$(cloud-upload)",
-        "userDescription": "Runs dry-run or execution import flow from file to table with audit details",
-        "modelDescription": "Use this tool to execute import into Netezza. For safety, run with dryRun=true first to validate inferred mapping and SQL. When dryRun=false it performs database write import and returns audit details. Requires active database connection for non-dry-run execution.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "import",
-          "execution",
-          "dry-run",
-          "audit",
-          "netezza"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "filePath": {
-              "type": "string",
-              "description": "Path to source file."
-            },
-            "targetTable": {
-              "type": "string",
-              "description": "Target table name in Netezza."
-            },
-            "dryRun": {
-              "type": "boolean",
-              "description": "When true, validates mapping and SQL without writing to DB. Default: true.",
-              "default": true
-            },
-            "timeoutSeconds": {
-              "type": "integer",
-              "description": "Optional import timeout in seconds."
-            }
-          },
-          "required": [
-            "filePath",
-            "targetTable"
-          ]
-        }
-      },
-      {
-        "name": "netezza_export_query_results",
-        "displayName": "Export Query Results",
-        "toolReferenceName": "exportQueryResults",
-        "icon": "$(export)",
-        "userDescription": "Exports query results to CSV, XLSX, XLSB, or Parquet file",
-        "modelDescription": "Use this tool to export either SQL query results or the active Query Results grid data to csv/xlsx/xlsb/parquet/xpt. For SQL mode, provide sql directly, sqlFilePath, or rely on active SQL editor fallback (selection preferred). For results mode, set source='activeResults'. If outputPath is omitted, a temp path is used; Desktop path is recommended for user-friendly output.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "export",
-          "query",
-          "csv",
-          "xlsx",
-          "xlsb",
-          "parquet",
-          "xpt"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "sql": {
-              "type": "string",
-              "description": "Optional SQL query to export. If not provided, tool can use sqlFilePath or active SQL editor content."
-            },
-            "sqlFilePath": {
-              "type": "string",
-              "description": "Optional path to a .sql file used as query source when sql is not provided."
-            },
-            "format": {
-              "type": "string",
-              "enum": [
-                "csv",
-                "xlsx",
-                "xlsb",
-                "parquet",
-                "xpt"
-              ],
-              "description": "Output format. Default: csv."
-            },
-            "outputPath": {
-              "type": "string",
-              "description": "Optional target file path. If omitted, a temp path is generated."
-            },
-            "timeoutSeconds": {
-              "type": "integer",
-              "description": "Optional export timeout in seconds."
-            },
-            "source": {
-              "type": "string",
-              "enum": [
-                "sql",
-                "activeResults"
-              ],
-              "description": "Export source. 'sql' executes query export. 'activeResults' exports the currently active Query Results grid."
-            }
-          },
-          "required": []
-        }
-      },
-      {
         "name": "netezza_explain_plan",
         "displayName": "Get Explain Plan",
         "toolReferenceName": "explainPlan",
@@ -1715,146 +1573,6 @@
             }
           },
           "required": []
-        }
-      },
-      {
-        "name": "netezza_get_sample_data",
-        "displayName": "Get Sample Data",
-        "toolReferenceName": "getSampleData",
-        "icon": "$(table)",
-        "userDescription": "Gets sample data (first N rows) from a table in the connected Netezza database",
-        "modelDescription": "This tool retrieves sample data (first N rows) from a specific table in the connected IBM Netezza database. Use this when you need to see example data from a table. Requires an active database connection.",
-        "canBeReferencedInPrompt": true,
-        "when": "config.justybase.copilot.tools.sampleDataEnabled",
-        "tags": [
-          "sql",
-          "database",
-          "sample",
-          "data",
-          "netezza"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "tableName": {
-              "type": "string",
-              "description": "Name of the table to get sample data from. Can be TABLE, SCHEMA.TABLE, or DB.SCHEMA.TABLE format."
-            },
-            "database": {
-              "type": "string",
-              "description": "Database name. Required when table name doesn't include database prefix."
-            },
-            "limit": {
-              "type": "integer",
-              "description": "Maximum number of rows to return. Default: 10, Maximum: 100.",
-              "default": 10,
-              "minimum": 1,
-              "maximum": 100
-            }
-          },
-          "required": [
-            "tableName"
-          ]
-        }
-      },
-      {
-        "name": "netezza_compile_procedure",
-        "displayName": "Compile Procedure",
-        "toolReferenceName": "compileProcedure",
-        "icon": "$(debug-start)",
-        "userDescription": "Compiles a stored procedure by executing CREATE OR REPLACE PROCEDURE DDL",
-        "modelDescription": "Executes CREATE OR REPLACE PROCEDURE DDL to compile a stored procedure on the connected Netezza database. Returns SUCCESS or FAILED with error details. Use this after modifying procedure code to verify syntax is valid. If compilation fails, use the error message to guide fixes. BEFORE starting work on a procedure, ask the user: 'Do you have diagnostic SQL queries to validate correctness?' The user may provide one or more queries that define success conditions. After each compile attempt, use netezza_run_diagnostic_queries with those queries to verify.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "compile",
-          "ddl",
-          "netezza",
-          "procedure"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "sql": {
-              "type": "string",
-              "description": "The CREATE OR REPLACE PROCEDURE SQL statement to execute."
-            },
-            "database": {
-              "type": "string",
-              "description": "Optional database name for scoped execution."
-            }
-          },
-          "required": [
-            "sql"
-          ]
-        }
-      },
-      {
-        "name": "netezza_execute_procedure",
-        "displayName": "Execute Procedure (CALL)",
-        "toolReferenceName": "executeProcedure",
-        "icon": "$(run-all)",
-        "userDescription": "Executes a stored procedure via CALL statement",
-        "modelDescription": "Executes a stored procedure via CALL statement on the connected Netezza database. Returns execution status (SUCCESS/FAILED) and any error details. Use this to test-run a compiled procedure. Does NOT return result data - use netezza_execute_query after this if you need to verify side effects.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "call",
-          "execution",
-          "netezza",
-          "procedure"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "procedureName": {
-              "type": "string",
-              "description": "Name of the procedure to call. Can use DB..PROC_NAME notation."
-            },
-            "arguments": {
-              "type": "string",
-              "description": "Optional comma-separated arguments to pass to the procedure, e.g. '1, \"text\", NULL'."
-            },
-            "database": {
-              "type": "string",
-              "description": "Optional database name for scoped execution."
-            }
-          },
-          "required": [
-            "procedureName"
-          ]
-        }
-      },
-      {
-        "name": "netezza_run_diagnostic_queries",
-        "displayName": "Run Diagnostic Queries",
-        "toolReferenceName": "runDiagnosticQueries",
-        "icon": "$(testing-run-icon)",
-        "userDescription": "Runs diagnostic SQL queries to validate procedure correctness",
-        "modelDescription": "Runs a list of diagnostic SQL queries to validate procedure correctness. Each query result is reported as PASS or FAIL. Use this after each compile attempt to check if the procedure meets success criteria. BEFORE starting work, ask the user: 'Do you have diagnostic SQL queries to validate correctness?' The user may provide one or more queries. Pass them to this tool after each compile/execute iteration. If any diagnostic fails, analyze the results and fix the procedure accordingly.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "diagnostic",
-          "netezza",
-          "procedure",
-          "validation"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "queries": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "List of SQL diagnostic queries to run. Each must be a complete, executable SQL statement."
-            },
-            "database": {
-              "type": "string",
-              "description": "Optional database name for scoped execution."
-            }
-          },
-          "required": [
-            "queries"
-          ]
         }
       }
     ],
@@ -3904,16 +3622,6 @@
           "type": "boolean",
           "default": true,
           "description": "Enable AI-powered SQL assistance features (Fix SQL, Optimize SQL, Explain SQL, Generate SQL). When disabled, no data will be sent to GitHub Copilot and all AI features will be unavailable."
-        },
-        "justybase.copilot.tools.executeQueryEnabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Allow AI agents to run the Execute SQL Query tool. Disabled by default because query results can expose sensitive database data."
-        },
-        "justybase.copilot.tools.sampleDataEnabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Allow AI agents to run the Get Sample Data tool. Disabled by default because sample rows can expose sensitive database data."
         },
         "justybase.copilot.skipPrivacyConfirmation": {
           "type": "boolean",

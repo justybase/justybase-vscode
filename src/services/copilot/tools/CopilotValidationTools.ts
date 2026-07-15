@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { SqlParser } from '../../../sql/sqlParser';
 import { createSqlValidatorForDocument, getSqlAuthoringForDocument } from '../../../commands/validationCommands';
 import { LintIssue } from '../../../providers/linterRules';
 import { analyzeExplainPlanSemantic, collectExplainHotspotNextActions } from '../../tuning/explainPlanSemanticAnalyzer';
 import { CopilotToolRuntime } from './copilotToolRuntime';
+import { buildSafeExplainSql } from '../../copilotTools/aiSqlSafety';
 
 interface AntiPatternFixProfile {
     rationale: string;
@@ -215,16 +215,6 @@ export class CopilotValidationTools {
         });
     }
 
-    private buildExplainSql(sql: string, verbose: boolean): string {
-        let explainSql = sql.trim();
-        if (!explainSql.toUpperCase().startsWith('EXPLAIN')) {
-            explainSql = `EXPLAIN ${verbose ? 'VERBOSE ' : ''}${explainSql}`;
-        } else if (verbose && !explainSql.toUpperCase().includes('VERBOSE')) {
-            explainSql = explainSql.replace(/^EXPLAIN/i, 'EXPLAIN VERBOSE');
-        }
-        return explainSql;
-    }
-
     async validateSqlParser(sql: string): Promise<string> {
         const validator = createSqlValidatorForDocument();
         const { SqlQualityEngine } = await import('../../../providers/sqlQualityEngine');
@@ -281,12 +271,8 @@ export class CopilotValidationTools {
     }
 
     async validateSqlOnDatabase(sql: string, database?: string): Promise<string> {
-        const statements = SqlParser.splitStatements(sql)
-            .map(statement => statement.trim())
-            .filter(statement => statement.length > 0);
-        const statementWarnings: string[] = [];
-
-        if (statements.length === 0) {
+        const statementSql = sql.trim();
+        if (!statementSql) {
             return this.deps.runtime.formatStructuredToolResponse({
                 summary: 'Database validation could not start because SQL input is empty.',
                 errors: ['No SQL statement detected for EXPLAIN dry-run validation.'],
@@ -294,13 +280,19 @@ export class CopilotValidationTools {
             });
         }
 
-        if (statements.length > 1) {
-            statementWarnings.push('Multiple SQL statements detected; only the first statement was validated.');
+        let explainSql: string;
+        try {
+            explainSql = buildSafeExplainSql(statementSql, true);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return this.deps.runtime.formatStructuredToolResponse({
+                summary: 'Database validation accepts only a planner-safe SELECT statement.',
+                errors: [message],
+                nextActions: ['Provide exactly one SELECT or WITH ... SELECT statement without EXPLAIN.']
+            });
         }
-
-        const statementSql = statements[0];
+        const statementWarnings: string[] = [];
         const statementType = this.getStatementType(statementSql);
-        const explainSql = this.buildExplainSql(statementSql, true);
 
         try {
             const planText = await this.deps.getExplainPlan(statementSql, true, database);
@@ -323,7 +315,7 @@ export class CopilotValidationTools {
                 data: {
                     databaseScope: this.deps.runtime.normalizeScopeDatabase(database) || 'active connection database',
                     statementType,
-                    statementCount: statements.length,
+                    statementCount: 1,
                     validatedStatement: statementSql,
                     explainSql,
                     semanticSummary: analysis.summary,
@@ -346,7 +338,7 @@ export class CopilotValidationTools {
                 data: {
                     databaseScope: this.deps.runtime.normalizeScopeDatabase(database) || 'active connection database',
                     statementType,
-                    statementCount: statements.length,
+                    statementCount: 1,
                     validatedStatement: statementSql,
                     explainSql
                 },

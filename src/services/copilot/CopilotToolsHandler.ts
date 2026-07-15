@@ -9,8 +9,6 @@ import { CopilotSchemaIntrospectionTools } from './tools/CopilotSchemaIntrospect
 import { CopilotExplainTuningTools } from './tools/CopilotExplainTuningTools';
 import { CopilotValidationTools } from './tools/CopilotValidationTools';
 import { CopilotDependencyTools } from './tools/CopilotDependencyTools';
-import { CopilotProcedureTools } from './tools/CopilotProcedureTools';
-import { CopilotQueryTools } from './tools/CopilotQueryTools';
 
 export class CopilotToolsHandler {
     private readonly runtime: CopilotToolRuntime;
@@ -20,8 +18,6 @@ export class CopilotToolsHandler {
     private readonly explainTuningTools: CopilotExplainTuningTools;
     private readonly validationTools: CopilotValidationTools;
     private readonly dependencyTools: CopilotDependencyTools;
-    private readonly procedureTools: CopilotProcedureTools;
-    private readonly queryTools: CopilotQueryTools;
 
     constructor(
         connectionManager: ConnectionManager,
@@ -41,14 +37,7 @@ export class CopilotToolsHandler {
         });
 
         this.importExportTools = new CopilotImportExportTools({
-            connectionManager,
-            context,
-            resultPanelProvider,
-            getActiveConnectionDetails: () => this.runtime.getActiveConnectionDetails(),
-            formatStructuredToolResponse: payload => this.runtime.formatStructuredToolResponse(payload),
-            resolveSqlInput: (sql, sqlFilePath) => this.runtime.resolveSqlInput(sql, sqlFilePath),
-            getEditorSqlCandidate: () => this.runtime.getEditorSqlCandidate(),
-            getActiveResultSetForExport: () => this.runtime.getActiveResultSetForExport()
+            formatStructuredToolResponse: payload => this.runtime.formatStructuredToolResponse(payload)
         });
 
         this.schemaTools = new CopilotSchemaIntrospectionTools({
@@ -62,7 +51,7 @@ export class CopilotToolsHandler {
             connectionManager,
             context,
             runtime: this.runtime,
-            getTableStats: (tableName, database, mode) => this.getTableStats(tableName, database, mode)
+            getTableStats: (tableName, database) => this.getTableStats(tableName, database)
         });
 
         this.validationTools = new CopilotValidationTools({
@@ -75,15 +64,6 @@ export class CopilotToolsHandler {
             runtime: this.runtime
         });
 
-        this.procedureTools = new CopilotProcedureTools({
-            connectionManager,
-            context,
-            runtime: this.runtime
-        });
-
-        this.queryTools = new CopilotQueryTools({
-            runtime: this.runtime
-        });
     }
 
     async getTablesFromDatabase(database?: string, schema?: string): Promise<string> {
@@ -94,10 +74,6 @@ export class CopilotToolsHandler {
         return this.schemaTools.getColumnsForTables(tables, database);
     }
 
-    async executeSelectQuery(sql: string, maxRows: number, database?: string): Promise<string> {
-        return this.queryTools.executeSelectQuery(sql, maxRows, database);
-    }
-
     async getExplainPlan(sql: string, verbose: boolean, database?: string): Promise<string> {
         return this.explainTuningTools.getExplainPlan(sql, verbose, database);
     }
@@ -106,16 +82,12 @@ export class CopilotToolsHandler {
         return this.explainTuningTools.getExplainPlanAnalysis(sql, verbose, database);
     }
 
-    async getSampleData(table: string, database: string | undefined, sampleSize: number): Promise<string> {
-        return this.schemaTools.getSampleData(table, database, sampleSize);
-    }
-
     async tableStats(table: string): Promise<string> {
         return this.schemaTools.tableStats(table);
     }
 
-    async getTableStats(tableName: string, database?: string, mode: 'quick' | 'deep' = 'quick'): Promise<string> {
-        return this.schemaTools.getTableStats(tableName, database, mode);
+    async getTableStats(tableName: string, database?: string): Promise<string> {
+        return this.schemaTools.getTableStats(tableName, database);
     }
 
     async getTuningAdvice(
@@ -175,26 +147,6 @@ export class CopilotToolsHandler {
         return this.importExportTools.proposeImportMapping(filePath, targetTable);
     }
 
-    async executeImport(
-        filePath: string,
-        targetTable: string,
-        dryRun: boolean = true,
-        timeoutSeconds?: number
-    ): Promise<string> {
-        return this.importExportTools.executeImport(filePath, targetTable, dryRun, timeoutSeconds);
-    }
-
-    async exportQueryResults(
-        sql?: string,
-        format?: string,
-        outputPath?: string,
-        timeoutSeconds?: number,
-        source: 'sql' | 'activeResults' = 'sql',
-        sqlFilePath?: string
-    ): Promise<string> {
-        return this.importExportTools.exportQueryResults(sql, format, outputPath, timeoutSeconds, source, sqlFilePath);
-    }
-
     async getObjectDependencies(
         object: string,
         database?: string,
@@ -229,15 +181,4 @@ export class CopilotToolsHandler {
         return this.schemaTools.getDDL(params);
     }
 
-    async compileProcedure(sql: string, database?: string): Promise<string> {
-        return this.procedureTools.compileProcedure(sql, database);
-    }
-
-    async executeProcedure(procedureName: string, args?: string, database?: string): Promise<string> {
-        return this.procedureTools.executeProcedure(procedureName, args, database);
-    }
-
-    async runDiagnosticQueries(queries: string[], database?: string): Promise<string> {
-        return this.procedureTools.runDiagnosticQueries(queries, database);
-    }
 }

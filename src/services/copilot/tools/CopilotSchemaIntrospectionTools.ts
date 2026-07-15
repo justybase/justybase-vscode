@@ -20,8 +20,6 @@ import { MetadataCache } from '../../../metadataCache';
 import { ColumnMetadata } from '../../../metadata/types';
 import { CopilotToolRuntime } from './copilotToolRuntime';
 
-type TableStatsMode = 'quick' | 'deep';
-
 interface CopilotSchemaIntrospectionToolsDeps {
     connectionManager: ConnectionManager;
     context: vscode.ExtensionContext;
@@ -244,176 +242,46 @@ export class CopilotSchemaIntrospectionTools {
         return this.deps.runtime.runQuerySafe(sql, 'fetch table stats');
     }
 
-    /**
-     * Gets table statistics including distribution info and skew analysis.
-     * quick mode: catalog estimates only (low-cost)
-     * deep mode: exact COUNT(*) + DATASLICE skew scan (higher-cost)
-     */
-    async getTableStats(tableName: string, database?: string, mode: TableStatsMode = 'quick'): Promise<string> {
+    /** Gets catalog-based table statistics without scanning user table data. */
+    async getTableStats(tableName: string, database?: string): Promise<string> {
         const connectionName = this.deps.connectionManager.getActiveConnectionName();
-        if (!connectionName) {
-            return 'No active database connection. Please connect to a Netezza database first.';
-        }
-
+        if (!connectionName) return 'No active database connection. Please connect to a Netezza database first.';
         try {
-            const effectiveMode: TableStatsMode = mode === 'deep' ? 'deep' : 'quick';
-
-            // Parse table name
             const parts = tableName.split('.');
             let db: string | undefined;
             let schema: string | undefined;
             let table: string;
-
-            if (parts.length === 3) {
-                [db, schema, table] = parts;
-            } else if (parts.length === 2) {
-                [schema, table] = parts;
-                db = database;
-            } else {
-                table = parts[0];
-                db = database;
-            }
-
+            if (parts.length === 3) [db, schema, table] = parts;
+            else if (parts.length === 2) [schema, table] = parts;
+            else table = parts[0];
+            db ||= database || await this.deps.connectionManager.getCurrentDatabase(connectionName) || undefined;
+            if (!db) return 'Could not determine database. Please specify database name.';
             const connectionDetails = await this.deps.connectionManager.getConnection(connectionName);
-            if (!connectionDetails) {
-                return `Connection "${connectionName}" not found.`;
-            }
-            const ddlProvider = getRequiredDatabaseDdlProvider(connectionDetails.dbType);
-
-            if (!db) {
-                db = await this.deps.connectionManager.getCurrentDatabase(connectionName) || undefined;
-            }
-            if (!db) {
-                return 'Could not determine database. Please specify database name.';
-            }
-
+            if (!connectionDetails) return `Connection "${connectionName}" not found.`;
             const connection = await createConnectedDatabaseConnectionFromDetails(connectionDetails);
-            if (!connection) {
-                return 'Could not establish database connection.';
-            }
-
+            if (!connection) return 'Could not establish database connection.';
             try {
-                // Find schema if not specified
-                if (!schema) {
-                    schema = await this.findTableSchema(connection, ddlProvider, db, table);
+                const ddlProvider = getRequiredDatabaseDdlProvider(connectionDetails.dbType);
+                schema ||= await this.findTableSchema(connection, ddlProvider, db, table);
+                if (!schema) return `Table "${table}" not found in database "${db}".`;
+                const lines = [`## Table Statistics: ${db}.${schema}.${table}`, '**Mode:** quick\n'];
+                const info = await executeDatabaseQuery(connection, ddlProvider.buildTableStatsQuery(db, schema, table));
+                if (info.length > 0) {
+                    const row = info[0] as Record<string, unknown>;
+                    lines.push(`**Distribution Key:** ${row.DIST_KEY || 'RANDOM'}`, `**Owner:** ${row.OWNER || 'N/A'}`);
                 }
-                if (!schema) {
-                    return `Table "${table}" not found in database "${db}".`;
+                const storageSql = `SELECT s.TBL_ROWS, s.SKEW FROM ${db.toUpperCase()}.._V_TABLE_STORAGE_STAT s JOIN ${db.toUpperCase()}.._V_TABLE t ON s.OBJID = t.OBJID WHERE UPPER(t.SCHEMA) = ${escapeSqlLiteral(schema.toUpperCase())} AND UPPER(t.TABLENAME) = ${escapeSqlLiteral(table.toUpperCase())} LIMIT 1`;
+                const storage = await executeDatabaseQuery(connection, storageSql);
+                if (storage.length > 0) {
+                    const row = storage[0] as Record<string, unknown>;
+                    const estimatedRows = Number(row.TBL_ROWS);
+                    const skew = Number(row.SKEW);
+                    if (!Number.isNaN(estimatedRows)) lines.push(`**Estimated Row Count:** ${estimatedRows.toLocaleString()}`);
+                    if (!Number.isNaN(skew)) lines.push(`**Skew Ratio:** ${skew.toFixed(1)}% (catalog estimate)`);
                 }
-
-                const fullTableName = `${db}.${schema}.${table}`;
-                const lines: string[] = [`## Table Statistics: ${fullTableName}`, `**Mode:** ${effectiveMode}\n`];
-
-                // Get table info from system catalog
-                const infoQuery = ddlProvider.buildTableStatsQuery(db, schema, table);
-                const infoResult = await executeDatabaseQuery(connection, infoQuery);
-                if (infoResult && infoResult.length > 0) {
-                    const info = infoResult[0] as Record<string, unknown>;
-                    lines.push(`**Distribution Key:** ${info.DIST_KEY || 'RANDOM'}`);
-                    lines.push(`**Owner:** ${info.OWNER || 'N/A'}`);
-                }
-
-                if (effectiveMode === 'deep') {
-                    try {
-                        const countQuery = `SELECT COUNT(*) AS ROW_COUNT FROM ${fullTableName}`;
-                        const countResult = await executeDatabaseQuery(connection, countQuery);
-                        if (countResult && countResult.length > 0) {
-                            const count = (countResult[0] as Record<string, unknown>).ROW_COUNT;
-                            lines.push(`**Row Count:** ${Number(count).toLocaleString()}`);
-                        } else {
-                            lines.push('**Row Count:** Unable to retrieve');
-                        }
-                    } catch {
-                        lines.push('**Row Count:** Unable to retrieve');
-                    }
-
-                    lines.push('\n### Data Distribution (Skew Check)\n');
-                    try {
-                        const skewQuery = ddlProvider.buildSkewCheckQuery(fullTableName);
-                        const skewResult = await executeDatabaseQuery(connection, skewQuery);
-                        if (skewResult && skewResult.length > 0) {
-                            const counts = skewResult.map(r => Number((r as Record<string, unknown>).ROW_COUNT));
-                            const min = Math.min(...counts);
-                            const max = Math.max(...counts);
-                            const avg = counts.reduce((a, b) => a + b, 0) / counts.length;
-                            const skewRatio = max > 0 ? ((max - min) / max * 100).toFixed(1) : '0';
-
-                            lines.push(`**SPU Count:** ${skewResult.length}`);
-                            lines.push(`**Min Rows/SPU:** ${min.toLocaleString()}`);
-                            lines.push(`**Max Rows/SPU:** ${max.toLocaleString()}`);
-                            lines.push(`**Avg Rows/SPU:** ${Math.round(avg).toLocaleString()}`);
-                            lines.push(`**Skew Ratio:** ${skewRatio}%`);
-
-                            if (Number(skewRatio) > 20) {
-                                lines.push('\n⚠️ **Warning:** High data skew detected. Consider reviewing distribution key.');
-                            } else {
-                                lines.push('\n✅ Data distribution looks balanced.');
-                            }
-                        } else {
-                            lines.push('No distribution data available.');
-                        }
-                    } catch {
-                        lines.push('Could not retrieve distribution data.');
-                    }
-                } else {
-                    lines.push('**Row Count:** [quick mode] use deep mode for exact COUNT(*)');
-                    lines.push('\n### Data Distribution (Skew Check)\n');
-                    try {
-                        const storageQuery = `
-                            SELECT
-                                s.TBL_ROWS,
-                                s.ALLOCATED_BYTES,
-                                s.USED_BYTES,
-                                s.SKEW
-                            FROM ${db.toUpperCase()}.._V_TABLE_STORAGE_STAT s
-                            JOIN ${db.toUpperCase()}.._V_TABLE t ON s.OBJID = t.OBJID
-                            WHERE UPPER(t.SCHEMA) = ${escapeSqlLiteral(schema.toUpperCase())}
-                                AND UPPER(t.TABLENAME) = ${escapeSqlLiteral(table.toUpperCase())}
-                            LIMIT 1
-                        `;
-                        const storageResult = await executeDatabaseQuery(connection, storageQuery);
-                        if (storageResult && storageResult.length > 0) {
-                            const storage = storageResult[0] as Record<string, unknown>;
-                            const estimatedRows = Number(storage.TBL_ROWS);
-                            const allocatedBytes = Number(storage.ALLOCATED_BYTES);
-                            const usedBytes = Number(storage.USED_BYTES);
-                            const skewRatio = Number(storage.SKEW);
-
-                            if (!Number.isNaN(estimatedRows)) {
-                                lines.push(`**Estimated Row Count:** ${estimatedRows.toLocaleString()}`);
-                            }
-                            if (!Number.isNaN(allocatedBytes)) {
-                                lines.push(`**Allocated Size:** ${(allocatedBytes / (1024 * 1024)).toFixed(2)} MB`);
-                            }
-                            if (!Number.isNaN(usedBytes)) {
-                                lines.push(`**Used Size:** ${(usedBytes / (1024 * 1024)).toFixed(2)} MB`);
-                            }
-                            if (!Number.isNaN(skewRatio)) {
-                                lines.push(`**Skew Ratio:** ${skewRatio.toFixed(1)}%`);
-                                if (skewRatio > 20) {
-                                    lines.push('\n⚠️ **Warning:** High data skew detected (catalog estimate).');
-                                } else {
-                                    lines.push('\n✅ Data distribution looks balanced (catalog estimate).');
-                                }
-                            } else {
-                                lines.push('No distribution data available.');
-                            }
-                        } else {
-                            lines.push('No distribution data available.');
-                        }
-                    } catch {
-                        lines.push('Could not retrieve distribution data.');
-                    }
-                }
-
                 return lines.join('\n');
-            } finally {
-                await connection.close();
-            }
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            return `Error getting table statistics: ${msg}`;
-        }
+            } finally { await connection.close(); }
+        } catch (error) { return `Error getting table statistics: ${error instanceof Error ? error.message : String(error)}`; }
     }
 
     private async findTableSchema(

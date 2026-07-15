@@ -100,12 +100,15 @@ export function buildTableDDLFromCache(
 
         if (keyInfo.typeChar === 'f') {
             const cleanPkCols = keyInfo.pkColumns.filter(c => c).map(c => quoteNameIfNeeded(c));
-            if (cleanPkCols.length > 0) {
+            if (cleanPkCols.length > 0 && keyInfo.pkDatabase && keyInfo.pkSchema && keyInfo.pkRelation) {
+                const cleanPkDatabase = quoteNameIfNeeded(keyInfo.pkDatabase);
+                const cleanPkSchema = quoteNameIfNeeded(keyInfo.pkSchema);
+                const cleanPkRelation = quoteNameIfNeeded(keyInfo.pkRelation);
                 ddlLines.push(
                     `ALTER TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName} ` +
                     `ADD CONSTRAINT ${cleanKeyName} ${keyInfo.type} ` +
                     `(${cleanColumns.join(', ')}) ` +
-                    `REFERENCES ${keyInfo.pkDatabase}.${keyInfo.pkSchema}.${keyInfo.pkRelation} ` +
+                    `REFERENCES ${cleanPkDatabase}.${cleanPkSchema}.${cleanPkRelation} ` +
                     `(${cleanPkCols.join(', ')}) ` +
                     `ON DELETE ${keyInfo.deleteType} ON UPDATE ${keyInfo.updateType};`
                 );
