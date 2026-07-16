@@ -2,7 +2,7 @@
     "name": "justybase-mssql",
     "displayName": "MSSQL Tools (justybase)",
     "description": "Optional Microsoft SQL Server support for Netezza SQL Tools (justybase)",
-    "version": "3.16.8",
+    "version": "3.16.9",
     "publisher": "justybase",
     "license": "Apache-2.0",
     "icon": "icon.png",
