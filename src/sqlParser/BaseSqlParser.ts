@@ -272,6 +272,7 @@ export class BaseSqlParser extends CstParser {
       Offset,
       Null,
       NotNull,
+      IsNull,
       Is,
       Like,
       Ilike,
@@ -1557,6 +1558,7 @@ export class BaseSqlParser extends CstParser {
       Between,
       Is,
       Null,
+      IsNull,
       NotNull,
       Escape,
       Any,
@@ -1631,6 +1633,21 @@ export class BaseSqlParser extends CstParser {
             );
           },
           ALT: () => this.SUBRULE(this.literal),
+        },
+        {
+          GATE: () => this.LA(1).tokenType === IsNull && this.LA(2).tokenType === LParen,
+          ALT: () => {
+            this.CONSUME(IsNull);
+            this.CONSUME1(LParen);
+            this.OPTION(() => {
+              this.OR2([
+                { ALT: () => this.CONSUME(Distinct) },
+                { ALT: () => this.CONSUME(All) },
+              ]);
+            });
+            this.OPTION1(() => this.SUBRULE(this.functionArguments));
+            this.CONSUME1(RParen);
+          },
         },
         { ALT: () => this.SUBRULE(this.functionCall) },
         { ALT: () => this.SUBRULE(this.castFunctionExpression) },

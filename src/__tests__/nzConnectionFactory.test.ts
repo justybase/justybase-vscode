@@ -26,7 +26,10 @@ describe('nzConnectionFactory', () => {
 
         const connection = createNzConnection(config);
 
-        expect(mockNzConnectionConstructor).toHaveBeenCalledWith(config);
+        expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
+            ...config,
+            connectionTimeout: 5,
+        });
         expect(connection).toBe(mockConnection);
     });
 
@@ -42,7 +45,10 @@ describe('nzConnectionFactory', () => {
 
         const connection = createNzConnection(config);
 
-        expect(mockNzConnectionConstructor).toHaveBeenCalledWith(config);
+        expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
+            ...config,
+            connectionTimeout: 5,
+        });
         expect(connection).toBe(mockConnection);
     });
 });

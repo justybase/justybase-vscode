@@ -10,6 +10,9 @@ import { netezzaConnectionForm } from "./connectionForm";
 import { netezzaMetadataProvider } from "./metadata/provider";
 import { netezzaSqlAuthoring } from "./sql/authoring";
 import { netezzaDialectTraits } from "./traits";
+import { getOptionNumber } from "../../core/connectionUtils";
+
+const DEFAULT_CONNECTION_TIMEOUT_SECONDS = 5;
 
 let _cachedAdvancedFeatures: DatabaseAdvancedFeatures | undefined;
 
@@ -47,6 +50,15 @@ export const netezzaDialect: DatabaseDialect = {
   },
   createConnection(config: DatabaseConnectionConfig): DatabaseConnection {
     const NzConnectionClass = netezzaDialect.getConnectionConstructor();
-    return new NzConnectionClass(config);
+    const configuredTimeout = getOptionNumber(config, "connectionTimeout");
+    return new NzConnectionClass({
+      ...config,
+      // @justybase/netezza-driver expects this setting at the top level,
+      // while shared connection details store dialect options in `options`.
+      connectionTimeout:
+        configuredTimeout !== undefined && configuredTimeout >= 0
+          ? configuredTimeout
+          : DEFAULT_CONNECTION_TIMEOUT_SECONDS,
+    } as DatabaseConnectionConfig);
   },
 };

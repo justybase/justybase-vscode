@@ -631,12 +631,15 @@ export class ConnectionManager {
 
         // Create new connection for this document with effective database
         const connectPromise = (async () => {
+            let conn: NzConnection | undefined;
             try {
-                const conn = createDatabaseConnectionFromDetails({
+                conn = createDatabaseConnectionFromDetails({
                     ...details,
                     database: connectionDatabase
                 }) as NzConnection;
+                logWithFallback('info', `[ConnectionManager] Connecting persistent Netezza tab connection for ${normalizedUri}`);
                 await conn.connect();
+                logWithFallback('info', `[ConnectionManager] Persistent tab connection established for ${normalizedUri}`);
                 if (shouldApplyCatalogOverride && databaseOverride) {
                     const setCatalogCommand = conn.createCommand(
                         `SET CATALOG ${formatCatalogTarget(databaseOverride, resolvedKind)}`
@@ -650,6 +653,17 @@ export class ConnectionManager {
                     database: effectiveDatabase
                 });
                 return conn;
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                logWithFallback('warn', `[ConnectionManager] Persistent connection failed for ${normalizedUri}: ${message}`);
+                if (conn) {
+                    try {
+                        await conn.close();
+                    } catch (closeError: unknown) {
+                        logWithFallback('warn', `[ConnectionManager] Failed to reset failed connection for ${normalizedUri}:`, closeError);
+                    }
+                }
+                throw error;
             } finally {
                 // Clear the promise once resolution is complete
                 this._documentConnectionPromises.delete(normalizedUri);

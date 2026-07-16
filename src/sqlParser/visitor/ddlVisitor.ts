@@ -25,6 +25,8 @@ export interface DdlVisitorHost {
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void;
   isDropTargetTableLike(): boolean;
   setDropTargetIsTableLike(value: boolean): void;
+  setPendingRenameSource(table: TableInfo | undefined): void;
+  getPendingRenameSource(): TableInfo | undefined;
 }
 
 export function createTableStatement(
@@ -218,6 +220,8 @@ export function alterTableStatement(
   host: DdlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
+  let oldTable: TableInfo | undefined;
+
   if (ctx.qualifiedName && host.getSchemaProvider()) {
     const nameInfo = host.visitAs<{
       name: string;
@@ -225,23 +229,42 @@ export function alterTableStatement(
       database?: string;
     }>(ctx.qualifiedName[0]);
     const isQualified = !!(nameInfo.database || nameInfo.schema);
+    const table: TableInfo = {
+      name: nameInfo.name,
+      database: nameInfo.database,
+      schema: nameInfo.schema,
+      isCte: false,
+      isTempTable: false,
+      columns: [],
+    };
     if (isQualified) {
-      const table: TableInfo = {
-        name: nameInfo.name,
-        database: nameInfo.database,
-        schema: nameInfo.schema,
-        isCte: false,
-        isTempTable: false,
-        columns: [],
-      };
       host.validateTableExists(table, ctx.qualifiedName[0] as CstNode);
     }
+    oldTable = table;
     addTableQualificationWarningFromQualifiedName(
       host as unknown as SqlVisitorHost,
       nameInfo,
       ctx.qualifiedName[0] as CstNode,
     );
+  } else if (ctx.qualifiedName) {
+    // No schema provider but still need name info for rename tracking
+    const nameInfo = host.visitAs<{
+      name: string;
+      schema?: string;
+      database?: string;
+    }>(ctx.qualifiedName[0]);
+    oldTable = {
+      name: nameInfo.name,
+      database: nameInfo.database,
+      schema: nameInfo.schema,
+      isCte: false,
+      isTempTable: false,
+      columns: [],
+    };
   }
+
+  // Set pending rename source so alterTableRenameTableAction can use it
+  host.setPendingRenameSource(oldTable);
 
   if (ctx.alterTableAction) {
     host.visit(ctx.alterTableAction[0]);
@@ -258,6 +281,9 @@ export function alterTableStatement(
       );
     }
   }
+
+  // Clear pending rename source
+  host.setPendingRenameSource(undefined);
 
   if (ctx.organizeClause) {
     host.visit(ctx.organizeClause[0]);
@@ -370,9 +396,48 @@ export function alterTableRenameTableAction(
   host: DdlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
-  if (ctx.qualifiedName) {
-    host.visit(ctx.qualifiedName[0]);
+  if (!ctx.qualifiedName) {
+    return;
   }
+
+  // Extract the new table name
+  const newNameInfo = host.visitAs<{
+    name: string;
+    schema?: string;
+    database?: string;
+  }>(ctx.qualifiedName[0]);
+
+  if (!newNameInfo.name) {
+    return;
+  }
+
+  // Handle the rename in script scope: the RENAME TO creates a new table name
+  // that subsequent statements (e.g., DROP TABLE, ALTER TABLE) need to resolve.
+  const renameSource = host.getPendingRenameSource();
+
+  const newTable: TableInfo = {
+    name: newNameInfo.name,
+    // Inherit database/schema from the old table if the new name doesn't specify them
+    // This is critical because RENAME TO targets are often unqualified (e.g., "RENAME TO BACKUP")
+    // while subsequent references use the fully qualified name.
+    database: newNameInfo.database || renameSource?.database,
+    schema: newNameInfo.schema || renameSource?.schema,
+    isCte: false,
+    isTempTable: false,
+    columns: [],
+  };
+
+  // Remove old table from script scope (if it was script-created)
+  if (renameSource) {
+    host.removeScriptCreatedTable(renameSource);
+    host.getScopeBuilder().removeTable(renameSource);
+  }
+
+  // Add new table name to script scope so subsequent statements can resolve it
+  if (!host.getInProcedureContext()) {
+    host.addScriptCreatedTable(newTable);
+  }
+  host.getScopeBuilder().addTable(newTable);
 }
 
 export function alterTableSetPrivilegesAction(

@@ -91,7 +91,10 @@ describe("connectionFactory", () => {
 
     const connection = createDatabaseConnection(config, "NetezzaSQL");
 
-    expect(mockNzConnectionConstructor).toHaveBeenCalledWith(config);
+    expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
+      ...config,
+      connectionTimeout: 5,
+    });
     expect(connection).toBe(mockConnection);
   });
 

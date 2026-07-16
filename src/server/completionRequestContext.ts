@@ -1,6 +1,6 @@
 import type { Position } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { getDatabaseSqlAuthoring } from "../core/connectionFactory";
+import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
 import type { DatabaseKind } from "../contracts/database";
 import { normalizeDialectQuotedIdentifiers } from "./completionDialectAdapter";
 import { CompletionContextExtractor } from "./completionContextExtractor";

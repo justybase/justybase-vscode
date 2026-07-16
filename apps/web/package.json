@@ -1,0 +1,31 @@
+{
+  "name": "@justybase/web",
+  "private": true,
+  "version": "3.16.8",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "check-types": "tsc -p tsconfig.json --noEmit",
+    "dev": "vite",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "@justybase/contracts": "*",
+    "@monaco-editor/react": "^4.7.0",
+    "@tanstack/react-query": "^5.90.0",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.13.12",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "vite": "^7.1.12"
+  }
+}

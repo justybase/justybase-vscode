@@ -79,6 +79,11 @@ describe("SQL Validator - Comprehensive Netezza SQL tests", () => {
       );
     });
 
+    it("should validate SELECT with ISNULL / NOTNULL keywords", () => {
+      expectValid("SELECT D.DATEKEY FROM DIMDATE D WHERE D.CALENDARQUARTER ISNULL;");
+      expectValid("SELECT D.DATEKEY FROM DIMDATE D WHERE D.CALENDARQUARTER NOTNULL;");
+    });
+
     it("should validate SELECT with BETWEEN", () => {
       expectValid(
         "SELECT * FROM TESTDB..EMPLOYEES WHERE SALARY BETWEEN 1000 AND 5000;",
@@ -1845,6 +1850,12 @@ FROM (
     it("should validate SELECT with NVL2 (Netezza function)", () => {
       expectValid(
         "SELECT NVL2(E.MANAGER_ID, 'HAS_MANAGER', 'NO_MANAGER') AS MGR_FLAG FROM TESTDB..EMPLOYEES E;",
+      );
+    });
+
+    it("should validate SELECT with ISNULL function", () => {
+      expectValid(
+        "SELECT ISNULL(E.MANAGER_ID, 0) AS MGR FROM TESTDB..EMPLOYEES E;",
       );
     });
 

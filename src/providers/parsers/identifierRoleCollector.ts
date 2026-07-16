@@ -88,6 +88,19 @@ class IdentifierRoleCollector {
       case "starExpression":
         this.visitStarExpression(node);
         return;
+      case "commentStatement":
+        this.visitCommentStatement(node);
+        return;
+      case "generateStatisticsStatement":
+        this.visitGenerateStatisticsStatement(node);
+        return;
+      case "alterTableRenameTableAction":
+      case "alterTableSetPrivilegesAction":
+        this.registerQualifiedTableNameTokens(
+          this.getChildNodes(node, "qualifiedName")[0],
+        );
+        this.visitChildren(node);
+        return;
       case "createTableStatement":
       case "truncateStatement":
       case "groomStatement":
@@ -247,6 +260,28 @@ class IdentifierRoleCollector {
   }
 
   private visitQualifiedTableDdl(node: CstNode): void {
+    const qualifiedNameNode = this.getChildNodes(node, "qualifiedName")[0];
+    this.registerQualifiedTableNameTokens(qualifiedNameNode);
+    this.visitChildren(node);
+  }
+
+  private visitCommentStatement(node: CstNode): void {
+    const qualifiedNameNode = this.getChildNodes(node, "qualifiedName")[0];
+    this.registerQualifiedTableNameTokens(qualifiedNameNode);
+    const columnTokens = this.getTokens(node, "Column");
+    if (columnTokens.length > 0) {
+      const identifierNode = this.getChildNodes(node, "identifier")[0];
+      if (identifierNode) {
+        const columnToken = this.getFirstTokenFromCst(identifierNode);
+        if (columnToken) {
+          this.registerOccurrence(columnToken, "column");
+        }
+      }
+    }
+    this.visitChildren(node);
+  }
+
+  private visitGenerateStatisticsStatement(node: CstNode): void {
     const qualifiedNameNode = this.getChildNodes(node, "qualifiedName")[0];
     this.registerQualifiedTableNameTokens(qualifiedNameNode);
     this.visitChildren(node);

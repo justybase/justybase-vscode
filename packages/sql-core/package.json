@@ -1,0 +1,17 @@
+{
+  "name": "@justybase/sql-core",
+  "private": true,
+  "version": "3.16.8",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "node ../../scripts/build-sql-core.js",
+    "check-types": "tsc --ignoreConfig --noEmit --module commonjs --moduleResolution bundler --target es2022 --lib es2022 --types node --strict --esModuleInterop --skipLibCheck src/runtime.ts"
+  },
+  "dependencies": {
+    "@justybase/contracts": "*",
+    "chevrotain": "^12.0.0",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  }
+}

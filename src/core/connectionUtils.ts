@@ -17,6 +17,10 @@ export function getErrorCode(error: unknown): string | undefined {
     return error.code;
 }
 
+export function isConnectionTimeoutError(error: unknown): boolean {
+    return /connection timeout after \d+(?:\.\d+)? seconds/i.test(getErrorMessage(error));
+}
+
 export function getOptionString(config: DatabaseConnectionConfig, key: string): string | undefined {
     const value = config.options?.[key];
     return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;

@@ -289,12 +289,15 @@ END_PROC;`;
     expect(roleAt(sql, 'OLD_TABLE')).toBe('table');
   });
 
-  it('classifies ALTER TABLE qualified names', () => {
-    const sql = 'ALTER TABLE MYDB.ADMIN.TARGET RENAME TO TARGET_NEW';
+  it('classifies ALTER TABLE qualified names including RENAME TO target', () => {
+    const sql = 'ALTER TABLE MYDB.ADMIN.TARGET RENAME TO MYDB.ADMIN.NEW_NAME';
 
-    expect(roleAt(sql, 'MYDB')).toBe('database');
-    expect(roleAt(sql, 'ADMIN')).toBe('schema');
+    expect(roleAt(sql, 'MYDB', 0)).toBe('database');
+    expect(roleAt(sql, 'ADMIN', 0)).toBe('schema');
     expect(roleAt(sql, 'TARGET')).toBe('table');
+    expect(roleAt(sql, 'MYDB', 1)).toBe('database');
+    expect(roleAt(sql, 'ADMIN', 1)).toBe('schema');
+    expect(roleAt(sql, 'NEW_NAME')).toBe('table');
   });
 
   it('classifies JOIN ON columns when column name is a SQL keyword token', () => {
@@ -354,5 +357,41 @@ END_PROC;`;
 
     expect(roleAt(sql, 'i', 0, 'netezza')).toBe('localVariable');
     expect(roleAt(sql, 'v', 0, 'netezza')).toBe('localVariable');
+  });
+
+  it('classifies COMMENT ON TABLE qualified names', () => {
+    const sql = "COMMENT ON TABLE JUST_DATA_2.ADMIN.DIMDATE IS 'daimdate w bazie JD2';";
+
+    expect(roleAt(sql, 'JUST_DATA_2')).toBe('database');
+    expect(roleAt(sql, 'ADMIN')).toBe('schema');
+    expect(roleAt(sql, 'DIMDATE')).toBe('table');
+  });
+
+  it('classifies COMMENT ON COLUMN qualified names and column identifier', () => {
+    const sql = "COMMENT ON COLUMN JUST_DATA_2.ADMIN.DIMDATE.DATEKEY IS 'aaa';";
+
+    expect(roleAt(sql, 'JUST_DATA_2')).toBe('database');
+    expect(roleAt(sql, 'ADMIN')).toBe('schema');
+    expect(roleAt(sql, 'DIMDATE')).toBe('table');
+    expect(roleAt(sql, 'DATEKEY')).toBe('column');
+  });
+
+  it('classifies GENERATE EXPRESS STATISTICS ON qualified names', () => {
+    const sql = 'GENERATE EXPRESS STATISTICS ON JUST_DATA_2.ADMIN.DIMDATE;';
+
+    expect(roleAt(sql, 'JUST_DATA_2')).toBe('database');
+    expect(roleAt(sql, 'ADMIN')).toBe('schema');
+    expect(roleAt(sql, 'DIMDATE')).toBe('table');
+  });
+
+  it('classifies ALTER TABLE SET PRIVILEGES TO qualified names', () => {
+    const sql = 'ALTER TABLE MYDB.ADMIN.TARGET SET PRIVILEGES TO MYDB.ADMIN.OTHER;';
+
+    expect(roleAt(sql, 'MYDB', 0)).toBe('database');
+    expect(roleAt(sql, 'ADMIN', 0)).toBe('schema');
+    expect(roleAt(sql, 'TARGET')).toBe('table');
+    expect(roleAt(sql, 'MYDB', 1)).toBe('database');
+    expect(roleAt(sql, 'ADMIN', 1)).toBe('schema');
+    expect(roleAt(sql, 'OTHER')).toBe('table');
   });
 });

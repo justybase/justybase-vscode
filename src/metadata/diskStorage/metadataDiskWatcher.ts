@@ -32,6 +32,7 @@ export class MetadataDiskIndexWatcher {
     private pollTimer: ReturnType<typeof setInterval> | undefined;
     private fsWatcher: fs.FSWatcher | undefined;
     private _active = false;
+    private checkPromise: Promise<string[]> | undefined;
     /** Set to true after the first initial sync completes so new connections are reported. */
     private _initialSyncDone = false;
     private knownGeneration: number | undefined;
@@ -134,7 +135,25 @@ export class MetadataDiskIndexWatcher {
      * Read the v3 index from disk and compare against known timestamps.
      * Returns the list of connection names whose `prefetchCompletedAt` has advanced.
      */
-    async checkForChanges(): Promise<string[]> {
+    checkForChanges(): Promise<string[]> {
+        if (!this._active) {
+            return Promise.resolve([]);
+        }
+        if (this.checkPromise) {
+            return this.checkPromise;
+        }
+
+        const promise = this.performCheckForChanges();
+        this.checkPromise = promise;
+        void promise.finally(() => {
+            if (this.checkPromise === promise) {
+                this.checkPromise = undefined;
+            }
+        }).catch(() => undefined);
+        return promise;
+    }
+
+    private async performCheckForChanges(): Promise<string[]> {
         if (!this._active) {
             return [];
         }

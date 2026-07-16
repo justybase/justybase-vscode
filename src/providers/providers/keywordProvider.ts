@@ -11,7 +11,7 @@ export function getKeywords(): vscode.CompletionItem[] {
     const keywords = [
         'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT', 'INSERT', 'INTO', 'VALUES',
         'UPDATE', 'SET', 'DELETE', 'CREATE', 'DROP', 'TABLE', 'VIEW', 'DATABASE', 'JOIN',
-        'INNER', 'LEFT', 'RIGHT', 'OUTER', 'ON', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'NOTNULL', 'IN',
+        'INNER', 'LEFT', 'RIGHT', 'OUTER', 'ON', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'NOTNULL', 'ISNULL', 'IN',
         'BETWEEN', 'LIKE', 'AS', 'DISTINCT', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'WITH',
         'UNION', 'ALL'
     ];

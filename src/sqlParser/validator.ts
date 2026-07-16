@@ -6,7 +6,7 @@ import {
 } from "./parsingRuntime";
 import { SqlVisitor } from "./visitor/sqlVisitor";
 import { collectSqlSymbolUsagesFromCst } from "./symbols";
-import { getDatabaseSqlAuthoring } from "../core/connectionFactory";
+import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
 import type {
   ValidationResult,
   ValidationError,
@@ -23,6 +23,7 @@ import type {
 } from "./documentParseSession";
 import type { StatementBoundary } from "./statementIndex";
 import {
+  SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN,
   SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN,
   SCRIPT_SCOPE_DROP_STATEMENT_PATTERN,
 } from "./scriptScopeStatements";
@@ -455,10 +456,21 @@ export class SqlValidator {
       return this.removeDroppedRelationsFromSeed(currentSeed, statementSql);
     }
 
+    if (SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN.test(statementSql)) {
+      return this.applyParseToScopeSeed(currentSeed, statementSql);
+    }
+
     if (!SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN.test(statementSql)) {
       return currentSeed;
     }
 
+    return this.applyParseToScopeSeed(currentSeed, statementSql);
+  }
+
+  private applyParseToScopeSeed(
+    currentSeed: ScopeSeed,
+    statementSql: string,
+  ): ScopeSeed {
     const parseResult = parseSqlStatements({
       sql: statementSql,
       runtime: this.getParsingRuntime(),

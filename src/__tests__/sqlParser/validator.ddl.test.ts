@@ -659,6 +659,54 @@ FROM TESTDB..EMPLOYEES d;`);
   // ========================================================================
   // ALTER commands — additional patterns
   // ========================================================================
+  // ====================================================================
+  // ALTER TABLE RENAME TO — script scope awareness
+  // ====================================================================
+  describe("ALTER TABLE RENAME TO — script scope awareness", () => {
+    it("should allow DROP of a table that was created via RENAME TO in the same script", () => {
+      expectValid(`CREATE TABLE JUST_DATA.ADMIN.SOME_NEW_NAME
+(
+    ACCOUNTKEY INTEGER,
+    PARENTACCOUNTKEY INTEGER
+)
+DISTRIBUTE ON RANDOM;
+
+INSERT INTO JUST_DATA.ADMIN.SOME_NEW_NAME SELECT * FROM JUST_DATA.ADMIN.DIMACCOUNT;
+
+ALTER TABLE JUST_DATA.ADMIN.SOME_NEW_NAME SET PRIVILEGES TO JUST_DATA.ADMIN.DIMACCOUNT;
+
+ALTER TABLE JUST_DATA.ADMIN.DIMACCOUNT RENAME TO SOME_NEW_NAME_BACKUP_U4N8O;
+ALTER TABLE JUST_DATA.ADMIN.SOME_NEW_NAME RENAME TO DIMACCOUNT;
+
+ALTER TABLE JUST_DATA.ADMIN.DIMACCOUNT OWNER TO ADMIN;
+
+DROP TABLE JUST_DATA.ADMIN.SOME_NEW_NAME_BACKUP_U4N8O;`);
+    });
+
+    it("should allow ALTER TABLE OWNER TO on a table renamed from a script-created table", () => {
+      expectValid(`CREATE TABLE JUST_DATA.ADMIN.TEST1 (ID INT4) DISTRIBUTE ON RANDOM;
+ALTER TABLE JUST_DATA.ADMIN.TEST1 RENAME TO TEST2;
+ALTER TABLE JUST_DATA.ADMIN.TEST2 OWNER TO ADMIN;`);
+    });
+
+    it("should allow DROP of a table renamed from a script-created table", () => {
+      expectValid(`CREATE TABLE JUST_DATA.ADMIN.MYT1 (ID INT4) DISTRIBUTE ON RANDOM;
+ALTER TABLE JUST_DATA.ADMIN.MYT1 RENAME TO MYT2;
+DROP TABLE JUST_DATA.ADMIN.MYT2;`);
+    });
+
+    it("should detect non-existing table after rename when original was a real DB table", () => {
+      const result = validator.validate(`ALTER TABLE JUST_DATA.ADMIN.DIMACCOUNT RENAME TO DIMACCOUNT_BACKUP;
+DROP TABLE JUST_DATA.ADMIN.DIMACCOUNT_BACKUP;`);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it("should detect error when dropping a non-existent renamed table (not created via rename in script)", () => {
+      const result = validator.validate(`DROP TABLE JUST_DATA.ADMIN.NON_EXISTENT_RENAMED;`);
+      expect(result.errors.some((e) => e.code === "SQL006")).toBe(true);
+    });
+  });
+
   describe("ALTER commands — additional patterns", () => {
     it("should validate ALTER TABLE ADD COLUMN with NOT NULL", () => {
       expectValid(

@@ -1,6 +1,6 @@
 import { CstNode, type IToken } from "chevrotain";
 import type { SqlParser } from "../parser";
-import { getDatabaseSqlAuthoring } from "../../core/connectionFactory";
+import { getDatabaseSqlAuthoring } from "../../core/sqlAuthoringRegistry";
 import { resolveSqlParsingRuntime } from "../parsingRuntime";
 import { ScopeBuilder } from "./scopeBuilder";
 import type {
@@ -92,6 +92,7 @@ export class SqlVisitor
   private scriptCreatedProcedures = new Set<string>();
   private scriptCreatedTableSeed: TableInfo[] = [];
   private scriptCreatedTables: TableInfo[] = [];
+  private pendingRenameSource: TableInfo | undefined = undefined;
   private selectOutputAliasesStack: Array<Set<string>> = [];
   // Tracks aliases defined earlier in the current SELECT list (for Netezza alias reuse in select items)
   private selectListAliasesSoFar: Set<string> = new Set();
@@ -307,6 +308,14 @@ export class SqlVisitor
 
   setDropTargetIsTableLike(value: boolean): void {
     this._dropTargetIsTableLike = value;
+  }
+
+  setPendingRenameSource(table: TableInfo | undefined): void {
+    this.pendingRenameSource = table;
+  }
+
+  getPendingRenameSource(): TableInfo | undefined {
+    return this.pendingRenameSource;
   }
 
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void {

@@ -1,0 +1,31 @@
+{
+  "name": "@justybase/web-api",
+  "private": true,
+  "version": "3.16.8",
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "types": "dist/main.d.ts",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check-types": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/static": "^8.2.0",
+    "@fastify/websocket": "^11.2.0",
+    "@justybase/database-runtime": "*",
+    "@justybase/contracts": "*",
+    "@justybase/netezza-driver": "*",
+    "@justybase/spreadsheet-tasks": "*",
+    "@justybase/sql-core": "*",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "fastify": "^5.6.2"
+  }
+}

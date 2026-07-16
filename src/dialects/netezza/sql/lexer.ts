@@ -82,6 +82,7 @@ export const Offset = createToken({ name: 'Offset', pattern: /OFFSET/i, longer_a
 
 // NULL handling
 export const NotNull = createToken({ name: 'NotNull', pattern: /NOTNULL/i, longer_alt: Identifier })
+export const IsNull = createToken({ name: 'IsNull', pattern: /ISNULL/i, longer_alt: Identifier })
 export const Nulls = createToken({ name: 'Nulls', pattern: /NULLS/i, longer_alt: Identifier })
 export const Null = createToken({ name: 'Null', pattern: /NULL/i, longer_alt: Identifier })
 export const Is = createToken({ name: 'Is', pattern: /IS/i, longer_alt: Identifier })
@@ -434,6 +435,7 @@ export const allTokens = [
     Limit,
     Offset,
     Nulls,
+    IsNull,
     Null,
     Is,
     Like,

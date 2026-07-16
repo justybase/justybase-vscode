@@ -149,7 +149,10 @@ const DIALECT_CASES: readonly DialectContractCase[] = [
       connection: unknown,
       expectedConfig: DatabaseConnectionConfig,
     ): void {
-      expect(mockNzConnectionConstructor).toHaveBeenCalledWith(expectedConfig);
+      expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
+        ...expectedConfig,
+        connectionTimeout: 5,
+      });
       expect(connection).toMatchObject({
         createCommand: expect.any(Function),
         connect: expect.any(Function),

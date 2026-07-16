@@ -350,6 +350,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
         { ALT: () => this.CONSUME(Replace) },
         { ALT: () => this.CONSUME(Random) },
         { ALT: () => this.CONSUME(Value) },
+        { ALT: () => this.CONSUME(netezzaSqlLexer.IsNull) },
       ]);
       this.CONSUME(LParen);
       this.OPTION(() => {

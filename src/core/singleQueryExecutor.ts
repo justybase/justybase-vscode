@@ -5,6 +5,7 @@ import {
   resolveQueryVariablesWithValues,
 } from "./variableResolver";
 import { QueryResult } from "../types";
+import { isConnectionTimeoutError } from "./connectionUtils";
 import { ResultFormatter } from "./streaming";
 import { streamingManager } from "./queryCancellation";
 import {
@@ -216,9 +217,60 @@ export async function runQueryRaw(
     const errObj = error as { message?: string };
     const errMsg = errObj.message || String(error);
     const isCancelled = errMsg.toLowerCase().includes('cancelled') || errMsg.toLowerCase().includes('cancel');
+    let connectionTimeoutRecoveryAttempted = false;
+
+    // A connect timeout can leave a half-open socket in the driver. Reset the
+    // tab connection before making one recovery attempt.
+    if (isConnectionTimeoutError(error) && documentUri && keepConnectionOpen) {
+      connectionTimeoutRecoveryAttempted = true;
+      logOutput(
+        logger,
+        "Netezza connection timeout detected. Resetting the tab connection and retrying once...",
+      );
+      await connManager.closeDocumentPersistentConnection(documentUri);
+
+      try {
+        const result = await executeRawQuery(
+          connManager,
+          resolvedConnectionName,
+          keepConnectionOpen,
+          documentUri,
+          queryToExecute,
+          maxRows,
+          logger,
+          promptValues,
+          timeoutSeconds,
+        );
+
+        const retryDurationMs = Date.now() - queryStartTime;
+        await logQueryToHistory(
+          context,
+          connManager,
+          resolvedConnectionName,
+          query,
+          isUserQuery,
+          documentUri,
+          'success',
+          retryDurationMs,
+          result.rowsAffected,
+        );
+        return result;
+      } catch (retryError: unknown) {
+        activeError = retryError;
+        logOutput(
+          logger,
+          `Netezza connection retry failed: ${(retryError as { message?: string }).message || String(retryError)}`,
+        );
+      }
+    }
 
     // Check if this is a broken connection error and we have a persistent connection
-    if (isConnectionBrokenError(error) && documentUri && keepConnectionOpen) {
+    if (
+      !connectionTimeoutRecoveryAttempted
+      && isConnectionBrokenError(activeError)
+      && documentUri
+      && keepConnectionOpen
+    ) {
       logOutput(
         logger,
         "Connection was closed by server. Reconnecting and retrying...",

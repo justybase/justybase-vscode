@@ -5,6 +5,7 @@
 
 import { CachePrefetcher, QueryRunnerRawFn, MetadataPrefetchProgress } from '../metadata/prefetch';
 import type { MetadataPrefetchTarget } from '../metadata/cache/MetadataPrefetchTarget';
+import type { PrefetchLease } from '../metadata/diskStorage/metadataDiskStorage';
 import { resetMetadataQueryLimiterForTests } from '../metadata/metadataQueryLimiter';
 import { Logger } from '../utils/logger';
 // Removed unused import
@@ -50,7 +51,7 @@ describe('CachePrefetcher', () => {
       getProcedures: jest.fn(),
       setProcedures: jest.fn(),
       getProceduresAllSchemas: jest.fn(),
-      tryAcquirePrefetchLock: jest.fn().mockResolvedValue(true),
+      tryAcquirePrefetchLock: jest.fn().mockResolvedValue({ connectionName: connName, generation: 0, fence: 0 } satisfies PrefetchLease),
       releasePrefetchLock: jest.fn().mockResolvedValue(undefined),
       saveConnectionToDiskAfterPrefetch: jest.fn().mockResolvedValue(undefined),
       checkpointSave: jest.fn().mockResolvedValue(undefined),
@@ -554,11 +555,11 @@ describe('CachePrefetcher', () => {
 
       expect(mockCache.setDatabases).toHaveBeenCalled();
       expect(mockCache.setSchemas).toHaveBeenCalled();
-      expect(mockCache.releasePrefetchLock).toHaveBeenCalledWith(connName);
+      expect(mockCache.releasePrefetchLock).toHaveBeenCalledWith(expect.objectContaining({ connectionName: connName }));
     });
 
     it('should skip prefetch when lock is not acquired (E8)', () => {
-      (mockCache.tryAcquirePrefetchLock as jest.Mock).mockReturnValue(false);
+      (mockCache.tryAcquirePrefetchLock as jest.Mock).mockReturnValue(undefined);
       prefetcher.triggerConnectionPrefetch(connName, mockRunQuery);
       expect(mockRunQuery).not.toHaveBeenCalled();
       expect(mockCache.releasePrefetchLock).not.toHaveBeenCalled();
@@ -573,7 +574,7 @@ describe('CachePrefetcher', () => {
       await new Promise(process.nextTick);
       await new Promise(process.nextTick);
       expect(mockCache.saveConnectionToDiskAfterPrefetch).not.toHaveBeenCalled();
-      expect(mockCache.releasePrefetchLock).toHaveBeenCalledWith(connName);
+      expect(mockCache.releasePrefetchLock).toHaveBeenCalledWith(expect.objectContaining({ connectionName: connName }));
     });
 
     it('should restore prefetch timestamps from disk load', () => {

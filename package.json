@@ -4,7 +4,8 @@
   "description": "Core Netezza extension with built-in SQLite and optional DuckDB, Db2, Oracle, PostgreSQL, Snowflake, MS SQL Server, and MySQL support",
   "version": "3.16.8",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "publisher": "justybase",
   "author": {
@@ -22,7 +23,7 @@
   ],
   "engines": {
     "vscode": "^1.103.2",
-    "node": ">=22.0.0"
+    "node": ">=22.12.0"
   },
   "keywords": [
     "SQL",
@@ -3981,6 +3982,12 @@
   "scripts": {
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.js --production",
+    "build:contracts": "npm run build --workspace @justybase/contracts",
+    "build:sql-core": "npm run build --workspace @justybase/sql-core",
+    "build:runtime": "npm run build:contracts && npm run build --workspace @justybase/database-runtime",
+    "build:api": "npm run build:contracts && npm run build:sql-core && npm run build:runtime && npm run build --workspace @justybase/web-api",
+    "build:web": "npm run build --workspace @justybase/web",
+    "build:all": "npm run build:api && npm run build:web",
     "build:db2": "npm --prefix extensions/db2 run build",
     "build:duckdb": "node scripts/run-optional-extension-task.js duckdb build",
     "build:oracle": "node scripts/run-optional-extension-task.js oracle build",
@@ -4044,10 +4051,14 @@
     "test:snowflake:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/snowflake.integration.test.ts",
     "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",
     "test:quickfix-regression": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"linterCodeActions.test.ts\"",
+    "test:api": "npm run build:contracts && npm run build:sql-core && npm run build:runtime && npm run test --workspace @justybase/web-api",
+    "test:web": "npm run test --workspace @justybase/web",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "validate": "npm run check-types && npm run lint",
     "check-types": "tsc --noEmit && tsc --project tsconfig.media.json --noEmit",
+    "check-types:api": "npm run build:contracts && npm run check-types --workspace @justybase/sql-core && npm run build:sql-core && npm run build:runtime && npm run check-types --workspace @justybase/web-api",
+    "check-types:web": "npm run check-types --workspace @justybase/web",
     "check-types:media": "tsc --project tsconfig.media.json --noEmit",
     "check-types:media:strict": "tsc --project tsconfig.media.json --noEmit",
     "check-types:db2": "node ./node_modules/typescript/bin/tsc --project extensions/db2/tsconfig.json --noEmit",

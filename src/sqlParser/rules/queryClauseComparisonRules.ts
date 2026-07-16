@@ -32,6 +32,7 @@ export interface QueryClauseComparisonTokens {
     Between: TokenType;
     Is: TokenType;
     Null: TokenType;
+    IsNull: TokenType;
     NotNull: TokenType;
     Any: TokenType;
     Some: TokenType;
@@ -117,6 +118,7 @@ export function registerQueryClauseComparisonRules(parser: SqlParser, tokens: Qu
         Between,
         Is,
         Null,
+        IsNull,
         NotNull,
         Any,
         Some,
@@ -292,7 +294,8 @@ export function registerQueryClauseComparisonRules(parser: SqlParser, tokens: Qu
                 { ALT: () => p.SUBRULE1(p.inExpression) },
                 { ALT: () => p.SUBRULE2(p.betweenExpression) },
                 { ALT: () => p.SUBRULE3(p.isExpression) },
-                { ALT: () => p.CONSUME(NotNull) }
+                { ALT: () => p.CONSUME(NotNull) },
+                { ALT: () => p.CONSUME(IsNull) }
             ]);
         });
     });

@@ -26,6 +26,7 @@ plans/
 
 # Exclude bundled sources
 node_modules/
+apps/
 
 icon.svg
 

@@ -69,7 +69,6 @@ const NETEZZA_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
     'THIS_MONTH',
     'THIS_QUARTER',
     'THIS_YEAR',
-    'ISNULL',
     'STRLEFT',
     'STRRIGHT',
     'GROUP_CONCAT',
