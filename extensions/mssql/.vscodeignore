@@ -1,10 +1,15 @@
 src/
 tsconfig.json
 esbuild.mssql.js
-**/*.map
 *.vsix
+package-lock.json
+coverage/
+*.log
+.env
+.env.*
 .vscode/
 .gitignore
+docker-compose*.yml
 
 # Generic dependency noise that is not required at runtime
 node_modules/**/.github/
@@ -19,3 +24,21 @@ node_modules/**/README*
 node_modules/**/CHANGELOG*
 node_modules/**/CHANGES*
 node_modules/**/MIGRATION_GUIDE*
+node_modules/**/readme*
+node_modules/**/changelog*
+node_modules/**/[Rr][Ee][Aa][Dd][Mm][Ee]*
+node_modules/**/[Cc][Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]*
+node_modules/**/.npmignore
+node_modules/**/.eslintrc*
+node_modules/**/tsconfig*.json
+node_modules/**/*.d.ts
+node_modules/**/*.d.cts
+node_modules/**/*.d.mts
+node_modules/**/test*.js
+node_modules/**/tests.js
+node_modules/**/*.test.js
+node_modules/**/*.test.cjs
+node_modules/**/*.test.mjs
+node_modules/**/*.spec.js
+node_modules/**/*.spec.cjs
+node_modules/**/*.spec.mjs

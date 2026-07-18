@@ -21,7 +21,7 @@ This pack is published with `"preview": true` in `extensions/postgresql/package.
 
 ## Installation
 
-1. Install the core extension: `justybase.justybase-netezza`
+1. Install the core extension: `krzysztof-d.justybaselite-netezza`
 2. Install the optional PostgreSQL support extension from this repository packaging flow
 3. For local packaging or development:
 

@@ -15,6 +15,13 @@ export function getPythonPath(): string {
     );
 }
 
+export function getPythonArgs(): string[] {
+    const configured = vscode.workspace.getConfiguration('justybase').get<unknown>('pythonArgs');
+    return Array.isArray(configured) && configured.every(value => typeof value === 'string')
+        ? configured
+        : [];
+}
+
 export async function executeMacroPython(
     script: string,
     args: string[],
@@ -23,7 +30,7 @@ export async function executeMacroPython(
     const command = getPythonPath();
 
     try {
-        const { stdout, stderr } = await execFileAsync(command, [script, ...args], {
+        const { stdout, stderr } = await execFileAsync(command, [...getPythonArgs(), script, ...args], {
             cwd,
             maxBuffer: 10 * 1024 * 1024,
             timeout: DEFAULT_TIMEOUT_MS,
@@ -47,13 +54,14 @@ export async function executeMacroPython(
 
 export function createMacroPythonExecutor(
     pythonPathOverride?: string,
+    pythonArgsOverride?: string[],
 ): MacroPythonExecutor {
     return async (script: string, args: string[]): Promise<MacroPythonExecutionResult> => {
         if (pythonPathOverride) {
             try {
                 const { stdout, stderr } = await execFileAsync(
                     pythonPathOverride,
-                    [script, ...args],
+                    [...(pythonArgsOverride ?? getPythonArgs()), script, ...args],
                     {
                         cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
                         maxBuffer: 10 * 1024 * 1024,

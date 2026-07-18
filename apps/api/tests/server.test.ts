@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -95,5 +95,37 @@ describe('web API authentication and connection profiles', () => {
 
     const deleted = await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf ?? '' } });
     expect(deleted.statusCode).toBe(200);
+  });
+
+  it('serves web assets and falls back to the SPA entry point', async () => {
+    const staticDataDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-api-static-data-'));
+    const webDistDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-api-static-web-'));
+    writeFileSync(path.join(webDistDir, 'index.html'), '<!doctype html><title>JustyBase</title>');
+    writeFileSync(path.join(webDistDir, 'app.js'), 'console.log("app");');
+    const staticApp = await buildServer({
+      host: '127.0.0.1',
+      port: 0,
+      dataDir: staticDataDir,
+      webDistDir,
+      masterKey: 'test-master-key',
+    });
+
+    try {
+      const asset = await staticApp.inject({ method: 'GET', url: '/app.js' });
+      expect(asset.statusCode).toBe(200);
+      expect(asset.body).toBe('console.log("app");');
+
+      const spaRoute = await staticApp.inject({ method: 'GET', url: '/connections/new' });
+      expect(spaRoute.statusCode).toBe(200);
+      expect(spaRoute.body).toContain('<title>JustyBase</title>');
+
+      const missingApiRoute = await staticApp.inject({ method: 'GET', url: '/api/missing' });
+      expect(missingApiRoute.statusCode).toBe(404);
+      expect(missingApiRoute.json()).toEqual({ code: 'NOT_FOUND', message: 'Route not found.' });
+    } finally {
+      await staticApp.close();
+      rmSync(staticDataDir, { recursive: true, force: true });
+      rmSync(webDistDir, { recursive: true, force: true });
+    }
   });
 });

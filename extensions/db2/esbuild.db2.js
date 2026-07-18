@@ -1,6 +1,8 @@
 const esbuild = require('esbuild');
 
-const production = process.argv.includes('--production');
+// Marketplace artifacts must stay reviewable. Minification is opt-in and is
+// intentionally not used by the packaging or release scripts.
+const minify = process.argv.includes('--minify');
 
 /**
  * DB2CODEPAGE UTF-8 Banner - Layer 1 of Defense-in-Depth Strategy
@@ -31,8 +33,8 @@ async function main() {
         entryPoints: ['./src/extension.ts'],
         bundle: true,
         format: 'cjs',
-        minify: production,
-        sourcemap: !production,
+        minify,
+        sourcemap: true,
         sourcesContent: true,
         platform: 'node',
         outfile: 'dist/extension.js',

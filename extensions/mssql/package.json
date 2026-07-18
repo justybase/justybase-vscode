@@ -1,9 +1,9 @@
 {
-    "name": "justybase-mssql",
-    "displayName": "MSSQL Tools (justybase)",
-    "description": "Optional Microsoft SQL Server support for Netezza SQL Tools (justybase)",
+    "name": "justybaselite-mssql",
+    "displayName": "JustyBase MS SQL Server Support",
+    "description": "Optional Microsoft SQL Server Support for JustyBase Core",
     "version": "3.16.9",
-    "publisher": "justybase",
+    "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
     "engines": {
@@ -34,15 +34,17 @@
         "onStartupFinished"
     ],
     "extensionDependencies": [
-        "justybase.justybase-netezza"
+        "krzysztof-d.justybaselite-netezza"
     ],
     "scripts": {
-        "build": "node esbuild.mssql.js --production",
+        "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
+        "build": "node esbuild.mssql.js",
+        "build:minified": "node esbuild.mssql.js --minify",
         "build:dev": "node esbuild.mssql.js",
         "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
         "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/mssql')) { console.error('Missing mssql. Run npm install in extensions\\\\mssql before packaging.'); process.exit(1); }\"",
         "prepackage": "npm run verify:runtime-deps",
-        "package": "node ../../node_modules/@vscode/vsce/vsce package"
+        "package": "node ../../scripts/package-optional-vsix.js package"
     },
     "dependencies": {
         "mssql": "^11.0.1"

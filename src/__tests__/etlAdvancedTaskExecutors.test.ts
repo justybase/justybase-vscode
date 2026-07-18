@@ -508,6 +508,7 @@ describe('ETL advanced task executors', () => {
                 script: '',
                 scriptPath: 'C:\\scripts\\task.py',
                 interpreter: 'python311',
+                interpreterArgs: ['-3'],
                 arguments: ['--dry-run'],
                 timeout: 15
             });
@@ -516,7 +517,7 @@ describe('ETL advanced task executors', () => {
 
             expect(runner.run).toHaveBeenCalledWith(
                 'python311',
-                ['C:\\scripts\\task.py', '--dry-run'],
+                ['-3', 'C:\\scripts\\task.py', '--dry-run'],
                 expect.objectContaining({
                     ETL_VAR_ENV: 'DEV'
                 }),

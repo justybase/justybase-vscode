@@ -6,7 +6,6 @@ src/
 .eslintrc.json
 tsconfig.json
 esbuild.js
-**/*.map
 **/*.tsbuildinfo
 .prettierrc
 .npmrc
@@ -14,6 +13,8 @@ esbuild.js
 CONTRIBUTING.md
 .github/
 test/
+fixtures/
+jest.*.config.js
 **/.DS_Store
 coverage/
 .husky/
@@ -27,6 +28,7 @@ plans/
 # Exclude bundled sources
 node_modules/
 apps/
+packages/
 
 icon.svg
 
@@ -64,6 +66,7 @@ AGENTS.md
 GEMINI.md
 Benchmark/
 .kilocode/
+.kilo/
 validation_manual/
 .old
 netezza_reference
@@ -77,7 +80,8 @@ test-infer.ts
 sync.sh
 
 # Environment and secrets
-.env.local
+.env
+.env.*
 
 # Build artifacts
 out/

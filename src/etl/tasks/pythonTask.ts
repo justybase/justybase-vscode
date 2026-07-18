@@ -31,7 +31,7 @@ class DefaultPythonRunner implements IPythonRunner {
         timeout?: number
     ): Promise<PythonResult> {
         return new Promise((resolve) => {
-            const proc: ChildProcess = spawn(interpreter, args, { env, shell: true });
+            const proc: ChildProcess = spawn(interpreter, args, { env, shell: false });
 
             let stdout = '';
             let stderr = '';
@@ -136,7 +136,11 @@ export class PythonTaskExecutor extends BaseTaskExecutor<PythonNodeConfig> {
                 this.reportProgress(context, `Executing Python script: ${path.basename(scriptPath)}`);
 
                 // Build arguments and environment
-                const args = [scriptPath, ...(config.arguments || [])];
+                const args = [
+                    ...(config.interpreterArgs || []),
+                    scriptPath,
+                    ...(config.arguments || []),
+                ];
                 const env = this.buildEnvironment(context.variables);
 
                 // Execute Python

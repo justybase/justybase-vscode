@@ -1,14 +1,14 @@
 const esbuild = require('esbuild');
 
-const production = process.argv.includes('--production');
+const minify = process.argv.includes('--minify');
 
 async function main() {
     const context = await esbuild.context({
         entryPoints: ['./src/extension.ts'],
         bundle: true,
         format: 'cjs',
-        minify: production,
-        sourcemap: !production,
+        minify,
+        sourcemap: true,
         sourcesContent: true,
         platform: 'node',
         outfile: 'dist/extension.js',

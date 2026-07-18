@@ -11,14 +11,18 @@
 A powerful, **Zero Config** VS Code extension for working with IBM Netezza / PureData System for Analytics databases.
 Distinct from other extensions, JustyBase includes a **custom Node.js-based Netezza driver** provided by `@justybase/netezza-driver`, eliminating the need to install or configure IBM ODBC drivers. Just install and connect!
 
-> **Publisher migration:** The active core extension is `justybase.justybase-netezza`. The former `krzysztof-d.justybaselite-netezza` extension ID is separate from the new publisher; Marketplace cannot transfer it or update it to the new extension ID. Install the `justybase` extension explicitly; install optional database packages from the same `justybase` publisher.
+> **Marketplace identity:** The active core extension is `krzysztof-d.justybaselite-netezza`. This established identity is retained so existing users receive updates automatically.
 
 ## Quick start
 
-1. Install **JustyBase Netezza SQL Tools (justybase)** from the VS Code Extensions view.
+1. Install **JustyBase Core (NetezzaSQL)** from the VS Code Extensions view.
 2. Open the **Netezza** view in the Activity Bar and select **Connect**.
 3. Enter the server host, user, password, and database, then open or create a `.sql` file.
 4. Run the current statement or selection with `Ctrl+Enter` / `F5`.
+
+### Packaging transparency
+
+Published VSIX packages use readable JavaScript bundles with source maps that include the original TypeScript source. The release workflow checks every VSIX for those maps, established Marketplace identity, unexpected executable files, and dynamic code construction before publication. Db2 setup never changes the Windows registry automatically; any ODBC registration must be performed manually by an administrator.
 
 ### Database support model
 
@@ -352,7 +356,7 @@ See [docs/snowflake.md](docs/snowflake.md) for setup, development, security guid
 
 ### Marketplace troubleshooting
 
-If the Visual Studio Marketplace is temporarily unavailable (for example, it returns an HTTP 429 rate-limit error), install the extension manually from a `.vsix` package. Open the project's [GitHub Releases](https://github.com/justybase/justybase-vscode/releases), download `justybase-netezza-<version>.vsix` from **Assets**, then in VS Code run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`). Do not download `Source code (zip)` or `Source code (tar.gz)` — they are not installable extensions. Manual installation does not receive automatic Marketplace updates.
+If the Visual Studio Marketplace is temporarily unavailable (for example, it returns an HTTP 429 rate-limit error), install the extension manually from a `.vsix` package. Open the project's [GitHub Releases](https://github.com/justybase/justybase-vscode/releases), download `justybaselite-netezza-<version>.vsix` from **Assets**, then in VS Code run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`). Do not download `Source code (zip)` or `Source code (tar.gz)` — they are not installable extensions. Manual installation does not receive automatic Marketplace updates.
 
 <details>
 <summary>For contributors and maintainers</summary>
@@ -507,3 +511,5 @@ The repository includes combined debug targets for Db2, DuckDB, Oracle, PostgreS
 ## License
 
 Apache-2.0
+
+Marketplace packages include the full Apache 2.0 license and a generated `THIRD_PARTY_NOTICES.md` with locked component versions, upstream sources, SPDX identifiers, and available license texts. Release VSIX files are secret-scanned by the pinned stable VSCE and pass the repository's final-artifact audit before publication.

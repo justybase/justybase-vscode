@@ -57,7 +57,7 @@ jobs:
         run: >
           npm run package:duckdb --
           --target ${{ matrix.target }}
-          --out justybase-duckdb-${{ matrix.target }}.vsix
+          --out justybaselite-duckdb-${{ matrix.target }}.vsix
 
       - name: Verify packaged DuckDB runtime files
         shell: bash
@@ -65,7 +65,7 @@ jobs:
           python - <<'PY'
           import zipfile
 
-          vsix_path = 'extensions/duckdb/justybase-duckdb-${{ matrix.target }}.vsix'
+          vsix_path = 'extensions/duckdb/justybaselite-duckdb-${{ matrix.target }}.vsix'
           expected_binding = 'node_modules/${{ matrix.expected_binding_package }}/duckdb.node'
 
           with zipfile.ZipFile(vsix_path, 'r') as archive:
@@ -85,6 +85,6 @@ jobs:
       - name: Upload DuckDB VSIX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: justybase-duckdb-${{ matrix.target }}
-          path: extensions/duckdb/justybase-duckdb-${{ matrix.target }}.vsix
+          name: justybaselite-duckdb-${{ matrix.target }}
+          path: extensions/duckdb/justybaselite-duckdb-${{ matrix.target }}.vsix
           retention-days: 1

@@ -12,7 +12,7 @@ const KNOWN_SQL_EXTENSIONS = [
     { id: 'cweijan.vscode-mysql-client2', name: 'MySQL' },
     { id: 'ckolkman.vscode-postgres', name: 'PostgreSQL' },
 ];
-const GETTING_STARTED_CATEGORY = 'justybase.justybase-netezza#netezzaGettingStarted';
+const GETTING_STARTED_CATEGORY = 'krzysztof-d.justybaselite-netezza#netezzaGettingStarted';
 const GETTING_STARTED_STEP = 'connect';
 
 export async function checkForConflictingExtensions(_context: vscode.ExtensionContext): Promise<void> {
@@ -31,7 +31,7 @@ export async function checkForConflictingExtensions(_context: vscode.ExtensionCo
 
     const otherSqlExtensions = vscode.extensions.all.filter(ext => {
         const pkg = ext.packageJSON;
-        if (!pkg || ext.id === 'justybase.justybase-netezza') {
+        if (!pkg || ext.id === 'krzysztof-d.justybaselite-netezza') {
             return false;
         }
         if (KNOWN_SQL_EXTENSIONS.some(k => k.id === ext.id)) {

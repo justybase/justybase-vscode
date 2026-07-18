@@ -75,7 +75,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -316,13 +316,13 @@ jobs:
         run: npm run build
 
       - name: Package main VSIX
-        run: npm run package -- --out justybase-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+        run: npm run package -- --out justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
 
       - name: Upload main VSIX artifact
         uses: actions/upload-artifact@v4
         with:
           name: vsix-main
-          path: justybase-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+          path: justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
           retention-days: 1
 
   build-db2:
@@ -396,7 +396,7 @@ jobs:
         run: >
           npm run package --
           --target ${{ matrix.target }}
-          --out justybase-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          --out justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
 
       - name: Verify packaged runtime files
         shell: bash
@@ -404,7 +404,7 @@ jobs:
           python - <<'PY'
           import zipfile
 
-          vsix_path = 'extensions/db2/justybase-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
+          vsix_path = 'extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
           expected_driver = '${{ matrix.expected_driver }}'
 
           with zipfile.ZipFile(vsix_path, 'r') as archive:
@@ -425,7 +425,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vsix-db2-${{ matrix.target }}
-          path: extensions/db2/justybase-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          path: extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
           retention-days: 1
 
   build-duckdb:
@@ -470,7 +470,7 @@ jobs:
 
       - name: Install DuckDB extension dependencies
         working-directory: extensions/duckdb
-        run: npm install
+        run: npm ci
 
       - name: Build DuckDB extension
         run: npm run build:duckdb
@@ -479,7 +479,7 @@ jobs:
         run: >
           npm run package:duckdb --
           --target ${{ matrix.target }}
-          --out justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          --out justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
 
       - name: Verify packaged DuckDB runtime files
         shell: bash
@@ -487,7 +487,7 @@ jobs:
           python - <<'PY'
           import zipfile
 
-          vsix_path = 'extensions/duckdb/justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
+          vsix_path = 'extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
           expected_binding = 'node_modules/${{ matrix.expected_binding_package }}/duckdb.node'
 
           with zipfile.ZipFile(vsix_path, 'r') as archive:
@@ -508,7 +508,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vsix-duckdb-${{ matrix.target }}
-          path: extensions/duckdb/justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          path: extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
           retention-days: 1
 
   build-optional:
@@ -551,17 +551,17 @@ jobs:
       - name: Package extension VSIX
         run: >
           npm run package:${{ matrix.id }} --
-          --out justybase-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
+          --out justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
 
       - name: Upload extension VSIX artifact
         uses: actions/upload-artifact@v4
         with:
           name: vsix-${{ matrix.id }}
-          path: extensions/${{ matrix.id }}/justybase-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
+          path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
           retention-days: 1
 
-  attach-release-assets:
-    name: Attach VSIX files to GitHub Release
+  audit-vsix:
+    name: Audit Marketplace VSIX files
     needs:
       - validate-release
       - quality-gate
@@ -582,12 +582,76 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install audit dependencies
+        run: npm ci
+
       - name: Download packaged VSIX files
         uses: actions/download-artifact@v4
         with:
           pattern: vsix-*
           merge-multiple: true
           path: artifacts
+
+      - name: Verify reviewability and identities
+        run: node scripts/audit-marketplace-vsix.js artifacts marketplace-review
+
+      - name: Upload Marketplace review report
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-review
+          path: marketplace-review
+          retention-days: 30
+
+  attach-release-assets:
+    name: Attach VSIX files to GitHub Release
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+      - build-main
+      - build-db2
+      - build-duckdb
+      - build-optional
+      - audit-vsix
+    if: |
+      always()
+      && needs.validate-release.result == 'success'
+      && needs.quality-gate.result == 'success'
+      && needs.test-gate.result == 'success'
+      && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
+      && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
+      && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
+      && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
+      && needs.audit-vsix.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged VSIX files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Download Marketplace review report
+        uses: actions/download-artifact@v4
+        with:
+          name: marketplace-review
+          path: marketplace-review
 
       - name: Attach VSIX files to GitHub Release
         shell: bash
@@ -618,7 +682,7 @@ jobs:
           printf 'Attaching %s VSIX file(s) to release %s:\n' "${#vsix_files[@]}" "$RELEASE_TAG"
           printf ' - %s\n' "${vsix_files[@]}"
           printf ' - %s (combined archive)\n' "$bundle_path"
-          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" "$bundle_path" \
+          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" "$bundle_path" marketplace-review/SHA256SUMS marketplace-review/marketplace-review.json \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
@@ -632,6 +696,7 @@ jobs:
       - build-db2
       - build-duckdb
       - build-optional
+      - audit-vsix
       - attach-release-assets
     if: |
       always()
@@ -643,6 +708,7 @@ jobs:
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
       && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
+      && needs.audit-vsix.result == 'success'
       && needs.attach-release-assets.result == 'success'
     runs-on: ubuntu-latest
 
@@ -663,7 +729,7 @@ jobs:
           fi
 
       - name: Install VSCE
-        run: npm install --global @vscode/vsce@3.7.1
+        run: npm install --global @vscode/vsce@3.9.2
 
       - name: Download packaged VSIX files
         uses: actions/download-artifact@v4
@@ -683,7 +749,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: >
           vsce publish
-          --packagePath artifacts/justybase-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+          --packagePath artifacts/justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
           -p "$VSCE_PAT"
 
       - name: Publish DB2 extensions
@@ -694,7 +760,7 @@ jobs:
         run: |
           for target in win32-x64 linux-x64 darwin-arm64; do
             vsce publish \
-              --packagePath "artifacts/justybase-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
+              --packagePath "artifacts/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
               -p "$VSCE_PAT"
           done
 
@@ -706,7 +772,7 @@ jobs:
         run: |
           for target in win32-x64 linux-x64 darwin-arm64; do
             vsce publish \
-              --packagePath "artifacts/justybase-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
+              --packagePath "artifacts/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
               -p "$VSCE_PAT"
           done
 
@@ -720,7 +786,7 @@ jobs:
         run: |
           IFS=',' read -ra targets <<< "$OPTIONAL_TARGETS"
           for target in "${targets[@]}"; do
-            package_path="artifacts/justybase-${target}-${RELEASE_VERSION}.vsix"
+            package_path="artifacts/justybaselite-${target}-${RELEASE_VERSION}.vsix"
             if [ ! -f "$package_path" ]; then
               echo "Missing package for ${target}: $package_path" >&2
               exit 1

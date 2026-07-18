@@ -67,6 +67,16 @@ function FormatIcon(): ReactElement {
   );
 }
 
+function CancelIcon(): ReactElement {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+    </svg>
+  );
+}
+
 // ── Run mode types ────────────────────────────────────
 
 export type RunMode = 'run' | 'smart' | 'batch' | 'export-csv' | 'export-xlsx' | 'export-xlsb';
@@ -173,6 +183,13 @@ export function EditorToolbar({
             </div>
           )}
         </div>
+
+        {isRunning && (
+          <button className="tb-btn tb-cancel-btn" title="Cancel (Esc)" onClick={onCancel}>
+            <CancelIcon />
+            Cancel
+          </button>
+        )}
       </div>
 
       {/* Center group */}
@@ -186,13 +203,7 @@ export function EditorToolbar({
       </div>
 
       {/* Right group */}
-      <div className="toolbar-right">
-        {isRunning && (
-          <button className="tb-btn tb-cancel-btn" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
-        <select
+      <div className="toolbar-right">          <select
           className="tb-select"
           title="Connection"
           value={connectionId || ''}
