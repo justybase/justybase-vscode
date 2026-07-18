@@ -2,7 +2,7 @@
     "name": "justybaselite-snowflake",
     "displayName": "JustyBase Snowflake Support",
     "description": "Optional Snowflake Support for JustyBase Core",
-    "version": "3.16.9",
+    "version": "3.16.10",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
