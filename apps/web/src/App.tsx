@@ -55,6 +55,8 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   const [columns, setColumns] = useState<MetadataColumn[]>([]);
   const [inspectedObject, setInspectedObject] = useState<SchemaTreeNode | null>(null);
   const [databases, setDatabases] = useState<MetadataDatabase[]>([]);
+  const [lastQueryTime, setLastQueryTime] = useState<number | null>(null);
+  const [overwrite, setOverwrite] = useState(false);
 
   // Split pane sizes — persisted in localStorage
   function getInitial(key: string, fallback: number): number {
@@ -70,10 +72,12 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   const selectedRef = useRef<ConnectionProfileSummary | null>(null);
   const databaseRef = useRef('');
   const schemaRef = useRef('');
+  const activeQueryIdRef = useRef('');
   const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
   const sql = activeTab?.sql ?? '';
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => { activeQueryIdRef.current = activeQueryId; }, [activeQueryId]);
   useEffect(() => { setDatabase(''); setSchema(''); setColumns([]); setInspectedObject(null); }, [selected?.id]);
   useEffect(() => { databaseRef.current = database; }, [database]);
   useEffect(() => { schemaRef.current = schema; }, [schema]);
@@ -97,6 +101,11 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
         setTabs(prev => prev.map(t => t.id === 'query-1' ? { ...t, sql: draft } : t));
       }
     } catch { /* ignore */ }
+    // Restore saved database
+    try {
+      const savedDb = localStorage.getItem('jwb_database');
+      if (savedDb) setDatabase(savedDb);
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => { if (!selected) return; void api.databases(selected.id).then(setDatabases).catch(() => undefined); }, [selected?.id]);
@@ -104,6 +113,10 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   // Persist panel sizes
   useEffect(() => { try { localStorage.setItem('jwb_sidebar', String(sidebar.size)); } catch { /* ignore */ } }, [sidebar.size]);
   useEffect(() => { try { localStorage.setItem('jwb_editor_pct', String(editorSplit.size)); } catch { /* ignore */ } }, [editorSplit.size]);
+
+  // Persist connection selection
+  useEffect(() => { try { localStorage.setItem('jwb_connection', selected?.id ?? ''); } catch { /* ignore */ } }, [selected?.id]);
+  useEffect(() => { try { localStorage.setItem('jwb_database', database); } catch { /* ignore */ } }, [database]);
 
   // Stable refs for keyboard shortcuts to avoid re-registering listener on every render
   const handleSaveRef = useRef(handleSave);
@@ -116,15 +129,30 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   addTabRef.current = addTab;
   const closeTabRef = useRef(closeTab);
   closeTabRef.current = closeTab;
+  const handleCancelRef = useRef(handleCancel);
+  handleCancelRef.current = handleCancel;
+
+  function handleCancel(): void {
+    if (activeQueryId) { void api.cancelQuery(activeQueryId); }
+  }
 
   // Keyboard shortcuts
   useEffect(() => {
     function handler(e: KeyboardEvent) {
+      // Escape — cancel running query (handled BEFORE Ctrl guard so plain Escape works)
+      if (e.key === 'Escape' && activeQueryIdRef.current) {
+        e.preventDefault();
+        handleCancelRef.current();
+        return;
+      }
+
       const ctrl = e.ctrlKey || e.metaKey;
       if (!ctrl) return;
+
       // Don't intercept if user is typing in an input/select (e.g. filter fields)
       const tag = (e.target as HTMLElement)?.tagName;
       const isInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+
       switch (e.key.toLowerCase()) {
         case 's':
           e.preventDefault();
@@ -152,7 +180,6 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
             closeTabRef.current(activeTabId);
           }
           break;
-        // Ctrl+/ is handled natively by Monaco editor
       }
     }
     window.addEventListener('keydown', handler);
@@ -177,7 +204,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
       setActiveQueryId(started.queryId);
       const socket = connectToQueryEvents(started.queryId, (event: QueryEvent) => {
         setResult(previous => applyQueryEvent(previous, event));
-        if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') { setBusy(false); socket.close(); }
+        if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') { setBusy(false); socket.close(); if (event.type === 'complete') setLastQueryTime(Date.now()); }
       }, () => { setBusy(false); setResult(previous => ({ ...previous, status: 'error', message: 'Could not connect to the query result stream.' })); });
     } catch (reason: unknown) { setBusy(false); setResult({ ...emptyResult, status: 'error', message: reason instanceof Error ? reason.message : 'Query failed.' }); }
   }
@@ -197,6 +224,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
           setResult(previous => applyQueryEvent(previous, event));
           if (event.type === 'complete') {
             socket.close();
+            setLastQueryTime(Date.now());
             resolve();
           } else if (event.type === 'error' || event.type === 'cancelled') {
             socket.close();
@@ -289,7 +317,12 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   function resetLayout(): void {
     sidebar.setSize(250);
     editorSplit.setSize(45);
-    try { localStorage.removeItem('jwb_sidebar'); localStorage.removeItem('jwb_editor_pct'); } catch { /* ignore */ }
+    try {
+      localStorage.removeItem('jwb_sidebar');
+      localStorage.removeItem('jwb_editor_pct');
+      localStorage.removeItem('jwb_connection');
+      localStorage.removeItem('jwb_database');
+    } catch { /* ignore */ }
   }
 
   function selectConnection(id: string): void {
@@ -376,7 +409,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
             onComment={handleComment}
             onFormat={handleFormat}
             isRunning={busy}
-            onCancel={() => activeQueryId ? void api.cancelQuery(activeQueryId) : undefined}
+            onCancel={handleCancel}
           />
 
           {/* Editor + Results with vertical split */}
@@ -394,7 +427,18 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
                   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
                     handleRunRef.current('run');
                   });
-                  registerSqlLanguageFeatures(editor, monaco, () => ({
+                  // Track INSERT/OVR mode
+              const isInsert = editor.getOption(monaco.editor.EditorOption.insertMode);
+              setOverwrite(!isInsert);
+              const disposable = editor.onKeyDown(e => {
+                if (e.keyCode === monaco.KeyCode.Insert) {
+                  setTimeout(() => {
+                    setOverwrite(!editor.getOption(monaco.editor.EditorOption.insertMode));
+                  }, 0);
+                }
+              });
+              editor.onDidDispose(() => disposable.dispose());
+              registerSqlLanguageFeatures(editor, monaco, () => ({
                     connectionId: selectedRef.current?.id,
                     database: databaseRef.current,
                     schema: schemaRef.current,
@@ -470,6 +514,14 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
           }}
         />
       )}
+
+      {/* ── Status bar ── */}
+      <StatusBar
+        connectionName={selected?.name}
+        database={database}
+        lastQueryTime={lastQueryTime}
+        overwrite={overwrite}
+      />
     </div>
   );
 }
@@ -489,6 +541,47 @@ function EditorSettings({ value, onSave, onClose, onResetLayout }: { value: Edit
   const update = <K extends keyof EditorPreferences>(key: K, next: EditorPreferences[K]): void => setForm(previous => ({ ...previous, [key]: next }));
   async function save(): Promise<void> { onSave(await api.updateEditorPreferences(form)); }
   return <div className="modal-backdrop"><section className="modal-card"><div className="section-title">Editor settings <button className="icon-button" onClick={onClose}>×</button></div><div className="settings-grid"><label>Font size<input type="number" min="10" max="32" value={form.fontSize} onChange={event => update('fontSize', Number(event.target.value))} /></label><label>Tab size<input type="number" min="1" max="16" value={form.tabSize} onChange={event => update('tabSize', Number(event.target.value))} /></label><label>Word wrap<select value={form.wordWrap} onChange={event => update('wordWrap', event.target.value as EditorPreferences['wordWrap'])}><option value="off">Off</option><option value="on">On</option><option value="bounded">Bounded</option></select></label><label>Keyword case<select value={form.keywordCase} onChange={event => update('keywordCase', event.target.value as EditorPreferences['keywordCase'])}><option value="upper">Uppercase</option><option value="lower">Lowercase</option><option value="preserve">Preserve</option></select></label><label className="checkbox"><input type="checkbox" checked={form.insertSpaces} onChange={event => update('insertSpaces', event.target.checked)} /> Insert spaces</label><label className="checkbox"><input type="checkbox" checked={form.minimap} onChange={event => update('minimap', event.target.checked)} /> Minimap</label><label className="checkbox"><input type="checkbox" checked={form.lineNumbers} onChange={event => update('lineNumbers', event.target.checked)} /> Line numbers</label><label className="checkbox"><input type="checkbox" checked={form.linterEnabled} onChange={event => update('linterEnabled', event.target.checked)} /> SQL linter</label><label className="checkbox"><input type="checkbox" checked={form.formatOnType} onChange={event => update('formatOnType', event.target.checked)} /> Format on type</label><label className="checkbox"><input type="checkbox" checked={form.formatOnSave} onChange={event => update('formatOnSave', event.target.checked)} /> Format on save</label>            <label className="checkbox"><input type="checkbox" checked={form.inlineTypeHints} onChange={event => update('inlineTypeHints', event.target.checked)} /> Inline type hints</label></div><div className="settings-actions"><div className="form-actions"><button onClick={() => void save()}>Save settings</button><button className="secondary" onClick={onClose}>Cancel</button></div><button className="secondary small settings-reset-layout" onClick={() => { onResetLayout?.(); onClose(); }}>Reset layout</button></div></section></div>;
+}
+
+function StatusBar({ connectionName, database, lastQueryTime, overwrite }: { connectionName?: string; database: string; lastQueryTime: number | null; overwrite: boolean }): ReactElement {
+  const timeStr = lastQueryTime
+    ? new Date(lastQueryTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null;
+  return (
+    <footer className="statusbar">
+      <div className="statusbar-left">
+        {connectionName && (
+          <span className="statusbar-item" title="Connection">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 7V4h16v3" /><path d="M9 20h6" /><path d="M12 4v16" />
+            </svg>
+            {connectionName}
+          </span>
+        )}
+        {database && (
+          <span className="statusbar-item" title="Database">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+            </svg>
+            {database}
+          </span>
+        )}
+      </div>
+      <div className="statusbar-right">
+        {timeStr && (
+          <span className="statusbar-item" title="Last query completed">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+            </svg>
+            {timeStr}
+          </span>
+        )}
+        <span className={`statusbar-item statusbar-ovr ${overwrite ? 'active' : ''}`} title={overwrite ? 'Overwrite mode (Press Insert to toggle)' : 'Insert mode (Press Insert to toggle)'}>
+          {overwrite ? 'OVR' : 'INS'}
+        </span>
+      </div>
+    </footer>
+  );
 }
 
 function HistoryPanel({ entries, onClose, onOpen }: { entries: Awaited<ReturnType<typeof api.history>>; onClose(): void; onOpen(entry: Awaited<ReturnType<typeof api.history>>[number]): void }): ReactElement {

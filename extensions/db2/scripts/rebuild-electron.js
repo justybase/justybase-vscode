@@ -745,27 +745,17 @@ function main() {
         }
     }
 
-    // Step 3: Register IBM CLI driver as a Windows ODBC driver.
-    // The ibm_db bundled clidriver is not registered by default.
-    // db2cli install -setup writes the ODBC registry entries so the
-    // Windows ODBC Driver Manager can find it (needs admin for HKLM).
+    // Step 3: Print the optional IBM CLI registration instruction.
+    // This script never changes Windows ODBC registry entries automatically.
     if (process.platform === 'win32') {
         const db2cliExe = path.join(clidriverPath, 'bin', 'db2cli.exe');
         if (fs.existsSync(db2cliExe)) {
-            console.log('\nStep 3/3: Registering IBM CLI driver as Windows ODBC driver...');
-            try {
-                execFileSync(db2cliExe, ['install', '-setup'], {
-                    cwd: path.join(clidriverPath, 'bin'),
-                    stdio: 'inherit'
-                });
-            } catch {
-                console.warn(
-                    '⚠️  db2cli install -setup failed (may need admin rights).\n' +
-                    '   If connections fail with "Data source name not found", run\n' +
-                    '   the following from an elevated (admin) command prompt:\n' +
-                    `   "${db2cliExe}" install -setup`
-                );
-            }
+            console.log(
+                '\nStep 3/3: No ODBC driver was registered automatically.\n' +
+                'If connections fail with "Data source name not found" and an administrator approves it, run\n' +
+                'the following from an elevated command prompt:\n' +
+                `  "${db2cliExe}" install -setup`
+            );
         }
     }
 

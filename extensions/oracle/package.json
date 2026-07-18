@@ -1,9 +1,9 @@
 {
-    "name": "justybase-oracle",
-    "displayName": "Oracle Tools (justybase)",
-    "description": "Optional Oracle support for Netezza SQL Tools (justybase) using node-oracledb thin mode",
+    "name": "justybaselite-oracle",
+    "displayName": "JustyBase Oracle Support",
+    "description": "Optional Oracle Support for JustyBase Core using node-oracledb thin mode",
     "version": "3.16.9",
-    "publisher": "justybase",
+    "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
     "engines": {
@@ -34,15 +34,17 @@
         "onStartupFinished"
     ],
     "extensionDependencies": [
-        "justybase.justybase-netezza"
+        "krzysztof-d.justybaselite-netezza"
     ],
     "scripts": {
-        "build": "node esbuild.oracle.js --production",
+        "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
+        "build": "node esbuild.oracle.js",
+        "build:minified": "node esbuild.oracle.js --minify",
         "build:dev": "node esbuild.oracle.js",
         "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
         "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/oracledb')) { console.error('Missing oracledb. Run npm install in extensions\\\\oracle before packaging.'); process.exit(1); }\"",
         "prepackage": "npm run verify:runtime-deps",
-        "package": "node ../../node_modules/@vscode/vsce/vsce package"
+        "package": "node ../../scripts/package-optional-vsix.js package"
     },
     "dependencies": {
         "oracledb": "^6.9.0"

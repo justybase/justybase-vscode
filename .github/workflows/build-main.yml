@@ -37,11 +37,11 @@ jobs:
         run: npm run build
 
       - name: Package VSIX
-        run: npx @vscode/vsce package
+        run: npx --no-install @vscode/vsce package
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: justybase-netezza
-          path: justybase-netezza-*.vsix
+          name: justybaselite-netezza
+          path: justybaselite-netezza-*.vsix
           retention-days: 1

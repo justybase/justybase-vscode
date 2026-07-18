@@ -75,6 +75,9 @@ export function ResultGrid({ queryId, result }: { queryId: string; result: Resul
   const [error, setError] = useState('');
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [exporting, setExporting] = useState(false);
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => result.columns.map((_, i) => String(i)));
+  const [draggedColId, setDraggedColId] = useState<string | null>(null);
+  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
   const requestGeneration = useRef(0);
 
   useEffect(() => {
@@ -82,6 +85,7 @@ export function ResultGrid({ queryId, result }: { queryId: string; result: Resul
     setTotalRows(result.totalRows);
     setPageIndex(0);
     setRowSelection({});
+    setColumnOrder(result.columns.map((_, i) => String(i)));
   }, [result.sessionId]);
 
   useEffect(() => {
@@ -126,13 +130,14 @@ export function ResultGrid({ queryId, result }: { queryId: string; result: Resul
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnFilters, globalFilter, rowSelection, columnVisibility, columnPinning },
+    state: { sorting, columnFilters, globalFilter, rowSelection, columnVisibility, columnPinning, columnOrder },
     onSortingChange: updater => { setSorting(updater); setPageIndex(0); },
     onColumnFiltersChange: updater => { setColumnFilters(updater); setPageIndex(0); },
     onGlobalFilterChange: updater => { setGlobalFilter(updater); setPageIndex(0); },
     onRowSelectionChange: setRowSelection,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnPinningChange: setColumnPinning,
+    onColumnOrderChange: setColumnOrder,
     manualSorting: true,
     manualFiltering: true,
     enableRowSelection: true,
@@ -189,14 +194,42 @@ export function ResultGrid({ queryId, result }: { queryId: string; result: Resul
         className={[
           header.column.getIsPinned() ? 'pinned-column' : '',
           header.column.getIsResizing() ? 'is-resizing' : '',
+          draggedColId === header.column.id ? 'dragging' : '',
+          dragOverColId === header.column.id && draggedColId !== header.column.id && draggedColId !== null ? 'drag-over' : '',
         ].filter(Boolean).join(' ')}
         style={{
           ...(header.column.getIsPinned() ? { left: `${header.column.getStart('left')}px` } : {}),
           width: header.getSize(),
           minWidth: header.getSize(),
         }}
-      >{header.isPlaceholder ? null : <div className="grid-header-content">
-        <button type="button" onClick={header.column.getToggleSortingHandler()} title={`Sort by ${String(header.column.columnDef.header)}`}>
+      >{
+        header.isPlaceholder ? null : <div className="grid-header-content">
+        <button
+          type="button"
+          draggable
+          onDragStart={() => setDraggedColId(header.column.id)}
+          onDragOver={e => { e.preventDefault(); setDragOverColId(header.column.id); }}
+          onDragEnd={() => { setDraggedColId(null); setDragOverColId(null); }}
+          onDrop={e => {
+            e.preventDefault();
+            if (!draggedColId || draggedColId === header.column.id) return;
+            setColumnOrder(prev => {
+              const reordered = [...prev];
+              const oldIdx = reordered.indexOf(draggedColId);
+              const newIdx = reordered.indexOf(header.column.id);
+              if (oldIdx === -1 || newIdx === -1) return prev;
+              reordered.splice(oldIdx, 1);
+              // After removing at oldIdx, indices shift left. Adjust when oldIdx < newIdx.
+              const insertAt = oldIdx < newIdx ? newIdx - 1 : newIdx;
+              reordered.splice(insertAt, 0, draggedColId);
+              return reordered;
+            });
+            setDraggedColId(null);
+            setDragOverColId(null);
+          }}
+          onClick={header.column.getToggleSortingHandler()}
+          title={`Sort by ${String(header.column.columnDef.header)}`}
+        >
           <span className="header-label">{flexRender(header.column.columnDef.header, header.getContext())}</span>
           <span className="sort-arrows">
             <span className={`sort-arrow sort-asc ${header.column.getIsSorted() === 'asc' ? 'active' : ''}`}>▲</span>

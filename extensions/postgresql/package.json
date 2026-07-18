@@ -1,9 +1,9 @@
 {
-    "name": "justybase-postgresql",
-    "displayName": "PostgreSQL Tools (justybase)",
-    "description": "Optional PostgreSQL support for Netezza SQL Tools (justybase)",
+    "name": "justybaselite-postgresql",
+    "displayName": "JustyBase PostgreSQL Support",
+    "description": "Optional PostgreSQL Support for JustyBase Core",
     "version": "3.16.9",
-    "publisher": "justybase",
+    "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
     "engines": {
@@ -34,15 +34,17 @@
         "onStartupFinished"
     ],
     "extensionDependencies": [
-        "justybase.justybase-netezza"
+        "krzysztof-d.justybaselite-netezza"
     ],
     "scripts": {
-        "build": "node esbuild.postgresql.js --production",
+        "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
+        "build": "node esbuild.postgresql.js",
+        "build:minified": "node esbuild.postgresql.js --minify",
         "build:dev": "node esbuild.postgresql.js",
         "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
         "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/pg')) { console.error('Missing pg. Run npm install in extensions\\\\postgresql before packaging.'); process.exit(1); }\"",
         "prepackage": "npm run verify:runtime-deps",
-        "package": "node ../../node_modules/@vscode/vsce/vsce package"
+        "package": "node ../../scripts/package-optional-vsix.js package"
     },
     "dependencies": {
         "pg": "^8.12.0"

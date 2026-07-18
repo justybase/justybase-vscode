@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'events';
 import type { Column as IbmDbColumnMetadata, Database as IbmDbDatabase, ODBCResult } from 'ibm_db';
@@ -146,41 +145,6 @@ function isOdbcDriverManagerError(error: unknown): boolean {
     return message.includes('Data source name not found')
         || message.includes('Nie mo') && message.includes('nazwy') && message.includes('danych')
         || message.includes('Mened') && message.includes('ODBC');
-}
-
-/**
- * Attempt to register the bundled IBM CLI driver as a Windows ODBC driver.
- * When the native addon is linked against the Windows ODBC Driver Manager
- * (odbc32.dll) instead of the IBM CLI library (db2app64.dll), a registered
- * ODBC driver entry is required for SQLDriverConnect to succeed.
- * `db2cli install -setup` writes those entries to the Windows registry
- * (HKLM — needs admin; may fail silently without elevation).
- */
-function tryRegisterOdbcDriver(clidriverHome: string): boolean {
-    const db2cliExe = path.join(clidriverHome, 'bin', 'db2cli.exe');
-    if (!fs.existsSync(db2cliExe)) {
-        return false;
-    }
-    try {
-        execFileSync(db2cliExe, ['install', '-setup'], {
-            cwd: path.join(clidriverHome, 'bin'),
-            stdio: 'ignore',
-            timeout: 15_000
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function clearIbmDbRequireCache(): void {
-    for (const cacheKey of Object.keys(_extensionRequire.cache)) {
-        if (cacheKey.includes(`${path.sep}node_modules${path.sep}ibm_db${path.sep}`)
-            || cacheKey.includes(`${path.sep}node_modules${path.sep}bindings${path.sep}`)) {
-            delete _extensionRequire.cache[cacheKey];
-        }
-    }
-    _ibmDbModulePromise = undefined;
 }
 
 function buildIbmDbLoadError(error: unknown, clidriverHome: string | undefined): Error {
@@ -648,32 +612,13 @@ export class Db2Connection extends EventEmitter implements DatabaseConnection {
             this._database = await ibmDb.open(buildConnectionString(this.config), buildOpenOptions(this.config));
             this._connected = true;
         } catch (error) {
-            if (isOdbcDriverManagerError(error) && isValidClidriverHome(_bundledClidriverHome)) {
-                // The native addon is linked against the Windows ODBC Driver
-                // Manager (odbc32.dll) instead of the IBM CLI library directly.
-                // Try registering the bundled CLI driver as a Windows ODBC
-                // driver and retry the connection.
-                try {
-                    process.env.IBM_DB_HOME = _bundledClidriverHome;
-                    ensureClidriverOnPath(_bundledClidriverHome);
-                    tryRegisterOdbcDriver(_bundledClidriverHome);
-
-                    clearIbmDbRequireCache();
-                    const ibmDb = await loadIbmDb();
-                    this._database = await ibmDb.open(buildConnectionString(this.config), buildOpenOptions(this.config));
-                    this._connected = true;
-                    return;
-                } catch {
-                    // Preserve the original connection error below.
-                }
-            }
-
             const db2cliExe = path.join(_bundledClidriverHome, 'bin', 'db2cli.exe');
             const odbcHint = isOdbcDriverManagerError(error)
                 ? '\nThe native addon routes through the Windows ODBC Driver Manager.\n' +
                   'Fix: run "npm run db2:runtime:electron" (or the legacy alias "npm run rebuild:db2")\n' +
                   'to recompile with direct IBM CLI linking.\n' +
-                  'Or register the bundled ODBC driver from an admin command prompt:\n' +
+                  'This extension never registers an ODBC driver automatically.\n' +
+                  'If your administrator approves it, register the bundled ODBC driver manually from an elevated command prompt:\n' +
                   `  "${db2cliExe}" install -setup`
                 : '';
 

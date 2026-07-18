@@ -114,3 +114,7 @@ To disable Snowflake support:
 
 - disable or uninstall `Snowflake Tools (justybase)` in VS Code, or
 - remove the `extensions/snowflake` package from your development workspace when testing the core extension without Snowflake
+
+## License and third-party software
+
+This extension is licensed under Apache-2.0. Its Marketplace VSIX includes the full project license and a generated `THIRD_PARTY_NOTICES.md` covering locked runtime dependencies and their available license texts.

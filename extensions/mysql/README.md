@@ -44,3 +44,7 @@ npm run build
 ```
 
 The extension bundle may externalize `mysql`/`mysql2`, so the package should keep the runtime dependency available when running in a development or packaged environment.
+
+## License and third-party software
+
+This extension is licensed under Apache-2.0. Its Marketplace VSIX includes the full project license and a generated `THIRD_PARTY_NOTICES.md` covering locked runtime dependencies and their available license texts.

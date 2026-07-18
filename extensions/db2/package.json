@@ -1,9 +1,9 @@
 {
-  "name": "justybase-db2",
-  "displayName": "Db2 Tools (justybase)",
-  "description": "Optional Db2 support for Netezza SQL Tools (justybase)",
+  "name": "justybaselite-db2",
+  "displayName": "JustyBase Db2 Support",
+  "description": "Optional Db2 Support for JustyBase Core",
   "version": "3.16.9",
-  "publisher": "justybase",
+  "publisher": "krzysztof-d",
   "license": "Apache-2.0",
   "icon": "icon.png",
   "engines": {
@@ -34,10 +34,12 @@
     "onStartupFinished"
   ],
   "extensionDependencies": [
-    "justybase.justybase-netezza"
+    "krzysztof-d.justybaselite-netezza"
   ],
   "scripts": {
-    "build": "node esbuild.db2.js --production",
+        "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
+    "build": "node esbuild.db2.js",
+    "build:minified": "node esbuild.db2.js --minify",
     "build:dev": "node esbuild.db2.js",
     "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
     "install:vscode": "node scripts/switch-runtime.js electron",

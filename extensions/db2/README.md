@@ -37,6 +37,14 @@ Each platform requires its own DB2 VSIX artifact because `ibm_db` and `clidriver
 - Db2 procedures are enabled in runtime capabilities; table maintenance and session monitor remain intentionally disabled in this iteration.
 - Fallback table DDL now reconstructs constraints, check constraints, comments, secondary indexes, and key partition metadata from `SYSCAT.*`; storage/compression details that cannot be rendered as safe SQL are emitted as metadata comments in the fallback output.
 
+## Windows ODBC registration
+
+The extension never registers an ODBC driver or changes the Windows registry automatically. If the Db2 driver reports **Data source name not found**, first rebuild the Electron runtime with `npm run db2:runtime:electron`. Only when approved by an administrator, register the bundled driver manually from an elevated command prompt:
+
+```powershell
+<path-to-clidriver>\bin\db2cli.exe install -setup
+```
+
 ## Installation Order
 
 Marketplace or manual VSIX installation should end with both extensions installed:
@@ -73,3 +81,7 @@ npm run package:db2:full
 This runs clean, lint, typecheck, build, and creates the DB2 VSIX.
 
 For CI multi-platform builds and artifact names, see `.github/workflows/db2-build.yml`. Marketplace publication of the core VSIX plus the three Db2 target VSIX files is handled separately by `.github/workflows/publish-marketplace.yml` when a GitHub Release is published.
+
+## License and third-party software
+
+This extension is licensed under Apache-2.0. Its Marketplace VSIX includes the full project license and a generated `THIRD_PARTY_NOTICES.md` covering locked runtime dependencies and their available license texts.

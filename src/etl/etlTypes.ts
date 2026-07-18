@@ -38,6 +38,7 @@ export interface PythonNodeConfig {
     script: string;       // Python script content or path
     scriptPath?: string;  // Path to Python script file
     interpreter?: string; // Python interpreter path
+    interpreterArgs?: string[]; // Structured interpreter arguments, for example ["-3"]
     arguments?: string[];
     timeout?: number;
 }

@@ -1,15 +1,15 @@
 {
-  "name": "justybase-netezza",
-  "displayName": "Netezza SQL Tools (justybase)",
-  "description": "Core Netezza extension with built-in SQLite and optional DuckDB, Db2, Oracle, PostgreSQL, Snowflake, MS SQL Server, and MySQL support",
+  "name": "justybaselite-netezza",
+  "displayName": "JustyBase Core (NetezzaSQL)",
+  "description": "A powerful, zero-config VS Code extension for IBM Netezza / PureData System for Analytics databases",
   "version": "3.16.9",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
-  "publisher": "justybase",
+  "publisher": "krzysztof-d",
   "author": {
-    "name": "JustyBase Maintainers"
+    "name": "Krzysztof Duśko"
   },
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -3370,7 +3370,15 @@
         "justybase.pythonPath": {
           "type": "string",
           "default": "python",
-          "description": "Path to Python executable for running scripts."
+          "description": "Python executable for running scripts. Use justybase.pythonArgs for interpreter arguments."
+        },
+        "justybase.pythonArgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments passed to the configured Python executable before the script, for example [\"-3\"] with the Windows py launcher."
         },
         "justybase.showConflictWarnings": {
           "type": "boolean",
@@ -3980,8 +3988,9 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run build",
-    "build": "node esbuild.js --production",
+    "vscode:prepublish": "npm run build && node scripts/generate-third-party-notices.js .",
+    "build": "node esbuild.js",
+    "build:minified": "node esbuild.js --minify",
     "build:contracts": "npm run build --workspace @justybase/contracts",
     "build:sql-core": "npm run build --workspace @justybase/sql-core",
     "build:runtime": "npm run build:contracts && npm run build --workspace @justybase/database-runtime",
@@ -4034,7 +4043,6 @@
     "test:watch": "cross-env NODE_ENV=test JEST_SILENT=1 jest --watch",
     "test:unit:debug": "cross-env NODE_ENV=test JEST_SILENT=0 JEST_VERBOSE=1 JEST_LOG_HEAP=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand",
     "test:coverage": "cross-env NODE_ENV=test JEST_SILENT=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --coverage --runInBand",
-    "test:live:prefetch-heavy": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config Benchmark/jest.config.js --runInBand --verbose Benchmark/metadataPrefetchHeavyLive.test.ts",
     "provision:heavy-prefetch-schema": "npx tsx Benchmark/provisionHeavyPrefetchSchema.ts",
     "benchmark": "npm run benchmark:suggest && npm run benchmark:lsp && npm run benchmark:quality && npm run benchmark:result-panel",
     "benchmark:suggest": "jest --config Benchmark/jest.config.js --runInBand Benchmark/suggestBenchmark.test.ts",
@@ -4130,7 +4138,7 @@
     "@types/vscode": "^1.103.2",
     "@typescript-eslint/eslint-plugin": "^8.57.1",
     "@typescript-eslint/parser": "^8.57.1",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "3.9.2",
     "adm-zip": "^0.5.16",
     "archiver": "^7.0.1",
     "babel-jest": "^30.3.0",
@@ -4156,5 +4164,11 @@
     "flatted": "^3.4.1",
     "undici": "^7.24.4",
     "yauzl": "^3.2.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "keytar@7.9.0": true,
+    "unrs-resolver@1.12.2": true,
+    "@vscode/vsce-sign@2.0.9": true
   }
 }

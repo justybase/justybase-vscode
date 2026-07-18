@@ -110,6 +110,25 @@ function RefreshIcon(): ReactElement {
   );
 }
 
+function ExpandIcon(): ReactElement {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="16" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+
+function CollapseIcon(): ReactElement {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+
 function CopyIcon(): ReactElement {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -252,6 +271,48 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
     void loadFn(ROOT);
   }
 
+  // Expand all — recursively loads and expands databases and schemas (2 levels deep)
+  async function expandAll(): Promise<void> {
+    // 1. Ensure root is loaded
+    if (!children[ROOT] && !loading[ROOT]) {
+      await loadFn(ROOT);
+    }
+
+    const newExpanded: Record<string, boolean> = { [ROOT]: true };
+
+    // 2. Expand level 1 (databases / first-level nodes) + load their children
+    const level1 = children[ROOT] ?? [];
+    for (const n1 of level1) {
+      newExpanded[n1.id] = true;
+      if (!children[n1.id] && n1.hasChildren && !loading[n1.id]) {
+        if (n1.kind === 'object' && n1.objectName) {
+          await loadColumns(n1);
+        } else {
+          await loadFn(n1.id);
+        }
+      }
+
+      // 3. Expand level 2 (schemas / second-level nodes) + load their children
+      const level2 = children[n1.id] ?? [];
+      for (const n2 of level2) {
+        newExpanded[n2.id] = true;
+        if (!children[n2.id] && n2.hasChildren && !loading[n2.id]) {
+          if (n2.kind === 'object' && n2.objectName) {
+            await loadColumns(n2);
+          } else {
+            await loadFn(n2.id);
+          }
+        }
+      }
+    }
+
+    setExpanded(prev => ({ ...prev, ...newExpanded }));
+  }
+
+  function collapseAll(): void {
+    setExpanded({ [ROOT]: true });
+  }
+
   // Load columns for an object node
   async function loadColumns(node: SchemaTreeNode): Promise<void> {
     if (!node.database || !node.schema || !node.objectName) return;
@@ -371,6 +432,12 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
           value={search}
           onChange={event => setSearch(event.target.value)}
         />
+        <button className="schema-refresh-btn" title="Collapse all" onClick={collapseAll}>
+          <CollapseIcon />
+        </button>
+        <button className="schema-refresh-btn" title="Expand all (databases and schemas)" onClick={() => void expandAll()}>
+          <ExpandIcon />
+        </button>
         <button className="schema-refresh-btn" title="Refresh schema" onClick={refresh}>
           <RefreshIcon />
         </button>
