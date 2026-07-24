@@ -15,6 +15,12 @@ import {
   getSqlParserInstance as getBaseSqlParserInstance,
 } from "./parser";
 import { SqlLexer as baseSqlLexer } from "./lexer";
+import { SqlLexer as oracleSqlLexer } from "../dialects/oracle/sql/lexer";
+import {
+  createSqlParserInstance as createOracleSqlParserInstance,
+  getSqlParserInstance as getOracleSqlParserInstance,
+} from "../dialects/oracle/sql/parser";
+import { oracleSqlAuthoring } from "../../extensions/oracle/src/sql/authoring";
 import type {
   DatabaseSqlAuthoring,
   DatabaseSqlValidationProfile,
@@ -603,6 +609,13 @@ export const NETEZZA_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
   createSqlParserInstance: createNetezzaSqlParserInstance,
 };
 
+export const ORACLE_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "oracle",
+  SqlLexer: oracleSqlLexer,
+  getSqlParserInstance: getOracleSqlParserInstance,
+  createSqlParserInstance: createOracleSqlParserInstance,
+};
+
 const runtimeByKind = new Map<DatabaseKind, SqlParsingRuntime>();
 const runtimeByAuthoring = new WeakMap<object, SqlParsingRuntime>();
 const runtimeByValidationProfile = new WeakMap<object, SqlParsingRuntime>();
@@ -635,6 +648,13 @@ registerSqlParsingRuntime({
   kind: "netezza",
   authoring: netezzaSqlAuthoring,
   validationProfile: netezzaSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: ORACLE_SQL_PARSING_RUNTIME,
+  kind: "oracle",
+  authoring: oracleSqlAuthoring,
+  validationProfile: oracleSqlAuthoring.validation,
 });
 
 function resolveDatabaseKind(

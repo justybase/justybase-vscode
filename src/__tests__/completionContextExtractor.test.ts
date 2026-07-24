@@ -290,4 +290,21 @@ SELECT * FROM `;
     expect(first.variables).toEqual(["VAR1"]);
     expect(second.variables).toEqual(["VAR1", "VAR2"]);
   });
+
+  it("keys Oracle PL/SQL local definitions by cursor position", () => {
+    const sql = `DECLARE
+  v_before NUMBER;
+  v_after NUMBER;
+BEGIN
+  NULL;
+END;`;
+    const document = TextDocument.create("file:///oracle-scope.sql", "sql", 1, sql);
+    const beforeDeclaration = sql.indexOf("v_after");
+    const afterDeclaration = sql.indexOf("BEGIN");
+
+    const before = extractor.getParsedContext(document, "oracle", beforeDeclaration);
+    const after = extractor.getParsedContext(document, "oracle", afterDeclaration);
+
+    expect(before.contentHash).not.toBe(after.contentHash);
+  });
 });

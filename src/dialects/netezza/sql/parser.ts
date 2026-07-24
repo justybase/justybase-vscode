@@ -219,12 +219,23 @@ export class NetezzaSqlParser extends BaseSqlParser {
   alterTableSetPrivilegesAction!: AnyRule;
   alterTableCascadeRestrictClause!: AnyRule;
 
-  constructor() {
-    super(netezzaSqlLexer);
+  /** Guard flag to prevent double-registration of alterTableStatement rule. */
+  private _alterTableRuleRegistered = false;
+
+  constructor(tokenBundle: typeof netezzaSqlLexer = netezzaSqlLexer) {
+    super(tokenBundle);
     this.overrideSharedGrammarForNetezza();
     this.registerNetezzaRules();
+    this.registerDialectExtensions();
     this.finalizeParser();
   }
+
+  /**
+   * Hook for dialects that build on the shared/Netezza grammar. It runs after
+   * the Netezza extensions have been registered but before Chevrotain performs
+   * self analysis, so subclasses can add rules and override shared rules.
+   */
+  protected registerDialectExtensions(): void {}
 
   protected getAdditionalStatementAlternatives(): OrAlternative[] {
     return [
@@ -288,6 +299,36 @@ export class NetezzaSqlParser extends BaseSqlParser {
   protected registerCreateTableDialectClauses(): void {
     this.OPTION7(() => this.SUBRULE(this.distributeClause));
     this.OPTION8(() => this.SUBRULE(this.organizeClause));
+  }
+
+  /**
+   * Registers the dialect-specific ALTER TABLE rule. A dialect layered on
+   * this parser can replace the rule without inheriting Netezza's ORGANIZE
+   * clause or other Netezza-only actions.
+   */
+  protected registerAlterTableDialectRule(): void {
+    // Guard against double-registration: if a subclass calls super.registerAlterTableDialectRule()
+    // and also registers its own rule, Chevrotain would throw "Already existing rule".
+    // Skip if already registered by a subclass.
+    if (this["_alterTableRuleRegistered"]) {
+      return;
+    }
+    this["_alterTableRuleRegistered"] = true;
+    this.OVERRIDE_RULE("alterTableStatement", () => {
+      this.CONSUME(Alter);
+      this.CONSUME(Table);
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION(() => this.SUBRULE(this.alterTableAction));
+      this.OPTION1(() => this.SUBRULE(this.organizeClause));
+    });
+  }
+
+  /** Hook for dialect-specific procedure statement rules. */
+  protected registerDialectProcedureRules(): void {}
+
+  /** Additional statements available inside a stored procedure body. */
+  protected getAdditionalProcedureStatementAlternatives(): OrAlternative[] {
+    return [];
   }
 
   protected supportsEmptyQualifiedNameSegment(): boolean {
@@ -1087,6 +1128,8 @@ export class NetezzaSqlParser extends BaseSqlParser {
           this.CONSUME(RParen);
         });
 
+        this.registerDialectProcedureRules();
+
         this.RULE("procedureStatement", () => {
           this.OR([
             {
@@ -1144,6 +1187,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
             { ALT: () => this.SUBRULE(this.generateStatisticsStatement) },
             { ALT: () => this.SUBRULE(this.grantStatement) },
             { ALT: () => this.SUBRULE(this.revokeStatement) },
+            ...this.getAdditionalProcedureStatementAlternatives(),
           ]);
         });
 
@@ -1590,13 +1634,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
           ]);
         });
 
-        this.OVERRIDE_RULE("alterTableStatement", () => {
-          this.CONSUME(Alter);
-          this.CONSUME(Table);
-          this.SUBRULE(this.qualifiedName);
-          this.OPTION(() => this.SUBRULE(this.alterTableAction));
-          this.OPTION1(() => this.SUBRULE(this.organizeClause));
-        });
+        this.registerAlterTableDialectRule();
   }
 }
 

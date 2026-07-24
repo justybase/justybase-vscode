@@ -13,6 +13,7 @@ import { normalizeAndDeduplicateHeaders, normalizeImportedHeader } from './impor
 export interface TabularDataImporterOptions {
     kind?: string | DatabaseKind;
     logDir?: string;
+    inferBoolean?: boolean;
 }
 
 function normalizeKind(kind?: string | DatabaseKind): DatabaseKind | undefined {
@@ -72,7 +73,9 @@ export class TabularDataImporter {
             : options;
         this.kind = normalizeKind(resolvedOptions?.kind);
         this.targetTable = targetTable;
-        this.importer = new NetezzaImporter(filePath, targetTable, resolvedOptions?.logDir);
+        this.importer = new NetezzaImporter(filePath, targetTable, resolvedOptions?.logDir, {
+            inferBoolean: resolvedOptions?.inferBoolean === true,
+        });
     }
 
     private refreshInferredState(): void {

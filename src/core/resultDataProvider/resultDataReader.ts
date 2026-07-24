@@ -115,3 +115,53 @@ export function resolveExportRows(
     }
     return rows;
 }
+
+/**
+ * Lazily projects result rows for export. In particular, SQLite-backed
+ * results are fetched one row/batch at a time and never copied into a second
+ * full `unknown[][]` array.
+ */
+export function* iterateResultRows(
+    resultSet: ResultSet,
+    rowIndices: number[] | undefined,
+    columnIndices: number[],
+): Generator<unknown[], void, unknown> {
+    const pickColumns = (row: unknown[]): unknown[] =>
+        columnIndices.map(columnIndex => row[columnIndex]);
+    if (resultSet.storageMode !== 'sqlite' || !resultSet.diskStoreId) {
+        if (rowIndices && rowIndices.length > 0) {
+            for (const index of rowIndices) {
+                const row = resultSet.data[index];
+                if (Array.isArray(row)) {
+                    yield pickColumns(row);
+                }
+            }
+            return;
+        }
+        for (const row of resultSet.data) {
+            if (Array.isArray(row)) {
+                yield pickColumns(row);
+            }
+        }
+        return;
+    }
+
+    const reader = createResultDataReader(resultSet);
+    if (rowIndices && rowIndices.length > 0) {
+        for (const index of rowIndices) {
+            const row = reader.getRows({ offset: index, limit: 1 })[0];
+            if (Array.isArray(row)) {
+                yield pickColumns(row);
+            }
+        }
+        return;
+    }
+
+    for (const batch of reader.iterateRows(50_000)) {
+        for (const row of batch) {
+            if (Array.isArray(row)) {
+                yield pickColumns(row);
+            }
+        }
+    }
+}

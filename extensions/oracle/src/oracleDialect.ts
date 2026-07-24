@@ -26,6 +26,7 @@ export const oracleDialect: DatabaseDialect = {
     supportsProcedures: true,
     supportsTableMaintenance: true,
     supportsSessionMonitor: true,
+    supportsDistributionMetrics: false,
   }),
   connectionForm: {
     fields: [

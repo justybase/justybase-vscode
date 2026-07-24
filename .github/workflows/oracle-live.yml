@@ -1,0 +1,69 @@
+name: Oracle Live Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  ORACLE_LIVE_TEST_REQUIRED: 'true'
+
+jobs:
+  oracle-live:
+    name: Oracle live suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/oracle/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Oracle extension dependencies
+        working-directory: extensions/oracle
+        run: npm ci
+
+      - name: Install Oracle extension
+        run: npm run install:oracle
+
+      - name: Check root types
+        run: npm run check-types
+
+      - name: Lint root
+        run: npm run lint
+
+      - name: Check Oracle extension types
+        run: npm run check-types:oracle
+
+      - name: Lint Oracle extension
+        run: npm run lint:oracle
+
+      - name: Build root
+        run: npm run build
+
+      - name: Build Oracle extension
+        run: npm run build:oracle
+
+      - name: Run Oracle integration suite
+        env:
+          ORACLE_LIVE_TEST_HOST: ${{ secrets.ORACLE_LIVE_TEST_HOST }}
+          ORACLE_LIVE_TEST_PORT: ${{ secrets.ORACLE_LIVE_TEST_PORT }}
+          ORACLE_LIVE_TEST_DATABASE: ${{ secrets.ORACLE_LIVE_TEST_DATABASE }}
+          ORACLE_LIVE_TEST_USER: ${{ secrets.ORACLE_LIVE_TEST_USER }}
+          ORACLE_LIVE_TEST_PASSWORD: ${{ secrets.ORACLE_LIVE_TEST_PASSWORD }}
+          ORACLE_LIVE_TEST_CURRENT_SCHEMA: ${{ secrets.ORACLE_LIVE_TEST_CURRENT_SCHEMA }}
+          ORACLE_LIVE_TEST_CONNECT_STRING: ${{ secrets.ORACLE_LIVE_TEST_CONNECT_STRING }}
+          ORACLE_LIVE_TEST_CONFIG_DIR: ${{ secrets.ORACLE_LIVE_TEST_CONFIG_DIR }}
+          ORACLE_LIVE_TEST_CONNECT_TIMEOUT: ${{ secrets.ORACLE_LIVE_TEST_CONNECT_TIMEOUT }}
+        run: npm run test:oracle:integration

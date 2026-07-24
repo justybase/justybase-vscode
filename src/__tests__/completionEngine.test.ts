@@ -673,6 +673,30 @@ SELECT * FROM CTE1`);
       expect(upperLabels).not.toContain("GROOM");
     });
 
+    it("completes Oracle PL/SQL parameters and local variables", async () => {
+      metadataProvider.databaseKind = "oracle";
+      metadataProvider.effectiveDatabase = "ORCL";
+
+      const items = await complete(`CREATE OR REPLACE FUNCTION F(P_AMOUNT IN NUMBER)
+RETURN NUMBER IS
+  V_TOTAL NUMBER;
+BEGIN
+  V_TOTAL := P_AMOUNT;
+  RETURN |;
+END;`);
+
+      expect(items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          label: "V_TOTAL",
+          kind: CompletionItemKind.Variable,
+        }),
+        expect.objectContaining({
+          label: "P_AMOUNT",
+          kind: CompletionItemKind.Variable,
+        }),
+      ]));
+    });
+
     it("returns DB2 tables for schema dot completion even when no partial object name is typed yet", async () => {
       metadataProvider.databaseKind = "db2";
       metadataProvider.effectiveDatabase = "TESTDB";

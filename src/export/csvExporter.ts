@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
+import type { DatabaseCommand, DatabaseDataReader } from '@justybase/contracts';
 import { logWithFallback } from '../utils/logger';
 import { createCsvFileWriter } from './csvStream';
+import { cancelCommandAndCloseReader, ExportCancelledError, isCancellationError } from '../core/cancellation';
 
 // import * as odbc from 'odbc'; // Removed odbc dependency
 
@@ -18,11 +20,16 @@ export async function exportToCsv(
     cancellationToken?: vscode.CancellationToken
 ): Promise<void> {
     let connection: NzConnection | null = null;
+    let command: DatabaseCommand | undefined;
+    let reader: DatabaseDataReader | undefined;
+    let cancellationDisposable: vscode.Disposable | undefined;
+    let cancellationRequested = false;
+    const cleanupContext = { timeoutMs: 5_000 };
 
     try {
         // Check cancellation before starting
         if (cancellationToken?.isCancellationRequested) {
-            throw new Error('Export cancelled by user');
+            throw new ExportCancelledError(filePath, 0, 'Export cancelled by user');
         }
 
         if (progress) {
@@ -36,11 +43,32 @@ export async function exportToCsv(
         }
 
         // executeReader returns a reader that allows streaming rows
-        const cmd = connection!.createCommand(query);
+        command = connection.createCommand(query);
         if (timeout) {
-            cmd.commandTimeout = timeout;
+            command.commandTimeout = timeout;
         }
-        const reader = await cmd.executeReader();
+        const requestCancellation = () => {
+            cancellationRequested = true;
+            void cancelCommandAndCloseReader(command, reader, cleanupContext);
+        };
+        cancellationDisposable = cancellationToken?.onCancellationRequested(requestCancellation);
+
+        try {
+            reader = await command.executeReader();
+        } catch (error: unknown) {
+            if (cancellationRequested || cancellationToken?.isCancellationRequested || isCancellationError(error)) {
+                requestCancellation();
+                await cancelCommandAndCloseReader(command, reader, cleanupContext);
+                throw new ExportCancelledError(filePath, 0);
+            }
+            throw error;
+        }
+
+        if (cancellationToken?.isCancellationRequested || cancellationRequested) {
+            requestCancellation();
+            await cancelCommandAndCloseReader(command, reader, cleanupContext);
+            throw new ExportCancelledError(filePath, 0);
+        }
 
         if (progress) {
             progress.report({ message: 'Writing to CSV...' });
@@ -65,11 +93,13 @@ export async function exportToCsv(
         let rowBuffer: string[] = []; // Buffer multiple rows before writing
         const BUFFER_SIZE = 500; // Increased buffer size
         let wasCancelled = false;
+        let readError: unknown;
 
         try {
             while (await reader.read()) {
                 // Check for cancellation during data fetch
-                if (cancellationToken?.isCancellationRequested) {
+                if (cancellationToken?.isCancellationRequested || cancellationRequested) {
+                    requestCancellation();
                     wasCancelled = true;
                     if (progress) {
                         progress.report({ message: `Export cancelled - finalizing ${totalRows} rows...` });
@@ -101,7 +131,8 @@ export async function exportToCsv(
                     await new Promise(resolve => setImmediate(resolve));
 
                     // Check again after yielding
-                    if (cancellationToken?.isCancellationRequested) {
+                    if (cancellationToken?.isCancellationRequested || cancellationRequested) {
+                        requestCancellation();
                         wasCancelled = true;
                         if (progress) {
                             progress.report({ message: `Export cancelled - finalizing ${totalRows} rows...` });
@@ -115,11 +146,14 @@ export async function exportToCsv(
                 }
             }
         } catch (readErr: unknown) {
-            // Handle read errors but still finalize file with partial data
-            wasCancelled = true;
-            if (progress) {
+            if (cancellationRequested || cancellationToken?.isCancellationRequested || isCancellationError(readErr)) {
+                requestCancellation();
+                wasCancelled = true;
+                progress?.report({ message: `Export cancelled - finalizing ${totalRows} rows...` });
+            } else {
+                readError = readErr;
                 const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
-                progress.report({ message: `Error after ${totalRows} rows: ${errMsg}` });
+                progress?.report({ message: `Error after ${totalRows} rows: ${errMsg}` });
             }
         }
 
@@ -130,11 +164,25 @@ export async function exportToCsv(
 
         await csvWriter.finalize();
 
-        if (progress) {
-            const status = wasCancelled ? ' (cancelled - partial data saved)' : '';
-            progress.report({ message: `Completed: ${totalRows} rows exported${status}` });
+        if (readError) {
+            throw readError;
         }
+        if (wasCancelled || cancellationToken?.isCancellationRequested || cancellationRequested) {
+            progress?.report({ message: `Export cancelled - partial data saved (${totalRows} rows)` });
+            throw new ExportCancelledError(filePath, totalRows);
+        }
+        progress?.report({ message: `Completed: ${totalRows} rows exported` });
     } finally {
+        cancellationDisposable?.dispose();
+        if (cancellationRequested) {
+            await cancelCommandAndCloseReader(command, reader, cleanupContext);
+        } else if (reader) {
+            try {
+                await reader.close();
+            } catch (e: unknown) {
+                logWithFallback('error', 'Error closing CSV reader:', e);
+            }
+        }
         if (connection) {
             try {
                 await connection.close();

@@ -4,6 +4,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import type { Hover, Position } from "vscode-languageserver/node";
 import { provideHover, type HoverDependencies } from "../../server/hoverEngine";
 import type { MetadataBridge } from "../../server/metadataBridge";
+import type { LocalDefinition } from "../../providers/types";
 
 /*
  * Cursor positions (0-based):
@@ -94,6 +95,39 @@ function aliasBindings(
 }
 
 describe("LSP hoverEngine — regression guard", () => {
+  it("shows hover for an Oracle PL/SQL local variable", async () => {
+    const sql = `CREATE OR REPLACE FUNCTION F(P_AMOUNT IN NUMBER)
+RETURN NUMBER IS
+  V_TOTAL NUMBER;
+BEGIN
+  V_TOTAL := P_AMOUNT;
+  RETURN V_TOTAL;
+END;`;
+    const hover = await provideHover(
+      makeDocument(sql),
+      { position: makePosition(5, 10) },
+      makeDeps({
+        getStatementAtPosition: jest.fn(() => null),
+        getCompletionLocalDefinitions: jest.fn(() => [
+          { name: "V_TOTAL", type: "Variable", columns: [] },
+        ]),
+        findLocalDefinition: jest.fn((definitions: LocalDefinition[], name: string) =>
+          definitions.find((definition) => definition.name === name),
+        ),
+      }),
+      makeBridge({
+        getContext: jest.fn(() =>
+          Promise.resolve({
+            effectiveDatabase: "ORCL",
+            databaseKind: "oracle",
+          }),
+        ),
+      }),
+    );
+
+    expect(getMarkdown(hover)).toContain("**PL/SQL variable** `V_TOTAL`");
+  });
+
   // ============================================================
   // TABLE HOVER — manual resolution (no symbol)
   // ============================================================

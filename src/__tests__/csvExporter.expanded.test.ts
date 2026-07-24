@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import { createConnectedDatabaseConnectionFromDetails } from "../core/connectionFactory";
 import { exportToCsv, escapeCsvField } from "../export/csvExporter";
+import { ExportCancelledError } from "../core/cancellation";
 import { ConnectionDetails } from "../types";
 
 // Mock fs module
@@ -25,6 +26,8 @@ const mockCreateCommand = jest.fn();
 const mockRead = jest.fn();
 const mockGetName = jest.fn();
 const mockGetValue = jest.fn();
+const mockCancel = jest.fn();
+const mockReaderClose = jest.fn();
 
 const mockConnection = {
   connect: mockConnect,
@@ -92,6 +95,7 @@ describe("export/csvExporter", () => {
     mockCreateCommand.mockReturnValue({
       executeReader: mockExecuteReader,
       commandTimeout: 0,
+      cancel: mockCancel,
     });
 
     // Setup mock reader
@@ -100,6 +104,7 @@ describe("export/csvExporter", () => {
       getName: mockGetName,
       getValue: mockGetValue,
       read: mockRead,
+      close: mockReaderClose,
     });
 
     mockConnect.mockResolvedValue(undefined);
@@ -212,20 +217,21 @@ describe("export/csvExporter", () => {
         (i: number) => [readCount, `Name${readCount}`][i],
       );
 
-      await exportToCsv(
+      await expect(exportToCsv(
         connectionDetails,
         "SELECT * FROM test",
         "/tmp/test.csv",
         mockProgress,
         undefined,
         mockCancellationToken,
-      );
+      )).rejects.toBeInstanceOf(ExportCancelledError);
 
       expect(mockProgress.report).toHaveBeenCalledWith(
         expect.objectContaining({
           message: expect.stringContaining("cancelled"),
         }),
       );
+      expect(mockCancel).toHaveBeenCalledTimes(1);
     });
 
     it("should use default port when not specified", async () => {
@@ -264,12 +270,12 @@ describe("export/csvExporter", () => {
       mockRead.mockRejectedValue(new Error("Read error"));
       mockGetName.mockReturnValue("id");
 
-      await exportToCsv(
+      await expect(exportToCsv(
         connectionDetails,
         "SELECT * FROM test",
         "/tmp/test.csv",
         mockProgress,
-      );
+      )).rejects.toThrow("Read error");
 
       expect(mockProgress.report).toHaveBeenCalledWith(
         expect.objectContaining({

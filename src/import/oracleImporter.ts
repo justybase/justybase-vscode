@@ -5,6 +5,7 @@ import {
     importClipboardWithBatching,
     importDataWithBatching,
     normalizeImportedLiteralValue,
+    normalizeTimestampWithTimeZoneValue,
     parseImportTargetTable,
     type BatchImportTargetTable,
     type PreparedImportColumnDescriptor
@@ -48,8 +49,22 @@ function mapImportTypeToOracleType(typeName: string): string {
     if (baseType === 'TEXT') {
         return 'CLOB';
     }
+    if (baseType === 'BLOB') {
+        return 'BLOB';
+    }
+    if (baseType === 'RAW') {
+        const match = normalized.match(/^RAW\(\s*(\d+)\s*\)$/);
+        const length = Math.max(1, Math.min(match ? Number(match[1]) : 2000, 2000));
+        return `RAW(${length})`;
+    }
     if (baseType === 'DATE') {
         return 'DATE';
+    }
+    if (normalized.startsWith('TIMESTAMP WITH TIME ZONE')) {
+        return normalized;
+    }
+    if (normalized.startsWith('TIMESTAMP WITH LOCAL TIME ZONE')) {
+        return normalized;
     }
     if (baseType === 'DATETIME' || baseType === 'TIMESTAMP') {
         return 'TIMESTAMP';
@@ -63,15 +78,31 @@ function toOracleLiteral(value: string | null, column: PreparedImportColumnDescr
         return 'NULL';
     }
 
-    const baseType = getBaseDataType(column.targetDataType);
+    const targetType = normalizeDataType(column.targetDataType);
+    const baseType = getBaseDataType(targetType);
     if (['NUMBER', 'FLOAT', 'BINARY_FLOAT', 'BINARY_DOUBLE'].includes(baseType)) {
         return value;
     }
     if (baseType === 'DATE') {
         return `TO_DATE('${value.replace(/'/g, "''")}', 'YYYY-MM-DD')`;
     }
+    if (targetType.startsWith('TIMESTAMP WITH TIME ZONE') || targetType.startsWith('TIMESTAMP WITH LOCAL TIME ZONE')) {
+        const normalized = normalizeTimestampWithTimeZoneValue(value);
+        return `TO_TIMESTAMP_TZ('${normalized.replace(/'/g, "''")}', 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM')`;
+    }
     if (baseType === 'TIMESTAMP') {
         return `TO_TIMESTAMP('${value.replace(/'/g, "''")}', 'YYYY-MM-DD HH24:MI:SS')`;
+    }
+    if (baseType === 'RAW' || baseType === 'BLOB') {
+        const hexMatch = value.match(/^(?:hex:|0x)([0-9a-f]+)$/i);
+        if (!hexMatch || hexMatch[1].length % 2 !== 0) {
+            throw new Error(`Invalid binary value for ${baseType}; expected hex:<even-length-hex>`);
+        }
+
+        const hex = hexMatch[1].toUpperCase();
+        return baseType === 'BLOB'
+            ? `TO_BLOB(HEXTORAW('${hex}'))`
+            : `HEXTORAW('${hex}')`;
     }
 
     return `'${value.replace(/'/g, "''")}'`;
@@ -104,6 +135,8 @@ export const oracleBatchImportConfig: BatchImportDialectConfig = {
     kind: 'oracle',
     label: 'Oracle',
     insertBatchSize: 100,
+    inferBoolean: true,
+    cleanupCreatedTargetOnFailure: true,
     mapImportType: mapImportTypeToOracleType,
     parseTargetTable(targetTable: string, connectionDetails: ConnectionDetails) {
         return parseImportTargetTable(targetTable, connectionDetails, 'oracle', {
@@ -115,6 +148,9 @@ export const oracleBatchImportConfig: BatchImportDialectConfig = {
     rollbackTransactionSql: 'ROLLBACK',
     buildInsertSql(target, columns, rows, decimalDelimiter) {
         return buildOracleInsertSql(target, columns, rows, decimalDelimiter);
+    },
+    buildDropTableSql(target) {
+        return `DROP TABLE ${target.qualifiedName} PURGE`;
     }
 };
 

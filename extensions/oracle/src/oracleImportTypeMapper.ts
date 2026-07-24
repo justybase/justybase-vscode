@@ -98,6 +98,6 @@ export const oracleImportTypeMapper: DatabaseImportTypeMapper = {
         return new OracleImportDataType(dbType, precision, scale, length);
     },
     createColumnTypeChooser(decimalDelimiter?: string): DatabaseColumnTypeChooser {
-        return new ColumnTypeChooser(decimalDelimiter);
+        return new ColumnTypeChooser(decimalDelimiter, { inferBoolean: true });
     }
 };

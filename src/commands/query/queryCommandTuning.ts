@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from '../../core/connectionManager';
-import { getRequiredDatabaseDdlProvider, getRequiredDatabaseTuningAdvisor } from '../../core/connectionFactory';
+import { getDatabaseDialect, getRequiredDatabaseDdlProvider, getRequiredDatabaseTuningAdvisor } from '../../core/connectionFactory';
 import { runExplainQuery, runQueryRaw, queryResultToRows } from '../../core/queryRunner';
 import { SqlParser } from '../../sql/sqlParser';
 import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
@@ -403,6 +403,8 @@ async function fetchPrimaryTableStatsForTuning(
         ? `${target.database}.${target.schema}.${target.table}`
         : `${target.database}..${target.table}`;
     const ddlProvider = getTuningDdlProvider(connectionManager, connectionName);
+    const databaseKind = connectionManager.getConnectionDatabaseKind(connectionName);
+    const supportsDistributionMetrics = getDatabaseDialect(databaseKind).capabilities.supportsDistributionMetrics;
 
     const lines: string[] = [`## Table Statistics: ${fullTableName}`, ''];
 
@@ -433,21 +435,36 @@ async function fetchPrimaryTableStatsForTuning(
                 connectionName,
                 ddlProvider.buildTableStatsQuery(target.database, target.schema, target.table),
             );
-            const distributionKeys = infoRows
-                .map((row) => toStringValue(getCaseInsensitiveValue(row, 'DIST_KEY')))
-                .filter((value): value is string => Boolean(value && value.trim().length > 0));
             const owner = toStringValue(getCaseInsensitiveValue(infoRows[0] || {}, 'OWNER'));
 
-            lines.push(`**Distribution Key:** ${distributionKeys.length > 0 ? distributionKeys.join(', ') : 'RANDOM'}`);
+            if (supportsDistributionMetrics) {
+                const distributionKeys = infoRows
+                    .map((row) => toStringValue(getCaseInsensitiveValue(row, 'DIST_KEY')))
+                    .filter((value): value is string => Boolean(value && value.trim().length > 0));
+                lines.push(`**Distribution Key:** ${distributionKeys.length > 0 ? distributionKeys.join(', ') : 'RANDOM'}`);
+            }
             lines.push(`**Owner:** ${owner || 'N/A'}`);
         } catch {
-            lines.push('**Distribution Key:** Unable to retrieve');
+            if (supportsDistributionMetrics) {
+                lines.push('**Distribution Key:** Unable to retrieve');
+            }
             lines.push('**Owner:** Unable to retrieve');
             diagnostics.push(`Distribution metadata query failed for ${fullTableName}.`);
         }
     } else {
-        lines.push('**Distribution Key:** Unknown (schema not resolved)');
+        if (supportsDistributionMetrics) {
+            lines.push('**Distribution Key:** Unknown (schema not resolved)');
+        }
         lines.push('**Owner:** N/A');
+    }
+
+    if (!supportsDistributionMetrics) {
+        lines.push('', '**Distribution metrics:** Not applicable for this database dialect.');
+        return {
+            tableStatsText: lines.join('\n'),
+            tableName: fullTableName,
+            diagnostics,
+        };
     }
 
     lines.push('', '### Data Distribution (Skew Check)', '');

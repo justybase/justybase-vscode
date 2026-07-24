@@ -321,6 +321,7 @@ export class NetezzaDocumentSymbolProvider implements vscode.DocumentSymbolProvi
             case 'table':
                 return vscode.SymbolKind.Class;
             case 'macro_variable':
+            case 'local_variable':
                 return vscode.SymbolKind.Variable;
             default:
                 return vscode.SymbolKind.Object;
@@ -343,6 +344,8 @@ export class NetezzaDocumentSymbolProvider implements vscode.DocumentSymbolProvi
                 return 'Table';
             case 'macro_variable':
                 return 'Macro variable';
+            case 'local_variable':
+                return 'PL/SQL local variable';
             default:
                 return 'Symbol';
         }

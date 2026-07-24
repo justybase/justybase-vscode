@@ -36,6 +36,7 @@ export const netezzaDialect: DatabaseDialect = {
     supportsProcedures: true,
     supportsTableMaintenance: true,
     supportsSessionMonitor: true,
+    supportsDistributionMetrics: true,
   }),
   connectionForm: netezzaConnectionForm,
   traits: netezzaDialectTraits,

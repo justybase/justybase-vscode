@@ -7,6 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { exportResultSetToFile, ExportOptions } from '../export/resultExporter';
 import { ResultSet } from '../types';
+import { ExportCancelledError } from '../core/cancellation';
 
 function makeTempFile(ext: string): string {
     return path.join(os.tmpdir(), `test_export_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
@@ -41,6 +42,29 @@ async function exportToTempFile(resultSet: ResultSet, options: ExportOptions): P
 }
 
 describe('export/resultExporter', () => {
+    it('keeps a syntactically valid partial JSON file and throws typed cancellation', async () => {
+        const resultSet = makeResultSet({ data: [[1, 'Alice', 1], [2, 'Bob', 2], [3, 'Cara', 3]] });
+        const filePath = makeTempFile('.json');
+        let checks = 0;
+        const cancellationToken = {
+            get isCancellationRequested() {
+                checks += 1;
+                return checks > 2;
+            }
+        } as ExportOptions['cancellationToken'];
+
+        try {
+            await expect(exportResultSetToFile(resultSet, filePath, {
+                format: 'json',
+                cancellationToken,
+            })).rejects.toBeInstanceOf(ExportCancelledError);
+            const content = fs.readFileSync(filePath, 'utf8');
+            expect(() => JSON.parse(content)).not.toThrow();
+        } finally {
+            try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        }
+    });
+
     describe('CSV export', () => {
         it('should export all rows with headers', async () => {
             const content = await exportToTempFile(makeResultSet(), { format: 'csv' });
@@ -371,6 +395,56 @@ describe('export/resultExporter', () => {
             const content = await exportToTempFile(resultSet, { format: 'sql' });
             expect(content).toContain('TRUE');
             expect(content).toContain('FALSE');
+        });
+
+        it('should export Date values as portable SQL date/timestamp literals', async () => {
+            const resultSet = makeResultSet({
+                columns: [
+                    { name: 'EVENT_DATE', type: 'DATE' },
+                    { name: 'EVENT_TS', type: 'TIMESTAMP' },
+                ],
+                data: [[
+                    new Date(Date.UTC(2024, 0, 2)),
+                    new Date(Date.UTC(2024, 0, 2, 3, 4, 5)),
+                ]],
+            } as unknown as Partial<ResultSet>);
+
+            const content = await exportToTempFile(resultSet, { format: 'sql' });
+            expect(content).toContain("DATE '2024-01-02'");
+            expect(content).toContain("TIMESTAMP '2024-01-02 03:04:05'");
+            expect(content).not.toContain('GMT');
+        });
+
+it('preserves the time component of Oracle DATE values', async () => {
+            const resultSet = makeResultSet({
+                columns: [{ name: 'EVENT_DATE', type: 'DATE' }],
+                data: [[new Date(Date.UTC(2024, 0, 2, 3, 4, 5))]],
+            } as unknown as Partial<ResultSet>);
+
+            const content = await exportToTempFile(resultSet, { format: 'sql', sqlDialect: 'oracle' });
+            expect(content).toContain("TO_DATE('2024-01-02 03:04:05', 'YYYY-MM-DD HH24:MI:SS')");
+        });
+
+        it('should export Oracle binary and timestamp-with-time-zone values as executable literals', async () => {
+            const resultSet = makeResultSet({
+                columns: [
+                    { name: 'PAYLOAD', type: 'BLOB' },
+                    { name: 'EVENT_AT', type: 'TIMESTAMP WITH TIME ZONE' },
+                ],
+                data: [[
+                    Buffer.from([0xca, 0xfe]),
+                    '2026-07-18 12:30:45.123 +02:00',
+                ]],
+            } as unknown as Partial<ResultSet>);
+
+            const content = await exportToTempFile(resultSet, {
+                format: 'sql',
+                sqlTargetTable: 'HR.JBL_EXPORT_TARGET',
+                sqlDialect: 'oracle',
+            });
+            expect(content).toContain('INSERT INTO HR.JBL_EXPORT_TARGET');
+            expect(content).toContain("TO_BLOB(HEXTORAW('CAFE'))");
+            expect(content).toContain("TO_TIMESTAMP_TZ('2026-07-18 12:30:45.123 +02:00'");
         });
 
         it('should escape single quotes in string values', async () => {

@@ -1016,6 +1016,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             isLastChunk: boolean;
             totalRowsSoFar: number;
             limitReached: boolean;
+            isCancelled?: boolean;
         },
         sql: string,
         refreshSql?: string,

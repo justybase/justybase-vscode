@@ -1,0 +1,58 @@
+{
+  "Oracle SELECT": {
+    "prefix": "oraselect",
+    "body": [
+      "SELECT ${1:column1}, ${2:column2}",
+      "FROM ${3:schema}.${4:table}",
+      "WHERE ${5:condition}",
+      "ORDER BY ${6:column1};"
+    ],
+    "description": "Oracle SELECT statement"
+  },
+  "Oracle hierarchical query": {
+    "prefix": "oraconnectby",
+    "body": [
+      "SELECT ${1:column1}",
+      "FROM ${2:schema}.${3:table}",
+      "START WITH ${4:parent_id} IS NULL",
+      "CONNECT BY NOCYCLE PRIOR ${5:id} = ${6:parent_id}",
+      "ORDER SIBLINGS BY ${7:name};"
+    ],
+    "description": "Oracle CONNECT BY hierarchy"
+  },
+  "Oracle pivot": {
+    "prefix": "orapivot",
+    "body": [
+      "SELECT *",
+      "FROM ${1:schema}.${2:table}",
+      "PIVOT (",
+      "  ${3:SUM}( ${4:measure} ) FOR ${5:pivot_column} IN (${6:'VALUE'} AS ${7:value})",
+      ");"
+    ],
+    "description": "Oracle PIVOT query"
+  },
+  "Oracle insert returning": {
+    "prefix": "orainsertreturning",
+    "body": [
+      "INSERT INTO ${1:schema}.${2:table} (${3:column})",
+      "VALUES (${4:value})",
+      "RETURNING ${5:id} INTO :${6:out_value};"
+    ],
+    "description": "Oracle DML RETURNING INTO"
+  },
+  "Oracle PL/SQL block": {
+    "prefix": "oraplsql",
+    "body": [
+      "DECLARE",
+      "  ${1:v_result} ${2:NUMBER};",
+      "BEGIN",
+      "  ${1:v_result} := ${3:0};",
+      "  ${4:NULL};",
+      "EXCEPTION",
+      "  WHEN OTHERS THEN",
+      "    RAISE;",
+      "END;"
+    ],
+    "description": "Anonymous Oracle PL/SQL block"
+  }
+}

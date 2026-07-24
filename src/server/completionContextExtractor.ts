@@ -71,8 +71,11 @@ export class CompletionContextExtractor {
       return stripComments(normalizedText.substring(0, boundary));
     })();
 
+    const cursorCacheKey = databaseKind === "oracle"
+      ? normalizedCursorOffset ?? "full"
+      : "shared";
     const contentHash = simpleHash(
-      `${databaseKind ?? "default"}:${persistentScopeText}:${statementBoundary?.start ?? "full"}`,
+      `${databaseKind ?? "default"}:${persistentScopeText}:${statementBoundary?.start ?? "full"}:${cursorCacheKey}`,
     );
 
     const cleanText = stripComments(normalizedText);
@@ -95,9 +98,10 @@ export class CompletionContextExtractor {
 
     const allLocalDefs = (() => {
       try {
+        const scopeText = databaseKind === "oracle" ? cleanText : persistentScopeText;
         return this.getSemanticScope(
           document,
-          persistentScopeText,
+          scopeText,
           undefined,
           databaseKind,
         ).localDefinitions;
@@ -105,9 +109,26 @@ export class CompletionContextExtractor {
         return [];
       }
     })();
-    const localDefs = allLocalDefs.filter((def) =>
-      isPersistentDocumentDefinition(def),
-    );
+    const localDefs = (() => {
+      const persistentDefinitions = allLocalDefs.filter((def) =>
+        isPersistentDocumentDefinition(def),
+      );
+      if (databaseKind !== "oracle" || normalizedCursorOffset === undefined) {
+        return persistentDefinitions;
+      }
+
+      try {
+        const visibleDefinitions = this.getSemanticScope(
+          document,
+          cleanText,
+          normalizedCursorOffset,
+          databaseKind,
+        ).visibleLocalDefinitions;
+        return mergeLocalDefinitions(persistentDefinitions, visibleDefinitions);
+      } catch {
+        return persistentDefinitions;
+      }
+    })();
 
     const parsed: ParsedContext = {
       contentHash,

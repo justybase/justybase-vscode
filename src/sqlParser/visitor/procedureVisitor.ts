@@ -1,7 +1,10 @@
 import { CstNode, type IToken } from "chevrotain";
 import type { ValidationError } from "../types";
 import { resolveSqlParsingRuntime } from "../parsingRuntime";
-import { ProcedureScopeBuilder } from "../procedure/procedureScopeBuilder";
+import {
+  ProcedureScopeBuilder,
+  type ProcedureParamMode,
+} from "../procedure/procedureScopeBuilder";
 import {
   decodeSqlStringLiteral,
   getStringBodyOffsetShift,
@@ -25,6 +28,8 @@ export interface ProcedureVisitorHost {
   isToken(value: unknown): value is IToken;
   getInProcedureContext(): boolean;
   setInProcedureContext(value: boolean): void;
+  getInProcedureSqlContext(): boolean;
+  setInProcedureSqlContext(value: boolean): void;
   getProcedureScope(): ProcedureScopeBuilder | null;
   setProcedureScope(scope: ProcedureScopeBuilder | null): void;
   getProcedureTopLevelSelect(): boolean;
@@ -46,7 +51,7 @@ function getFirstReturnsToken(
   ctx: Record<string, CstNode[] | IToken[]>,
 ): IToken | undefined {
   for (const [key, value] of Object.entries(ctx)) {
-    if (!key.startsWith("Returns") || !Array.isArray(value)) continue;
+    if (!(key.startsWith("Returns") || key.startsWith("Return")) || !Array.isArray(value)) continue;
     const token = value[0];
     if (host.isToken(token)) return token;
   }
@@ -151,6 +156,12 @@ export function createProcedureStatement(
   if (ctx.procedureBody) {
     host.visit(ctx.procedureBody[0]);
   }
+  if (ctx.procedureBlock) {
+    host.visit(ctx.procedureBlock[0]);
+  }
+  if (ctx.oracleAnonymousBlock) {
+    host.visit(ctx.oracleAnonymousBlock[0]);
+  }
 
   for (const diagnostic of scope.finalize()) {
     host.addError(
@@ -166,6 +177,401 @@ export function createProcedureStatement(
   host.setInProcedureContext(prev);
 }
 
+export function oracleProgramUnit(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.createProcedureStatement) {
+    host.visit(ctx.createProcedureStatement[0]);
+    return;
+  }
+
+  if (!ctx.procedureBlock) {
+    return;
+  }
+
+  const previousContext = host.getInProcedureContext();
+  host.setInProcedureContext(true);
+  host.getScopeBuilder().enterScope();
+  const scope = new ProcedureScopeBuilder();
+  host.setProcedureScope(scope);
+  try {
+    host.visit(ctx.procedureBlock[0]);
+    for (const diagnostic of scope.finalize()) {
+      host.addError(
+        diagnostic.message,
+        diagnostic.token,
+        diagnostic.severity,
+        diagnostic.code,
+      );
+    }
+  } finally {
+    host.setProcedureScope(null);
+    host.getScopeBuilder().exitScope();
+    host.setInProcedureContext(previousContext);
+  }
+}
+
+export function oraclePackageUnit(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  ctx.oraclePackageMember?.forEach((member) => host.visit(member));
+}
+
+export function oraclePackageMember(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.oraclePackageRoutine) {
+    host.visit(ctx.oraclePackageRoutine[0]);
+  }
+}
+
+export function oraclePackageRoutine(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  // Package specifications contain routine declarations without a body. They
+  // do not form a procedure scope until the matching package body is parsed.
+  if (!ctx.oracleAnonymousBlock) return;
+
+  const previousContext = host.getInProcedureContext();
+  const scope = new ProcedureScopeBuilder();
+  host.setInProcedureContext(true);
+  host.getScopeBuilder().enterScope();
+  host.setProcedureScope(scope);
+  try {
+    if (ctx.procedureArguments) {
+      host.visit(ctx.procedureArguments[0]);
+    }
+    if (ctx.procedureSignatureSpec) {
+      host.visit(ctx.procedureSignatureSpec[0]);
+    }
+    host.visit(ctx.oracleAnonymousBlock[0]);
+    for (const diagnostic of scope.finalize()) {
+      host.addError(
+        diagnostic.message,
+        diagnostic.token,
+        diagnostic.severity,
+        diagnostic.code,
+      );
+    }
+  } finally {
+    host.setProcedureScope(null);
+    host.getScopeBuilder().exitScope();
+    host.setInProcedureContext(previousContext);
+  }
+}
+
+export function oracleTriggerUnit(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.oracleAnonymousBlock) {
+    host.visit(ctx.oracleAnonymousBlock[0]);
+  }
+}
+
+export function oracleTriggerHeader(): void {
+  // Trigger timing/event clauses are syntax-only at this layer.
+}
+
+export function oracleAnonymousBlock(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  const existingScope = host.getProcedureScope();
+  if (existingScope) {
+    if (ctx.oracleVariableDeclarations) {
+      host.visit(ctx.oracleVariableDeclarations[0]);
+    }
+    if (ctx.oracleBlockBody) {
+      host.visit(ctx.oracleBlockBody[0]);
+    }
+    return;
+  }
+
+  const previousContext = host.getInProcedureContext();
+  const scope = new ProcedureScopeBuilder();
+  host.setInProcedureContext(true);
+  host.getScopeBuilder().enterScope();
+  host.setProcedureScope(scope);
+  try {
+    if (ctx.oracleVariableDeclarations) {
+      host.visit(ctx.oracleVariableDeclarations[0]);
+    }
+    if (ctx.oracleBlockBody) {
+      host.visit(ctx.oracleBlockBody[0]);
+    }
+    for (const diagnostic of scope.finalize()) {
+      host.addError(
+        diagnostic.message,
+        diagnostic.token,
+        diagnostic.severity,
+        diagnostic.code,
+      );
+    }
+  } finally {
+    host.setProcedureScope(null);
+    host.getScopeBuilder().exitScope();
+    host.setInProcedureContext(previousContext);
+  }
+}
+
+export function oracleBlockBody(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  const tokens: IToken[] = [];
+  const blockStatements = ctx.oracleBlockStatement ?? [];
+  if (blockStatements.length > 0) {
+    blockStatements.forEach((statement) => collectOracleCstTokens(host, statement, tokens));
+  } else {
+    (ctx.oracleProgramToken ?? [])
+      .map((node) => host.getFirstTokenFromCst(node))
+      .forEach((token) => {
+        if (token) tokens.push(token);
+      });
+  }
+
+  const scope = host.getProcedureScope();
+  if (scope) {
+    scanOracleBlockTokens(scope, tokens);
+  }
+
+  blockStatements.forEach((statement) => host.visit(statement));
+}
+
+function collectOracleCstTokens(
+  host: ProcedureVisitorHost,
+  node: CstNode,
+  result: IToken[],
+): void {
+  for (const values of Object.values(node.children ?? {})) {
+    for (const value of values) {
+      if (host.isToken(value)) {
+        result.push(value);
+      } else {
+        collectOracleCstTokens(host, value, result);
+      }
+    }
+  }
+}
+
+function scanOracleBlockTokens(scope: ProcedureScopeBuilder, tokens: IToken[]): void {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const image = tokenImage(token);
+
+    if (image === 'RETURN') {
+      scope.setHasReturn();
+      continue;
+    }
+
+    if (image === 'SELECT') {
+      let hasInto = false;
+      for (let lookahead = index + 1; lookahead < tokens.length; lookahead += 1) {
+        const nextImage = tokenImage(tokens[lookahead]);
+        if (nextImage === 'INTO') hasInto = true;
+        if (nextImage === ';' || nextImage === 'END') {
+          scope.checkStandaloneSelect(token, hasInto);
+          index = lookahead;
+          break;
+        }
+      }
+      continue;
+    }
+
+    if (!['StringLiteral', 'NumberLiteral', 'Semicolon', 'Comma', 'LParen', 'RParen', 'Dot', 'Equals', 'Assign', 'LineComment', 'BlockComment', 'Comment', 'WhiteSpace'].includes(token.tokenType.name)) {
+      const nextImage = tokenImage(tokens[index + 1]);
+      if (nextImage === ':=') {
+        scope.markNameAssigned(unquoteIdentifier(token.image ?? ''));
+      } else {
+        scope.markNameUsed(unquoteIdentifier(token.image ?? ''));
+      }
+    }
+  }
+}
+
+function tokenImage(token: IToken | undefined): string {
+  return (token?.image ?? '').replace(/^"|"$/g, '').toUpperCase();
+}
+
+export function oracleBlockStatement(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  const child = [
+    ctx.oracleIfStatement,
+    ctx.ifStatement,
+    ctx.oracleLoopStatement,
+    ctx.oracleWhileStatement,
+    ctx.oracleForStatement,
+    ctx.loopStatement,
+    ctx.whileStatement,
+    ctx.forStatement,
+    ctx.assignmentStatement,
+    ctx.selectStatement,
+    ctx.insertStatement,
+    ctx.updateStatement,
+    ctx.deleteStatement,
+    ctx.callStatement,
+    ctx.executeImmediateStatement,
+    ctx.returnStatement,
+    ctx.oracleNullStatement,
+    ctx.oracleTokenStatement,
+  ].find((entries) => entries?.length);
+  if (child) {
+    const isSqlStatement = [
+      ctx.selectStatement,
+      ctx.insertStatement,
+      ctx.updateStatement,
+      ctx.deleteStatement,
+    ].includes(child);
+    const previousSqlContext = host.getInProcedureSqlContext();
+    if (isSqlStatement) {
+      host.setInProcedureSqlContext(true);
+    }
+    try {
+      host.visit(child[0]);
+    } finally {
+      if (isSqlStatement) {
+        host.setInProcedureSqlContext(previousSqlContext);
+      }
+    }
+  }
+}
+
+export function oracleConditionalBody(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  ctx.oracleBlockStatement?.forEach((statement) => host.visit(statement));
+}
+
+export function oracleIfStatement(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.expression) {
+    host.visit(ctx.expression[0]);
+  }
+  if (ctx.oracleConditionalBody) {
+    host.visit(ctx.oracleConditionalBody[0]);
+  }
+  ctx.oracleElsifClause?.forEach((clause) => host.visit(clause));
+  // Visit all remaining conditional bodies (ELSE branch, if any)
+  if (ctx.oracleConditionalBody?.length && ctx.oracleConditionalBody.length > 1) {
+    for (let i = 1; i < ctx.oracleConditionalBody.length; i++) {
+      host.visit(ctx.oracleConditionalBody[i]);
+    }
+  }
+}
+
+export function oracleElsifClause(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.expression) {
+    host.visit(ctx.expression[0]);
+  }
+  if (ctx.oracleConditionalBody) {
+    host.visit(ctx.oracleConditionalBody[0]);
+  }
+}
+
+export function oracleLoopStatement(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.oracleConditionalBody) {
+    host.visit(ctx.oracleConditionalBody[0]);
+  }
+}
+
+export function oracleWhileStatement(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.expression) {
+    host.visit(ctx.expression[0]);
+  }
+  if (ctx.oracleConditionalBody) {
+    host.visit(ctx.oracleConditionalBody[0]);
+  }
+}
+
+export function oracleForStatement(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.oracleForHeader) {
+    host.visit(ctx.oracleForHeader[0]);
+  }
+  if (ctx.oracleConditionalBody) {
+    host.visit(ctx.oracleConditionalBody[0]);
+  }
+}
+
+export function oracleForHeader(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  ctx.oracleProgramToken?.forEach((token) => host.visit(token));
+}
+
+export function oracleExceptionBlock(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  ctx.oracleWhenClause?.forEach((clause) => host.visit(clause));
+}
+
+export function oracleWhenClause(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.oracleExceptionBody) {
+    host.visit(ctx.oracleExceptionBody[0]);
+  }
+}
+
+export function oracleExceptionBody(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  ctx.oracleBlockStatement?.forEach((statement) => host.visit(statement));
+}
+
+export function oracleVariableDeclarations(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  ctx.oracleVariableDeclaration?.forEach((declaration) => host.visit(declaration));
+}
+
+export function oracleVariableDeclaration(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  const identifier = ctx.identifier?.[0];
+  if (identifier) {
+    const name = host.visitAs<string>(identifier);
+    const token = host.getFirstTokenFromCst(identifier);
+    if (name && token) {
+      host.getProcedureScope()?.registerVariable(name, token);
+    }
+    host.visit(identifier);
+  }
+  if (ctx.typeName) {
+    host.visit(ctx.typeName[0]);
+  }
+  if (ctx.expression) {
+    ctx.expression.forEach((expression) => host.visit(expression));
+  }
+}
+
 export function procedureArguments(
   host: ProcedureVisitorHost,
   ctx: Record<string, CstNode[]>,
@@ -179,6 +585,15 @@ export function procedureArgument(
   host: ProcedureVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
+  if (ctx.oracleProcedureArgumentWithMode) {
+    host.visit(ctx.oracleProcedureArgumentWithMode[0]);
+    return;
+  }
+  if (ctx.oracleProcedureArgumentWithoutMode) {
+    host.visit(ctx.oracleProcedureArgumentWithoutMode[0]);
+    return;
+  }
+
   let mode: "IN" | "OUT" | "INOUT" = "IN";
   if (ctx.procedureArgumentMode) {
     const modeNode = ctx.procedureArgumentMode[0];
@@ -202,6 +617,64 @@ export function procedureArgument(
   }
   if (ctx.typeName) {
     host.visit(ctx.typeName[0]);
+  }
+}
+
+function visitOracleArgument(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+  mode: ProcedureParamMode,
+): void {
+  const identifier = ctx.identifier?.[0];
+  if (identifier) {
+    const name = host.visitAs<string>(identifier);
+    const token = host.getFirstTokenFromCst(identifier);
+    if (name && token) {
+      host.getProcedureScope()?.registerParameter(name, mode, token);
+    }
+    host.visit(identifier);
+  }
+  if (ctx.procedureArgumentMode) {
+    host.visit(ctx.procedureArgumentMode[0]);
+  }
+  if (ctx.typeName) {
+    host.visit(ctx.typeName[0]);
+  }
+  if (ctx.oracleParameterDefault) {
+    host.visit(ctx.oracleParameterDefault[0]);
+  }
+}
+
+export function oracleProcedureArgumentWithMode(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  let mode: ProcedureParamMode = 'IN';
+  const modeNode = ctx.procedureArgumentMode?.[0];
+  if (modeNode) {
+    const children = modeNode.children ?? {};
+    if (children.Inout || (children.In && children.Out)) {
+      mode = 'INOUT';
+    } else if (children.Out) {
+      mode = 'OUT';
+    }
+  }
+  visitOracleArgument(host, ctx, mode);
+}
+
+export function oracleProcedureArgumentWithoutMode(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  visitOracleArgument(host, ctx, 'IN');
+}
+
+export function oracleParameterDefault(
+  host: ProcedureVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.expression) {
+    host.visit(ctx.expression[0]);
   }
 }
 
@@ -268,6 +741,9 @@ export function procedureBlock(
 ): void {
   if (ctx.procedureDeclareSection) {
     host.visit(ctx.procedureDeclareSection[0]);
+  }
+  if (ctx.oracleVariableDeclarations) {
+    host.visit(ctx.oracleVariableDeclarations[0]);
   }
   if (ctx.autocommitClause) {
     host.visit(ctx.autocommitClause[0]);

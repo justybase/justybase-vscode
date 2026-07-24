@@ -360,7 +360,12 @@ export const db2Harness: LiveDialectHarness = {
 
 export const oracleHarness: LiveDialectHarness = {
     name: 'Oracle',
-    config: buildLiveConfig('ORACLE', 1521, { currentSchema: 'CURRENT_SCHEMA' }),
+    config: buildLiveConfig('ORACLE', 1521, {
+        currentSchema: 'CURRENT_SCHEMA',
+        connectString: 'CONNECT_STRING',
+        configDir: 'CONFIG_DIR',
+        connectTimeout: 'CONNECT_TIMEOUT',
+    }),
     createConnection: config => new OracleConnection(config),
     metadataProvider: oracleMetadataProvider,
     smokeSql: 'SELECT 1 AS TEST_VALUE FROM DUAL',

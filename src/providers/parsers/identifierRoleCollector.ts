@@ -70,11 +70,20 @@ class IdentifierRoleCollector {
       case "createProcedureStatement":
         this.visitCreateProcedureStatement(node);
         return;
+      case "oraclePackageRoutine":
+        this.visitOraclePackageRoutine(node);
+        return;
+      case "oracleVariableDeclaration":
       case "variableDeclaration":
         this.visitVariableDeclaration(node);
         return;
+      case "oracleProcedureArgumentWithMode":
+      case "oracleProcedureArgumentWithoutMode":
       case "procedureArgument":
         this.visitProcedureArgument(node);
+        return;
+      case "oracleForStatement":
+        this.visitForStatement(node);
         return;
       case "assignmentStatement":
         this.visitAssignmentStatement(node);
@@ -211,6 +220,14 @@ class IdentifierRoleCollector {
   private visitCreateProcedureStatement(node: CstNode): void {
     const qualifiedNameNode = this.getChildNodes(node, "qualifiedName")[0];
     this.registerQualifiedTableNameTokens(qualifiedNameNode);
+    this.visitChildren(node);
+  }
+
+  private visitOraclePackageRoutine(node: CstNode): void {
+    const routineName = this.getChildNodes(node, "qualifiedName")[0];
+    if (routineName) {
+      this.registerQualifiedTableNameTokens(routineName);
+    }
     this.visitChildren(node);
   }
 

@@ -3,7 +3,7 @@ import type { DatabaseKind } from '../contracts/database'
 import { getOrderedReferenceTokens, isCstNode, isToken } from '../providers/parsers/scope'
 import { parseSqlStatements, type SqlStatementsParseResult } from './parsingRuntime'
 
-export type SqlRenameSymbolKind = 'cte' | 'table_alias' | 'table'
+export type SqlRenameSymbolKind = 'cte' | 'table_alias' | 'table' | 'local_variable'
 type SqlRenameSymbolRole = 'definition' | 'reference'
 
 export interface SqlRenameOccurrence {
@@ -41,6 +41,7 @@ interface SqlRenameOccurrenceInternal extends SqlRenameOccurrence {
 class SqlSymbolCollector {
     private readonly cteScopes: Array<Map<string, SqlSymbolDefinition>> = [new Map()]
     private readonly aliasScopes: Array<Map<string, SqlSymbolDefinition>> = []
+    private readonly localVariableScopes: Array<Map<string, SqlSymbolDefinition>> = []
     private readonly createdTables = new Map<string, SqlSymbolDefinition>()
     private readonly unresolvedAliasQualifiers: IToken[][] = []
     private readonly definitions = new Map<string, SqlSymbolDefinition>()
@@ -82,6 +83,32 @@ class SqlSymbolCollector {
                 return
             case 'selectStatement':
                 this.visitSelectStatement(node)
+                return
+            case 'createProcedureStatement':
+                if (this.getChildNodes(node, 'oracleAnonymousBlock').length > 0) {
+                    this.visitOracleRoutine(node)
+                    return
+                }
+                this.visitChildren(node)
+                return
+            case 'oraclePackageUnit':
+                this.visitChildren(node)
+                return
+            case 'oraclePackageRoutine':
+                this.visitOracleRoutine(node)
+                return
+            case 'oracleAnonymousBlock':
+                this.visitOracleAnonymousBlock(node)
+                return
+            case 'oracleVariableDeclaration':
+                this.visitOracleVariableDeclaration(node)
+                return
+            case 'oracleProcedureArgumentWithMode':
+            case 'oracleProcedureArgumentWithoutMode':
+                this.visitOracleProcedureArgument(node)
+                return
+            case 'oracleForStatement':
+                this.visitOracleForStatement(node)
                 return
             case 'createTableStatement':
                 this.visitCreateTableStatement(node)
@@ -207,6 +234,59 @@ class SqlSymbolCollector {
         }
     }
 
+    private visitOracleRoutine(node: CstNode): void {
+        this.pushLocalVariableScope()
+        try {
+            this.visitChildren(node)
+        } finally {
+            this.popLocalVariableScope()
+        }
+    }
+
+    private visitOracleAnonymousBlock(node: CstNode): void {
+        const ownsScope = this.localVariableScopes.length === 0
+        if (ownsScope) {
+            this.pushLocalVariableScope()
+        }
+        try {
+            this.visitChildren(node)
+        } finally {
+            if (ownsScope) {
+                this.popLocalVariableScope()
+            }
+        }
+    }
+
+    private visitOracleVariableDeclaration(node: CstNode): void {
+        const identifier = this.getChildNodes(node, 'identifier')[0]
+        const token = this.getFirstTokenFromCst(identifier)
+        if (token) {
+            const symbol = this.createDefinition('local_variable', token)
+            this.getCurrentLocalVariableScope()?.set(symbol.normalizedName, symbol)
+        }
+        this.visitChildren(node)
+    }
+
+    private visitOracleProcedureArgument(node: CstNode): void {
+        const identifier = this.getChildNodes(node, 'identifier')[0]
+        const token = this.getFirstTokenFromCst(identifier)
+        if (token) {
+            const symbol = this.createDefinition('local_variable', token)
+            this.getCurrentLocalVariableScope()?.set(symbol.normalizedName, symbol)
+        }
+        this.visitChildren(node)
+    }
+
+    private visitOracleForStatement(node: CstNode): void {
+        const identifier = this.getChildNodes(node, 'identifier')[0]
+        const token = this.getFirstTokenFromCst(identifier)
+        if (token) {
+            const symbol = this.createDefinition('local_variable', token)
+            this.getCurrentLocalVariableScope()?.set(symbol.normalizedName, symbol)
+        }
+        this.visitChildren(node)
+    }
+
     private visitCreateTableStatement(node: CstNode): void {
         const tableQName = this.getChildNodes(node, 'qualifiedName')[0]
         this.registerCreatedTableDefinition(tableQName)
@@ -314,6 +394,13 @@ class SqlSymbolCollector {
 
         if (tokens.length === 2) {
             this.registerQualifierReference(tokens[0])
+            return
+        }
+        if (tokens.length === 1) {
+            const localVariable = this.resolveLocalVariable(this.normalizeIdentifier(tokens[0]))
+            if (localVariable) {
+                this.addReference(localVariable, tokens[0])
+            }
         }
     }
 
@@ -378,6 +465,16 @@ class SqlSymbolCollector {
         this.unresolvedAliasQualifiers.push([])
     }
 
+    private pushLocalVariableScope(): void {
+        this.localVariableScopes.push(new Map())
+    }
+
+    private popLocalVariableScope(): void {
+        if (this.localVariableScopes.length > 0) {
+            this.localVariableScopes.pop()
+        }
+    }
+
     private popAliasScope(): void {
         const aliasScope = this.aliasScopes[this.aliasScopes.length - 1]
         const unresolved = this.unresolvedAliasQualifiers[this.unresolvedAliasQualifiers.length - 1]
@@ -409,6 +506,21 @@ class SqlSymbolCollector {
 
     private getCurrentCteScope(): Map<string, SqlSymbolDefinition> {
         return this.cteScopes[this.cteScopes.length - 1]
+    }
+
+    private getCurrentLocalVariableScope(): Map<string, SqlSymbolDefinition> | undefined {
+        return this.localVariableScopes[this.localVariableScopes.length - 1]
+    }
+
+    private resolveLocalVariable(name: string): SqlSymbolDefinition | undefined {
+        const upperName = name.toUpperCase()
+        for (let index = this.localVariableScopes.length - 1; index >= 0; index--) {
+            const match = this.localVariableScopes[index].get(upperName)
+            if (match) {
+                return match
+            }
+        }
+        return undefined
     }
 
     private resolveAlias(name: string): SqlSymbolDefinition | undefined {

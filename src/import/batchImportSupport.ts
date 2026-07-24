@@ -37,6 +37,8 @@ export interface BatchImportDialectConfig {
     kind: DatabaseKind;
     label: string;
     insertBatchSize: number;
+    inferBoolean?: boolean;
+    cleanupCreatedTargetOnFailure?: boolean;
     mapImportType(typeName: string): string;
     parseTargetTable(targetTable: string, connectionDetails: ConnectionDetails): BatchImportTargetTable;
     toSqlLiteral(value: string | null, column: PreparedImportColumnDescriptor, decimalDelimiter: string): string;
@@ -49,6 +51,7 @@ export interface BatchImportDialectConfig {
         rows: string[][],
         decimalDelimiter: string
     ): string;
+    buildDropTableSql?(target: BatchImportTargetTable): string;
 }
 
 interface ImportExecutionInput {
@@ -248,6 +251,23 @@ export function normalizeTimestampValue(value: string): string {
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
 }
 
+export function normalizeTimestampWithTimeZoneValue(value: string): string {
+    const normalizedValue = value.trim().replace('T', ' ');
+    const match = normalizedValue.match(
+        /^(\d{4})[./-](\d{1,2})[./-](\d{1,2})\s+(\d{1,2})(?::(\d{1,2})(?::(\d{1,2})(?:\.(\d+))?)?)?\s*(Z|[+-]\d{2}:?\d{2})$/i,
+    );
+    if (!match) {
+        return normalizedValue;
+    }
+
+    const [, year, month, day, hour = '00', minute = '00', second = '00', fraction, rawOffset] = match;
+    const offset = rawOffset.toUpperCase() === 'Z'
+        ? '+00:00'
+        : rawOffset.includes(':') ? rawOffset : `${rawOffset.slice(0, 3)}:${rawOffset.slice(3)}`;
+    const fractionPart = fraction ? `.${fraction}` : '';
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}${fractionPart} ${offset}`;
+}
+
 export function truncateNumeric(value: string, scale: number, decimalDelimiter: string): string {
     if (!value || scale < 0) {
         return value;
@@ -294,6 +314,17 @@ export function normalizeImportedLiteralValue(
 
     const normalizedSourceType = getBaseDataType(sourceType);
     const normalizedTargetType = getBaseDataType(targetType);
+    const sourceTypeWithZone = normalizeDataType(sourceType);
+    const targetTypeWithZone = normalizeDataType(targetType);
+
+    if (
+        sourceTypeWithZone.includes('TIMESTAMP WITH TIME ZONE')
+        || sourceTypeWithZone.includes('TIMESTAMP WITH LOCAL TIME ZONE')
+        || targetTypeWithZone.includes('TIMESTAMP WITH TIME ZONE')
+        || targetTypeWithZone.includes('TIMESTAMP WITH LOCAL TIME ZONE')
+    ) {
+        return normalizeTimestampWithTimeZoneValue(trimmed);
+    }
 
     if (normalizedSourceType === 'BOOLEAN' || normalizedTargetType === 'BOOLEAN' || normalizedTargetType === 'BIT') {
         return normalizeBooleanValue(trimmed);
@@ -468,9 +499,13 @@ async function executeBatchImport(
 ): Promise<ImportResult> {
     const startTime = Date.now();
     let connection: DatabaseConnection | null = null;
+    let createdTargetTable = false;
+    let targetForCleanup: BatchImportTargetTable | undefined;
+    const warnings: string[] = [];
 
     try {
         const target = config.parseTargetTable(input.targetTable, input.connectionDetails);
+        targetForCleanup = target;
         const columns = buildPreparedColumns(input.columns, config);
 
         if (columns.length === 0) {
@@ -492,6 +527,7 @@ async function executeBatchImport(
 
         input.progressCallback?.(`Creating target table ${target.displayName}...`);
         await executeStatement(connection, buildCreateTableSql(target, columns, config.kind), 3600);
+        createdTargetTable = true;
 
         const insertedRows = await insertRowsInBatches(
             connection,
@@ -521,7 +557,8 @@ async function executeBatchImport(
                 rowsInserted: insertedRows,
                 processingTime: `${processingTime.toFixed(2)} seconds`,
                 columns: columns.length,
-                detectedDelimiter: input.detectedDelimiter
+                detectedDelimiter: input.detectedDelimiter,
+                warnings: warnings.length > 0 ? warnings : undefined,
             }
         };
     } catch (error: unknown) {
@@ -533,9 +570,33 @@ async function executeBatchImport(
             }
         }
 
+        if (
+            connection
+            && createdTargetTable
+            && config.cleanupCreatedTargetOnFailure
+            && config.buildDropTableSql
+            && targetForCleanup
+        ) {
+            try {
+                await executeStatement(connection, config.buildDropTableSql(targetForCleanup), 3600);
+            } catch (cleanupError: unknown) {
+                warnings.push(
+                    `Failed to remove the newly created target table ${targetForCleanup.displayName}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+                );
+            }
+        }
+
         return {
             success: false,
-            message: error instanceof Error ? error.message : String(error)
+            message: error instanceof Error ? error.message : String(error),
+            details: {
+                sourceFile: input.sourceFile,
+                targetTable: targetForCleanup?.displayName,
+                fileSize: input.fileSize,
+                format: input.format,
+                rowsProcessed: input.totalRows,
+                warnings: warnings.length > 0 ? warnings : undefined,
+            },
         };
     } finally {
         if (connection) {
@@ -575,7 +636,10 @@ export async function importDataWithBatching(
     }
 
     progressCallback?.('Analyzing source file...');
-    const importer = createTabularDataImporter(filePath, targetTable, { kind: config.kind });
+    const importer = createTabularDataImporter(filePath, targetTable, {
+        kind: config.kind,
+        inferBoolean: config.inferBoolean,
+    });
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
 
@@ -610,7 +674,7 @@ export async function importClipboardWithBatching(
         };
     }
 
-    const processor = new ClipboardDataProcessor();
+    const processor = new ClipboardDataProcessor({ inferBoolean: config.inferBoolean });
     const analyzer = await processor.analyzeClipboardData(progressCallback);
     const headers = normalizeAndDeduplicateHeaders(analyzer.getHeaders(), config.kind);
     const dataTypes = analyzer.getDataTypes().map(typeChooser => normalizeDataType(typeChooser.currentType.toString()));

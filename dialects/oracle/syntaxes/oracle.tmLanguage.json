@@ -1,0 +1,27 @@
+{
+  "scopeName": "oracle.injection",
+  "name": "Oracle SQL Injection",
+  "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block), L:source.oracle - (string.quoted | comment.line | comment.block)",
+  "patterns": [
+    {
+      "name": "keyword.control.oracle",
+      "match": "\\b(CONNECT\\s+BY|START\\s+WITH|ORDER\\s+SIBLINGS\\s+BY|PIVOT|UNPIVOT|RETURNING\\s+INTO|PRIOR|NOCYCLE)\\b"
+    },
+    {
+      "name": "keyword.control.plsql.oracle",
+      "match": "\\b(DECLARE|BEGIN|EXCEPTION|END|PACKAGE|PROCEDURE|FUNCTION|TRIGGER|PRAGMA)\\b"
+    },
+    {
+      "name": "variable.parameter.oracle",
+      "match": ":[A-Za-z_][A-Za-z0-9_$#]*"
+    },
+    {
+      "name": "string.quoted.oracle",
+      "match": "\\b[qQ]'(?:\\[(?:[^\\]]|\\n)*\\]|\\((?:[^)]|\\n)*\\)|\\{(?:[^}]|\\n)*\\}|<(?:[^>]|\\n)*>)'"
+    },
+    {
+      "name": "constant.language.oracle",
+      "match": "\\b(SYSDATE|SYSTIMESTAMP|CURRENT_DATE|CURRENT_TIMESTAMP|CURRENT_SCHEMA|DUAL)\\b"
+    }
+  ]
+}

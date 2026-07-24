@@ -24,6 +24,7 @@ export { BaseSqlParser } from "./BaseSqlParser";
 export {
   BASE_SQL_PARSING_RUNTIME,
   NETEZZA_SQL_PARSING_RUNTIME,
+  ORACLE_SQL_PARSING_RUNTIME,
   parseSqlStatements,
   resolveSqlParsingRuntime,
   runWithSqlParserSession,

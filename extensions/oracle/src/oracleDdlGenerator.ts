@@ -16,7 +16,10 @@ import {
     buildColumnMetadataQuery,
     buildDdlQuery,
     buildFindTableSchemaQuery,
+    buildIndexObjectListQuery,
     buildKeysInfoQuery,
+    buildObjectGrantsQuery,
+    buildPartitionedTableListQuery,
     buildRoutineSourceQuery,
     buildTableCommentQuery,
     buildTableStatsQuery,
@@ -65,6 +68,19 @@ interface ObjectRow {
     OBJECT_SCHEMA?: string | null;
     OBJECT_NAME?: string | null;
     OBJECT_TYPE?: string | null;
+}
+
+interface IndexRow extends ObjectRow {
+    TABLE_NAME?: string | null;
+}
+
+interface GrantRow {
+    OBJECT_SCHEMA?: string | null;
+    OBJECT_NAME?: string | null;
+    GRANTEE?: string | null;
+    PRIVILEGE?: string | null;
+    GRANTABLE?: string | null;
+    COLUMN_NAME?: string | null;
 }
 
 const ROUTINE_SOURCE_TYPES = new Set(['PROCEDURE', 'FUNCTION', 'PACKAGE', 'PACKAGE BODY', 'TRIGGER']);
@@ -208,7 +224,8 @@ function isSupportedObjectType(objectType: string): boolean {
         || normalizedType === 'PACKAGE BODY'
         || normalizedType === 'SEQUENCE'
         || normalizedType === 'SYNONYM'
-        || normalizedType === 'TRIGGER';
+        || normalizedType === 'TRIGGER'
+        || normalizedType === 'INDEX';
 }
 
 async function createConnectionFromDetails(connectionDetails: ConnectionDetails): Promise<DatabaseConnection> {
@@ -325,8 +342,50 @@ async function generateObjectDdl(
     if (normalizedType === 'SEQUENCE' || normalizedType === 'SYNONYM') {
         return getDbmsMetadataDdl(connection, schema, objectName, normalizedType);
     }
+    if (normalizedType === 'INDEX') {
+        return getDbmsMetadataDdl(connection, schema, objectName, 'INDEX');
+    }
 
     throw new Error(`Oracle DDL generation is not implemented for object type "${objectType}".`);
+}
+
+function objectTypeOrder(objectType: string): number {
+    const order: Record<string, number> = {
+        SEQUENCE: 10,
+        TABLE: 20,
+        INDEX: 30,
+        VIEW: 40,
+        PACKAGE: 50,
+        'PACKAGE BODY': 60,
+        FUNCTION: 70,
+        PROCEDURE: 80,
+        TRIGGER: 90,
+        SYNONYM: 100,
+    };
+    return order[objectType] ?? 1000;
+}
+
+function buildGrantDdl(row: GrantRow): string {
+    const schema = row.OBJECT_SCHEMA?.trim();
+    const objectName = row.OBJECT_NAME?.trim();
+    const grantee = row.GRANTEE?.trim();
+    const privilege = row.PRIVILEGE?.trim().toUpperCase();
+    if (!schema || !objectName || !grantee || !privilege) {
+        throw new Error('Oracle grant metadata is incomplete.');
+    }
+
+    const qualifiedObject = buildQualifiedOracleName(schema, objectName);
+    const column = row.COLUMN_NAME?.trim()
+        ? ` (${formatIdentifierForSql(row.COLUMN_NAME.trim(), 'oracle')})`
+        : '';
+    const formattedGrantee = grantee.toUpperCase() === 'PUBLIC'
+        ? 'PUBLIC'
+        : formatIdentifierForSql(grantee, 'oracle');
+    const grantOption = String(row.GRANTABLE ?? '').trim().toUpperCase() === 'YES'
+        ? ' WITH GRANT OPTION'
+        : '';
+
+    return `GRANT ${privilege}${column} ON ${qualifiedObject} TO ${formattedGrantee}${grantOption};`;
 }
 
 const oracleDdlProvider: OracleDdlProvider = {
@@ -340,7 +399,8 @@ const oracleDdlProvider: OracleDdlProvider = {
         return buildTableStatsQuery(schema, tableName);
     },
     buildSkewCheckQuery(qualifiedTableName: string): string {
-        return `SELECT 1 AS DATASLICEID, COUNT(*) AS ROW_COUNT FROM ${qualifiedTableName}`;
+        void qualifiedTableName;
+        throw new Error('Oracle does not expose Netezza SPU/data-slice skew metrics.');
     },
     async getColumns(
         connection: DatabaseConnection,
@@ -493,37 +553,133 @@ const oracleDdlProvider: OracleDdlProvider = {
     },
     async generateBatchDDL(options: DatabaseBatchDDLOptions): Promise<DatabaseBatchDDLResult> {
         const connection = await createConnectionFromDetails(options.connectionDetails);
+        const mode = options.mode ?? 'objects';
+        const includeIndexes = options.includeIndexes ?? mode === 'schema-migration';
+        const includePartitions = options.includePartitions ?? mode === 'schema-migration';
+        const includeGrants = options.includeGrants ?? mode === 'schema-migration';
         try {
             const rows = await executeDatabaseQuery<ObjectRow>(connection, buildBatchObjectListQuery(options.schema, options.objectTypes));
-            const ddlStatements: string[] = [];
+            const generatedStatements: Array<{ order: number; sequence: number; ddl: string }> = [];
             const errors: string[] = [];
+            const warnings: string[] = [];
+            let skipped = 0;
+            let sequence = 0;
 
-            for (const row of rows) {
+            const partitionedTables = new Set<string>();
+            if (includePartitions) {
+                try {
+                    const partitionRows = await executeDatabaseQuery<ObjectRow>(
+                        connection,
+                        buildPartitionedTableListQuery(options.schema),
+                    );
+                    for (const row of partitionRows) {
+                        const schema = row.OBJECT_SCHEMA?.trim().toUpperCase();
+                        const table = row.OBJECT_NAME?.trim().toUpperCase();
+                        if (schema && table) {
+                            partitionedTables.add(`${schema}.${table}`);
+                        }
+                    }
+                } catch (error: unknown) {
+                    errors.push(`Unable to inspect Oracle partition metadata: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+
+            const orderedRows = [...rows].sort((left, right) => {
+                const leftType = left.OBJECT_TYPE?.trim().toUpperCase() || '';
+                const rightType = right.OBJECT_TYPE?.trim().toUpperCase() || '';
+                return objectTypeOrder(leftType) - objectTypeOrder(rightType)
+                    || String(left.OBJECT_NAME).localeCompare(String(right.OBJECT_NAME));
+            });
+
+            const generatedIndexNames = new Set<string>();
+            for (const row of orderedRows) {
                 const objectSchema = row.OBJECT_SCHEMA?.trim();
                 const objectName = row.OBJECT_NAME?.trim();
                 const objectType = row.OBJECT_TYPE?.trim().toUpperCase();
                 if (!objectSchema || !objectName || !objectType) {
+                    skipped += 1;
                     continue;
                 }
 
                 if (!isSupportedObjectType(objectType)) {
                     errors.push(`Skipped unsupported Oracle object type "${objectType}" for ${objectSchema}.${objectName}.`);
+                    skipped += 1;
                     continue;
                 }
 
                 try {
-                    ddlStatements.push(await generateObjectDdl(this, connection, options.database, objectSchema, objectName, objectType));
+                    const ddl = await generateObjectDdl(this, connection, options.database, objectSchema, objectName, objectType);
+                    generatedStatements.push({ order: objectTypeOrder(objectType), sequence: sequence++, ddl });
+                    if (objectType === 'INDEX') {
+                        generatedIndexNames.add(`${objectSchema.toUpperCase()}.${objectName.toUpperCase()}`);
+                    }
+                    if (includePartitions && objectType === 'TABLE' && partitionedTables.has(`${objectSchema.toUpperCase()}.${objectName.toUpperCase()}`) && !/\bPARTITION\s+BY\b/i.test(ddl)) {
+                        warnings.push(`Partition metadata for ${objectSchema}.${objectName} was not present in the generated table DDL.`);
+                    }
                 } catch (error) {
                     errors.push(`${objectType} ${objectSchema}.${objectName}: ${error instanceof Error ? error.message : String(error)}`);
                 }
             }
+
+            if (includeIndexes) {
+                try {
+                    const indexRows = await executeDatabaseQuery<IndexRow>(connection, buildIndexObjectListQuery(options.schema));
+                    for (const row of indexRows) {
+                        const objectSchema = row.OBJECT_SCHEMA?.trim();
+                        const objectName = row.OBJECT_NAME?.trim();
+                        if (!objectSchema || !objectName) {
+                            skipped += 1;
+                            continue;
+                        }
+
+                        const indexKey = `${objectSchema.toUpperCase()}.${objectName.toUpperCase()}`;
+                        if (generatedIndexNames.has(indexKey)) {
+                            continue;
+                        }
+
+                        try {
+                            generatedStatements.push({
+                                order: objectTypeOrder('INDEX'),
+                                sequence: sequence++,
+                                ddl: await generateObjectDdl(this, connection, options.database, objectSchema, objectName, 'INDEX'),
+                            });
+                            generatedIndexNames.add(indexKey);
+                        } catch (error) {
+                            errors.push(`INDEX ${objectSchema}.${objectName}: ${error instanceof Error ? error.message : String(error)}`);
+                        }
+                    }
+                } catch (error: unknown) {
+                    errors.push(`Unable to enumerate Oracle indexes: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+
+            if (includeGrants) {
+                try {
+                    const grantRows = await executeDatabaseQuery<GrantRow>(connection, buildObjectGrantsQuery(options.schema));
+                    for (const row of grantRows) {
+                        try {
+                            generatedStatements.push({ order: 200, sequence: sequence++, ddl: buildGrantDdl(row) });
+                        } catch (error) {
+                            errors.push(`GRANT metadata: ${error instanceof Error ? error.message : String(error)}`);
+                        }
+                    }
+                } catch (error: unknown) {
+                    errors.push(`Unable to enumerate Oracle object grants: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+
+            const ddlStatements = generatedStatements
+                .sort((left, right) => left.order - right.order || left.sequence - right.sequence)
+                .map(statement => statement.ddl);
 
             return {
                 success: errors.length === 0 && ddlStatements.length > 0,
                 ddlCode: ddlStatements.join('\n\n'),
                 objectCount: ddlStatements.length,
                 errors,
-                skipped: Math.max(rows.length - ddlStatements.length, 0)
+                skipped,
+                warnings: warnings.length > 0 ? warnings : undefined,
+                artifactKind: mode,
             };
         } finally {
             await connection.close();

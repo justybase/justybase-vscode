@@ -2468,6 +2468,14 @@
           "meta.create.sql": "other",
           "entity.name.function.sql": "other"
         }
+      },
+      {
+        "path": "./dialects/oracle/syntaxes/oracle.tmLanguage.json",
+        "scopeName": "oracle.injection",
+        "injectTo": [
+          "source.sql",
+          "source.oracle"
+        ]
       }
     ],
     "colors": [
@@ -3264,6 +3272,10 @@
       {
         "language": "sql",
         "path": "./dialects/netezza/snippets/netezza.code-snippets"
+      },
+      {
+        "language": "sql",
+        "path": "./dialects/oracle/snippets/oracle.code-snippets"
       }
     ],
     "walkthroughs": [
@@ -3681,6 +3693,13 @@
           "maximum": 5000000,
           "description": "Spill result rows to SQLite once this row count is reached (host RAM)."
         },
+        "justybase.results.diskBackedResults.memoryByteThreshold": {
+          "type": "integer",
+          "default": 134217728,
+          "minimum": 1048576,
+          "maximum": 4294967296,
+          "description": "Approximate host-memory budget in bytes before results spill to SQLite."
+        },
         "justybase.results.diskBackedResults.insertBatchSize": {
           "type": "integer",
           "default": 50000,
@@ -4055,6 +4074,7 @@
     "test:duckdb:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/duckdb.integration.test.ts",
     "test:db2:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/db2.integration.test.ts",
     "test:metadata-cache:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand src/__tests__/integration/metadataCacheRestart.integration.test.ts",
+    "test:oracle:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/oracle.integration.test.ts",
     "test:postgres:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/postgres.integration.test.ts",
     "test:snowflake:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/snowflake.integration.test.ts",
     "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",
@@ -4120,9 +4140,9 @@
     "hyparquet-compressors": "^1.1.1",
     "hyparquet-writer": "^0.16.1",
     "mssql": "^12.5.0",
-    "vscode-languageclient": "^9.0.1",
-    "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.12"
+    "vscode-languageclient": "^10.1.0",
+    "vscode-languageserver": "^10.1.0",
+    "vscode-languageserver-textdocument": "^1.0.13"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

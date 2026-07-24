@@ -15,6 +15,7 @@ import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { getEffectiveResultColumnType } from '../core/streaming/resultColumnMetadata';
 import { validateExportPath } from './exportUtils';
+import { ExportCancelledError } from '../core/cancellation';
 import type { ProgressCallback } from './xlsbExporter';
 import type { ExportResult } from './xlsbExporter';
 import type { SasColumnDef } from './xptColumnMapper';
@@ -67,13 +68,18 @@ interface PreparedColumn {
  * Follows the `exportStructuredToXlsb`/`exportStructuredToParquet` pattern.
  */
 export async function exportStructuredToXpt(
-    items: { columns: ExportColumn[]; rows: unknown[][]; sql?: string; name?: string }[],
+    items: { columns: ExportColumn[]; rows: Iterable<unknown[]>; sql?: string; name?: string }[],
     outputPath: string,
     copyToClipboard: boolean = false,
     progressCallback?: ProgressCallback,
+    cancellationToken?: vscode.CancellationToken,
 ): Promise<ExportResult> {
     try {
         validateExportPath(outputPath);
+
+        if (cancellationToken?.isCancellationRequested) {
+            throw new ExportCancelledError(outputPath, 0);
+        }
 
         if (progressCallback) {
             progressCallback('Preparing SAS XPORT export...');
@@ -132,8 +138,8 @@ export async function exportStructuredToXpt(
         //
         // For a StructuredExportItem, rows are in-memory arrays.
         // We iterate row-by-row.
-        const totalRows = items.reduce((sum, item) => sum + item.rows.length, 0);
         let writtenRows = 0;
+        let wasCancelled = false;
         const obsBuf = new Uint8Array(computeObsLength(activeCols));
 
         for (const item of items) {
@@ -141,6 +147,10 @@ export async function exportStructuredToXpt(
 
             // Verify column compatibility (same set of columns).
             for (const row of item.rows) {
+                if (cancellationToken?.isCancellationRequested) {
+                    wasCancelled = true;
+                    break;
+                }
                 let offset = 0;
                 for (let ci = 0; ci < activeCols.length; ci++) {
                     const col = activeCols[ci];
@@ -166,6 +176,7 @@ export async function exportStructuredToXpt(
                     progressCallback(`Writing ${writtenRows.toLocaleString()} rows...`);
                 }
             }
+            if (wasCancelled) break;
         }
 
         // Finalize: pad to 80-byte boundary.
@@ -185,6 +196,10 @@ export async function exportStructuredToXpt(
             fs.closeSync(fd);
         }
 
+        if (wasCancelled) {
+            throw new ExportCancelledError(outputPath, writtenRows);
+        }
+
         const stats = fs.statSync(outputPath);
         const fileSizeMb = stats.size / (1024 * 1024);
 
@@ -198,7 +213,7 @@ export async function exportStructuredToXpt(
                     progressCallback(`  ... and ${uniqueWarnings.length - 20} more warnings`);
                 }
             }
-            progressCallback(`  - Rows: ${totalRows.toLocaleString()}`);
+            progressCallback(`  - Rows: ${writtenRows.toLocaleString()}`);
             progressCallback(`  - Columns: ${activeCols.length}`);
             progressCallback(`  - File size: ${fileSizeMb.toFixed(1)} MB`);
             progressCallback(`  - Location: ${outputPath}`);
@@ -206,9 +221,9 @@ export async function exportStructuredToXpt(
 
         const exportResult: ExportResult = {
             success: true,
-            message: `Successfully exported ${totalRows} rows to ${outputPath}`,
+            message: `Successfully exported ${writtenRows} rows to ${outputPath}`,
             details: {
-                rows_exported: totalRows,
+                rows_exported: writtenRows,
                 columns: activeCols.length,
                 file_size_mb: parseFloat(fileSizeMb.toFixed(1)),
                 file_path: outputPath,
@@ -227,6 +242,9 @@ export async function exportStructuredToXpt(
 
         return exportResult;
     } catch (err: unknown) {
+        if (err instanceof ExportCancelledError) {
+            throw err;
+        }
         const errorMsg = err instanceof Error ? err.message : String(err);
         return { success: false, message: `Export failed: ${errorMsg}` };
     }
@@ -251,7 +269,7 @@ export async function exportQueryToXpt(
         validateExportPath(outputPath);
 
         if (cancellationToken?.isCancellationRequested) {
-            throw new Error('Export cancelled by user');
+            throw new ExportCancelledError(outputPath, 0);
         }
 
         if (progressCallback) {
@@ -425,6 +443,10 @@ export async function exportQueryToXpt(
         // Finalize the record writer (pad to 80 bytes).
         writer.finalize();
 
+        if (wasCancelled) {
+            throw new ExportCancelledError(outputPath, totalRows);
+        }
+
         if (progressCallback) {
             progressCallback('Writing output file...');
         }
@@ -477,6 +499,9 @@ export async function exportQueryToXpt(
 
         return exportResult;
     } catch (error: unknown) {
+        if (error instanceof ExportCancelledError) {
+            throw error;
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         return { success: false, message: `Export error: ${errorMsg}` };
     } finally {

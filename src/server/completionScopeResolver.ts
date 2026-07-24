@@ -31,6 +31,7 @@ import { findLocalDefinition } from "./completionLocalDefinitionUtils";
 import {
   toColumnItems,
   toMetadataColumnItem,
+  toLocalVariableItems,
   toScopedColumnItems,
 } from "./completionRenderer";
 import { parseQualifierPathToSource } from "./completionQualifierUtils";
@@ -323,6 +324,7 @@ export class CompletionScopeResolver {
     );
 
     const columnItems = toScopedColumnItems(scopedColumns, typedPrefix, position);
+    const variableItems = toLocalVariableItems(localDefs, typedPrefix, position);
     const functionItems = buildExpressionFunctionItems(
       statementPrefix,
       typedPrefix,
@@ -350,6 +352,7 @@ export class CompletionScopeResolver {
     );
     const items = dedupeCompletionItems([
       ...columnItems,
+      ...variableItems,
       ...functionItems,
       ...specialValueItems,
       ...clauseKeywordItems,

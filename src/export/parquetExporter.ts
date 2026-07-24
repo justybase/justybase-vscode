@@ -7,6 +7,7 @@ import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { getEffectiveResultColumnType } from '../core/streaming/resultColumnMetadata';
 import { validateExportPath } from './exportUtils';
+import { ExportCancelledError } from '../core/cancellation';
 import {
     formatParquetRow,
     writeParquetRows,
@@ -29,7 +30,7 @@ export interface ExportResult {
 
 export interface StructuredExportItem {
     columns: { name: string; type?: string; scale?: number }[];
-    rows: unknown[][];
+    rows: Iterable<unknown[]>;
     sql?: string;
     name: string;
 }
@@ -54,24 +55,28 @@ function buildRowIterable(
         }
     }
 
-    const totalRows = items.reduce((sum, item) => sum + item.rows.length, 0);
-    return { columns, rows: generateRows(), totalRows };
+    return { columns, rows: generateRows(), totalRows: 0 };
 }
 
 export async function exportStructuredToParquet(
     items: StructuredExportItem[],
     outputPath: string,
     copyToClipboard: boolean = false,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    cancellationToken?: vscode.CancellationToken,
 ): Promise<ExportResult> {
     try {
         validateExportPath(outputPath);
+
+        if (cancellationToken?.isCancellationRequested) {
+            throw new ExportCancelledError(outputPath, 0);
+        }
 
         if (progressCallback) {
             progressCallback('Initializing Parquet writer...');
         }
 
-        const { columns, rows, totalRows } = buildRowIterable(items);
+        const { columns, rows } = buildRowIterable(items);
         if (columns.length === 0) {
             return {
                 success: false,
@@ -84,8 +89,13 @@ export async function exportStructuredToParquet(
         }
 
         let writtenRows = 0;
+        let wasCancelled = false;
         async function* trackedRows(): AsyncIterable<Record<string, unknown>> {
             for (const row of rows) {
+                if (cancellationToken?.isCancellationRequested) {
+                    wasCancelled = true;
+                    break;
+                }
                 writtenRows++;
                 if (writtenRows % 10000 === 0 && progressCallback) {
                     progressCallback(`Streaming ${writtenRows.toLocaleString()} rows...`);
@@ -95,25 +105,29 @@ export async function exportStructuredToParquet(
         }
 
         if (progressCallback) {
-            progressCallback(`Processing ${totalRows.toLocaleString()} rows...`);
+            progressCallback('Processing rows...');
         }
 
         await writeParquetRows(outputPath, columns, trackedRows());
+
+        if (wasCancelled) {
+            throw new ExportCancelledError(outputPath, writtenRows);
+        }
 
         const stats = fs.statSync(outputPath);
         const fileSizeMb = stats.size / (1024 * 1024);
 
         if (progressCallback) {
             progressCallback('Parquet file created successfully');
-            progressCallback(`  - Rows: ${totalRows.toLocaleString()}`);
+            progressCallback(`  - Rows: ${writtenRows.toLocaleString()}`);
             progressCallback(`  - File size: ${fileSizeMb.toFixed(1)} MB`);
         }
 
         const exportResult: ExportResult = {
             success: true,
-            message: `Successfully exported ${totalRows} rows to ${outputPath}`,
+            message: `Successfully exported ${writtenRows} rows to ${outputPath}`,
             details: {
-                rows_exported: totalRows,
+                rows_exported: writtenRows,
                 columns: columns.length,
                 file_size_mb: parseFloat(fileSizeMb.toFixed(1)),
                 file_path: outputPath,
@@ -132,6 +146,9 @@ export async function exportStructuredToParquet(
 
         return exportResult;
     } catch (err: unknown) {
+        if (err instanceof ExportCancelledError) {
+            throw err;
+        }
         const errorMsg = err instanceof Error ? err.message : String(err);
         return {
             success: false,
@@ -155,7 +172,7 @@ export async function exportQueryToParquet(
         validateExportPath(outputPath);
 
         if (cancellationToken?.isCancellationRequested) {
-            throw new Error('Export cancelled by user');
+            throw new ExportCancelledError(outputPath, 0);
         }
 
         if (progressCallback) {
@@ -329,6 +346,10 @@ export async function exportQueryToParquet(
 
         await writeParquetRows(outputPath, columnsForWrite, allRows(), { rowGroupSize: 65536 });
 
+        if (wasCancelled) {
+            throw new ExportCancelledError(outputPath, totalRows);
+        }
+
         const stats = fs.statSync(outputPath);
         const fileSizeMb = stats.size / (1024 * 1024);
 
@@ -368,6 +389,9 @@ export async function exportQueryToParquet(
 
         return exportResult;
     } catch (error: unknown) {
+        if (error instanceof ExportCancelledError) {
+            throw error;
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
             success: false,

@@ -59,6 +59,31 @@ export function toLocalDefinitionItems(
     }));
 }
 
+export function toLocalVariableItems(
+  localDefs: LocalDefinition[],
+  typedPrefix: string,
+  position: Position,
+): CompletionItem[] {
+  return localDefs
+    .filter((definition) => {
+      const type = definition.type.toUpperCase();
+      return (
+        (type === "VARIABLE" || type === "PARAMETER") &&
+        matchesPrefix(definition.name, typedPrefix)
+      );
+    })
+    .map((definition) => {
+      const item: CompletionItem = {
+        label: definition.name,
+        kind: CompletionItemKind.Variable,
+        detail: `PL/SQL ${definition.type.toLowerCase()}`,
+        sortText: `1_${definition.name}`,
+      };
+      applyPrefixRange(item, position, typedPrefix);
+      return item;
+    });
+}
+
 export function toMetadataColumnItem(
   column: MetadataColumnItem,
 ): CompletionItem {

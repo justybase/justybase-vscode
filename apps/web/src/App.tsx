@@ -73,12 +73,25 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   const databaseRef = useRef('');
   const schemaRef = useRef('');
   const activeQueryIdRef = useRef('');
+  const savedConnectionIdRef = useRef<string | null>(null);
+  const savedDatabaseRef = useRef('');
+  const restoredSelectionRef = useRef(false);
   const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
   const sql = activeTab?.sql ?? '';
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   useEffect(() => { activeQueryIdRef.current = activeQueryId; }, [activeQueryId]);
-  useEffect(() => { setDatabase(''); setSchema(''); setColumns([]); setInspectedObject(null); }, [selected?.id]);
+  useEffect(() => {
+    if (!selected) return;
+    if (!restoredSelectionRef.current) {
+      restoredSelectionRef.current = true;
+      if (selected.id === savedConnectionIdRef.current && savedDatabaseRef.current) {
+        setDatabase(savedDatabaseRef.current);
+        return;
+      }
+    }
+    setDatabase(''); setSchema(''); setColumns([]); setInspectedObject(null);
+  }, [selected?.id]);
   useEffect(() => { databaseRef.current = database; }, [database]);
   useEffect(() => { schemaRef.current = schema; }, [schema]);
   useEffect(() => {
@@ -88,6 +101,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
       let conn: ConnectionProfileSummary | undefined;
       try {
         const savedId = localStorage.getItem('jwb_connection');
+        savedConnectionIdRef.current = savedId;
         if (savedId) conn = items.find(c => c.id === savedId);
       } catch { /* ignore */ }
       setSelected(conn ?? items[0] ?? null);
@@ -101,10 +115,10 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
         setTabs(prev => prev.map(t => t.id === 'query-1' ? { ...t, sql: draft } : t));
       }
     } catch { /* ignore */ }
-    // Restore saved database
+    // Capture the saved database so the selected-connection reset can preserve it.
     try {
       const savedDb = localStorage.getItem('jwb_database');
-      if (savedDb) setDatabase(savedDb);
+      savedDatabaseRef.current = savedDb ?? '';
     } catch { /* ignore */ }
   }, []);
 

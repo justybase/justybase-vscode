@@ -6,6 +6,7 @@ import {
     parseLocalDefinitionsWithParser,
     parseVisibleLocalDefinitionsWithParser
 } from '../providers/parsers/parserSqlContext';
+import { resolveSqlRenameSymbol } from '../sqlParser/symbols';
 
 describe('parserSqlContext', () => {
     it('parses alias bindings for TABLE WITH FINAL function sources', () => {
@@ -48,6 +49,49 @@ describe('parserSqlContext', () => {
             db: 'JUST_DATA',
             table: 'DIMACCOUNT'
         });
+    });
+
+    it('uses the Oracle CST runtime for hierarchical queries and quoted aliases', () => {
+        const sql = 'SELECT "e".employee_id FROM "HR"."EMPLOYEES" "e" START WITH manager_id IS NULL CONNECT BY PRIOR employee_id = manager_id';
+        const scope = parseSemanticScopeWithParser(sql, sql.indexOf('employee_id'), 'oracle');
+
+        expect(scope.source).toBe('cst');
+        expect(scope.preferredAliasBindings.get('E')).toEqual({
+            schema: 'HR',
+            table: 'EMPLOYEES'
+        });
+    });
+
+    it('exposes Oracle parameters and local variables only inside their PL/SQL block', () => {
+        const sql = `CREATE OR REPLACE FUNCTION HR.CALC_TOTAL(P_AMOUNT IN NUMBER)
+RETURN NUMBER IS
+    V_TOTAL NUMBER;
+BEGIN
+    V_TOTAL := P_AMOUNT;
+    RETURN V_TOTAL;
+END;`;
+        const insideOffset = sql.indexOf('RETURN V_TOTAL');
+        const outsideOffset = sql.length;
+
+        const inside = parseVisibleLocalDefinitionsWithParser(sql, insideOffset, 'oracle');
+        expect(inside).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'P_AMOUNT', type: 'Parameter' }),
+            expect.objectContaining({ name: 'V_TOTAL', type: 'Variable' }),
+        ]));
+        expect(parseVisibleLocalDefinitionsWithParser(sql, outsideOffset, 'oracle')).not.toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ name: 'P_AMOUNT' }),
+                expect.objectContaining({ name: 'V_TOTAL' }),
+            ]),
+        );
+    });
+
+    it('resolves Oracle table-alias rename occurrences through the parser runtime', () => {
+        const sql = 'SELECT e.employee_id FROM HR.EMPLOYEES e WHERE e.employee_id > 0';
+        const resolution = resolveSqlRenameSymbol(sql, sql.indexOf('e.employee_id'), 'oracle');
+
+        expect(resolution).toBeDefined();
+        expect(resolution?.occurrences.length).toBeGreaterThanOrEqual(3);
     });
 
     it('keeps OF as a table alias in incomplete procedure token fallback', () => {

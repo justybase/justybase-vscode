@@ -96,6 +96,8 @@ interface OracleDbModule {
     CLOB: unknown;
     NCLOB: unknown;
     fetchAsString: unknown[];
+    BLOB: unknown;
+    fetchAsBuffer: unknown[];
     STMT_TYPE_SELECT: number;
     getConnection(options: OracleConnectOptions): Promise<OracleRuntimeConnection>;
 }
@@ -227,6 +229,11 @@ async function loadOracleDb(): Promise<OracleDbModule> {
                     fetchAsString.push(oracleDb.NCLOB);
                 }
                 oracleDb.fetchAsString = fetchAsString;
+                const fetchAsBuffer = Array.isArray(oracleDb.fetchAsBuffer) ? [...oracleDb.fetchAsBuffer] : [];
+                if (!fetchAsBuffer.includes(oracleDb.BLOB)) {
+                    fetchAsBuffer.push(oracleDb.BLOB);
+                }
+                oracleDb.fetchAsBuffer = fetchAsBuffer;
                 return oracleDb;
             })
             .catch(error => {
@@ -426,8 +433,19 @@ export class OracleConnection extends EventEmitter implements DatabaseConnection
         }
 
         if (typeof connection.breakExecution === 'function') {
-            await connection.breakExecution();
-            return;
+            try {
+                await connection.breakExecution();
+                return;
+            } catch (breakExecutionError) {
+                // Thin-mode versions differ in which break API they expose.
+                // A failed breakExecution must still get the legacy fallback.
+                try {
+                    await connection.break();
+                    return;
+                } catch {
+                    throw breakExecutionError;
+                }
+            }
         }
 
         await connection.break();
@@ -599,6 +617,7 @@ class OracleCommand implements DatabaseCommand {
     public commandTimeout = 0;
     public _recordsAffected = -1;
     private _cancelled = false;
+    private _cancelPromise?: Promise<void>;
 
     public constructor(
         private readonly _connection: OracleConnection,
@@ -626,7 +645,10 @@ class OracleCommand implements DatabaseCommand {
 
     public async cancel(): Promise<void> {
         this._cancelled = true;
-        await this._connection.breakCurrentOperation();
+        if (!this._cancelPromise) {
+            this._cancelPromise = this._connection.breakCurrentOperation();
+        }
+        await this._cancelPromise;
     }
 
     public async execute(): Promise<void> {

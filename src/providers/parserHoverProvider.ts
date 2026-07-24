@@ -93,9 +93,11 @@ export class NetezzaParserHoverProvider implements vscode.HoverProvider {
             cursorOffset: statementRelativeOffset,
         };
 
-        const semanticScope = this.parseSession
-            ? this.resolveStatementSemanticScope(statementParseRequest, statementSql, statementRelativeOffset, databaseKind)
-            : parseSemanticScopeWithParser(statementSql, statementRelativeOffset, databaseKind);
+        const semanticScope = databaseKind === 'oracle'
+            ? this.resolveStatementSemanticScope(parseRequest, fullSql, offset, databaseKind)
+            : this.parseSession
+                ? this.resolveStatementSemanticScope(statementParseRequest, statementSql, statementRelativeOffset, databaseKind)
+                : parseSemanticScopeWithParser(statementSql, statementRelativeOffset, databaseKind);
         const aliasBindings = semanticScope.preferredAliasBindings;
         const localDefinitions = semanticScope.visibleLocalDefinitions;
 

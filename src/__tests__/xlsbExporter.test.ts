@@ -15,6 +15,7 @@ import {
   copyFileToClipboard,
   getTempFilePath
 } from '../export/xlsbExporter';
+import { ExportCancelledError } from '../core/cancellation';
 
 // Mock dependencies
 jest.mock('fs', () => ({
@@ -174,9 +175,8 @@ describe('xlsbExporter', () => {
       const tokenSource = new (require('vscode').CancellationTokenSource)();
       tokenSource.token.isCancellationRequested = true;
 
-      const result = await exportQueryToXlsb(mockConnDetails, 'SELECT 1', 'out.xlsb', false, undefined, undefined, tokenSource.token);
-      expect(result.success).toBe(false);
-      expect(result.message).toContain('cancelled');
+      await expect(exportQueryToXlsb(mockConnDetails, 'SELECT 1', 'out.xlsb', false, undefined, undefined, tokenSource.token))
+        .rejects.toBeInstanceOf(ExportCancelledError);
     });
 
     it('should handle runtime cancellation', async () => {
@@ -204,9 +204,8 @@ describe('xlsbExporter', () => {
       };
       mockExecuteReader.mockResolvedValue(mockReader);
 
-      const result = await exportQueryToXlsb(mockConnDetails, 'SELECT 1', 'out.xlsb', false, undefined, undefined, tokenSource as any);
-      expect(result.success).toBe(true); // Still "success" but with partial data message
-      expect(result.message).toContain('cancelled');
+      await expect(exportQueryToXlsb(mockConnDetails, 'SELECT 1', 'out.xlsb', false, undefined, undefined, tokenSource as any))
+        .rejects.toBeInstanceOf(ExportCancelledError);
     });
 
     it('should handle empty result sets', async () => {

@@ -4,6 +4,7 @@ import {
     buildColumnsWithKeysQuery,
     buildDdlQuery,
     buildFindTableSchemaQuery,
+    buildIndexObjectListQuery,
     buildObjectSearchQuery,
     buildProcedureSourceSearchQuery,
     buildKeysInfoQuery,
@@ -14,6 +15,8 @@ import {
     buildListViewsQuery,
     buildLookupColumnsQuery,
     buildObjectTypeQuery,
+    buildObjectGrantsQuery,
+    buildPartitionedTableListQuery,
     buildRoutineSourceQuery,
     buildTableColumnsQuery,
     buildTableCommentQuery,
@@ -113,6 +116,9 @@ describe('oracleSystemQueries', () => {
         const viewDefinitionQuery = compactSql(buildViewDefinitionQuery('HR', 'ORDERS_V'));
         const routineSourceQuery = compactSql(buildRoutineSourceQuery('HR', 'DO_WORK', 'PROCEDURE'));
         const batchQuery = compactSql(buildBatchObjectListQuery('HR', ['SEQUENCE', 'PACKAGE BODY']));
+        const indexQuery = compactSql(buildIndexObjectListQuery('HR'));
+        const partitionQuery = compactSql(buildPartitionedTableListQuery('HR'));
+        const grantsQuery = compactSql(buildObjectGrantsQuery('HR'));
 
         expect(typeGroupsQuery).toContain("SELECT 'TABLE' AS OBJTYPE FROM DUAL");
         expect(typeGroupsQuery).toContain("UNION ALL SELECT 'TRIGGER' AS OBJTYPE FROM DUAL");
@@ -135,6 +141,11 @@ describe('oracleSystemQueries', () => {
         expect(batchQuery).toContain("O.OBJECT_TYPE IN ('SEQUENCE', 'PACKAGE BODY')");
         expect(batchQuery).toContain("AND UPPER(O.OWNER) = UPPER('HR')");
         expect(batchQuery).toContain("WHEN 'SEQUENCE' THEN 1");
+        expect(indexQuery).toContain('FROM ALL_INDEXES I');
+        expect(indexQuery).toContain("NVL(I.GENERATED, 'N') <> 'Y'");
+        expect(partitionQuery).toContain('FROM ALL_PART_TABLES');
+        expect(grantsQuery).toContain('FROM ALL_TAB_PRIVS');
+        expect(grantsQuery).toContain('FROM ALL_COL_PRIVS');
 
         expect(mapObjectTypeToDbmsMetadataType('package body')).toBe('PACKAGE_BODY');
         expect(mapObjectTypeToDbmsMetadataType('trigger')).toBe('TRIGGER');

@@ -476,6 +476,14 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 defaultValue: 25000
             },
             {
+                id: 'results-disk-byte-threshold',
+                label: 'Memory Byte Threshold',
+                description: 'Approximate bytes before memory-to-disk spill starts (1 MiB–4 GiB)',
+                type: 'number',
+                configKey: 'results.diskBackedResults.memoryByteThreshold',
+                defaultValue: 134217728
+            },
+            {
                 id: 'results-disk-batch',
                 label: 'Insert Batch Size',
                 description: 'SQLite insert batch size for disk-backed results (1000–200000)',

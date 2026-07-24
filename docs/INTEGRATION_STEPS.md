@@ -25,6 +25,28 @@ npm run test -- --testPathPatterns="postgresql"
 npm run verify:postgresql
 ```
 
+## Oracle Checklist
+
+The Oracle extension has a dedicated live suite at
+`src/__tests__/integration/oracle.integration.test.ts`. Install the optional
+runtime first, then provide `ORACLE_LIVE_TEST_HOST`,
+`ORACLE_LIVE_TEST_PORT`, `ORACLE_LIVE_TEST_DATABASE`,
+`ORACLE_LIVE_TEST_USER`, and `ORACLE_LIVE_TEST_PASSWORD` (optionally
+`ORACLE_LIVE_TEST_CURRENT_SCHEMA`) and run:
+
+```bash
+npm run install:oracle
+npm run test:oracle:integration
+npm run verify:oracle
+```
+
+The suite exercises the Oracle connection, catalog/search metadata, DDL
+extraction and generation, Oracle optimizer statistics, the guarded
+non-applicable distribution/skew path, and session-monitor storage. The shared
+optional smoke suite additionally covers the Oracle import path. Both live
+suites are excluded from the default unit-test configuration and are
+intentionally opt-in because they create temporary live database objects.
+
 ## Snowflake Checklist
 
 Use Snowflake when you need a cloud-only optional runtime with stricter auth and cost controls:

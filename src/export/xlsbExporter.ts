@@ -15,6 +15,8 @@ const XlsbWriter = require('@justybase/spreadsheet-tasks').XlsbWriter as new (fi
 import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { getEffectiveResultColumnType } from '../core/streaming/resultColumnMetadata';
+import { formatBinaryValue } from './binaryValue';
+import { ExportCancelledError } from '../core/cancellation';
 import {
     convertRowExcelNumericStrings,
     convertToExcelNumberIfNumericString,
@@ -79,11 +81,11 @@ export async function exportQueryToXlsb(
         // Pre-validate export path
         validateExportPath(outputPath);
 
-        // Check cancellation before starting
         if (cancellationToken?.isCancellationRequested) {
-            throw new Error('Export cancelled by user');
+            throw new ExportCancelledError(outputPath, 0);
         }
 
+        // Check cancellation before starting
         // Connect to database
         if (progressCallback) {
             progressCallback('Connecting to database...');
@@ -191,9 +193,12 @@ export async function exportQueryToXlsb(
                             const row: unknown[] = [];
                             for (let i = 0; i < reader.fieldCount; i++) {
                                 let val = reader.getValue(i);
+                                const binaryValue = formatBinaryValue(val);
 
                                 // Apply conversion ONLY if column is strictly numeric in database
-                                if (colIsNumeric[i]) {
+                                if (binaryValue) {
+                                    val = binaryValue;
+                                } else if (colIsNumeric[i]) {
                                     val = convertToExcelNumberIfNumericString(val, columnTypes[i]);
                                 }
 
@@ -285,6 +290,10 @@ export async function exportQueryToXlsb(
         }
         await writer.finalize();
 
+        if (wasCancelled) {
+            throw new ExportCancelledError(outputPath, totalRows);
+        }
+
         // Check file size
         const stats = fs.statSync(outputPath);
         const fileSizeMb = stats.size / (1024 * 1024);
@@ -326,6 +335,9 @@ export async function exportQueryToXlsb(
 
         return exportResult;
     } catch (error: unknown) {
+        if (error instanceof ExportCancelledError) {
+            throw error;
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
             success: false,
@@ -362,7 +374,7 @@ export interface CsvExportItem {
  */
 export interface StructuredExportItem {
     columns: { name: string; type?: string }[];
-    rows: unknown[][];
+    rows: Iterable<unknown[]>;
     sql?: string;
     name: string;
 }
@@ -545,6 +557,9 @@ export async function exportCsvToXlsb(
 
         return exportResult;
     } catch (err: unknown) {
+        if (err instanceof ExportCancelledError) {
+            throw err;
+        }
         const errorMsg = err instanceof Error ? err.message : String(err);
         return {
             success: false,
@@ -566,11 +581,16 @@ export async function exportStructuredToXlsb(
     items: StructuredExportItem[],
     outputPath: string,
     copyToClipboard: boolean = false,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    cancellationToken?: vscode.CancellationToken,
 ): Promise<ExportResult> {
     try {
         // Pre-validate export path
         validateExportPath(outputPath);
+
+        if (cancellationToken?.isCancellationRequested) {
+            throw new ExportCancelledError(outputPath, 0);
+        }
 
         if (progressCallback) {
             progressCallback('Initializing XLSB writer...');
@@ -579,6 +599,7 @@ export async function exportStructuredToXlsb(
         const writer = new XlsbWriter(outputPath);
         let totalRows = 0;
         let totalColumns = 0;
+        let wasCancelled = false;
         const sqlItems: { name: string; sql: string }[] = [];
 
         for (const item of items) {
@@ -606,7 +627,13 @@ export async function exportStructuredToXlsb(
             let sheetRows = 0;
             // Write rows with type-aware conversion
             for (const row of item.rows) {
+                if (cancellationToken?.isCancellationRequested) {
+                    wasCancelled = true;
+                    break;
+                }
                 const processedRow = row.map((val, i) => {
+                    const binaryValue = formatBinaryValue(val);
+                    if (binaryValue) return binaryValue;
                     if (colIsNumeric[i]) {
                         // Column is numeric type - apply conversion
                         return convertToExcelNumberIfNumericString(val, item.columns[i]?.type);
@@ -624,6 +651,8 @@ export async function exportStructuredToXlsb(
             }
 
             writer.endSheet();
+
+            if (wasCancelled) break;
 
             if (item.sql) {
                 sqlItems.push({ name: sheetName, sql: item.sql });
@@ -647,6 +676,10 @@ export async function exportStructuredToXlsb(
             progressCallback('Finalizing XLSB file...');
         }
         await writer.finalize();
+
+        if (wasCancelled) {
+            throw new ExportCancelledError(outputPath, totalRows);
+        }
 
         const stats = fs.statSync(outputPath);
         const fileSizeMb = stats.size / (1024 * 1024);
@@ -680,6 +713,9 @@ export async function exportStructuredToXlsb(
 
         return exportResult;
     } catch (err: unknown) {
+        if (err instanceof ExportCancelledError) {
+            throw err;
+        }
         const errorMsg = err instanceof Error ? err.message : String(err);
         return {
             success: false,

@@ -129,6 +129,31 @@ describe("sqlParser/symbols", () => {
     expect(symbol?.occurrences).toHaveLength(3);
   });
 
+  it("renames Oracle PL/SQL parameters and local variables", () => {
+    const sql = `CREATE OR REPLACE FUNCTION HR.CALC_TOTAL(P_AMOUNT IN NUMBER)
+RETURN NUMBER IS
+    V_TOTAL NUMBER;
+BEGIN
+    V_TOTAL := P_AMOUNT;
+    RETURN V_TOTAL;
+END;`;
+    const symbol = resolveSqlRenameSymbol(
+      sql,
+      sql.indexOf("V_TOTAL :=") + 2,
+      "oracle",
+    );
+
+    expect(symbol).toMatchObject({
+      kind: "local_variable",
+      name: "V_TOTAL",
+    });
+    expect(symbol?.occurrences.map((occurrence) => occurrence.role)).toEqual([
+      "definition",
+      "reference",
+      "reference",
+    ]);
+  });
+
   describe("CTE scope isolation", () => {
     const cteLeakSql = `WITH ABC_1 AS (
       SELECT A.ACCOUNTKEY FROM JUST_DATA..DIMACCOUNT A
