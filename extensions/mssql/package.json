@@ -2,7 +2,7 @@
     "name": "justybaselite-mssql",
     "displayName": "JustyBase MS SQL Server Support",
     "description": "Optional Microsoft SQL Server Support for JustyBase Core",
-    "version": "3.16.10",
+    "version": "3.16.11",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
