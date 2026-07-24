@@ -2,7 +2,7 @@
   "name": "justybaselite-netezza",
   "displayName": "JustyBase Core (NetezzaSQL)",
   "description": "A powerful, zero-config VS Code extension for IBM Netezza / PureData System for Analytics databases",
-  "version": "3.16.10",
+  "version": "3.16.11",
   "workspaces": [
     "packages/*",
     "apps/*"
