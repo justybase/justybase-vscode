@@ -264,7 +264,7 @@ export function columnReference(
 
   if (rawTokens.length === 0) return;
   const procedureScope = host.getProcedureScope();
-  if (host.getInProcedureContext()) {
+  if (host.getInProcedureContext() && !host.getInProcedureSqlContext()) {
     if (procedureScope && rawTokens.length >= 1) {
       procedureScope.markNameUsed(
         unquoteIdentifier(host.getTokenText(rawTokens[0])),
@@ -436,14 +436,18 @@ export function functionCall(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[] | IToken[]>,
 ): void {
+  const identifierTokens = (ctx.Identifier as unknown as IToken[] | undefined) ?? [];
   const fnToken =
-    (ctx.Identifier?.[0] as unknown as IToken | undefined) ||
+    (ctx.OracleQualifiedFunction?.[0] as unknown as IToken | undefined) ||
+    (identifierTokens[0] as IToken | undefined) ||
     (ctx.Replace?.[0] as unknown as IToken | undefined) ||
     (ctx.Random?.[0] as unknown as IToken | undefined);
   let upper = "";
 
   if (fnToken) {
-    const fnName = host.getTokenText(fnToken);
+    const fnName = identifierTokens.length > 1
+      ? identifierTokens.map((token) => host.getTokenText(token)).join(".")
+      : host.getTokenText(fnToken);
     upper = fnName.toUpperCase();
 
     if (host.getInWhere() && AGGREGATE_FUNCTIONS.has(upper)) {

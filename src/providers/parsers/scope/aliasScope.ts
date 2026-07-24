@@ -110,6 +110,18 @@ export class ParserSqlContextCollector {
     }
 
     switch (node.name) {
+      case "createProcedureStatement":
+        this.visitOracleRoutineParameters(node);
+        this.visitChildren(node);
+        break;
+      case "oraclePackageRoutine":
+        this.visitOracleRoutineParameters(node);
+        this.visitChildren(node);
+        break;
+      case "oracleAnonymousBlock":
+        this.visitOracleBlockVariables(node);
+        this.visitChildren(node);
+        break;
       case "cteDefinition":
         this.visitCteDefinition(node);
         break;
@@ -352,13 +364,23 @@ export class ParserSqlContextCollector {
     name: string,
     type: string,
     columns: string[],
+    scope?: { start: number; end: number },
   ): void {
-    const key = name.toUpperCase();
+    const normalizedType = type.toUpperCase();
+    const key = normalizedType === "VARIABLE" || normalizedType === "PARAMETER"
+      ? `${normalizedType}:${name.toUpperCase()}:${scope?.start ?? -1}:${scope?.end ?? -1}`
+      : name.toUpperCase();
     const existing = this._localDefinitions.get(key);
     const dedupedColumns = this.dedupeColumns(columns);
 
     if (!existing) {
-      this._localDefinitions.set(key, { name, type, columns: dedupedColumns });
+      this._localDefinitions.set(key, {
+        name,
+        type,
+        columns: dedupedColumns,
+        scopeStart: scope?.start,
+        scopeEnd: scope?.end,
+      });
       return;
     }
 
@@ -368,7 +390,62 @@ export class ParserSqlContextCollector {
       name: existing.name,
       type: existing.type,
       columns: mergedColumns,
+      scopeStart: existing.scopeStart,
+      scopeEnd: existing.scopeEnd,
     });
+  }
+
+  private visitOracleRoutineParameters(node: CstNode): void {
+    const range = getNodeRange(node, this._rangeCache);
+    if (!range) {
+      return;
+    }
+
+    const argumentsNode = getChildNodesByKey(node, "procedureArguments")[0];
+    if (!argumentsNode) {
+      return;
+    }
+
+    for (const argument of getChildNodesByKey(argumentsNode, "procedureArgument")) {
+      const argumentNode =
+        getChildNodesByKey(argument, "oracleProcedureArgumentWithMode")[0] ??
+        getChildNodesByKey(argument, "oracleProcedureArgumentWithoutMode")[0];
+      if (!argumentNode) {
+        continue;
+      }
+      const identifier = this.getIdentifierToken(argumentNode);
+      if (identifier) {
+        this.setLocalDefinition(
+          normalizeTokenText(identifier),
+          "Parameter",
+          [],
+          range,
+        );
+      }
+    }
+  }
+
+  private visitOracleBlockVariables(node: CstNode): void {
+    const range = getNodeRange(node, this._rangeCache);
+    const declarationsNode = getChildNodesByKey(node, "oracleVariableDeclarations")[0];
+    if (!range || !declarationsNode) {
+      return;
+    }
+
+    for (const declaration of getChildNodesByKey(
+      declarationsNode,
+      "oracleVariableDeclaration",
+    )) {
+      const identifier = this.getIdentifierToken(declaration);
+      if (identifier) {
+        this.setLocalDefinition(
+          normalizeTokenText(identifier),
+          "Variable",
+          [],
+          range,
+        );
+      }
+    }
   }
 
   private dedupeColumns(columns: string[]): string[] {
@@ -1369,5 +1446,3 @@ function isAliasBoundaryToken(token: IToken | undefined): boolean {
 
   return boundaryTokenNames.has(token.tokenType.name);
 }
-
-

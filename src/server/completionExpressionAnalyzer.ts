@@ -110,6 +110,7 @@ export function resolveExpressionClauseContext(
   | "group"
   | "order"
   | "set"
+  | "plsql"
   | undefined {
   const lexResult = SqlLexer.tokenize(statementPrefix);
   if (lexResult.tokens.length === 0) {
@@ -125,6 +126,7 @@ export function resolveExpressionClauseContext(
     | "group"
     | "order"
     | "set"
+    | "plsql"
     | undefined;
   for (const token of lexResult.tokens) {
     const name = token.tokenType.name;
@@ -160,6 +162,15 @@ export function resolveExpressionClauseContext(
       clause = "set";
       continue;
     }
+    if (
+      name === "Return" ||
+      name === "Assign" ||
+      name === "Then" ||
+      name === "Else"
+    ) {
+      clause = "plsql";
+      continue;
+    }
   }
 
   if (
@@ -169,7 +180,8 @@ export function resolveExpressionClauseContext(
     clause === "having" ||
     clause === "group" ||
     clause === "order" ||
-    clause === "set"
+    clause === "set" ||
+    clause === "plsql"
   ) {
     return clause;
   }

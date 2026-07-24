@@ -26,6 +26,7 @@ describe('diskBackedSettings', () => {
             enabled: true,
             rowThreshold: 500000,
             memoryRowThreshold: 25000,
+            memoryByteThreshold: 134217728,
             insertBatchSize: 50000,
             idleSpillMinutes: 0,
             idleSpillRowThreshold: 10000,

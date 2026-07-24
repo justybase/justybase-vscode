@@ -12,7 +12,10 @@ import {
   createConnectedDatabaseConnectionFromDetails,
   getDatabaseConnectionConstructor,
 } from "../core/connectionFactory";
-import { ColumnTypeChooser } from "../dialects/netezza/import/typeMapping";
+import {
+  ColumnTypeChooser,
+  type ColumnTypeChooserOptions,
+} from "../dialects/netezza/import/typeMapping";
 import { headerForcesTextImportType } from "./importTypeInferenceUtils";
 
 // Helper to unblock event loop
@@ -87,6 +90,7 @@ export interface ImportResult {
     processingTime?: string;
     columns?: number;
     detectedDelimiter?: string;
+    warnings?: string[];
     snowflakeWorkflow?: {
       workflowMarkdown: string;
       createTableSql?: string;
@@ -182,11 +186,18 @@ export class NetezzaImporter {
   private selectedColumnIndexes: number[] = [];
   private forcedColumnTypes: Map<number, string> = new Map();
   private columnNameOverrides: Map<number, string> = new Map();
+  private readonly typeChooserOptions: ColumnTypeChooserOptions;
 
-  constructor(filePath: string, targetTable: string, logDir?: string) {
+  constructor(
+    filePath: string,
+    targetTable: string,
+    logDir?: string,
+    typeChooserOptions?: ColumnTypeChooserOptions,
+  ) {
     this.filePath = filePath;
     this.targetTable = targetTable;
     this.logDir = logDir || path.join(path.dirname(filePath), "netezza_logs");
+    this.typeChooserOptions = typeChooserOptions ?? {};
 
     // Check if this is an Excel file
     const fileExt = path.extname(filePath).toLowerCase();
@@ -332,6 +343,7 @@ export class NetezzaImporter {
       (header) =>
         new ColumnTypeChooser(decimalDelimiter, {
           forceText: headerForcesTextImportType(header),
+          ...this.typeChooserOptions,
         }),
     );
   }

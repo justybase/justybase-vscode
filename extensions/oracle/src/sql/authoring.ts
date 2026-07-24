@@ -5,6 +5,7 @@ import type {
     DatabaseSqlTypeSpec,
     DatabaseSqlValidationProfile
 } from '../../../../src/sql/authoring/types';
+import { oracleSqlQualityRules } from './qualityRules';
 
 const ORACLE_COMPLETION_KEYWORDS = [
     'SELECT',
@@ -28,6 +29,16 @@ const ORACLE_COMPLETION_KEYWORDS = [
     'PACKAGE',
     'TRIGGER',
     'SYNONYM',
+    'INDEX',
+    'MATERIALIZED VIEW',
+    'GRANT',
+    'REVOKE',
+    'COMMIT',
+    'ROLLBACK',
+    'SAVEPOINT',
+    'RETURNING INTO',
+    'PIVOT',
+    'UNPIVOT',
     'ORDER BY',
     'GROUP BY',
     'CONNECT BY',
@@ -54,7 +65,16 @@ const ORACLE_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     'TIMESTAMP WITH LOCAL TIME ZONE': { canonical: 'TIMESTAMP WITH LOCAL TIME ZONE', paramsMin: 0, paramsMax: 1 },
     CLOB: { canonical: 'CLOB', paramsMin: 0, paramsMax: 0 },
     NCLOB: { canonical: 'NCLOB', paramsMin: 0, paramsMax: 0 },
-    BLOB: { canonical: 'BLOB', paramsMin: 0, paramsMax: 0 }
+    BLOB: { canonical: 'BLOB', paramsMin: 0, paramsMax: 0 },
+    LONG: { canonical: 'LONG', paramsMin: 0, paramsMax: 0 },
+    'LONG RAW': { canonical: 'LONG RAW', paramsMin: 0, paramsMax: 0 },
+    ROWID: { canonical: 'ROWID', paramsMin: 0, paramsMax: 0 },
+    UROWID: { canonical: 'UROWID', paramsMin: 0, paramsMax: 1 },
+    BOOLEAN: { canonical: 'BOOLEAN', paramsMin: 0, paramsMax: 0 },
+    XMLTYPE: { canonical: 'XMLTYPE', paramsMin: 0, paramsMax: 0 },
+    JSON: { canonical: 'JSON', paramsMin: 0, paramsMax: 0 },
+    'INTERVAL YEAR TO MONTH': { canonical: 'INTERVAL YEAR TO MONTH', paramsMin: 1, paramsMax: 1 },
+    'INTERVAL DAY TO SECOND': { canonical: 'INTERVAL DAY TO SECOND', paramsMin: 1, paramsMax: 1 }
 };
 
 const ORACLE_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
@@ -104,6 +124,31 @@ const ORACLE_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[
             name: 'SYS_CONTEXT',
             parameters: ['namespace', 'parameter'],
             description: 'Returns the value of an Oracle application or USERENV context.'
+        }]
+    ],
+    [
+        'TO_DATE',
+        [{
+            name: 'TO_DATE',
+            parameters: ['value', 'format?'],
+            description: 'Converts text to an Oracle DATE using an optional format mask.',
+            example: "TO_DATE('2026-01-31', 'YYYY-MM-DD')",
+        }]
+    ],
+    [
+        'REGEXP_LIKE',
+        [{
+            name: 'REGEXP_LIKE',
+            parameters: ['source', 'pattern', 'match_parameter?'],
+            description: 'Tests whether a source value matches a regular expression.',
+        }]
+    ],
+    [
+        'ADD_MONTHS',
+        [{
+            name: 'ADD_MONTHS',
+            parameters: ['date', 'months'],
+            description: 'Returns a date shifted by the requested number of months.',
         }]
     ]
 ]);
@@ -159,7 +204,18 @@ const oracleFormatterProfile: DatabaseSqlFormatterProfile = {
         'FUNCTION',
         'TRIGGER',
         'SEQUENCE',
-        'SYNONYM'
+        'SYNONYM',
+        'PIVOT',
+        'UNPIVOT',
+        'RETURNING',
+        'INTO',
+        'PRIOR',
+        'NOCYCLE',
+        'SIBLINGS',
+        'GRANT',
+        'REVOKE',
+        'COMMIT',
+        'ROLLBACK'
     ]),
     clauseKeywords: new Set(['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'SET', 'VALUES', 'ON', 'CONNECT BY', 'START WITH']),
     newlineBeforeKeywords: new Set(['FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'SET', 'VALUES', 'CONNECT BY', 'START WITH']),
@@ -171,26 +227,42 @@ const oracleFormatterProfile: DatabaseSqlFormatterProfile = {
 const oracleValidationProfile: DatabaseSqlValidationProfile = {
     builtinFunctions: new Set([
         'ABS',
+        'ADD_MONTHS',
         'AVG',
+        'CAST',
         'COALESCE',
         'COUNT',
         'CURRENT_DATE',
         'CURRENT_TIMESTAMP',
+        'DECODE',
+        'EXTRACT',
+        'GREATEST',
+        'INSTR',
+        'LAST_DAY',
+        'LEAST',
         'DBMS_METADATA.GET_DDL',
         'LOWER',
         'MAX',
         'MIN',
         'NVL',
+        'NVL2',
+        'NULLIF',
+        'REGEXP_LIKE',
+        'REGEXP_REPLACE',
+        'REGEXP_SUBSTR',
         'ROUND',
         'SUBSTR',
         'SUM',
         'SYSDATE',
         'SYSTIMESTAMP',
         'SYS_CONTEXT',
+        'TO_CLOB',
         'TO_CHAR',
         'TO_DATE',
         'TO_NUMBER',
         'TO_TIMESTAMP',
+        'TRUNC',
+        'UID',
         'UPPER'
     ]),
     systemColumns: new Set(),
@@ -210,7 +282,7 @@ const oracleValidationProfile: DatabaseSqlValidationProfile = {
     supportsProcedureAnySizeArgument(): boolean {
         return false;
     },
-    syntaxValidationMode: 'bestEffort'
+    syntaxValidationMode: 'strict',
 };
 
 export const oracleSqlAuthoring: DatabaseSqlAuthoring = {
@@ -218,5 +290,14 @@ export const oracleSqlAuthoring: DatabaseSqlAuthoring = {
     signatures: ORACLE_SIGNATURES,
     formatter: oracleFormatterProfile,
     validation: oracleValidationProfile,
-    qualityRules: []
+    qualityRules: oracleSqlQualityRules,
+    parsing: {
+        lexerModulePath: 'src/dialects/oracle/sql/lexer.ts',
+        parserModulePath: 'src/dialects/oracle/sql/parser.ts',
+    },
+    staticAssets: {
+        snippetsPath: 'dialects/oracle/snippets/oracle.code-snippets',
+        grammarPath: 'dialects/oracle/syntaxes/oracle.tmLanguage.json',
+        grammarScopeName: 'oracle.injection',
+    },
 };

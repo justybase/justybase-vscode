@@ -48,7 +48,8 @@ export interface HydratedExportItem {
 }
 
 import { escapeCsvField } from './csvExporter';
-import { resolveExportRows } from '../core/resultDataProvider/resultDataReader';
+import { iterateResultRows, resolveExportRows } from '../core/resultDataProvider/resultDataReader';
+import { ExportCancelledError } from '../core/cancellation';
 
 export class ExportManager {
     constructor(private _resultsMap: Map<string, ResultSet[]>) { }
@@ -86,47 +87,54 @@ export class ExportManager {
                 {
                     location: vscode.ProgressLocation.Window,
                     title: `Exporting to ${format.toUpperCase()}...`,
-                    cancellable: false
+                    cancellable: true
                 },
-                async () => {
+                async (_progress, cancellationToken) => {
                     if (format === 'parquet') {
                         const { exportStructuredToParquet } = await import('../export/parquetExporter');
                         const columns = resultSet.columns.map(c => ({ name: c.name, type: c.type, scale: c.scale }));
                         const visibleColumnIndices = columnIds
                             ? columnIds.map(id => parseInt(id)).filter(idx => !isNaN(idx) && idx >= 0 && idx < columns.length)
                             : columns.map((_, i) => i);
-                        const filteredRows = resolveExportRows(resultSet, rowIndices, visibleColumnIndices);
+                        const filteredRows = iterateResultRows(resultSet, rowIndices, visibleColumnIndices);
                         await exportStructuredToParquet([{
                             columns: visibleColumnIndices.map(i => columns[i]),
                             rows: filteredRows,
                             sql: resultSet.sql || '',
                             name: resultSet.name || 'Result'
-                        }], uri.fsPath);
+                        }], uri.fsPath, false, undefined, cancellationToken);
                     } else if (format === 'xpt') {
                         const { exportStructuredToXpt } = await import('../export/xptExporter');
                         const columns = resultSet.columns.map(c => ({ name: c.name, type: c.type, scale: c.scale }));
                         const visibleColumnIndices = columnIds
                             ? columnIds.map(id => parseInt(id)).filter(idx => !isNaN(idx) && idx >= 0 && idx < columns.length)
                             : columns.map((_, i) => i);
-                        const filteredRows = resolveExportRows(resultSet, rowIndices, visibleColumnIndices);
+                        const filteredRows = iterateResultRows(resultSet, rowIndices, visibleColumnIndices);
                         await exportStructuredToXpt([{
                             columns: visibleColumnIndices.map(i => columns[i]),
                             rows: filteredRows,
                             sql: resultSet.sql || '',
                             name: resultSet.name || 'Result'
-                        }], uri.fsPath);
+                        }], uri.fsPath, false, undefined, cancellationToken);
                     } else {
                         await exportResultSetToFile(resultSet, uri.fsPath, {
                             format,
                             rowIndices,
                             columnIds,
-                            formatting: message.formatting
+                            formatting: message.formatting,
+                            cancellationToken,
                         });
                     }
                 }
             );
             vscode.window.showInformationMessage(`Results exported to ${uri.fsPath}`);
         } catch (err: unknown) {
+            if (err instanceof ExportCancelledError) {
+                vscode.window.showInformationMessage(
+                    `Export cancelled — retained ${err.rowsWritten.toLocaleString()} rows in ${err.filePath}`,
+                );
+                return;
+            }
             const errorMsg = err instanceof Error ? err.message : String(err);
             vscode.window.showErrorMessage(`Export failed: ${errorMsg}`);
         }
@@ -363,6 +371,38 @@ export class ExportManager {
         return hydrated;
     }
 
+    /** Builds Excel/export items backed by the ResultSet iterator instead of a full row copy. */
+    public createStreamingExportData(metadata: ExcelExportMetadata): StructuredExportItem[] {
+        if (!metadata?.results) return [];
+        const allResults = this._resultsMap.get(metadata.sourceUri);
+        if (!allResults) return [];
+
+        const items: StructuredExportItem[] = [];
+        for (const request of metadata.results) {
+            const resultSet = allResults[request.resultSetIndex];
+            if (!resultSet) continue;
+            const selectedColumnIndices = (request.columnIds?.length
+                ? request.columnIds.map(id => Number.parseInt(id, 10))
+                : resultSet.columns.map((_, index) => index))
+                .filter(index => Number.isInteger(index) && index >= 0 && index < resultSet.columns.length);
+            if (selectedColumnIndices.length === 0) continue;
+
+            const rows = resultSet.storageMode === 'sqlite'
+                ? iterateResultRows(resultSet, request.rowIndices, selectedColumnIndices)
+                : resolveExportRows(resultSet, request.rowIndices, selectedColumnIndices);
+            if (Array.isArray(rows) && rows.length === 0) continue;
+
+            items.push({
+                columns: selectedColumnIndices.map(index => resultSet.columns[index]),
+                rows,
+                sql: resultSet.sql,
+                name: request.name || resultSet.name || 'Result',
+                isActive: request.isActive,
+            });
+        }
+        return items;
+    }
+
     public async initiateExport(exportData: ExportMetadata): Promise<void> {
         const formatItems = [
             { label: 'Excel (XLSB)', description: 'Binary Excel Format', id: 'excel' },
@@ -372,7 +412,7 @@ export class ExportManager {
             { label: 'CSV.ZST', description: 'Zstandard-compressed CSV', id: 'csv.zst' },
             { label: 'JSON', description: 'JavaScript Object Notation', id: 'json' },
             { label: 'XML', description: 'Extensible Markup Language', id: 'xml' },
-            { label: 'SQL INSERT', description: 'SQL Insert Statements', id: 'sql' },
+            { label: 'SQL INSERT — data only', description: 'SQL INSERT statements; schema/DDL is not included', id: 'sql' },
             { label: 'Markdown', description: 'Markdown Table', id: 'markdown' },
             { label: 'Parquet', description: 'Apache Parquet Columnar Format', id: 'parquet' },
             { label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5', id: 'xpt' }
@@ -470,7 +510,7 @@ export class ExportManager {
                 }
             ]
         };
-        const hydrated = this.hydrateExportData(dataToExport) as StructuredExportItem[];
+        const hydrated = this.createStreamingExportData(dataToExport);
 
         if (!hydrated || hydrated.length === 0) {
             vscode.window.showErrorMessage('Failed to prepare data for export');
@@ -742,11 +782,11 @@ export class ExportManager {
                 {
                     location: vscode.ProgressLocation.Window,
                     title: `Exporting all result sets to Excel (${ext.toUpperCase()})...`,
-                    cancellable: false
+                    cancellable: true
                 },
-                async (progress) => {
-                    // Hydrate the export data
-                    const hydratedData = this.hydrateExportData(metadata);
+                async (progress, cancellationToken) => {
+                    // Keep rows lazy all the way into the spreadsheet writer.
+                    const hydratedData = this.createStreamingExportData(metadata);
 
                     if (hydratedData.length === 0) {
                         throw new Error('No data available to export');
@@ -755,9 +795,17 @@ export class ExportManager {
                     progress.report({ message: `Exporting ${hydratedData.length} result sets...` });
 
                     if (selectedFormat.id === 'xlsb') {
-                        await exportStructuredToXlsb(hydratedData, targetPath, selectedDestination.id === 'temp');
+                        if (cancellationToken) {
+                            await exportStructuredToXlsb(hydratedData, targetPath, selectedDestination.id === 'temp', undefined, cancellationToken);
+                        } else {
+                            await exportStructuredToXlsb(hydratedData, targetPath, selectedDestination.id === 'temp');
+                        }
                     } else {
-                        await exportStructuredToXlsx(hydratedData, targetPath, selectedDestination.id === 'temp');
+                        if (cancellationToken) {
+                            await exportStructuredToXlsx(hydratedData, targetPath, selectedDestination.id === 'temp', undefined, cancellationToken);
+                        } else {
+                            await exportStructuredToXlsx(hydratedData, targetPath, selectedDestination.id === 'temp');
+                        }
                     }
                 }
             );

@@ -83,6 +83,8 @@ export type ResultSet = QueryResult & {
   diskQueryCountSpecKey?: string;
   /** Rows already streamed to the webview during an in-flight large result. */
   webviewStreamedRows?: number;
+  /** Approximate bytes held by the in-memory row buffer before SQLite spill. */
+  bufferedBytes?: number;
 };
 
 export interface ColumnDefinition {

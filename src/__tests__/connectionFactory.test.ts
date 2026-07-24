@@ -116,6 +116,7 @@ describe("connectionFactory", () => {
       supportsProcedures: true,
       supportsTableMaintenance: true,
       supportsSessionMonitor: true,
+      supportsDistributionMetrics: true,
     });
     expect(registeredDialects.some((item) => item.kind === "netezza")).toBe(
       true,
@@ -131,6 +132,7 @@ describe("connectionFactory", () => {
       supportsProcedures: false,
       supportsTableMaintenance: false,
       supportsSessionMonitor: false,
+      supportsDistributionMetrics: false,
     });
     expect(getDatabaseMetadataProvider("netezza").defaultObjectTypes).toContain(
       "TABLE",
@@ -154,6 +156,7 @@ describe("connectionFactory", () => {
         supportsProcedures: false,
         supportsTableMaintenance: false,
         supportsSessionMonitor: false,
+        supportsDistributionMetrics: false,
       });
     },
   );

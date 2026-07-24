@@ -8,7 +8,8 @@ type CapabilityContextKey =
     | 'supportsExternalTables'
     | 'supportsProcedures'
     | 'supportsTableMaintenance'
-    | 'supportsSessionMonitor';
+    | 'supportsSessionMonitor'
+    | 'supportsDistributionMetrics';
 
 const CAPABILITY_CONTEXT_KEYS: readonly CapabilityContextKey[] = [
     'supportsExplainPlan',
@@ -16,7 +17,8 @@ const CAPABILITY_CONTEXT_KEYS: readonly CapabilityContextKey[] = [
     'supportsExternalTables',
     'supportsProcedures',
     'supportsTableMaintenance',
-    'supportsSessionMonitor'
+    'supportsSessionMonitor',
+    'supportsDistributionMetrics'
 ];
 
 export const DATABASE_UI_CONTEXT_PREFIX = 'justybase';

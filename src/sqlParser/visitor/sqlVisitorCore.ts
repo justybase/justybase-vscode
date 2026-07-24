@@ -84,6 +84,7 @@ export class SqlVisitor
   private inOrderBy = false;
   private inWhere = false;
   private inProcedureContext = false;
+  private inProcedureSqlContext = false;
   private inPerformContext = false;
   private procedureScope: ProcedureScopeBuilder | null = null;
   private procedureTopLevelSelect = false;
@@ -185,6 +186,14 @@ export class SqlVisitor
 
   getInProcedureContext(): boolean {
     return this.inProcedureContext;
+  }
+
+  getInProcedureSqlContext(): boolean {
+    return this.inProcedureSqlContext;
+  }
+
+  setInProcedureSqlContext(value: boolean): void {
+    this.inProcedureSqlContext = value;
   }
 
   setInProcedureContext(value: boolean): void {
@@ -700,6 +709,12 @@ export class SqlVisitor
       this.visit(ctx.createTableStatement[0]);
     } else if (ctx.createProcedureStatement) {
       this.visit(ctx.createProcedureStatement[0]);
+    } else if (ctx.oracleAnonymousBlock) {
+      this.visit(ctx.oracleAnonymousBlock[0]);
+    } else if (ctx.oraclePackageUnit) {
+      this.visit(ctx.oraclePackageUnit[0]);
+    } else if (ctx.oracleTriggerUnit) {
+      this.visit(ctx.oracleTriggerUnit[0]);
     } else if (ctx.createSynonymStatement) {
       this.visit(ctx.createSynonymStatement[0]);
     } else if (ctx.createViewStatement) {
@@ -1116,12 +1131,116 @@ export class SqlVisitor
     procedureVisitor.createProcedureStatement(this, ctx);
   }
 
+  oracleProgramUnit(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleProgramUnit(this, ctx);
+  }
+
+  oracleAnonymousBlock(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleAnonymousBlock(this, ctx);
+  }
+
+  oraclePackageUnit(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oraclePackageUnit(this, ctx);
+  }
+
+  oraclePackageMember(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oraclePackageMember(this, ctx);
+  }
+
+  oraclePackageRoutine(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oraclePackageRoutine(this, ctx);
+  }
+
+  oracleTriggerUnit(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleTriggerUnit(this, ctx);
+  }
+
+  oracleTriggerHeader(): void {
+    procedureVisitor.oracleTriggerHeader();
+  }
+
+  oracleVariableDeclarations(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleVariableDeclarations(this, ctx);
+  }
+
+  oracleVariableDeclaration(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleVariableDeclaration(this, ctx);
+  }
+
+  oracleBlockBody(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleBlockBody(this, ctx);
+  }
+
+  oracleBlockStatement(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleBlockStatement(this, ctx);
+  }
+
+  oracleTokenStatement(): void {
+    // Unsupported PL/SQL statements remain syntax-checked token sequences.
+  }
+
+  oracleConditionalBody(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleConditionalBody(this, ctx);
+  }
+
+  oracleIfStatement(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleIfStatement(this, ctx);
+  }
+
+  oracleElsifClause(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleElsifClause(this, ctx);
+  }
+
+  oracleLoopStatement(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleLoopStatement(this, ctx);
+  }
+
+  oracleWhileStatement(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleWhileStatement(this, ctx);
+  }
+
+  oracleForStatement(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleForStatement(this, ctx);
+  }
+
+  oracleForHeader(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleForHeader(this, ctx);
+  }
+
+  oracleExceptionBlock(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleExceptionBlock(this, ctx);
+  }
+
+  oracleWhenClause(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleWhenClause(this, ctx);
+  }
+
+  oracleExceptionBody(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleExceptionBody(this, ctx);
+  }
+
+  oracleNullStatement(): void {
+    // NULL is a valid no-op PL/SQL statement.
+  }
+
   procedureArguments(ctx: Record<string, CstNode[]>): void {
     procedureVisitor.procedureArguments(this, ctx);
   }
 
   procedureArgument(ctx: Record<string, CstNode[]>): void {
     procedureVisitor.procedureArgument(this, ctx);
+  }
+
+  oracleProcedureArgumentWithMode(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleProcedureArgumentWithMode(this, ctx);
+  }
+
+  oracleProcedureArgumentWithoutMode(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleProcedureArgumentWithoutMode(this, ctx);
+  }
+
+  oracleParameterDefault(ctx: Record<string, CstNode[]>): void {
+    procedureVisitor.oracleParameterDefault(this, ctx);
   }
 
   procedureArgumentMode(): void {

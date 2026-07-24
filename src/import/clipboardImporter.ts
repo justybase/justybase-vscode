@@ -30,8 +30,10 @@ class TextDataAnalyzer {
     private dataTypes: ColumnTypeChooser[] = [];
     private decimalDelimiter: string = '.';
     private rowCount: number = 0;
+    private readonly inferBoolean: boolean;
 
-    constructor(textData: string) {
+    constructor(textData: string, options?: { inferBoolean?: boolean }) {
+        this.inferBoolean = options?.inferBoolean === true;
         this.lines = textData.split('\n');
 
         // Strip UTF-8 BOM from first line (can appear when copied from Notepad, Excel, etc.)
@@ -122,7 +124,8 @@ class TextDataAnalyzer {
     private createColumnTypeChoosers(): ColumnTypeChooser[] {
         return this.headers.map(header =>
             new ColumnTypeChooser(this.decimalDelimiter, {
-                forceText: headerForcesTextImportType(header)
+                forceText: headerForcesTextImportType(header),
+                inferBoolean: this.inferBoolean,
             })
         );
     }
@@ -223,6 +226,8 @@ class TextDataAnalyzer {
  * Clipboard data processor
  */
 export class ClipboardDataProcessor {
+    public constructor(private readonly options?: { inferBoolean?: boolean }) {}
+
     /**
      * Get clipboard text content using VS Code API
      */
@@ -246,7 +251,7 @@ export class ClipboardDataProcessor {
 
         progressCallback?.(`Data size: ${rawData.length.toLocaleString()} characters`);
 
-        const analyzer = new TextDataAnalyzer(rawData);
+        const analyzer = new TextDataAnalyzer(rawData, this.options);
         await analyzer.analyze(progressCallback);
 
         return analyzer;

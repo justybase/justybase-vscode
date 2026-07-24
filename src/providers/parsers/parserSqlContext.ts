@@ -90,7 +90,16 @@ function filterVisibleLocalDefinitions(
   }
 
   return localDefinitions.filter(
-    (def) => def.type !== "CTE" || visibleCtes.has(def.name.toUpperCase()),
+    (def) => {
+      if (
+        def.scopeStart !== undefined &&
+        def.scopeEnd !== undefined &&
+        (offset < def.scopeStart || offset > def.scopeEnd)
+      ) {
+        return false;
+      }
+      return def.type !== "CTE" || visibleCtes.has(def.name.toUpperCase());
+    },
   );
 }
 

@@ -63,6 +63,8 @@ export interface SqlVisitorHost {
   getInWhere(): boolean;
   setInWhere(value: boolean): void;
   getInProcedureContext(): boolean;
+  getInProcedureSqlContext(): boolean;
+  setInProcedureSqlContext(value: boolean): void;
   getInPerformContext(): boolean;
   setInPerformContext(value: boolean): void;
   getInSelectList(): boolean;

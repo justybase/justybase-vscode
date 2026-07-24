@@ -60,6 +60,7 @@ export function registerHoverHandler(deps: HoverHandlerDeps): void {
         statementSql,
         statementOffset,
         databaseKind,
+        cursorOffset,
       ) =>
         getSessionCompletionLocalDefinitions(
           documentParseSession,
@@ -68,6 +69,7 @@ export function registerHoverHandler(deps: HoverHandlerDeps): void {
           statementSql,
           statementOffset,
           databaseKind,
+          cursorOffset,
         ),
       findLocalDefinition,
       formatObjectPath,
@@ -117,6 +119,7 @@ function getSessionCompletionLocalDefinitions(
   statementSql: string,
   statementOffset: number,
   databaseKind?: string,
+  cursorOffset?: number,
 ): LocalDefinition[] {
   const persistentDefs = getSessionPersistentDocumentDefinitions(
     documentParseSession,
@@ -124,14 +127,39 @@ function getSessionCompletionLocalDefinitions(
     fullSql,
     databaseKind,
   );
-  const visibleDefs = getSessionVisibleStatementDefinitions(
-    documentParseSession,
-    document,
-    statementSql,
-    statementOffset,
-    databaseKind,
-  );
+  const visibleDefs = databaseKind === "oracle" && cursorOffset !== undefined
+    ? getSessionVisibleDocumentDefinitions(
+      documentParseSession,
+      document,
+      fullSql,
+      cursorOffset,
+      databaseKind,
+    )
+    : getSessionVisibleStatementDefinitions(
+      documentParseSession,
+      document,
+      statementSql,
+      statementOffset,
+      databaseKind,
+    );
   return mergeLocalDefinitions(persistentDefs, visibleDefs);
+}
+
+function getSessionVisibleDocumentDefinitions(
+  documentParseSession: DocumentParseSession,
+  document: TextDocument,
+  sql: string,
+  cursorOffset: number,
+  databaseKind?: string,
+): LocalDefinition[] {
+  try {
+    return documentParseSession.getSemanticScope({
+      ...toDocumentParseRequest(document, sql, databaseKind),
+      cursorOffset,
+    }).visibleLocalDefinitions;
+  } catch {
+    return [];
+  }
 }
 
 function getSessionVisibleStatementDefinitions(

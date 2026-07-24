@@ -132,6 +132,7 @@ const DIALECT_CASES: readonly DialectContractCase[] = [
       supportsProcedures: true,
       supportsTableMaintenance: true,
       supportsSessionMonitor: true,
+      supportsDistributionMetrics: true,
     }),
     expectedConnectionFieldKeys: [
       "host",

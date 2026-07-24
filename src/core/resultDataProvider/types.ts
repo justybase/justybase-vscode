@@ -11,6 +11,8 @@ export interface DiskBackedResultsSettings {
     rowThreshold: number;
     /** Host RAM spill trigger (independent of webview stream cap). */
     memoryRowThreshold: number;
+    /** Host RAM spill trigger measured in approximate bytes. */
+    memoryByteThreshold?: number;
     insertBatchSize: number;
     /** Minutes of inactivity before idle spill (0 = disabled). */
     idleSpillMinutes: number;
@@ -47,6 +49,8 @@ export const DISK_BACKED_WINDOW_ROWS = 2_000;
 export const DISK_BACKED_PAGE_SIZE = 800;
 /** Default host spill threshold — spill to SQLite once reached. */
 export const DISK_BACKED_DEFAULT_MEMORY_ROW_THRESHOLD = 25_000;
+/** Default approximate in-memory result budget (128 MiB). */
+export const DISK_BACKED_DEFAULT_MEMORY_BYTE_THRESHOLD = 128 * 1024 * 1024;
 /** Hard upper bound before disk-backed storage must activate. */
 export const DISK_BACKED_DEFAULT_ROW_THRESHOLD = 500_000;
 /** Max rows streamed into webview before stream cap (preview-only phase). */

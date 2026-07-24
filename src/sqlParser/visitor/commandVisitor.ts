@@ -279,8 +279,18 @@ export function typeName(
   name: string;
   params: string[];
 } {
-  const parts = (ctx.typeNameWord ?? [])
-    .map((node) => host.visitAs<string>(node as CstNode))
+  const parts = [
+    ...(ctx.typeNameWord ?? []).map((node) => ({
+      offset: host.getFirstTokenFromCst(node as CstNode)?.startOffset ?? 0,
+      text: host.visitAs<string>(node as CstNode),
+    })),
+    ...((ctx.With as IToken[] | undefined) ?? []).map((token) => ({
+      offset: token.startOffset ?? 0,
+      text: host.getTokenText(token),
+    })),
+  ]
+    .sort((left, right) => left.offset - right.offset)
+    .map((part) => part.text)
     .filter((part) => part.length > 0);
 
   const params = (ctx.typeArgument ?? [])
@@ -307,7 +317,9 @@ export function typeNameWord(
   ctx: Record<string, IToken[]>,
 ): string {
   const token =
-    ctx.Identifier?.[0] || ctx.QuotedIdentifier?.[0] || ctx.To?.[0];
+    ctx.Identifier?.[0]
+    || ctx.QuotedIdentifier?.[0]
+    || ctx.To?.[0];
   const text = host.getTokenText(token);
   return text.replace(/"/g, "");
 }

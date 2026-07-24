@@ -23,6 +23,7 @@ const db2Capabilities: DatabaseCapabilities = {
   supportsProcedures: true,
   supportsTableMaintenance: true,
   supportsSessionMonitor: true,
+  supportsDistributionMetrics: false,
 };
 
 export const db2Dialect: DatabaseDialect = {

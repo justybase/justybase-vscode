@@ -61,6 +61,19 @@ export class ProcedureScopeBuilder {
     }
   }
 
+  markNameAssigned(name: string): void {
+    const key = name.toUpperCase();
+    const variable = this.variables.get(key);
+    if (variable) {
+      variable.used = true;
+      return;
+    }
+    const parameter = this.parameters.get(key);
+    if (parameter) {
+      parameter.assigned = true;
+    }
+  }
+
   setHasReturns(token: IToken): void {
     this.hasReturnsClause = true;
     this.returnsToken = token;

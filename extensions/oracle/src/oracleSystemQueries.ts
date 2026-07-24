@@ -9,7 +9,8 @@ type OracleCatalogObjectType =
     | 'PACKAGE BODY'
     | 'SEQUENCE'
     | 'SYNONYM'
-    | 'TRIGGER';
+    | 'TRIGGER'
+    | 'INDEX';
 
 type OracleColumnObjectType = 'TABLE' | 'VIEW';
 
@@ -74,26 +75,35 @@ function buildCurrentDatabaseExpression(): string {
 
 function buildOracleTypeExpression(columnAlias: string): string {
     return `
-        ${columnAlias}.DATA_TYPE ||
         CASE
-            WHEN ${columnAlias}.DATA_TYPE IN ('CHAR', 'NCHAR', 'VARCHAR2', 'NVARCHAR2')
-                AND COALESCE(${columnAlias}.CHAR_LENGTH, 0) > 0
-                THEN '(' || TO_CHAR(${columnAlias}.CHAR_LENGTH) ||
-                    CASE WHEN ${columnAlias}.CHAR_USED = 'C' THEN ' CHAR' ELSE '' END || ')'
-            WHEN ${columnAlias}.DATA_TYPE = 'RAW'
-                AND COALESCE(${columnAlias}.DATA_LENGTH, 0) > 0
-                THEN '(' || TO_CHAR(${columnAlias}.DATA_LENGTH) || ')'
-            WHEN ${columnAlias}.DATA_TYPE = 'NUMBER'
-                AND ${columnAlias}.DATA_PRECISION IS NOT NULL
-                AND COALESCE(${columnAlias}.DATA_SCALE, 0) > 0
-                THEN '(' || TO_CHAR(${columnAlias}.DATA_PRECISION) || ',' || TO_CHAR(${columnAlias}.DATA_SCALE) || ')'
-            WHEN ${columnAlias}.DATA_TYPE = 'NUMBER'
-                AND ${columnAlias}.DATA_PRECISION IS NOT NULL
-                THEN '(' || TO_CHAR(${columnAlias}.DATA_PRECISION) || ')'
+            WHEN ${columnAlias}.DATA_TYPE LIKE 'TIMESTAMP%'
+                AND INSTR(${columnAlias}.DATA_TYPE, '(') > 0
+                THEN ${columnAlias}.DATA_TYPE
             WHEN ${columnAlias}.DATA_TYPE LIKE 'TIMESTAMP%'
                 AND ${columnAlias}.DATA_SCALE IS NOT NULL
-                THEN '(' || TO_CHAR(${columnAlias}.DATA_SCALE) || ')'
-            ELSE ''
+                THEN CASE
+                    WHEN ${columnAlias}.DATA_TYPE = 'TIMESTAMP'
+                        THEN ${columnAlias}.DATA_TYPE || '(' || TO_CHAR(${columnAlias}.DATA_SCALE) || ')'
+                    ELSE 'TIMESTAMP(' || TO_CHAR(${columnAlias}.DATA_SCALE) || ')' || SUBSTR(${columnAlias}.DATA_TYPE, 10)
+                END
+            ELSE ${columnAlias}.DATA_TYPE ||
+                CASE
+                    WHEN ${columnAlias}.DATA_TYPE IN ('CHAR', 'NCHAR', 'VARCHAR2', 'NVARCHAR2')
+                        AND COALESCE(${columnAlias}.CHAR_LENGTH, 0) > 0
+                        THEN '(' || TO_CHAR(${columnAlias}.CHAR_LENGTH) ||
+                            CASE WHEN ${columnAlias}.CHAR_USED = 'C' THEN ' CHAR' ELSE '' END || ')'
+                    WHEN ${columnAlias}.DATA_TYPE = 'RAW'
+                        AND COALESCE(${columnAlias}.DATA_LENGTH, 0) > 0
+                        THEN '(' || TO_CHAR(${columnAlias}.DATA_LENGTH) || ')'
+                    WHEN ${columnAlias}.DATA_TYPE = 'NUMBER'
+                        AND ${columnAlias}.DATA_PRECISION IS NOT NULL
+                        AND COALESCE(${columnAlias}.DATA_SCALE, 0) > 0
+                        THEN '(' || TO_CHAR(${columnAlias}.DATA_PRECISION) || ',' || TO_CHAR(${columnAlias}.DATA_SCALE) || ')'
+                    WHEN ${columnAlias}.DATA_TYPE = 'NUMBER'
+                        AND ${columnAlias}.DATA_PRECISION IS NOT NULL
+                        THEN '(' || TO_CHAR(${columnAlias}.DATA_PRECISION) || ')'
+                    ELSE ''
+                END
         END
     `.trim();
 }
@@ -678,7 +688,10 @@ export function buildRoutineSourceQuery(schema: string, objectName: string, sour
 export function buildBatchObjectListQuery(schema?: string, objectTypes?: readonly string[]): string {
     const normalizedObjectTypes = (objectTypes ?? ORACLE_DEFAULT_OBJECT_TYPES)
         .map(type => type.trim().toUpperCase())
-        .filter((type): type is OracleCatalogObjectType => ORACLE_DEFAULT_OBJECT_TYPES.includes(type as OracleCatalogObjectType));
+        .filter((type): type is OracleCatalogObjectType =>
+            ORACLE_DEFAULT_OBJECT_TYPES.includes(type as Exclude<OracleCatalogObjectType, 'INDEX'>)
+            || type === 'INDEX'
+        );
     const objectTypeList = (normalizedObjectTypes.length > 0 ? normalizedObjectTypes : ORACLE_DEFAULT_OBJECT_TYPES)
         .map(type => quoteLiteral(type))
         .join(', ');
@@ -706,6 +719,62 @@ export function buildBatchObjectListQuery(schema?: string, objectTypes?: readonl
                 ELSE 10
             END,
             O.OBJECT_NAME
+    `;
+}
+
+export function buildIndexObjectListQuery(schema?: string): string {
+    return `
+        SELECT
+            I.OWNER AS OBJECT_SCHEMA,
+            I.INDEX_NAME AS OBJECT_NAME,
+            I.TABLE_NAME AS TABLE_NAME
+        FROM ALL_INDEXES I
+        LEFT JOIN ALL_CONSTRAINTS C
+            ON C.OWNER = I.TABLE_OWNER
+           AND C.TABLE_NAME = I.TABLE_NAME
+           AND C.INDEX_NAME = I.INDEX_NAME
+           AND C.CONSTRAINT_TYPE IN ('P', 'U')
+        WHERE NVL(I.GENERATED, 'N') <> 'Y'
+          AND C.CONSTRAINT_NAME IS NULL
+          ${buildEqualityFilter('I.OWNER', schema)}
+        ORDER BY I.OWNER, I.TABLE_NAME, I.INDEX_NAME
+    `;
+}
+
+export function buildPartitionedTableListQuery(schema?: string): string {
+    return `
+        SELECT OWNER AS OBJECT_SCHEMA, TABLE_NAME AS OBJECT_NAME
+        FROM ALL_PART_TABLES
+        WHERE 1 = 1
+          ${buildEqualityFilter('OWNER', schema)}
+        ORDER BY OWNER, TABLE_NAME
+    `;
+}
+
+export function buildObjectGrantsQuery(schema?: string): string {
+    return `
+        SELECT DISTINCT
+            TABLE_SCHEMA AS OBJECT_SCHEMA,
+            TABLE_NAME AS OBJECT_NAME,
+            GRANTEE,
+            PRIVILEGE,
+            GRANTABLE,
+            CAST(NULL AS VARCHAR2(128)) AS COLUMN_NAME
+        FROM ALL_TAB_PRIVS
+        WHERE 1 = 1
+          ${buildEqualityFilter('TABLE_SCHEMA', schema)}
+        UNION
+        SELECT DISTINCT
+            TABLE_SCHEMA AS OBJECT_SCHEMA,
+            TABLE_NAME AS OBJECT_NAME,
+            GRANTEE,
+            PRIVILEGE,
+            GRANTABLE,
+            COLUMN_NAME
+        FROM ALL_COL_PRIVS
+        WHERE 1 = 1
+          ${buildEqualityFilter('TABLE_SCHEMA', schema)}
+        ORDER BY OBJECT_SCHEMA, OBJECT_NAME, GRANTEE, PRIVILEGE, COLUMN_NAME
     `;
 }
 

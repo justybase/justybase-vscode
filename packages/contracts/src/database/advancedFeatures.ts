@@ -89,11 +89,17 @@ export interface DatabaseExternalTableInfo {
   rejectFile: string | null;
 }
 
+export type DatabaseDdlGenerationMode = 'objects' | 'schema-migration';
+
 export interface DatabaseBatchDDLOptions {
   connectionDetails: ConnectionDetails;
   database: string;
   schema?: string;
   objectTypes?: string[];
+  mode?: DatabaseDdlGenerationMode;
+  includeIndexes?: boolean;
+  includePartitions?: boolean;
+  includeGrants?: boolean;
 }
 
 export interface DatabaseBatchDDLResult {
@@ -102,6 +108,8 @@ export interface DatabaseBatchDDLResult {
   objectCount: number;
   errors: string[];
   skipped: number;
+  warnings?: string[];
+  artifactKind?: DatabaseDdlGenerationMode;
 }
 
 export interface DatabaseDdlProvider {

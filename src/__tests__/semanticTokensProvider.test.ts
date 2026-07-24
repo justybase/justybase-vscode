@@ -218,6 +218,46 @@ describe('NetezzaSemanticTokensProvider', () => {
     expect((aliasInWhere?.tokenModifiers ?? 0) & ITALIC_MASK).toBe(ITALIC_MASK);
   });
 
+  it('uses Oracle parsing for semantic roles in hierarchical queries', () => {
+    const sql = 'SELECT e.employee_id FROM HR.EMPLOYEES e START WITH manager_id IS NULL CONNECT BY PRIOR employee_id = manager_id';
+    const document = createDocument(sql);
+    const oracleConnectionManager = createMockConnectionManager({
+      getExecutionDatabaseKind: jest.fn().mockReturnValue('oracle'),
+    });
+    const oracleProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      oracleConnectionManager,
+    );
+    const tokens = tokensFor(oracleProvider, sql);
+
+    expect(findToken(tokens, sql, document, 'HR')?.tokenType).toBe(SCHEMA_IDX);
+    expect(findToken(tokens, sql, document, 'EMPLOYEES')?.tokenType).toBe(TABLE_IDX);
+    expect(findToken(tokens, sql, document, 'e')?.tokenType).toBe(ALIAS_IDX);
+  });
+
+  it('colors Oracle PL/SQL variables and parameters as local variables', () => {
+    const sql = `CREATE OR REPLACE FUNCTION f(p IN NUMBER) RETURN NUMBER IS
+      v_count NUMBER;
+    BEGIN
+      v_count := p;
+      RETURN v_count;
+    END f;`;
+    const document = createDocument(sql);
+    const oracleConnectionManager = createMockConnectionManager({
+      getExecutionDatabaseKind: jest.fn().mockReturnValue('oracle'),
+    });
+    const oracleProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      oracleConnectionManager,
+    );
+    const tokens = tokensFor(oracleProvider, sql);
+
+    expect(findToken(tokens, sql, document, 'p')?.tokenType).toBe(LOCAL_VARIABLE_IDX);
+    expect(findToken(tokens, sql, document, 'v_count', 0)?.tokenType).toBe(LOCAL_VARIABLE_IDX);
+    expect(findToken(tokens, sql, document, 'v_count', 1)?.tokenType).toBe(LOCAL_VARIABLE_IDX);
+    expect(findToken(tokens, sql, document, 'v_count', 2)?.tokenType).toBe(LOCAL_VARIABLE_IDX);
+  });
+
   it('colors qualified table references with database, schema, and table types', () => {
     const sql =
       'SELECT ALIAS_TABELI.ACCOUNTKEY FROM JUST_DATA.ADMIN.DIMACCOUNT ALIAS_TABELI';

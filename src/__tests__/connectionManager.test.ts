@@ -271,7 +271,8 @@ describe('ConnectionManager', () => {
                 supportsExternalTables: true,
                 supportsProcedures: true,
                 supportsTableMaintenance: true,
-                supportsSessionMonitor: true
+                supportsSessionMonitor: true,
+                supportsDistributionMetrics: true
             });
         });
 
@@ -324,7 +325,8 @@ describe('ConnectionManager', () => {
                 supportsExternalTables: false,
                 supportsProcedures: false,
                 supportsTableMaintenance: false,
-                supportsSessionMonitor: false
+                supportsSessionMonitor: false,
+                supportsDistributionMetrics: false
             });
         });
 
@@ -338,7 +340,8 @@ describe('ConnectionManager', () => {
                 supportsExternalTables: false,
                 supportsProcedures: false,
                 supportsTableMaintenance: false,
-                supportsSessionMonitor: false
+                supportsSessionMonitor: false,
+                supportsDistributionMetrics: false
             });
         });
 
@@ -359,7 +362,8 @@ describe('ConnectionManager', () => {
                     supportsExternalTables: false,
                     supportsProcedures: false,
                     supportsTableMaintenance: false,
-                    supportsSessionMonitor: false
+                    supportsSessionMonitor: false,
+                    supportsDistributionMetrics: false
                 });
                 expect(manager.supportsCapability('supportsExplainPlan', undefined, connectionName)).toBe(false);
             }

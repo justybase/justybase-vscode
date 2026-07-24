@@ -68,10 +68,10 @@ export function mergeLocalDefinitions(
 ): LocalDefinition[] {
   const merged = new Map<string, LocalDefinition>();
   for (const definition of base) {
-    merged.set(definition.name.toUpperCase(), definition);
+    merged.set(localDefinitionKey(definition), definition);
   }
   for (const definition of currentStatement) {
-    merged.set(definition.name.toUpperCase(), definition);
+    merged.set(localDefinitionKey(definition), definition);
   }
   return mergeDefinitionColumns(Array.from(merged.values()));
 }
@@ -81,13 +81,15 @@ export function mergeDefinitionColumns(
 ): LocalDefinition[] {
   const merged = new Map<string, LocalDefinition>();
   for (const definition of localDefs) {
-    const key = definition.name.toUpperCase();
+    const key = localDefinitionKey(definition);
     const existing = merged.get(key);
     if (!existing) {
-      merged.set(key, {
-        name: definition.name,
-        type: definition.type,
-        columns: [...definition.columns],
+    merged.set(key, {
+      name: definition.name,
+      type: definition.type,
+      columns: [...definition.columns],
+      scopeStart: definition.scopeStart,
+      scopeEnd: definition.scopeEnd,
       });
       continue;
     }
@@ -107,10 +109,24 @@ export function mergeDefinitionColumns(
       name: existing.name,
       type: existing.type,
       columns: combinedColumns,
+      scopeStart: existing.scopeStart,
+      scopeEnd: existing.scopeEnd,
     });
   }
 
   return Array.from(merged.values());
+}
+
+function localDefinitionKey(definition: LocalDefinition): string {
+  const type = definition.type.toUpperCase();
+  if (
+    (type === "VARIABLE" || type === "PARAMETER") &&
+    definition.scopeStart !== undefined &&
+    definition.scopeEnd !== undefined
+  ) {
+    return `${type}:${definition.name.toUpperCase()}:${definition.scopeStart}:${definition.scopeEnd}`;
+  }
+  return definition.name.toUpperCase();
 }
 
 export function normalizeColumnNames(columns: string[]): string[] {

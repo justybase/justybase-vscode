@@ -9,6 +9,13 @@ import {
     getResultReaderNumericScale
 } from './resultColumnMetadata';
 import { isConnectionRecoveryError } from '../connectionReadiness';
+import {
+    cancelCommandAndCloseReader,
+    isCancellationError,
+    isTimeoutError,
+    type CancellationCleanupContext,
+    type OperationStatus,
+} from '../cancellation';
 
 /**
  * Streaming chunk callback interface for progressive result delivery
@@ -20,6 +27,7 @@ export interface StreamingChunk {
     isLastChunk: boolean;
     totalRowsSoFar: number;
     limitReached: boolean;
+    isCancelled?: boolean;
 }
 
 /**
@@ -47,14 +55,6 @@ async function closeReaderBestEffort(reader: NzDataReader | undefined, context: 
         await reader.close();
     } catch (closeErr: unknown) {
         logWithFallback('warn', `[StreamingManager] Failed to close reader after ${context}:`, closeErr);
-    }
-}
-
-async function cancelCommandBestEffort(cmd: NzCommand, context: string): Promise<void> {
-    try {
-        await cmd.cancel();
-    } catch (cancelErr: unknown) {
-        logWithFallback('warn', `[StreamingManager] Failed to cancel command after ${context}:`, cancelErr);
     }
 }
 
@@ -239,7 +239,8 @@ export class StreamingManager {
         sessionId?: string,
         _connectionManager?: { closeDocumentPersistentConnection(uri: string): Promise<void> },
         onDropSession?: (sessionId: string) => Promise<void>,
-        cancelFirst: boolean = false
+        cancelFirst: boolean = false,
+        cleanupContext?: CancellationCleanupContext,
     ): Promise<void> {
         const startTime = Date.now();
         const timeoutMs = CANCEL_TIMEOUT_MS;
@@ -247,32 +248,25 @@ export class StreamingManager {
 
         try {
             if (cancelFirst) {
-                try {
-                    await cmd.cancel();
-                } catch (cancelErr: unknown) {
-                    logWithFallback('warn', `[StreamingManager] Immediate cmd.cancel() failed for session ${sessionId}, falling back to drain flow:`, cancelErr);
+                const cleanup = await cancelCommandAndCloseReader(cmd, reader, cleanupContext ?? { timeoutMs });
+                if (cleanup.cancelError) {
+                    logWithFallback('warn', `[StreamingManager] Immediate cmd.cancel() failed for session ${sessionId}:`, cleanup.cancelError);
                 }
-
-                try {
-                    await new Promise<void>((resolve, reject) => {
-                        const closeTimer = setTimeout(() => {
-                            reject(new Error(`reader.close() timed out after ${timeoutMs}ms`));
-                        }, timeoutMs);
-
-                        Promise.resolve(reader.close())
-                            .then(() => {
-                                clearTimeout(closeTimer);
-                                resolve();
-                            })
-                            .catch((closeErr) => {
-                                clearTimeout(closeTimer);
-                                reject(closeErr);
-                            });
-                    });
-                    return;
-                } catch (closeErr: unknown) {
-                    logWithFallback('warn', `[StreamingManager] Immediate reader.close() after cancel failed for session ${sessionId}, falling back to drain flow:`, closeErr);
+                if (cleanup.closeError) {
+                    logWithFallback('warn', `[StreamingManager] Immediate reader.close() after cancel failed for session ${sessionId}:`, cleanup.closeError);
+                    // Some drivers reject close while a fetch is unwinding. A
+                    // bounded drain gives those readers a chance to release
+                    // their server cursor before the final cleanup attempt.
+                    try {
+                        const drainStarted = Date.now();
+                        while (await reader.read()) {
+                            if (Date.now() - drainStarted >= timeoutMs) break;
+                        }
+                    } catch (drainError) {
+                        logWithFallback('warn', `[StreamingManager] Reader drain after close failure failed for session ${sessionId}:`, drainError);
+                    }
                 }
+                return;
             }
 
             let timedOut = false;
@@ -360,7 +354,7 @@ export class StreamingManager {
                 }
             }
 
-            await cmd.cancel();
+            await cancelCommandAndCloseReader(cmd, reader, { timeoutMs });
         } catch (e: unknown) {
             logWithFallback('warn', '[StreamingManager] Failed to cancel command after limit reached:', e);
         }
@@ -380,7 +374,7 @@ export class StreamingManager {
         connectionManager?: { closeDocumentPersistentConnection(uri: string): Promise<void> },
         maxRows?: number,
         onDropSession?: (sessionId: string) => Promise<void>
-    ): Promise<{ results: InternalResultSet[]; error?: Error; recordsAffected?: number }> {
+    ): Promise<{ results: InternalResultSet[]; error?: Error; recordsAffected?: number; status: OperationStatus }> {
         const cmd = connection.createCommand(query);
         if (timeoutSeconds && timeoutSeconds > 0) {
             cmd.commandTimeout = timeoutSeconds;
@@ -390,11 +384,20 @@ export class StreamingManager {
         const signal = documentUri
             ? this.registerCommand(documentUri, cmd, sessionId).signal
             : undefined;
+        const cancellationContext: CancellationCleanupContext = { timeoutMs: CANCEL_TIMEOUT_MS };
+        let abortListener: (() => void) | undefined;
+        if (signal) {
+            abortListener = () => {
+                void cancelCommandAndCloseReader(cmd, reader, cancellationContext);
+            };
+            signal.addEventListener('abort', abortListener, { once: true });
+        }
 
         const alertTimeout = this.setupLongQueryAlert();
 
         let reader: NzDataReader | undefined;
         let caughtError: Error | undefined;
+        let operationStatus: OperationStatus = 'success';
         let commandCleanupDone = false;
 
         try {
@@ -402,8 +405,11 @@ export class StreamingManager {
                 reader = await cmd.executeReader();
             } catch (executeErr: unknown) {
                 caughtError = executeErr instanceof Error ? executeErr : new Error(String(executeErr));
-                await cancelCommandBestEffort(cmd, 'executeAndFetch executeReader failure');
-                return { results: [], error: caughtError, recordsAffected: cmd._recordsAffected };
+                operationStatus = signal?.aborted || isCancellationError(executeErr)
+                    ? 'cancelled'
+                    : isTimeoutError(executeErr) ? 'timeout' : 'error';
+                await cancelCommandAndCloseReader(cmd, reader, cancellationContext);
+                return { results: [], error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
             }
 
             const results: InternalResultSet[] = [];
@@ -435,6 +441,7 @@ export class StreamingManager {
                     while (await reader.read()) {
                         // Check for cancellation
                         if (signal?.aborted) {
+                            operationStatus = 'cancelled';
                             await this.consumeRestAndCancel(
                                 reader,
                                 cmd,
@@ -442,7 +449,8 @@ export class StreamingManager {
                                 sessionId,
                                 connectionManager,
                                 onDropSession,
-                                true
+                                true,
+                                cancellationContext,
                             );
                             commandCleanupDone = true;
                             throw new Error('Query cancelled by user');
@@ -472,7 +480,8 @@ export class StreamingManager {
                                 sessionId,
                                 connectionManager,
                                 onDropSession,
-                                true
+                                true,
+                                cancellationContext,
                             );
                             commandCleanupDone = true;
                             break;
@@ -489,10 +498,18 @@ export class StreamingManager {
                 } while (hasMore);
             } catch (readErr: unknown) {
                 caughtError = readErr instanceof Error ? readErr : new Error(String(readErr));
+                operationStatus = signal?.aborted || isCancellationError(readErr)
+                    ? 'cancelled'
+                    : isTimeoutError(readErr) ? 'timeout' : 'error';
                 // Don't throw loop error immediately, return what we have so far
             }
 
-            return { results, error: caughtError, recordsAffected: cmd._recordsAffected };
+            if (signal?.aborted && operationStatus === 'success') {
+                operationStatus = 'cancelled';
+                caughtError ??= new Error('Query cancelled');
+            }
+
+            return { results, error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
         } finally {
             if (reader && !commandCleanupDone) {
                 if (caughtError && isConnectionRecoveryError(caughtError)) {
@@ -504,6 +521,7 @@ export class StreamingManager {
                         connectionManager,
                         onDropSession,
                         true,
+                        cancellationContext,
                     );
                 } else {
                     await closeReaderBestEffort(reader, 'executeAndFetch');
@@ -513,6 +531,9 @@ export class StreamingManager {
                 clearTimeout(alertTimeout);
             }
             if (documentUri) {
+                if (signal && abortListener) {
+                    signal.removeEventListener('abort', abortListener);
+                }
                 this.unregisterCommand(documentUri);
             }
         }
@@ -534,7 +555,7 @@ export class StreamingManager {
         connectionManager?: { closeDocumentPersistentConnection(uri: string): Promise<void> },
         maxRows?: number,
         onDropSession?: (sessionId: string) => Promise<void>
-    ): Promise<{ totalRows: number; limitReached: boolean; error?: Error; recordsAffected?: number }> {
+    ): Promise<{ totalRows: number; limitReached: boolean; error?: Error; recordsAffected?: number; status: OperationStatus }> {
         const cmd = connection.createCommand(query);
         if (timeoutSeconds && timeoutSeconds > 0) {
             cmd.commandTimeout = timeoutSeconds;
@@ -544,11 +565,20 @@ export class StreamingManager {
         const signal = documentUri
             ? this.registerCommand(documentUri, cmd, sessionId).signal
             : undefined;
+        const cancellationContext: CancellationCleanupContext = { timeoutMs: CANCEL_TIMEOUT_MS };
+        let abortListener: (() => void) | undefined;
+        if (signal) {
+            abortListener = () => {
+                void cancelCommandAndCloseReader(cmd, reader, cancellationContext);
+            };
+            signal.addEventListener('abort', abortListener, { once: true });
+        }
 
         const alertTimeout = this.setupLongQueryAlert();
 
         let reader: NzDataReader | undefined;
         let caughtError: Error | undefined;
+        let operationStatus: OperationStatus = 'success';
         let commandCleanupDone = false;
 
         try {
@@ -556,8 +586,11 @@ export class StreamingManager {
                 reader = await cmd.executeReader();
             } catch (executeErr: unknown) {
                 caughtError = executeErr instanceof Error ? executeErr : new Error(String(executeErr));
-                await cancelCommandBestEffort(cmd, 'executeWithStreaming executeReader failure');
-                return { totalRows: 0, limitReached: false, error: caughtError, recordsAffected: cmd._recordsAffected };
+                operationStatus = signal?.aborted || isCancellationError(executeErr)
+                    ? 'cancelled'
+                    : isTimeoutError(executeErr) ? 'timeout' : 'error';
+                await cancelCommandAndCloseReader(cmd, reader, cancellationContext);
+                return { totalRows: 0, limitReached: false, error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
             }
 
             let totalRows = 0;
@@ -589,6 +622,7 @@ export class StreamingManager {
                     // Check for cancellation
                     if (signal?.aborted) {
                         userCancelled = true;
+                        operationStatus = 'cancelled';
                         // User cancelled during fetch - consume remaining data and cancel properly
                         await this.consumeRestAndCancel(
                             reader,
@@ -597,7 +631,8 @@ export class StreamingManager {
                             sessionId,
                             connectionManager,
                             onDropSession,
-                            true
+                            true,
+                            cancellationContext,
                         );
                         commandCleanupDone = true;
                         break;
@@ -643,7 +678,8 @@ export class StreamingManager {
                             sessionId,
                             connectionManager,
                             onDropSession,
-                            true
+                            true,
+                            cancellationContext,
                         );
                         commandCleanupDone = true;
                         break;
@@ -652,13 +688,36 @@ export class StreamingManager {
 
                 // If user cancelled, return early with an error
                 if (userCancelled) {
-                    return { totalRows, limitReached, error: new Error('Query cancelled'), recordsAffected: cmd._recordsAffected };
+                    if (chunk.length > 0) {
+                        onChunk({
+                            columns: isFirstChunk ? columns : [],
+                            rows: chunk,
+                            isFirstChunk,
+                            isLastChunk: true,
+                            totalRowsSoFar: totalRows,
+                            limitReached,
+                            isCancelled: true,
+                        });
+                    }
+                    return { totalRows, limitReached, error: new Error('Query cancelled'), recordsAffected: cmd._recordsAffected, status: 'cancelled' };
                 }
 
                 // Send final chunk (even if empty, to signal completion)
                 // But skip it if we were cancelled in the meantime
                 if (signal?.aborted) {
-                    return { totalRows, limitReached, error: caughtError || new Error('Query cancelled'), recordsAffected: cmd._recordsAffected };
+                    operationStatus = 'cancelled';
+                    if (chunk.length > 0) {
+                        onChunk({
+                            columns: isFirstChunk ? columns : [],
+                            rows: chunk,
+                            isFirstChunk,
+                            isLastChunk: true,
+                            totalRowsSoFar: totalRows,
+                            limitReached,
+                            isCancelled: true,
+                        });
+                    }
+                    return { totalRows, limitReached, error: caughtError || new Error('Query cancelled'), recordsAffected: cmd._recordsAffected, status: 'cancelled' };
                 }
 
                 onChunk({
@@ -671,9 +730,12 @@ export class StreamingManager {
                 });
             } catch (readErr: unknown) {
                 caughtError = readErr instanceof Error ? readErr : new Error(String(readErr));
+                operationStatus = signal?.aborted || isCancellationError(readErr)
+                    ? 'cancelled'
+                    : isTimeoutError(readErr) ? 'timeout' : 'error';
             }
 
-            return { totalRows, limitReached, error: caughtError, recordsAffected: cmd._recordsAffected };
+            return { totalRows, limitReached, error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
         } finally {
             if (reader && !commandCleanupDone) {
                 if (caughtError && isConnectionRecoveryError(caughtError)) {
@@ -685,6 +747,7 @@ export class StreamingManager {
                         connectionManager,
                         onDropSession,
                         true,
+                        cancellationContext,
                     );
                 } else {
                     await closeReaderBestEffort(reader, 'executeWithStreaming');
@@ -694,6 +757,9 @@ export class StreamingManager {
                 clearTimeout(alertTimeout);
             }
             if (documentUri) {
+                if (signal && abortListener) {
+                    signal.removeEventListener('abort', abortListener);
+                }
                 this.unregisterCommand(documentUri);
             }
         }

@@ -264,10 +264,32 @@ export function registerDDLCommands(deps: SchemaCommandsDependencies): vscode.Di
                 const objectTypes = isTypeGroup
                     ? [item.objType || item.contextValue.replace('typeGroup:', '')]
                     : undefined;
+                let ddlMode: 'objects' | 'schema-migration' = 'objects';
+                if (isDatabase && connectionDetails.dbType === 'oracle') {
+                    const selectedMode = await vscode.window.showQuickPick(
+                        [
+                            {
+                                label: 'Object DDL',
+                                description: 'Export supported Oracle objects only',
+                                value: 'objects' as const
+                            },
+                            {
+                                label: 'Schema migration DDL',
+                                description: 'Include tables, partitions, indexes and visible object grants',
+                                value: 'schema-migration' as const
+                            }
+                        ],
+                        { placeHolder: 'Select Oracle DDL scope' }
+                    );
+                    if (!selectedMode) {
+                        return;
+                    }
+                    ddlMode = selectedMode.value;
+                }
 
                 await executeWithProgress(
                     isDatabase
-                        ? `Exporting all DDL for database ${database}...`
+                        ? `Exporting ${ddlMode === 'schema-migration' ? 'schema migration' : 'object'} DDL for database ${database}...`
                         : `Exporting ${objectTypes?.[0]} DDL for ${database}...`,
                     async () => {
                         const { generateBatchDDL } = await import('../../ddlGenerator');
@@ -275,7 +297,8 @@ export function registerDDLCommands(deps: SchemaCommandsDependencies): vscode.Di
                         const result = await generateBatchDDL({
                             connectionDetails,
                             database: database!,
-                            objectTypes
+                            objectTypes,
+                            ...(ddlMode === 'schema-migration' ? { mode: ddlMode } : {})
                         });
 
                         if (result.success && result.ddlCode) {
@@ -335,6 +358,9 @@ export function registerDDLCommands(deps: SchemaCommandsDependencies): vscode.Di
                                 vscode.window.showWarningMessage(
                                     `Batch DDL completed with ${result.errors.length} error(s). Check the generated file for details.`
                                 );
+                            }
+                            if (result.warnings && result.warnings.length > 0) {
+                                vscode.window.showWarningMessage(result.warnings.join(' '));
                             }
                         } else {
                             throw new Error(result.errors.join(', ') || 'Batch DDL generation failed');

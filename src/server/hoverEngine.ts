@@ -56,6 +56,7 @@ export interface HoverDependencies {
     statementSql: string,
     statementOffset: number,
     databaseKind?: string,
+    cursorOffset?: number,
   ) => { name: string; type: string; columns: string[] }[];
   findLocalDefinition: (
     localDefinitions: { name: string; type: string; columns: string[] }[],
@@ -102,6 +103,7 @@ export async function provideHover(
     statementSql,
     statementOffset,
     context.databaseKind,
+    offset,
   );
   const effectiveDatabase = context.effectiveDatabase;
 
@@ -255,6 +257,20 @@ export async function provideHover(
 
   // Try table name match first (handles JUST_DATA_2.ADMIN.FACT_SALES_2)
   const upperWord = hoverWord.toUpperCase();
+  const localDefinition = deps.findLocalDefinition(localDefinitions, hoverWord);
+  if (
+    localDefinition &&
+    (localDefinition.type.toUpperCase() === "VARIABLE" ||
+      localDefinition.type.toUpperCase() === "PARAMETER")
+  ) {
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: `**PL/SQL ${localDefinition.type.toLowerCase()}** \`${localDefinition.name}\``,
+      },
+    };
+  }
+
   for (const [, aliasRef] of aliasBindings) {
     if (aliasRef.table.toUpperCase() === upperWord) {
       const database = aliasRef.db || effectiveDatabase;

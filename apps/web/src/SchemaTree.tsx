@@ -223,14 +223,16 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
   // Separate store for column metadata not present on SchemaTreeNode
   const [columnMeta, setColumnMeta] = useState<Record<string, ColumnMeta>>({});
 
-  const loadFn = useCallback(async (parentId: string): Promise<void> => {
+  const loadFn = useCallback(async (parentId: string): Promise<SchemaTreeNode[]> => {
     setLoading(prev => ({ ...prev, [parentId]: true }));
     setError('');
     try {
       const response = await api.schemaTree(connectionId, parentId === ROOT ? undefined : parentId);
       setChildren(prev => ({ ...prev, [parentId]: response.nodes }));
+      return response.nodes;
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not load schema tree.');
+      return [];
     } finally {
       setLoading(prev => ({ ...prev, [parentId]: false }));
     }
@@ -281,20 +283,20 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
     const newExpanded: Record<string, boolean> = { [ROOT]: true };
 
     // 2. Expand level 1 (databases / first-level nodes) + load their children
-    const level1 = children[ROOT] ?? [];
+    const level1 = children[ROOT] ?? await loadFn(ROOT);
     for (const n1 of level1) {
       newExpanded[n1.id] = true;
+      let level2 = children[n1.id];
       if (!children[n1.id] && n1.hasChildren && !loading[n1.id]) {
         if (n1.kind === 'object' && n1.objectName) {
-          await loadColumns(n1);
+          level2 = await loadColumns(n1);
         } else {
-          await loadFn(n1.id);
+          level2 = await loadFn(n1.id);
         }
       }
 
       // 3. Expand level 2 (schemas / second-level nodes) + load their children
-      const level2 = children[n1.id] ?? [];
-      for (const n2 of level2) {
+      for (const n2 of level2 ?? []) {
         newExpanded[n2.id] = true;
         if (!children[n2.id] && n2.hasChildren && !loading[n2.id]) {
           if (n2.kind === 'object' && n2.objectName) {
@@ -314,8 +316,8 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
   }
 
   // Load columns for an object node
-  async function loadColumns(node: SchemaTreeNode): Promise<void> {
-    if (!node.database || !node.schema || !node.objectName) return;
+  async function loadColumns(node: SchemaTreeNode): Promise<SchemaTreeNode[]> {
+    if (!node.database || !node.schema || !node.objectName) return [];
     setLoading(prev => ({ ...prev, [node.id]: true }));
     setError('');
     try {
@@ -342,8 +344,10 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
       }
       setColumnMeta(prev => ({ ...prev, ...metaEntries }));
       setChildren(prev => ({ ...prev, [node.id]: colNodes }));
+      return colNodes;
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not load columns.');
+      return [];
     } finally {
       setLoading(prev => ({ ...prev, [node.id]: false }));
     }

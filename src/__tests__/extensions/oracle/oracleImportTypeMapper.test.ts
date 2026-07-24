@@ -103,5 +103,15 @@ describe('Oracle Data Import Type Mapper', () => {
             expect(chooser).toBeDefined();
             expect(typeof chooser.refreshCurrentType).toBe('function');
         });
+
+        it('infers BOOLEAN values for Oracle imports but falls back to text for mixed values', () => {
+            const booleanChooser = oracleImportTypeMapper.createColumnTypeChooser();
+            expect(booleanChooser.refreshCurrentType('true').dbType).toBe('BOOLEAN');
+            expect(booleanChooser.refreshCurrentType('false').dbType).toBe('BOOLEAN');
+
+            const mixedChooser = oracleImportTypeMapper.createColumnTypeChooser();
+            mixedChooser.refreshCurrentType('true');
+            expect(mixedChooser.refreshCurrentType('unknown').dbType).toBe('NVARCHAR');
+        });
     });
 });

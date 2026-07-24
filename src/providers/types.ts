@@ -6,6 +6,9 @@ export interface LocalDefinition {
     name: string;
     type: string;
     columns: string[];
+    /** Optional source range for block-scoped definitions such as PL/SQL locals. */
+    scopeStart?: number;
+    scopeEnd?: number;
 }
 
 export interface AliasInfo {

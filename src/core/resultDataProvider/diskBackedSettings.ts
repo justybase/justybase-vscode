@@ -1,6 +1,7 @@
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import {
     DISK_BACKED_DEFAULT_MEMORY_ROW_THRESHOLD,
+    DISK_BACKED_DEFAULT_MEMORY_BYTE_THRESHOLD,
     DISK_BACKED_DEFAULT_ROW_THRESHOLD,
 } from './types';
 import type { DiskBackedResultsSettings } from './types';
@@ -22,6 +23,10 @@ export function getDiskBackedResultsSettings(): DiskBackedResultsSettings {
             'diskBackedResults.memoryRowThreshold',
             DEFAULT_MEMORY_ROW_THRESHOLD,
         ) ?? DEFAULT_MEMORY_ROW_THRESHOLD,
+        memoryByteThreshold: config.get<number>(
+            'diskBackedResults.memoryByteThreshold',
+            DISK_BACKED_DEFAULT_MEMORY_BYTE_THRESHOLD,
+        ) ?? DISK_BACKED_DEFAULT_MEMORY_BYTE_THRESHOLD,
         insertBatchSize: config.get<number>('diskBackedResults.insertBatchSize', DEFAULT_INSERT_BATCH_SIZE)
             ?? DEFAULT_INSERT_BATCH_SIZE,
         idleSpillMinutes: config.get<number>('diskBackedResults.idleSpillMinutes', DEFAULT_IDLE_SPILL_MINUTES)

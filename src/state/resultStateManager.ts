@@ -21,6 +21,29 @@ import {
 /** SQL truncation length for log entries */
 const SQL_TRUNCATION_LENGTH = 200;
 
+function estimateValueBytes(value: unknown, depth = 0): number {
+    if (value === null || value === undefined) return 1;
+    if (typeof value === 'string') return Buffer.byteLength(value, 'utf8') + 16;
+    if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') return 16;
+    if (value instanceof Date) return 16;
+    if (Buffer.isBuffer(value)) return value.byteLength + 16;
+    if (depth > 2) return 64;
+    try {
+        return Buffer.byteLength(JSON.stringify(value), 'utf8') + 32;
+    } catch {
+        return 64;
+    }
+}
+
+function estimateRowsBytes(rows: unknown[][]): number {
+    let bytes = 0;
+    for (const row of rows) {
+        bytes += 24;
+        for (const value of row) bytes += estimateValueBytes(value);
+    }
+    return bytes;
+}
+
 interface ExecutionLogEntry {
     id: string;
     sql: string;
@@ -75,6 +98,7 @@ type OneChunk = {
     isLastChunk: boolean;
     totalRowsSoFar: number;
     limitReached: boolean;
+    isCancelled?: boolean;
 };
 
 export interface PinnedResultInfo {
@@ -838,7 +862,7 @@ export class ResultStateManager {
 
         if (!resultSet.isLog && !resultSet.isError) {
             const rowCount = resultSet.totalRowCount ?? resultSet.data.length;
-            if (this._shouldUseDiskBacking(rowCount, resultSet.data.length)) {
+            if (this._shouldUseDiskBacking(rowCount, resultSet.data.length, resultSet.bufferedBytes ?? estimateRowsBytes(resultSet.data))) {
                 const props = this.spillResultSetToDisk(
                     sourceUri,
                     resultSet,
@@ -963,7 +987,7 @@ export class ResultStateManager {
                 continue;
             }
             const rowCount = rs.totalRowCount ?? rs.data.length;
-            if (this._shouldUseDiskBacking(rowCount, rs.data.length)) {
+            if (this._shouldUseDiskBacking(rowCount, rs.data.length, rs.bufferedBytes ?? estimateRowsBytes(rs.data))) {
                 const props = this.spillResultSetToDisk(
                     sourceUri,
                     rs,
@@ -1088,7 +1112,11 @@ export class ResultStateManager {
         }
     }
 
-    private _shouldUseDiskBacking(totalRowsSoFar: number, bufferedRowCount?: number): boolean {
+    private _shouldUseDiskBacking(
+        totalRowsSoFar: number,
+        bufferedRowCount?: number,
+        bufferedBytes?: number,
+    ): boolean {
         const settings = getDiskBackedResultsSettings();
         if (!isDiskBackedResultsAvailable(settings)) {
             return false;
@@ -1097,7 +1125,8 @@ export class ResultStateManager {
         const effectiveCount = bufferedRowCount !== undefined
             ? Math.max(totalRowsSoFar, bufferedRowCount)
             : totalRowsSoFar;
-        return effectiveCount >= threshold;
+        return effectiveCount >= threshold
+            || (bufferedBytes ?? 0) >= (settings.memoryByteThreshold ?? Number.POSITIVE_INFINITY);
     }
 
     /**
@@ -1132,7 +1161,11 @@ export class ResultStateManager {
         if (targetResultSet.storageMode === 'sqlite' || targetResultSet.isLog) {
             return null;
         }
-        if (!force && !this._shouldUseDiskBacking(totalRowsSoFar, targetResultSet.data.length)) {
+        if (!force && !this._shouldUseDiskBacking(
+            totalRowsSoFar,
+            targetResultSet.data.length,
+            targetResultSet.bufferedBytes,
+        )) {
             return null;
         }
 
@@ -1158,6 +1191,7 @@ export class ResultStateManager {
             targetResultSet.diskStoreId = store.id;
             targetResultSet.totalRowCount = totalRowsSoFar;
             targetResultSet.data = [];
+            targetResultSet.bufferedBytes = 0;
             targetResultSet.isEditable = false;
 
             this._incrementDataVersion(sourceUri);
@@ -1316,6 +1350,8 @@ export class ResultStateManager {
                 sql,
                 refreshSql: refreshSql ?? sql,
                 limitReached: chunk.limitReached,
+                isCancelled: chunk.isCancelled,
+                bufferedBytes: estimateRowsBytes(chunk.rows),
                 isEditable,
                 editSource: editSource ?? undefined,
             };
@@ -1381,6 +1417,7 @@ export class ResultStateManager {
                     store?.insertRows(chunk.rows);
                     targetResultSet.totalRowCount = chunk.totalRowsSoFar;
                     targetResultSet.limitReached = targetResultSet.limitReached === true || chunk.limitReached === true;
+                    targetResultSet.isCancelled = targetResultSet.isCancelled === true || chunk.isCancelled === true;
                     this._incrementDataVersion(sourceUri);
 
                     return {
@@ -1396,7 +1433,9 @@ export class ResultStateManager {
                 }
 
                 targetResultSet.data.push(...chunk.rows);
+                targetResultSet.bufferedBytes = (targetResultSet.bufferedBytes ?? 0) + estimateRowsBytes(chunk.rows);
                 targetResultSet.limitReached = targetResultSet.limitReached === true || chunk.limitReached === true;
+                targetResultSet.isCancelled = targetResultSet.isCancelled === true || chunk.isCancelled === true;
 
                 const migrateResult = this._tryMigrateResultSetToDisk(
                     sourceUri,

@@ -279,6 +279,7 @@ export async function runQueriesSequentially(
                         results: batchResults,
                         error: batchError,
                         recordsAffected: batchRecordsAffected,
+                        status: batchStatus,
                     } = await streamingManager.executeAndFetch(
                         connection,
                         queryToExecute,
@@ -291,20 +292,20 @@ export async function runQueriesSequentially(
                         createDropSessionCallback(connManager, documentUri),
                     );
 
-                    if (documentUri && streamingManager.isAborted(documentUri)) {
-                        const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(executionId, 0, durationMs, 'cancelled', 'Query cancelled');
-                        }
-                        throw new Error('Query cancelled');
-                    }
-
-                    const durationMs = Date.now() - startTime;
                     const totalRows = batchResults?.reduce(
                         (sum, rs) => sum + (rs.rows?.length || 0),
                         0,
                     ) || 0;
 
+                    if (batchStatus === 'cancelled' || (documentUri && streamingManager.isAborted(documentUri))) {
+                        const durationMs = Date.now() - startTime;
+                        if (queryEndCallback && executionId) {
+                            queryEndCallback(executionId, totalRows, durationMs, 'cancelled', 'Query cancelled');
+                        }
+                        throw new Error('Query cancelled');
+                    }
+
+                    const durationMs = Date.now() - startTime;
                     if (logCallback) {
                         let logMessage = `Executed query ${i + 1}/${queries.length} in ${durationMs}ms`;
                         if (batchRecordsAffected !== undefined && batchRecordsAffected > 0) {
@@ -620,7 +621,7 @@ export async function runQueriesWithStreaming(
 
                     const { queryTimeout, rowLimit } = getQueryConfig();
 
-                    const { totalRows, limitReached, error, recordsAffected } =
+                    const { totalRows, limitReached, error, recordsAffected, status } =
                         await streamingManager.executeWithStreaming(
                             connection,
                             queryToExecute,
@@ -639,10 +640,10 @@ export async function runQueriesWithStreaming(
                             createDropSessionCallback(connManager, documentUri),
                         );
 
-                    if (documentUri && streamingManager.isAborted(documentUri)) {
+                    if (status === 'cancelled' || (documentUri && streamingManager.isAborted(documentUri))) {
                         const durationMs = Date.now() - startTime;
                         if (queryEndCallback && executionId) {
-                            queryEndCallback(executionId, 0, durationMs, 'cancelled', 'Query cancelled');
+                            queryEndCallback(executionId, totalRows, durationMs, 'cancelled', 'Query cancelled');
                         }
                         throw new Error('Query cancelled');
                     }

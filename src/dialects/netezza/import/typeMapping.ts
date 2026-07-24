@@ -5,6 +5,11 @@ import type {
 } from '../../../contracts/database';
 import { valueForcesTextImportType } from '../../../import/importTypeInferenceUtils';
 
+export interface ColumnTypeChooserOptions {
+    forceText?: boolean;
+    inferBoolean?: boolean;
+}
+
 export class NetezzaDataType implements DatabaseImportDataType {
     constructor(
         public dbType: string,
@@ -14,7 +19,7 @@ export class NetezzaDataType implements DatabaseImportDataType {
     ) { }
 
     toString(): string {
-        if (['BIGINT', 'DATE', 'DATETIME'].includes(this.dbType)) {
+        if (['BIGINT', 'DATE', 'DATETIME', 'BOOLEAN'].includes(this.dbType)) {
             return this.dbType;
         }
         if (this.dbType === 'NUMERIC') {
@@ -34,9 +39,11 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
     private maxPrecision: number = 0;
     private maxScale: number = 0;
     private readonly forceText: boolean;
+    private readonly inferBoolean: boolean;
 
-    constructor(decimalDelimiter: string = '.', options?: { forceText?: boolean }) {
+    constructor(decimalDelimiter: string = '.', options?: ColumnTypeChooserOptions) {
         this.forceText = options?.forceText === true;
+        this.inferBoolean = options?.inferBoolean === true;
         this.currentType = this.forceText
             ? new NetezzaDataType('NVARCHAR', undefined, undefined, 20)
             : new NetezzaDataType('BIGINT');
@@ -72,6 +79,11 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
 
         const strValNoSpace = strVal.replace(/\s/g, '');
         const strLenNoSpace = strValNoSpace.length;
+
+        if (this.inferBoolean && /^(true|false)$/i.test(strValNoSpace)) {
+            this.firstTime = false;
+            return new NetezzaDataType('BOOLEAN');
+        }
 
         if (
             currentDbType === 'BIGINT' &&

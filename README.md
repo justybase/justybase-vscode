@@ -401,6 +401,7 @@ npm run build:mysql
 npm run test -- --testPathPatterns="sqlParser.test.ts"
 npm run test -- --testNamePattern="ConnectionManager"
 npm run test:duckdb:integration
+npm run test:oracle:integration
 npm run test:live:local
 
 # Switch Db2 runtime between Jest/Node and F5/Electron
@@ -455,6 +456,8 @@ The Db2-bearing F5 launch targets now call `npm run db2:runtime:electron` automa
 - optional live metadata/connectivity smoke tests for Db2, Oracle, and PostgreSQL (`src\__tests__\integration\optionalDialects.live.integration.test.ts`)
 
 The default `npm run test` and `npm run test:watch` flows skip both live suites on purpose, so normal regression runs stay local-environment-independent. Use `npm run test:live:local` when you explicitly want real database smoke coverage.
+
+For the full Oracle live suite (connection, metadata search, DDL extraction/generation, maintenance, and session monitor), run `npm run test:oracle:integration`. It requires `ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_PORT`, `ORACLE_LIVE_TEST_DATABASE`, `ORACLE_LIVE_TEST_USER`, and `ORACLE_LIVE_TEST_PASSWORD` (with optional `ORACLE_LIVE_TEST_CURRENT_SCHEMA`).
 
 The live tests are env-gated and stay skipped unless you provide credentials. Supported variables are:
 
