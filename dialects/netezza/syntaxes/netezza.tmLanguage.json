@@ -1,11 +1,12 @@
 {
   "scopeName": "netezza.injection",
   "name": "Netezza SQL Injection",
+  "comment": "Comment/string exclusion is injectionSelector-only. Do not add per-rule (?m)(?<!^\\s*--...) line lookbehinds or variable-length CREATE/TABLE lookbehinds — they are O(n²) on long lines (see tmLanguageLookbehindGuard.test.ts).",
   "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block), L:source.tsql - (string.quoted | comment.line | comment.block), L:source.pgsql - (string.quoted | comment.line | comment.block), L:source.plpgsql - (string.quoted | comment.line | comment.block), L:source.mysql - (string.quoted | comment.line | comment.block), L:source.oracle - (string.quoted | comment.line | comment.block)",
   "patterns": [
     {
       "comment": "─── P0: CREATE TABLE target — begin/end region for full qualified name (fixes db..table vs built-in meta.create.sql) ──",
-      "begin": "(?i)(?m)(?<!^\\s*--[^\\n]*)(\\bCREATE\\b)(?:\\s+(OR\\s+REPLACE))?(?:\\s+(GLOBAL))?(?:\\s+(TEMP(?:ORARY)?))?\\s+(\\bTABLE\\b)(?:\\s+(IF\\s+NOT\\s+EXISTS))?\\s+",
+      "begin": "(?i)(\\bCREATE\\b)(?:\\s+(OR\\s+REPLACE))?(?:\\s+(GLOBAL))?(?:\\s+(TEMP(?:ORARY)?))?\\s+(\\bTABLE\\b)(?:\\s+(IF\\s+NOT\\s+EXISTS))?\\s+",
       "beginCaptures": {
         "1": {
           "name": "keyword.other.ddl.netezza"
@@ -30,7 +31,7 @@
       "contentName": "meta.create.table-target.netezza",
       "patterns": [
         {
-          "comment": "P0.1: database.schema.table",
+          "comment": "P0.1: database.schema.table (no ^ — same-line CTAS target after TABLE)",
           "captures": {
             "1": {
               "name": "constant.other.database-name.sql"
@@ -42,7 +43,7 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+          "match": "(\\w+)\\.(\\w+)\\.(\\w+)\\b"
         },
         {
           "comment": "P0.2: database..table (Netezza notation)",
@@ -54,7 +55,7 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\.\\.(\\w+)\\b"
+          "match": "(\\w+)\\.\\.(\\w+)\\b"
         },
         {
           "comment": "P0.3: schema.table",
@@ -66,7 +67,7 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\.(\\w+)\\b"
+          "match": "(\\w+)\\.(\\w+)\\b"
         },
         {
           "comment": "P0.4: single unqualified table name",
@@ -75,22 +76,13 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\b"
+          "match": "(\\w+)\\b"
         }
       ]
     },
     {
-      "comment": "─── P0d: fallback single unqualified CREATE TABLE name when begin/end capture scopes are not applied ──",
-      "captures": {
-        "1": {
-          "name": "constant.other.table-name.sql"
-        }
-      },
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\bCREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:GLOBAL\\s+)?(?:TEMP(?:ORARY)?\\s+)?TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?)(\\w+)\\b(?!\\.)"
-    },
-    {
       "comment": "─── P0g: GROOM TABLE target — begin/end region for qualified table name ──",
-      "begin": "(?i)(?m)(?<!^\\s*--[^\\n]*)(\\bGROOM\\b)\\s+(\\bTABLE\\b)\\s+",
+      "begin": "(?i)(\\bGROOM\\b)\\s+(\\bTABLE\\b)\\s+",
       "beginCaptures": {
         "1": {
           "name": "keyword.other.ddl.netezza"
@@ -103,7 +95,7 @@
       "contentName": "meta.ddl.table-target.netezza",
       "patterns": [
         {
-          "comment": "P0g.1: database.schema.table",
+          "comment": "P0g.1: database.schema.table (no ^ — same-line target after TABLE)",
           "captures": {
             "1": {
               "name": "constant.other.database-name.sql"
@@ -115,7 +107,7 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+          "match": "(\\w+)\\.(\\w+)\\.(\\w+)\\b"
         },
         {
           "comment": "P0g.2: database..table (Netezza notation)",
@@ -127,7 +119,7 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\.\\.(\\w+)\\b"
+          "match": "(\\w+)\\.\\.(\\w+)\\b"
         },
         {
           "comment": "P0g.3: schema.table",
@@ -139,7 +131,7 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\.(\\w+)\\b"
+          "match": "(\\w+)\\.(\\w+)\\b"
         },
         {
           "comment": "P0g.4: single unqualified table name",
@@ -148,189 +140,180 @@
               "name": "constant.other.table-name.sql"
             }
           },
-          "match": "^\\s*(\\w+)\\b"
+          "match": "(\\w+)\\b"
         }
       ]
     },
     {
-      "comment": "─── P0gd: fallback single unqualified GROOM TABLE name when begin/end capture scopes are not applied ──",
-      "captures": {
-        "1": {
-          "name": "constant.other.table-name.sql"
-        }
-      },
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\bGROOM\\s+TABLE\\s+)(\\w+)\\b(?!\\.)"
-    },
-    {
-      "comment": "Line guard (?m)(?<!^--). Block comments are excluded by injectionSelector per source target.",
+      "comment": "─── P1: session builtins ──",
       "name": "constant.language.netezza",
-      "begin": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\bCURRENT_(?:TIMEZONE|SID|DB|TX_SCHEMA|DATE|TIME(?:STAMP)?|USER|CATALOG|SCHEMA)\\b",
+      "begin": "(?i)\\bCURRENT_(?:TIMEZONE|SID|DB|TX_SCHEMA|DATE|TIME(?:STAMP)?|USER|CATALOG|SCHEMA)\\b",
       "end": "(?=[^\\w]|$)"
     },
     {
       "comment": "P1b: Standalone session user keywords (constant.language)",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(SESSION_USER|SYSTEM_USER|USER)\\b",
+      "match": "(?i)\\b(SESSION_USER|SYSTEM_USER|USER)\\b",
       "name": "constant.language.netezza"
     },
     {
       "comment": "─── P2: Netezza system columns (variable.language) ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ROWID|CREATEXID|DELETEXID|DATASLICEID)\\b",
+      "match": "(?i)\\b(ROWID|CREATEXID|DELETEXID|DATASLICEID)\\b",
       "name": "variable.language.netezza"
     },
     {
       "comment": "─── P3a: SAS-like macro directives ───",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)%(LET|PUT|EXPORT|PYTHON|IF|THEN|ELSE|DO|END|INCLUDE)\\b",
+      "match": "(?i)%(LET|PUT|EXPORT|PYTHON|IF|THEN|ELSE|DO|END|INCLUDE)\\b",
       "name": "keyword.control.macro.sas.sql"
     },
     {
       "comment": "─── P3b: SAS-like macro functions ───",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)%(EVAL|SQL|SQLLIST)\\b",
+      "match": "(?i)%(EVAL|SQL|SQLLIST)\\b",
       "name": "support.function.macro.sas.sql"
     },
     {
       "comment": "─── P3: Variable substitution ───",
-      "match": "(?m)(?<!^\\s*--[^\\n]*)(?:\\$\\{\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*\\}|[&$][a-zA-Z_][a-zA-Z0-9_]*\\b)",
+      "match": "(?:\\$\\{\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*\\}|[&$][a-zA-Z_][a-zA-Z0-9_]*\\b)",
       "name": "variable.other.macro.sas.sql"
     },
     {
       "comment": "─── P4: Built-in functions (entity.name.function = yellow/gold) ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(BTRIM|INSTR|STRPOS|UNICHR|UNICODE|UNICODES|OVERLAPS|DURATION_ADD|DURATION_SUBTRACT|TIMEOFDAY|TIMEZONE|HEX_TO_BINARY|HEX_TO_GEOMETRY|INT_TO_STRING|STRING_TO_INT|ISFALSE|ISNOTFALSE|ISTRUE|ISNOTTRUE|VERSION|GET_VIEWDEF|SETSEED|DCEIL|DFLOOR|FPOW|NUMERIC_SQRT|POW|INT1AND|INT1OR|INT1XOR|INT1NOT|INT1SHL|INT1SHR|INT2AND|INT2OR|INT2XOR|INT2NOT|INT2SHL|INT2SHR|INT4AND|INT4OR|INT4XOR|INT4NOT|INT4SHL|INT4SHR|INT8AND|INT8OR|INT8XOR|INT8NOT|INT8SHL|INT8SHR|DAYS_BETWEEN|HOURS_BETWEEN|MINUTES_BETWEEN|SECONDS_BETWEEN|WEEKS_BETWEEN|NEXT_WEEK|NEXT_MONTH|NEXT_QUARTER|NEXT_YEAR|THIS_WEEK|THIS_MONTH|THIS_QUARTER|THIS_YEAR|STRLEFT|STRRIGHT|PROC_ARGUMENT_TYPES|HASH|HASH4|HASH8|HASH_NVARCHAR)\\b",
+      "match": "(?i)\\b(BTRIM|INSTR|STRPOS|UNICHR|UNICODE|UNICODES|OVERLAPS|DURATION_ADD|DURATION_SUBTRACT|TIMEOFDAY|TIMEZONE|HEX_TO_BINARY|HEX_TO_GEOMETRY|INT_TO_STRING|STRING_TO_INT|ISFALSE|ISNOTFALSE|ISTRUE|ISNOTTRUE|VERSION|GET_VIEWDEF|SETSEED|DCEIL|DFLOOR|FPOW|NUMERIC_SQRT|POW|INT1AND|INT1OR|INT1XOR|INT1NOT|INT1SHL|INT1SHR|INT2AND|INT2OR|INT2XOR|INT2NOT|INT2SHL|INT2SHR|INT4AND|INT4OR|INT4XOR|INT4NOT|INT4SHL|INT4SHR|INT8AND|INT8OR|INT8XOR|INT8NOT|INT8SHL|INT8SHR|DAYS_BETWEEN|HOURS_BETWEEN|MINUTES_BETWEEN|SECONDS_BETWEEN|WEEKS_BETWEEN|NEXT_WEEK|NEXT_MONTH|NEXT_QUARTER|NEXT_YEAR|THIS_WEEK|THIS_MONTH|THIS_QUARTER|THIS_YEAR|STRLEFT|STRRIGHT|PROC_ARGUMENT_TYPES|HASH|HASH4|HASH8|HASH_NVARCHAR)\\b",
       "name": "entity.name.function.netezza"
     },
     {
       "comment": "─── P5: Netezza-specific data types (storage.type = teal/blue) ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(BYTEINT|INT1|INT2|INT4|INT8|FLOAT4|FLOAT8|TIMETZ|TIMESTAMPTZ|ABSTIME|RELTIME|VARBYTE|BYTEA|NCHAR|NVARCHAR)\\b",
+      "match": "(?i)\\b(BYTEINT|INT1|INT2|INT4|INT8|FLOAT4|FLOAT8|TIMETZ|TIMESTAMPTZ|ABSTIME|RELTIME|VARBYTE|BYTEA|NCHAR|NVARCHAR)\\b",
       "name": "storage.type.netezza"
     },
     {
       "comment": "─── P6: Netezza DDL multi-word commands ─── keyword.other.ddl ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(MATERIALIZED)\\s+VIEW\\b",
+      "match": "(?i)\\b(MATERIALIZED)\\s+VIEW\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GROOM)\\s+TABLE\\b",
+      "match": "(?i)\\b(GROOM)\\s+TABLE\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ORGANIZE)\\s+ON\\b",
+      "match": "(?i)\\b(ORGANIZE)\\s+ON\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DISTRIBUTE)\\s+ON\\b",
+      "match": "(?i)\\b(DISTRIBUTE)\\s+ON\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GENERATE)\\s+(EXPRESS\\s+)?STATISTICS\\b",
+      "match": "(?i)\\b(GENERATE)\\s+(EXPRESS\\s+)?STATISTICS\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(EXTERNAL)\\s+TABLE\\b",
+      "match": "(?i)\\b(EXTERNAL)\\s+TABLE\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(COMMENT)\\s+ON\\b",
+      "match": "(?i)\\b(COMMENT)\\s+ON\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(CREATE|ALTER|DROP)\\s+SYNONYM\\b",
+      "match": "(?i)\\b(CREATE|ALTER|DROP)\\s+SYNONYM\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ADD)\\s+COLUMN\\b",
+      "match": "(?i)\\b(ADD)\\s+COLUMN\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DROP)\\s+(COLUMN|CONSTRAINT)\\b",
+      "match": "(?i)\\b(DROP)\\s+(COLUMN|CONSTRAINT)\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ALTER)\\s+COLUMN\\b",
+      "match": "(?i)\\b(ALTER)\\s+COLUMN\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(MODIFY)\\s+COLUMN\\b",
+      "match": "(?i)\\b(MODIFY)\\s+COLUMN\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(RENAME)\\s+(COLUMN|TO)\\b",
+      "match": "(?i)\\b(RENAME)\\s+(COLUMN|TO)\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(SET)\\s+PRIVILEGES\\s+TO\\b",
+      "match": "(?i)\\b(SET)\\s+PRIVILEGES\\s+TO\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
       "comment": "─── P7: DDL single-word keywords ───",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(VERSIONS|RECORDS|PAGES|READY|RECLAIM|BACKUPSET|REORGANIZE|RENAME|MODIFY|PRIVILEGES)\\b",
+      "match": "(?i)\\b(VERSIONS|RECORDS|PAGES|READY|RECLAIM|BACKUPSET|REORGANIZE|RENAME|MODIFY|PRIVILEGES)\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DISTRIBUTE|ORGANIZE|RANDOM|SAMEAS|EXPRESS|NONE)\\b",
+      "match": "(?i)\\b(DISTRIBUTE|ORGANIZE|RANDOM|SAMEAS|EXPRESS|NONE)\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(SHOW|COPY|LOCK|REINDEX|RESET)\\b",
+      "match": "(?i)\\b(SHOW|COPY|LOCK|REINDEX|RESET)\\b",
       "name": "keyword.other.ddl.netezza"
     },
     {
       "comment": "─── P8: DML: MERGE ───",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(MERGE)(?=\\s+INTO\\b)",
+      "match": "(?i)\\b(MERGE)(?=\\s+INTO\\b)",
       "name": "keyword.other.ddl.netezza"
     },
     {
       "comment": "─── P9: Window frame ─── keyword.other ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(GROUPS|FILTER|WITHIN|EXCLUDE|TIES)\\b",
+      "match": "(?i)\\b(GROUPS|FILTER|WITHIN|EXCLUDE|TIES)\\b",
       "name": "keyword.other.netezza"
     },
     {
       "comment": "─── P10: Sequence syntax ───",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(NEXT)\\s+(VALUE)\\s+(FOR)\\b",
+      "match": "(?i)\\b(NEXT)\\s+(VALUE)\\s+(FOR)\\b",
       "name": "keyword.other.netezza"
     },
     {
       "comment": "─── P11: Modifiers (TEMP, GLOBAL, EXPLAIN options, CASCADE) ─── storage.modifier ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(TEMP|TEMPORARY|GLOBAL|PLANTEXT|PLANGRAPH|VERBOSE|DISTRIBUTION|CASCADE|RESTRICT)\\b",
+      "match": "(?i)\\b(TEMP|TEMPORARY|GLOBAL|PLANTEXT|PLANGRAPH|VERBOSE|DISTRIBUTION|CASCADE|RESTRICT)\\b",
       "name": "storage.modifier.netezza"
     },
     {
       "comment": "─── P12: NZPLSQL control flow ─── keyword.control ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(BEGIN_PROC|END_PROC)\\b",
+      "match": "(?i)\\b(BEGIN_PROC|END_PROC)\\b",
       "name": "keyword.control.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(EXCEPTION|RAISE|OTHERS|SQLSTATE)\\b",
+      "match": "(?i)\\b(EXCEPTION|RAISE|OTHERS|SQLSTATE)\\b",
       "name": "keyword.control.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(DECLARE|ELSIF|LOOP|WHILE|EXIT|ELSE)\\b",
+      "match": "(?i)\\b(DECLARE|ELSIF|LOOP|WHILE|EXIT|ELSE)\\b",
       "name": "keyword.control.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(COMMIT|ROLLBACK)\\b",
+      "match": "(?i)\\b(COMMIT|ROLLBACK)\\b",
       "name": "keyword.control.netezza"
     },
     {
       "comment": "─── P13: NZPLSQL metadata keywords ─── keyword.other.nzplsql ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(NZPLSQL|RETURNS?|LANGUAGE|OWNER|CALLER|REFTABLE|VARARGS|ALIAS|CONSTANT|NOTICE|DEBUG|WARNING|ERROR|PERFORM|REVERSE|INOUT|OUT)\\b",
+      "match": "(?i)\\b(NZPLSQL|RETURNS?|LANGUAGE|OWNER|CALLER|REFTABLE|VARARGS|ALIAS|CONSTANT|NOTICE|DEBUG|WARNING|ERROR|PERFORM|REVERSE|INOUT|OUT)\\b",
       "name": "keyword.other.nzplsql.netezza"
     },
     {
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(EXECUTE|EXEC|CALL|IMMEDIATE)\\b",
+      "match": "(?i)\\b(EXECUTE|EXEC|CALL|IMMEDIATE)\\b",
       "name": "keyword.other.nzplsql.netezza"
     },
     {
       "comment": "─── P14: Operator: ILIKE ─── keyword.operator ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ILIKE)\\b",
+      "match": "(?i)\\b(ILIKE)\\b",
       "name": "keyword.operator.pattern.netezza"
     },
     {
       "comment": "─── P14a: ISNULL (shorthand for IS NULL) ─── keyword.other.DDL.create.II.sql ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(ISNULL)\\b",
+      "match": "(?i)\\b(ISNULL)\\b",
       "name": "keyword.other.DDL.create.II.sql"
     },
     {
       "comment": "─── P14b: NOTNULL (shorthand for IS NOT NULL) ─── keyword.other.DDL.create.II.sql (matches base grammar's IS NOT NULL scope) ──",
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(NOTNULL)\\b",
+      "match": "(?i)\\b(NOTNULL)\\b",
       "name": "keyword.other.DDL.create.II.sql"
     },
     {
@@ -343,47 +326,59 @@
           "name": "constant.other.table-name.sql"
         }
       },
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)\\b(\\w+)\\.\\.(\\w+)\\b"
+      "match": "(?i)\\b(\\w+)\\.\\.(\\w+)\\b"
     },
     {
-      "comment": "─── P16: 3-part name after DDL/FROM context — database + schema + table scopes ──",
-      "captures": {
-        "1": {
-          "name": "constant.other.database-name.sql"
-        },
-        "2": {
-          "name": "constant.other.schema-name.sql"
-        },
-        "3": {
-          "name": "constant.other.table-name.sql"
+      "comment": "─── P16: 3-part name after DDL/FROM — begin/end (no variable-length lookbehind; lookahead requires db.schema.table) ──",
+      "begin": "(?i)\\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW|DROP|ALTER|TRUNCATE|GROOM)\\s+(?=\\w+\\.\\w+\\.\\w+\\b)",
+      "end": "(?=\\s|[;(,)\\]}]|$)",
+      "patterns": [
+        {
+          "captures": {
+            "1": {
+              "name": "constant.other.database-name.sql"
+            },
+            "2": {
+              "name": "constant.other.schema-name.sql"
+            },
+            "3": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "(\\w+)\\.(\\w+)\\.(\\w+)\\b"
         }
-      },
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW|DROP|ALTER|TRUNCATE|GROOM)\\s+)(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+      ]
     },
     {
-      "comment": "─── P17b: SCHEMA.TABLE in FROM/JOIN only — schema + table; alias.column handled by semantic tokens ──",
-      "captures": {
-        "1": {
-          "name": "constant.other.schema-name.sql"
-        },
-        "2": {
-          "name": "constant.other.table-name.sql"
+      "comment": "─── P17b: SCHEMA.TABLE after FROM/JOIN — begin/end (no variable-length lookbehind; alias.column via semantic tokens) ──",
+      "begin": "(?i)\\b(?:FROM|JOIN)\\s+(?=\\w+\\.\\w+\\b)",
+      "end": "(?=\\s|[;(,)\\]}]|$)",
+      "patterns": [
+        {
+          "captures": {
+            "1": {
+              "name": "constant.other.schema-name.sql"
+            },
+            "2": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "(\\w+)\\.(\\w+)\\b"
         }
-      },
-      "match": "(?i)(?m)(?<!^\\s*--[^\\n]*)(?<=\\b(?:FROM|JOIN)\\s+)(\\w+)\\.(\\w+)\\b"
+      ]
     }
   ],
   "injections": {
     "L:meta.create.sql - (comment | string.quoted)": {
       "patterns": [
         {
-          "comment": "Fallback: recolor CREATE TABLE first identifier when .. continues outside meta.create span",
+          "comment": "Fallback: recolor CREATE TABLE first identifier when .. continues outside meta.create span (bounded \\s{1,16} lookbehind — not \\s+)",
           "captures": {
             "1": {
               "name": "constant.other.database-name.sql"
             }
           },
-          "match": "(?i)(?<=\\btable\\s+)(\\w+)\\b(?=\\s*\\.\\.)"
+          "match": "(?i)(?<=\\btable\\s{1,16})(\\w+)\\b(?=\\s*\\.\\.)"
         }
       ]
     }
