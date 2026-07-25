@@ -462,7 +462,7 @@ var VirtualCore = (() => {
           if (idx < count) {
             const anchorItem = newMeasurements[idx];
             if (anchorItem) {
-              const newOffset = anchorItem.start + anchorOffset;
+              const newOffset = Math.max(0, anchorItem.start + anchorOffset);
               if (newOffset !== this.scrollOffset) {
                 anchorDelta = newOffset - this.scrollOffset;
                 this.scrollOffset = newOffset;
@@ -646,6 +646,10 @@ var VirtualCore = (() => {
         const cur = this.getScrollOffset();
         const max = this.getMaxScrollOffset();
         if (cur < 0 || cur > max) return;
+        if (this._iosDeferredAdjustment < 0 && cur >= max - 1) {
+          this._iosDeferredAdjustment = 0;
+          return;
+        }
         const delta = this._iosDeferredAdjustment;
         this._iosDeferredAdjustment = 0;
         this._scrollToOffset(cur, {
@@ -985,6 +989,23 @@ var VirtualCore = (() => {
         if (delta !== 0) {
           const wasAtEnd = this.options.anchorTo === "end" && ((_a = this.scrollState) == null ? void 0 : _a.behavior) !== "smooth" && this.getVirtualDistanceFromEnd() <= this.options.scrollEndThreshold;
           const prevTotalSize = wasAtEnd ? this.getTotalSize() : 0;
+          const scrollOffsetWithAdj = this.getScrollOffset() + this.scrollAdjustments;
+          const isFirstMeasure = !this.itemSizeCache.has(key);
+          const defaultShouldAdjust = isFirstMeasure ? (
+            // First measurement: compensate any item whose top sits above the
+            // fold — the estimate→actual delta must be corrected regardless of
+            // scroll direction, since the whole estimated block was above it.
+            itemStart < scrollOffsetWithAdj
+          ) : (
+            // Re-measurement: only compensate an item that is ENTIRELY above the
+            // fold. An item that merely *spans* the fold (top above, bottom
+            // below — e.g. a streaming chat message growing at its bottom)
+            // changes size *below* the anchor point, so shifting scrollTop by the
+            // delta would drag the viewport downward on every growth (#1218).
+            // Also skip during backward scroll to avoid the "items jump while
+            // scrolling up" cascade.
+            itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
+          );
           const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
             // The callback expects a VirtualItem; build one lazily only
             // when the consumer actually supplied a custom predicate.
@@ -998,15 +1019,7 @@ var VirtualCore = (() => {
             },
             delta,
             this
-          ) : (
-            // Default: adjust when the resize is an above-viewport item.
-            // First measurement (!has(key)): always adjust — the item
-            // has never been sized, so the estimate→actual delta must
-            // be compensated regardless of scroll direction.
-            // Re-measurement (has(key)): skip during backward scroll
-            // to avoid the "items jump while scrolling up" cascade.
-            itemStart < this.getScrollOffset() + this.scrollAdjustments && (!this.itemSizeCache.has(key) || this.scrollDirection !== "backward")
-          ));
+          ) : defaultShouldAdjust);
           if (this.pendingMin === null || index < this.pendingMin) {
             this.pendingMin = index;
           }
@@ -1112,6 +1125,7 @@ var VirtualCore = (() => {
         ];
       };
       this.scrollToOffset = (toOffset, { align = "start", behavior = "auto" } = {}) => {
+        this._iosDeferredAdjustment = 0;
         const offset = this.getOffsetForAlignment(toOffset, align);
         const now = this.now();
         this.scrollState = {
@@ -1129,6 +1143,7 @@ var VirtualCore = (() => {
         align: initialAlign = "auto",
         behavior = "auto"
       } = {}) => {
+        this._iosDeferredAdjustment = 0;
         index = Math.max(0, Math.min(index, this.options.count - 1));
         const offsetInfo = this.getOffsetForIndex(index, initialAlign);
         if (!offsetInfo) {
@@ -1252,6 +1267,7 @@ var VirtualCore = (() => {
         });
         if (this.scrollOffset !== null) {
           this.scrollOffset += this.scrollAdjustments;
+          if (this.scrollOffset < 0) this.scrollOffset = 0;
           this.scrollAdjustments = 0;
         }
       }

@@ -165,6 +165,18 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     expect(hasScope(table, /table-name/)).toBe(true);
   });
 
+  it('highlights P16 three-part names after multiple spaces', async () => {
+    const sql = 'FROM  JUST_DATA.ADMIN.DIMDATE d';
+    const tokens = await tokenizeSql(sql);
+    const db = findTokenContaining(tokens, 'JUST_DATA', { onlyActiveCode: true });
+    const schema = findTokenContaining(tokens, 'ADMIN', { onlyActiveCode: true });
+    const table = findTokenContaining(tokens, 'DIMDATE', { onlyActiveCode: true });
+
+    expect(hasScope(db, /database-name/)).toBe(true);
+    expect(hasScope(schema, /schema-name/)).toBe(true);
+    expect(hasScope(table, /table-name/)).toBe(true);
+  });
+
   it.each([
     [
       'CREATE TABLE',
@@ -215,7 +227,7 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     expect(hasScope(db, /entity\.name\.function\.sql/)).toBe(false);
   });
 
-  it('highlights CREATE TEMP TABLE single unqualified name (P0.4/P0d)', async () => {
+  it('highlights CREATE TEMP TABLE single unqualified name (P0.4)', async () => {
     const sql = 'CREATE TEMP TABLE TEST1 AS (\n    SELECT * FROM DIMDATE\n) DISTRIBUTE';
     const tokens = await tokenizeSql(sql);
     const table = findTokenContaining(tokens, 'TEST1', { onlyActiveCode: true });
@@ -295,7 +307,7 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     expect(hasScope(token, /keyword\.other\.ddl\.netezza/)).toBe(true);
   });
 
-  it('highlights GROOM TABLE single unqualified name (P0g.4/P0gd)', async () => {
+  it('highlights GROOM TABLE single unqualified name (P0g.4)', async () => {
     const sql = 'GROOM TABLE DIMACCOUNT2 VERSIONS;';
     const tokens = await tokenizeSql(sql);
     const table = findTokenContaining(tokens, 'DIMACCOUNT2', { onlyActiveCode: true });
@@ -354,6 +366,33 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     expect(hasScope(table, /table-name/)).toBe(true);
   });
 
+  it('highlights P17 schema.table after multiple spaces', async () => {
+    const sql = 'JOIN  ADMIN.DIMACCOUNT a ON 1=1';
+    const tokens = await tokenizeSql(sql);
+    const schema = findTokenContaining(tokens, 'ADMIN', { onlyActiveCode: true });
+    const table = findTokenContaining(tokens, 'DIMACCOUNT', { onlyActiveCode: true });
+
+    expect(hasScope(schema, /schema-name/)).toBe(true);
+    expect(hasScope(table, /table-name/)).toBe(true);
+  });
+
+  it('ends P16/P17 regions before an opening paren (does not swallow (args))', async () => {
+    const sql3 = 'FROM JUST_DATA.ADMIN.DIMDATE(c)';
+    const sql2 = 'JOIN ADMIN.DIMACCOUNT(d)';
+
+    const tokens3 = await tokenizeSql(sql3);
+    const tokens2 = await tokenizeSql(sql2);
+
+    expect(hasScope(findTokenContaining(tokens3, 'JUST_DATA', { onlyActiveCode: true }), /database-name/)).toBe(true);
+    expect(hasScope(findTokenContaining(tokens3, 'DIMDATE', { onlyActiveCode: true }), /table-name/)).toBe(true);
+    expect(hasScope(findTokenContaining(tokens2, 'ADMIN', { onlyActiveCode: true }), /schema-name/)).toBe(true);
+    expect(hasScope(findTokenContaining(tokens2, 'DIMACCOUNT', { onlyActiveCode: true }), /table-name/)).toBe(true);
+
+    // Paren args must not stay inside the P16/P17 begin/end region.
+    expect(hasScope(findTokenContaining(tokens3, 'c', { onlyActiveCode: true }), /(?:database|schema|table)-name/)).toBe(false);
+    expect(hasScope(findTokenContaining(tokens2, 'd', { onlyActiveCode: true }), /(?:database|schema|table)-name/)).toBe(false);
+  });
+
   it('does not attach ddl.netezza scopes in block comments', async () => {
     const sql = '/*\nDISTRIBUTE ON RANDOM\n*/';
     const tokens = await tokenizeSql(sql);
@@ -378,4 +417,88 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     const activeSelect = findTokenContaining(tokens, 'SELECT', { onlyActiveCode: true });
     expect(activeSelect?.line).toBe(4);
   });
+
+  it.each([
+    {
+      label: '02.5 mid (~2800)',
+      literalLen: 2800,
+      // Pre line-guard fix: ~600–900 ms; after removing P0d lookbehind: typically <20 ms.
+      budgetMs: 80,
+    },
+    {
+      label: '02.5 long (~8700)',
+      literalLen: 8700,
+      // Pre P0d removal: ~950 ms with variable-length CREATE TABLE lookbehind.
+      budgetMs: 100,
+    },
+    {
+      label: 'near maxTokenizationLineLength (~19800)',
+      // Default editor.maxTokenizationLineLength is 20000; stay just under.
+      literalLen: 19800,
+      budgetMs: 150,
+    },
+  ])(
+    'tokenizes a long-literal line ($label) within budget',
+    async ({ literalLen, budgetMs }) => {
+      // Warm grammar load so the budget measures matching, not Oniguruma WASM init.
+      await tokenizeSql('SELECT 1');
+
+      const prefix =
+        "SELECT COALESCE(SUBSTRING(UPPER(TRIM(col_0)), 1, 10)) AS COL1, '";
+      const sql = `${prefix}${'X'.repeat(literalLen)}'`;
+
+      // Warm this exact shape, then take the best of a few runs (CI can be noisy).
+      await tokenizeSql(sql);
+      const samples: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now();
+        await tokenizeSql(sql);
+        samples.push(performance.now() - started);
+      }
+      const elapsedMs = Math.min(...samples);
+
+      const tokens = await tokenizeSql(sql);
+      expect(tokens.length).toBeGreaterThan(0);
+      expect(elapsedMs).toBeLessThan(budgetMs);
+
+      const midLiteral = findTokenContaining(tokens, 'X'.repeat(40));
+      expect(hasScope(midLiteral, /string\.quoted/)).toBe(true);
+    },
+  );
+
+  it.each([
+    {
+      label: '800 cols + FROM DB.SCH.TBL',
+      // Pre P16/P17 \\s+ lookbehind fix: ~160 ms; after begin/end: typically ~5 ms.
+      suffix: ' FROM DB.SCH.TBL',
+      budgetMs: 25,
+    },
+    {
+      label: '800 cols + FROM db..t',
+      // Exercises P15 on a wide SELECT without P16 3-part match.
+      suffix: ' FROM db..t',
+      budgetMs: 25,
+    },
+  ])(
+    'tokenizes a wide SELECT list ($label) within budget',
+    async ({ suffix, budgetMs }) => {
+      await tokenizeSql('SELECT 1');
+
+      const cols = Array.from({ length: 800 }, (_, i) => `col_${i}`).join(', ');
+      const sql = `SELECT ${cols}${suffix}`;
+
+      await tokenizeSql(sql);
+      const samples: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now();
+        await tokenizeSql(sql);
+        samples.push(performance.now() - started);
+      }
+      const elapsedMs = Math.min(...samples);
+
+      const tokens = await tokenizeSql(sql);
+      expect(tokens.length).toBeGreaterThan(0);
+      expect(elapsedMs).toBeLessThan(budgetMs);
+    },
+  );
 });
