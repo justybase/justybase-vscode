@@ -8,6 +8,8 @@
 
 ---
 
+[![Release](https://github.com/justybase/justybase-vscode/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/justybase/justybase-vscode/actions/workflows/release.yml)
+
 A powerful, **Zero Config** VS Code extension for working with IBM Netezza / PureData System for Analytics databases.
 Distinct from other extensions, JustyBase includes a **custom Node.js-based Netezza driver** provided by `@justybase/netezza-driver`, eliminating the need to install or configure IBM ODBC drivers. Just install and connect!
 
