@@ -69,17 +69,15 @@ function extractLookbehinds(
 ): Array<{ kind: '<=' | '<!'; body: string }> {
   const hits: Array<{ kind: '<=' | '<!'; body: string }> = [];
   for (let i = 0; i < pattern.length; i++) {
-    let kind: '<=' | '<!' | undefined;
-    let bodyStart = 0;
+    let kind: '<=' | '<!';
     if (pattern.startsWith('(?<=', i)) {
       kind = '<=';
-      bodyStart = i + 4;
     } else if (pattern.startsWith('(?<!', i)) {
       kind = '<!';
-      bodyStart = i + 4;
     } else {
       continue;
     }
+    const bodyStart = i + 4;
 
     let depth = 0;
     let j = i;
