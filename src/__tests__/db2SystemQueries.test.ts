@@ -38,6 +38,7 @@ import {
     buildIndexColumnsDetailedQuery,
     buildIsPartitionedQuery
 } from '../../extensions/db2/src/db2SystemQueries';
+import { db2MetadataProvider } from '../../extensions/db2/src/db2SchemaProvider';
 
 function compactSql(sql: string): string {
     return sql.replace(/\s+/g, ' ').trim();
@@ -67,6 +68,22 @@ describe('db2SystemQueries', () => {
 
         expect(typeGroupsQuery).toContain(`SELECT 'NICKNAME' AS OBJTYPE FROM SYSIBM.SYSDUMMY1`);
         expect(typeGroupsQuery).toContain(`UNION ALL SELECT 'PASSTHRU AUTH' AS OBJTYPE FROM SYSIBM.SYSDUMMY1`);
+    });
+
+    it('scopes metadata provider table lists only when called with (database, schema)', () => {
+        // Two-arg form: database is ignored by the delegate; schema drives TABSCHEMA filter.
+        const scoped = compactSql(db2MetadataProvider.buildListTablesQuery('TESTDB', 'DB2INST1'));
+        expect(scoped).toContain(`AND TABSCHEMA = 'DB2INST1'`);
+
+        // One-arg form historically passes schema as database and drops the TABSCHEMA filter.
+        // Callers must always pass (database, schema) — never schema alone as the first arg.
+        const unscoped = compactSql(db2MetadataProvider.buildListTablesQuery('DB2INST1'));
+        expect(unscoped).not.toMatch(/AND TABSCHEMA =/);
+
+        const scopedViews = compactSql(db2MetadataProvider.buildListViewsQuery('TESTDB', 'DB2INST1'));
+        expect(scopedViews).toContain(`AND TABSCHEMA = 'DB2INST1'`);
+        const unscopedViews = compactSql(db2MetadataProvider.buildListViewsQuery('DB2INST1'));
+        expect(unscopedViews).not.toMatch(/AND TABSCHEMA =/);
     });
 
     it('builds DB2 column metadata helpers with database selection, table-like filters, and key flags', () => {

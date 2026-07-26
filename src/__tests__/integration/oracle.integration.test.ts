@@ -1,12 +1,22 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
+
+jest.unmock('chevrotain');
+
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { ExtensionContext } from 'vscode';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { OracleConnection } from '../../../extensions/oracle/src/oracleConnection';
 import { oracleDialect } from '../../../extensions/oracle/src/oracleDialect';
+import {
+	buildOracleExplainQuery,
+	parseOracleExplainJson,
+	renderOracleExplainPlan,
+} from '../../../extensions/oracle/src/oracleExplainParser';
 import { oracleMaintenanceProvider } from '../../../extensions/oracle/src/oracleMaintenanceProvider';
+import { oracleSqlAuthoring } from '../../../extensions/oracle/src/sql/authoring';
 import { importDataToOracle } from '../../../src/import/oracleImporter';
 import { exportResultSetToFile } from '../../../src/export/resultExporter';
 import { cancelCommandAndCloseReader } from '../../../src/core/cancellation';
@@ -18,6 +28,11 @@ import type {
 	DatabaseMaintenanceTarget,
 } from '../../contracts/database';
 import type { ConnectionManager } from '../../core/connectionManager';
+import { LspCompletionEngine, type CompletionMetadataProvider } from '../../server/completionEngine';
+import type { MetadataColumnItem, MetadataObjectItem } from '../../lsp/protocol';
+import { SqlQualityEngine } from '../../providers/sqlQualityEngine';
+import { InMemorySchemaProvider } from '../../sqlParser/schemaProvider';
+import { SqlValidator } from '../../sqlParser/validator';
 import type { ConnectionDetails } from '../../types';
 import { oracleHarness, registerLiveIntegrationSuite } from './optionalDialectIntegrationHarness';
 
@@ -122,6 +137,265 @@ function createMockConnectionManager(config: DatabaseConnectionConfig): Connecti
 		getActiveConnectionName: () => 'oracle-live-test',
 		getConnection: async () => toConnectionDetails(config),
 	} as unknown as ConnectionManager;
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value === 'string' && value.trim().length > 0) {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? parsed : undefined;
+	}
+	return undefined;
+}
+
+function toOptionalString(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/** Convert flat PLAN_TABLE rows (ID/PARENT_ID) into the nested JSON shape expected by parseOracleExplainJson. */
+function buildOracleExplainTreeFromPlanTableRows(
+	rows: ReadonlyArray<Record<string, unknown>>,
+): Record<string, unknown> {
+	if (rows.length === 0) {
+		throw new Error('PLAN_TABLE returned no rows for the explained statement.');
+	}
+
+	type MutableNode = Record<string, unknown> & { children: MutableNode[] };
+	const nodesById = new Map<number, MutableNode>();
+
+	for (const row of rows) {
+		const id = toOptionalNumber(row.ID);
+		if (id === undefined) {
+			continue;
+		}
+
+		nodesById.set(id, {
+			operation: toOptionalString(row.OPERATION) ?? 'Unknown',
+			options: toOptionalString(row.OPTIONS),
+			object_owner: toOptionalString(row.OBJECT_OWNER),
+			object_name: toOptionalString(row.OBJECT_NAME),
+			object_type: toOptionalString(row.OBJECT_TYPE),
+			cost: toOptionalNumber(row.COST),
+			cardinality: toOptionalNumber(row.CARDINALITY) ?? 0,
+			bytes: toOptionalNumber(row.BYTES),
+			cpu_cost: toOptionalNumber(row.CPU_COST),
+			io_cost: toOptionalNumber(row.IO_COST),
+			filter_predicates: toOptionalString(row.FILTER_PREDICATES),
+			access_predicates: toOptionalString(row.ACCESS_PREDICATES),
+			children: [],
+		});
+	}
+
+	let root: MutableNode | undefined;
+	for (const row of rows) {
+		const id = toOptionalNumber(row.ID);
+		if (id === undefined) {
+			continue;
+		}
+		const node = nodesById.get(id);
+		if (!node) {
+			continue;
+		}
+
+		const parentId = toOptionalNumber(row.PARENT_ID);
+		if (parentId === undefined) {
+			root = node;
+			continue;
+		}
+
+		const parent = nodesById.get(parentId);
+		if (parent) {
+			parent.children.push(node);
+		} else if (!root) {
+			root = node;
+		}
+	}
+
+	if (!root) {
+		root = nodesById.values().next().value;
+	}
+	if (!root) {
+		throw new Error('Unable to build Oracle explain tree from PLAN_TABLE rows.');
+	}
+
+	return { plan: root };
+}
+
+function isOraclePermissionOrMissingObjectError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return /ORA-00942|ORA-01031|ORA-00904|insufficient privileges|table or view does not exist/i.test(
+		message,
+	);
+}
+
+function createDocumentWithCursor(sqlWithCursor: string): {
+	document: TextDocument;
+	cursorOffset: number;
+} {
+	const cursorOffset = sqlWithCursor.indexOf('|');
+	if (cursorOffset < 0) {
+		throw new Error('Missing cursor marker "|"');
+	}
+
+	const sql = `${sqlWithCursor.slice(0, cursorOffset)}${sqlWithCursor.slice(cursorOffset + 1)}`;
+	return {
+		document: TextDocument.create('file:///oracle-live-completion.sql', 'sql', 1, sql),
+		cursorOffset,
+	};
+}
+
+function completionLabels(items: { label: string }[]): string[] {
+	return items
+		.map((item) => item.label)
+		.filter((label) => label !== '* (Expand Columns)');
+}
+
+class LiveOracleCompletionMetadataProvider implements CompletionMetadataProvider {
+	public readonly lookupRequests: Array<{
+		database: string;
+		table: string;
+		schema?: string;
+	}> = [];
+
+	public constructor(
+		private readonly connection: OracleConnection,
+		private readonly database: string,
+		private readonly schema: string,
+	) {}
+
+	public async getContext(_documentUri: string): Promise<{
+		effectiveDatabase?: string;
+		effectiveSchema?: string;
+		databaseKind?: 'oracle';
+	}> {
+		return {
+			effectiveDatabase: this.database,
+			effectiveSchema: this.schema,
+			databaseKind: 'oracle',
+		};
+	}
+
+	public async getDatabases(_documentUri: string): Promise<MetadataObjectItem[]> {
+		return [{ name: this.database, detail: 'Service' }];
+	}
+
+	public async getSchemas(
+		_documentUri: string,
+		_database: string,
+	): Promise<MetadataObjectItem[]> {
+		return [{ name: this.schema, detail: 'Schema' }];
+	}
+
+	public async getTables(
+		_documentUri: string,
+		_database: string,
+		schema?: string,
+	): Promise<MetadataObjectItem[]> {
+		const rows = await readRows(
+			this.connection,
+			oracleMetadataProvider.buildListTablesQuery(
+				this.database,
+				schema ?? this.schema,
+			),
+		);
+		const tables: MetadataObjectItem[] = [];
+		for (const row of rows) {
+			const name = row.OBJNAME;
+			if (typeof name === 'string' && name.trim().length > 0) {
+				tables.push({ name, detail: 'Table' });
+			}
+		}
+		return tables;
+	}
+
+	public async getViews(
+		_documentUri: string,
+		_database: string,
+		schema?: string,
+	): Promise<MetadataObjectItem[]> {
+		const rows = await readRows(
+			this.connection,
+			oracleMetadataProvider.buildListViewsQuery(
+				this.database,
+				schema ?? this.schema,
+			),
+		);
+		const views: MetadataObjectItem[] = [];
+		for (const row of rows) {
+			const name = row.OBJNAME;
+			if (typeof name === 'string' && name.trim().length > 0) {
+				views.push({ name, detail: 'View' });
+			}
+		}
+		return views;
+	}
+
+	public async getProcedures(
+		_documentUri: string,
+		_database: string,
+		_schema?: string,
+	): Promise<MetadataObjectItem[]> {
+		return [];
+	}
+
+	public async getColumns(
+		_documentUri: string,
+		database: string,
+		table: string,
+		schema?: string,
+	): Promise<MetadataColumnItem[]> {
+		this.lookupRequests.push({ database, table, schema });
+		const rows = await readRows(
+			this.connection,
+			oracleMetadataProvider.buildLookupColumnsQuery({
+				schema: schema ?? this.schema,
+				tableName: table,
+			}),
+		);
+
+		const columns: MetadataColumnItem[] = [];
+		for (const row of rows) {
+			const name = row.ATTNAME;
+			if (typeof name !== 'string' || name.trim().length === 0) {
+				continue;
+			}
+			const type = row.FORMAT_TYPE;
+			columns.push({
+				name,
+				type: typeof type === 'string' && type.trim().length > 0 ? type : 'VARCHAR2',
+			});
+		}
+		return columns;
+	}
+}
+
+async function buildLiveOracleSchemaProvider(
+	connection: OracleConnection,
+	config: DatabaseConnectionConfig,
+	schemaName: string,
+	tableName: string,
+): Promise<InMemorySchemaProvider> {
+	const columns = await oracleDialect.advancedFeatures!.ddl!.getColumns(
+		connection,
+		config.database,
+		schemaName,
+		tableName,
+	);
+	const schemaProvider = new InMemorySchemaProvider(true);
+	schemaProvider.addTable({
+		name: tableName,
+		database: config.database,
+		schema: schemaName,
+		isCte: false,
+		isTempTable: false,
+		columns: columns.map((column) => ({
+			name: column.name,
+			dataType: column.fullTypeName,
+		})),
+	});
+	return schemaProvider;
 }
 
 const config = oracleHarness.config;
@@ -343,10 +617,16 @@ describeIfConfigured('oracle integration', () => {
 		});
 
 		it('lists tables, views, and procedures including created integration objects', async () => {
-			const tables = await readRows(connection, oracleMetadataProvider.buildListTablesQuery(schemaName));
+			const tablesSql = oracleMetadataProvider.buildListTablesQuery(config!.database, schemaName);
+			expect(tablesSql.toUpperCase()).toContain('O.OWNER');
+			expect(tablesSql.toUpperCase()).toContain(schemaName.toUpperCase());
+
+			const tables = await readRows(connection, tablesSql);
 			expect(tables.some((row) => String(row.OBJNAME).toUpperCase() === tableName)).toBe(true);
 
-			const views = await readRows(connection, oracleMetadataProvider.buildListViewsQuery(schemaName));
+			const viewsSql = oracleMetadataProvider.buildListViewsQuery(config!.database, schemaName);
+			expect(viewsSql.toUpperCase()).toContain('O.OWNER');
+			const views = await readRows(connection, viewsSql);
 			expect(views.some((row) => String(row.OBJNAME).toUpperCase() === viewName)).toBe(true);
 
 			const procedures = await readRows(
@@ -354,6 +634,10 @@ describeIfConfigured('oracle integration', () => {
 				oracleMetadataProvider.buildListProceduresQuery(config!.database, schemaName),
 			);
 			expect(procedures.some((row) => String(row.PROCEDURE).toUpperCase() === procedureName)).toBe(true);
+
+			// One-arg call historically passed schema as database and dropped the OWNER filter.
+			const unscopedSql = oracleMetadataProvider.buildListTablesQuery(schemaName);
+			expect(unscopedSql.toUpperCase()).not.toMatch(/AND UPPER\(O\.OWNER\)/);
 		});
 
 		it('finds created objects and source text through Oracle-specific search queries', async () => {
@@ -452,6 +736,104 @@ describeIfConfigured('oracle integration', () => {
 			expect(() => ddl.buildSkewCheckQuery(buildQualifiedName(schemaName, tableName))).toThrow(
 				/does not expose Netezza SPU/i,
 			);
+		});
+
+		it('generates DDL for function, package, trigger, sequence, and synonym objects', async () => {
+			const ddl = oracleDialect.advancedFeatures!.ddl!;
+			const connectionDetails = toConnectionDetails(config!);
+			const cases: Array<{ name: string; type: string; expectFragment: RegExp }> = [
+				{ name: functionName, type: 'FUNCTION', expectFragment: /CREATE[\s\S]*FUNCTION/i },
+				{ name: packageName, type: 'PACKAGE', expectFragment: /CREATE[\s\S]*PACKAGE/i },
+				{ name: triggerName, type: 'TRIGGER', expectFragment: /CREATE[\s\S]*TRIGGER/i },
+				{ name: sequenceName, type: 'SEQUENCE', expectFragment: /CREATE[\s\S]*SEQUENCE/i },
+				{ name: synonymName, type: 'SYNONYM', expectFragment: /CREATE[\s\S]*SYNONYM/i },
+			];
+
+			for (const testCase of cases) {
+				const result = await ddl.generateDDL(
+					connectionDetails,
+					config!.database,
+					schemaName,
+					testCase.name,
+					testCase.type,
+				);
+				expect(result.success).toBe(true);
+				expect(result.ddlCode).toBeTruthy();
+				expect(result.ddlCode).toMatch(testCase.expectFragment);
+				expect(result.ddlCode?.toUpperCase()).toContain(testCase.name.toUpperCase());
+			}
+		}, 180000);
+	});
+
+	describe('explain and tuning advisor', () => {
+		it('runs EXPLAIN PLAN, parses the plan tree, and surfaces SELECT * tuning advice', async () => {
+			const statementId = `JBL_${stamp}`.slice(0, 30);
+			const qualifiedTable = buildQualifiedName(schemaName, tableName);
+			const explainedSql = `SELECT * FROM ${qualifiedTable} WHERE ID = 1`;
+
+			await tryExecute(
+				connection,
+				`DELETE FROM PLAN_TABLE WHERE STATEMENT_ID = '${statementId.replace(/'/g, "''")}'`,
+			);
+
+			await connection
+				.createCommand(
+					`EXPLAIN PLAN SET STATEMENT_ID = '${statementId.replace(/'/g, "''")}' FOR ${explainedSql}`,
+				)
+				.execute();
+
+			const planRows = await readRows(
+				connection,
+				[
+					'SELECT ID, PARENT_ID, OPERATION, OPTIONS, OBJECT_OWNER, OBJECT_NAME, OBJECT_TYPE,',
+					'       COST, CARDINALITY, BYTES, CPU_COST, IO_COST, FILTER_PREDICATES, ACCESS_PREDICATES',
+					'FROM PLAN_TABLE',
+					`WHERE STATEMENT_ID = '${statementId.replace(/'/g, "''")}'`,
+					'ORDER BY ID',
+				].join('\n'),
+			);
+			expect(planRows.length).toBeGreaterThan(0);
+			expect(planRows.some((row) => String(row.OPERATION ?? '').length > 0)).toBe(true);
+
+			const explainEnvelope = buildOracleExplainTreeFromPlanTableRows(planRows);
+			const explainPlanText = JSON.stringify(explainEnvelope);
+			const parsed = parseOracleExplainJson(explainPlanText);
+			expect(parsed.root.operation.length).toBeGreaterThan(0);
+			expect(renderOracleExplainPlan(parsed)).toContain(parsed.root.operation);
+
+			// Sanity-check the shared query builder still matches the EXPLAIN PLAN FOR shape.
+			expect(buildOracleExplainQuery(explainedSql)).toContain('EXPLAIN PLAN FOR');
+
+			const tuningAdvisor = oracleDialect.advancedFeatures?.tuningAdvisor;
+			expect(tuningAdvisor).toBeDefined();
+			const report = tuningAdvisor!.analyze({
+				sql: explainedSql,
+				explainPlanText,
+			});
+			expect(report.recommendations.map((item) => item.id)).toEqual(
+				expect.arrayContaining(['ORTA-001']),
+			);
+
+			await tryExecute(
+				connection,
+				`DELETE FROM PLAN_TABLE WHERE STATEMENT_ID = '${statementId.replace(/'/g, "''")}'`,
+			);
+		}, 120000);
+	});
+
+	describe('compatibility shims', () => {
+		it('emulates CURRENT_CATALOG and CURRENT_SCHEMA through OracleConnection', async () => {
+			const catalogRows = await readRows(connection, 'SELECT CURRENT_CATALOG FROM DUAL');
+			expect(catalogRows).toHaveLength(1);
+			expect(String(catalogRows[0].CURRENT_CATALOG ?? '').length).toBeGreaterThan(0);
+
+			const schemaRows = await readRows(connection, 'SELECT CURRENT_SCHEMA FROM DUAL');
+			expect(schemaRows).toHaveLength(1);
+			expect(String(schemaRows[0].CURRENT_SCHEMA ?? '')).toBe(schemaName);
+
+			const sidRows = await readRows(connection, 'SELECT CURRENT_SID FROM DUAL');
+			expect(sidRows).toHaveLength(1);
+			expect(String(sidRows[0].CURRENT_SID ?? '').length).toBeGreaterThan(0);
 		});
 	});
 
@@ -585,9 +967,11 @@ describeIfConfigured('oracle integration', () => {
 				await exportResultSetToFile(resultSet, sqlPath, {
 					format: 'sql',
 					sqlTargetTable: buildQualifiedName(schemaName, exportTableName),
+					sqlDialect: 'oracle',
 				});
 				expect(fs.readFileSync(csvPath, 'utf8')).toContain('hex:ABCD');
 				expect(fs.readFileSync(jsonPath, 'utf8')).toContain('hex:');
+				expect(fs.readFileSync(sqlPath, 'utf8')).toMatch(/HEXTORAW\('ABCD'\)/i);
 
 				await connection.createCommand(`
 					CREATE TABLE ${buildQualifiedName(schemaName, exportTableName)} (
@@ -666,6 +1050,46 @@ describeIfConfigured('oracle integration', () => {
 			expect(statsRows[0].LAST_ANALYZED).toBeTruthy();
 		}, 120000);
 
+		it('analyzes a table through the maintenance provider', async () => {
+			const executedSql: string[] = [];
+			const services = createMaintenanceServices(connection, config!, executedSql);
+			const target = createMaintenanceTarget(config!, schemaName, tableName);
+
+			await oracleMaintenanceProvider.analyzeTable!(target, services);
+
+			expect(executedSql.some((sql) => /ANALYZE\s+TABLE/i.test(sql))).toBe(true);
+			expect(executedSql.some((sql) => sql.toUpperCase().includes(tableName))).toBe(true);
+		}, 120000);
+
+		it('moves a disposable table through vacuumTable without touching the main fixture', async () => {
+			const moveTableName = `JBL_ORA_MV_${stamp}`;
+			const qualifiedMoveTable = buildQualifiedName(schemaName, moveTableName);
+			await connection
+				.createCommand(
+					`CREATE TABLE ${qualifiedMoveTable} (ID NUMBER PRIMARY KEY, NOTE VARCHAR2(40))`,
+				)
+				.execute();
+
+			try {
+				const executedSql: string[] = [];
+				const services = createMaintenanceServices(connection, config!, executedSql);
+				const target = createMaintenanceTarget(config!, schemaName, moveTableName);
+
+				await oracleMaintenanceProvider.vacuumTable!(target, services);
+
+				expect(executedSql.some((sql) => /ALTER\s+TABLE[\s\S]*\bMOVE\b/i.test(sql))).toBe(true);
+				expect(executedSql.some((sql) => sql.toUpperCase().includes(moveTableName))).toBe(true);
+
+				const controlRows = await readRows(
+					connection,
+					`SELECT COUNT(*) AS ROW_COUNT FROM ${qualifiedMoveTable}`,
+				);
+				expect(Number(controlRows[0].ROW_COUNT)).toBe(0);
+			} finally {
+				await tryExecute(connection, `DROP TABLE ${qualifiedMoveTable} PURGE`);
+			}
+		}, 180000);
+
 		it('returns storage data through the Oracle session monitor provider', async () => {
 			const provider = oracleDialect.advancedFeatures?.sessionMonitor;
 			expect(provider).toBeDefined();
@@ -681,5 +1105,334 @@ describeIfConfigured('oracle integration', () => {
 				expect(storage[0]).toHaveProperty('USED_MB');
 			}
 		});
+
+		it('lists sessions through the Oracle session monitor V$SESSION shape', async () => {
+			// Query via the live connection (not runQueryRaw): silent variable resolution
+			// treats V$SESSION / V$SQL as $SESSION / $SQL placeholders.
+			try {
+				const sessions = await readRows(
+					connection,
+					`
+						SELECT
+							s.SID AS "ID",
+							s.SID AS "PID",
+							s.USERNAME AS "USERNAME",
+							NVL(SYS_CONTEXT('USERENV', 'CON_NAME'), SYS_CONTEXT('USERENV', 'DB_NAME')) AS "DBNAME",
+							COALESCE(s.MODULE, s.PROGRAM, 'oracle') AS "TYPE",
+							TO_CHAR(s.LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') AS "CONNTIME",
+							s.STATUS AS "STATUS",
+							SUBSTR(COALESCE(q.SQL_TEXT, s.EVENT, ''), 1, 200) AS "COMMAND",
+							0 AS "PRIORITY",
+							0 AS "CID",
+							COALESCE(s.MACHINE, '') AS "IPADDR",
+							COALESCE(s.OSUSER, '') AS "CLIENT_OS_USERNAME"
+						FROM V$SESSION s
+						LEFT JOIN V$SQL q ON q.SQL_ID = s.SQL_ID
+						WHERE s.TYPE <> 'BACKGROUND'
+						  AND s.USERNAME IS NOT NULL
+						ORDER BY s.LOGON_TIME DESC
+						FETCH FIRST 50 ROWS ONLY
+					`,
+				);
+
+				expect(sessions.length).toBeGreaterThan(0);
+				expect(sessions[0]).toHaveProperty('ID');
+				expect(sessions[0]).toHaveProperty('USERNAME');
+				expect(sessions[0]).toHaveProperty('STATUS');
+				expect(
+					sessions.some(
+						(row) => String(row.USERNAME ?? '').toUpperCase() === config!.user.toUpperCase(),
+					),
+				).toBe(true);
+			} catch (error: unknown) {
+				if (isOraclePermissionOrMissingObjectError(error)) {
+					console.warn(
+						`Skipping Oracle getSessions assertion: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return;
+				}
+				throw error;
+			}
+		}, 60000);
+
+		it('lists active queries when V$SQL is visible to the test user', async () => {
+			try {
+				const queries = await readRows(
+					connection,
+					`
+						SELECT
+							s.SID AS "QS_SESSIONID",
+							0 AS "QS_PLANID",
+							0 AS "QS_CLIENTID",
+							COALESCE(s.MACHINE, '') AS "QS_CLIIPADDR",
+							SUBSTR(COALESCE(q.SQL_TEXT, ''), 1, 300) AS "QS_SQL",
+							COALESCE(s.STATUS, 'ACTIVE') AS "QS_STATE",
+							s.USERNAME AS "USERNAME"
+						FROM V$SESSION s
+						LEFT JOIN V$SQL q ON q.SQL_ID = s.SQL_ID
+						WHERE s.TYPE <> 'BACKGROUND'
+						  AND s.USERNAME IS NOT NULL
+						  AND s.STATUS = 'ACTIVE'
+						  AND s.SQL_ID IS NOT NULL
+						ORDER BY s.LAST_CALL_ET DESC
+						FETCH FIRST 50 ROWS ONLY
+					`,
+				);
+
+				expect(Array.isArray(queries)).toBe(true);
+				if (queries.length > 0) {
+					expect(queries[0]).toHaveProperty('QS_SESSIONID');
+					expect(queries[0]).toHaveProperty('QS_SQL');
+				}
+			} catch (error: unknown) {
+				if (isOraclePermissionOrMissingObjectError(error)) {
+					console.warn(
+						`Skipping Oracle getQueries assertion: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return;
+				}
+				throw error;
+			}
+		}, 60000);
+	});
+
+	describe('Oracle live completion (Netezza-quality E2E)', () => {
+		it('completes columns for an alias against live ALL_TAB_COLUMNS metadata', async () => {
+			const provider = new LiveOracleCompletionMetadataProvider(
+				connection,
+				config!.database,
+				schemaName,
+			);
+			const engine = new LspCompletionEngine(provider);
+			const { document, cursorOffset } = createDocumentWithCursor(
+				`SELECT t.| FROM ${schemaName}.${tableName} t`,
+			);
+			const items = await engine.provideCompletionItems(
+				document,
+				document.positionAt(cursorOffset),
+			);
+			const labels = completionLabels(items).map((label) => label.toUpperCase());
+
+			expect(provider.lookupRequests.length).toBeGreaterThan(0);
+			expect(labels).toEqual(expect.arrayContaining(['ID', searchColumnName.toUpperCase()]));
+		}, 120000);
+
+		it('completes tables after schema dot from live catalog', async () => {
+			const scopedSql = oracleMetadataProvider.buildListTablesQuery(config!.database, schemaName);
+			expect(scopedSql.toUpperCase()).toMatch(/AND UPPER\(O\.OWNER\)\s*=\s*UPPER\('/i);
+
+			const scopedRows = await readRows(connection, scopedSql);
+			expect(
+				scopedRows.some((row) => String(row.OBJNAME).toUpperCase() === tableName.toUpperCase()),
+			).toBe(true);
+
+			const foreignSchemaRows = await readRows(
+				connection,
+				oracleMetadataProvider.buildListTablesQuery(config!.database, 'SYS'),
+			);
+			expect(
+				foreignSchemaRows.some(
+					(row) => String(row.OBJNAME).toUpperCase() === tableName.toUpperCase(),
+				),
+			).toBe(false);
+
+			const provider = new LiveOracleCompletionMetadataProvider(
+				connection,
+				config!.database,
+				schemaName,
+			);
+			const engine = new LspCompletionEngine(provider);
+			const { document, cursorOffset } = createDocumentWithCursor(
+				`SELECT * FROM ${schemaName}.|`,
+			);
+			const items = await engine.provideCompletionItems(
+				document,
+				document.positionAt(cursorOffset),
+			);
+			const labels = completionLabels(items).map((label) => label.toUpperCase());
+
+			expect(labels).toContain(tableName.toUpperCase());
+		}, 120000);
+
+		it('offers Oracle keywords and excludes Netezza-only GROOM', async () => {
+			const provider = new LiveOracleCompletionMetadataProvider(
+				connection,
+				config!.database,
+				schemaName,
+			);
+			const engine = new LspCompletionEngine(provider);
+			const { document, cursorOffset } = createDocumentWithCursor('|');
+			const items = await engine.provideCompletionItems(
+				document,
+				document.positionAt(cursorOffset),
+			);
+			const upperLabels = completionLabels(items).map((label) => label.toUpperCase());
+
+			expect(upperLabels).toEqual(expect.arrayContaining(['DUAL', 'CONNECT BY']));
+			expect(upperLabels).not.toContain('GROOM');
+		}, 60000);
+	});
+
+	describe('Oracle live SQL quality', () => {
+		it('runs ORA rules, strict parser rejects GROOM, and schema-aware unknown columns', async () => {
+			const qualifiedTable = `${schemaName}.${tableName}`;
+			const schemaProvider = await buildLiveOracleSchemaProvider(
+				connection,
+				config!,
+				schemaName,
+				tableName,
+			);
+			const qualityEngine = new SqlQualityEngine(
+				new SqlValidator(schemaProvider, oracleSqlAuthoring.validation),
+				oracleSqlAuthoring.qualityRules,
+			);
+
+			const selectStar = qualityEngine.analyze(`SELECT * FROM ${qualifiedTable}`);
+			expect(selectStar.issues.map((issue) => issue.ruleId)).toContain('ORA001');
+
+			const deleteAll = qualityEngine.analyze(`DELETE FROM ${qualifiedTable}`);
+			expect(deleteAll.issues.map((issue) => issue.ruleId)).toContain('ORA002');
+
+			const updateAll = qualityEngine.analyze(
+				`UPDATE ${qualifiedTable} SET ${quoteIdentifier(searchColumnName)} = 'X'`,
+			);
+			expect(updateAll.issues.map((issue) => issue.ruleId)).toContain('ORA003');
+
+			const rownumOrder = qualityEngine.analyze(
+				`SELECT ID FROM ${qualifiedTable} WHERE ROWNUM <= 10 ORDER BY ID`,
+			);
+			expect(rownumOrder.issues.map((issue) => issue.ruleId)).toContain('ORA004');
+
+			const groom = qualityEngine.analyze('GROOM TABLE sales VERSIONS;');
+			expect(groom.parserResult.errors.length).toBeGreaterThan(0);
+
+			const unknownColumn = qualityEngine.analyze(
+				`SELECT BAD_COL_THAT_DOES_NOT_EXIST FROM ${qualifiedTable}`,
+			);
+			expect(
+				unknownColumn.parserResult.errors.some((error) => error.code === 'SQL004'),
+			).toBe(true);
+
+			const plsql = qualityEngine.analyze(`
+				DECLARE
+					v_unused NUMBER;
+				BEGIN
+					SELECT ID FROM ${qualifiedTable};
+				END;
+			`);
+			expect(plsql.parserResult.warnings.map((warning) => warning.code)).toEqual(
+				expect.arrayContaining(['SQL037', 'SQL039']),
+			);
+		}, 120000);
+	});
+
+	describe('Oracle advanced DDL fixtures', () => {
+		it('generates DDL for composite indexes and partitioned tables created on the live database', async () => {
+			const advTableName = `JBL_ORA_ADV_${stamp}`;
+			const advIndexName = `JBL_ORA_AIX_${stamp}`;
+			const advPartName = `JBL_ORA_APT_${stamp}`;
+			const qualifiedAdvTable = buildQualifiedName(schemaName, advTableName);
+			const qualifiedAdvIndex = buildQualifiedName(schemaName, advIndexName);
+			const qualifiedAdvPart = buildQualifiedName(schemaName, advPartName);
+			const connectionDetails = toConnectionDetails(config!);
+			const ddl = oracleDialect.advancedFeatures!.ddl!;
+
+			await connection
+				.createCommand(
+					`
+					CREATE TABLE ${qualifiedAdvTable} (
+						ID NUMBER(10) NOT NULL,
+						CODE VARCHAR2(40) NOT NULL,
+						REGION VARCHAR2(20) NOT NULL,
+						AMOUNT NUMBER(12,2),
+						CONSTRAINT ${quoteIdentifier(`PK_${advTableName}`)} PRIMARY KEY (ID),
+						CONSTRAINT ${quoteIdentifier(`UQ_${advTableName}`)} UNIQUE (CODE)
+					)
+					`,
+				)
+				.execute();
+			await connection
+				.createCommand(
+					`COMMENT ON TABLE ${qualifiedAdvTable} IS 'JBL advanced DDL fixture ${stamp}'`,
+				)
+				.execute();
+			await connection
+				.createCommand(
+					`CREATE INDEX ${qualifiedAdvIndex} ON ${qualifiedAdvTable} (REGION, AMOUNT)`,
+				)
+				.execute();
+			await connection
+				.createCommand(
+					`
+					CREATE TABLE ${qualifiedAdvPart} (
+						ID NUMBER NOT NULL,
+						EVENT_AT TIMESTAMP NOT NULL
+					)
+					PARTITION BY RANGE (EVENT_AT) (
+						PARTITION P_OLD VALUES LESS THAN (TIMESTAMP '2027-01-01 00:00:00'),
+						PARTITION P_MAX VALUES LESS THAN (MAXVALUE)
+					)
+					`,
+				)
+				.execute();
+
+			try {
+				const tableDdl = await ddl.generateTableDDL(
+					connection,
+					config!.database,
+					schemaName,
+					advTableName,
+				);
+				expect(tableDdl.toUpperCase()).toContain('CREATE TABLE');
+				expect(tableDdl.toUpperCase()).toContain(advTableName);
+
+				const indexResult = await ddl.generateDDL(
+					connectionDetails,
+					config!.database,
+					schemaName,
+					advIndexName,
+					'INDEX',
+				);
+				expect(indexResult.success).toBe(true);
+				expect(indexResult.ddlCode?.toUpperCase()).toContain('CREATE INDEX');
+				expect(indexResult.ddlCode?.toUpperCase()).toContain(advIndexName);
+				expect(indexResult.ddlCode?.toUpperCase()).toMatch(/REGION/);
+
+				const partResult = await ddl.generateDDL(
+					connectionDetails,
+					config!.database,
+					schemaName,
+					advPartName,
+					'TABLE',
+				);
+				expect(partResult.success).toBe(true);
+				expect(partResult.ddlCode?.toUpperCase()).toContain('PARTITION BY');
+				expect(partResult.ddlCode?.toUpperCase()).toContain(advPartName);
+
+				const migration = await ddl.generateBatchDDL({
+					connectionDetails,
+					database: config!.database,
+					schema: schemaName,
+					objectTypes: ['TABLE'],
+					mode: 'schema-migration',
+					includeIndexes: true,
+					includePartitions: true,
+					includeGrants: false,
+				});
+				if (!migration.success) {
+					throw new Error(migration.errors.join('\n'));
+				}
+				const migrationSql = migration.ddlCode?.toUpperCase() ?? '';
+				expect(migrationSql).toContain(advTableName);
+				expect(migrationSql).toContain(advIndexName);
+				expect(migrationSql).toContain(advPartName);
+				expect(migrationSql).toContain('CREATE INDEX');
+				expect(migrationSql).toContain('PARTITION BY');
+			} finally {
+				await tryExecute(connection, `DROP INDEX ${qualifiedAdvIndex}`);
+				await tryExecute(connection, `DROP TABLE ${qualifiedAdvPart} PURGE`);
+				await tryExecute(connection, `DROP TABLE ${qualifiedAdvTable} PURGE`);
+			}
+		}, 180000);
 	});
 });

@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { SqlLexer } from "../dialects/netezza/sql/lexer";
 import {
   NETEZZA_BUILTIN_FUNCTIONS,
   NETEZZA_SPECIAL_BUILTIN_VALUES,
@@ -12,10 +11,12 @@ import {
   type IdentifierSemanticRole,
 } from "./parsers/identifierRoleCollector";
 import type { DatabaseKind } from "../contracts/database";
+import { getDatabaseSqlAuthoring } from "../core/connectionFactory";
 import { getCachedColumnsFromMetadataCache } from "../metadata/columnCacheLookup";
 import type { MetadataCache } from "../metadataCache";
 import type { ConnectionManager } from "../core/connectionManager";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
+import { resolveSqlParsingRuntime } from "../sqlParser/parsingRuntime";
 import { isOffsetInSqlComment } from "../sql/sqlSourceScan";
 import { LARGE_SCRIPT_CHAR_THRESHOLD } from "../sqlParser/validationConfig";
 import { simpleHash } from "./parsers/hashUtils";
@@ -134,6 +135,32 @@ const KEYWORD_TOKEN_NAMES = new Set([
   "Next",
   "Statistics",
   "Start",
+  // Db2 LUW phrase tokens
+  "Db2OptimizeFor",
+  "Db2WithUr",
+  "Db2WithCs",
+  "Db2WithRs",
+  "Db2WithRr",
+  "Db2ForReadOnly",
+  "Db2ForUpdate",
+  "Db2FinalTable",
+  "Db2OldTable",
+  "Db2NewTable",
+  "Db2ModifiedBy",
+  "Db2DeclareGlobalTemporary",
+  "Db2GeneratedAlways",
+  "Db2GeneratedByDefault",
+  "Db2Identity",
+  "Db2OrganizeBy",
+  "Db2DataCapture",
+  "Db2CurrentSchema",
+  "Db2CurrentServer",
+  "Db2CurrentDate",
+  "Db2CurrentTime",
+  "Db2CurrentTimestamp",
+  "Db2CurrentUser",
+  "Db2LanguageSql",
+  "Db2Nickname",
 ]);
 
 const MACRO_TOKEN_NAMES = new Set([
@@ -154,6 +181,28 @@ const MODIFIER_TOKEN_NAMES = new Set(["Temp", "Temporary", "Global"]);
 
 function isNetezzaType(text: string): boolean {
   return getNetezzaTypeSpec(text) !== undefined;
+}
+
+function resolveSemanticAuthoring(databaseKind?: DatabaseKind) {
+  try {
+    return getDatabaseSqlAuthoring(databaseKind);
+  } catch {
+    return getDatabaseSqlAuthoring("netezza");
+  }
+}
+
+function isAuthoringType(
+  text: string,
+  databaseKind?: DatabaseKind,
+): boolean {
+  const authoring = resolveSemanticAuthoring(databaseKind);
+  if (authoring.validation.getTypeSpec(text)) {
+    return true;
+  }
+  if (!databaseKind || databaseKind === "netezza") {
+    return isNetezzaType(text);
+  }
+  return false;
 }
 
 function roleToTypeIdx(role: IdentifierSemanticRole): TypeIdx | undefined {
@@ -450,13 +499,20 @@ export class NetezzaSemanticTokensProvider
     cancellationToken: vscode.CancellationToken,
   ): vscode.SemanticTokens {
     if (cancellationToken.isCancellationRequested) return this.emptyTokens();
-    const lexResult = SqlLexer.tokenize(text);
-    const builder = new vscode.SemanticTokensBuilder(LEGEND);
 
     const documentUri = document.uri.toString();
     const databaseKind = this.connectionManager?.getExecutionDatabaseKind(
       documentUri,
     );
+    const runtime = resolveSqlParsingRuntime({ databaseKind });
+    const lexResult = runtime.SqlLexer.tokenize(text);
+    const builder = new vscode.SemanticTokensBuilder(LEGEND);
+    const authoring = resolveSemanticAuthoring(databaseKind);
+    const builtinFunctions = authoring.validation.builtinFunctions;
+    const specialBuiltinValues = authoring.validation.specialBuiltinValues;
+    const systemColumns = authoring.validation.systemColumns.size > 0
+      ? authoring.validation.systemColumns
+      : NETEZZA_SYSTEM_COLUMNS;
 
     if (cancellationToken.isCancellationRequested) return this.emptyTokens();
     const useParser = text.length <= LARGE_SCRIPT_CHAR_THRESHOLD;
@@ -547,14 +603,22 @@ export class NetezzaSemanticTokensProvider
         const word = image.toUpperCase();
         const roleOccurrence = identifierRoles.get(startOffset);
 
-        if (NETEZZA_BUILTIN_FUNCTIONS.has(word)) {
+        if (
+          builtinFunctions.has(word)
+          || ((databaseKind === "netezza" || !databaseKind)
+            && NETEZZA_BUILTIN_FUNCTIONS.has(word))
+        ) {
           typeIdx = TypeIdx.function;
-        } else if (NETEZZA_SPECIAL_BUILTIN_VALUES.has(word)) {
+        } else if (
+          specialBuiltinValues.has(word)
+          || ((databaseKind === "netezza" || !databaseKind)
+            && NETEZZA_SPECIAL_BUILTIN_VALUES.has(word))
+        ) {
           typeIdx = TypeIdx.enumMember;
-        } else if (NETEZZA_SYSTEM_COLUMNS.has(word)) {
+        } else if (systemColumns.has(word)) {
           typeIdx = TypeIdx.variable;
           modifierMask = ModifierMask.readonly;
-        } else if (isNetezzaType(word)) {
+        } else if (isAuthoringType(word, databaseKind)) {
           typeIdx = TypeIdx.type;
         } else if (roleOccurrence) {
           typeIdx = roleToTypeIdx(roleOccurrence.role);

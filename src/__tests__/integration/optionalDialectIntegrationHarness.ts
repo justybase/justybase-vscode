@@ -11,7 +11,10 @@ import type {
 } from '../../contracts/database';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import type { ConnectionDetails } from '../../types';
-import { Db2Connection, ensureClidriverOnPath } from '../../../extensions/db2/src/db2Connection';
+import {
+    Db2Connection,
+    configureBundledClidriverForCurrentProcess,
+} from '../../../extensions/db2/src/db2Connection';
 import { db2Dialect } from '../../../extensions/db2/src/db2Dialect';
 import { db2MetadataProvider } from '../../../extensions/db2/src/db2SchemaProvider';
 import { MsSqlConnection } from '../../../extensions/mssql/src/mssqlConnection';
@@ -41,22 +44,9 @@ registerDatabaseDialect(verticaDialect);
 const db2RuntimeRequire = createRequire(
     path.join(process.cwd(), 'extensions', 'db2', 'package.json'),
 );
-const db2ClidriverHome = path.join(
-    process.cwd(),
-    'extensions',
-    'db2',
-    'node_modules',
-    'ibm_db',
-    'installer',
-    'clidriver',
-);
-
 function hasDb2NodeRuntime(): boolean {
     try {
-        if (fs.existsSync(db2ClidriverHome)) {
-            process.env.IBM_DB_HOME = db2ClidriverHome;
-            ensureClidriverOnPath(db2ClidriverHome);
-        }
+        configureBundledClidriverForCurrentProcess();
         db2RuntimeRequire('ibm_db');
         return true;
     } catch {

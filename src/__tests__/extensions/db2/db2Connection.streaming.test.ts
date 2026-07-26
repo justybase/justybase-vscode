@@ -169,15 +169,21 @@ describe('Db2Connection async streaming', () => {
         expect(database.querySync).not.toHaveBeenCalled();
     });
 
-    it('surfaces DB2 SQL error payloads from async fallback execution', async () => {
-        const database = createDatabase(null);
-        database.query.mockResolvedValueOnce(
-            '[node-ibm_db] Error in ODBCConnection::QuerySync while executing query.\t-104\t' +
-            'SQL0104N  An unexpected token "," was found. SQLSTATE=42601'
-        );
-        const connection = createConnectionWithDatabase(database);
+    it('stops further reads after cancel mid-stream (soft cancel parity)', async () => {
+        const result = createResult([
+            { ID: 1, NAME: 'Alice' },
+            { ID: 2, NAME: 'Bob' },
+            { ID: 3, NAME: 'Carol' },
+        ]);
+        const connection = createConnectionWithDatabase(createDatabase(result));
+        const command = connection.createCommand('SELECT ID, NAME FROM EMP');
+        const reader = await command.executeReader();
 
-        await expect(connection.createCommand('SELECT 1,,2 FROM SYSIBM.SYSDUMMY1').executeReader())
-            .rejects.toThrow('SQL0104N');
+        await expect(reader.read()).resolves.toBe(true);
+        expect(reader.getValue(0)).toBe(1);
+
+        await command.cancel();
+        await expect(reader.read()).resolves.toBe(false);
+        expect(result.close).toHaveBeenCalled();
     });
 });

@@ -2072,7 +2072,7 @@
       "view/item/context": [
         {
           "command": "netezza.refreshSchemaSelection",
-          "when": "view == netezza.schema && justybase.schemaDatabaseKind == netezza && (viewItem == typeGroup:TABLE || viewItem == typeGroup:GLOBAL TEMP TABLE || viewItem == netezza:TABLE || viewItem == netezza:GLOBAL TEMP TABLE)",
+          "when": "view == netezza.schema && (viewItem == serverInstance || viewItem == database || viewItem =~ /^typeGroup:/ || viewItem =~ /^netezza:/)",
           "group": "inline@0"
         },
         {
@@ -2475,6 +2475,13 @@
         "injectTo": [
           "source.sql",
           "source.oracle"
+        ]
+      },
+      {
+        "path": "./dialects/db2/syntaxes/db2.tmLanguage.json",
+        "scopeName": "db2.injection",
+        "injectTo": [
+          "source.sql"
         ]
       }
     ],
@@ -3276,6 +3283,10 @@
       {
         "language": "sql",
         "path": "./dialects/oracle/snippets/oracle.code-snippets"
+      },
+      {
+        "language": "sql",
+        "path": "./dialects/db2/snippets/db2.code-snippets"
       }
     ],
     "walkthroughs": [
@@ -4072,7 +4083,11 @@
     "test:playwright:ui": "npx playwright test --ui --config=test-harness/playwright.config.ts",
     "test:playwright:install": "npx playwright install chromium",
     "test:duckdb:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/duckdb.integration.test.ts",
-    "test:db2:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/db2.integration.test.ts",
+    "test:db2:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/jest/bin/jest.js --config jest.live.config.js --runInBand src/__tests__/integration/db2.integration.test.ts",
+    "db2:connect-probe": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-connect-probe.ts",
+    "db2:seed-live-fixture": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-live-fixture/seed.ts",
+    "db2:drop-live-fixture": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-live-fixture/drop.ts",
+    "db2:verify-live-fixture": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-live-fixture/verify.ts",
     "test:metadata-cache:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand src/__tests__/integration/metadataCacheRestart.integration.test.ts",
     "test:oracle:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/oracle.integration.test.ts",
     "test:postgres:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/postgres.integration.test.ts",

@@ -1,0 +1,12 @@
+{
+  "scopeName": "db2.injection",
+  "name": "Db2 SQL",
+  "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block)",
+  "patterns": [
+    {
+      "name": "keyword.other.db2.sql",
+      "match": "(?i)\\b(FETCH\\s+FIRST|OPTIMIZE\\s+FOR|FOR\\s+READ\\s+ONLY|FOR\\s+UPDATE|WITH\\s+(?:UR|CS|RS|RR)|FINAL\\s+TABLE|OLD\\s+TABLE|NEW\\s+TABLE|MODIFIED\\s+BY|DECLARE\\s+GLOBAL\\s+TEMPORARY|GENERATED\\s+(?:ALWAYS|BY\\s+DEFAULT)|IDENTITY|ORGANIZE\\s+BY|DATA\\s+CAPTURE|LANGUAGE\\s+SQL|CREATE\\s+(?:ALIAS|NICKNAME)|CURRENT\\s+(?:SCHEMA|SERVER|DATE|TIME|TIMESTAMP|USER))\\b"
+    }
+  ],
+  "repository": {}
+}

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { DatabaseConnection } from '../contracts/database';
+import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import type { ConnectionManager } from '../core/connectionManager';
 import { queryResultToRows, runQueryRaw } from '../core/queryRunner';
 import type { SchemaProvider } from '../providers/schemaProvider';
@@ -15,7 +16,9 @@ import {
     warmTableColumnsFromCatalog,
 } from './cache/columnCacheWarmup';
 import type { MetadataCache } from './cache/MetadataCache';
+import { isTableCacheObjectType } from './cache/schemaTreeDataSource';
 import type { RawColumnRowWithKeys } from './columnRowMapping';
+import type { ProcedureMetadata } from './types';
 import {
     removeTableObject,
     replaceTableObjectTypeForDatabase,
@@ -178,26 +181,44 @@ export class TableDdlSynchronizer {
         database: string,
         objectType: string,
     ): Promise<void> {
-        if (this.connectionManager.getConnectionDatabaseKind(connectionName) !== 'netezza') {
-            return;
-        }
-        const provider = netezzaMetadataProvider;
+        const databaseKind = this.connectionManager.getConnectionDatabaseKind(connectionName);
+        const provider = getDatabaseMetadataProvider(databaseKind);
+        const normalizedType = objectType.trim().toUpperCase();
         const result = await runQueryRaw({
             context: this.context,
-            query: provider.buildObjectTypeQuery(database, objectType),
+            query: provider.buildObjectTypeQuery(database, normalizedType),
             silent: true,
             connectionManager: this.connectionManager,
             connectionName,
             isUserQuery: false,
         });
         const rows = queryResultToRows<CatalogObjectRow>(result);
-        replaceTableObjectTypeForDatabase(
-            this.metadataCache,
-            connectionName,
-            database,
-            objectType,
-            rows.map(row => toTableMetadata({ ...row, OBJTYPE: objectType })),
-        );
+
+        if (normalizedType === 'PROCEDURE') {
+            const procedures: ProcedureMetadata[] = rows.map(row => ({
+                PROCEDURE: row.OBJNAME,
+                PROCEDURESIGNATURE: row.OBJNAME,
+                SCHEMA: row.SCHEMA,
+                OWNER: row.OWNER,
+                DESCRIPTION: row.DESCRIPTION,
+                label: row.OBJNAME,
+                kind: vscode.CompletionItemKind.Function,
+                objType: 'PROCEDURE',
+                detail: row.SCHEMA ? `PROCEDURE (${row.SCHEMA})` : 'PROCEDURE',
+                sortText: row.OBJNAME,
+            }));
+            this.metadataCache.setProcedures(connectionName, `${database}..`, procedures);
+            this.metadataCache.markProcedureCatalogLoaded(connectionName, database);
+        } else if (isTableCacheObjectType(normalizedType)) {
+            replaceTableObjectTypeForDatabase(
+                this.metadataCache,
+                connectionName,
+                database,
+                normalizedType,
+                rows.map(row => toTableMetadata({ ...row, OBJTYPE: normalizedType })),
+            );
+        }
+
         this.metadataCache.notifyMetadataChanged();
         this.schemaProvider.refresh();
     }
@@ -206,6 +227,11 @@ export class TableDdlSynchronizer {
         connectionName: string,
         target: ResolvedTableTarget,
     ): Promise<void> {
+        if (this.connectionManager.getConnectionDatabaseKind(connectionName) !== 'netezza') {
+            await this.refreshObjectType(connectionName, target.database, 'TABLE');
+            return;
+        }
+
         const provider = netezzaMetadataProvider;
         const query = provider.buildObjectByNameQuery(
             target.database,

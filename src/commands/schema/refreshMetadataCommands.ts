@@ -1,58 +1,129 @@
 import * as vscode from 'vscode';
+import { runQueryRaw } from '../../core/queryRunner';
+import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
 import type { SchemaItem } from '../../providers/schemaProvider';
 import type { SchemaCommandsDependencies } from './types';
 
-const REFRESHABLE_TABLE_TYPES = new Set(['TABLE', 'GLOBAL TEMP TABLE']);
+const NETEZZA_SINGLE_OBJECT_REFRESH_TYPES = new Set(['TABLE', 'GLOBAL TEMP TABLE']);
+
+function resolveItemName(item: SchemaItem): string | undefined {
+	const raw = item.rawLabel || item.label;
+	if (typeof raw === 'string') {
+		return raw;
+	}
+	if (raw && typeof raw === 'object' && 'label' in raw) {
+		return String((raw as { label: string }).label);
+	}
+	return undefined;
+}
 
 export function registerRefreshMetadataCommands(
-    deps: SchemaCommandsDependencies,
+	deps: SchemaCommandsDependencies,
 ): vscode.Disposable[] {
-    return [
-        vscode.commands.registerCommand(
-            'netezza.refreshSchemaSelection',
-            async (item?: SchemaItem) => {
-                const synchronizer = deps.tableDdlSynchronizer;
-                const connectionName = item?.connectionName;
-                const database = item?.dbName;
-                const objectType = item?.objType?.toUpperCase();
-                if (!synchronizer || !item || !connectionName || !database || !objectType) {
-                    vscode.window.showWarningMessage('Select a Netezza table or table group to refresh.');
-                    return;
-                }
-                if (!REFRESHABLE_TABLE_TYPES.has(objectType)) {
-                    vscode.window.showWarningMessage('Lightweight refresh is available for TABLE and GLOBAL TEMP TABLE.');
-                    return;
-                }
+	return [
+		vscode.commands.registerCommand(
+			'netezza.refreshSchemaSelection',
+			async (item?: SchemaItem) => {
+				const synchronizer = deps.tableDdlSynchronizer;
+				const connectionName = item?.connectionName;
+				if (!item || !connectionName) {
+					vscode.window.showWarningMessage(
+						'Select a connection, database, object group, or object in the schema tree to refresh.',
+					);
+					return;
+				}
 
-                try {
-                    await vscode.window.withProgress(
-                        {
-                            location: vscode.ProgressLocation.Window,
-                            title: `Refreshing ${objectType.toLowerCase()} metadata...`,
-                            cancellable: false,
-                        },
-                        async () => {
-                            if (item.contextValue.startsWith('typeGroup')) {
-                                await synchronizer.refreshObjectType(connectionName, database, objectType);
-                                return;
-                            }
-                            const schema = item.schema;
-                            const table = item.rawLabel || item.label;
-                            if (!schema || !table) {
-                                throw new Error('The selected object has no resolved schema or name.');
-                            }
-                            await synchronizer.refreshObject(connectionName, {
-                                database,
-                                schema,
-                                table,
-                            });
-                        },
-                    );
-                } catch (error: unknown) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    vscode.window.showErrorMessage(`Failed to refresh metadata: ${message}`);
-                }
-            },
-        ),
-    ];
+				const contextValue = item.contextValue || '';
+				const database = item.dbName;
+				const objectType = item.objType?.toUpperCase();
+				const databaseKind = deps.connectionManager.getConnectionDatabaseKind(connectionName);
+
+				try {
+					await vscode.window.withProgress(
+						{
+							location: vscode.ProgressLocation.Window,
+							title: 'Refreshing selected metadata...',
+							cancellable: false,
+						},
+						async () => {
+							if (contextValue === 'serverInstance') {
+								deps.metadataCache.clearConnectionMetadata(connectionName);
+								deps.schemaProvider.clearConnectionError(connectionName);
+								deps.schemaProvider.refresh();
+								if (supportsLegacyMetadataPrefetch(databaseKind)) {
+									deps.metadataCache.triggerConnectionPrefetch(connectionName, (query) =>
+										runQueryRaw(
+											deps.context,
+											query,
+											true,
+											deps.connectionManager,
+											connectionName,
+											undefined,
+											undefined,
+											undefined,
+											1000000,
+											false,
+										),
+									);
+								}
+								return;
+							}
+
+							if (contextValue === 'database') {
+								if (!database) {
+									throw new Error('The selected database node has no database name.');
+								}
+								deps.metadataCache.invalidateSchema(connectionName, database);
+								await deps.schemaProvider.reloadTypeGroups(connectionName, database);
+								return;
+							}
+
+							if (!synchronizer) {
+								throw new Error('Metadata refresh is not available in this session.');
+							}
+
+							if (contextValue.startsWith('typeGroup')) {
+								if (!database || !objectType) {
+									throw new Error('The selected object group has no database or type.');
+								}
+								await synchronizer.refreshObjectType(connectionName, database, objectType);
+								return;
+							}
+
+							if (contextValue.startsWith('netezza:') || contextValue.startsWith('favoritesObject:')) {
+								if (!database || !objectType) {
+									throw new Error('The selected object has no database or type.');
+								}
+								if (
+									databaseKind === 'netezza'
+									&& NETEZZA_SINGLE_OBJECT_REFRESH_TYPES.has(objectType)
+								) {
+									const schema = item.schema;
+									const table = resolveItemName(item);
+									if (!schema || !table) {
+										throw new Error('The selected object has no resolved schema or name.');
+									}
+									await synchronizer.refreshObject(connectionName, {
+										database,
+										schema,
+										table,
+									});
+									return;
+								}
+								await synchronizer.refreshObjectType(connectionName, database, objectType);
+								return;
+							}
+
+							throw new Error(
+								'Select a connection, database, object group, or catalog object to refresh.',
+							);
+						},
+					);
+				} catch (error: unknown) {
+					const message = error instanceof Error ? error.message : String(error);
+					vscode.window.showErrorMessage(`Failed to refresh metadata: ${message}`);
+				}
+			},
+		),
+	];
 }

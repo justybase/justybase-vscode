@@ -1,115 +1,243 @@
 import type {
-    DatabaseSqlAuthoring,
-    DatabaseSqlFormatterProfile,
-    DatabaseSqlFunctionSignature,
-    DatabaseSqlTypeSpec,
-    DatabaseSqlValidationProfile
+	DatabaseSqlAuthoring,
+	DatabaseSqlFormatterProfile,
+	DatabaseSqlFunctionSignature,
+	DatabaseSqlTypeSpec,
+	DatabaseSqlValidationProfile,
 } from '../../../../src/sql/authoring/types';
+import { db2SqlQualityRules } from './qualityRules';
 
 const DB2_COMPLETION_KEYWORDS = [
-    'SELECT',
-    'FROM',
-    'WHERE',
-    'INSERT',
-    'UPDATE',
-    'DELETE',
-    'MERGE',
-    'CALL',
-    'CREATE',
-    'ALTER',
-    'DROP',
-    'TABLE',
-    'VIEW',
-    'PROCEDURE',
-    'FUNCTION',
-    'SEQUENCE',
-    'TRIGGER',
-    'FETCH FIRST',
-    'WITH UR',
-    'ORDER BY',
-    'GROUP BY'
+	'SELECT',
+	'FROM',
+	'WHERE',
+	'INSERT',
+	'UPDATE',
+	'DELETE',
+	'MERGE',
+	'CALL',
+	'CREATE',
+	'ALTER',
+	'DROP',
+	'TABLE',
+	'VIEW',
+	'PROCEDURE',
+	'FUNCTION',
+	'SEQUENCE',
+	'TRIGGER',
+	'ALIAS',
+	'INDEX',
+	'VALUES',
+	'IDENTITY',
+	'GENERATED',
+	'ALWAYS',
+	'BY DEFAULT',
+	'FETCH FIRST',
+	'OPTIMIZE FOR',
+	'FOR READ ONLY',
+	'FOR UPDATE',
+	'WITH UR',
+	'WITH CS',
+	'WITH RS',
+	'WITH RR',
+	'FINAL TABLE',
+	'DECLARE GLOBAL TEMPORARY',
+	'ORGANIZE BY',
+	'DATA CAPTURE',
+	'LANGUAGE SQL',
+	'ORDER BY',
+	'GROUP BY',
+	'HAVING',
+	'UNION',
+	'INTERSECT',
+	'EXCEPT',
+	'CURRENT SCHEMA',
+	'CURRENT SERVER',
+	'CURRENT DATE',
+	'CURRENT TIME',
+	'CURRENT TIMESTAMP',
+	'CURRENT USER',
 ] as const;
 
 const DB2_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
-    SMALLINT: { canonical: 'SMALLINT', paramsMin: 0, paramsMax: 0 },
-    INTEGER: { canonical: 'INTEGER', paramsMin: 0, paramsMax: 0 },
-    BIGINT: { canonical: 'BIGINT', paramsMin: 0, paramsMax: 0 },
-    DECIMAL: { canonical: 'DECIMAL', paramsMin: 1, paramsMax: 2 },
-    NUMERIC: { canonical: 'NUMERIC', paramsMin: 1, paramsMax: 2 },
-    CHAR: { canonical: 'CHAR', paramsMin: 1, paramsMax: 1, warnIfNoLength: true },
-    VARCHAR: { canonical: 'VARCHAR', paramsMin: 1, paramsMax: 1, warnIfNoLength: true },
-    DATE: { canonical: 'DATE', paramsMin: 0, paramsMax: 0 },
-    TIME: { canonical: 'TIME', paramsMin: 0, paramsMax: 0 },
-    TIMESTAMP: { canonical: 'TIMESTAMP', paramsMin: 0, paramsMax: 1 }
+	SMALLINT: { canonical: 'SMALLINT', paramsMin: 0, paramsMax: 0 },
+	INTEGER: { canonical: 'INTEGER', paramsMin: 0, paramsMax: 0 },
+	BIGINT: { canonical: 'BIGINT', paramsMin: 0, paramsMax: 0 },
+	DECIMAL: { canonical: 'DECIMAL', paramsMin: 1, paramsMax: 2 },
+	NUMERIC: { canonical: 'NUMERIC', paramsMin: 1, paramsMax: 2 },
+	DECFLOAT: { canonical: 'DECFLOAT', paramsMin: 0, paramsMax: 1 },
+	REAL: { canonical: 'REAL', paramsMin: 0, paramsMax: 0 },
+	DOUBLE: { canonical: 'DOUBLE', paramsMin: 0, paramsMax: 0 },
+	CHAR: { canonical: 'CHAR', paramsMin: 1, paramsMax: 1, warnIfNoLength: true },
+	VARCHAR: { canonical: 'VARCHAR', paramsMin: 1, paramsMax: 1, warnIfNoLength: true },
+	GRAPHIC: { canonical: 'GRAPHIC', paramsMin: 1, paramsMax: 1, warnIfNoLength: true },
+	VARGRAPHIC: { canonical: 'VARGRAPHIC', paramsMin: 1, paramsMax: 1, warnIfNoLength: true },
+	CLOB: { canonical: 'CLOB', paramsMin: 0, paramsMax: 1 },
+	BLOB: { canonical: 'BLOB', paramsMin: 0, paramsMax: 1 },
+	XML: { canonical: 'XML', paramsMin: 0, paramsMax: 0 },
+	DATE: { canonical: 'DATE', paramsMin: 0, paramsMax: 0 },
+	TIME: { canonical: 'TIME', paramsMin: 0, paramsMax: 0 },
+	TIMESTAMP: { canonical: 'TIMESTAMP', paramsMin: 0, paramsMax: 1 },
 };
 
 const DB2_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
-    [
-        'COUNT',
-        [{
-            name: 'COUNT',
-            parameters: ['expression'],
-            description: 'Returns the number of non-null values for the expression.'
-        }]
-    ],
-    [
-        'COALESCE',
-        [{
-            name: 'COALESCE',
-            parameters: ['value1', 'value2', '...'],
-            description: 'Returns the first non-null argument.'
-        }]
-    ],
-    [
-        'CONCAT',
-        [{
-            name: 'CONCAT',
-            parameters: ['left', 'right'],
-            description: 'Concatenates two string expressions.'
-        }]
-    ]
+	[
+		'COUNT',
+		[
+			{
+				name: 'COUNT',
+				parameters: ['expression'],
+				description: 'Returns the number of non-null values for the expression.',
+			},
+		],
+	],
+	[
+		'COALESCE',
+		[
+			{
+				name: 'COALESCE',
+				parameters: ['value1', 'value2', '...'],
+				description: 'Returns the first non-null argument.',
+			},
+		],
+	],
+	[
+		'CONCAT',
+		[
+			{
+				name: 'CONCAT',
+				parameters: ['left', 'right'],
+				description: 'Concatenates two string expressions.',
+			},
+		],
+	],
+	[
+		'VARCHAR',
+		[
+			{
+				name: 'VARCHAR',
+				parameters: ['expression', 'length?'],
+				description: 'Casts or truncates an expression to VARCHAR.',
+			},
+		],
+	],
 ]);
 
 const db2FormatterProfile: DatabaseSqlFormatterProfile = {
-    keywords: new Set(DB2_COMPLETION_KEYWORDS),
-    clauseKeywords: new Set(['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'FETCH FIRST', 'WITH UR']),
-    newlineBeforeKeywords: new Set(['FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'FETCH FIRST', 'WITH UR']),
-    joinModifiers: new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS']),
-    commaNewlineClauses: new Set(['SELECT']),
-    logicalBreakKeywords: new Set(['AND', 'OR'])
+	keywords: new Set(DB2_COMPLETION_KEYWORDS),
+	clauseKeywords: new Set([
+		'SELECT',
+		'FROM',
+		'WHERE',
+		'GROUP BY',
+		'HAVING',
+		'ORDER BY',
+		'FETCH FIRST',
+		'WITH UR',
+		'WITH CS',
+		'OPTIMIZE FOR',
+	]),
+	newlineBeforeKeywords: new Set([
+		'FROM',
+		'WHERE',
+		'GROUP BY',
+		'HAVING',
+		'ORDER BY',
+		'FETCH FIRST',
+		'WITH UR',
+		'WITH CS',
+		'OPTIMIZE FOR',
+	]),
+	joinModifiers: new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS']),
+	commaNewlineClauses: new Set(['SELECT']),
+	logicalBreakKeywords: new Set(['AND', 'OR']),
 };
 
 const db2ValidationProfile: DatabaseSqlValidationProfile = {
-    builtinFunctions: new Set([
-        'ABS',
-        'AVG',
-        'COALESCE',
-        'CONCAT',
-        'COUNT',
-        'CURRENT DATE',
-        'CURRENT TIME',
-        'CURRENT TIMESTAMP',
-        'CURRENT USER',
-        'MAX',
-        'MIN',
-        'SUM'
-    ]),
-    systemColumns: new Set(),
-    specialBuiltinValues: new Set(['NULL', 'CURRENT DATE', 'CURRENT TIME', 'CURRENT TIMESTAMP', 'CURRENT USER']),
-    getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
-        if (!typeName) return undefined;
-        return DB2_TYPE_SPECS[typeName.trim().toUpperCase()];
-    },
-    supportsProcedureAnySizeArgument(): boolean {
-        return false;
-    },
-    syntaxValidationMode: 'bestEffort'
+	builtinFunctions: new Set([
+		'ABS',
+		'AVG',
+		'CAST',
+		'CEIL',
+		'CEILING',
+		'CHAR',
+		'COALESCE',
+		'CONCAT',
+		'COUNT',
+		'CURRENT DATE',
+		'CURRENT TIME',
+		'CURRENT TIMESTAMP',
+		'CURRENT USER',
+		'DECIMAL',
+		'FLOOR',
+		'HEX',
+		'INTEGER',
+		'LENGTH',
+		'LOCATE',
+		'LOWER',
+		'LTRIM',
+		'MAX',
+		'MIN',
+		'MOD',
+		'NULLIF',
+		'POSSTR',
+		'ROUND',
+		'RTRIM',
+		'SUBSTR',
+		'SUM',
+		'TRIM',
+		'UPPER',
+		'VARCHAR',
+		'VALUE',
+		'XMLSERIALIZE',
+	]),
+	systemColumns: new Set(),
+	specialBuiltinValues: new Set([
+		'NULL',
+		'CURRENT DATE',
+		'CURRENT TIME',
+		'CURRENT TIMESTAMP',
+		'CURRENT USER',
+		'CURRENT SCHEMA',
+		'CURRENT SERVER',
+	]),
+	getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
+		if (!typeName) {
+			return undefined;
+		}
+		const normalized = typeName.trim().toUpperCase();
+		if (DB2_TYPE_SPECS[normalized]) {
+			return DB2_TYPE_SPECS[normalized];
+		}
+		// Catalog / FORMAT_TYPE style names (e.g. "INTEGER", "CHARACTER VARYING(100)").
+		const base = normalized.replace(/\s*\(.*\)$/, '').trim();
+		if (base === 'CHARACTER VARYING' || base === 'CHARACTER') {
+			return DB2_TYPE_SPECS.VARCHAR;
+		}
+		if (base === 'INT') {
+			return DB2_TYPE_SPECS.INTEGER;
+		}
+		return DB2_TYPE_SPECS[base];
+	},
+	supportsProcedureAnySizeArgument(): boolean {
+		return false;
+	},
+	syntaxValidationMode: 'strict',
 };
 
 export const db2SqlAuthoring: DatabaseSqlAuthoring = {
-    completionKeywords: DB2_COMPLETION_KEYWORDS,
-    signatures: DB2_SIGNATURES,
-    formatter: db2FormatterProfile,
-    validation: db2ValidationProfile,
-    qualityRules: []
+	completionKeywords: DB2_COMPLETION_KEYWORDS,
+	signatures: DB2_SIGNATURES,
+	formatter: db2FormatterProfile,
+	validation: db2ValidationProfile,
+	qualityRules: db2SqlQualityRules,
+	parsing: {
+		lexerModulePath: 'src/dialects/db2/sql/lexer.ts',
+		parserModulePath: 'src/dialects/db2/sql/parser.ts',
+	},
+	staticAssets: {
+		snippetsPath: 'dialects/db2/snippets/db2.code-snippets',
+		grammarPath: 'dialects/db2/syntaxes/db2.tmLanguage.json',
+		grammarScopeName: 'db2.injection',
+	},
 };

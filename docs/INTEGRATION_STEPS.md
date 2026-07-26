@@ -29,10 +29,11 @@ npm run verify:postgresql
 
 The Oracle extension has a dedicated live suite at
 `src/__tests__/integration/oracle.integration.test.ts`. Install the optional
-runtime first, then provide `ORACLE_LIVE_TEST_HOST`,
-`ORACLE_LIVE_TEST_PORT`, `ORACLE_LIVE_TEST_DATABASE`,
-`ORACLE_LIVE_TEST_USER`, and `ORACLE_LIVE_TEST_PASSWORD` (optionally
-`ORACLE_LIVE_TEST_CURRENT_SCHEMA`) and run:
+runtime first, then provide the four required variables
+`ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_DATABASE`, `ORACLE_LIVE_TEST_USER`,
+and `ORACLE_LIVE_TEST_PASSWORD` (optional `ORACLE_LIVE_TEST_PORT`, default
+1521; optional `ORACLE_LIVE_TEST_CURRENT_SCHEMA` and connect-string overrides)
+and run:
 
 ```bash
 npm run install:oracle
@@ -40,12 +41,62 @@ npm run test:oracle:integration
 npm run verify:oracle
 ```
 
-The suite exercises the Oracle connection, catalog/search metadata, DDL
-extraction and generation, Oracle optimizer statistics, the guarded
-non-applicable distribution/skew path, and session-monitor storage. The shared
-optional smoke suite additionally covers the Oracle import path. Both live
-suites are excluded from the default unit-test configuration and are
-intentionally opt-in because they create temporary live database objects.
+The deep suite exercises:
+
+- connection and compatibility shims (`CURRENT_CATALOG` / `CURRENT_SCHEMA` / `CURRENT_SID`)
+- catalog/search metadata across table, view, procedure, function, package, trigger, sequence, synonym, index, and partition objects
+- DDL extraction/generation for those object families plus schema-migration batch DDL, including disposable composite-index and partitioned-table fixtures
+- live completion E2E (`LspCompletionEngine` + live Oracle metadata), same quality style as Netezza live completion suites
+- live SQL quality (`SqlQualityEngine` / ORA001–004, strict GROOM rejection, PL/SQL SQL037/039, SQL004 unknown column against live column metadata)
+- `EXPLAIN PLAN` / plan-tree parsing and the Oracle tuning advisor (`SELECT *` rule)
+- Oracle optimizer statistics, `ANALYZE TABLE`, disposable-table `ALTER TABLE … MOVE`
+- session-monitor storage via provider; `V$SESSION` / `V$SQL` query shapes via live connection (avoids `$` variable-resolution collisions in `runQueryRaw`)
+- import/export (typed columns, cancel during fetch, Oracle SQL dialect for binary round-trip) and the guarded non-applicable distribution/skew path
+
+Oracle-native surfaces (indexes, partitions, packages) are validated on purpose; they are not required to mirror Netezza 1:1. The shared optional smoke suite additionally covers a small Oracle import path.
+Both live suites are excluded from the default unit-test configuration and are
+intentionally opt-in because they create temporary live database objects. See
+[docs/oracle.md](oracle.md) for the env and coverage matrix.
+
+## Db2 Checklist
+
+The Db2 extension has a dedicated live suite at
+`src/__tests__/integration/db2.integration.test.ts`. Native `ibm_db` must be
+aligned to the Node/Jest ABI before the suite runs (the npm script does this
+via `switch-runtime.js auto-for-live-tests`). Provide `DB2_LIVE_TEST_HOST`,
+`DB2_LIVE_TEST_DATABASE`, `DB2_LIVE_TEST_USER`, and `DB2_LIVE_TEST_PASSWORD`
+(optional port default **50000**, optional `DB2_LIVE_TEST_CURRENT_SCHEMA` /
+fixture schema) and run:
+
+```bash
+npm run install:db2
+npm run test:db2:integration
+npm run verify:db2
+npm run db2:connect-probe
+```
+
+Optional persistent catalog for richer assertions:
+
+```bash
+npm run db2:seed-live-fixture -- --force
+npm run db2:verify-live-fixture
+```
+
+The deep suite exercises:
+
+- connection context (`CURRENT SERVER` / `CURRENT SCHEMA` / `SYSIBM.SYSDUMMY1`)
+- metadata/search for tables, views, aliases, procedures; scoped `buildListTablesQuery(database, schema)` regression
+- DDL generation, disposable composite index / partition fixtures, `JBL_LIVE` fixture when seeded
+- live completion E2E (`LspCompletionEngine` + live Db2 metadata; keywords `FETCH FIRST` / `WITH UR`, no `GROOM`)
+- live SQL quality (`SqlQualityEngine` / DB2001–DB2008, strict GROOM/`LIMIT`/`DB..TABLE` rejection, SQL004 unknown column + SQL025 type mismatch against live column metadata)
+
+Local `npm run test:db2:integration` **requires** `DB2_LIVE_TEST_*` (fails if missing). GitHub Actions soft-skips when secrets are absent — do not set `DB2_LIVE_TEST_REQUIRED` on CI.
+- explain JSON parse + tuning advisor (soft-skip if explain tables missing)
+- RUNSTATS maintenance (soft-skip on privilege errors)
+- session-monitor storage provider
+
+Db2 does not mirror Netezza distribution/skew UI. See [docs/db2.md](db2.md).
+CI opt-in: `.github/workflows/db2-live.yml`.
 
 ## Snowflake Checklist
 
