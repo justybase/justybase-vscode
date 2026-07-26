@@ -1,9 +1,8 @@
 # Db2 Tools (justybase)
 
+Optional Db2 LUW support for Netezza SQL Tools (justybase).
 
-Optional Db2 support for Netezza SQL Tools (justybase).
-
-This extension adds the `Db2 LUW` dialect to Netezza SQL Tools (justybase) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `Db2 LUW` dialect and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry. Core ships a dedicated Db2 SQL lexer/parser (strict), grammar, snippets, dialect-aware semantic tokens, and **DB2001–DB2008** quality rules; this VSIX supplies the native `ibm_db` driver and runtime providers.
 
 ## Requirements
 
@@ -13,33 +12,38 @@ This extension adds the `Db2 LUW` dialect to Netezza SQL Tools (justybase) and i
 
 ## Supported Platforms
 
-`Db2 Tools (justybase)` is built and packaged per target platform:
+Built and packaged per target platform (native `ibm_db` / clidriver):
 
 - Windows (`win32-x64`)
 - Linux (`linux-x64`)
 - macOS Apple Silicon (`darwin-arm64`)
 
-Each platform requires its own DB2 VSIX artifact because `ibm_db` and `clidriver` are native/runtime-platform specific.
-
 ## What This Extension Adds
 
-- Db2 LUW connection type in the login panel
-- Db2-aware connection factory and runtime driver integration, including a UTF-8 `ClientCodepage=1208` default that can be overridden from the connection form
-- Schema metadata queries for Db2 system catalogs, including separate runtime groups for nicknames, aliases, procedures, functions, servers, server options, wrappers, wrapper options, user mappings, and passthru auth
-- Db2 SQL authoring profile and dialect registration
-- Db2 table DDL fallback reconstruction from catalog metadata when direct runtime DDL is unavailable, plus catalog-based DDL for aliases and nicknames
+- Db2 LUW connection type (optional `currentSchema`, connect timeout, `ClientCodepage`, SSL)
+- Runtime driver integration with UTF-8 `ClientCodepage=1208` default (overridable)
+- Schema metadata for tables, views, nicknames, aliases, procedures, functions, and federated catalog groups
+- DDL fallback from `SYSCAT.*` (constraints, indexes, partitions, comments, alias/nickname DDL)
+- Explain plan parsing, tuning advisor, session monitor, and table maintenance (`RUNSTATS` / `REORG`, index/partition helpers)
+- Import type mapping for Db2 types
+- Copilot reference text for optimization and SQL PL
 
-## Current Runtime Notes
+## Capabilities (aligned with `db2Dialect`)
 
-- Nicknames and aliases are treated as table-like objects for tree expansion and SQL completion.
-- Servers, server options, wrappers, wrapper options, user mappings, and passthru auth are exposed as read-only catalog groups in the schema browser.
-- Db2 type groups are split between schema-scoped objects (`TABLE`, `VIEW`, `NICKNAME`, `ALIAS`, `PROCEDURE`, `FUNCTION`) and global federated groups (`SERVER`, `SERVER OPTION`, `WRAPPER`, `WRAPPER OPTION`, `USER MAPPING`, `PASSTHRU AUTH`).
-- Db2 procedures are enabled in runtime capabilities; table maintenance and session monitor remain intentionally disabled in this iteration.
-- Fallback table DDL now reconstructs constraints, check constraints, comments, secondary indexes, and key partition metadata from `SYSCAT.*`; storage/compression details that cannot be rendered as safe SQL are emitted as metadata comments in the fallback output.
+| Capability | Enabled |
+| --- | --- |
+| Explain plan / graph | Yes |
+| Tuning advisor | Yes |
+| Procedures | Yes |
+| Table maintenance | Yes |
+| Session monitor | Yes |
+| External tables / distribution metrics | No (Netezza-only surfaces stay hidden) |
+
+Editor depth is **Advanced (LUW SQL + CST linter/semantic)**; deep SQL PL visitor (SQL037–039) remains a follow-on. See [docs/db2.md](../../docs/db2.md) and [plans/DIALECT_PARITY_MATRIX.md](../../plans/DIALECT_PARITY_MATRIX.md).
 
 ## Windows ODBC registration
 
-The extension never registers an ODBC driver or changes the Windows registry automatically. If the Db2 driver reports **Data source name not found**, first rebuild the Electron runtime with `npm run db2:runtime:electron`. Only when approved by an administrator, register the bundled driver manually from an elevated command prompt:
+The extension **never** registers an ODBC driver or changes the Windows registry automatically. If the driver reports **Data source name not found**, rebuild with `npm run db2:runtime:electron`. Only when approved by an administrator, register the bundled driver manually:
 
 ```powershell
 <path-to-clidriver>\bin\db2cli.exe install -setup
@@ -47,41 +51,35 @@ The extension never registers an ODBC driver or changes the Windows registry aut
 
 ## Installation Order
 
-Marketplace or manual VSIX installation should end with both extensions installed:
-
 1. Install `Netezza SQL Tools (justybase)`
 2. Install `Db2 Tools (justybase)`
 
-`Db2 Tools (justybase)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`extensionDependencies` on the core extension allow Marketplace resolution.
 
-## Development Notes
-
-For local debugging and native runtime refresh after `ibm_db` or Electron changes:
+## Development
 
 ```powershell
-npm run rebuild:db2
+npm run install:db2
+npm run rebuild:db2          # Electron ABI for F5
+# F5 -> Run Core + Db2 Support
+
+npm run db2:runtime:node     # before Jest / live tests
+npm run test:db2:integration
+npm run verify:db2
 ```
 
-Then start the debug profile:
+Live env: `DB2_LIVE_TEST_*` — see [docs/db2.md](../../docs/db2.md). Persistent fixture: `npm run db2:seed-live-fixture`.
 
-```powershell
-F5 -> Run Core + Db2 Support
-```
-
-For Linux/macOS development, runtime library loading may require unixODBC setup and `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` visibility. See `extensions/DB2_DEBUG_AND_INSTALL.md` for platform-specific diagnostics.
+For Linux/macOS library path notes see `extensions/DB2_DEBUG_AND_INSTALL.md` when present.
 
 ## Packaging
-
-From the repository root:
 
 ```powershell
 npm run package:db2:full
 ```
 
-This runs clean, lint, typecheck, build, and creates the DB2 VSIX.
+CI: `.github/workflows/db2-build.yml` (VSIX) and `.github/workflows/db2-live.yml` (opt-in live suite).
 
-For CI multi-platform builds and artifact names, see `.github/workflows/db2-build.yml`. Marketplace publication of the core VSIX plus the three Db2 target VSIX files is handled separately by `.github/workflows/publish-marketplace.yml` when a GitHub Release is published.
+## License
 
-## License and third-party software
-
-This extension is licensed under Apache-2.0. Its Marketplace VSIX includes the full project license and a generated `THIRD_PARTY_NOTICES.md` covering locked runtime dependencies and their available license texts.
+Apache-2.0. Marketplace VSIX includes `THIRD_PARTY_NOTICES.md`.

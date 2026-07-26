@@ -11,6 +11,7 @@ import * as parsingRuntime from '../sqlParser/parsingRuntime';
 jest.mock('vscode', () => jest.requireActual('./__mocks__/vscode'));
 
 const FUNCTION_IDX = 1;
+const KEYWORD_IDX = 2;
 const VARIABLE_IDX = 5;
 const TYPE_IDX = 6;
 const COLUMN_IDX = 7;
@@ -233,6 +234,25 @@ describe('NetezzaSemanticTokensProvider', () => {
     expect(findToken(tokens, sql, document, 'HR')?.tokenType).toBe(SCHEMA_IDX);
     expect(findToken(tokens, sql, document, 'EMPLOYEES')?.tokenType).toBe(TABLE_IDX);
     expect(findToken(tokens, sql, document, 'e')?.tokenType).toBe(ALIAS_IDX);
+  });
+
+  it('uses Db2 parsing for isolation keywords and alias roles', () => {
+    const sql =
+      'SELECT e.DEPT_ID FROM JBL_LIVE.JBL_EMPLOYEES e WHERE e.DEPT_ID = 1 FETCH FIRST 5 ROWS ONLY WITH UR';
+    const document = createDocument(sql);
+    const db2ConnectionManager = createMockConnectionManager({
+      getExecutionDatabaseKind: jest.fn().mockReturnValue('db2'),
+    });
+    const db2Provider = new NetezzaSemanticTokensProvider(
+      undefined,
+      db2ConnectionManager,
+    );
+    const tokens = tokensFor(db2Provider, sql);
+
+    expect(findToken(tokens, sql, document, 'JBL_LIVE')?.tokenType).toBe(SCHEMA_IDX);
+    expect(findToken(tokens, sql, document, 'JBL_EMPLOYEES')?.tokenType).toBe(TABLE_IDX);
+    expect(findToken(tokens, sql, document, 'e')?.tokenType).toBe(ALIAS_IDX);
+    expect(findToken(tokens, sql, document, 'WITH UR')?.tokenType).toBe(KEYWORD_IDX);
   });
 
   it('colors Oracle PL/SQL variables and parameters as local variables', () => {

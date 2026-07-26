@@ -3,10 +3,14 @@ import type { DatabaseCopilotReferenceProvider, DatabaseReferenceTopic } from '@
 const ALL_REFERENCE = `
 Db2 LUW guidance:
 - Use fully qualified object names (SCHEMA.OBJECT) in production and migration scripts.
+- Prefer FETCH FIRST n ROWS ONLY (and OPTIMIZE FOR when needed) over client-side top-N.
+- Use isolation clauses intentionally (WITH UR / CS / RS / RR); default is often CS.
 - Use EXPLAIN to populate plan tables and db2exfmt or Visual Explain to inspect access plans.
 - Prefer LOAD or IMPORT utilities for bulk data ingestion; use INSERT FROM for smaller volumes.
 - Run RUNSTATS regularly to keep the optimizer informed of data distribution and table growth.
 - Use REORG TABLE to reclaim space and reorganise data for optimal access paths after heavy DML.
+- Nicknames and aliases are table-like for browsing; nicknames require federation (SERVER/WRAPPER).
+- GROOM and DISTRIBUTE ON are Netezza-only — do not use them on Db2.
 `.trim();
 
 const OPTIMIZATION_REFERENCE = `

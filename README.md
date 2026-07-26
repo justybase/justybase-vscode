@@ -31,9 +31,11 @@ Published VSIX packages use readable JavaScript bundles with source maps that in
 | Target | Install | SQL tooling |
 | ------ | ------- | ----------- |
 | **IBM Netezza / PureData** | Core extension (this package) | **First-class** — full dialect stack: Chevrotain parser, NZPLSQL procedure diagnostics, semantic tokens, LSP completion/navigation/rename, SQL/NZ/NZP linter rules, Netezza-specific Copilot tools, GROOM/monitor/ETL workflows, and more |
-| **Other databases** | Core extension **+** separate optional extension per database | **Limited** — shared connect/query/schema/export UX and metadata-aware basics where implemented; **not** the same depth of dialect-specific parsing, linting, or procedure tooling as Netezza |
+| **Oracle** | Core extension **+** [Oracle support pack](extensions/oracle) | **Near-full companion** — dedicated Oracle Chevrotain parser and PL/SQL validation in core, grammar/snippets, advanced DDL/import/export, explain graph, tuning advisor, session monitor, and ORA quality rules; requires optional VSIX for `oracledb` connectivity. Not Netezza parity (no NZ/NZP depth, GROOM/ETL, or skew Copilot). See [docs/oracle.md](docs/oracle.md) |
+| **Db2 LUW** | Core extension **+** [Db2 support pack](extensions/db2) | **Near-full companion runtime** — advanced connect/metadata/DDL/import/explain/maintenance with dedicated live suite and DB2 quality rules; editor Shared until deeper Chevrotain/SQL PL work. Native `ibm_db` VSIX. See [docs/db2.md](docs/db2.md) |
+| **Other optional databases** | Core extension **+** separate optional extension per database | **Preview companions** — shared connect/query/schema/export UX and metadata-aware SQL tooling **where implemented**; typically less editor depth than Netezza or Oracle |
 
-JustyBase is built **first and foremost for Netezza**. Optional database packs reuse the same VS Code shell (connections, schema browser, results grid, import/export) but should be treated as companion runtimes — install the matching extension, connect, and expect **reduced SQL editor intelligence** compared to Netezza.
+JustyBase is built **first and foremost for Netezza**. Most optional database packs are preview companion runtimes with **reduced** SQL editor intelligence compared to Netezza. **Oracle is the exception**: install core + Oracle pack for advanced Oracle SQL/PL/SQL authoring on the shared LSP stack.
 
 Netezza SQL files support SAS-like preprocessing macros, including `%let`, `%if/%do/%end`, `%export`, `%include`, and `%python` (which substitutes a Python script's standard output).
 
@@ -296,37 +298,48 @@ Right-click on objects in the Schema Browser for powerful context actions:
 
 ## Optional Database Support
 
-Optional database packs plug into the **shared core UX** (login UI, schema explorer, query execution, results/export). They do **not** ship the full Netezza SQL development stack.
+Optional database packs plug into the **shared core UX** (login UI, schema explorer, query execution, results/export). They do **not** replace the Netezza-first product surface (NZ/NZP linter depth, GROOM/ETL, Netezza-tuned Copilot tools).
 
-**What optional extensions typically provide**
+**What most optional extensions provide**
 
 - Connect and run queries against the target database
 - Schema browser refresh (scope varies by dialect)
 - Metadata-aware completion and diagnostics **where implemented** for that dialect
 - Import/export and DDL helpers **where implemented**
 
+**Oracle (exception)** — with core + [Oracle pack](extensions/oracle): dedicated Oracle parser/PL/SQL validation, grammar/snippets, advanced data and schema workflows, explain/tuning/session monitor, and ORA quality rules. Documented in [docs/oracle.md](docs/oracle.md); internal parity labels in [plans/DIALECT_PARITY_MATRIX.md](plans/DIALECT_PARITY_MATRIX.md).
+
 **What remains Netezza-only (or Netezza-first)**
 
-- Dedicated Netezza Chevrotain grammar and NZPLSQL procedure analysis (SQL037+ / NZP rules)
-- Netezza-specific maintenance workflows (GROOM, skew analysis, session monitor, ETL designer)
+- NZ/NZP rule depth and NZPLSQL regex fallback paths beyond shared procedure-scope codes
+- Netezza-specific maintenance workflows (GROOM, skew analysis, ETL designer)
 - Netezza-tuned Copilot tools (`#compileProcedure`, `#tableStats` skew/distribution, and similar)
-- Deepest linter coverage (SQL/NZ/NZP rule set exercised primarily against Netezza SQL)
 
 | Database          | Status        | Distribution                | Marketplace `preview` | Notes                                                                                  |
 | ----------------- | ------------- | --------------------------- | --------------------- | -------------------------------------------------------------------------------------- |
 | **SQLite**        | Experimental  | Built into core extension   | n/a (core)            | File-based, no separate installation; minimal SQL validation                           |
-| **IBM Db2**       | Preview       | Separate optional extension | yes                   | Requires native `ibm_db` dependency                                                    |
+| **IBM Db2**       | Near-full preview | Separate optional extension | yes                   | Advanced runtime + dedicated live suite; Shared editor (DB2xxx + first-slice parser) — [docs/db2.md](docs/db2.md) |
 | **DuckDB**        | Preview       | Separate optional extension | yes                   | Uses `@duckdb/node-api` with platform-specific native bindings                         |
 | **PostgreSQL**    | Preview       | Separate optional extension | yes                   | Pure JS `pg` runtime; connect, schema browser, query/export; limited SQL validation  |
 | **Snowflake**     | Preview       | Separate optional extension | yes                   | Pure JS `snowflake-sdk`; connect, schema browser, stage helpers; limited SQL validation |
-| **Oracle**        | Preview       | Separate optional extension | yes                   | Requires `oracledb` npm package (thin mode)                                            |
+| **Oracle**        | Near-full preview | Separate optional extension | yes               | Advanced SQL/PL/SQL editor in core + thin `oracledb` VSIX; dedicated live suite — [docs/oracle.md](docs/oracle.md) |
 | **Microsoft SQL** | Preview       | Separate optional extension | yes                   | Requires `mssql` npm package                                                           |
 | **MySQL**         | Preview       | Separate optional extension | yes                   | Requires `mysql2` npm package                                                          |
 | **Vertica**       | Preview       | Separate optional extension | yes                   | Requires `vertica` npm package                                                         |
 
-All optional database extensions are published with `"preview": true` in their `package.json` (PostgreSQL included). Treat them uniformly as **preview companion runtimes** — not a graduated tier below Netezza. Depth of SQL editor support still varies by dialect, but none matches the Netezza-first stack listed above.
+All optional database extensions are published with `"preview": true` in their `package.json` (PostgreSQL included). Treat them as **preview companion runtimes** — not peers of the full Netezza-first stack. SQL editor depth varies by dialect; **Oracle** is closest to Netezza on the shared parser/LSP path.
 
-Install the core extension first, then install the PostgreSQL support package to enable:
+Install the core extension first, then install the Oracle support package to enable:
+
+- Oracle connections (`node-oracledb` thin mode) in the shared login UI
+- schema explorer for tables, views, procedures, functions, packages, triggers, sequences, and synonyms
+- dedicated Oracle Chevrotain parser, TextMate grammar, snippets, and strict PL/SQL validation (SQL037–SQL040 where applicable)
+- metadata-aware completion, hover, rename, semantic tokens, and ORA001–ORA004 quality rules
+- advanced DDL and schema-migration extraction (`DBMS_METADATA`), import/export, explain graph, tuning advisor, session monitor, and table maintenance
+
+See [docs/oracle.md](docs/oracle.md) for setup, parity versus Netezza, and live validation.
+
+Install the PostgreSQL support package to enable:
 
 - PostgreSQL connections in the shared login UI
 - schema explorer refresh for databases, schemas, tables, views, procedures, functions, and sequences
@@ -460,6 +473,8 @@ The Db2-bearing F5 launch targets now call `npm run db2:runtime:electron` automa
 The default `npm run test` and `npm run test:watch` flows skip both live suites on purpose, so normal regression runs stay local-environment-independent. Use `npm run test:live:local` when you explicitly want real database smoke coverage.
 
 For the full Oracle live suite (connection, metadata search, DDL extraction/generation, maintenance, and session monitor), run `npm run test:oracle:integration`. It requires `ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_PORT`, `ORACLE_LIVE_TEST_DATABASE`, `ORACLE_LIVE_TEST_USER`, and `ORACLE_LIVE_TEST_PASSWORD` (with optional `ORACLE_LIVE_TEST_CURRENT_SCHEMA`).
+
+For Db2, run `npm run test:db2:integration` with the `DB2_LIVE_TEST_*` variables below. That command rebuilds `ibm_db` for Node/Jest when live env is present, injects the **bundled** clidriver into the test process only (no system ODBC registration), and restores the Electron/F5 build afterward—same pattern as `npm run test:live:local`. Quick connectivity check: `npm run db2:connect-probe`. Persistent catalog fixture: see [docs/db2.md](docs/db2.md) (`npm run db2:seed-live-fixture`).
 
 The live tests are env-gated and stay skipped unless you provide credentials. Supported variables are:
 

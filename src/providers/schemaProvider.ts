@@ -1232,33 +1232,41 @@ export class SchemaProvider
         }
         this.typeGroupsRefreshInProgress.add(key);
 
-        // Run in background without awaiting
-        (async () => {
-            try {
-                const databaseKind = this.requireConnectionDatabaseKind(connectionName, 'refresh schema object groups');
-                const query = buildTypeGroupsQueryForKind(dbName, databaseKind);
-                const result = await runQueryWithTimeout(
-                    this.context,
-                    query,
-                    this.connectionManager,
-                    connectionName,
-                    SCHEMA_QUERY_TIMEOUT,
-                );
-                const types = result ? queryResultToRows<{ OBJTYPE: string }>(result) : [];
-                const typeList = types.map((t: { OBJTYPE: string }) => t.OBJTYPE);
-                this.metadataCache.setTypeGroups(connectionName, dbName, typeList);
-                logWithFallback('debug', `[SchemaProvider] Refreshed typeGroups for ${dbName}: ${typeList.join(', ')}`);
-                this.refresh();
-            } catch (e: unknown) {
-                if (e instanceof SchemaQueryTimeoutError) {
-                    logWithFallback('warn', `[SchemaProvider] Timeout refreshing typeGroups for ${dbName}:`, e.message);
-                } else {
-                    logWithFallback('error', `[SchemaProvider] Failed to refresh typeGroups for ${dbName}:`, e);
-                }
-            } finally {
+        void this.reloadTypeGroups(connectionName, dbName)
+            .catch((e) => logWithFallback('error', '[SchemaProvider] typeGroups refresh error:', e))
+            .finally(() => {
                 this.typeGroupsRefreshInProgress.delete(key);
+            });
+    }
+
+    /**
+     * Reload object-type groups for a database and refresh the schema tree.
+     * Used by Refresh Selected Metadata for database nodes across dialects.
+     */
+    async reloadTypeGroups(connectionName: string, dbName: string): Promise<void> {
+        try {
+            const databaseKind = this.requireConnectionDatabaseKind(connectionName, 'refresh schema object groups');
+            const query = buildTypeGroupsQueryForKind(dbName, databaseKind);
+            const result = await runQueryWithTimeout(
+                this.context,
+                query,
+                this.connectionManager,
+                connectionName,
+                SCHEMA_QUERY_TIMEOUT,
+            );
+            const types = result ? queryResultToRows<{ OBJTYPE: string }>(result) : [];
+            const typeList = types.map((t: { OBJTYPE: string }) => t.OBJTYPE);
+            this.metadataCache.setTypeGroups(connectionName, dbName, typeList);
+            logWithFallback('debug', `[SchemaProvider] Refreshed typeGroups for ${dbName}: ${typeList.join(', ')}`);
+            this.refresh();
+        } catch (e: unknown) {
+            if (e instanceof SchemaQueryTimeoutError) {
+                logWithFallback('warn', `[SchemaProvider] Timeout refreshing typeGroups for ${dbName}:`, e.message);
+            } else {
+                logWithFallback('error', `[SchemaProvider] Failed to refresh typeGroups for ${dbName}:`, e);
             }
-        })().catch((e) => logWithFallback('error', '[SchemaProvider] typeGroups refresh error:', e));
+            throw e;
+        }
     }
 
     private mapCachedTableObjectsToSchemaItems(

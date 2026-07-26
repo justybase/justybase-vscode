@@ -117,6 +117,16 @@ function resolveBundledClidriverHome(): string | undefined {
     return undefined;
 }
 
+/**
+ * Points the current Node/Electron process at the bundled clidriver shipped with the Db2
+ * extension (PATH / LD_LIBRARY_PATH / IBM_DB_HOME). Process-local only — does not register
+ * ODBC drivers or change the OS install. Used by the extension at connect time and by repo
+ * live-test tooling.
+ */
+export function configureBundledClidriverForCurrentProcess(): string | undefined {
+    return resolveBundledClidriverHome();
+}
+
 function getRuntimeVersionSummary(): string {
     const nodeVersion = process.version;
     const electronVersion = process.versions.electron ?? 'n/a';

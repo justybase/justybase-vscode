@@ -1,7 +1,7 @@
 {
     "name": "justybaselite-oracle",
     "displayName": "JustyBase Oracle Support",
-    "description": "Optional Oracle Support for JustyBase Core using node-oracledb thin mode",
+    "description": "Near-full Oracle companion for JustyBase Core: thin-mode oracledb, advanced DDL/import/export, explain/tuning, and PL/SQL-aware SQL editor (with core extension)",
     "version": "3.16.13",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",

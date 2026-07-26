@@ -1,0 +1,59 @@
+{
+  "SELECT * FROM table FETCH FIRST n ROWS ONLY": {
+    "prefix": "db2-fetch-first",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM ${2:schema}.${3:table}",
+      "ORDER BY ${4:id}",
+      "FETCH FIRST ${5:10} ROWS ONLY",
+      "WITH UR;"
+    ],
+    "description": "Db2 FETCH FIRST with uncommitted read"
+  },
+  "OPTIMIZE FOR n ROWS": {
+    "prefix": "db2-optimize-for",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM ${2:schema}.${3:table}",
+      "OPTIMIZE FOR ${4:10} ROWS",
+      "WITH UR;"
+    ],
+    "description": "Db2 OPTIMIZE FOR with isolation"
+  },
+  "MERGE INTO": {
+    "prefix": "db2-merge",
+    "body": [
+      "MERGE INTO ${1:target} AS T",
+      "USING ${2:source} AS S",
+      "ON (T.${3:key} = S.${3:key})",
+      "WHEN MATCHED THEN UPDATE SET T.${4:col} = S.${4:col}",
+      "WHEN NOT MATCHED THEN INSERT (${5:cols}) VALUES (S.${5:cols});"
+    ],
+    "description": "Db2 MERGE statement"
+  },
+  "DECLARE GLOBAL TEMPORARY TABLE": {
+    "prefix": "db2-dgtt",
+    "body": [
+      "DECLARE GLOBAL TEMPORARY TABLE ${1:SESSION.TMP}",
+      "(",
+      "  ${2:ID} INTEGER",
+      ")",
+      "ON COMMIT PRESERVE ROWS;"
+    ],
+    "description": "Db2 declared global temporary table"
+  },
+  "CREATE OR REPLACE PROCEDURE": {
+    "prefix": "db2-procedure",
+    "body": [
+      "CREATE OR REPLACE PROCEDURE ${1:schema}.${2:proc_name} (",
+      "  IN ${3:p_in} INTEGER,",
+      "  OUT ${4:p_out} INTEGER",
+      ")",
+      "LANGUAGE SQL",
+      "BEGIN",
+      "  SET ${4:p_out} = ${3:p_in};",
+      "END"
+    ],
+    "description": "Db2 SQL PL procedure skeleton"
+  }
+}

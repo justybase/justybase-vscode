@@ -426,6 +426,80 @@ export class MetadataCache implements MetadataPrefetchTarget {
     }
   }
 
+  /**
+   * Drop in-memory metadata for one connection so the schema tree can reload it.
+   * Does not wipe other connections (unlike clearCache).
+   */
+  clearConnectionMetadata(connectionName: string): void {
+    const prefix = `${connectionName}|`;
+    const deletePrefixed = <T>(map: Map<string, T>): void => {
+      for (const key of Array.from(map.keys())) {
+        if (key === connectionName || key.startsWith(prefix)) {
+          map.delete(key);
+        }
+      }
+    };
+
+    this._store.dbCache.delete(connectionName);
+    deletePrefixed(this._store.schemaCache);
+    deletePrefixed(this._store.currentSchemaCache);
+    deletePrefixed(this._store.defaultSchemaCache);
+    this._store.netezzaSchemasEnabledCache.delete(connectionName);
+    deletePrefixed(this._store.tableCache);
+    deletePrefixed(this._store.procedureCache);
+    deletePrefixed(this._store.columnCache);
+    deletePrefixed(this._store.tableIdMap);
+    deletePrefixed(this._store.typeGroupCache);
+    deletePrefixed(this._store.objectsByTypeCache);
+    deletePrefixed(this._store.objectLookupIndex);
+    deletePrefixed(this._store.tableNameOnlyIndex);
+    this._store.deadDatabases.delete(connectionName);
+
+    for (const key of Array.from(this._viewsCatalogLoaded)) {
+      if (key.startsWith(prefix)) {
+        this._viewsCatalogLoaded.delete(key);
+      }
+    }
+    for (const key of Array.from(this._objectsCatalogLoaded)) {
+      if (key.startsWith(prefix)) {
+        this._objectsCatalogLoaded.delete(key);
+      }
+    }
+    for (const key of Array.from(this._invalidatedColumnLayerKeys)) {
+      if (key.startsWith(prefix)) {
+        this._invalidatedColumnLayerKeys.delete(key);
+      }
+    }
+
+    this._diskLifecycleState.deferredIndexConnections.delete(connectionName);
+    this._diskLifecycleState.metadataHydratingConnections.delete(connectionName);
+    this._diskLifecycleState.metadataHydratePromises.delete(connectionName);
+    this._columnLoaderState.columnsOnDisk.delete(connectionName);
+    this._columnLoaderState.columnsLoadedDatabases.delete(connectionName);
+    for (const key of Array.from(this._columnLoaderState.columnLoadPromises.keys())) {
+      if (key.startsWith(prefix)) {
+        this._columnLoaderState.columnLoadPromises.delete(key);
+      }
+    }
+    for (const key of Array.from(this._columnLoaderState.columnLayerLoadPromises.keys())) {
+      if (key.startsWith(prefix)) {
+        this._columnLoaderState.columnLayerLoadPromises.delete(key);
+      }
+    }
+    for (const key of Array.from(this._columnLoaderState.parsedColumnFileCache.keys())) {
+      if (key.startsWith(prefix)) {
+        this._columnLoaderState.parsedColumnFileCache.delete(key);
+      }
+    }
+
+    this.prefetcher.clearConnectionPrefetchTimestamp(connectionName);
+    this._stats.clearConnection(connectionName);
+    Logger.getInstance().info(
+      `[MetadataCache] Cleared in-memory metadata for connection '${connectionName}'`,
+    );
+    this._onDidInvalidate.fire();
+  }
+
   private resetLocalCacheAfterExternalGeneration(): void {
     this._diskLifecycleState.cacheGeneration++;
     this._columnLoaderState.cacheGeneration = this._diskLifecycleState.cacheGeneration;

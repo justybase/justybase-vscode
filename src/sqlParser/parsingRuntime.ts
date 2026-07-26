@@ -21,6 +21,12 @@ import {
   getSqlParserInstance as getOracleSqlParserInstance,
 } from "../dialects/oracle/sql/parser";
 import { oracleSqlAuthoring } from "../../extensions/oracle/src/sql/authoring";
+import { db2SqlAuthoring } from "../../extensions/db2/src/sql/authoring";
+import { SqlLexer as db2SqlLexer } from "../dialects/db2/sql/lexer";
+import {
+  createSqlParserInstance as createDb2SqlParserInstance,
+  getSqlParserInstance as getDb2SqlParserInstance,
+} from "../dialects/db2/sql/parser";
 import type {
   DatabaseSqlAuthoring,
   DatabaseSqlValidationProfile,
@@ -616,6 +622,13 @@ export const ORACLE_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
   createSqlParserInstance: createOracleSqlParserInstance,
 };
 
+export const DB2_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "db2",
+  SqlLexer: db2SqlLexer,
+  getSqlParserInstance: getDb2SqlParserInstance,
+  createSqlParserInstance: createDb2SqlParserInstance,
+};
+
 const runtimeByKind = new Map<DatabaseKind, SqlParsingRuntime>();
 const runtimeByAuthoring = new WeakMap<object, SqlParsingRuntime>();
 const runtimeByValidationProfile = new WeakMap<object, SqlParsingRuntime>();
@@ -655,6 +668,13 @@ registerSqlParsingRuntime({
   kind: "oracle",
   authoring: oracleSqlAuthoring,
   validationProfile: oracleSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: DB2_SQL_PARSING_RUNTIME,
+  kind: "db2",
+  authoring: db2SqlAuthoring,
+  validationProfile: db2SqlAuthoring.validation,
 });
 
 function resolveDatabaseKind(
