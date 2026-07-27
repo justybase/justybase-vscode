@@ -8,6 +8,7 @@
 import {
   normalizeUriKey,
   isConnectionBrokenError,
+  formatQueryRunnerErrorMessage,
   isBusyConnectionError,
   createLogger,
   logOutput,
@@ -87,6 +88,22 @@ describe("queryRunnerUtils", () => {
       );
     });
 
+    it("should detect Netezza driver connection is closed error", () => {
+      expect(isConnectionBrokenError(new Error("Connection is closed"))).toBe(
+        true,
+      );
+    });
+
+    it("should detect broken connection on nested error cause", () => {
+      expect(
+        isConnectionBrokenError(
+          new Error("Error: query failed", {
+            cause: new Error("Connection is closed"),
+          }),
+        ),
+      ).toBe(true);
+    });
+
     it("should detect econnreset error", () => {
       expect(isConnectionBrokenError(new Error("ECONNRESET"))).toBe(true);
     });
@@ -119,6 +136,28 @@ describe("queryRunnerUtils", () => {
       expect(isConnectionBrokenError(new Error("SOCKET CLOSED"))).toBe(true);
       expect(isConnectionBrokenError(new Error("Connection RESET"))).toBe(true);
       expect(isConnectionBrokenError(new Error("ECONNRESET"))).toBe(true);
+    });
+  });
+
+  describe("formatQueryRunnerErrorMessage", () => {
+    it("should prefix plain messages with Error:", () => {
+      expect(formatQueryRunnerErrorMessage("Connection is closed")).toBe(
+        "Error: Connection is closed",
+      );
+    });
+
+    it("should not double-prefix reconnect failure messages", () => {
+      expect(
+        formatQueryRunnerErrorMessage(
+          "Error (after reconnect attempt): still broken",
+        ),
+      ).toBe("Error (after reconnect attempt): still broken");
+    });
+
+    it("should leave messages that already start with Error:", () => {
+      expect(formatQueryRunnerErrorMessage("Error: Syntax error")).toBe(
+        "Error: Syntax error",
+      );
     });
   });
 

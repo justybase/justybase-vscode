@@ -14,6 +14,7 @@ import {
   createLogger,
   logOutput,
   isConnectionBrokenError,
+  formatQueryRunnerErrorMessage,
   resolveConnectionName as resolveConnectionNameUtil,
 } from "./queryRunnerUtils";
 import {
@@ -217,12 +218,7 @@ export async function runQueryRaw(
     const errObj = error as { message?: string };
     const errMsg = errObj.message || String(error);
     const isCancelled = errMsg.toLowerCase().includes('cancelled') || errMsg.toLowerCase().includes('cancel');
-    let connectionTimeoutRecoveryAttempted = false;
-
-    // A connect timeout can leave a half-open socket in the driver. Reset the
-    // tab connection before making one recovery attempt.
     if (isConnectionTimeoutError(error) && documentUri && keepConnectionOpen) {
-      connectionTimeoutRecoveryAttempted = true;
       logOutput(
         logger,
         "Netezza connection timeout detected. Resetting the tab connection and retrying once...",
@@ -261,69 +257,6 @@ export async function runQueryRaw(
           logger,
           `Netezza connection retry failed: ${(retryError as { message?: string }).message || String(retryError)}`,
         );
-      }
-    }
-
-    // Check if this is a broken connection error and we have a persistent connection
-    if (
-      !connectionTimeoutRecoveryAttempted
-      && isConnectionBrokenError(activeError)
-      && documentUri
-      && keepConnectionOpen
-    ) {
-      logOutput(
-        logger,
-        "Connection was closed by server. Reconnecting and retrying...",
-      );
-      await connManager.closeDocumentPersistentConnection(documentUri);
-
-      try {
-        const result = await executeRawQuery(
-          connManager,
-          resolvedConnectionName,
-          keepConnectionOpen,
-          documentUri,
-          queryToExecute,
-          maxRows,
-          logger,
-          promptValues,
-          timeoutSeconds,
-        );
-
-        const retryDurationMs = Date.now() - queryStartTime;
-
-        await logQueryToHistory(
-          context,
-          connManager,
-          resolvedConnectionName,
-          query,
-          isUserQuery,
-          documentUri,
-          'success',
-          retryDurationMs,
-          result.rowsAffected,
-        );
-
-        return result;
-      } catch (retryError: unknown) {
-        const retryErrObj = retryError as { message?: string };
-        const retryErrorMessage = `Error (after reconnect attempt): ${retryErrObj.message || String(retryError)}`;
-        logOutput(logger, retryErrorMessage);
-
-        await logQueryToHistory(
-          context,
-          connManager,
-          resolvedConnectionName,
-          query,
-          isUserQuery,
-          documentUri,
-          'error',
-          durationMs,
-          undefined,
-          retryErrorMessage,
-        );
-
-        throw new Error(retryErrorMessage, { cause: retryError });
       }
     }
 
@@ -403,7 +336,11 @@ export async function runQueryRaw(
       });
     }
 
-    const errorMessage = `Error: ${errMsg}`;
+    const finalErrMsg =
+      activeError instanceof Error
+        ? activeError.message
+        : String(activeError);
+    const errorMessage = formatQueryRunnerErrorMessage(finalErrMsg);
     logOutput(logger, errorMessage);
 
     await logQueryToHistory(
@@ -419,7 +356,9 @@ export async function runQueryRaw(
       errorMessage,
     );
 
-    throw new Error(errorMessage, { cause: error });
+    throw activeError instanceof Error
+      ? activeError
+      : new Error(finalErrMsg, { cause: activeError });
   }
 }
 
@@ -431,6 +370,66 @@ export async function runQueryRaw(
  * preserves that full expanded payload.
  */
 export async function executeRawQuery(
+  connManager: ConnectionManager,
+  resolvedConnectionName: string,
+  keepConnectionOpen: boolean,
+  documentUri: string | undefined,
+  queryToExecute: string,
+  maxRows: number | undefined,
+  logger: OutputLogger,
+  macroValues: Record<string, string> = {},
+  timeoutSeconds?: number,
+  isRetryAttempt = false,
+): Promise<QueryResult> {
+  try {
+    return await executeRawQueryOnce(
+      connManager,
+      resolvedConnectionName,
+      keepConnectionOpen,
+      documentUri,
+      queryToExecute,
+      maxRows,
+      logger,
+      macroValues,
+      timeoutSeconds,
+    );
+  } catch (error: unknown) {
+    if (
+      !isRetryAttempt
+      && keepConnectionOpen
+      && documentUri
+      && isConnectionBrokenError(error)
+    ) {
+      logOutput(
+        logger,
+        "Connection was closed by server. Reconnecting and retrying...",
+      );
+      await connManager.closeDocumentPersistentConnection(documentUri);
+      try {
+        return await executeRawQuery(
+          connManager,
+          resolvedConnectionName,
+          keepConnectionOpen,
+          documentUri,
+          queryToExecute,
+          maxRows,
+          logger,
+          macroValues,
+          timeoutSeconds,
+          true,
+        );
+      } catch (retryError: unknown) {
+        const retryErrObj = retryError as { message?: string };
+        const retryErrorMessage = `Error (after reconnect attempt): ${retryErrObj.message || String(retryError)}`;
+        logOutput(logger, retryErrorMessage);
+        throw new Error(retryErrorMessage, { cause: retryError });
+      }
+    }
+    throw error;
+  }
+}
+
+async function executeRawQueryOnce(
   connManager: ConnectionManager,
   resolvedConnectionName: string,
   keepConnectionOpen: boolean,

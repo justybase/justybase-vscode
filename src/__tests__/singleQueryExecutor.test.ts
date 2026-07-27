@@ -58,20 +58,24 @@ jest.mock('../core/variableResolver', () => ({
     resolveQueryVariables: jest.fn().mockImplementation((q: string) => Promise.resolve(q)),
 }));
 
-jest.mock('../core/queryRunnerUtils', () => ({
-    normalizeUriKey: jest.fn().mockImplementation((uri: string) => uri),
-    getOutputChannel: jest.fn().mockReturnValue({ appendLine: jest.fn(), show: jest.fn() }),
-    createLogger: jest.fn().mockReturnValue({
-        outputChannel: { appendLine: jest.fn() },
-        logCallback: undefined,
-    }),
-    logOutput: jest.fn(),
-    isConnectionBrokenError: jest.fn().mockReturnValue(false),
-    isBusyConnectionError: jest.fn((error: unknown) => (
-        error instanceof Error && error.message.includes('Connection is already executing a command')
-    )),
-    resolveConnectionName: jest.fn().mockReturnValue('testConn'),
-}));
+jest.mock('../core/queryRunnerUtils', () => {
+    const actual = jest.requireActual('../core/queryRunnerUtils');
+    return {
+        ...actual,
+        normalizeUriKey: jest.fn().mockImplementation((uri: string) => uri),
+        getOutputChannel: jest.fn().mockReturnValue({ appendLine: jest.fn(), show: jest.fn() }),
+        createLogger: jest.fn().mockReturnValue({
+            outputChannel: { appendLine: jest.fn() },
+            logCallback: undefined,
+        }),
+        logOutput: jest.fn(),
+        isConnectionBrokenError: jest.fn().mockReturnValue(false),
+        isBusyConnectionError: jest.fn((error: unknown) => (
+            error instanceof Error && error.message.includes('Connection is already executing a command')
+        )),
+        resolveConnectionName: jest.fn().mockReturnValue('testConn'),
+    };
+});
 
 jest.mock('../core/connectionManager', () => ({
     ConnectionManager: jest.fn(),
@@ -520,6 +524,36 @@ describe('singleQueryExecutor', () => {
                     'BAD SQL', undefined, logger,
                 ),
             ).rejects.toThrow('query failed');
+        });
+
+        it('should reconnect and retry once when persistent connection is closed', async () => {
+            (isConnectionBrokenError as jest.Mock)
+                .mockReturnValueOnce(true)
+                .mockReturnValueOnce(false);
+
+            mockExecuteAndFetch
+                .mockResolvedValueOnce({
+                    results: [],
+                    error: new Error('Connection is closed'),
+                })
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
+                    error: null,
+                });
+
+            const result = await executeRawQuery(
+                mockConnManager,
+                'testConn',
+                true,
+                'file:///test.sql',
+                'SELECT 1',
+                undefined,
+                logger,
+            );
+
+            expect(result.data).toEqual([[1]]);
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
         });
 
         it('should not await connection recovery before throwing executeAndFetch errors', async () => {

@@ -319,7 +319,7 @@ COMPRESS NO;`);
       expect(result.errors.some((e) => e.code === "PAR001")).toBe(true);
     });
 
-    it("should suppress parser errors for DB2-only DDL under best-effort DB2 validation", () => {
+    it("should keep parser errors for DB2-only DDL under strict DB2 validation", () => {
       const validator = new SqlValidator(undefined, db2SqlAuthoring.validation);
       const result = validator.validate(`CREATE TABLE DB2INST1.PRODUCTS (
 PRODUCT_ID INTEGER NOT NULL,
@@ -330,7 +330,7 @@ PRICE DECIMAL(10,2)
 ORGANIZE BY ROW IN USERSPACE1
 COMPRESS NO;`);
 
-      expect(result.errors.some((e) => e.code === "PAR001")).toBe(false);
+      expect(result.errors.some((e) => e.code === "PAR001")).toBe(true);
     });
 
     it("should not report lexer errors for Netezza DB..TABLE aliases", () => {
