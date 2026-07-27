@@ -84,22 +84,46 @@ export function logOutput(logger: OutputLogger, message: string): void {
   }
 }
 
+function collectConnectionErrorMessages(error: unknown, maxDepth = 5): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < maxDepth && current != null; depth++) {
+    if (current instanceof Error) {
+      parts.push(current.message);
+      current = current.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  return parts.join(" ");
+}
+
 /**
  * Check if an error indicates a broken/closed connection that should trigger retry.
  * Detects common network/socket errors that occur when a connection is terminated.
  */
 export function isConnectionBrokenError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const msg = error.message.toLowerCase();
+  const msg = collectConnectionErrorMessages(error).toLowerCase();
   return (
     msg.includes("socket closed") ||
     msg.includes("socket destroyed") ||
     msg.includes("connection reset") ||
+    msg.includes("connection is closed") ||
     msg.includes("connection closed") ||
     msg.includes("econnreset") ||
     msg.includes("epipe") ||
     msg.includes("broken pipe")
   );
+}
+
+/** User-facing query error text; avoids `Error: Error (after reconnect attempt): …`. */
+export function formatQueryRunnerErrorMessage(message: string): string {
+  const trimmed = message.trim();
+  if (/^Error(?:\s*\(|:)/i.test(trimmed)) {
+    return message;
+  }
+  return `Error: ${message}`;
 }
 
 /**

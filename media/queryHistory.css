@@ -4,7 +4,9 @@
     --bg: var(--vscode-editor-background, #0b0d12);
     --s1: var(--vscode-sideBar-background, #11141c);
     --s2: var(--vscode-editorGroupHeader-tabsBackground, #181c27);
-    --s3: var(--vscode-widget-background, #1e2332);
+    --s3: var(--vscode-widget-background, color-mix(in srgb, var(--vscode-editor-background) 90%, var(--vscode-foreground) 10%));
+    --chip-bg: var(--vscode-badge-background, color-mix(in srgb, var(--vscode-editor-background) 88%, var(--vscode-foreground) 12%));
+    --chip-fg: var(--vscode-badge-foreground, var(--vscode-foreground));
     --bd: var(--vscode-panel-border, #232840);
     --bd2: var(--vscode-widget-border, #2d3350);
     --ac: var(--vscode-focusBorder, #3b82f6);
@@ -185,9 +187,9 @@ button.primary:hover {
     font-weight: 600;
     letter-spacing: 0.03em;
     text-transform: uppercase;
-    color: var(--tx2);
-    background: var(--s3);
-    border: 1px solid var(--bd2);
+    color: var(--chip-fg);
+    background: var(--chip-bg);
+    border: 1px solid var(--vscode-panel-border, var(--bd2));
     border-radius: 2px;
     padding: 1px 5px;
     max-width: 120px;
@@ -296,7 +298,7 @@ button.primary:hover {
 }
 
 .action-btn:hover {
-    background: var(--s3);
+    background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground, var(--s3)));
     color: var(--tx);
     border-color: var(--bd2);
 }
@@ -330,9 +332,9 @@ button.primary:hover {
 
 .tag-chip {
     display: inline-block;
-    border: 1px solid var(--ac);
+    border: 1px solid color-mix(in srgb, var(--ac) 55%, var(--vscode-panel-border, var(--bd2)));
     color: var(--ac);
-    background: var(--ac-lo);
+    background: color-mix(in srgb, var(--ac) 14%, var(--vscode-editor-background));
     border-radius: 2px;
     padding: 0 5px;
     font-size: 9px;

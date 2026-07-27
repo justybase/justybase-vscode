@@ -6,6 +6,9 @@
     --s2: var(--vscode-editorGroupHeader-tabsBackground, #181c27);
     --bd: var(--vscode-panel-border, #232840);
     --bd2: var(--vscode-widget-border, #2d3350);
+    --ac: var(--vscode-focusBorder, #3b82f6);
+    --chip-bg: var(--vscode-badge-background, color-mix(in srgb, var(--vscode-editor-background) 88%, var(--vscode-foreground) 12%));
+    --chip-fg: var(--vscode-badge-foreground, var(--vscode-foreground));
     --tx: var(--vscode-editor-foreground, #d1d9f0);
     --tx2: var(--vscode-descriptionForeground, #6b7599);
     --gr: var(--vscode-testing-iconPassed, #22c55e);
@@ -468,8 +471,9 @@ button.favorite {
 }
 
 .tag {
-    border: 1px solid var(--bd2);
-    color: var(--tx2);
+    border: 1px solid var(--vscode-panel-border, var(--bd2));
+    color: var(--chip-fg);
+    background: var(--chip-bg);
     padding: 1px 6px;
     border-radius: 2px;
     font-size: 10px;
