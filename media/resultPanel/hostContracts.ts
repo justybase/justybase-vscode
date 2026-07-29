@@ -40,6 +40,17 @@ export type ResultPanelWebviewToHostMessage =
     | { command: 'switchResultSet'; sourceUri: string; resultSetIndex: number }
     | { command: 'pinResult'; sourceUri: string; resultSetIndex: number }
     | { command: 'selectionStats'; stats: SelectionStatsPayload }
+    | {
+        command: 'reportUxPerf';
+        event: {
+            op: string;
+            phase: string;
+            traceId?: string;
+            durationMs?: number;
+            doc?: { uri?: string; chars?: number; lines?: number; ver?: number };
+            meta?: Record<string, string | number | boolean | null>;
+        };
+    }
     | { command: string; [key: string]: unknown };
 
 /** Host → webview messages (cast at boundary). */

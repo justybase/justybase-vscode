@@ -40,6 +40,7 @@ import {
 } from '../core/resultDataProvider/diskBackedSettings';
 import { ResultFormattingSettingsStore } from '../results/resultFormattingSettingsStore';
 import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf/performanceEvents';
+import { getUxPerfSession } from '../services/perf/uxPerfSession';
 import { ResultPanelPerformanceStore } from '../services/perf/resultPanelPerformanceStore';
 import { affectsExtensionConfiguration } from '../compatibility/configuration';
 import { getConnectionForDocument } from '../core/queryRunnerHelpers';
@@ -105,6 +106,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     private _logSyncRetryAttempts = new Map<string, number>();
     /** Last row count posted to webview per streaming result set (pre-insert throttling). */
     private _streamingRowCountLastReported = new Map<string, number>();
+    /** Active UX source-switch trace propagated into setActiveSource / hydrate. */
+    private _pendingUxTraceId: string | undefined;
     private readonly _context?: vscode.ExtensionContext;
     private readonly _connectionManager?: ConnectionManager;
 
@@ -319,8 +322,32 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         await this._performanceStore?.clear();
     }
 
-    public setActiveSource(sourceUri: string) {
-        if (this._stateManager.setActiveSource(sourceUri)) {
+    public setActiveSource(sourceUri: string, uxTraceId?: string) {
+        if (uxTraceId) {
+            this._pendingUxTraceId = uxTraceId;
+        }
+        if (!this._stateManager.setActiveSource(sourceUri)) {
+            if (uxTraceId && getUxPerfSession().isActive()) {
+                getUxPerfSession().emit({
+                    op: 'result_panel.source_switch',
+                    phase: 'noop_same_source',
+                    traceId: uxTraceId,
+                    durationMs: 0,
+                    meta: { sourceUri },
+                });
+            }
+            return;
+        }
+        {
+            const ux = getUxPerfSession();
+            if (ux.isActive() && this._pendingUxTraceId) {
+                ux.emit({
+                    op: 'result_panel.source_switch',
+                    phase: 'host_set_active',
+                    traceId: this._pendingUxTraceId,
+                    meta: { sourceUri },
+                });
+            }
             // Send lightweight setActiveSource message first for immediate client-side switch,
             // then follow up with a full hydrate containing data.
             this._postMessageToWebview({
@@ -331,10 +358,23 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 sourcesJson: JSON.stringify(Array.from(this._stateManager.resultsMap.keys())),
                 pinnedSourcesJson: JSON.stringify(Array.from(this._stateManager.pinnedSources)),
                 diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled(),
-                formatSettings: this._formattingStore?.getPayloadForSource(sourceUri)
+                formatSettings: this._formattingStore?.getPayloadForSource(sourceUri),
+                uxTraceId: this._pendingUxTraceId,
             });
+            if (ux.isActive() && this._pendingUxTraceId) {
+                ux.emit({
+                    op: 'result_panel.source_switch',
+                    phase: 'lightweight_posted',
+                    traceId: this._pendingUxTraceId,
+                    meta: { sourceUri },
+                });
+            }
             this._updateWebview();
         }
+    }
+
+    public notifyUxPerfSession(active: boolean): void {
+        this._postMessageToWebview({ command: 'uxPerfSession', active });
     }
 
     private _isResultSyncSqlDocument(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
@@ -1504,8 +1544,21 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 })));
                 this._postMessageToWebview({
                     command: 'hydrate',
-                    data: viewData
+                    data: viewData,
+                    uxTraceId: this._pendingUxTraceId,
                 });
+                if (getUxPerfSession().isActive() && this._pendingUxTraceId) {
+                    getUxPerfSession().emit({
+                        op: 'result_panel.source_switch',
+                        phase: 'hydrate_posted',
+                        traceId: this._pendingUxTraceId,
+                        meta: {
+                            reason,
+                            payloadBytes: metrics.payloadBytes,
+                            resultSetCount: metrics.resultSetCount,
+                        },
+                    });
+                }
             } else {
                 this._view.webview.html = this._getHtmlForWebview();
             }
@@ -1550,6 +1603,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             formatSettings: this._formattingStore
                 ? this._formattingStore.getPayloadForSource(sourceUri)
                 : undefined,
+            uxTraceId: this._pendingUxTraceId,
         });
     }
 

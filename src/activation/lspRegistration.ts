@@ -23,6 +23,7 @@ import {
   NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION,
   NETEZZA_GET_METADATA_REQUEST,
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
+  NETEZZA_UX_PERF_NOTIFICATION,
   type DocumentContextChangedParams,
   type MetadataCacheInvalidatedParams,
   type MetadataColumnItem,
@@ -31,12 +32,18 @@ import {
   type MetadataRequestParams,
   type MetadataResponse,
   type MetadataTableInfoResponse,
+  type UxPerfNotificationParams,
 } from "../lsp/protocol";
+import { getUxPerfSession } from "../services/perf/uxPerfSession";
 
 interface LanguageClientLike {
   onRequest(
     method: string,
     handler: (params: MetadataRequestParams) => Promise<MetadataResponse>,
+  ): void;
+  onNotification(
+    method: string,
+    handler: (params: UxPerfNotificationParams) => void,
   ): void;
   sendNotification(method: string, params?: unknown): void;
   start(): Promise<void>;
@@ -158,6 +165,13 @@ export async function startSqlLanguageClient(
           metadataCache,
           connectionManager,
         );
+      },
+    );
+
+    client.onNotification(
+      NETEZZA_UX_PERF_NOTIFICATION,
+      (params: UxPerfNotificationParams) => {
+        getUxPerfSession().emit(params);
       },
     );
 

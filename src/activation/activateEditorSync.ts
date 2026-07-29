@@ -5,6 +5,7 @@ import type { ConnectionManager } from '../core/connectionManager';
 import type { ResultPanelView } from '../views/resultPanelView';
 import type { MetadataPrefetchCoordinator } from './MetadataPrefetchCoordinator';
 import { setContextIfChanged } from '../services/contextKeyService';
+import { getUxPerfSession } from '../services/perf/uxPerfSession';
 
 function isResultSyncSqlDocument(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
     if (!doc?.uri || typeof doc.languageId !== 'string') {
@@ -41,14 +42,37 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         metadataPrefetchCoordinator,
     } = params;
 
+    let lastSyncedSourceUri: string | undefined;
+
     const clearPrimedResultCopyContext = (): void => {
         setContextIfChanged('netezza.resultsCopyPrimed', false);
     };
 
-    const syncResultPanelSourceWithEditor = (editor: vscode.TextEditor | undefined) => {
-        if (isResultSyncSqlDocument(editor?.document)) {
-            resultPanelProvider.setActiveSource(editor.document.uri.toString());
+    const syncResultPanelSourceWithEditor = (
+        editor: vscode.TextEditor | undefined,
+        options?: { fromEditorSwitch?: boolean },
+    ) => {
+        if (!isResultSyncSqlDocument(editor?.document)) {
+            return;
         }
+
+        const sourceUri = editor.document.uri.toString();
+        const uriChanged = sourceUri !== lastSyncedSourceUri;
+        lastSyncedSourceUri = sourceUri;
+
+        let uxTraceId: string | undefined;
+        if (uriChanged && options?.fromEditorSwitch && getUxPerfSession().isActive()) {
+            uxTraceId = getUxPerfSession().startTrace('result_panel.source_switch');
+            getUxPerfSession().emit({
+                op: 'result_panel.source_switch',
+                phase: 'editor_focus',
+                traceId: uxTraceId,
+                doc: getUxPerfSession().docContextFromDocument(editor.document),
+                meta: { sourceUri },
+            });
+        }
+
+        resultPanelProvider.setActiveSource(sourceUri, uxTraceId);
     };
 
     const refreshConnectionAccentForDocument = (document: vscode.TextDocument | undefined) => {
@@ -69,13 +93,14 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         vscode.window.onDidChangeActiveTextEditor(editor => {
             clearPrimedResultCopy();
             clearResultPanelFocusContexts();
-            syncResultPanelSourceWithEditor(editor);
+            syncResultPanelSourceWithEditor(editor, { fromEditorSwitch: true });
             refreshConnectionAccentForDocument(editor?.document);
         }),
         vscode.window.onDidChangeTextEditorSelection(event => {
             if (event.textEditor === vscode.window.activeTextEditor) {
                 clearPrimedResultCopy();
                 clearResultPanelFocusContexts();
+                // Selection changes call setActiveSource but must not start a new UX trace.
                 syncResultPanelSourceWithEditor(event.textEditor);
             }
         }),
@@ -86,6 +111,9 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         vscode.workspace.onDidCloseTextDocument(doc => {
             if (isResultSyncSqlDocument(doc)) {
                 const sourceUri = doc.uri.toString();
+                if (lastSyncedSourceUri === sourceUri) {
+                    lastSyncedSourceUri = undefined;
+                }
                 resultPanelProvider.closeSource(sourceUri);
                 connectionManager.closeDocumentPersistentConnection(sourceUri).catch(e => {
                     logWithFallback('error', 'Failed to close persistent connection for document:', e);
@@ -96,6 +124,6 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
 
     clearPrimedResultCopy();
     clearResultPanelFocusContexts();
-    syncResultPanelSourceWithEditor(vscode.window.activeTextEditor);
+    syncResultPanelSourceWithEditor(vscode.window.activeTextEditor, { fromEditorSwitch: true });
     refreshConnectionAccentForDocument(vscode.window.activeTextEditor?.document);
 }

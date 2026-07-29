@@ -9,9 +9,11 @@ jest.mock('vscode');
 const mockStart = jest.fn().mockResolvedValue(undefined);
 const mockStop = jest.fn().mockResolvedValue(undefined);
 const mockOnRequest = jest.fn();
+const mockOnNotification = jest.fn();
 const mockSendNotification = jest.fn();
 const mockLanguageClient = jest.fn().mockImplementation((_id, _name, _serverOptions, clientOptions) => ({
     onRequest: mockOnRequest,
+    onNotification: mockOnNotification,
     sendNotification: mockSendNotification,
     start: mockStart,
     stop: mockStop,

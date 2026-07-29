@@ -31,6 +31,7 @@ import {
 } from "../compatibility/configuration";
 import { isSqlAuthoringLanguageId } from "../utils/sqlLanguage";
 import { Logger } from "../utils/logger";
+import { getUxPerfSession } from "../services/perf/uxPerfSession";
 
 type LinterMode = "advanced";
 
@@ -273,6 +274,24 @@ export class SqlLinterProvider {
     cancelled: boolean,
   ): void {
     const durationMs = performance.now() - startedAt;
+    const largeScript = this.isLargeScript(document);
+    const skippedBecauseLsp = isSqlLanguageClientRunning() && largeScript;
+    const ux = getUxPerfSession();
+    if (ux.isActive()) {
+      ux.emit({
+        op: "editor.ext_lint",
+        phase: "end",
+        durationMs,
+        doc: ux.docContextFromDocument(document),
+        meta: {
+          cacheHit,
+          cancelled,
+          largeScript,
+          skippedBecauseLsp,
+          lspRunning: isSqlLanguageClientRunning(),
+        },
+      });
+    }
     if (durationMs < 100) return;
     const memory = process.memoryUsage();
     Logger.tryGetInstance()?.warn(

@@ -231,6 +231,18 @@
         "icon": "$(trash)"
       },
       {
+        "command": "netezza.uxPerf.startSession",
+        "title": "JustyBase: Start UX Perf Session"
+      },
+      {
+        "command": "netezza.uxPerf.stopSession",
+        "title": "JustyBase: Stop UX Perf Session"
+      },
+      {
+        "command": "netezza.uxPerf.openLog",
+        "title": "JustyBase: Open UX Perf Log"
+      },
+      {
         "command": "netezza.copySelectAll",
         "title": "Select Top 1000"
       },
@@ -1718,6 +1730,18 @@
           "when": "true"
         },
         {
+          "command": "netezza.uxPerf.startSession",
+          "when": "true"
+        },
+        {
+          "command": "netezza.uxPerf.stopSession",
+          "when": "true"
+        },
+        {
+          "command": "netezza.uxPerf.openLog",
+          "when": "true"
+        },
+        {
           "command": "netezza.groomTable",
           "when": "false"
         },
@@ -3068,6 +3092,33 @@
               }
             },
             {
+              "scope": [
+                "keyword.control.sql",
+                "keyword.other.sql",
+                "keyword.other.DML.sql",
+                "keyword.other.DML.II.sql",
+                "keyword.other.DDL.sql",
+                "keyword.other.DDL.create.II.sql",
+                "keyword.other.LUW.sql",
+                "keyword.other.create.sql",
+                "keyword.other.order.sql",
+                "keyword.other.table.sql",
+                "keyword.other.alias.sql",
+                "keyword.other.cascade.sql",
+                "keyword.other.authorization.sql",
+                "keyword.other.data-integrity.sql",
+                "keyword.other.object-comments.sql",
+                "keyword.operator.logical.sql",
+                "storage.modifier.sql",
+                "keyword.other.netezza",
+                "keyword.control.netezza",
+                "keyword.other.ddl.netezza"
+              ],
+              "settings": {
+                "foreground": "#0000FF"
+              }
+            },
+            {
               "scope": "support.function.macro.sas.sql",
               "settings": {
                 "foreground": "#795E26"
@@ -3174,6 +3225,33 @@
               }
             },
             {
+              "scope": [
+                "keyword.control.sql",
+                "keyword.other.sql",
+                "keyword.other.DML.sql",
+                "keyword.other.DML.II.sql",
+                "keyword.other.DDL.sql",
+                "keyword.other.DDL.create.II.sql",
+                "keyword.other.LUW.sql",
+                "keyword.other.create.sql",
+                "keyword.other.order.sql",
+                "keyword.other.table.sql",
+                "keyword.other.alias.sql",
+                "keyword.other.cascade.sql",
+                "keyword.other.authorization.sql",
+                "keyword.other.data-integrity.sql",
+                "keyword.other.object-comments.sql",
+                "keyword.operator.logical.sql",
+                "storage.modifier.sql",
+                "keyword.other.netezza",
+                "keyword.control.netezza",
+                "keyword.other.ddl.netezza"
+              ],
+              "settings": {
+                "foreground": "#569CD6"
+              }
+            },
+            {
               "scope": "support.function.macro.sas.sql",
               "settings": {
                 "foreground": "#DCDCAA"
@@ -3270,6 +3348,33 @@
             "scope": "meta.ddl.table-target.netezza constant.other.table-name.sql",
             "settings": {
               "foreground": "#4EC9B0"
+            }
+          },
+          {
+            "scope": [
+              "keyword.control.sql",
+              "keyword.other.sql",
+              "keyword.other.DML.sql",
+              "keyword.other.DML.II.sql",
+              "keyword.other.DDL.sql",
+              "keyword.other.DDL.create.II.sql",
+              "keyword.other.LUW.sql",
+              "keyword.other.create.sql",
+              "keyword.other.order.sql",
+              "keyword.other.table.sql",
+              "keyword.other.alias.sql",
+              "keyword.other.cascade.sql",
+              "keyword.other.authorization.sql",
+              "keyword.other.data-integrity.sql",
+              "keyword.other.object-comments.sql",
+              "keyword.operator.logical.sql",
+              "storage.modifier.sql",
+              "keyword.other.netezza",
+              "keyword.control.netezza",
+              "keyword.other.ddl.netezza"
+            ],
+            "settings": {
+              "foreground": "#569CD6"
             }
           }
         ]

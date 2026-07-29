@@ -17,12 +17,18 @@ import type { MetadataCache } from "../metadataCache";
 import type { ConnectionManager } from "../core/connectionManager";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import { resolveSqlParsingRuntime } from "../sqlParser/parsingRuntime";
-import { isOffsetInSqlComment } from "../sql/sqlSourceScan";
-import { LARGE_SCRIPT_CHAR_THRESHOLD } from "../sqlParser/validationConfig";
+import { buildSqlSourceScanIndex } from "../sql/sqlSourceScan";
+import {
+  isLargeScriptDocument,
+  LARGE_SCRIPT_CHAR_THRESHOLD,
+} from "../sqlParser/validationConfig";
 import { simpleHash } from "./parsers/hashUtils";
 import { tryGetLogger } from "../utils/logger";
+import { getUxPerfSession } from "../services/perf/uxPerfSession";
 
 const SEMANTIC_TOKEN_DEBOUNCE_MS = 150;
+/** Longer coalesce window while typing in multi-thousand-line CTE scripts. */
+const SEMANTIC_TOKEN_LARGE_LINE_DEBOUNCE_MS = 800;
 const SLOW_SEMANTIC_TOKEN_MS = 100;
 
 interface SemanticTokenCacheEntry {
@@ -30,12 +36,17 @@ interface SemanticTokenCacheEntry {
   tokens: vscode.SemanticTokens;
 }
 
-interface PendingSemanticRequest {
+/** Name-based roles from the last full parse — reused by progressive lex-only. */
+interface SemanticRoleNameCache {
+  aliasNames: Set<string>;
+  cteNames: Set<string>;
+  columnNames: Set<string>;
+}
+
+interface PendingSemanticUpgrade {
   identity: string;
   startedAt: number;
   timer: ReturnType<typeof setTimeout>;
-  promise: Promise<vscode.SemanticTokens>;
-  resolve: (tokens: vscode.SemanticTokens) => void;
 }
 
 const LEGEND = new vscode.SemanticTokensLegend(
@@ -231,7 +242,8 @@ export class NetezzaSemanticTokensProvider
   private readonly _onDidChangeSemanticTokens = new vscode.EventEmitter<void>();
   readonly onDidChangeSemanticTokens = this._onDidChangeSemanticTokens.event;
   private readonly tokenCache = new Map<string, SemanticTokenCacheEntry>();
-  private readonly pendingRequests = new Map<string, PendingSemanticRequest>();
+  private readonly roleNameCache = new Map<string, SemanticRoleNameCache>();
+  private readonly pendingUpgrades = new Map<string, PendingSemanticUpgrade>();
   private readonly connectionEpochs = new Map<string, number>();
   private globalMetadataEpoch = 0;
 
@@ -244,6 +256,20 @@ export class NetezzaSemanticTokensProvider
       : SEMANTIC_TOKEN_DEBOUNCE_MS,
   ) {}
 
+  private resolveDebounceMs(document: vscode.TextDocument, textLength: number): number {
+    if (this.debounceMs <= 0) {
+      return 0;
+    }
+    if (isLargeScriptDocument(document.lineCount, textLength)) {
+      return Math.max(this.debounceMs, SEMANTIC_TOKEN_LARGE_LINE_DEBOUNCE_MS);
+    }
+    return this.debounceMs;
+  }
+
+  private getStaleTokens(documentUri: string): vscode.SemanticTokens {
+    return this.tokenCache.get(documentUri)?.tokens ?? this.emptyTokens();
+  }
+
   getLegend(): vscode.SemanticTokensLegend {
     return LEGEND;
   }
@@ -255,26 +281,30 @@ export class NetezzaSemanticTokensProvider
     } else {
       this.globalMetadataEpoch += 1;
       this.tokenCache.clear();
+      this.roleNameCache.clear();
     }
     this._onDidChangeSemanticTokens.fire();
   }
 
   invalidateDocument(documentUri: string): void {
-    this.cancelPending(documentUri, "document-context-changed");
+    this.cancelPendingUpgrade(documentUri, "document-context-changed");
     this.tokenCache.delete(documentUri);
+    this.roleNameCache.delete(documentUri);
     this._onDidChangeSemanticTokens.fire();
   }
 
   releaseDocument(documentUri: string): void {
-    this.cancelPending(documentUri, "document-closed");
+    this.cancelPendingUpgrade(documentUri, "document-closed");
     this.tokenCache.delete(documentUri);
+    this.roleNameCache.delete(documentUri);
   }
 
   dispose(): void {
-    for (const documentUri of this.pendingRequests.keys()) {
-      this.cancelPending(documentUri, "provider-disposed");
+    for (const documentUri of this.pendingUpgrades.keys()) {
+      this.cancelPendingUpgrade(documentUri, "provider-disposed");
     }
     this.tokenCache.clear();
+    this.roleNameCache.clear();
     this._onDidChangeSemanticTokens.dispose();
   }
 
@@ -294,15 +324,29 @@ export class NetezzaSemanticTokensProvider
     );
 
     if (token.isCancellationRequested) {
-      return this.emptyTokens();
+      return this.getStaleTokens(documentUri);
     }
 
     const cached = this.tokenCache.get(documentUri);
     if (cached?.identity === identity) {
+      this.emitUxSemanticTokens(
+        document,
+        text.length,
+        0,
+        0,
+        true,
+        false,
+        text.length > LARGE_SCRIPT_CHAR_THRESHOLD,
+        "full",
+      );
       return cached.tokens;
     }
 
-    if (this.debounceMs <= 0) {
+    const debounceMs = this.resolveDebounceMs(document, text.length);
+    const canParse = text.length <= LARGE_SCRIPT_CHAR_THRESHOLD;
+
+    // Tests / zero-debounce, or scripts too large for CST: final tokens immediately.
+    if (debounceMs <= 0 || !canParse) {
       return this.computeTokens(
         document,
         text,
@@ -310,45 +354,68 @@ export class NetezzaSemanticTokensProvider
         identity,
         connectionName,
         false,
+        {
+          useParser: canParse,
+          quality: canParse ? "full" : "lex",
+          cacheResult: true,
+        },
       );
     }
 
-    const pending = this.pendingRequests.get(documentUri);
-    if (pending) {
-      this.cancelPending(documentUri, "superseded");
+    // Progressive path: sync lex-only (correct line positions after Enter),
+    // then upgrade to full CST roles after debounce.
+    this.cancelPendingUpgrade(documentUri, "superseded");
+
+    const lexTokens = this.computeTokens(
+      document,
+      text,
+      token,
+      identity,
+      connectionName,
+      false,
+      { useParser: false, quality: "lex", cacheResult: false },
+    );
+
+    if (token.isCancellationRequested) {
+      return lexTokens;
     }
 
-    let resolveRequest!: (tokens: vscode.SemanticTokens) => void;
-    const promise = new Promise<vscode.SemanticTokens>((resolve) => {
-      resolveRequest = resolve;
-    });
     const startedAt = performance.now();
     const timer = setTimeout(() => {
-      const current = this.pendingRequests.get(documentUri);
-      if (current?.identity !== identity || token.isCancellationRequested) {
-        this.cancelPending(documentUri, "cancelled-before-tokenize");
+      const current = this.pendingUpgrades.get(documentUri);
+      if (!current || current.identity !== identity) {
         return;
       }
-      this.pendingRequests.delete(documentUri);
-      resolveRequest(
-        this.computeTokens(
-          document,
-          text,
-          token,
-          identity,
-          connectionName,
-          false,
-        ),
+      this.pendingUpgrades.delete(documentUri);
+      if (token.isCancellationRequested) {
+        return;
+      }
+      this.computeTokens(
+        document,
+        text,
+        token,
+        identity,
+        connectionName,
+        false,
+        {
+          useParser: true,
+          quality: "full",
+          cacheResult: true,
+        },
+        performance.now(),
+        current.startedAt,
       );
-    }, this.debounceMs);
-    this.pendingRequests.set(documentUri, {
+      // Ask VS Code to re-query so it picks up cached full tokens.
+      this._onDidChangeSemanticTokens.fire();
+    }, debounceMs);
+
+    this.pendingUpgrades.set(documentUri, {
       identity,
       startedAt,
       timer,
-      promise,
-      resolve: resolveRequest,
     });
-    return promise;
+
+    return lexTokens;
   }
 
   private computeTokens(
@@ -358,21 +425,108 @@ export class NetezzaSemanticTokensProvider
     identity: string,
     connectionName: string | undefined,
     cacheHit: boolean,
+    options: {
+      useParser: boolean;
+      quality: "lex" | "full";
+      cacheResult: boolean;
+    },
     startedAt = performance.now(),
+    wallStartedAt = startedAt,
   ): vscode.SemanticTokens {
     const documentUri = document.uri.toString();
+    const parseSkippedLarge =
+      text.length > LARGE_SCRIPT_CHAR_THRESHOLD || !options.useParser;
 
     try {
-      const tokens = this.tokenize(text, document, token);
+      const computeStartedAt = performance.now();
+      const tokens = this.tokenize(text, document, token, {
+        useParser: options.useParser,
+      });
+      const computeMs = performance.now() - computeStartedAt;
       const cancelled = token.isCancellationRequested;
-      if (!cancelled && this.buildTokenIdentity(document.version, text, connectionName) === identity) {
+      if (
+        !cancelled &&
+        options.cacheResult &&
+        this.buildTokenIdentity(document.version, text, connectionName) === identity
+      ) {
         this.tokenCache.set(documentUri, { identity, tokens });
       }
       this.logSlowPath(document, text.length, startedAt, cacheHit, cancelled);
-      return cancelled ? this.emptyTokens() : tokens;
+      this.emitUxSemanticTokens(
+        document,
+        text.length,
+        computeMs,
+        performance.now() - wallStartedAt,
+        cacheHit,
+        cancelled,
+        parseSkippedLarge,
+        options.quality,
+      );
+      return cancelled ? this.getStaleTokens(documentUri) : tokens;
     } catch (error: unknown) {
       this.logSlowPath(document, text.length, startedAt, cacheHit, true, error);
-      return this.emptyTokens();
+      this.emitUxSemanticTokens(
+        document,
+        text.length,
+        performance.now() - startedAt,
+        performance.now() - wallStartedAt,
+        cacheHit,
+        true,
+        parseSkippedLarge,
+        options.quality,
+      );
+      return this.getStaleTokens(documentUri);
+    }
+  }
+
+  private emitUxSemanticTokens(
+    document: vscode.TextDocument,
+    length: number,
+    computeMs: number,
+    wallMs: number,
+    cacheHit: boolean,
+    cancelled: boolean,
+    parseSkippedLarge: boolean,
+    quality: "lex" | "full",
+  ): void {
+    const ux = getUxPerfSession();
+    if (!ux.isActive()) {
+      return;
+    }
+    const documentUri = document.uri.toString();
+    // Only attribute change→tokens when a recent keystroke exists (skips idle /
+    // tab-switch / cache-refresh noise that previously produced multi-minute "slow").
+    const changeToTokensMs = ux.getRecentDocChangeMs(documentUri);
+    ux.emit({
+      op: "editor.semantic_tokens",
+      phase: "end",
+      durationMs: computeMs,
+      doc: ux.docContextFromDocument(document),
+      meta: {
+        debounceMs: this.resolveDebounceMs(document, length),
+        computeMs: Math.round(computeMs * 10) / 10,
+        wallMs: Math.round(wallMs * 10) / 10,
+        cacheHit,
+        cancelled,
+        parseSkippedLarge,
+        quality,
+        length,
+        version: document.version,
+      },
+    });
+    if (changeToTokensMs !== undefined && !cancelled && !cacheHit) {
+      ux.emit({
+        op: "editor.change_to_tokens",
+        phase: "end",
+        durationMs: changeToTokensMs,
+        doc: ux.docContextFromDocument(document),
+        meta: {
+          computeMs: Math.round(computeMs * 10) / 10,
+          wallMs: Math.round(wallMs * 10) / 10,
+          cacheHit,
+          quality,
+        },
+      });
     }
   }
 
@@ -386,16 +540,15 @@ export class NetezzaSemanticTokensProvider
     return `${documentVersion}|${simpleHash(text)}|${this.globalMetadataEpoch}|${connectionKey}|${connectionEpoch}`;
   }
 
-  private cancelPending(documentUri: string, reason: string): void {
-    const pending = this.pendingRequests.get(documentUri);
+  private cancelPendingUpgrade(documentUri: string, reason: string): void {
+    const pending = this.pendingUpgrades.get(documentUri);
     if (!pending) return;
     clearTimeout(pending.timer);
-    this.pendingRequests.delete(documentUri);
-    pending.resolve(this.emptyTokens());
+    this.pendingUpgrades.delete(documentUri);
     const durationMs = performance.now() - pending.startedAt;
     if (durationMs >= SLOW_SEMANTIC_TOKEN_MS) {
       tryGetLogger()?.warn(
-        `[SemanticTokens] slow cancelled request uri=${documentUri} durationMs=${durationMs.toFixed(1)} reason=${reason}`,
+        `[SemanticTokens] slow cancelled upgrade uri=${documentUri} durationMs=${durationMs.toFixed(1)} reason=${reason}`,
       );
     }
   }
@@ -497,10 +650,13 @@ export class NetezzaSemanticTokensProvider
     text: string,
     document: vscode.TextDocument,
     cancellationToken: vscode.CancellationToken,
+    options?: { useParser?: boolean },
   ): vscode.SemanticTokens {
-    if (cancellationToken.isCancellationRequested) return this.emptyTokens();
-
     const documentUri = document.uri.toString();
+    if (cancellationToken.isCancellationRequested) {
+      return this.getStaleTokens(documentUri);
+    }
+
     const databaseKind = this.connectionManager?.getExecutionDatabaseKind(
       documentUri,
     );
@@ -514,8 +670,11 @@ export class NetezzaSemanticTokensProvider
       ? authoring.validation.systemColumns
       : NETEZZA_SYSTEM_COLUMNS;
 
-    if (cancellationToken.isCancellationRequested) return this.emptyTokens();
-    const useParser = text.length <= LARGE_SCRIPT_CHAR_THRESHOLD;
+    if (cancellationToken.isCancellationRequested) {
+      return this.getStaleTokens(documentUri);
+    }
+    const useParser =
+      options?.useParser ?? text.length <= LARGE_SCRIPT_CHAR_THRESHOLD;
     const scope = useParser
       ? this.resolveDocumentScope(document, text, databaseKind)
       : undefined;
@@ -523,7 +682,25 @@ export class NetezzaSemanticTokensProvider
       ? collectIdentifierOccurrencesFromScope(scope)
       : new Map<number, { role: IdentifierSemanticRole }>();
     const aliasNames = new Set<string>();
+    const cteNames = new Set<string>();
     let columnNames = new Set<string>();
+
+    // Progressive lex-only: reuse last full-parse name sets so known aliases
+    // (e.g. TN) keep green/italic while typing, instead of flashing to default.
+    if (!scope) {
+      const prior = this.roleNameCache.get(documentUri);
+      if (prior) {
+        for (const name of prior.aliasNames) {
+          aliasNames.add(name);
+        }
+        for (const name of prior.cteNames) {
+          cteNames.add(name);
+        }
+        for (const name of prior.columnNames) {
+          columnNames.add(name);
+        }
+      }
+    }
 
     if (scope) {
       try {
@@ -537,6 +714,12 @@ export class NetezzaSemanticTokensProvider
             aliasNames.add(key);
           }
         });
+
+        for (const definition of scope.localDefinitions) {
+          if (definition.type.toUpperCase() === "CTE" && definition.name) {
+            cteNames.add(definition.name.toUpperCase());
+          }
+        }
 
         if (
           this.metadataCache &&
@@ -559,19 +742,28 @@ export class NetezzaSemanticTokensProvider
             );
           }
         }
+
+        this.roleNameCache.set(documentUri, {
+          aliasNames: new Set(aliasNames),
+          cteNames: new Set(cteNames),
+          columnNames: new Set(columnNames),
+        });
       } catch {
         // Metadata lookup failed — proceed with CST map and lexer fallback only
       }
     }
 
     let previousTokenWasAlias = false;
+    // Build comment/string index once — do not call isOffsetInSqlComment per token
+    // (even with module cache, concurrent scans can invalidate mid-loop).
+    const scanIndex = buildSqlSourceScanIndex(text);
 
     for (let tokenIndex = 0; tokenIndex < lexResult.tokens.length; tokenIndex++) {
       if (
         tokenIndex % 256 === 0 &&
         cancellationToken.isCancellationRequested
       ) {
-        return this.emptyTokens();
+        return this.getStaleTokens(documentUri);
       }
       const token = lexResult.tokens[tokenIndex];
       const tokenTypeName = token.tokenType.name;
@@ -581,7 +773,7 @@ export class NetezzaSemanticTokensProvider
         continue;
       }
 
-      if (isOffsetInSqlComment(text, startOffset)) {
+      if (scanIndex.isInComment(startOffset)) {
         continue;
       }
 
@@ -625,13 +817,24 @@ export class NetezzaSemanticTokensProvider
           if (roleOccurrence.role === "alias") {
             modifierMask = ModifierMask.italic;
           }
+        } else if (aliasNames.has(word)) {
+          typeIdx = TypeIdx.alias;
+          modifierMask = ModifierMask.italic;
+        } else if (cteNames.has(word)) {
+          typeIdx = TypeIdx.table;
         } else if (columnNames.has(word)) {
           typeIdx = TypeIdx.column;
         } else if (previousTokenWasAlias) {
           typeIdx = TypeIdx.column;
         }
 
-        previousTokenWasAlias = aliasNames.has(word);
+        previousTokenWasAlias = aliasNames.has(word) || cteNames.has(word);
+      } else if (/^[A-Za-z_]/.test(image)) {
+        // Lexer reserved-word tokens (Select, From, With, As, ...) are not all
+        // listed in KEYWORD_TOKEN_NAMES — still color them as keywords so the
+        // progressive lex-only pass paints correct lines after Enter.
+        typeIdx = TypeIdx.keyword;
+        previousTokenWasAlias = false;
       } else if (tokenTypeName !== "Dot") {
         previousTokenWasAlias = false;
       }
@@ -640,8 +843,11 @@ export class NetezzaSemanticTokensProvider
         continue;
       }
 
-      const pos = document.positionAt(startOffset);
-      builder.push(pos.line, pos.character, length, typeIdx, modifierMask);
+      // Chevrotain lines/columns are 1-based; SemanticTokensBuilder is 0-based.
+      // Avoid document.positionAt in the hot loop (can be O(n) per call).
+      const line = Math.max(0, (token.startLine ?? 1) - 1);
+      const character = Math.max(0, (token.startColumn ?? 1) - 1);
+      builder.push(line, character, length, typeIdx, modifierMask);
     }
 
     return builder.build();

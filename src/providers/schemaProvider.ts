@@ -25,6 +25,7 @@ import { getDialectIconUri } from '../utils/dialectIcons';
 import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
 import { logWithFallback } from '../utils/logger';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
+import { isLargeScriptDocument } from '../sqlParser/validationConfig';
 import {
     buildSchemaFilterRegex,
     columnVisibleInSchemaFilter,
@@ -381,6 +382,16 @@ export class SchemaProvider
                     activeEditor?.document === event.document &&
                     isSqlAuthoringLanguageId(activeEditor.document.languageId)
                 ) {
+                    // Avoid full re-parse of CTE trees on every keystroke in large scripts.
+                    // Snapshot is refreshed on editor switch / explicit tree refresh.
+                    if (
+                        isLargeScriptDocument(
+                            event.document.lineCount,
+                            event.document.getText().length,
+                        )
+                    ) {
+                        return;
+                    }
                     this.scheduleCteTreeRefresh();
                 }
             }),

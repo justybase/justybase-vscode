@@ -148,7 +148,7 @@ describe('SQL interaction performance', () => {
       }
     });
 
-    it('coalesces 300 rapid document versions and publishes only the latest', async () => {
+    it('coalesces 300 rapid document versions and full-parses only the latest', async () => {
       jest.useFakeTimers();
       const spy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
       const session = new DocumentParseSession();
@@ -158,24 +158,28 @@ describe('SQL interaction performance', () => {
         session,
         150,
       );
-      const requests: Array<Promise<vscode.SemanticTokens>> = [];
+      const requests: vscode.SemanticTokens[] = [];
 
       try {
         for (let version = 1; version <= 300; version++) {
           const sql = `${SAMPLE_SQL}\n-- edit ${version}`;
           const base = createLargeSqlDocument(sql, 'file:///semantic-burst.sql');
           const document = { ...base, version } as vscode.TextDocument;
-          requests.push(Promise.resolve(provider.provideDocumentSemanticTokens(
+          // Progressive path returns sync lex-only immediately (non-empty).
+          const result = provider.provideDocumentSemanticTokens(
             document,
             { isCancellationRequested: false } as vscode.CancellationToken,
-          )));
+          );
+          expect(result).not.toBeInstanceOf(Promise);
+          requests.push(result as vscode.SemanticTokens);
         }
 
+        // Lex-only must not parse; only the final debounced upgrade does.
+        expect(spy).not.toHaveBeenCalled();
+        expect(requests.every((result) => result.data.length > 0)).toBe(true);
+
         jest.advanceTimersByTime(150);
-        const results = await Promise.all(requests);
         expect(spy).toHaveBeenCalledTimes(1);
-        expect(results.slice(0, -1).every((result) => result.data.length === 0)).toBe(true);
-        expect(results[results.length - 1]?.data.length).toBeGreaterThan(0);
         expect(session.getCacheSizes().parses).toBe(1);
       } finally {
         provider.dispose();
@@ -184,7 +188,7 @@ describe('SQL interaction performance', () => {
       }
     });
 
-    it('restarts same-version pending work after the previous caller is cancelled', async () => {
+    it('keeps sync lex tokens when a pending upgrade caller is cancelled', async () => {
       jest.useFakeTimers();
       const spy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
       const provider = new NetezzaSemanticTokensProvider(
@@ -201,28 +205,21 @@ describe('SQL interaction performance', () => {
       const replacementToken = { isCancellationRequested: false };
 
       try {
-        const firstRequest = Promise.resolve(
-          provider.provideDocumentSemanticTokens(
-            document,
-            firstToken as vscode.CancellationToken,
-          ),
-        );
+        const firstResult = provider.provideDocumentSemanticTokens(
+          document,
+          firstToken as vscode.CancellationToken,
+        ) as vscode.SemanticTokens;
         firstToken.isCancellationRequested = true;
-        const replacementRequest = Promise.resolve(
-          provider.provideDocumentSemanticTokens(
-            document,
-            replacementToken as vscode.CancellationToken,
-          ),
-        );
+        const replacementResult = provider.provideDocumentSemanticTokens(
+          document,
+          replacementToken as vscode.CancellationToken,
+        ) as vscode.SemanticTokens;
+
+        expect(firstResult.data.length).toBeGreaterThan(0);
+        expect(replacementResult.data.length).toBeGreaterThan(0);
+        expect(spy).not.toHaveBeenCalled();
 
         jest.advanceTimersByTime(150);
-        const [firstResult, replacementResult] = await Promise.all([
-          firstRequest,
-          replacementRequest,
-        ]);
-
-        expect(firstResult.data.length).toBe(0);
-        expect(replacementResult.data.length).toBeGreaterThan(0);
         expect(spy).toHaveBeenCalledTimes(1);
       } finally {
         provider.dispose();

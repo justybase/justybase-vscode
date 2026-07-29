@@ -33,6 +33,7 @@ import type {
 } from '../results/databaseGroupingSql';
 import { diskQuerySpecIsActive } from '../core/resultDataProvider/types';
 import { bucketizePayloadSize, formatPerformanceEvent } from '../services/perf/performanceEvents';
+import { getUxPerfSession } from '../services/perf/uxPerfSession';
 import type { ResultSet } from '../types';
 import { getLogger } from '../utils/logger';
 import { findTrailingLimitClause } from '../results/refreshSqlLimit';
@@ -211,6 +212,10 @@ export class ResultPanelMessageHandler {
                     }
                 }));
                 this._callbacks.onRecordHydrationMetrics?.(message.metrics);
+                return;
+
+            case 'reportUxPerf':
+                getUxPerfSession().emit(message.event);
                 return;
 
             case 'requestDatabaseGrouping':
