@@ -7,6 +7,7 @@ import { NetezzaSemanticTokensProvider } from '../providers/semanticTokensProvid
 import { parseSemanticScopeWithParser } from '../providers/parsers/parserSqlContext';
 import { DocumentParseSession } from '../sqlParser/documentParseSession';
 import * as parsingRuntime from '../sqlParser/parsingRuntime';
+import { LARGE_SCRIPT_CHAR_THRESHOLD } from '../sqlParser/validationConfig';
 
 jest.mock('vscode', () => jest.requireActual('./__mocks__/vscode'));
 
@@ -94,6 +95,7 @@ function createDocument(sql: string, version = 1): vscode.TextDocument {
     uri: vscode.Uri.parse('file:///test.sql'),
     languageId: 'sql',
     version,
+    lineCount: sql.split('\n').length,
     getText: () => sql,
     positionAt: (offset: number) => {
       const before = sql.slice(0, offset);
@@ -643,5 +645,235 @@ END_PROC;`;
     expect(findToken(stringTokens, stringSql, stringDoc, 'DIMACCOUNT')?.tokenType).toBe(
       TABLE_IDX,
     );
+  });
+
+  it('tokenizes large scripts without document.positionAt and within a latency budget', () => {
+    const statement =
+      'SELECT a.col1, a.col2, SUM(a.amt) FROM mydb.admin.fact_sales a WHERE a.col1 > 0 GROUP BY 1, 2;\n';
+    const sql = statement.repeat(Math.ceil(200_000 / statement.length));
+    expect(sql.length).toBeGreaterThan(LARGE_SCRIPT_CHAR_THRESHOLD);
+
+    const localProvider = new NetezzaSemanticTokensProvider();
+    const document = createDocument(sql, 7);
+    const positionAtSpy = jest.spyOn(document, 'positionAt');
+    const token = new vscode.CancellationTokenSource().token;
+
+    const started = performance.now();
+    const result = requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(document, token),
+    );
+    const elapsedMs = performance.now() - started;
+
+    expect(positionAtSpy).not.toHaveBeenCalled();
+    expect(result.data.length).toBeGreaterThan(0);
+    // Lex-only path on large scripts should stay responsive on EH.
+    expect(elapsedMs).toBeLessThan(150);
+  });
+
+  it('returns sync lex-only tokens immediately when debounce is active', () => {
+    const sql = [
+      'WITH cte_a AS (SELECT 1 AS x)',
+      'SELECT cte_a.x FROM cte_a',
+    ].join('\n');
+    const localProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      undefined,
+      undefined,
+      40,
+    );
+    const document = createDocument(sql + '\n', 2);
+    const result = localProvider.provideDocumentSemanticTokens(
+      document,
+      new vscode.CancellationTokenSource().token,
+    );
+
+    expect(result).not.toBeInstanceOf(Promise);
+    const raw = requireSemanticTokens(result);
+    expect(raw.data.length).toBeGreaterThan(0);
+    const tokens = decodeSemanticTokens(raw.data);
+    // Keywords are available immediately with correct positions after Enter.
+    expect(findToken(tokens, sql + '\n', document, 'SELECT', 1)?.tokenType).toBe(KEYWORD_IDX);
+  });
+
+  it('upgrades to full CTE/alias roles after debounce and onDidChangeSemanticTokens', async () => {
+    const sql = [
+      'WITH cte_a AS (SELECT 1 AS x)',
+      'SELECT cte_a.x FROM cte_a',
+    ].join('\n');
+    const localProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      undefined,
+      undefined,
+      40,
+    );
+    const cancellation = new vscode.CancellationTokenSource().token;
+    const document = createDocument(sql, 1);
+
+    const upgraded = new Promise<void>((resolve) => {
+      const sub = localProvider.onDidChangeSemanticTokens(() => {
+        sub.dispose();
+        resolve();
+      });
+    });
+
+    const lexRaw = requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(document, cancellation),
+    );
+    expect(lexRaw.data.length).toBeGreaterThan(0);
+
+    await upgraded;
+
+    const fullRaw = requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(document, cancellation),
+    );
+    const fullTokens = decodeSemanticTokens(fullRaw.data);
+    // After upgrade, CTE name at definition is role-colored (table token type).
+    const cteDef = findToken(fullTokens, sql, document, 'cte_a', 0);
+    expect(cteDef?.tokenType).toBe(TABLE_IDX);
+  });
+
+  it('superseding an upgrade keeps returning fresh sync lex tokens', () => {
+    const sqlV1 = 'SELECT cte_a.x FROM (SELECT 1 AS x) cte_a';
+    const sqlV2 = 'SELECT cte_a.x FROM (SELECT 1 AS x) cte_a\n';
+    const sqlV3 = 'SELECT cte_a.x FROM (SELECT 1 AS x) cte_a\n ';
+    const localProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      undefined,
+      undefined,
+      80,
+    );
+    const cancellation = new vscode.CancellationTokenSource().token;
+
+    const first = requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(createDocument(sqlV1, 1), cancellation),
+    );
+    expect(first.data.length).toBeGreaterThan(0);
+
+    const second = requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(createDocument(sqlV2, 2), cancellation),
+    );
+    const third = requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(createDocument(sqlV3, 3), cancellation),
+    );
+
+    // Each edit returns current-document lex tokens synchronously (correct lines),
+    // not a deferred Promise of stale coordinates.
+    expect(second.data.length).toBeGreaterThan(0);
+    expect(third.data.length).toBeGreaterThan(0);
+    const thirdDoc = createDocument(sqlV3, 3);
+    expect(
+      findToken(decodeSemanticTokens(third.data), sqlV3, thirdDoc, 'SELECT')?.tokenType,
+    ).toBe(KEYWORD_IDX);
+  });
+
+  it('lex-only pass reuses prior alias names so TN does not flash as plain identifier', async () => {
+    const sqlBase = [
+      'SELECT tn.ACCOUNTDESCRIPTION',
+      'FROM JUST_DATA..DIMACCOUNT tn',
+      'WHERE tn.ACCOUNTTYPE IS NOT NULL',
+    ].join('\n');
+    const sqlTyped = `${sqlBase}\nAND tn`;
+    const localProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      undefined,
+      undefined,
+      40,
+    );
+    const cancellation = new vscode.CancellationTokenSource().token;
+
+    const upgraded = new Promise<void>((resolve) => {
+      const sub = localProvider.onDidChangeSemanticTokens(() => {
+        sub.dispose();
+        resolve();
+      });
+    });
+
+    requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(createDocument(sqlBase, 1), cancellation),
+    );
+    await upgraded;
+
+    // Next keystroke: sync lex-only should still color known alias TN/tn.
+    const lexRaw = requireSemanticTokens(
+      localProvider.provideDocumentSemanticTokens(createDocument(sqlTyped, 2), cancellation),
+    );
+    const lexTokens = decodeSemanticTokens(lexRaw.data);
+    const typedDoc = createDocument(sqlTyped, 2);
+    const lastTn = findToken(lexTokens, sqlTyped, typedDoc, 'tn', 2);
+    expect(lastTn?.tokenType).toBe(ALIAS_IDX);
+    expect((lastTn?.tokenModifiers ?? 0) & ITALIC_MASK).toBe(ITALIC_MASK);
+  });
+
+  it('lex-only colors SQL keywords without a parse and keeps line positions after Enter', () => {
+    const sql = 'SELECT 1\nAND x IS NOT NULL';
+    const localProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      undefined,
+      undefined,
+      40,
+    );
+    const document = createDocument(sql, 3);
+    const positionAtSpy = jest.spyOn(document, 'positionAt');
+    const parseSpy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
+
+    try {
+      const started = performance.now();
+      const raw = requireSemanticTokens(
+        localProvider.provideDocumentSemanticTokens(
+          document,
+          new vscode.CancellationTokenSource().token,
+        ),
+      );
+      const elapsedMs = performance.now() - started;
+      const tokens = decodeSemanticTokens(raw.data);
+
+      expect(positionAtSpy).not.toHaveBeenCalled();
+      expect(parseSpy).not.toHaveBeenCalled();
+      expect(elapsedMs).toBeLessThan(50);
+      expect(findToken(tokens, sql, document, 'SELECT')?.tokenType).toBe(KEYWORD_IDX);
+      expect(findToken(tokens, sql, document, 'AND')?.tokenType).toBe(KEYWORD_IDX);
+      expect(findToken(tokens, sql, document, 'AND')?.line).toBe(1);
+      expect(findToken(tokens, sql, document, 'IS')?.tokenType).toBe(KEYWORD_IDX);
+      expect(findToken(tokens, sql, document, 'NULL')?.tokenType).toBe(KEYWORD_IDX);
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
+
+  it('mid-size progressive lex stays under budget and skips parse on the sync pass', () => {
+    const statement = 'SELECT a.col FROM t a WHERE a.col IS NOT NULL;\n';
+    // >1500 lines, still under the 150k char large-script lex-only threshold.
+    const sql = statement.repeat(2000);
+    expect(sql.length).toBeLessThan(LARGE_SCRIPT_CHAR_THRESHOLD);
+    expect(sql.split('\n').length).toBeGreaterThan(1500);
+
+    const localProvider = new NetezzaSemanticTokensProvider(
+      undefined,
+      undefined,
+      undefined,
+      800,
+    );
+    const document = createDocument(sql, 9);
+    const positionAtSpy = jest.spyOn(document, 'positionAt');
+    const parseSpy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
+
+    try {
+      const started = performance.now();
+      const raw = requireSemanticTokens(
+        localProvider.provideDocumentSemanticTokens(
+          document,
+          new vscode.CancellationTokenSource().token,
+        ),
+      );
+      const elapsedMs = performance.now() - started;
+
+      expect(raw.data.length).toBeGreaterThan(0);
+      expect(positionAtSpy).not.toHaveBeenCalled();
+      expect(parseSpy).not.toHaveBeenCalled();
+      expect(elapsedMs).toBeLessThan(200);
+    } finally {
+      parseSpy.mockRestore();
+      localProvider.dispose();
+    }
   });
 });

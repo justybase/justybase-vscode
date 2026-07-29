@@ -45,6 +45,14 @@ import {
     scheduleRunningUiRefresh,
     shouldDeferRunningUi,
 } from './runningUiDelay.js';
+import {
+    completeSourceSwitchEnd,
+    scheduleSourceSwitchEnd,
+    setUxPerfSessionActive,
+    beginSourceSwitchEndSchedule,
+    invalidateSourceSwitchEnd,
+    UxPerfMark,
+} from './uxPerf.js';
 import type { ColumnAggregationState, LogRow, ResultSet } from './types.js';
 import {
     asScrollState,
@@ -506,7 +514,7 @@ export function setupStreamingMessageHandler(): void {
       }
       break;
             case 'hydrate':
-                handleHydrate(message.data as HydrateData);
+                handleHydrate(message.data as HydrateData, typeof message.uxTraceId === 'string' ? message.uxTraceId : undefined);
                 break;
             case 'refreshView':
                 handleRefreshView();
@@ -515,6 +523,9 @@ export function setupStreamingMessageHandler(): void {
                 break;
             case 'setActiveSource':
                 handleSetActiveSource(message);
+                break;
+            case 'uxPerfSession':
+                setUxPerfSessionActive(message.active === true);
                 break;
             case 'saveScrollState':
                 handleSaveScrollState();
@@ -588,6 +599,12 @@ export function handleSaveScrollState(): void {
 
 export function handleSetActiveSource(message: Record<string, unknown>): void {
     const sourceUri = message.sourceUri as string;
+    const uxTraceId = typeof message.uxTraceId === 'string' ? message.uxTraceId : undefined;
+    const sourceMark = uxTraceId
+        ? new UxPerfMark('result_panel.source_switch', uxTraceId)
+        : undefined;
+    sourceMark?.phase('webview_set_active', { sourceUri }, { uri: sourceUri });
+
     const activeSource = getActiveSourceUri();
     const resultSets = getResultSets();
     const previousGridIndex = getActiveGridIndex();
@@ -648,6 +665,10 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         ? getCachedSource(sourceUri) as { resultSets?: ResultSet[]; activeGridIndex?: number } | undefined
         : undefined;
     if (cached) {
+        sourceMark?.phase('cache_hit', {
+            sourceUri,
+            resultSetCount: cached.resultSets?.length ?? 0,
+        }, { uri: sourceUri });
         const cachedResultSets = cached.resultSets ?? [];
         normalizeResultSetsEditability(cachedResultSets);
         setResultSets(cachedResultSets);
@@ -660,7 +681,9 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     } else if (isExecutingSource) {
         // Result sets come from hydrate/appendRows — do not restore cache or strip tabs here.
         // (Stripping to logs-only hid manually pinned tabs during streaming.)
+        sourceMark?.phase('cache_miss_executing', { sourceUri }, { uri: sourceUri });
     } else {
+        sourceMark?.phase('cache_miss', { sourceUri }, { uri: sourceUri });
         setResultSets([]);
         setActiveGridIndex(0);
     }
@@ -683,6 +706,13 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         syncAnalysisView();
         callPanelMethod('updateEditButtons');
         updateAllRefreshFailureBanners();
+        if (sourceMark) {
+            scheduleSourceSwitchEnd(
+                sourceMark,
+                { path: 'preserve_grids', sourceUri },
+                { uri: sourceUri },
+            );
+        }
         return;
     }
 
@@ -696,6 +726,11 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     renderDocIndicator(getActiveSourceUri());
     renderResultSetTabs();
     renderGrids();
+    sourceMark?.phase('grids_rendered', {
+        sourceUri,
+        resultSetCount: getResultSets().length,
+        cacheHit: !!cached,
+    }, { uri: sourceUri });
     updateLoadingState();
     updateExecutionStatusBanner();
     updateResultLimitBanner();
@@ -711,6 +746,17 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     syncAnalysisView();
     callPanelMethod('updateEditButtons');
     updateAllRefreshFailureBanners();
+    if (sourceMark) {
+        scheduleSourceSwitchEnd(
+            sourceMark,
+            {
+                path: cached ? 'cache' : 'empty_or_wait_hydrate',
+                sourceUri,
+                resultSetCount: getResultSets().length,
+            },
+            { uri: sourceUri },
+        );
+    }
 }
 
 // Track last hydrate data fingerprint to skip duplicates.
@@ -765,12 +811,26 @@ function releaseRowsForReplacedResults(previous: ResultSet[], next: ResultSet[])
     }
 }
 
-export function handleHydrate(data: HydrateData): void {
+export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
     const newKey = buildHydrateDedupKey(data);
     if (newKey && newKey === _lastHydrateKey) {
         return;
     }
     _lastHydrateKey = newKey;
+
+    const hydrateMark = uxTraceId
+        ? new UxPerfMark('result_panel.source_switch', uxTraceId)
+        : undefined;
+    const hydrateStartedAt = performance.now();
+    if (hydrateMark) {
+        // Hydrate owns the trace from here — drop pending setActiveSource end.
+        invalidateSourceSwitchEnd();
+    }
+    hydrateMark?.phase('hydrate_start', {
+        payloadHint: data.resultSetsMsgPack instanceof Uint8Array
+            ? data.resultSetsMsgPack.byteLength
+            : 0,
+    });
 
     clearAllSearchWorkerData();
     clearDiskBackedPendingRequests();
@@ -780,7 +840,6 @@ export function handleHydrate(data: HydrateData): void {
 
     setPreserveScrollDuringHydrate(true);
     try {
-        const hydrateStartedAt = performance.now();
         let payloadBytes = 0;
         const panel = getResultPanelWindow();
         const existingResultSets = getResultSets();
@@ -860,6 +919,10 @@ export function handleHydrate(data: HydrateData): void {
         renderDocIndicator(getActiveSourceUri());
         renderResultSetTabs();
         renderGrids();
+        hydrateMark?.phase('grids_rendered', {
+            resultSetCount: hydratedResultSets.length,
+            payloadBytes,
+        }, { uri: getActiveSourceUri() || undefined });
         updateLoadingState();
         updateExecutionStatusBanner();
         updateResultLimitBanner();
@@ -880,6 +943,8 @@ export function handleHydrate(data: HydrateData): void {
                 verifyAfterFrame: true,
             });
 
+            const endToken = beginSourceSwitchEndSchedule();
+            const endScheduledAt = performance.now();
             requestAnimationFrame(() => {
                 reportHydrationMetrics({
                     durationMs: performance.now() - hydrateStartedAt,
@@ -889,8 +954,35 @@ export function handleHydrate(data: HydrateData): void {
                     totalRowCount: getTotalRowCount(hydratedResultSets)
                 });
 
+                if (hydrateMark) {
+                    completeSourceSwitchEnd(
+                        endToken,
+                        hydrateMark,
+                        {
+                            path: 'hydrate',
+                            payloadBytes,
+                            resultSetCount: hydratedResultSets.length,
+                            totalRowCount: getTotalRowCount(hydratedResultSets),
+                        },
+                        { uri: getActiveSourceUri() || undefined },
+                        {
+                            frameDelayMs: Math.round((performance.now() - endScheduledAt) * 10) / 10,
+                        },
+                    );
+                }
+
                 setPreserveScrollDuringHydrate(false);
             });
+        } else if (hydrateMark) {
+            scheduleSourceSwitchEnd(
+                hydrateMark,
+                {
+                    path: 'hydrate_empty',
+                    payloadBytes,
+                    resultSetCount: 0,
+                },
+                { uri: getActiveSourceUri() || undefined },
+            );
         }
         acknowledgeCurrentLogRows();
         resetEditSession();

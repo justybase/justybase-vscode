@@ -4,12 +4,18 @@ import {
   createPerformanceTimer,
   formatPerformanceEvent,
 } from "../../services/perf/performanceEvents";
+import { NETEZZA_UX_PERF_NOTIFICATION } from "../../lsp/protocol";
 import {
   SqlValidator,
   DocumentParseSession,
   DocumentValidationSession,
 } from "../../sqlParser";
-import { LARGE_SCRIPT_CHAR_THRESHOLD } from "../../sqlParser/validationConfig";
+import {
+  HUGE_SCRIPT_LINE_THRESHOLD,
+  LARGE_SCRIPT_CHAR_THRESHOLD,
+  LARGE_SCRIPT_LINT_DEBOUNCE_MS,
+  LSP_LARGE_DIAGNOSTICS_LINE_THRESHOLD,
+} from "../../sqlParser/validationConfig";
 import {
   prepareIncrementalValidation,
   runValidationPipeline,
@@ -63,10 +69,14 @@ export function createDiagnosticsHandler(
 
   const scheduleDiagnostics = (document: TextDocument): void => {
     clearScheduledDiagnostics(document.uri);
+    const debounceMs =
+      document.lineCount > LSP_LARGE_DIAGNOSTICS_LINE_THRESHOLD
+        ? LARGE_SCRIPT_LINT_DEBOUNCE_MS
+        : LINT_DEBOUNCE_MS;
     const timer = setTimeout(() => {
       lintTimers.delete(document.uri);
       void publishDiagnostics(document);
-    }, LINT_DEBOUNCE_MS);
+    }, debounceMs);
     lintTimers.set(document.uri, timer);
   };
 
@@ -88,7 +98,10 @@ export function createDiagnosticsHandler(
 
   async function publishDiagnostics(document: TextDocument): Promise<void> {
     const sql = document.getText();
-    if (sql.length > LARGE_SCRIPT_CHAR_THRESHOLD) {
+    if (
+      sql.length > LARGE_SCRIPT_CHAR_THRESHOLD ||
+      document.lineCount > HUGE_SCRIPT_LINE_THRESHOLD
+    ) {
       connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
       return;
     }
@@ -234,22 +247,48 @@ export function createDiagnosticsHandler(
       if (event.duration_ms >= DIAGNOSTICS_SLOW_LOG_MS) {
         connection.console.log(formatPerformanceEvent(event));
       }
+      void connection.sendNotification(NETEZZA_UX_PERF_NOTIFICATION, {
+        op: "lsp.diagnostics",
+        phase: "end",
+        durationMs: event.duration_ms,
+        doc: {
+          uri: document.uri,
+          chars: sql.length,
+          ver: document.version,
+        },
+        meta: {
+          diagnosticCount: diagnostics.length,
+          validatedStatements: dirtyIndices.length,
+          incremental: incrementalCandidate,
+        },
+      });
     } catch (error: unknown) {
       connection.console.error(
         `Failed to publish diagnostics for ${document.uri}: ${toErrorMessage(error)}`,
       );
-      connection.console.log(
-        formatPerformanceEvent(
-          timer.finish({
-            result: "error",
-            errorCode: "HANDLER_ERROR",
-            metadata: {
-              document_uri: document.uri,
-              error_message: toErrorMessage(error),
-            },
-          }),
-        ),
-      );
+      const errorEvent = timer.finish({
+        result: "error",
+        errorCode: "HANDLER_ERROR",
+        metadata: {
+          document_uri: document.uri,
+          error_message: toErrorMessage(error),
+        },
+      });
+      connection.console.log(formatPerformanceEvent(errorEvent));
+      void connection.sendNotification(NETEZZA_UX_PERF_NOTIFICATION, {
+        op: "lsp.diagnostics",
+        phase: "end",
+        durationMs: errorEvent.duration_ms,
+        doc: {
+          uri: document.uri,
+          chars: sql.length,
+          ver: document.version,
+        },
+        meta: {
+          error: true,
+          errorMessage: toErrorMessage(error),
+        },
+      });
     }
   }
 

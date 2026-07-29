@@ -26,6 +26,7 @@ import {
 } from '../core/queryRunner';
 import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
 import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf/performanceEvents';
+import { getUxPerfSession } from '../services/perf/uxPerfSession';
 import { findVisibleQueryFlowEditor } from '../utils/queryFlowEditor';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import type { QueryFlowNode } from '../sqlParser';
@@ -707,6 +708,36 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
 
             await resultPanelProvider.clearPerformanceStats();
             vscode.window.showInformationMessage('Result panel performance stats cleared.');
+        }),
+
+        vscode.commands.registerCommand('netezza.uxPerf.startSession', async () => {
+            getUxPerfSession().attachExtensionContext(context);
+            getUxPerfSession().setWebviewNotifier(active => {
+                resultPanelProvider.notifyUxPerfSession(active);
+            });
+            const started = await getUxPerfSession().startSession();
+            vscode.window.showInformationMessage(
+                `UX perf session started. Log: ${started.logPath}`,
+            );
+        }),
+
+        vscode.commands.registerCommand('netezza.uxPerf.stopSession', async () => {
+            const summary = await getUxPerfSession().stopSession();
+            if (!summary) {
+                vscode.window.showInformationMessage('No active UX perf session.');
+                return;
+            }
+            const slowOps = Object.entries(summary.byOp)
+                .filter(([, stats]) => stats.slowCount > 0)
+                .map(([op, stats]) => `${op}: slow=${stats.slowCount} max=${stats.maxMs}ms p95=${stats.p95Ms}ms`)
+                .join('; ');
+            vscode.window.showInformationMessage(
+                `UX perf stopped (${summary.eventCount} events). ${slowOps || 'No slow events.'} Log: ${summary.logPath}`,
+            );
+        }),
+
+        vscode.commands.registerCommand('netezza.uxPerf.openLog', async () => {
+            await getUxPerfSession().openLog();
         }),
 
   // Copy selection from results

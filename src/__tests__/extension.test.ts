@@ -767,7 +767,10 @@ describe('extension.ts', () => {
             const activeEditorCallbacks = (window.onDidChangeActiveTextEditor as jest.Mock).mock.calls.map(call => call[0]);
             activeEditorCallbacks.forEach((callback: (editor: unknown) => void) => callback(mockEditor));
 
-            expect(providerInstance?.setActiveSource).toHaveBeenCalledWith('file:///focused.sql');
+            expect(providerInstance?.setActiveSource).toHaveBeenCalledWith(
+                'file:///focused.sql',
+                undefined,
+            );
         });
 
         it('should not resend already-cleared result contexts when editor focus returns', async () => {

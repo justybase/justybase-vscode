@@ -12,6 +12,7 @@ import { SqlParser } from '../sql/sqlParser';
 import { SqlLexer } from '../sqlParser/lexer';
 import { affectsExtensionConfiguration, getExtensionConfiguration } from '../compatibility/configuration';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
+import { isLargeScriptDocument } from '../sqlParser/validationConfig';
 
 const RUNNABLE_STATEMENT_TOKENS = new Set([
     'Select',
@@ -126,9 +127,15 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
             return [];
         }
 
+        const text = document.getText();
+        // Large scripts: keep file-level Run/Batch lenses only — skip procedure
+        // / statement scans that re-walk the whole document while typing.
+        if (isLargeScriptDocument(document.lineCount, text.length)) {
+            return this.createFileLevelCodeLenses(document);
+        }
+
         const lenses: vscode.CodeLens[] = [];
 
-        const text = document.getText();
         const procedureBlocks = this.findProcedureBlocks(text);
         lenses.push(...this.createProcedureCodeLenses(document, procedureBlocks));
         lenses.push(...this.createFileLevelCodeLenses(document));

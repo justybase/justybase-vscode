@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { SqlParser } from '../sql/sqlParser';
 import { affectsExtensionConfiguration, getExtensionConfiguration } from '../compatibility/configuration';
 import { LARGE_SCRIPT_CHAR_THRESHOLD, LARGE_SCRIPT_LINE_THRESHOLD } from '../sqlParser/validationConfig';
+import { getUxPerfSession } from '../services/perf/uxPerfSession';
 
 const SELECTION_HIGHLIGHT_DEBOUNCE_MS = 100;
 const LARGE_SCRIPT_HIGHLIGHT_DEBOUNCE_MS = 500;
@@ -85,6 +86,10 @@ export function updateSqlHighlight(
 ): void {
     const config = getExtensionConfiguration();
     const enabled = config.get<boolean>('highlightActiveStatement', true);
+    const uxStartedAt = performance.now();
+    const debounceMs = editor?.document.lineCount && editor.document.lineCount > LARGE_SCRIPT_LINE_THRESHOLD
+        ? LARGE_SCRIPT_HIGHLIGHT_DEBOUNCE_MS
+        : SELECTION_HIGHLIGHT_DEBOUNCE_MS;
 
     if (!enabled || !editor || (editor.document.languageId !== 'sql' && editor.document.languageId !== 'mssql')) {
         if (editor) {
@@ -99,6 +104,7 @@ export function updateSqlHighlight(
         if (document.lineCount > LARGE_SCRIPT_LINE_THRESHOLD) {
             editor.setDecorations(sqlStatementDecoration, []);
             clearHighlightState(editor);
+            emitHighlightUx(document, uxStartedAt, debounceMs, true, 'line_threshold');
             return;
         }
 
@@ -109,6 +115,7 @@ export function updateSqlHighlight(
         if (text.length > LARGE_SCRIPT_CHAR_THRESHOLD) {
             editor.setDecorations(sqlStatementDecoration, []);
             clearHighlightState(editor);
+            emitHighlightUx(document, uxStartedAt, debounceMs, true, 'char_threshold');
             return;
         }
         const documentKey = {
@@ -136,9 +143,35 @@ export function updateSqlHighlight(
             editor.setDecorations(sqlStatementDecoration, []);
             rememberHighlightState(editor, document.version, offset, -1, -1);
         }
+        emitHighlightUx(document, uxStartedAt, debounceMs, false, 'updated');
     } catch (e) {
         console.error('Error updating SQL highlight:', e);
     }
+}
+
+function emitHighlightUx(
+    document: vscode.TextDocument,
+    startedAt: number,
+    debounceMs: number,
+    skipped: boolean,
+    reason: string,
+): void {
+    const ux = getUxPerfSession();
+    if (!ux.isActive()) {
+        return;
+    }
+    ux.emit({
+        op: 'editor.highlight',
+        phase: 'end',
+        durationMs: performance.now() - startedAt,
+        doc: ux.docContextFromDocument(document),
+        meta: {
+            debounceMs,
+            skipped,
+            reason,
+            largeScript: document.lineCount > LARGE_SCRIPT_LINE_THRESHOLD,
+        },
+    });
 }
 
 function scheduleSqlHighlightUpdate(

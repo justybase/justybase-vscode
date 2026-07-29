@@ -38,6 +38,24 @@ export interface ResultPanelHydrationMetricsPayload {
     executionState: ResultPanelExecutionState;
 }
 
+export type UxPerfMetaValue = string | number | boolean | null;
+
+export interface UxPerfDocContextPayload {
+    uri?: string;
+    chars?: number;
+    lines?: number;
+    ver?: number;
+}
+
+export interface UxPerfEventPayload {
+    op: string;
+    phase: string;
+    traceId?: string;
+    durationMs?: number;
+    doc?: UxPerfDocContextPayload;
+    meta?: Record<string, UxPerfMetaValue>;
+}
+
 export interface SelectionStatsPayload {
     cellCount: number;
     type: 'numeric' | 'date' | 'text' | 'mixed';
@@ -77,6 +95,7 @@ export type ResultPanelWebviewToHostMessage =
   | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
   | { command: 'selectAll' }
   | { command: 'reportHydrationMetrics'; metrics: ResultPanelHydrationMetricsPayload }
+  | { command: 'reportUxPerf'; event: UxPerfEventPayload }
     | { command: 'describeWithCopilot'; data: unknown; sql?: string }
     | { command: 'fixSqlError'; errorMessage: string; sql: string }
     | { command: 'initiateExport'; data: ExportMetadata }
@@ -217,7 +236,7 @@ export type ResultPanelWebviewToHostMessage =
     };
 
 export type ResultPanelHostToWebviewMessage =
-  | { command: 'hydrate'; data: ResultPanelViewData }
+  | { command: 'hydrate'; data: ResultPanelViewData; uxTraceId?: string }
   | {
       command: 'setActiveSource';
       sourceUri: string;
@@ -227,7 +246,9 @@ export type ResultPanelHostToWebviewMessage =
       pinnedSourcesJson: string;
       formatSettings?: ResultFormattingPayload;
       diskBackedStreamCapEnabled?: boolean;
+      uxTraceId?: string;
     }
+  | { command: 'uxPerfSession'; active: boolean }
   | { command: 'saveScrollState' }
   | { command: 'refreshView' }
   | { command: 'copySelection'; copyFormat?: 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon' }
@@ -361,6 +382,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'requestLogSync',
   'selectAll',
   'reportHydrationMetrics',
+  'reportUxPerf',
   'describeWithCopilot',
   'fixSqlError',
   'initiateExport',
@@ -421,6 +443,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
 export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
   'hydrate',
   'setActiveSource',
+  'uxPerfSession',
   'saveScrollState',
   'refreshView',
   'copySelection',

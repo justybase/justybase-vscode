@@ -26,6 +26,7 @@ import {
     callPanelMethod,
     type ResultSet,
 } from './types.js';
+import { UxPerfMark, isUxPerfSessionActive } from './uxPerf.js';
 
 const vscode = { postMessage: postHostMessage };
 
@@ -329,6 +330,21 @@ function createMenuItem(text: string, onClick: () => void): HTMLDivElement {
 export function switchToResultSet(index: number, skipScrollRestore = false): void {
     if (index < 0 || index >= getAllGrids().length) return;
 
+    const fromIndex = getActiveGridIndex();
+    const targetRs = getResultSetAt(index);
+    const mark = isUxPerfSessionActive()
+        ? new UxPerfMark('result_panel.tab_switch')
+        : undefined;
+    const sourceUri = getActiveSourceUri();
+    const doc = sourceUri ? { uri: sourceUri } : undefined;
+    mark?.phase('start', {
+        fromIndex,
+        toIndex: index,
+        isLog: !!targetRs?.isLog,
+        skipScrollRestore,
+        rowCount: targetRs?.totalRowCount ?? targetRs?.data?.length ?? 0,
+    }, doc);
+
     // Save state of current grid before switching
     saveAllGridStates();
 
@@ -378,6 +394,13 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
         htmlWrapper.style.display = isTarget ? 'block' : 'none';
     });
 
+    mark?.phase('dom_visible', {
+        fromIndex,
+        toIndex: index,
+        isLog: !!getResultSetAt(index)?.isLog,
+        hasScrollRestore: shouldRestoreScroll,
+    }, doc);
+
     if (shouldRestoreScroll) {
         const grid = getGrid(index);
         if (grid?.render) {
@@ -388,13 +411,18 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
             autoBottomLogs: true,
             forceBottomLogs: getResultSetAt(index)?.isLog === true && isActiveSourceExecuting(),
         });
-        const sourceUri = source;
+        mark?.phase('scroll_restore', {
+            fromIndex,
+            toIndex: index,
+            masked: maskScrollRestore,
+        }, doc);
+        const sourceUriForRestore = source;
         const rsIdx = index;
         // setTimeout (not requestAnimationFrame): layout must settle after display:block + render().
         setTimeout(() => {
             try {
                 applyScrollForResultSet(rsIdx, {
-                    sourceUri,
+                    sourceUri: sourceUriForRestore,
                     autoBottomLogs: true,
                     forceBottomLogs: getResultSetAt(rsIdx)?.isLog === true && isActiveSourceExecuting(),
                 });
@@ -402,6 +430,12 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
                 if (maskScrollRestore && targetWrapper) {
                     targetWrapper.style.visibility = '';
                 }
+                mark?.phase('end_visible', {
+                    fromIndex,
+                    toIndex: index,
+                    isLog: !!getResultSetAt(index)?.isLog,
+                    intentionalDelayMs: 50,
+                }, doc);
             }
         }, 50);
     } else if (maskScrollRestore && targetWrapper) {
@@ -436,4 +470,12 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
     }
 
     updateRefreshFailureBanner(index);
+
+    mark?.phase('end', {
+        fromIndex,
+        toIndex: index,
+        isLog: !!getResultSetAt(index)?.isLog,
+        hasScrollRestore: shouldRestoreScroll,
+        awaitEndVisible: shouldRestoreScroll && maskScrollRestore,
+    }, doc);
 }

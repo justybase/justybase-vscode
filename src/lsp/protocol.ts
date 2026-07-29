@@ -6,6 +6,21 @@ export const NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION =
   "netezza/documentContextChanged";
 export const NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION =
   "netezza/metadataCacheInvalidated";
+export const NETEZZA_UX_PERF_NOTIFICATION = "netezza/uxPerf";
+
+export type UxPerfNotificationParams = {
+  op: string;
+  phase: string;
+  traceId?: string;
+  durationMs?: number;
+  doc?: {
+    uri?: string;
+    chars?: number;
+    lines?: number;
+    ver?: number;
+  };
+  meta?: Record<string, string | number | boolean | null>;
+};
 
 export type MetadataRequestKind =
   | "context"

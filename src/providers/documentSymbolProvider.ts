@@ -5,6 +5,7 @@ import {
     collectSqlSymbolUsages,
     collectSqlSymbolUsagesFromCst,
 } from '../sqlParser/symbols';
+import { isLargeScriptDocument } from '../sqlParser/validationConfig';
 
 type OutlineOccurrenceRole = 'definition' | 'reference';
 
@@ -46,6 +47,9 @@ export class NetezzaDocumentSymbolProvider implements vscode.DocumentSymbolProvi
         _token: vscode.CancellationToken
     ): vscode.ProviderResult<vscode.DocumentSymbol[]> {
         const sql = document.getText();
+        if (isLargeScriptDocument(document.lineCount, sql.length)) {
+            return [];
+        }
         const symbols = this.collectSymbols(document, sql);
         const documentSymbols = symbols.map(symbol => this.createDocumentSymbol(document, symbol));
         return documentSymbols;

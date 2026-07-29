@@ -17,6 +17,14 @@ export type ResultPanelInboundMessage =
     | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
     | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
     | { command: 'reportHydrationMetrics'; metrics: ResultPanelHydrationMetricsPayload }
+    | { command: 'reportUxPerf'; event: {
+        op: string;
+        phase: string;
+        traceId?: string;
+        durationMs?: number;
+        doc?: { uri?: string; chars?: number; lines?: number; ver?: number };
+        meta?: Record<string, string | number | boolean | null>;
+    } }
     | { command: 'describeWithCopilot'; data: unknown; sql?: string }
     | { command: 'fixSqlError'; errorMessage: string; sql: string }
     | { command: 'initiateExport'; data: ExportMetadata }
@@ -108,7 +116,7 @@ export interface ResultPanelHydrationMetricsPayload {
 // ============================================================================
 
 export type ResultPanelOutboundMessage =
-    | { command: 'hydrate'; data: ResultPanelViewData }
+    | { command: 'hydrate'; data: ResultPanelViewData; uxTraceId?: string }
     | {
         command: 'setActiveSource';
         sourceUri: string;
@@ -118,7 +126,9 @@ export type ResultPanelOutboundMessage =
         pinnedSourcesJson: string;
         formatSettings?: ResultFormattingPayload;
         diskBackedStreamCapEnabled?: boolean;
+        uxTraceId?: string;
     }
+    | { command: 'uxPerfSession'; active: boolean }
     | { command: 'saveScrollState' }
     | { command: 'refreshView' }
     | { command: 'copySelection'; copyFormat?: 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon' }
@@ -300,6 +310,7 @@ export const RESULT_PANEL_INBOUND_COMMANDS = [
     'logRowsApplied',
     'requestLogSync',
     'reportHydrationMetrics',
+    'reportUxPerf',
     'describeWithCopilot',
     'fixSqlError',
     'initiateExport',
@@ -348,6 +359,7 @@ export const RESULT_PANEL_INBOUND_COMMANDS = [
 export const RESULT_PANEL_OUTBOUND_COMMANDS = [
     'hydrate',
     'setActiveSource',
+    'uxPerfSession',
     'saveScrollState',
     'refreshView',
     'copySelection',
