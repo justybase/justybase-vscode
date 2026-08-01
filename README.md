@@ -474,6 +474,8 @@ The default `npm run test` and `npm run test:watch` flows skip both live suites 
 
 For the full Oracle live suite (connection, metadata search, DDL extraction/generation, maintenance, and session monitor), run `npm run test:oracle:integration`. It requires `ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_PORT`, `ORACLE_LIVE_TEST_DATABASE`, `ORACLE_LIVE_TEST_USER`, and `ORACLE_LIVE_TEST_PASSWORD` (with optional `ORACLE_LIVE_TEST_CURRENT_SCHEMA`).
 
+For MS SQL Server, run `npm run test:mssql:integration` with the `MSSQL_LIVE_TEST_*` variables below. That suite covers streaming cancel, typed import/export round-trip, live completion, and MSS*/SQL004/SQL025 quality checks against catalog metadata.
+
 For Db2, run `npm run test:db2:integration` with the `DB2_LIVE_TEST_*` variables below. That command rebuilds `ibm_db` for Node/Jest when live env is present, injects the **bundled** clidriver into the test process only (no system ODBC registration), and restores the Electron/F5 build afterward—same pattern as `npm run test:live:local`. Quick connectivity check: `npm run db2:connect-probe`. Persistent catalog fixture: see [docs/db2.md](docs/db2.md) (`npm run db2:seed-live-fixture`).
 
 The live tests are env-gated and stay skipped unless you provide credentials. Supported variables are:
@@ -481,6 +483,7 @@ The live tests are env-gated and stay skipped unless you provide credentials. Su
 - Netezza: `NZ_DEV_PASSWORD` plus optional `NZ_DEV_HOST`, `NZ_DEV_PORT`, `NZ_DEV_DATABASE`, `NZ_DEV_USER`
 - Db2: `DB2_LIVE_TEST_HOST`, `DB2_LIVE_TEST_PORT`, `DB2_LIVE_TEST_DATABASE`, `DB2_LIVE_TEST_USER`, `DB2_LIVE_TEST_PASSWORD`, optional `DB2_LIVE_TEST_CURRENT_SCHEMA`
 - Oracle: `ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_PORT`, `ORACLE_LIVE_TEST_DATABASE` (service name), `ORACLE_LIVE_TEST_USER`, `ORACLE_LIVE_TEST_PASSWORD`, optional `ORACLE_LIVE_TEST_CURRENT_SCHEMA`
+- MS SQL Server: `MSSQL_LIVE_TEST_HOST`, `MSSQL_LIVE_TEST_PORT` (default 1433), `MSSQL_LIVE_TEST_DATABASE`, `MSSQL_LIVE_TEST_USER`, `MSSQL_LIVE_TEST_PASSWORD` (optional encrypt / trustServerCertificate via connection options)
 - PostgreSQL: `POSTGRES_LIVE_TEST_HOST`, `POSTGRES_LIVE_TEST_PORT`, `POSTGRES_LIVE_TEST_DATABASE`, `POSTGRES_LIVE_TEST_USER`, `POSTGRES_LIVE_TEST_PASSWORD`
 
 When the full `DB2_LIVE_TEST_*` configuration is present, `npm run test:live:local` now automatically:

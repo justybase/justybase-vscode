@@ -359,7 +359,30 @@ function collectOracleCstTokens(
   }
 }
 
-function scanOracleBlockTokens(scope: ProcedureScopeBuilder, tokens: IToken[]): void {
+export function registerOracleDeclarationTokens(
+  scope: ProcedureScopeBuilder,
+  tokens: IToken[],
+): void {
+  const declareIndex = tokens.findIndex((token) => tokenImage(token) === 'DECLARE');
+  const beginIndex = tokens.findIndex(
+    (token, index) => index > declareIndex && tokenImage(token) === 'BEGIN',
+  );
+  if (declareIndex < 0 || beginIndex < 0) return;
+
+  for (let index = declareIndex + 1; index < beginIndex; index += 1) {
+    const token = tokens[index];
+    const next = tokens[index + 1];
+    if (
+      (token.tokenType.name === 'Identifier' || token.tokenType.name === 'QuotedIdentifier')
+      && next
+      && next.tokenType.name === 'Identifier'
+    ) {
+      scope.registerVariable(unquoteIdentifier(token.image ?? ''), token);
+    }
+  }
+}
+
+export function scanOracleBlockTokens(scope: ProcedureScopeBuilder, tokens: IToken[]): void {
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     const image = tokenImage(token);
@@ -371,10 +394,26 @@ function scanOracleBlockTokens(scope: ProcedureScopeBuilder, tokens: IToken[]): 
 
     if (image === 'SELECT') {
       let hasInto = false;
+      let intoIndex = -1;
       for (let lookahead = index + 1; lookahead < tokens.length; lookahead += 1) {
         const nextImage = tokenImage(tokens[lookahead]);
-        if (nextImage === 'INTO') hasInto = true;
+        if (nextImage === 'INTO') {
+          hasInto = true;
+          intoIndex = lookahead;
+        }
         if (nextImage === ';' || nextImage === 'END') {
+          if (intoIndex >= 0) {
+            for (let targetIndex = intoIndex + 1; targetIndex < lookahead; targetIndex += 1) {
+              const target = tokens[targetIndex];
+              if (tokenImage(target) === 'FROM') break;
+              if (
+                target.tokenType.name === 'Identifier'
+                || target.tokenType.name === 'QuotedIdentifier'
+              ) {
+                scope.markNameAssigned(unquoteIdentifier(target.image ?? ''));
+              }
+            }
+          }
           scope.checkStandaloneSelect(token, hasInto);
           index = lookahead;
           break;

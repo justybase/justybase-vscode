@@ -58,6 +58,33 @@ Both live suites are excluded from the default unit-test configuration and are
 intentionally opt-in because they create temporary live database objects. See
 [docs/oracle.md](oracle.md) for the env and coverage matrix.
 
+## MS SQL Server Checklist
+
+The MSSQL extension has a dedicated live suite at
+`src/__tests__/integration/mssql.integration.test.ts`. Provide
+`MSSQL_LIVE_TEST_HOST`, `MSSQL_LIVE_TEST_DATABASE`, `MSSQL_LIVE_TEST_USER`, and
+`MSSQL_LIVE_TEST_PASSWORD` (optional `MSSQL_LIVE_TEST_PORT`, default **1433**)
+and run:
+
+```bash
+npm run install:mssql
+npm run test:mssql:integration
+npm run verify:mssql
+```
+
+The deep suite exercises:
+
+- connection and compatibility shims (`CURRENT_CATALOG` / `CURRENT_SCHEMA` / `CURRENT_SID`)
+- catalog/search metadata across tables, views, and procedures
+- DDL extraction/generation and table maintenance (`UPDATE STATISTICS`, index rebuild)
+- streaming cancel during large fetch (session remains usable)
+- typed import/export round-trip (BIT, DECIMAL, NVARCHAR, DATETIME2, UNIQUEIDENTIFIER)
+- live completion E2E (`LspCompletionEngine` + live MSSQL metadata)
+- live SQL quality (`MSS001–MSS008`, strict Netezza-only reject, SQL004 / SQL025 against catalog types)
+
+Editor parity uses `MSSQL_SQL_PARSING_RUNTIME` (Chevrotain T-SQL layer) with TextMate
+injection at `dialects/mssql/syntaxes/mssql.tmLanguage.json`.
+
 ## Db2 Checklist
 
 The Db2 extension has a dedicated live suite at

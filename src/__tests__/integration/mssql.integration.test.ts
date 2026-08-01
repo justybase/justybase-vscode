@@ -1,21 +1,33 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
+
+jest.unmock('chevrotain');
+
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionContext } from 'vscode';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { MsSqlConnection } from '../../../extensions/mssql/src/mssqlConnection';
 import { mssqlDialect } from '../../../extensions/mssql/src/mssqlDialect';
 import { mssqlMaintenanceProvider } from '../../../extensions/mssql/src/mssqlMaintenanceProvider';
 import { mssqlMetadataProvider } from '../../../extensions/mssql/src/mssqlSchemaProvider';
+import { mssqlSqlAuthoring } from '../../../extensions/mssql/src/sql/authoring';
 import { importDataToMsSql } from '../../import/mssqlImporter';
+import { exportResultSetToFile } from '../../export/resultExporter';
+import { cancelCommandAndCloseReader } from '../../core/cancellation';
 import type {
 	DatabaseConnectionConfig,
 	DatabaseMaintenanceServices,
 	DatabaseMaintenanceTarget,
 } from '../../contracts/database';
 import type { ConnectionManager } from '../../core/connectionManager';
-import type { ConnectionDetails } from '../../types';
+import type { ConnectionDetails, ResultSet } from '../../types';
+import type { MetadataColumnItem, MetadataObjectItem } from '../../lsp/protocol';
+import { LspCompletionEngine, type CompletionMetadataProvider } from '../../server/completionEngine';
+import { SqlQualityEngine } from '../../providers/sqlQualityEngine';
+import { SqlValidator } from '../../sqlParser/validator';
+import { InMemorySchemaProvider } from '../../sqlParser/schemaProvider';
 import { mssqlHarness, registerLiveIntegrationSuite } from './optionalDialectIntegrationHarness';
 
 registerLiveIntegrationSuite(mssqlHarness);
@@ -419,4 +431,408 @@ describeIfConfigured('mssql integration', () => {
 			}
 		});
 	});
+
+	describe('streaming cancel, import/export round-trip', () => {
+		it('cancels a large fetch and keeps the MSSQL session usable', async () => {
+			const command = connection.createCommand(`
+				WITH n AS (
+					SELECT 1 AS id
+					UNION ALL
+					SELECT id + 1 FROM n WHERE id < 500000
+				)
+				SELECT id FROM n OPTION (MAXRECURSION 0)
+			`);
+			const reader = await command.executeReader();
+			let fetchedRows = 0;
+			let fetchError: unknown;
+			const fetchPromise = (async () => {
+				try {
+					while (await reader.read()) {
+						fetchedRows += 1;
+					}
+				} catch (error: unknown) {
+					fetchError = error;
+				}
+			})();
+
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			const cleanup = await cancelCommandAndCloseReader(command, reader, { timeoutMs: 5_000 });
+			await Promise.race([
+				fetchPromise,
+				new Promise<void>((_, reject) =>
+					setTimeout(() => reject(new Error('MSSQL fetch did not stop after cancel')), 5_000),
+				),
+			]);
+
+			expect(cleanup.timedOut).toBe(false);
+			expect(fetchedRows).toBeGreaterThanOrEqual(0);
+			if (fetchError) {
+				expect(String(fetchError)).toMatch(/cancel|abort|closed/i);
+			}
+
+			const controlRows = await readRows(connection, 'SELECT 1 AS CONTROL_VALUE');
+			expect(Number(controlRows[0].CONTROL_VALUE)).toBe(1);
+		}, 120000);
+
+		it('round-trips typed CSV import and exports reusable SQL/CSV', async () => {
+			const connectionDetails = toConnectionDetails(config!);
+			const typedTable = `jbl_mssql_typed_${stamp}`;
+			const exportTable = `jbl_mssql_exp_${stamp}`;
+			const fixturePath = path.join(os.tmpdir(), `${typedTable}.csv`);
+			const csvOut = path.join(os.tmpdir(), `${exportTable}.csv`);
+			const sqlOut = path.join(os.tmpdir(), `${exportTable}.sql`);
+
+			fs.writeFileSync(
+				fixturePath,
+				'id,flag,amount,name,created_at,guid_col\n'
+					+ '1,1,12.34,Alice,2024-02-01 10:20:30,aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n'
+					+ '2,0,56.78,Bob,2024-03-04 11:22:33,11111111-2222-3333-4444-555555555555\n',
+				'utf8',
+			);
+
+			try {
+				const importResult = await importDataToMsSql(
+					fixturePath,
+					typedTable,
+					connectionDetails,
+					undefined,
+					undefined,
+					{
+						forcedColumnTypes: {
+							0: 'INT',
+							1: 'BIT',
+							2: 'DECIMAL(12,2)',
+							3: 'NVARCHAR(100)',
+							4: 'DATETIME2',
+							5: 'UNIQUEIDENTIFIER',
+						},
+					},
+				);
+				expect(importResult.success).toBe(true);
+				expect(importResult.details?.rowsInserted).toBe(2);
+
+				const imported = await readRows(
+					connection,
+					`SELECT id, flag, amount, name, CONVERT(VARCHAR(36), guid_col) AS guid_text FROM ${buildQualifiedName(schemaName, typedTable)} ORDER BY id`,
+				);
+				expect(imported).toHaveLength(2);
+				expect(Number(imported[0].flag)).toBe(1);
+				expect(String(imported[0].name)).toBe('Alice');
+				expect(String(imported[0].guid_text).toLowerCase()).toContain('aaaaaaaa');
+
+				const resultSet = {
+					columns: [
+						{ name: 'id', type: 'INT' },
+						{ name: 'flag', type: 'BIT' },
+						{ name: 'amount', type: 'DECIMAL' },
+						{ name: 'name', type: 'NVARCHAR' },
+						{ name: 'guid_text', type: 'VARCHAR' },
+					],
+					data: imported.map((row) => [
+						row.id,
+						row.flag,
+						row.amount,
+						row.name,
+						row.guid_text,
+					]),
+					rowCount: imported.length,
+				} as unknown as ResultSet;
+
+				await exportResultSetToFile(resultSet, csvOut, { format: 'csv' });
+				await exportResultSetToFile(resultSet, sqlOut, {
+					format: 'sql',
+					sqlTargetTable: buildQualifiedName(schemaName, exportTable),
+					sqlDialect: 'mssql',
+				});
+				expect(fs.readFileSync(csvOut, 'utf8')).toContain('Alice');
+				expect(fs.readFileSync(sqlOut, 'utf8').toUpperCase()).toContain('INSERT');
+			} finally {
+				await tryExecute(connection, `DROP TABLE IF EXISTS ${buildQualifiedName(schemaName, typedTable)}`);
+				await tryExecute(connection, `DROP TABLE IF EXISTS ${buildQualifiedName(schemaName, exportTable)}`);
+				for (const filePath of [fixturePath, csvOut, sqlOut]) {
+					if (fs.existsSync(filePath)) {
+						fs.unlinkSync(filePath);
+					}
+				}
+			}
+		}, 180000);
+	});
+
+	describe('MSSQL live completion', () => {
+		it('completes columns for an alias against live catalog metadata', async () => {
+			const provider = new LiveMsSqlCompletionMetadataProvider(
+				connection,
+				config!.database,
+				schemaName,
+			);
+			const engine = new LspCompletionEngine(provider);
+			const { document, cursorOffset } = createDocumentWithCursor(
+				`SELECT t.| FROM ${buildQualifiedName(schemaName, tableName)} t`,
+			);
+			const items = await engine.provideCompletionItems(
+				document,
+				document.positionAt(cursorOffset),
+			);
+			const labels = completionLabels(items).map((label) => label.toUpperCase());
+
+			expect(provider.lookupRequests.length).toBeGreaterThan(0);
+			expect(labels).toEqual(
+				expect.arrayContaining(['ID', searchColumnName.toUpperCase()]),
+			);
+		}, 120000);
+
+		it('offers MSSQL keywords and excludes Netezza-only GROOM', async () => {
+			const provider = new LiveMsSqlCompletionMetadataProvider(
+				connection,
+				config!.database,
+				schemaName,
+			);
+			const engine = new LspCompletionEngine(provider);
+			const { document, cursorOffset } = createDocumentWithCursor('|');
+			const items = await engine.provideCompletionItems(
+				document,
+				document.positionAt(cursorOffset),
+			);
+			const upperLabels = completionLabels(items).map((label) => label.toUpperCase());
+
+			expect(upperLabels).toEqual(expect.arrayContaining(['TOP', 'OUTPUT', 'CROSS APPLY']));
+			expect(upperLabels).not.toContain('GROOM');
+		}, 60000);
+	});
+
+	describe('MSSQL live SQL quality', () => {
+		it('runs MSS* rules, rejects Netezza-only syntax, and schema-aware SQL004/SQL025', async () => {
+			const qualifiedTable = buildQualifiedName(schemaName, tableName);
+			const schemaProvider = await buildLiveMsSqlSchemaProvider(
+				connection,
+				config!,
+				schemaName,
+				tableName,
+			);
+			const qualityEngine = new SqlQualityEngine(
+				new SqlValidator(schemaProvider, mssqlSqlAuthoring.validation),
+				mssqlSqlAuthoring.qualityRules,
+			);
+
+			expect(
+				qualityEngine.analyze(`SELECT * FROM ${qualifiedTable}`).issues.map((i) => i.ruleId),
+			).toContain('MSS001');
+			expect(
+				qualityEngine.analyze(`DELETE FROM ${qualifiedTable}`).issues.map((i) => i.ruleId),
+			).toContain('MSS002');
+			expect(
+				qualityEngine
+					.analyze(`UPDATE ${qualifiedTable} SET ${quoteIdentifier(searchColumnName)} = N'X'`)
+					.issues.map((i) => i.ruleId),
+			).toContain('MSS003');
+
+			const groom = qualityEngine.analyze('GROOM TABLE sales VERSIONS;');
+			expect(groom.issues.map((i) => i.ruleId)).toContain('MSS004');
+			expect(groom.parserResult.errors.length).toBeGreaterThan(0);
+
+			const limit = qualityEngine.analyze(
+				`SELECT ${quoteIdentifier(searchColumnName)} FROM ${qualifiedTable} LIMIT 5`,
+			);
+			expect(limit.issues.map((i) => i.ruleId)).toContain('MSS007');
+			expect(limit.parserResult.errors.length).toBeGreaterThan(0);
+
+			const doubleDot = qualityEngine.analyze('SELECT * FROM DB..TABLE');
+			expect(doubleDot.issues.map((i) => i.ruleId)).toContain('MSS008');
+			expect(doubleDot.parserResult.errors.length).toBeGreaterThan(0);
+
+			const topOk = qualityEngine.analyze(
+				`SELECT TOP 5 ${quoteIdentifier(searchColumnName)} FROM ${qualifiedTable} ORDER BY id`,
+			);
+			expect(topOk.parserResult.errors).toHaveLength(0);
+
+			const unknownColumn = qualityEngine.analyze(
+				`SELECT BAD_COL_THAT_DOES_NOT_EXIST FROM ${qualifiedTable}`,
+			);
+			expect(
+				unknownColumn.parserResult.errors.some((error) => error.code === 'SQL004'),
+			).toBe(true);
+
+			const typeMismatch = qualityEngine.analyze(
+				`SELECT id FROM ${qualifiedTable} WHERE id = 'not-a-number'`,
+			);
+			expect(
+				typeMismatch.parserResult.warnings.some((warning) => warning.code === 'SQL025')
+					|| typeMismatch.issues.some((issue) => issue.ruleId === 'SQL025'),
+			).toBe(true);
+		}, 120000);
+	});
 });
+
+function createDocumentWithCursor(sqlWithCursor: string): {
+	document: TextDocument;
+	cursorOffset: number;
+} {
+	const cursorOffset = sqlWithCursor.indexOf('|');
+	if (cursorOffset < 0) {
+		throw new Error('Missing cursor marker "|"');
+	}
+
+	const sql = `${sqlWithCursor.slice(0, cursorOffset)}${sqlWithCursor.slice(cursorOffset + 1)}`;
+	return {
+		document: TextDocument.create('file:///mssql-live-completion.sql', 'mssql', 1, sql),
+		cursorOffset,
+	};
+}
+
+function completionLabels(items: { label: string }[]): string[] {
+	return items
+		.map((item) => item.label)
+		.filter((label) => label !== '* (Expand Columns)');
+}
+
+class LiveMsSqlCompletionMetadataProvider implements CompletionMetadataProvider {
+	public readonly lookupRequests: Array<{
+		database: string;
+		table: string;
+		schema?: string;
+	}> = [];
+
+	public constructor(
+		private readonly connection: MsSqlConnection,
+		private readonly database: string,
+		private readonly schema: string,
+	) {}
+
+	public async getContext(_documentUri: string): Promise<{
+		effectiveDatabase?: string;
+		effectiveSchema?: string;
+		databaseKind?: 'mssql';
+	}> {
+		return {
+			effectiveDatabase: this.database,
+			effectiveSchema: this.schema,
+			databaseKind: 'mssql',
+		};
+	}
+
+	public async getDatabases(_documentUri: string): Promise<MetadataObjectItem[]> {
+		return [{ name: this.database, detail: 'Database' }];
+	}
+
+	public async getSchemas(
+		_documentUri: string,
+		_database: string,
+	): Promise<MetadataObjectItem[]> {
+		return [{ name: this.schema, detail: 'Schema' }];
+	}
+
+	public async getTables(
+		_documentUri: string,
+		_database: string,
+		schema?: string,
+	): Promise<MetadataObjectItem[]> {
+		const rows = await readRows(
+			this.connection,
+			mssqlMetadataProvider.buildListTablesQuery(this.database, schema ?? this.schema),
+		);
+		const tables: MetadataObjectItem[] = [];
+		for (const row of rows) {
+			const name = row.OBJNAME;
+			if (typeof name === 'string' && name.trim().length > 0) {
+				tables.push({ name: name.trim(), detail: 'Table' });
+			}
+		}
+		return tables;
+	}
+
+	public async getViews(
+		_documentUri: string,
+		_database: string,
+		schema?: string,
+	): Promise<MetadataObjectItem[]> {
+		const rows = await readRows(
+			this.connection,
+			mssqlMetadataProvider.buildListViewsQuery(this.database, schema ?? this.schema),
+		);
+		const views: MetadataObjectItem[] = [];
+		for (const row of rows) {
+			const name = row.OBJNAME;
+			if (typeof name === 'string' && name.trim().length > 0) {
+				views.push({ name: name.trim(), detail: 'View' });
+			}
+		}
+		return views;
+	}
+
+	public async getProcedures(
+		_documentUri: string,
+		_database: string,
+		schema?: string,
+	): Promise<MetadataObjectItem[]> {
+		const rows = await readRows(
+			this.connection,
+			mssqlMetadataProvider.buildListProceduresQuery(this.database, schema ?? this.schema),
+		);
+		const procedures: MetadataObjectItem[] = [];
+		for (const row of rows) {
+			const name = row.OBJNAME;
+			if (typeof name === 'string' && name.trim().length > 0) {
+				procedures.push({ name: name.trim(), detail: 'Procedure' });
+			}
+		}
+		return procedures;
+	}
+
+	public async getColumns(
+		_documentUri: string,
+		database: string,
+		table: string,
+		schema?: string,
+	): Promise<MetadataColumnItem[]> {
+		this.lookupRequests.push({ database, table, schema });
+		const rows = await readRows(
+			this.connection,
+			mssqlMetadataProvider.buildTableColumnsQuery(
+				this.database,
+				schema ?? this.schema,
+				table,
+			),
+		);
+
+		const columns: MetadataColumnItem[] = [];
+		for (const row of rows) {
+			const name = row.ATTNAME;
+			if (typeof name !== 'string' || name.trim().length === 0) {
+				continue;
+			}
+			const type = row.FORMAT_TYPE;
+			columns.push({
+				name: name.trim(),
+				type: typeof type === 'string' && type.trim().length > 0 ? type : 'NVARCHAR',
+			});
+		}
+		return columns;
+	}
+}
+
+async function buildLiveMsSqlSchemaProvider(
+	connection: MsSqlConnection,
+	config: DatabaseConnectionConfig,
+	schemaName: string,
+	tableName: string,
+): Promise<InMemorySchemaProvider> {
+	const columns = await mssqlDialect.advancedFeatures!.ddl!.getColumns(
+		connection,
+		config.database,
+		schemaName,
+		tableName,
+	);
+	const schemaProvider = new InMemorySchemaProvider(true);
+	schemaProvider.addTable({
+		name: tableName,
+		database: config.database,
+		schema: schemaName,
+		isCte: false,
+		isTempTable: false,
+		columns: columns.map((column) => ({
+			name: column.name,
+			dataType: column.fullTypeName,
+		})),
+	});
+	return schemaProvider;
+}

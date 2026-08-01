@@ -27,11 +27,13 @@ const ORACLE_PROGRAM_TOKENS: TokenType[] = [
     baseLexer.Begin,
     baseLexer.End,
     baseLexer.Exception,
+    baseLexer.Case,
     baseLexer.When,
     baseLexer.Others,
     baseLexer.Then,
     baseLexer.Else,
     baseLexer.If,
+    baseLexer.Elsif,
     baseLexer.Return,
     baseLexer.Returns,
     baseLexer.As,
@@ -52,6 +54,20 @@ const ORACLE_PROGRAM_TOKENS: TokenType[] = [
     baseLexer.Call,
     baseLexer.Execute,
     baseLexer.Immediate,
+    baseLexer.Commit,
+    baseLexer.Rollback,
+    baseLexer.Exit,
+    baseLexer.Raise,
+    baseLexer.Notice,
+    baseLexer.Debug,
+    baseLexer.Warning,
+    baseLexer.Error,
+    baseLexer.Perform,
+    baseLexer.Reverse,
+    baseLexer.Out,
+    baseLexer.Inout,
+    baseLexer.Sqlstate,
+    baseLexer.Using,
     baseLexer.Is,
     baseLexer.Null,
     baseLexer.And,
@@ -143,11 +159,6 @@ export class OracleSqlParser extends NetezzaSqlParser {
                 ALT: () => this.SUBRULE(this.createProcedureStatement),
             },
             {
-                GATE: () => this.LA(1).tokenType === baseLexer.Declare
-                    || this.LA(1).tokenType === baseLexer.Begin,
-                ALT: () => this.SUBRULE(this.oracleAnonymousBlock),
-            },
-            {
                 GATE: () => this.startsOraclePackage(),
                 ALT: () => this.SUBRULE(this.oraclePackageUnit),
             },
@@ -204,6 +215,55 @@ export class OracleSqlParser extends NetezzaSqlParser {
     protected registerDialectExtensions(): void {
         this.RULE('oracleProgramToken', () => {
             this.OR(this.getTokenAlternatives(ORACLE_PROGRAM_TOKENS));
+        });
+
+        // Standalone PL/SQL anonymous blocks (BEGIN...END / DECLARE...BEGIN...END)
+        // are parsed as a thin, acyclic token-soup unit. Making this rule (which the
+        // shared `statement` OR reaches via `beginStatement`) structurally deep or
+        // cyclic forces Chevrotain's self-analysis to blow up (40s+). CREATE
+        // PROCEDURE/FUNCTION/PACKAGE/TRIGGER bodies still use the structured
+        // `oracleAnonymousBlock` below (reached after an explicit header, so it stays cheap).
+        this.OVERRIDE_RULE('beginStatement', () => {
+            let nestedBeginDepth = 0;
+
+            this.OPTION({
+                GATE: () => this.LA(1).tokenType === baseLexer.Declare,
+                DEF: () => {
+                    this.CONSUME(baseLexer.Declare);
+                    this.MANY({
+                        GATE: () => this.LA(1).tokenType !== baseLexer.Begin,
+                        DEF: () => this.SUBRULE(this.oracleProgramToken),
+                    });
+                },
+            });
+            this.CONSUME(baseLexer.Begin);
+            this.MANY1({
+                GATE: () => nestedBeginDepth > 0
+                    || (this.LA(1).tokenType !== baseLexer.Exception
+                        && !this.isOracleOuterBlockEnd()),
+                DEF: () => {
+                    if (this.LA(1).tokenType === baseLexer.Begin) {
+                        nestedBeginDepth += 1;
+                    } else if (
+                        this.LA(1).tokenType === baseLexer.End
+                        && nestedBeginDepth > 0
+                    ) {
+                        nestedBeginDepth -= 1;
+                    }
+                    this.SUBRULE1(this.oracleProgramToken);
+                },
+            });
+            this.OPTION1({
+                GATE: () => this.LA(1).tokenType === baseLexer.Exception,
+                DEF: () => {
+                    this.CONSUME(baseLexer.Exception);
+                    this.MANY2({
+                        GATE: () => this.LA(1).tokenType !== baseLexer.End,
+                        DEF: () => this.SUBRULE2(this.oracleProgramToken),
+                    });
+                },
+            });
+            this.CONSUME(baseLexer.End);
         });
 
         this.RULE('oracleProgramTokenSequence', () => {

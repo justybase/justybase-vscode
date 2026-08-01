@@ -2507,6 +2507,14 @@
         "injectTo": [
           "source.sql"
         ]
+      },
+      {
+        "path": "./dialects/mssql/syntaxes/mssql.tmLanguage.json",
+        "scopeName": "mssql.injection",
+        "injectTo": [
+          "source.sql",
+          "source.tsql"
+        ]
       }
     ],
     "colors": [
@@ -3392,6 +3400,10 @@
       {
         "language": "sql",
         "path": "./dialects/db2/snippets/db2.code-snippets"
+      },
+      {
+        "language": "sql",
+        "path": "./dialects/mssql/snippets/mssql.code-snippets"
       }
     ],
     "walkthroughs": [
@@ -4195,6 +4207,7 @@
     "db2:verify-live-fixture": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-live-fixture/verify.ts",
     "test:metadata-cache:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand src/__tests__/integration/metadataCacheRestart.integration.test.ts",
     "test:oracle:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/oracle.integration.test.ts",
+    "test:mssql:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/mssql.integration.test.ts",
     "test:postgres:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/postgres.integration.test.ts",
     "test:snowflake:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/snowflake.integration.test.ts",
     "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",

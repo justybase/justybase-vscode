@@ -13,16 +13,31 @@ This extension adds the `MSSQL` dialect to Netezza SQL Tools (justybase) and int
 ## What This Extension Adds
 
 - Microsoft SQL Server connection type in the shared login panel
-- MSSQL runtime integration via the `mssql` package
+- MSSQL runtime integration via the `mssql` package with **streaming** result readers and cancel
 - Metadata queries for databases, schemas, tables, views, procedures, functions, and column lookup
-- MSSQL SQL authoring profile and dialect registration
+- Dedicated Chevrotain T-SQL parsing runtime (`MSSQL_SQL_PARSING_RUNTIME`) and **MSS001–MSS008** quality rules
+- TextMate injection + snippets for TOP / OFFSET FETCH / APPLY / TRY CATCH
 - DDL generation for tables and supporting object types where available
+
+## Live integration tests
+
+From the repository root, with a reachable SQL Server:
+
+```bash
+export MSSQL_LIVE_TEST_HOST=...
+export MSSQL_LIVE_TEST_PORT=1433
+export MSSQL_LIVE_TEST_DATABASE=...
+export MSSQL_LIVE_TEST_USER=...
+export MSSQL_LIVE_TEST_PASSWORD=...
+npm run install:mssql
+npm run test:mssql:integration
+```
 
 ## Current Runtime Notes
 
 - SQL Server authentication and connection options are provided through the shared connection form.
 - Schema browsing focuses on user databases and catalog objects that are safe to expose in the explorer.
-- The optional package exposes DDL and authoring features, but other database-specific workflows remain intentionally conservative.
+- Large query results stream row-by-row (`request.stream`); `cancel()` aborts the active request without discarding the pool.
 
 ## Installation Order
 
