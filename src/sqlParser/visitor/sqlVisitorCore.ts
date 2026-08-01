@@ -1,7 +1,7 @@
 import { CstNode, type IToken } from "chevrotain";
 import type { SqlParser } from "../parser";
 import { getDatabaseSqlAuthoring } from "../../core/sqlAuthoringRegistry";
-import { resolveSqlParsingRuntime } from "../parsingRuntime";
+import { parseSqlStatements, resolveSqlParsingRuntime } from "../parsingRuntime";
 import { ScopeBuilder } from "./scopeBuilder";
 import type {
   Scope,
@@ -793,7 +793,100 @@ export class SqlVisitor
   }
 
   beginStatement(ctx: Record<string, CstNode[]>): void {
-    commandVisitor.visitCommandTail(this, ctx);
+    if (resolveSqlParsingRuntime({ validationProfile: this.validationProfile }).id !== 'oracle') {
+      commandVisitor.visitCommandTail(this, ctx);
+      return;
+    }
+
+    const tokens: IToken[] = [];
+    const collectTokens = (value: unknown): void => {
+      if (this.isToken(value)) {
+        tokens.push(value);
+        return;
+      }
+      if (!this.isCstNode(value)) return;
+      Object.values(value.children ?? {}).forEach((children) => {
+        children.forEach((child) => collectTokens(child));
+      });
+    };
+    Object.values(ctx).forEach((children) => {
+      (children as unknown[]).forEach((child) => collectTokens(child));
+    });
+    tokens.sort((left, right) => (left.startOffset ?? 0) - (right.startOffset ?? 0));
+
+    const existingScope = this.getProcedureScope();
+    const scope = existingScope ?? new ProcedureScopeBuilder();
+    const previousContext = this.getInProcedureContext();
+    if (!existingScope) {
+      this.setInProcedureContext(true);
+      this.getScopeBuilder().enterScope();
+      this.setProcedureScope(scope);
+    }
+
+    try {
+      procedureVisitor.registerOracleDeclarationTokens(scope, tokens);
+      const beginIndex = tokens.findIndex((token) => token.image?.toUpperCase() === 'BEGIN');
+      procedureVisitor.scanOracleBlockTokens(
+        scope,
+        beginIndex >= 0 ? tokens.slice(beginIndex + 1) : tokens,
+      );
+      this.visitOracleEmbeddedSelects(tokens, beginIndex);
+
+      if (!existingScope) {
+        for (const diagnostic of scope.finalize()) {
+          this.addError(
+            diagnostic.message,
+            diagnostic.token,
+            diagnostic.severity,
+            diagnostic.code,
+          );
+        }
+      }
+    } finally {
+      if (!existingScope) {
+        this.setProcedureScope(null);
+        this.getScopeBuilder().exitScope();
+        this.setInProcedureContext(previousContext);
+      }
+    }
+  }
+
+  private visitOracleEmbeddedSelects(tokens: IToken[], beginIndex: number): void {
+    if (beginIndex < 0) return;
+
+    const runtime = resolveSqlParsingRuntime({
+      validationProfile: this.validationProfile,
+    });
+    for (let index = beginIndex + 1; index < tokens.length; index += 1) {
+      if (tokens[index].image?.toUpperCase() !== 'SELECT') continue;
+
+      const endIndex = tokens.findIndex(
+        (token, candidate) => candidate >= index && token.image === ';',
+      );
+      if (endIndex < 0) break;
+
+      const sql = tokens
+        .slice(index, endIndex + 1)
+        .map((token) => token.image)
+        .join(' ');
+      const parseResult = parseSqlStatements({ sql, runtime });
+      if (parseResult.actionableParserErrors.length > 0 || !parseResult.cst) {
+        index = endIndex;
+        continue;
+      }
+
+      const statement = parseResult.cst.children.statement?.[0];
+      if (statement && this.isCstNode(statement)) {
+        const previousSqlContext = this.getInProcedureSqlContext();
+        this.setInProcedureSqlContext(true);
+        try {
+          this.visit(statement);
+        } finally {
+          this.setInProcedureSqlContext(previousSqlContext);
+        }
+      }
+      index = endIndex;
+    }
   }
 
   variableSetStatement(ctx: Record<string, CstNode[]>): void {

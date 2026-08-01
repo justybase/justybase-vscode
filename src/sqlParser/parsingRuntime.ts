@@ -27,6 +27,12 @@ import {
   createSqlParserInstance as createDb2SqlParserInstance,
   getSqlParserInstance as getDb2SqlParserInstance,
 } from "../dialects/db2/sql/parser";
+import { mssqlSqlAuthoring } from "../../extensions/mssql/src/sql/authoring";
+import { SqlLexer as mssqlSqlLexer } from "../dialects/mssql/sql/lexer";
+import {
+  createSqlParserInstance as createMsSqlSqlParserInstance,
+  getSqlParserInstance as getMsSqlSqlParserInstance,
+} from "../dialects/mssql/sql/parser";
 import type {
   DatabaseSqlAuthoring,
   DatabaseSqlValidationProfile,
@@ -629,6 +635,13 @@ export const DB2_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
   createSqlParserInstance: createDb2SqlParserInstance,
 };
 
+export const MSSQL_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "mssql",
+  SqlLexer: mssqlSqlLexer,
+  getSqlParserInstance: getMsSqlSqlParserInstance,
+  createSqlParserInstance: createMsSqlSqlParserInstance,
+};
+
 const runtimeByKind = new Map<DatabaseKind, SqlParsingRuntime>();
 const runtimeByAuthoring = new WeakMap<object, SqlParsingRuntime>();
 const runtimeByValidationProfile = new WeakMap<object, SqlParsingRuntime>();
@@ -675,6 +688,13 @@ registerSqlParsingRuntime({
   kind: "db2",
   authoring: db2SqlAuthoring,
   validationProfile: db2SqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: MSSQL_SQL_PARSING_RUNTIME,
+  kind: "mssql",
+  authoring: mssqlSqlAuthoring,
+  validationProfile: mssqlSqlAuthoring.validation,
 });
 
 function resolveDatabaseKind(

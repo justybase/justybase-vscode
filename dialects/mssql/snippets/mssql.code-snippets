@@ -1,0 +1,66 @@
+{
+  "SELECT TOP n": {
+    "prefix": "mssql-top",
+    "body": [
+      "SELECT TOP (${1:10}) ${2:*}",
+      "FROM ${3:dbo}.${4:table}",
+      "ORDER BY ${5:id};"
+    ],
+    "description": "T-SQL SELECT TOP with ORDER BY"
+  },
+  "OFFSET FETCH": {
+    "prefix": "mssql-offset-fetch",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM ${2:dbo}.${3:table}",
+      "ORDER BY ${4:id}",
+      "OFFSET ${5:0} ROWS FETCH NEXT ${6:25} ROWS ONLY;"
+    ],
+    "description": "T-SQL OFFSET/FETCH pagination"
+  },
+  "CROSS APPLY": {
+    "prefix": "mssql-cross-apply",
+    "body": [
+      "SELECT t.${1:id}, x.${2:value}",
+      "FROM ${3:dbo}.${4:table} AS t",
+      "CROSS APPLY (${5:SELECT 1 AS value}) AS x;"
+    ],
+    "description": "T-SQL CROSS APPLY"
+  },
+  "MERGE INTO": {
+    "prefix": "mssql-merge",
+    "body": [
+      "MERGE INTO ${1:dbo.target} AS T",
+      "USING ${2:dbo.source} AS S",
+      "ON (T.${3:key} = S.${3:key})",
+      "WHEN MATCHED THEN UPDATE SET T.${4:col} = S.${4:col}",
+      "WHEN NOT MATCHED THEN INSERT (${5:cols}) VALUES (S.${5:cols});"
+    ],
+    "description": "T-SQL MERGE statement"
+  },
+  "BEGIN TRY CATCH": {
+    "prefix": "mssql-try-catch",
+    "body": [
+      "BEGIN TRY",
+      "  ${1:SELECT 1;}",
+      "END TRY",
+      "BEGIN CATCH",
+      "  ${2:THROW;}",
+      "END CATCH;"
+    ],
+    "description": "T-SQL TRY/CATCH block"
+  },
+  "CREATE PROCEDURE": {
+    "prefix": "mssql-procedure",
+    "body": [
+      "CREATE PROCEDURE ${1:dbo}.${2:proc_name}",
+      "  @${3:p_in} INT",
+      "AS",
+      "BEGIN",
+      "  SET NOCOUNT ON;",
+      "  ${4:SELECT @p_in AS result;}",
+      "END"
+    ],
+    "description": "T-SQL stored procedure skeleton"
+  }
+}

@@ -39,6 +39,17 @@ describe('Oracle SQL validator', () => {
     );
   });
 
+  it('does not report SELECT INTO targets as unused variables', () => {
+    const result = new SqlValidator(undefined, oracleSqlAuthoring.validation).validate(`
+      DECLARE
+        v_count NUMBER;
+      BEGIN
+        SELECT 1 INTO v_count FROM dual;
+      END;
+    `);
+    expect(result.warnings.map((warning) => warning.code)).not.toContain('SQL039');
+  });
+
   it('checks Oracle function returns and OUT parameter assignment', () => {
     const result = new SqlValidator(undefined, oracleSqlAuthoring.validation).validate(`
       CREATE OR REPLACE FUNCTION missing_return RETURN NUMBER IS

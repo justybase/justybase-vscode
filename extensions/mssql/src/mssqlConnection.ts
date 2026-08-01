@@ -1,6 +1,10 @@
 import { EventEmitter } from "events";
 import { createRequire } from "node:module";
-import type { ConnectionPool, IRecordSet, Request, config as SqlConfig } from "mssql";
+import type {
+  ConnectionPool,
+  IColumnMetadata,
+  config as SqlConfig,
+} from "mssql";
 import type {
   DatabaseCommand,
   DatabaseConnection,
@@ -38,7 +42,28 @@ interface MsSqlExecutionResult {
 type MsSqlModule = typeof import("mssql");
 type MsSqlRecord = Record<string, unknown>;
 
+/** Controllable streaming request surface used by production and unit tests. */
+export interface MsSqlStreamRequest {
+  stream: boolean;
+  cancel(): void;
+  pause(): boolean;
+  resume(): boolean;
+  query(command: string): Promise<unknown>;
+  on(event: "recordset", listener: (columns: Record<string, IColumnMetadata>) => void): this;
+  on(event: "row", listener: (row: MsSqlRecord) => void): this;
+  on(event: "error", listener: (error: Error) => void): this;
+  on(event: "done", listener: (result: { rowsAffected: number[] }) => void): this;
+  removeAllListeners(event?: string): this;
+}
+
+type StreamQueueItem =
+  | { kind: "recordset"; columns: MsSqlColumnDefinition[] }
+  | { kind: "row"; values: unknown[] }
+  | { kind: "error"; error: Error }
+  | { kind: "done"; rowsAffected: number };
+
 const DROP_SESSION_QUERY = /^DROP\s+SESSION\s+(\d+)\s*$/i;
+const DEFAULT_STREAM_HIGH_WATER = 256;
 
 const _extensionRequire = createRequire(__filename);
 let _mssqlModulePromise: Promise<MsSqlModule> | undefined;
@@ -88,6 +113,34 @@ function getTypeName(typeId: unknown): string {
   return String(typeId || "unknown");
 }
 
+function columnTypeName(meta: IColumnMetadata): string {
+  const type = meta.type;
+  if (typeof type === "function") {
+    try {
+      return getTypeName(type()?.name);
+    } catch {
+      return "unknown";
+    }
+  }
+  return getTypeName(type?.name);
+}
+
+function columnsFromMetadata(
+  columns: Record<string, IColumnMetadata>,
+): MsSqlColumnDefinition[] {
+  return Object.keys(columns).map((name) => ({
+    name,
+    typeName: columnTypeName(columns[name]),
+  }));
+}
+
+function rowToValues(
+  row: MsSqlRecord,
+  columns: readonly MsSqlColumnDefinition[],
+): unknown[] {
+  return columns.map((column) => row[column.name]);
+}
+
 async function loadMsSql(): Promise<MsSqlModule> {
   if (!_mssqlModulePromise) {
     _mssqlModulePromise = Promise.resolve()
@@ -105,7 +158,77 @@ async function loadMsSql(): Promise<MsSqlModule> {
   return _mssqlModulePromise;
 }
 
-class MsSqlDataReader implements DatabaseDataReader {
+/**
+ * Bounded async queue with pause/resume backpressure for node-mssql streaming.
+ * Exported for unit tests.
+ */
+export class MsSqlStreamQueue {
+  private readonly _items: StreamQueueItem[] = [];
+  private _waiters: Array<(item: StreamQueueItem | undefined) => void> = [];
+  private _closed = false;
+  private _paused = false;
+
+  public constructor(
+    private readonly _highWater: number,
+    private readonly _onPause: () => void,
+    private readonly _onResume: () => void,
+  ) {}
+
+  public get length(): number {
+    return this._items.length;
+  }
+
+  public push(item: StreamQueueItem): void {
+    if (this._closed) {
+      return;
+    }
+
+    const waiter = this._waiters.shift();
+    if (waiter) {
+      waiter(item);
+      return;
+    }
+
+    this._items.push(item);
+    if (!this._paused && this._items.length >= this._highWater) {
+      this._paused = true;
+      this._onPause();
+    }
+  }
+
+  public async take(): Promise<StreamQueueItem | undefined> {
+    if (this._items.length > 0) {
+      const item = this._items.shift();
+      if (this._paused && this._items.length <= this._highWater / 2) {
+        this._paused = false;
+        this._onResume();
+      }
+      return item;
+    }
+
+    if (this._closed) {
+      return undefined;
+    }
+
+    return await new Promise<StreamQueueItem | undefined>((resolve) => {
+      this._waiters.push(resolve);
+    });
+  }
+
+  public close(): void {
+    if (this._closed) {
+      return;
+    }
+
+    this._closed = true;
+    const waiters = this._waiters.splice(0);
+    for (const waiter of waiters) {
+      waiter(undefined);
+    }
+  }
+}
+
+class MsSqlBufferedDataReader implements DatabaseDataReader {
   private _resultSetIndex = 0;
   private _rowIndex = -1;
 
@@ -162,6 +285,176 @@ class MsSqlDataReader implements DatabaseDataReader {
   }
 }
 
+/**
+ * Streaming reader over node-mssql request events. Exported for unit tests.
+ */
+export class MsSqlStreamingDataReader implements DatabaseDataReader {
+  private _columns: MsSqlColumnDefinition[] = [];
+  private _currentRow: unknown[] | undefined;
+  private _closed = false;
+  private _aborted = false;
+  private _done = false;
+  private _pendingResultSets: MsSqlColumnDefinition[][] = [];
+  private _rowsAffected = -1;
+
+  public constructor(
+    private readonly _queue: MsSqlStreamQueue,
+    private readonly _isCommandCancelled: () => boolean,
+    private readonly _onClose: () => void,
+    private readonly _request: MsSqlStreamRequest | undefined,
+    initialColumns?: readonly MsSqlColumnDefinition[],
+  ) {
+    if (initialColumns) {
+      this._columns = [...initialColumns];
+    }
+  }
+
+  public get fieldCount(): number {
+    return this._columns.length;
+  }
+
+  public get rowsAffected(): number {
+    return this._rowsAffected;
+  }
+
+  public async read(): Promise<boolean> {
+    if (this._closed || this._aborted || this._isCommandCancelled()) {
+      this._currentRow = undefined;
+      await this.close();
+      return false;
+    }
+
+    while (true) {
+      const item = await this._queue.take();
+      if (
+        this._closed ||
+        this._aborted ||
+        this._isCommandCancelled() ||
+        item === undefined
+      ) {
+        this._currentRow = undefined;
+        await this.close();
+        return false;
+      }
+
+      if (item.kind === "error") {
+        this._currentRow = undefined;
+        await this.close();
+        if (this._aborted || this._isCommandCancelled()) {
+          return false;
+        }
+        throw normalizeQueryError(item.error, false);
+      }
+
+      if (item.kind === "done") {
+        this._rowsAffected = item.rowsAffected;
+        this._done = true;
+        this._currentRow = undefined;
+        await this.close();
+        return false;
+      }
+
+      if (item.kind === "recordset") {
+        // Extra result sets are consumed via nextResult(); stash and stop current set.
+        this._pendingResultSets.push(item.columns);
+        this._currentRow = undefined;
+        return false;
+      }
+
+      this._currentRow = item.values;
+      return true;
+    }
+  }
+
+  public async nextResult(): Promise<boolean> {
+    if (this._closed || this._aborted || this._isCommandCancelled()) {
+      return false;
+    }
+
+    if (this._pendingResultSets.length > 0) {
+      this._columns = this._pendingResultSets.shift()!;
+      this._currentRow = undefined;
+      return true;
+    }
+
+    // Drain remaining rows of the current set until the next recordset or done.
+    while (true) {
+      const item = await this._queue.take();
+      if (
+        this._closed ||
+        this._aborted ||
+        this._isCommandCancelled() ||
+        item === undefined
+      ) {
+        await this.close();
+        return false;
+      }
+
+      if (item.kind === "error") {
+        await this.close();
+        if (this._aborted || this._isCommandCancelled()) {
+          return false;
+        }
+        throw normalizeQueryError(item.error, false);
+      }
+
+      if (item.kind === "done") {
+        this._rowsAffected = item.rowsAffected;
+        this._done = true;
+        await this.close();
+        return false;
+      }
+
+      if (item.kind === "recordset") {
+        this._columns = item.columns;
+        this._currentRow = undefined;
+        return true;
+      }
+
+      // Skip leftover rows from the previous result set.
+    }
+  }
+
+  public async close(): Promise<void> {
+    if (this._closed) {
+      return;
+    }
+
+    this._closed = true;
+    this._queue.close();
+    if (this._request) {
+      try {
+        this._request.cancel();
+      } catch {
+        /* ignore */
+      }
+    }
+    this._onClose();
+  }
+
+  public async abort(): Promise<void> {
+    this._aborted = true;
+    this._currentRow = undefined;
+    await this.close();
+  }
+
+  public getName(index: number): string {
+    return this._columns[index]?.name ?? "";
+  }
+
+  public getTypeName(index: number): string {
+    return this._columns[index]?.typeName ?? "";
+  }
+
+  public getValue(index: number): unknown {
+    return this._currentRow?.[index];
+  }
+
+  public get isDone(): boolean {
+    return this._done;
+  }
+}
+
 export class MsSqlConnection
   extends EventEmitter
   implements DatabaseConnection
@@ -172,6 +465,8 @@ export class MsSqlConnection
   private _currentSchema?: string;
   private _activeCommand?: MsSqlCommand;
   private readonly _clientConfig: SqlConfig;
+  /** Optional factory for unit tests (inject mock stream requests). */
+  public createStreamRequest?: () => MsSqlStreamRequest;
 
   public constructor(public readonly config: DatabaseConnectionConfig) {
     super();
@@ -246,6 +541,14 @@ export class MsSqlConnection
     return this._pool;
   }
 
+  public createNativeStreamRequest(): MsSqlStreamRequest {
+    if (this.createStreamRequest) {
+      return this.createStreamRequest();
+    }
+
+    return this.getPool().request() as unknown as MsSqlStreamRequest;
+  }
+
   public getCurrentDatabaseName(): string {
     return this.config.database;
   }
@@ -313,7 +616,9 @@ export class MsSqlConnection
     try {
       const result = await this.getPool()
         .request()
-        .query<{ CURRENT_SCHEMA: string }>("SELECT SCHEMA_NAME() AS CURRENT_SCHEMA");
+        .query<{ CURRENT_SCHEMA: string }>(
+          "SELECT SCHEMA_NAME() AS CURRENT_SCHEMA",
+        );
       if (result.recordset && result.recordset.length > 0) {
         return result.recordset[0].CURRENT_SCHEMA;
       }
@@ -328,7 +633,9 @@ class MsSqlCommand implements DatabaseCommand {
   public commandTimeout = 0;
   public _recordsAffected = -1;
   private _cancelled = false;
-  private _request?: Request;
+  private _request?: MsSqlStreamRequest;
+  private _activeReader?: MsSqlStreamingDataReader;
+  private _timeoutHandle?: ReturnType<typeof setTimeout>;
 
   public constructor(
     private readonly _connection: MsSqlConnection,
@@ -336,170 +643,220 @@ class MsSqlCommand implements DatabaseCommand {
   ) {}
 
   public async executeReader(): Promise<DatabaseDataReader> {
-    const result = await this.executeInternal();
-    this._recordsAffected = result.recordsAffected;
-    return new MsSqlDataReader(result.resultSets);
+    if (this._cancelled) {
+      throw new Error("Query cancelled.");
+    }
+
+    const trimmedSql = stripTrailingSemicolons(this._sql);
+    if (!trimmedSql) {
+      this._recordsAffected = 0;
+      return new MsSqlBufferedDataReader([{ columns: [], rows: [] }]);
+    }
+
+    this._connection.beginCommand(this);
+    try {
+      const compatibilityResult =
+        await this.tryExecuteCompatibilityCommand(trimmedSql);
+      if (compatibilityResult) {
+        this._recordsAffected = compatibilityResult.recordsAffected;
+        this._connection.endCommand(this);
+        return new MsSqlBufferedDataReader(compatibilityResult.resultSets);
+      }
+
+      return await this.executeStreamingReader(trimmedSql);
+    } catch (error) {
+      this._connection.endCommand(this);
+      throw normalizeQueryError(error, this._cancelled);
+    }
   }
 
   public async cancel(): Promise<void> {
     this._cancelled = true;
     if (this._request) {
-      this._request.cancel();
+      try {
+        this._request.cancel();
+      } catch {
+        /* ignore */
+      }
     }
+    await this._activeReader?.abort();
   }
 
   public async execute(): Promise<void> {
     const reader = await this.executeReader();
-    await reader.close();
-  }
-
-  private async executeInternal(): Promise<MsSqlExecutionResult> {
-    const trimmedSql = stripTrailingSemicolons(this._sql);
-    if (!trimmedSql) {
-      return {
-        resultSets: [{ columns: [], rows: [] }],
-        recordsAffected: 0,
-      };
-    }
-
-    if (this._cancelled) {
-      throw new Error("Query cancelled.");
-    }
-
-    this._connection.beginCommand(this);
     try {
-      return await this.runWithTimeout(async () => {
-        const compatibilityResult =
-          await this.tryExecuteCompatibilityCommand(trimmedSql);
-        if (compatibilityResult) {
-          return compatibilityResult;
+      while (await reader.read()) {
+        // Drain rows for non-query side effects / DML.
+      }
+      while (await reader.nextResult()) {
+        while (await reader.read()) {
+          // Drain additional result sets.
         }
-
-        await loadMsSql();
-        this._request = this._connection.getPool().request();
-
-        const rawResult = await this._request.query<MsSqlRecord>(trimmedSql);
-
-        const resultSets: MsSqlResultSet[] = [];
-        const recordsetsArray: IRecordSet<MsSqlRecord>[] = Array.isArray(rawResult.recordsets)
-          ? rawResult.recordsets
-          : rawResult.recordsets
-            ? Object.values(rawResult.recordsets) as IRecordSet<MsSqlRecord>[]
-            : [];
-
-        for (const rs of recordsetsArray) {
-          const cols = Object.keys(rs[0] || {}).map((k) => ({
-            name: k,
-            typeName: "Unknown",
-          }));
-
-          const columnsDefinition: MsSqlColumnDefinition[] = [];
-          const castedRs = rs as {
-            columns?: Record<string, { type?: { name?: string } }>;
-          };
-          if (castedRs.columns) {
-            for (const key of Object.keys(castedRs.columns)) {
-              columnsDefinition.push({
-                name: key,
-                typeName: getTypeName(castedRs.columns[key].type?.name),
-              });
-            }
-          } else {
-            columnsDefinition.push(...cols);
-          }
-
-          const rows = rs.map((row) => {
-            return columnsDefinition.map((col) => row[col.name]);
-          });
-
-          resultSets.push({
-            columns: columnsDefinition,
-            rows,
-          });
-        }
-
-        if (resultSets.length === 0 && rawResult.recordset) {
-          const rs = rawResult.recordset;
-          const columnsDefinition: MsSqlColumnDefinition[] = [];
-          const castedRs = rs as {
-            columns?: Record<string, { type?: { name?: string } }>;
-          };
-          if (castedRs.columns) {
-            for (const key of Object.keys(castedRs.columns)) {
-              columnsDefinition.push({
-                name: key,
-                typeName: getTypeName(castedRs.columns[key].type?.name),
-              });
-            }
-          } else {
-            const cols = Object.keys(rs[0] || {}).map((k) => ({
-              name: k,
-              typeName: "Unknown",
-            }));
-            columnsDefinition.push(...cols);
-          }
-
-          const rows = rs.map((row) => {
-            return columnsDefinition.map((col) => row[col.name]);
-          });
-
-          resultSets.push({
-            columns: columnsDefinition,
-            rows,
-          });
-        }
-
-        const recordsAffected = rawResult.rowsAffected
-          ? rawResult.rowsAffected.reduce((a: number, b: number) => a + b, 0)
-          : -1;
-
-        return {
-          resultSets,
-          recordsAffected,
-        };
-      });
-    } catch (error) {
-      throw normalizeQueryError(error, this._cancelled);
+      }
     } finally {
-      this._request = undefined;
-      this._connection.endCommand(this);
+      await reader.close();
     }
   }
 
-  private async runWithTimeout<T>(operation: () => Promise<T>): Promise<T> {
-    if (!(this.commandTimeout > 0)) {
-      return operation();
-    }
+  private async executeStreamingReader(
+    trimmedSql: string,
+  ): Promise<DatabaseDataReader> {
+    await loadMsSql();
+    const request = this._connection.createNativeStreamRequest();
+    this._request = request;
+    request.stream = true;
 
-    return await new Promise<T>((resolve, reject) => {
-      let settled = false;
-      const timeoutHandle = setTimeout(
+    const queue = new MsSqlStreamQueue(
+      DEFAULT_STREAM_HIGH_WATER,
+      () => {
+        try {
+          request.pause();
+        } catch {
+          /* ignore */
+        }
+      },
+      () => {
+        try {
+          request.resume();
+        } catch {
+          /* ignore */
+        }
+      },
+    );
+
+    let currentColumns: MsSqlColumnDefinition[] = [];
+    let settledOpen = false;
+    let openError: Error | undefined;
+    let resolveOpen: ((columns: MsSqlColumnDefinition[] | null) => void) | undefined;
+    let rejectOpen: ((error: Error) => void) | undefined;
+
+    const openPromise = new Promise<MsSqlColumnDefinition[] | null>(
+      (resolve, reject) => {
+        resolveOpen = resolve;
+        rejectOpen = reject;
+      },
+    );
+
+    const finishOpen = (
+      columns: MsSqlColumnDefinition[] | null,
+      error?: Error,
+    ): void => {
+      if (settledOpen) {
+        return;
+      }
+      settledOpen = true;
+      if (error) {
+        openError = error;
+        rejectOpen?.(error);
+        return;
+      }
+      resolveOpen?.(columns);
+    };
+
+    const cleanupRequest = (): void => {
+      if (this._timeoutHandle) {
+        clearTimeout(this._timeoutHandle);
+        this._timeoutHandle = undefined;
+      }
+      try {
+        request.removeAllListeners();
+      } catch {
+        /* ignore */
+      }
+      this._request = undefined;
+      this._activeReader = undefined;
+      this._connection.endCommand(this);
+    };
+
+    request.on("recordset", (columnsMeta) => {
+      const columns = columnsFromMetadata(columnsMeta);
+      currentColumns = columns;
+      // First recordset opens the reader; later sets go through the queue for nextResult().
+      if (!settledOpen) {
+        finishOpen(columns);
+      } else {
+        queue.push({ kind: "recordset", columns });
+      }
+    });
+
+    request.on("row", (row) => {
+      if (this._cancelled) {
+        return;
+      }
+      queue.push({
+        kind: "row",
+        values: rowToValues(row, currentColumns),
+      });
+    });
+
+    request.on("error", (error) => {
+      const normalized = normalizeQueryError(error, this._cancelled);
+      queue.push({ kind: "error", error: normalized });
+      finishOpen(null, normalized);
+      queue.close();
+    });
+
+    request.on("done", (result) => {
+      const rowsAffected = Array.isArray(result?.rowsAffected)
+        ? result.rowsAffected.reduce((a, b) => a + b, 0)
+        : -1;
+      this._recordsAffected = rowsAffected;
+      queue.push({ kind: "done", rowsAffected });
+      finishOpen(currentColumns.length > 0 ? currentColumns : null);
+      queue.close();
+    });
+
+    if (this.commandTimeout > 0) {
+      this._timeoutHandle = setTimeout(
         () => {
           void this.cancel();
-          if (!settled) {
-            settled = true;
-            reject(new Error(`Query timed out after ${this.commandTimeout}s`));
-          }
         },
         Math.round(this.commandTimeout * 1000),
       );
+    }
 
-      operation()
-        .then((result) => {
-          clearTimeout(timeoutHandle);
-          if (!settled) {
-            settled = true;
-            resolve(result);
-          }
-        })
-        .catch((error) => {
-          clearTimeout(timeoutHandle);
-          if (!settled) {
-            settled = true;
-            reject(error);
-          }
-        });
+    // Fire query without awaiting full completion — rows stream via events.
+    void request.query(trimmedSql).catch((error: unknown) => {
+      const normalized = normalizeQueryError(error, this._cancelled);
+      queue.push({ kind: "error", error: normalized });
+      finishOpen(null, normalized);
+      queue.close();
     });
+
+    if (this._cancelled) {
+      try {
+        request.cancel();
+      } catch {
+        /* ignore */
+      }
+      queue.close();
+      cleanupRequest();
+      throw new Error("Query cancelled.");
+    }
+
+    let initialColumns: MsSqlColumnDefinition[] | null;
+    try {
+      initialColumns = await openPromise;
+    } catch (error) {
+      cleanupRequest();
+      throw normalizeQueryError(error, this._cancelled);
+    }
+
+    if (this._cancelled || openError) {
+      cleanupRequest();
+      throw new Error("Query cancelled.");
+    }
+
+    // DML / empty result: still return a reader (possibly empty).
+    const reader = new MsSqlStreamingDataReader(
+      queue,
+      () => this._cancelled,
+      cleanupRequest,
+      request,
+      initialColumns ?? [],
+    );
+    this._activeReader = reader;
+    return reader;
   }
 
   private async tryExecuteCompatibilityCommand(

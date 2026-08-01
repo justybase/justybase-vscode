@@ -467,7 +467,8 @@ export class NetezzaSqlParser extends BaseSqlParser {
     });
   }
 
-  private getNetezzaRelaxedNameTokens() {
+  /** Dialects (e.g. MSSQL bracketed names) may append tokens. */
+  protected getNetezzaRelaxedNameTokens() {
     return [
       Identifier,
       QuotedIdentifier,
@@ -487,7 +488,8 @@ export class NetezzaSqlParser extends BaseSqlParser {
     ];
   }
 
-  private getNetezzaIdentifierTokens() {
+  /** Dialects (e.g. MSSQL bracketed names) may append tokens. */
+  protected getNetezzaIdentifierTokens() {
     return [
       netezzaSqlLexer.Identifier,
       netezzaSqlLexer.QuotedIdentifier,

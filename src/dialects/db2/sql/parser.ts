@@ -255,10 +255,20 @@ export class Db2SqlParser extends NetezzaSqlParser {
 		});
 
 		/**
-		 * Thin SQL PL unit: CREATE … PROCEDURE header tokens, then BEGIN … END.
+		 * Thin SQL PL unit: explicit CREATE … PROCEDURE header, then BEGIN … END.
 		 * Nested BEGIN/END is not modeled yet (phase-4 depth); header stops at BEGIN.
+		 * The explicit header narrows the rule FIRST set to {Create} so the shared
+		 * statement OR stays cheap to self-analyze (catch-all token soups first sets
+		 * overlap every DML alternative and blow up Chevrotain's lookahead analysis).
 		 */
 		this.RULE('db2ProcedureUnit', () => {
+			this.CONSUME(baseLexer.Create);
+			this.OPTION(() => {
+				this.CONSUME(baseLexer.Or);
+				this.CONSUME(baseLexer.Replace);
+			});
+			this.CONSUME(baseLexer.Procedure);
+			this.SUBRULE(this.qualifiedName);
 			this.MANY({
 				GATE: () => this.LA(1).tokenType !== baseLexer.Begin,
 				DEF: () => this.SUBRULE(this.db2ProgramToken),
@@ -269,7 +279,7 @@ export class Db2SqlParser extends NetezzaSqlParser {
 				DEF: () => this.SUBRULE1(this.db2ProgramToken),
 			});
 			this.CONSUME(baseLexer.End);
-			this.OPTION(() => {
+			this.OPTION1(() => {
 				this.OR([
 					{ ALT: () => this.CONSUME(baseLexer.Identifier) },
 					{ ALT: () => this.CONSUME(baseLexer.QuotedIdentifier) },
