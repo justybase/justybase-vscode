@@ -42,6 +42,7 @@ type PgProtocolSerialize = typeof import('pg-protocol')['serialize'];
 const DROP_SESSION_QUERY = /^DROP\s+SESSION\s+(\d+)\s*$/i;
 const COPY_FROM_STDIN_QUERY = /^\s*COPY\b[\s\S]+\bFROM\s+STDIN\b/i;
 const COPY_IMPORT_STREAM_MARKER = /\/\*\s*JBL_IMPORT_STREAM:([A-Za-z0-9._-]+)\s*\*\/$/i;
+const POSTGRES_STREAM_QUEUE_LIMIT = 32;
 
 const _extensionRequire = createRequire(__filename);
 let _pgModulePromise: Promise<PgModule> | undefined;
@@ -72,6 +73,10 @@ interface PgInternalQuery {
     handleEmptyQuery?(connection: PgCopyProtocolConnection): void;
     handleCopyInResponse(connection: PgCopyProtocolConnection): void;
     handleCopyData(msg: unknown, connection: PgCopyProtocolConnection): void;
+    on(event: 'row', listener: (row: unknown, result: unknown) => void): this;
+    on(event: 'end', listener: (results: unknown) => void): this;
+    on(event: 'error', listener: (error: unknown) => void): this;
+    removeListener(event: string, listener: (...args: unknown[]) => void): this;
 }
 
 interface PgClientWithInternalQuery {
@@ -385,6 +390,145 @@ class PostgreSqlDataReader implements DatabaseDataReader {
     }
 }
 
+interface PostgreSqlStreamingResult {
+    columns: PostgreSqlColumnDefinition[];
+    rows: unknown[][];
+    complete: boolean;
+    source: unknown;
+}
+
+/** Reader over pg/lib/query row events; it never asks pg to accumulate rows. */
+export class PostgreSqlStreamingDataReader implements DatabaseDataReader {
+    private readonly resultSets: PostgreSqlStreamingResult[] = [];
+    private readonly waiters: Array<() => void> = [];
+    private resultIndex = 0;
+    private currentRow: unknown[] | undefined;
+    private ended = false;
+    private closed = false;
+    private error: Error | undefined;
+    private closeNotified = false;
+    private cancellationRequired = false;
+
+    public constructor(
+        query: PgInternalQuery,
+        private readonly socket: { pause?: () => void; resume?: () => void } | undefined,
+        private readonly onClose: () => void = () => undefined,
+        private readonly onCancel: () => Promise<void> = async () => undefined,
+    ) {
+        query.on('row', (row, source) => {
+            if (this.closed) return;
+            let result = this.resultSets.find(item => item.source === source);
+            if (!result) {
+                result = { columns: [], rows: [], complete: false, source };
+                this.resultSets.push(result);
+            }
+            const values = Array.isArray(row)
+                ? [...row]
+                : result.columns.map(column => (row as Record<string, unknown>)[column.name]);
+            // The socket pause is the producer-side backpressure boundary. The
+            // queue remains bounded in normal operation; the extra row is kept
+            // only when a synchronous protocol callback crosses that boundary.
+            if (result.rows.length >= POSTGRES_STREAM_QUEUE_LIMIT) this.socket?.pause?.();
+            result.rows.push(values);
+            this.wake();
+        });
+        query.on('end', () => {
+            this.ended = true;
+            this.wake();
+            this.notifyClose();
+        });
+        query.on('error', error => {
+            this.error = normalizeQueryError(error, false);
+            this.ended = true;
+            this.wake();
+            this.notifyClose();
+        });
+    }
+
+    public setFields(fields: readonly FieldDef[], source: unknown, pg: PgModule): void {
+        const result = this.resultSets.find(item => item.source === source);
+        if (result) {
+            result.columns = buildColumnDefinitions(pg, fields);
+        } else {
+            this.resultSets.push({
+                columns: buildColumnDefinitions(pg, fields),
+                rows: [],
+                complete: false,
+                source,
+            });
+        }
+        this.wake();
+    }
+
+    public markComplete(source: unknown): void {
+        const result = this.resultSets.find(item => item.source === source);
+        if (result) result.complete = true;
+        this.wake();
+    }
+
+    public fail(error: unknown, cancellationRequired = false): void {
+        this.error = normalizeQueryError(error, false);
+        this.cancellationRequired ||= cancellationRequired;
+        this.ended = true;
+        this.wake();
+    }
+
+    private wake(): void {
+        for (const waiter of this.waiters.splice(0)) waiter();
+    }
+
+    private notifyClose(): void {
+        if (!this.closeNotified) {
+            this.closeNotified = true;
+            this.onClose();
+        }
+    }
+
+    public get fieldCount(): number { return this.resultSets[this.resultIndex]?.columns.length ?? 0; }
+
+    public async read(): Promise<boolean> {
+        if (this.closed) return false;
+        while (!this.closed) {
+            if (this.error) throw this.error;
+            const result = this.resultSets[this.resultIndex];
+            if (result?.rows.length) {
+                this.currentRow = result.rows.shift();
+                if (result.rows.length < POSTGRES_STREAM_QUEUE_LIMIT) this.socket?.resume?.();
+                return true;
+            }
+            if (result?.complete || this.ended) {
+                this.currentRow = undefined;
+                return false;
+            }
+            await new Promise<void>(resolve => this.waiters.push(resolve));
+        }
+        return false;
+    }
+
+    public async nextResult(): Promise<boolean> {
+        while (!this.ended && this.resultIndex + 1 >= this.resultSets.length) {
+            await new Promise<void>(resolve => this.waiters.push(resolve));
+        }
+        if (this.resultIndex + 1 >= this.resultSets.length) return false;
+        this.resultIndex += 1;
+        this.currentRow = undefined;
+        return true;
+    }
+
+    public async close(): Promise<void> {
+        if (this.closed) return;
+        this.closed = true;
+        this.currentRow = undefined;
+        if (!this.ended || this.cancellationRequired) await this.onCancel();
+        this.wake();
+        this.notifyClose();
+    }
+
+    public getName(index: number): string { return this.resultSets[this.resultIndex]?.columns[index]?.name ?? ''; }
+    public getTypeName(index: number): string { return this.resultSets[this.resultIndex]?.columns[index]?.typeName ?? ''; }
+    public getValue(index: number): unknown { return this.currentRow?.[index]; }
+}
+
 export class PostgreSqlConnection extends EventEmitter implements DatabaseConnection {
     private static readonly _importStreams = new Map<string, Readable>();
     public _connected = false;
@@ -632,6 +776,10 @@ class PostgreSqlCommand implements DatabaseCommand {
     ) {}
 
     public async executeReader(): Promise<DatabaseDataReader> {
+        const trimmedSql = stripTrailingSemicolons(this._sql);
+        if (trimmedSql && !this.isBufferedCommand(trimmedSql) && !this._cancelled) {
+            return await this.executeStreaming(trimmedSql);
+        }
         const result = await this.executeInternal();
         this._recordsAffected = result.recordsAffected;
         return new PostgreSqlDataReader(result.resultSets);
@@ -645,23 +793,114 @@ class PostgreSqlCommand implements DatabaseCommand {
             return;
         }
 
-        const backendPid = await this._connection.ensureBackendPid();
-        if (backendPid === undefined) {
-            return;
-        }
-
-        this._cancelInFlightPromise = this._connection.cancelBackend(backendPid)
-            .then(() => undefined, () => undefined)
-            .finally(() => {
+        const cancellation = (async (): Promise<void> => {
+            const backendPid = await this._connection.ensureBackendPid();
+            if (backendPid === undefined) return;
+            await this._connection.cancelBackend(backendPid).then(
+                () => undefined,
+                () => undefined,
+            );
+        })();
+        const trackedCancellation = cancellation.finally(() => {
+            if (this._cancelInFlightPromise === trackedCancellation) {
                 this._cancelInFlightPromise = undefined;
-            });
-
-        await this._cancelInFlightPromise;
+            }
+        });
+        this._cancelInFlightPromise = trackedCancellation;
+        await trackedCancellation;
     }
 
     public async execute(): Promise<void> {
         const reader = await this.executeReader();
-        await reader.close();
+        try {
+            do {
+                while (await reader.read()) {
+                    // Consume the stream so execute() has the same completion
+                    // semantics as the previous buffered implementation.
+                }
+            } while (await reader.nextResult());
+        } finally {
+            await reader.close();
+        }
+    }
+
+    private isBufferedCommand(sql: string): boolean {
+        return resolveCopyImportRequest(sql) !== undefined
+            || CURRENT_CATALOG_AND_SCHEMA_QUERY.test(sql)
+            || CURRENT_CATALOG_QUERY.test(sql)
+            || CURRENT_SCHEMA_QUERY.test(sql)
+            || CURRENT_SID_QUERY.test(sql)
+            || DROP_SESSION_QUERY.test(sql)
+            || SET_CATALOG_QUERY.test(sql);
+    }
+
+    private async executeStreaming(sql: string): Promise<DatabaseDataReader> {
+        this._connection.beginCommand(this);
+        try {
+            const [pg, queryConstructor] = await Promise.all([loadPg(), loadPgInternalQueryConstructor()]);
+            const query = new queryConstructor({ text: sql, queryMode: 'simple', rowMode: 'array' } as unknown as { text: string });
+            const client = this._connection.getClient();
+            const socket = (client as unknown as { connection?: { stream?: { pause?: () => void; resume?: () => void } } }).connection?.stream;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            let released = false;
+            const finish = (): void => {
+                if (released) return;
+                const release = (): void => {
+                    if (released) return;
+                    released = true;
+                    if (timer) clearTimeout(timer);
+                    this._connection.endCommand(this);
+                };
+                // A timeout may have caused the protocol query to finish before
+                // pg_cancel_backend() has completed. Keep the connection busy
+                // until that cancellation request has settled.
+                if (this._cancelInFlightPromise) {
+                    void this._cancelInFlightPromise.then(release, release);
+                } else {
+                    release();
+                }
+            };
+            const reader = new PostgreSqlStreamingDataReader(
+                query,
+                socket,
+                finish,
+                async () => { await this.cancel(); },
+            );
+
+            const queryState = query as unknown as {
+                _result?: unknown;
+                handleRowDescription?: (message: { fields?: FieldDef[] }) => void;
+                handleCommandComplete?: (message: unknown, connection: unknown) => void;
+            };
+            const originalRowDescription = queryState.handleRowDescription;
+            queryState.handleRowDescription = message => {
+                originalRowDescription?.call(query, message);
+                reader.setFields(message.fields ?? [], queryState._result, pg);
+            };
+            const originalCommandComplete = queryState.handleCommandComplete;
+            queryState.handleCommandComplete = (message, connection) => {
+                const source = queryState._result;
+                originalCommandComplete?.call(query, message, connection);
+                reader.markComplete(source);
+            };
+            query.on('end', results => {
+                const normalized = results as PgQueryResult<Record<string, unknown> | unknown[]> | PgQueryResult<Record<string, unknown> | unknown[]>[];
+                this._recordsAffected = resolveRecordsAffected(normalized);
+            });
+
+            if (this.commandTimeout > 0) {
+                timer = setTimeout(() => {
+                    reader.fail(new Error(`Query timed out after ${this.commandTimeout}s`), true);
+                    void this.cancel();
+                }, Math.round(this.commandTimeout * 1000));
+            }
+
+            (client as unknown as { query(query: PgInternalQuery): void }).query(query);
+            return reader;
+        } catch (error) {
+            this._connection.endCommand(this);
+            throw normalizeQueryError(error, this._cancelled);
+        }
     }
 
     private async executeInternal(): Promise<PostgreSqlExecutionResult> {

@@ -1,18 +1,18 @@
-# DuckDB Tools (justybase)
+# JustyBase DuckDB Support
 
-Optional DuckDB support for Netezza SQL Tools (justybase).
+Optional DuckDB support for JustyBase Core (NetezzaSQL).
 
-This extension adds the `DuckDB` dialect to Netezza SQL Tools (justybase) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `DuckDB` dialect to JustyBase Core (NetezzaSQL) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `Netezza SQL Tools (justybase)`
+- Install the core extension first: `JustyBase Core (NetezzaSQL)`
 - VS Code Desktop
 - DuckDB is an embedded database, so no separate server is required. The extension uses the `@duckdb/node-api` package to interact with DuckDB.
 
 ## Runtime Model
 
-`DuckDB Tools (justybase)` uses `@duckdb/node-api` to interact with DuckDB:
+`JustyBase DuckDB Support` uses `@duckdb/node-api` to interact with DuckDB:
 
 - DuckDB is an in-process SQL OLAP database management system.
 - The extension allows you to query DuckDB databases (files) or in-memory databases.
@@ -43,10 +43,10 @@ This extension adds the `DuckDB` dialect to Netezza SQL Tools (justybase) and in
 
 Marketplace or manual VSIX installation should end with both extensions installed:
 
-1. Install `Netezza SQL Tools (justybase)`
-2. Install `DuckDB Tools (justybase)`
+1. Install `JustyBase Core (NetezzaSQL)`
+2. Install `JustyBase DuckDB Support`
 
-`DuckDB Tools (justybase)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`JustyBase DuckDB Support` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
 
 ## Development Notes
 

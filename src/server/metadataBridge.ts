@@ -398,6 +398,7 @@ export class MetadataBridge {
 
     const references = extractTableReferences(
       sqlFragments && sqlFragments.length > 0 ? sqlFragments.join("\n") : sql,
+      context.databaseKind,
     );
     const effectiveDatabase = context.effectiveDatabase;
     const refsFingerprint = this.computeValidationRefsFingerprint(references);
@@ -412,7 +413,7 @@ export class MetadataBridge {
       ))
     ) {
       const underQualifiedReferences = references.filter(
-        (reference) => !(reference.database && reference.schema),
+        (reference) => !isFullyQualifiedReference(reference, context.databaseKind),
       );
       if (
         underQualifiedReferences.length > 0 &&
@@ -479,7 +480,7 @@ export class MetadataBridge {
     }
 
     const underQualifiedReferences = references.filter(
-      (reference) => !(reference.database && reference.schema),
+      (reference) => !isFullyQualifiedReference(reference, context.databaseKind),
     );
     if (underQualifiedReferences.length > 0) {
       await this.warmQualificationProposals(
@@ -838,4 +839,13 @@ export class MetadataBridge {
     }
     return response as MetadataTableInfoResponse;
   }
+}
+
+function isFullyQualifiedReference(
+  reference: { database?: string; schema?: string; table: string },
+  databaseKind?: import("../contracts/database").DatabaseKind,
+): boolean {
+  return databaseKind === "mysql"
+    ? !!reference.database
+    : !!reference.database && !!reference.schema;
 }

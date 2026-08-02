@@ -63,6 +63,14 @@ declare module "pg" {
     public query<R = Record<string, unknown> | unknown[]>(
       config: QueryConfig,
     ): Promise<QueryResult<R> | QueryResult<R>[]>;
+    public query(query: PgQuery): void;
+  }
+
+  export interface PgQuery {
+    on(event: "row", listener: (row: unknown, result: QueryResult) => void): this;
+    on(event: "end", listener: (results: QueryResult | QueryResult[]) => void): this;
+    on(event: "error", listener: (error: unknown) => void): this;
+    removeListener(event: string, listener: (...args: unknown[]) => void): this;
   }
 }
 

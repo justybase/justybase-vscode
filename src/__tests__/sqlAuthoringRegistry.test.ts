@@ -12,7 +12,7 @@ import { netezzaSqlAuthoring } from "../dialects/netezza/sql/authoring";
 import { sqliteDialect } from "../dialects/sqlite";
 import { oracleSqlAuthoring } from "../../extensions/oracle/src/sql/authoring";
 import { mysqlSqlAuthoring } from "../../extensions/mysql/src/sql/authoring";
-import { postgresqlCompatibleSqlAuthoring } from "../shared/sql-authoring/postgresql-compatible";
+import { postgresqlSqlAuthoring } from "../../extensions/postgresql/src/postgresqlSqlAuthoring";
 import { __TEST_ONLY_resetDatabaseDialectRegistry } from "../core/factories/databaseDialectRegistry";
 import { resetDatabaseDialectTestingState } from "./dialectTestUtils";
 
@@ -41,7 +41,7 @@ describe("sqlAuthoringRegistry", () => {
   it("returns optional dialect authoring without requiring runtime dialect registration", () => {
     expect(getDatabaseSqlAuthoring("oracle")).toBe(oracleSqlAuthoring);
     expect(getDatabaseSqlAuthoring("postgresql")).toBe(
-      postgresqlCompatibleSqlAuthoring,
+      postgresqlSqlAuthoring,
     );
     expect(getDatabaseSqlAuthoring("mysql")).toBe(mysqlSqlAuthoring);
   });
@@ -49,7 +49,7 @@ describe("sqlAuthoringRegistry", () => {
   it("returns authoring from the non-throwing lookup helper for optional dialects", () => {
     expect(tryGetDatabaseSqlAuthoring("oracle")).toBe(oracleSqlAuthoring);
     expect(tryGetDatabaseSqlAuthoring("postgresql")).toBe(
-      postgresqlCompatibleSqlAuthoring,
+      postgresqlSqlAuthoring,
     );
     expect(tryGetDatabaseSqlAuthoring("mysql")).toBe(mysqlSqlAuthoring);
   });

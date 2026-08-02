@@ -12,6 +12,13 @@ describe("tableQualificationActions", () => {
     });
   });
 
+  it("parses MySQL database.table references", () => {
+    expect(parseTableReferenceText("`TESTDB`.`departments`", "mysql")).toEqual({
+      database: "TESTDB",
+      name: "departments",
+    });
+  });
+
   it("merges suggested fix with resolver proposals", () => {
     const proposals = collectQualificationActionProposals(
       "DB1.SALES.EMPLOYEES",

@@ -151,7 +151,7 @@ export class CompletionMetadataResolver {
     ];
     const databases = await this.metadataProvider.getDatabases(documentUri);
     result.push(
-      ...filterMetadataItems(databases, partial, CompletionItemKind.Module),
+      ...filterMetadataItems(databases, partial, CompletionItemKind.Module, databaseKind),
     );
 
     if (effectiveDb) {
@@ -217,6 +217,7 @@ export class CompletionMetadataResolver {
           views,
           context.partial,
           CompletionItemKind.Interface,
+          databaseKind,
         );
       }
       if (databaseKind === "db2") {
@@ -232,6 +233,7 @@ export class CompletionMetadataResolver {
           views,
           context.partial,
           CompletionItemKind.Interface,
+          databaseKind,
         );
       }
       if (databaseKind === "netezza") {
@@ -256,6 +258,7 @@ export class CompletionMetadataResolver {
           views,
           context.partial,
           CompletionItemKind.Interface,
+          databaseKind,
         );
       }
       return this.getSchemaPathCompletions(
@@ -276,6 +279,7 @@ export class CompletionMetadataResolver {
         views,
         context.partial,
         CompletionItemKind.Interface,
+        databaseKind,
       );
     }
 
@@ -291,6 +295,7 @@ export class CompletionMetadataResolver {
         views,
         context.partial,
         CompletionItemKind.Interface,
+        databaseKind,
       );
     }
 
@@ -299,6 +304,7 @@ export class CompletionMetadataResolver {
       databases,
       context.partial,
       CompletionItemKind.Module,
+      databaseKind,
     );
     if (effectiveDb) {
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
@@ -317,6 +323,7 @@ export class CompletionMetadataResolver {
           views,
           context.partial,
           CompletionItemKind.Interface,
+          databaseKind,
         ),
       );
     }
@@ -339,6 +346,7 @@ export class CompletionMetadataResolver {
           procedures,
           context.partial,
           CompletionItemKind.Function,
+          databaseKind,
         );
       }
       if (databaseKind === "db2") {
@@ -354,6 +362,7 @@ export class CompletionMetadataResolver {
           procedures,
           context.partial,
           CompletionItemKind.Function,
+          databaseKind,
         );
       }
       if (databaseKind === "netezza") {
@@ -378,6 +387,7 @@ export class CompletionMetadataResolver {
           procedures,
           context.partial,
           CompletionItemKind.Function,
+          databaseKind,
         );
       }
       return this.getSchemaPathCompletions(
@@ -398,6 +408,7 @@ export class CompletionMetadataResolver {
         procedures,
         context.partial,
         CompletionItemKind.Function,
+        databaseKind,
       );
     }
 
@@ -413,6 +424,7 @@ export class CompletionMetadataResolver {
         procedures,
         context.partial,
         CompletionItemKind.Function,
+        databaseKind,
       );
     }
 
@@ -421,6 +433,7 @@ export class CompletionMetadataResolver {
       databases,
       context.partial,
       CompletionItemKind.Module,
+      databaseKind,
     );
     if (effectiveDb) {
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
@@ -442,6 +455,7 @@ export class CompletionMetadataResolver {
           procedures,
           context.partial,
           CompletionItemKind.Function,
+          databaseKind,
         ),
       );
     }
@@ -514,6 +528,7 @@ export class CompletionMetadataResolver {
       schemas,
       partial,
       CompletionItemKind.Module,
+      databaseKind,
     );
     if (
       schemaItems.length > 0 ||

@@ -15,7 +15,7 @@ import {
   validateComparisonExpressionTypes,
 } from "./typeComparisonVisitor";
 import { getOrderedReferenceTokens } from "../../providers/parsers/scope";
-import { unquoteIdentifier } from "../../utils/identifierUtils";
+import { stripIdentifierQuoting } from "../../utils/identifierUtils";
 import type { TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 
@@ -267,7 +267,10 @@ export function columnReference(
   if (host.getInProcedureContext() && !host.getInProcedureSqlContext()) {
     if (procedureScope && rawTokens.length >= 1) {
       procedureScope.markNameUsed(
-        unquoteIdentifier(host.getTokenText(rawTokens[0])),
+        stripIdentifierQuoting(
+          host.getTokenText(rawTokens[0]),
+          host.getValidationProfile().databaseKind,
+        ),
       );
     }
     return;
@@ -275,7 +278,10 @@ export function columnReference(
 
   const tokens = rawTokens;
   const normalizeIdentifier = (token: IToken): string =>
-    host.getTokenText(token).replace(/"/g, "");
+    stripIdentifierQuoting(
+      host.getTokenText(token),
+      host.getValidationProfile().databaseKind,
+    );
 
   if (tokens.length === 1) {
     const columnName = normalizeIdentifier(tokens[0]);
@@ -441,7 +447,9 @@ export function functionCall(
     (ctx.OracleQualifiedFunction?.[0] as unknown as IToken | undefined) ||
     (identifierTokens[0] as IToken | undefined) ||
     (ctx.Replace?.[0] as unknown as IToken | undefined) ||
-    (ctx.Random?.[0] as unknown as IToken | undefined);
+    (ctx.Random?.[0] as unknown as IToken | undefined) ||
+    (ctx.If?.[0] as unknown as IToken | undefined) ||
+    (ctx.BacktickIdentifier?.[0] as unknown as IToken | undefined);
   let upper = "";
 
   if (fnToken) {

@@ -48,6 +48,13 @@ npm run build
     - high overall planner cost
     - row-estimate drift when `EXPLAIN ANALYZE` output is supplied
 
+## Streaming results
+
+Regular PostgreSQL commands use incremental `pg/lib/query` row events. Column
+names and PostgreSQL OID type names are available before the first row, result
+sets are exposed through `nextResult()`, and closing a reader cancels an active
+backend. A small socket-backed queue avoids materializing the complete result.
+
 ## Import and COPY
 
 - PostgreSQL CSV import uses `COPY ... FROM STDIN`

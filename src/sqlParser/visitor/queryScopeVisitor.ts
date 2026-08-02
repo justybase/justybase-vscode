@@ -364,7 +364,10 @@ export function addTableQualificationWarning(
     !tableNameNode ||
     table.isCte ||
     table.isTempTable ||
-    (table.database && table.schema)
+    (table.database && table.schema) ||
+    (host.getValidationProfile().databaseKind === "mysql" &&
+      table.database &&
+      !table.schema)
   ) {
     return;
   }
@@ -452,6 +455,10 @@ export function qualifiedName(
   }
 
   if (identifiers.length === 2) {
+    if (host.getValidationProfile().databaseKind === "mysql") {
+      return { database: identifiers[0], name: identifiers[1] };
+    }
+
     let treatAsDatabaseDotDot = false;
 
     if (dotCount === 1) {

@@ -2,13 +2,18 @@ import type { ConnectionManager } from "./connectionManager";
 import type { MetadataCache } from "../metadataCache";
 import type { ObjectWithSchema } from "../metadata/types";
 import { extractLabel } from "../metadata/helpers";
-import { isQuotedIdentifier, unquoteIdentifier } from "../utils/identifierUtils";
+import {
+  formatQualifiedObjectName,
+  stripIdentifierQuoting,
+} from "../utils/identifierUtils";
+import type { DatabaseKind } from "../contracts/database";
 
 export interface TableQualificationRequest {
   database?: string;
   schema?: string;
   name: string;
   documentUri?: string;
+  databaseKind?: DatabaseKind;
 }
 
 export interface QualificationProposal {
@@ -31,18 +36,25 @@ export function proposeTableQualification(
   deps: TableQualificationResolverDeps,
   request: TableQualificationRequest,
 ): QualificationProposal[] {
-  const tableName = normalizeLookupIdentifier(request.name);
-  if (!tableName || (request.database && request.schema)) {
-    return [];
-  }
-
   const connectionName = resolveConnectionName(deps, request.documentUri);
   if (!connectionName) {
     return [];
   }
 
-  const database = normalizeLookupIdentifier(request.database);
-  const schema = normalizeLookupIdentifier(request.schema);
+  const databaseKind = resolveDatabaseKind(deps, connectionName, request.databaseKind);
+  const tableName = normalizeLookupIdentifier(request.name, databaseKind);
+  if (!tableName || (request.database && request.schema)) {
+    return [];
+  }
+
+  const database = normalizeLookupIdentifier(request.database, databaseKind);
+  const schema = normalizeLookupIdentifier(request.schema, databaseKind);
+
+  // MySQL uses DATABASE.TABLE as its complete two-part object name. It must
+  // never be treated as a partially qualified schema.table reference.
+  if (databaseKind === "mysql" && database && !schema) {
+    return [];
+  }
   const effectiveDb = resolveEffectiveDatabase(
     deps,
     connectionName,
@@ -57,10 +69,21 @@ export function proposeTableQualification(
       request.name,
       tableName,
       request.database ?? database,
+      databaseKind,
     );
   }
 
   if (schema) {
+    if (databaseKind === "mysql") {
+      return buildMysqlProposals(
+        deps,
+        connectionName,
+        schema,
+        request.name,
+        tableName,
+        effectiveDb,
+      );
+    }
     return buildDatabaseProposals(
       deps,
       connectionName,
@@ -69,11 +92,23 @@ export function proposeTableQualification(
       tableName,
       effectiveDb,
       request.schema ?? schema,
+      databaseKind,
     );
   }
 
   if (!effectiveDb) {
     return [];
+  }
+
+  if (databaseKind === "mysql") {
+    return buildMysqlProposals(
+      deps,
+      connectionName,
+      effectiveDb,
+      request.name,
+      tableName,
+      effectiveDb,
+    );
   }
 
   return buildSchemaProposals(
@@ -83,6 +118,7 @@ export function proposeTableQualification(
     request.name,
     tableName,
     effectiveDb,
+    databaseKind,
   );
 }
 
@@ -93,6 +129,7 @@ function buildSchemaProposals(
   originalTableName: string,
   tableLookupName: string,
   displayDatabase: string,
+  databaseKind: DatabaseKind | undefined,
 ): QualificationProposal[] {
   const preferredSchema = resolvePreferredSchema(deps, connectionName, database);
   const schemaCandidates = findSchemaCandidates(
@@ -112,6 +149,7 @@ function buildSchemaProposals(
     schemas,
     originalTableName,
     resolvedPreferredSchema,
+    databaseKind,
   );
 }
 
@@ -123,6 +161,7 @@ function buildDatabaseProposals(
   tableLookupName: string,
   effectiveDb: string | undefined,
   displaySchema: string,
+  databaseKind: DatabaseKind | undefined,
 ): QualificationProposal[] {
   const dbCandidates = findDatabaseCandidates(
     deps,
@@ -143,7 +182,12 @@ function buildDatabaseProposals(
         database,
         schema: displaySchema,
         name: originalTableName,
-        qualifiedText: `${database}.${displaySchema}.${originalTableName}`,
+        qualifiedText: formatQualifiedObjectName(
+          database,
+          displaySchema,
+          originalTableName,
+          databaseKind,
+        ),
         isPreferred,
       };
     }),
@@ -155,6 +199,7 @@ function toSchemaProposals(
   schemas: readonly string[],
   tableName: string,
   preferredSchema: string | undefined,
+  databaseKind: DatabaseKind | undefined,
 ): QualificationProposal[] {
   return dedupeProposals(
     schemas.map((schema) => {
@@ -163,13 +208,55 @@ function toSchemaProposals(
         database,
         schema,
         name: tableName,
-        qualifiedText: `${database}.${schema}.${tableName}`,
+        qualifiedText: formatQualifiedObjectName(
+          database,
+          schema,
+          tableName,
+          databaseKind,
+        ),
         isPreferred,
       };
     }),
   )
     .sort((left, right) => Number(!!right.isPreferred) - Number(!!left.isPreferred))
     .slice(0, MAX_PROPOSALS);
+}
+
+function buildMysqlProposals(
+  deps: TableQualificationResolverDeps,
+  connectionName: string,
+  database: string,
+  originalTableName: string,
+  tableLookupName: string,
+  effectiveDatabase: string | undefined,
+): QualificationProposal[] {
+  const objects = deps.metadataCache.getObjectsWithSchema(connectionName, database);
+  const matchingObjects = objects.filter((objectInfo) =>
+    equalName(getObjectName(objectInfo), tableLookupName),
+  );
+  const metadataSchema = matchingObjects[0]?.schema;
+  const databaseName = matchingObjects.length > 0
+    ? database
+    : effectiveDatabase && equalName(effectiveDatabase, database)
+      ? effectiveDatabase
+      : database;
+
+  if (matchingObjects.length === 0 && !databaseName) {
+    return [];
+  }
+
+  return [{
+    database: databaseName,
+    schema: metadataSchema ?? "",
+    name: originalTableName,
+    qualifiedText: formatQualifiedObjectName(
+      databaseName,
+      metadataSchema,
+      originalTableName,
+      "mysql",
+    ),
+    isPreferred: !!effectiveDatabase && equalName(databaseName, effectiveDatabase),
+  }];
 }
 
 function findSchemaCandidates(
@@ -286,6 +373,14 @@ function resolveConnectionName(
   );
 }
 
+function resolveDatabaseKind(
+  deps: TableQualificationResolverDeps,
+  connectionName: string,
+  requestedKind: DatabaseKind | undefined,
+): DatabaseKind | undefined {
+  return requestedKind ?? deps.connectionManager.getConnectionDatabaseKind?.(connectionName);
+}
+
 function getCachedDatabaseNames(
   metadataCache: MetadataCache,
   connectionName: string,
@@ -300,11 +395,14 @@ function getCachedDatabaseNames(
     .map((dbName) => dbName.toUpperCase());
 }
 
-function normalizeLookupIdentifier(value: string | undefined): string | undefined {
+function normalizeLookupIdentifier(
+  value: string | undefined,
+  databaseKind?: DatabaseKind,
+): string | undefined {
   if (!value) {
     return undefined;
   }
-  const normalized = isQuotedIdentifier(value) ? unquoteIdentifier(value) : value;
+  const normalized = stripIdentifierQuoting(value, databaseKind);
   return normalized.trim() || undefined;
 }
 

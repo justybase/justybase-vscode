@@ -4,15 +4,16 @@
  * src/dialects/mssql/sql via parsingRuntime.ts when authoring kind is mssql.
  */
 import { createStubDialect } from '../stubDialectFactory';
+import { MSSQL_UNQUOTED_IDENTIFIER_PATTERN } from '../../shared/dialect-traits/mssql';
 
 export const mssqlDialect = createStubDialect('mssql', 'MS SQL Server', 1433, {
-	extensionDisplayName: 'MSSQL Tools (justybase)',
 	connectionFormOptions: {
 		databasePlaceholder: 'Database name',
 		userPlaceholder: 'SQL Server user',
 	},
 	traitsOverrides: {
 		identifiers: {
+			unquotedIdentifierPattern: MSSQL_UNQUOTED_IDENTIFIER_PATTERN,
 			generatedNameCase: 'preserve',
 		},
 		qualification: {

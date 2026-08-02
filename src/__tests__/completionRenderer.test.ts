@@ -195,6 +195,19 @@ describe("completionRenderer — documentation regression guard", () => {
       );
       expect(items.find((item) => item.label === "ORDERS")?.insertText).toBe("ORDERS");
     });
+
+    it("preserves mixed-case MSSQL table names without quoting them", () => {
+      const tables: MetadataObjectItem[] = [
+        { name: "departments", objectType: "table" },
+        { name: "Sales Orders", objectType: "table" },
+      ];
+      const items = filterMetadataItems(tables, "", undefined, "mssql");
+
+      expect(items.find((item) => item.label === "departments")?.insertText)
+        .toBe("departments");
+      expect(items.find((item) => item.label === "Sales Orders")?.insertText)
+        .toBe('"Sales Orders"');
+    });
   });
 
   describe("toFunctionItems", () => {

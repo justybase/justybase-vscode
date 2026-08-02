@@ -85,6 +85,15 @@ describe('identifierUtils', () => {
         expect(formatIdentifierForSql('orders()', 'mysql')).toBe('orders()');
     });
 
+    it('uses MSSQL case-insensitive unquoted identifier rules', () => {
+        expect(requiresIdentifierQuoting('departments', 'mssql')).toBe(false);
+        expect(requiresIdentifierQuoting('dbo', 'mssql')).toBe(false);
+        expect(requiresIdentifierQuoting('name with space', 'mssql')).toBe(true);
+        expect(formatIdentifierForSql('departments', 'mssql')).toBe('departments');
+        expect(formatQualifiedObjectName('TESTDB', 'dbo', 'departments', 'mssql'))
+            .toBe('TESTDB.dbo.departments');
+    });
+
     it('formats qualified SQLite object names with two-part notation', () => {
         expect(formatQualifiedObjectName('main', undefined, 'sales', 'sqlite')).toBe('main.sales');
         expect(formatQualifiedObjectName('main', 'analytics', 'sales', 'sqlite')).toBe('analytics.sales');
@@ -93,7 +102,7 @@ describe('identifierUtils', () => {
 
     it('formats qualified MySQL object names with database-style notation', () => {
         expect(formatQualifiedObjectName('catalog', undefined, 'sales', 'mysql')).toBe('catalog.sales');
-        expect(formatQualifiedObjectName('catalog', 'analytics', 'sales', 'mysql')).toBe('analytics.sales');
+        expect(formatQualifiedObjectName('catalog', 'analytics', 'sales', 'mysql')).toBe('catalog.sales');
         expect(formatQualifiedObjectName(undefined, 'analytics', 'select', 'mysql')).toBe('analytics.`select`');
     });
 
@@ -114,6 +123,6 @@ describe('identifierUtils', () => {
 
     it('formats qualified display paths with MySQL rules', () => {
         expect(formatQualifiedObjectPathForDisplay('catalog', undefined, 'sales', 'mysql')).toBe('catalog.sales');
-        expect(formatQualifiedObjectPathForDisplay('catalog', 'analytics', 'sales', 'mysql')).toBe('analytics.sales');
+        expect(formatQualifiedObjectPathForDisplay('catalog', 'analytics', 'sales', 'mysql')).toBe('catalog.sales');
     });
 });

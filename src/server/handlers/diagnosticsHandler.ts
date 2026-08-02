@@ -172,6 +172,7 @@ export function createDiagnosticsHandler(
         metadataBridge,
         document.uri,
         context.effectiveDatabase,
+        context.databaseKind,
       );
       const validator = new SqlValidator(
         schemaProvider,

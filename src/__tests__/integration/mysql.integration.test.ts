@@ -80,6 +80,21 @@ async function readScalar(
   }
 }
 
+async function readColumnMetadata(
+  connection: MysqlConnection,
+  sql: string,
+): Promise<{ name: string; typeName: string }[]> {
+  const reader = await connection.createCommand(sql).executeReader();
+  try {
+    return Array.from({ length: reader.fieldCount }, (_, index) => ({
+      name: reader.getName(index),
+      typeName: reader.getTypeName(index),
+    }));
+  } finally {
+    await reader.close();
+  }
+}
+
 function quoteIdentifier(value: string): string {
   return `\`${value.replace(/`/g, "``")}\``;
 }
@@ -104,6 +119,20 @@ describeIfConfigured("mysql integration", () => {
   });
 
   describe("connection and basic queries", () => {
+    it("uses the MySQL 8.0.34 TESTDB fixture", async () => {
+      const version = await readScalar(
+        connection,
+        "SELECT VERSION() AS VERSION",
+      );
+      const currentDatabase = await readScalar(
+        connection,
+        "SELECT DATABASE() AS DATABASE_NAME",
+      );
+
+      expect(String(version)).toMatch(/^8\.0\.34(?:[-+].*)?$/);
+      expect(String(currentDatabase).toUpperCase()).toBe("TESTDB");
+    });
+
     it("connects and returns current database context", async () => {
       const currentDb = await readScalar(
         connection,
@@ -133,6 +162,52 @@ describeIfConfigured("mysql integration", () => {
       } finally {
         await reader.close();
       }
+    });
+
+    it("accepts TESTDB.departments and rejects TESTDB.TESTDB.departments", async () => {
+      const columns = await readColumnMetadata(
+        connection,
+        "SELECT department_name, manager_id, budget FROM TESTDB.departments WHERE 1 = 0",
+      );
+
+      expect(columns.map((column) => column.name)).toEqual([
+        "department_name",
+        "manager_id",
+        "budget",
+      ]);
+      expect(columns.map((column) => column.typeName)).toEqual([
+        expect.stringMatching(/CHAR|TEXT|VARCHAR/i),
+        expect.stringMatching(/INT|DECIMAL|NUMERIC/i),
+        expect.stringMatching(/DECIMAL|NUMERIC|INT|DOUBLE|FLOAT/i),
+      ]);
+
+      await expect(
+        readRows(
+          connection,
+          "SELECT department_name FROM TESTDB.TESTDB.departments LIMIT 1",
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("streams a large information_schema result without buffering it first", async () => {
+      const reader = await connection
+        .createCommand(
+          "SELECT c.TABLE_SCHEMA, c.TABLE_NAME " +
+            "FROM information_schema.columns c " +
+            "CROSS JOIN information_schema.columns c2 " +
+            "LIMIT 4096",
+        )
+        .executeReader();
+      let rowsRead = 0;
+      try {
+        while (rowsRead < 256 && (await reader.read())) {
+          rowsRead += 1;
+        }
+      } finally {
+        await reader.close();
+      }
+
+      expect(rowsRead).toBe(256);
     });
   });
 
@@ -256,6 +331,48 @@ describeIfConfigured("mysql integration", () => {
       const rows = await readRows(connection, statsQuery);
       expect(rows.length).toBe(1);
       expect(rows[0]).toHaveProperty("ROW_COUNT");
+    });
+
+    it("creates and removes an isolated table, view, and index fixture", async () => {
+      const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const fixtureTable = `jbl_mysql_fixture_${suffix}`;
+      const fixtureView = `jbl_mysql_fixture_view_${suffix}`;
+      const fixtureIndex = `jbl_mysql_fixture_idx_${suffix}`;
+      const qualifiedTable = `${quoteIdentifier(testSchema)}.${quoteIdentifier(fixtureTable)}`;
+      const qualifiedView = `${quoteIdentifier(testSchema)}.${quoteIdentifier(fixtureView)}`;
+
+      try {
+        await connection
+          .createCommand(
+            `CREATE TABLE ${qualifiedTable} (` +
+              `id INT NOT NULL, name VARCHAR(64), PRIMARY KEY (id)` +
+              `) ENGINE=InnoDB`,
+          )
+          .execute();
+        await connection
+          .createCommand(
+            `CREATE INDEX ${quoteIdentifier(fixtureIndex)} ON ${qualifiedTable} (name)`,
+          )
+          .execute();
+        await connection
+          .createCommand(
+            `CREATE VIEW ${qualifiedView} AS SELECT id, name FROM ${qualifiedTable}`,
+          )
+          .execute();
+
+        const rows = await readRows(
+          connection,
+          `SELECT id, name FROM ${qualifiedView}`,
+        );
+        expect(rows).toEqual([]);
+      } finally {
+        await connection
+          .createCommand(`DROP VIEW IF EXISTS ${qualifiedView}`)
+          .execute();
+        await connection
+          .createCommand(`DROP TABLE IF EXISTS ${qualifiedTable}`)
+          .execute();
+      }
     });
   });
 

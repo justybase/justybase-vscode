@@ -452,6 +452,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
         { ALT: () => this.SUBRULE(this.existsExpression) },
         { ALT: () => this.SUBRULE(this.subquery) },
         { ALT: () => this.SUBRULE(this.expressionList) },
+        ...this.getAdditionalPrimaryExpressionAlternatives(),
         { ALT: () => this.SUBRULE(this.columnReference) },
         { ALT: () => this.CONSUME(Parameter) },
       ]);

@@ -12,7 +12,8 @@ export const mysqlDialect = createStubDialect('mysql', 'MySQL', 3306, {
             unquotedIdentifierPattern: /^[a-z_][a-z0-9_]*$/i,
         },
         qualification: {
-            twoPartNameStyle: 'schema-object',
+            twoPartNameStyle: 'database-object',
+            twoPartContainerPreference: 'database-over-schema',
             supportsThreePartName: false,
         },
     },

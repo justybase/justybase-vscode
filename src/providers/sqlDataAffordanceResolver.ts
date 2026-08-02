@@ -5,7 +5,7 @@ import type { ConnectionManager } from '../core/connectionManager';
 import type { MetadataCache } from '../metadataCache';
 import { getCachedColumnsFromMetadataCache } from '../metadata/columnCacheLookup';
 import type { ColumnMetadata, ObjectWithSchema, TableMetadata } from '../metadata/types';
-import { SqlLexer } from '../sqlParser';
+import { resolveSqlParsingRuntime } from '../sqlParser/parsingRuntime';
 import type { DocumentParseSession } from '../sqlParser/documentParseSession';
 import { isLargeScript } from '../sqlParser/validationConfig';
 import { buildSqlLocalShadowContext, type SqlLocalShadowContext } from './parsers/sqlLocalShadowContext';
@@ -275,7 +275,10 @@ export class SqlDataAffordanceResolver implements vscode.Disposable {
             return cached.candidates;
         }
 
-        const candidates = this.parseReferences(document.getText());
+        const candidates = this.parseReferences(
+            document.getText(),
+            this._connectionManager.getExecutionDatabaseKind?.(document.uri.toString()),
+        );
         this._parseCache.set(cacheKey, {
             version: document.version,
             candidates
@@ -291,8 +294,8 @@ export class SqlDataAffordanceResolver implements vscode.Disposable {
         return candidates;
     }
 
-    private parseReferences(sql: string): ParsedTableReference[] {
-        const lexResult = SqlLexer.tokenize(sql);
+    private parseReferences(sql: string, databaseKind?: DatabaseKind): ParsedTableReference[] {
+        const lexResult = resolveSqlParsingRuntime({ databaseKind }).SqlLexer.tokenize(sql);
         const tokens = lexResult.tokens;
         if (tokens.length === 0) {
             return [];
@@ -631,6 +634,9 @@ export class SqlDataAffordanceResolver implements vscode.Disposable {
         if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
             return text.slice(1, -1);
         }
+        if (text.length >= 2 && text.startsWith('`') && text.endsWith('`')) {
+            return text.slice(1, -1).replace(/``/g, '`');
+        }
         return text;
     }
 
@@ -639,7 +645,9 @@ export class SqlDataAffordanceResolver implements vscode.Disposable {
             return false;
         }
         const tokenName = token.tokenType.name;
-        return tokenName === 'Identifier' || tokenName === 'QuotedIdentifier';
+        return tokenName === 'Identifier'
+            || tokenName === 'QuotedIdentifier'
+            || tokenName === 'BacktickIdentifier';
     }
 
     private isAliasBoundaryToken(token: IToken | undefined): boolean {
@@ -713,7 +721,11 @@ export class SqlDataAffordanceResolver implements vscode.Disposable {
         reference: ParsedTableReference,
         databaseKind: ReturnType<ConnectionManager['getExecutionDatabaseKind']>
     ): ParsedTableReference {
-        if (databaseKind !== 'sqlite' || reference.notation !== 'schema-table' || !reference.schemaName) {
+        if (
+            reference.notation !== 'schema-table'
+            || !reference.schemaName
+            || (databaseKind !== 'sqlite' && databaseKind !== 'mysql')
+        ) {
             return reference;
         }
 
