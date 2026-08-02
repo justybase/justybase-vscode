@@ -50,7 +50,17 @@
       "name": "meta.create.sql"
     },
     {
-      "match": "(?i)\\b(SELECT|FROM|JOIN|WHERE|CALL|CREATE|TABLE|MERGE|INTO|USING|ON|TEMP|TEMPORARY|GLOBAL|AS|DISTRIBUTE)\\b",
+      "comment": "Mirror of microsoft/vscode sql.tmLanguage.json: INSERT INTO is consumed as a single DML token",
+      "match": "(?i)\\bINSERT\\s+(?:IGNORE\\s+)?INTO\\b",
+      "name": "keyword.other.DML.sql"
+    },
+    {
+      "comment": "Mirror of microsoft/vscode sql.tmLanguage.json DML keyword rule (subset)",
+      "match": "(?i)\\b(SELECT|UPDATE|DELETE|FROM|SET|WHERE|JOIN)\\b",
+      "name": "keyword.other.DML.sql"
+    },
+    {
+      "match": "(?i)\\b(CALL|CREATE|TABLE|MERGE|INTO|USING|ON|TEMP|TEMPORARY|GLOBAL|AS|DISTRIBUTE|TRUNCATE)\\b",
       "name": "keyword.other.sql"
     }
   ]

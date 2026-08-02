@@ -171,6 +171,10 @@ export function selectStatement(
     host.visit(ctx.fetchFirstClause[0]);
   }
 
+  if (ctx.offsetFetchClause) {
+    host.visit(ctx.offsetFetchClause[0]);
+  }
+
   if (ctx.setOperation) {
     ctx.setOperation.forEach((op: CstNode) => {
       host.visit(op);

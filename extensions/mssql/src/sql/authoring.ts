@@ -1,46 +1,64 @@
 import type {
 	DatabaseSqlAuthoring,
-	DatabaseSqlFormatterProfile,
 	DatabaseSqlFunctionSignature,
 	DatabaseSqlTypeSpec,
 	DatabaseSqlValidationProfile,
 } from '../../../../src/sql/authoring/types';
+import {
+	BASE_SQL_BUILTIN_FUNCTIONS,
+	BASE_SQL_COMPLETION_KEYWORDS,
+	BASE_SQL_FORMATTER_PROFILE,
+	BASE_SQL_FUNCTION_SIGNATURES,
+	BASE_SQL_SPECIAL_BUILTIN_VALUES,
+	extendFormatterProfile,
+	mergeFunctionSignatures,
+	mergeStringSets,
+	mergeUniqueStrings,
+} from '../../../../src/sql/authoring/baseProfiles';
 import { mssqlSqlQualityRules } from './qualityRules';
 
-const MSSQL_COMPLETION_KEYWORDS = [
-	'SELECT',
-	'FROM',
-	'WHERE',
-	'INSERT',
-	'UPDATE',
-	'DELETE',
-	'MERGE',
-	'WITH',
+const MSSQL_COMPLETION_KEYWORD_OVERLAYS = [
 	'OUTPUT',
-	'CREATE',
-	'ALTER',
-	'DROP',
-	'TABLE',
-	'VIEW',
 	'INDEX',
-	'PROCEDURE',
 	'FUNCTION',
 	'TRIGGER',
-	'ORDER BY',
-	'GROUP BY',
 	'HAVING',
 	'TOP',
-	'OFFSET',
 	'FETCH NEXT',
 	'CROSS APPLY',
 	'OUTER APPLY',
 	'BEGIN TRY',
 	'BEGIN CATCH',
 	'GO',
-	'UNION',
-	'INTERSECT',
-	'EXCEPT',
+	'ORDER BY',
+	'GROUP BY',
 ] as const;
+
+const MSSQL_COMPLETION_KEYWORDS = mergeUniqueStrings(
+	BASE_SQL_COMPLETION_KEYWORDS,
+	MSSQL_COMPLETION_KEYWORD_OVERLAYS,
+);
+
+const MSSQL_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
+	'CAST',
+	'CHARINDEX',
+	'CHOOSE',
+	'CONVERT',
+	'DATALENGTH',
+	'DATEADD',
+	'DATEDIFF',
+	'FORMAT',
+	'GETDATE',
+	'IIF',
+	'ISNULL',
+	'LEN',
+	'NEWID',
+	'STRING_AGG',
+	'STUFF',
+	'SYSDATETIME',
+]);
+
+const MSSQL_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>(['NULL']);
 
 const MSSQL_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
 	TINYINT: { canonical: 'TINYINT', paramsMin: 0, paramsMax: 0 },
@@ -74,7 +92,7 @@ const MSSQL_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
 	SQL_VARIANT: { canonical: 'SQL_VARIANT', paramsMin: 0, paramsMax: 0 },
 };
 
-const MSSQL_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
+const MSSQL_SIGNATURE_OVERLAYS = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
 	[
 		'COUNT',
 		[{
@@ -117,66 +135,17 @@ const MSSQL_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]
 	],
 ]);
 
-const mssqlFormatterProfile: DatabaseSqlFormatterProfile = {
-	keywords: new Set(MSSQL_COMPLETION_KEYWORDS),
-	clauseKeywords: new Set(['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'OFFSET', 'FETCH NEXT', 'OUTPUT']),
-	newlineBeforeKeywords: new Set(['FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'OFFSET', 'FETCH NEXT', 'OUTPUT']),
-	joinModifiers: new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS', 'APPLY']),
-	commaNewlineClauses: new Set(['SELECT']),
-	logicalBreakKeywords: new Set(['AND', 'OR']),
-};
+const mssqlFormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE, {
+	keywords: MSSQL_COMPLETION_KEYWORD_OVERLAYS,
+	clauseKeywords: ['GROUP BY', 'ORDER BY', 'OFFSET', 'FETCH NEXT', 'OUTPUT'],
+	newlineBeforeKeywords: ['GROUP BY', 'ORDER BY', 'OFFSET', 'FETCH NEXT', 'OUTPUT'],
+	joinModifiers: ['APPLY'],
+});
 
 const mssqlValidationProfile: DatabaseSqlValidationProfile = {
-	builtinFunctions: new Set([
-		'ABS',
-		'AVG',
-		'CAST',
-		'CEILING',
-		'CHARINDEX',
-		'CHOOSE',
-		'COALESCE',
-		'CONCAT',
-		'CONVERT',
-		'COUNT',
-		'DATALENGTH',
-		'DATEADD',
-		'DATEDIFF',
-		'DAY',
-		'DENSE_RANK',
-		'FLOOR',
-		'FORMAT',
-		'GETDATE',
-		'IIF',
-		'ISNULL',
-		'LEFT',
-		'LEN',
-		'LOWER',
-		'LTRIM',
-		'MAX',
-		'MIN',
-		'MONTH',
-		'NEWID',
-		'NULLIF',
-		'RANK',
-		'REPLACE',
-		'REVERSE',
-		'RIGHT',
-		'ROUND',
-		'ROW_NUMBER',
-		'RTRIM',
-		'STRING_AGG',
-		'STUFF',
-		'SUBSTRING',
-		'SUM',
-		'SYSDATETIME',
-		'TRIM',
-		'UPPER',
-		'YEAR',
-	]),
+	builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, MSSQL_BUILTIN_FUNCTION_OVERLAYS),
 	systemColumns: new Set([]),
-	specialBuiltinValues: new Set([
-		'NULL',
-	]),
+	specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, MSSQL_SPECIAL_BUILTIN_VALUE_OVERLAYS),
 	getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
 		if (!typeName) return undefined;
 		return MSSQL_TYPE_SPECS[typeName.trim().toUpperCase()];
@@ -189,7 +158,7 @@ const mssqlValidationProfile: DatabaseSqlValidationProfile = {
 
 export const mssqlSqlAuthoring: DatabaseSqlAuthoring = {
 	completionKeywords: MSSQL_COMPLETION_KEYWORDS,
-	signatures: MSSQL_SIGNATURES,
+	signatures: mergeFunctionSignatures(BASE_SQL_FUNCTION_SIGNATURES, MSSQL_SIGNATURE_OVERLAYS),
 	formatter: mssqlFormatterProfile,
 	validation: mssqlValidationProfile,
 	qualityRules: mssqlSqlQualityRules,

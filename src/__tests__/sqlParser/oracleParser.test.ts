@@ -80,6 +80,22 @@ describe("Oracle SQL parser", () => {
       "alternative quoted string",
       `SELECT q'[Oracle ''quoted'' text]' FROM DUAL;`,
     ],
+    [
+      "offset fetch first",
+      `SELECT employee_id FROM employees ORDER BY employee_id OFFSET 5 ROWS FETCH FIRST 10 ROWS ONLY;`,
+    ],
+    [
+      "offset fetch next",
+      `SELECT employee_id FROM employees ORDER BY employee_id OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY;`,
+    ],
+    [
+      "offset without fetch",
+      `SELECT employee_id FROM employees ORDER BY employee_id OFFSET 5 ROWS;`,
+    ],
+    [
+      "fetch first without offset",
+      `SELECT employee_id FROM employees FETCH FIRST 10 ROWS ONLY;`,
+    ],
   ])("parses %s without actionable errors", (_name, sql) => {
     const result = parse(sql);
 

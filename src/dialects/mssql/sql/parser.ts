@@ -58,7 +58,6 @@ const MSSQL_PROGRAM_TOKENS: TokenType[] = [
 export class MsSqlSqlParser extends NetezzaSqlParser {
 	mssqlTopClause!: AnyRule;
 	mssqlOutputClause!: AnyRule;
-	mssqlOffsetFetchClause!: AnyRule;
 	mssqlApplyClause!: AnyRule;
 	mssqlProgramToken!: AnyRule;
 	mssqlProgramKeyword!: AnyRule;
@@ -171,25 +170,6 @@ protected getNetezzaRelaxedNameTokens() {
 			});
 		});
 
-		this.RULE('mssqlOffsetFetchClause', () => {
-			this.CONSUME(baseLexer.Offset);
-			this.CONSUME(baseLexer.NumberLiteral);
-			this.OR([
-				{ ALT: () => this.CONSUME(baseLexer.Rows) },
-				{ ALT: () => this.CONSUME(baseLexer.Row) },
-			]);
-			this.OPTION(() => {
-				this.CONSUME(baseLexer.Fetch);
-				this.OPTION1(() => this.CONSUME(baseLexer.Next));
-				this.CONSUME1(baseLexer.NumberLiteral);
-				this.OR1([
-					{ ALT: () => this.CONSUME1(baseLexer.Rows) },
-					{ ALT: () => this.CONSUME1(baseLexer.Row) },
-				]);
-				this.OPTION2(() => this.CONSUME(baseLexer.Only));
-			});
-		});
-
 		this.RULE('mssqlApplyClause', () => {
 			this.OR([
 				{ ALT: () => this.CONSUME(mssqlLexer.MsSqlCrossApply) },
@@ -298,7 +278,7 @@ protected getNetezzaRelaxedNameTokens() {
 			this.OPTION2(() => this.SUBRULE(this.groupByClause));
 			this.OPTION3(() => this.SUBRULE(this.havingClause));
 			this.OPTION4(() => this.SUBRULE(this.orderByClause));
-			this.OPTION5(() => this.SUBRULE(this.mssqlOffsetFetchClause));
+			this.OPTION5(() => this.SUBRULE(this.offsetFetchClause));
 			this.OPTION6(() => this.SUBRULE(this.fetchFirstClause));
 			this.MANY(() => {
 				this.SUBRULE(this.setOperation);

@@ -1168,6 +1168,10 @@ export class SqlVisitor
     // No validation needed
   }
 
+  offsetFetchClause(): void {
+    // No validation needed
+  }
+
   createTableStatement(ctx: Record<string, CstNode[]>): void {
     ddlVisitor.createTableStatement(this, ctx);
   }

@@ -531,6 +531,17 @@ export function mergeFunctionSignatures(
     return merged;
 }
 
+export function replaceFunctionSignatures(
+    base: ReadonlyMap<string, readonly DatabaseSqlFunctionSignature[]>,
+    replacements: ReadonlyMap<string, readonly DatabaseSqlFunctionSignature[]>
+): ReadonlyMap<string, readonly DatabaseSqlFunctionSignature[]> {
+    const merged = new Map(base);
+    for (const [name, signatures] of replacements.entries()) {
+        merged.set(name, [...signatures]);
+    }
+    return merged;
+}
+
 export function extendFormatterProfile(
     baseProfile: DatabaseSqlFormatterProfile,
     overlay: Partial<Record<keyof DatabaseSqlFormatterProfile, Iterable<string>>>

@@ -43,6 +43,16 @@ describe('MsSqlSqlParser T-SQL', () => {
 		expect(parsed.cst).toBeDefined();
 	});
 
+	it('keeps accepting FETCH without FIRST/NEXT (legacy parity)', () => {
+		const parsed = parseSqlStatements({
+			sql: 'SELECT TOP 5 Id FROM dbo.Orders ORDER BY Id OFFSET 0 ROWS FETCH 5 ROWS ONLY',
+			authoring: mssqlSqlAuthoring,
+			databaseKind: 'mssql',
+		});
+		expect(parsed.actionableParserErrors).toHaveLength(0);
+		expect(parsed.cst).toBeDefined();
+	});
+
 	it.each([
 		[
 			'top percent with ties',
@@ -79,6 +89,14 @@ describe('MsSqlSqlParser T-SQL', () => {
 		[
 			'merge into',
 			'MERGE INTO target AS T USING source AS S ON (T.id = S.id) WHEN MATCHED THEN UPDATE SET T.v = S.v WHEN NOT MATCHED THEN INSERT (id, v) VALUES (S.id, S.v)',
+		],
+		[
+			'offset fetch first',
+			'SELECT TOP 5 Id FROM dbo.Orders ORDER BY Id OFFSET 0 ROWS FETCH FIRST 5 ROWS ONLY',
+		],
+		[
+			'offset without fetch',
+			'SELECT TOP 5 Id FROM dbo.Orders ORDER BY Id OFFSET 0 ROWS',
 		],
 		[
 			'cte',

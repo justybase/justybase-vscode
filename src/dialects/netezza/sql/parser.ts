@@ -109,8 +109,6 @@ import {
     LBracket,
     RBracket,
     AtSet,
-    Merge,
-    Into,
     Alter,
     Add,
     Drop,
@@ -371,13 +369,6 @@ export class NetezzaSqlParser extends BaseSqlParser {
           });
         },
       });
-    });
-
-    this.OVERRIDE_RULE('mergeStatement', () => {
-      this.CONSUME(Merge);
-      this.OPTION(() => this.CONSUME(Into));
-      this.SUBRULE(this.tableName);
-      this.OPTION1(() => this.SUBRULE(this.commandTail));
     });
 
     // Netezza exposes built-ins such as REPLACE/RANDOM through dedicated

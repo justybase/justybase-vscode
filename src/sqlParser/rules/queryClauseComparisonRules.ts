@@ -13,6 +13,7 @@ export interface QueryClauseComparisonTokens {
     NumberLiteral: TokenType;
     Offset: TokenType;
     Fetch: TokenType;
+    Next: TokenType;
     Rows: TokenType;
     Row: TokenType;
     Only: TokenType;
@@ -59,6 +60,7 @@ interface ParserDsl {
     OR(alts: Array<{ ALT: () => void; GATE?: () => boolean }>): void;
     OR1(alts: Array<{ ALT: () => void; GATE?: () => boolean }>): void;
     OR2(alts: Array<{ ALT: () => void; GATE?: () => boolean }>): void;
+    OR3(alts: Array<{ ALT: () => void; GATE?: () => boolean }>): void;
     AT_LEAST_ONE_SEP(def: { SEP: TokenType; DEF: () => void }): void;
     SUBRULE(rule: RuleRef): void;
     SUBRULE1(rule: RuleRef): void;
@@ -99,6 +101,7 @@ export function registerQueryClauseComparisonRules(parser: SqlParser, tokens: Qu
         NumberLiteral,
         Offset,
         Fetch,
+        Next,
         Rows,
         Row,
         Only,
@@ -170,6 +173,31 @@ export function registerQueryClauseComparisonRules(parser: SqlParser, tokens: Qu
             { ALT: () => p.CONSUME(Row) }
         ]);
         p.CONSUME(Only);
+    });
+
+    // ANSI SQL:2008 OFFSET … FETCH (MSSQL, Oracle 12c+). Optional FETCH part.
+    p.RULE('offsetFetchClause', () => {
+        p.CONSUME(Offset);
+        p.CONSUME(NumberLiteral);
+        p.OR1([
+            { ALT: () => p.CONSUME1(Rows) },
+            { ALT: () => p.CONSUME1(Row) }
+        ]);
+        p.OPTION(() => {
+            p.CONSUME(Fetch);
+            p.OPTION2(() => {
+                p.OR2([
+                    { ALT: () => p.CONSUME(First) },
+                    { ALT: () => p.CONSUME(Next) }
+                ]);
+            });
+            p.CONSUME1(NumberLiteral);
+            p.OR3([
+                { ALT: () => p.CONSUME2(Rows) },
+                { ALT: () => p.CONSUME2(Row) }
+            ]);
+            p.OPTION1(() => p.CONSUME(Only));
+        });
     });
 
     p.RULE('expression', () => {
