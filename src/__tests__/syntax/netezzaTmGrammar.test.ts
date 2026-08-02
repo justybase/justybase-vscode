@@ -13,6 +13,11 @@ function hasScope(token: FlatToken | undefined, pattern: RegExp): boolean {
   return token?.scopes.some((scope) => pattern.test(scope)) ?? false;
 }
 
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)] ?? Number.POSITIVE_INFINITY;
+}
+
 function commentInjectionLeaks(tokens: readonly FlatToken[]): string[] {
   return tokensMatching(
     tokens,
@@ -175,6 +180,22 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     expect(hasScope(db, /database-name/)).toBe(true);
     expect(hasScope(schema, /schema-name/)).toBe(true);
     expect(hasScope(table, /table-name/)).toBe(true);
+  });
+
+  it.each([
+    ['P15 DB..TABLE', 'SELECT * FROM JUST_DATA..DIMDATE D;', 'FROM', /keyword\.other\.DML\.sql/],
+    ['P16 three-part after FROM', 'SELECT * FROM JUST_DATA.ADMIN.DIMDATE D;', 'FROM', /keyword\.other\.DML\.sql/],
+    ['P16 three-part after UPDATE', 'UPDATE DB.SCH.TBL SET X = 1;', 'UPDATE', /keyword\.other\.DML\.sql/],
+    ['P17 schema.table after FROM', 'SELECT * FROM ADMIN.DIMDATE D;', 'FROM', /keyword\.other\.DML\.sql/],
+    ['P17 schema.table after JOIN', 'SELECT * FROM T JOIN ADMIN.DIMDATE D ON 1 = 1;', 'JOIN', /keyword\.other\.DML\.sql/],
+    ['P16b TRUNCATE', 'TRUNCATE TABLE DB.SCH.TBL;', 'TRUNCATE', /keyword\.other\.sql/],
+    ['P16b TABLE after TRUNCATE', 'TRUNCATE TABLE DB.SCH.TBL;', 'TABLE', /keyword\.other\.sql/],
+    ['P16b INTO', 'INSERT INTO DB.SCH.TBL SELECT 1;', 'INTO', /keyword\.other\.DML\.sql/],
+  ])('preserves the base SQL scope for %s', async (_label, sql, keyword, scope) => {
+    const tokens = await tokenizeSql(sql);
+    const token = findTokenContaining(tokens, keyword, { onlyActiveCode: true });
+
+    expect(hasScope(token, scope)).toBe(true);
   });
 
   it.each([
@@ -447,15 +468,16 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
         "SELECT COALESCE(SUBSTRING(UPPER(TRIM(col_0)), 1, 10)) AS COL1, '";
       const sql = `${prefix}${'X'.repeat(literalLen)}'`;
 
-      // Warm this exact shape, then take the best of a few runs (CI can be noisy).
+      // Warm this exact shape, then use the median of five runs to reduce both
+      // scheduler noise and the chance of hiding a broad regression.
       await tokenizeSql(sql);
       const samples: number[] = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         const started = performance.now();
         await tokenizeSql(sql);
         samples.push(performance.now() - started);
       }
-      const elapsedMs = Math.min(...samples);
+      const elapsedMs = median(samples);
 
       const tokens = await tokenizeSql(sql);
       expect(tokens.length).toBeGreaterThan(0);
@@ -489,12 +511,12 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
 
       await tokenizeSql(sql);
       const samples: number[] = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         const started = performance.now();
         await tokenizeSql(sql);
         samples.push(performance.now() - started);
       }
-      const elapsedMs = Math.min(...samples);
+      const elapsedMs = median(samples);
 
       const tokens = await tokenizeSql(sql);
       expect(tokens.length).toBeGreaterThan(0);

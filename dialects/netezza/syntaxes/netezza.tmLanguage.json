@@ -329,8 +329,13 @@
       "match": "(?i)\\b(\\w+)\\.\\.(\\w+)\\b"
     },
     {
-      "comment": "─── P16: 3-part name after DDL/FROM — begin/end (no variable-length lookbehind; lookahead requires db.schema.table) ──",
-      "begin": "(?i)\\b(?:FROM|JOIN|INTO|UPDATE|TABLE|VIEW|DROP|ALTER|TRUNCATE|GROOM)\\s+(?=\\w+\\.\\w+\\.\\w+\\b)",
+      "comment": "─── P16: 3-part name after DML keywords — begin/end (preserve base keyword.other.DML.sql scope for FROM/JOIN/UPDATE; no variable-length lookbehind) ──",
+      "begin": "(?i)\\b(FROM|JOIN|UPDATE)\\s+(?=\\w+\\.\\w+\\.\\w+\\b)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.DML.sql"
+        }
+      },
       "end": "(?=\\s|[;(,)\\]}]|$)",
       "patterns": [
         {
@@ -350,8 +355,39 @@
       ]
     },
     {
-      "comment": "─── P17b: SCHEMA.TABLE after FROM/JOIN — begin/end (no variable-length lookbehind; alias.column via semantic tokens) ──",
-      "begin": "(?i)\\b(?:FROM|JOIN)\\s+(?=\\w+\\.\\w+\\b)",
+      "comment": "─── P16b: 3-part name after DDL keywords — begin/end (preserve base keyword.other.sql scope; no variable-length lookbehind) ──",
+      "begin": "(?i)\\b(INTO|TABLE|VIEW|DROP|ALTER|TRUNCATE|GROOM)\\s+(?=\\w+\\.\\w+\\.\\w+\\b)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.sql"
+        }
+      },
+      "end": "(?=\\s|[;(,)\\]}]|$)",
+      "patterns": [
+        {
+          "captures": {
+            "1": {
+              "name": "constant.other.database-name.sql"
+            },
+            "2": {
+              "name": "constant.other.schema-name.sql"
+            },
+            "3": {
+              "name": "constant.other.table-name.sql"
+            }
+          },
+          "match": "(\\w+)\\.(\\w+)\\.(\\w+)\\b"
+        }
+      ]
+    },
+    {
+      "comment": "─── P17b: SCHEMA.TABLE after FROM/JOIN — begin/end (preserve base DML scope; no variable-length lookbehind) ──",
+      "begin": "(?i)\\b(FROM|JOIN)\\s+(?=\\w+\\.\\w+\\b)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.DML.sql"
+        }
+      },
       "end": "(?=\\s|[;(,)\\]}]|$)",
       "patterns": [
         {

@@ -1,33 +1,27 @@
 import type {
 	DatabaseSqlAuthoring,
-	DatabaseSqlFormatterProfile,
 	DatabaseSqlFunctionSignature,
 	DatabaseSqlTypeSpec,
 	DatabaseSqlValidationProfile,
 } from '../../../../src/sql/authoring/types';
+import {
+	BASE_SQL_BUILTIN_FUNCTIONS,
+	BASE_SQL_COMPLETION_KEYWORDS,
+	BASE_SQL_FORMATTER_PROFILE,
+	BASE_SQL_FUNCTION_SIGNATURES,
+	BASE_SQL_SPECIAL_BUILTIN_VALUES,
+	extendFormatterProfile,
+	mergeFunctionSignatures,
+	mergeStringSets,
+	mergeUniqueStrings,
+} from '../../../../src/sql/authoring/baseProfiles';
 import { db2SqlQualityRules } from './qualityRules';
 
-const DB2_COMPLETION_KEYWORDS = [
-	'SELECT',
-	'FROM',
-	'WHERE',
-	'INSERT',
-	'UPDATE',
-	'DELETE',
-	'MERGE',
-	'CALL',
-	'CREATE',
-	'ALTER',
-	'DROP',
-	'TABLE',
-	'VIEW',
-	'PROCEDURE',
+const DB2_COMPLETION_KEYWORD_OVERLAYS = [
 	'FUNCTION',
-	'SEQUENCE',
 	'TRIGGER',
 	'ALIAS',
 	'INDEX',
-	'VALUES',
 	'IDENTITY',
 	'GENERATED',
 	'ALWAYS',
@@ -45,19 +39,48 @@ const DB2_COMPLETION_KEYWORDS = [
 	'ORGANIZE BY',
 	'DATA CAPTURE',
 	'LANGUAGE SQL',
-	'ORDER BY',
-	'GROUP BY',
 	'HAVING',
-	'UNION',
-	'INTERSECT',
-	'EXCEPT',
 	'CURRENT SCHEMA',
 	'CURRENT SERVER',
 	'CURRENT DATE',
 	'CURRENT TIME',
 	'CURRENT TIMESTAMP',
 	'CURRENT USER',
+	'ORDER BY',
+	'GROUP BY',
 ] as const;
+
+const DB2_COMPLETION_KEYWORDS = mergeUniqueStrings(
+	BASE_SQL_COMPLETION_KEYWORDS,
+	DB2_COMPLETION_KEYWORD_OVERLAYS,
+);
+
+const DB2_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
+	'CAST',
+	'CHAR',
+	'CURRENT DATE',
+	'CURRENT TIME',
+	'CURRENT TIMESTAMP',
+	'CURRENT USER',
+	'DECIMAL',
+	'HEX',
+	'INTEGER',
+	'LOCATE',
+	'POSSTR',
+	'VARCHAR',
+	'VALUE',
+	'XMLSERIALIZE',
+]);
+
+const DB2_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>([
+	'NULL',
+	'CURRENT DATE',
+	'CURRENT TIME',
+	'CURRENT TIMESTAMP',
+	'CURRENT USER',
+	'CURRENT SCHEMA',
+	'CURRENT SERVER',
+]);
 
 const DB2_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
 	SMALLINT: { canonical: 'SMALLINT', paramsMin: 0, paramsMax: 0 },
@@ -80,7 +103,7 @@ const DB2_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
 	TIMESTAMP: { canonical: 'TIMESTAMP', paramsMin: 0, paramsMax: 1 },
 };
 
-const DB2_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
+const DB2_SIGNATURE_OVERLAYS = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
 	[
 		'COUNT',
 		[
@@ -123,84 +146,16 @@ const DB2_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>(
 	],
 ]);
 
-const db2FormatterProfile: DatabaseSqlFormatterProfile = {
-	keywords: new Set(DB2_COMPLETION_KEYWORDS),
-	clauseKeywords: new Set([
-		'SELECT',
-		'FROM',
-		'WHERE',
-		'GROUP BY',
-		'HAVING',
-		'ORDER BY',
-		'FETCH FIRST',
-		'WITH UR',
-		'WITH CS',
-		'OPTIMIZE FOR',
-	]),
-	newlineBeforeKeywords: new Set([
-		'FROM',
-		'WHERE',
-		'GROUP BY',
-		'HAVING',
-		'ORDER BY',
-		'FETCH FIRST',
-		'WITH UR',
-		'WITH CS',
-		'OPTIMIZE FOR',
-	]),
-	joinModifiers: new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS']),
-	commaNewlineClauses: new Set(['SELECT']),
-	logicalBreakKeywords: new Set(['AND', 'OR']),
-};
+const db2FormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE, {
+	keywords: DB2_COMPLETION_KEYWORD_OVERLAYS,
+	clauseKeywords: ['GROUP BY', 'ORDER BY', 'FETCH FIRST', 'WITH UR', 'WITH CS', 'OPTIMIZE FOR'],
+	newlineBeforeKeywords: ['GROUP BY', 'ORDER BY', 'FETCH FIRST', 'WITH UR', 'WITH CS', 'OPTIMIZE FOR'],
+});
 
 const db2ValidationProfile: DatabaseSqlValidationProfile = {
-	builtinFunctions: new Set([
-		'ABS',
-		'AVG',
-		'CAST',
-		'CEIL',
-		'CEILING',
-		'CHAR',
-		'COALESCE',
-		'CONCAT',
-		'COUNT',
-		'CURRENT DATE',
-		'CURRENT TIME',
-		'CURRENT TIMESTAMP',
-		'CURRENT USER',
-		'DECIMAL',
-		'FLOOR',
-		'HEX',
-		'INTEGER',
-		'LENGTH',
-		'LOCATE',
-		'LOWER',
-		'LTRIM',
-		'MAX',
-		'MIN',
-		'MOD',
-		'NULLIF',
-		'POSSTR',
-		'ROUND',
-		'RTRIM',
-		'SUBSTR',
-		'SUM',
-		'TRIM',
-		'UPPER',
-		'VARCHAR',
-		'VALUE',
-		'XMLSERIALIZE',
-	]),
+	builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, DB2_BUILTIN_FUNCTION_OVERLAYS),
 	systemColumns: new Set(),
-	specialBuiltinValues: new Set([
-		'NULL',
-		'CURRENT DATE',
-		'CURRENT TIME',
-		'CURRENT TIMESTAMP',
-		'CURRENT USER',
-		'CURRENT SCHEMA',
-		'CURRENT SERVER',
-	]),
+	specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, DB2_SPECIAL_BUILTIN_VALUE_OVERLAYS),
 	getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
 		if (!typeName) {
 			return undefined;
@@ -227,7 +182,7 @@ const db2ValidationProfile: DatabaseSqlValidationProfile = {
 
 export const db2SqlAuthoring: DatabaseSqlAuthoring = {
 	completionKeywords: DB2_COMPLETION_KEYWORDS,
-	signatures: DB2_SIGNATURES,
+	signatures: mergeFunctionSignatures(BASE_SQL_FUNCTION_SIGNATURES, DB2_SIGNATURE_OVERLAYS),
 	formatter: db2FormatterProfile,
 	validation: db2ValidationProfile,
 	qualityRules: db2SqlQualityRules,

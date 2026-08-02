@@ -1,36 +1,44 @@
 import type {
     DatabaseSqlAuthoring,
-    DatabaseSqlFormatterProfile,
     DatabaseSqlFunctionSignature,
     DatabaseSqlTypeSpec,
     DatabaseSqlValidationProfile
 } from '../../../../src/sql/authoring/types';
+import {
+    BASE_SQL_BUILTIN_FUNCTIONS,
+    BASE_SQL_COMPLETION_KEYWORDS,
+    BASE_SQL_FORMATTER_PROFILE,
+    BASE_SQL_FUNCTION_SIGNATURES,
+    BASE_SQL_SPECIAL_BUILTIN_VALUES,
+    extendFormatterProfile,
+    mergeFunctionSignatures,
+    mergeStringSets,
+    mergeUniqueStrings
+} from '../../../../src/sql/authoring/baseProfiles';
 
-const MYSQL_COMPLETION_KEYWORDS = [
-    'SELECT',
-    'FROM',
-    'WHERE',
-    'INSERT',
-    'UPDATE',
-    'DELETE',
-    'WITH',
-    'RECURSIVE',
+const MYSQL_COMPLETION_KEYWORD_OVERLAYS = [
     'RETURNING',
-    'CREATE',
-    'ALTER',
-    'DROP',
-    'TABLE',
-    'VIEW',
     'INDEX',
     'FUNCTION',
-    'PROCEDURE',
     'TRIGGER',
     'EVENT',
     'ORDER BY',
-    'GROUP BY',
-    'LIMIT',
-    'OFFSET'
+    'GROUP BY'
 ] as const;
+
+const MYSQL_COMPLETION_KEYWORDS = mergeUniqueStrings(
+    BASE_SQL_COMPLETION_KEYWORDS,
+    MYSQL_COMPLETION_KEYWORD_OVERLAYS
+);
+
+const MYSQL_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
+    'CURRENT_DATE',
+    'CURRENT_TIME',
+    'CURRENT_TIMESTAMP',
+    'IFNULL'
+]);
+
+const MYSQL_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>(['NULL', 'TRUE', 'FALSE']);
 
 const MYSQL_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     TINYINT: { canonical: 'TINYINT', paramsMin: 0, paramsMax: 1 },
@@ -64,7 +72,7 @@ const MYSQL_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     JSON: { canonical: 'JSON', paramsMin: 0, paramsMax: 0 }
 };
 
-const MYSQL_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
+const MYSQL_SIGNATURE_OVERLAYS = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
     [
         'COUNT',
         [{ name: 'COUNT', parameters: ['expression'], description: 'Returns the number of input rows where the expression is not null.' }]
@@ -83,38 +91,16 @@ const MYSQL_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]
     ]
 ]);
 
-const mysqlFormatterProfile: DatabaseSqlFormatterProfile = {
-    keywords: new Set(MYSQL_COMPLETION_KEYWORDS),
-    clauseKeywords: new Set(['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT', 'OFFSET', 'RETURNING']),
-    newlineBeforeKeywords: new Set(['FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT', 'OFFSET', 'RETURNING']),
-    joinModifiers: new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS']),
-    commaNewlineClauses: new Set(['SELECT']),
-    logicalBreakKeywords: new Set(['AND', 'OR'])
-};
+const mysqlFormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE, {
+    keywords: MYSQL_COMPLETION_KEYWORD_OVERLAYS,
+    clauseKeywords: ['GROUP BY', 'ORDER BY', 'LIMIT', 'OFFSET', 'RETURNING'],
+    newlineBeforeKeywords: ['GROUP BY', 'ORDER BY', 'LIMIT', 'OFFSET', 'RETURNING']
+});
 
 const mysqlValidationProfile: DatabaseSqlValidationProfile = {
-    builtinFunctions: new Set([
-        'ABS',
-        'AVG',
-        'COALESCE',
-        'CONCAT',
-        'COUNT',
-        'CURRENT_DATE',
-        'CURRENT_TIME',
-        'CURRENT_TIMESTAMP',
-        'IFNULL',
-        'LENGTH',
-        'LOWER',
-        'MAX',
-        'MIN',
-        'NOW',
-        'ROUND',
-        'SUBSTRING',
-        'SUM',
-        'UPPER'
-    ]),
+    builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, MYSQL_BUILTIN_FUNCTION_OVERLAYS),
     systemColumns: new Set(),
-    specialBuiltinValues: new Set(['NULL', 'TRUE', 'FALSE', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP']),
+    specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, MYSQL_SPECIAL_BUILTIN_VALUE_OVERLAYS),
     getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
         if (!typeName) return undefined;
         return MYSQL_TYPE_SPECS[typeName.trim().toUpperCase()];
@@ -127,7 +113,7 @@ const mysqlValidationProfile: DatabaseSqlValidationProfile = {
 
 export const mysqlSqlAuthoring: DatabaseSqlAuthoring = {
     completionKeywords: MYSQL_COMPLETION_KEYWORDS,
-    signatures: MYSQL_SIGNATURES,
+    signatures: mergeFunctionSignatures(BASE_SQL_FUNCTION_SIGNATURES, MYSQL_SIGNATURE_OVERLAYS),
     formatter: mysqlFormatterProfile,
     validation: mysqlValidationProfile,
     qualityRules: []

@@ -1,50 +1,59 @@
 import type {
     DatabaseSqlAuthoring,
-    DatabaseSqlFormatterProfile,
     DatabaseSqlFunctionSignature,
     DatabaseSqlTypeSpec,
     DatabaseSqlValidationProfile,
 } from '../../../../src/sql/authoring/types';
+import {
+    BASE_SQL_BUILTIN_FUNCTIONS,
+    BASE_SQL_COMPLETION_KEYWORDS,
+    BASE_SQL_FORMATTER_PROFILE,
+    BASE_SQL_FUNCTION_SIGNATURES,
+    BASE_SQL_SPECIAL_BUILTIN_VALUES,
+    extendFormatterProfile,
+    mergeFunctionSignatures,
+    mergeStringSets,
+    mergeUniqueStrings,
+} from '../../../../src/sql/authoring/baseProfiles';
 
-const VERTICA_COMPLETION_KEYWORDS = [
-    'SELECT',
-    'DISTINCT',
-    'FROM',
-    'WHERE',
-    'JOIN',
+const VERTICA_COMPLETION_KEYWORD_OVERLAYS = [
     'LEFT JOIN',
     'RIGHT JOIN',
     'FULL JOIN',
     'CROSS JOIN',
-    'INSERT',
-    'UPDATE',
-    'DELETE',
-    'MERGE',
-    'WITH',
     'COPY',
     'EXPORT',
-    'CREATE',
-    'ALTER',
-    'DROP',
-    'TRUNCATE',
-    'TABLE',
-    'VIEW',
     'PROJECTION',
-    'SEQUENCE',
     'FUNCTION',
-    'PROCEDURE',
-    'EXPLAIN',
     'ANALYZE_STATISTICS',
-    'ORDER BY',
-    'GROUP BY',
     'HAVING',
-    'LIMIT',
-    'OFFSET',
     'SEGMENTED BY',
     'UNSEGMENTED ALL NODES',
     'KSAFE',
+    'ORDER BY',
+    'GROUP BY',
     'PARTITION BY',
 ] as const;
+
+const VERTICA_COMPLETION_KEYWORDS = mergeUniqueStrings(
+    BASE_SQL_COMPLETION_KEYWORDS,
+    VERTICA_COMPLETION_KEYWORD_OVERLAYS
+);
+
+const VERTICA_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
+    'ANALYZE_STATISTICS',
+    'CASE',
+    'CLOSE_SESSION',
+    'CURRENT_DATABASE',
+    'CURRENT_SCHEMA',
+    'CURRENT_SESSION',
+    'CURRENT_TIMESTAMP',
+    'EXPORT_OBJECTS',
+    'HASH',
+    'PURGE_TABLE',
+]);
+
+const VERTICA_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>(['NULL', 'TRUE', 'FALSE']);
 
 const VERTICA_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     BOOLEAN: { canonical: 'BOOLEAN', paramsMin: 0, paramsMax: 0 },
@@ -72,7 +81,7 @@ const VERTICA_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     ARRAY: { canonical: 'ARRAY', paramsMin: 0, paramsMax: 0 },
 };
 
-const VERTICA_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
+const VERTICA_SIGNATURE_OVERLAYS = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
     [
         'COUNT',
         [{ name: 'COUNT', parameters: ['expression'], description: 'Returns the number of non-null input rows.' }],
@@ -99,40 +108,16 @@ const VERTICA_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature
     ],
 ]);
 
-const verticaFormatterProfile: DatabaseSqlFormatterProfile = {
-    keywords: new Set(VERTICA_COMPLETION_KEYWORDS),
-    clauseKeywords: new Set(['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT', 'OFFSET']),
-    newlineBeforeKeywords: new Set(['FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT', 'OFFSET']),
-    joinModifiers: new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS']),
-    commaNewlineClauses: new Set(['SELECT']),
-    logicalBreakKeywords: new Set(['AND', 'OR']),
-};
+const verticaFormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE, {
+    keywords: VERTICA_COMPLETION_KEYWORD_OVERLAYS,
+    clauseKeywords: ['GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT', 'OFFSET'],
+    newlineBeforeKeywords: ['GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT', 'OFFSET']
+});
 
 const verticaValidationProfile: DatabaseSqlValidationProfile = {
-    builtinFunctions: new Set([
-        'ABS',
-        'ANALYZE_STATISTICS',
-        'AVG',
-        'CASE',
-        'CLOSE_SESSION',
-        'COALESCE',
-        'COUNT',
-        'CURRENT_DATABASE',
-        'CURRENT_SCHEMA',
-        'CURRENT_SESSION',
-        'CURRENT_TIMESTAMP',
-        'DATE_TRUNC',
-        'EXPORT_OBJECTS',
-        'HASH',
-        'MAX',
-        'MIN',
-        'NOW',
-        'PURGE_TABLE',
-        'SUM',
-        'UPPER',
-    ]),
+    builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, VERTICA_BUILTIN_FUNCTION_OVERLAYS),
     systemColumns: new Set(),
-    specialBuiltinValues: new Set(['NULL', 'TRUE', 'FALSE', 'CURRENT_DATE', 'CURRENT_SCHEMA', 'CURRENT_TIMESTAMP']),
+    specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, VERTICA_SPECIAL_BUILTIN_VALUE_OVERLAYS),
     getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
         if (!typeName) {
             return undefined;
@@ -147,7 +132,7 @@ const verticaValidationProfile: DatabaseSqlValidationProfile = {
 
 export const verticaSqlAuthoring: DatabaseSqlAuthoring = {
     completionKeywords: VERTICA_COMPLETION_KEYWORDS,
-    signatures: VERTICA_SIGNATURES,
+    signatures: mergeFunctionSignatures(BASE_SQL_FUNCTION_SIGNATURES, VERTICA_SIGNATURE_OVERLAYS),
     formatter: verticaFormatterProfile,
     validation: verticaValidationProfile,
     qualityRules: [],

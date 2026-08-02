@@ -956,6 +956,7 @@ export class OracleSqlParser extends NetezzaSqlParser {
             this.OPTION5(() => this.SUBRULE(this.havingClause));
             this.OPTION6(() => this.SUBRULE(this.orderByClause));
             this.OPTION7(() => this.SUBRULE(this.fetchFirstClause));
+            this.OPTION8(() => this.SUBRULE(this.offsetFetchClause));
             this.MANY(() => {
                 this.SUBRULE(this.setOperation);
                 this.OR7([

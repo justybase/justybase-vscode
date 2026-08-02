@@ -1,51 +1,69 @@
 import type {
   DatabaseSqlAuthoring,
-  DatabaseSqlFormatterProfile,
   DatabaseSqlFunctionSignature,
   DatabaseSqlTypeSpec,
   DatabaseSqlValidationProfile,
 } from "../../sql/authoring/types";
+import {
+  BASE_SQL_BUILTIN_FUNCTIONS,
+  BASE_SQL_COMPLETION_KEYWORDS,
+  BASE_SQL_FORMATTER_PROFILE,
+  BASE_SQL_FUNCTION_SIGNATURES,
+  BASE_SQL_SPECIAL_BUILTIN_VALUES,
+  extendFormatterProfile,
+  mergeFunctionSignatures,
+  mergeStringSets,
+  mergeUniqueStrings,
+} from "../../sql/authoring/baseProfiles";
 
-const POSTGRESQL_COMPATIBLE_KEYWORDS = [
-  "SELECT",
-  "DISTINCT",
+const POSTGRESQL_COMPATIBLE_KEYWORD_OVERLAYS = [
   "DISTINCT ON",
-  "FROM",
-  "WHERE",
-  "JOIN",
   "LEFT JOIN",
   "RIGHT JOIN",
   "FULL JOIN",
   "LATERAL",
-  "INSERT",
-  "UPDATE",
-  "DELETE",
-  "WITH",
   "RETURNING",
   "ON CONFLICT",
   "UPSERT",
-  "CREATE",
-  "ALTER",
-  "DROP",
   "ANALYZE",
   "VACUUM",
-  "TABLE",
-  "VIEW",
   "MATERIALIZED VIEW",
   "INDEX",
-  "SEQUENCE",
   "FUNCTION",
-  "PROCEDURE",
   "TRIGGER",
   "COPY",
-  "EXPLAIN",
+  "HAVING",
+  "WINDOW",
   "ORDER BY",
   "GROUP BY",
-  "HAVING",
-  "LIMIT",
-  "OFFSET",
-  "WINDOW",
 ] as const;
+
+const POSTGRESQL_COMPATIBLE_KEYWORDS = mergeUniqueStrings(
+  BASE_SQL_COMPLETION_KEYWORDS,
+  POSTGRESQL_COMPATIBLE_KEYWORD_OVERLAYS,
+);
+
+const POSTGRESQL_COMPATIBLE_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
+  "ARRAY_AGG",
+  "CURRENT_DATE",
+  "CURRENT_CATALOG",
+  "CURRENT_SCHEMA",
+  "CURRENT_TIME",
+  "CURRENT_TIMESTAMP",
+  "CURRENT_USER",
+  "GENERATE_SERIES",
+  "JSONB_AGG",
+  "JSONB_BUILD_OBJECT",
+  "JSON_BUILD_OBJECT",
+  "REGEXP_REPLACE",
+  "STRING_AGG",
+]);
+
+const POSTGRESQL_COMPATIBLE_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>([
+  "NULL",
+  "TRUE",
+  "FALSE",
+]);
 
 const POSTGRESQL_COMPATIBLE_TYPE_SPECS: Readonly<
   Record<string, DatabaseSqlTypeSpec>
@@ -106,7 +124,7 @@ const POSTGRESQL_COMPATIBLE_TYPE_SPECS: Readonly<
   XML: { canonical: "XML", paramsMin: 0, paramsMax: 0 },
 };
 
-const POSTGRESQL_COMPATIBLE_SIGNATURES = new Map<
+const POSTGRESQL_COMPATIBLE_SIGNATURE_OVERLAYS = new Map<
   string,
   readonly DatabaseSqlFunctionSignature[]
 >([
@@ -196,91 +214,26 @@ const POSTGRESQL_COMPATIBLE_SIGNATURES = new Map<
   ],
 ]);
 
-const postgresqlCompatibleFormatterProfile: DatabaseSqlFormatterProfile = {
-  keywords: new Set(POSTGRESQL_COMPATIBLE_KEYWORDS),
-  clauseKeywords: new Set([
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "GROUP BY",
-    "HAVING",
-    "ORDER BY",
-    "LIMIT",
-    "OFFSET",
-    "RETURNING",
-  ]),
-  newlineBeforeKeywords: new Set([
-    "FROM",
-    "WHERE",
-    "GROUP BY",
-    "HAVING",
-    "ORDER BY",
-    "LIMIT",
-    "OFFSET",
-    "RETURNING",
-  ]),
-  joinModifiers: new Set([
-    "INNER",
-    "LEFT",
-    "RIGHT",
-    "FULL",
-    "OUTER",
-    "CROSS",
-    "LATERAL",
-  ]),
-  commaNewlineClauses: new Set(["SELECT"]),
-  logicalBreakKeywords: new Set(["AND", "OR"]),
-};
+const postgresqlCompatibleFormatterProfile = extendFormatterProfile(
+  BASE_SQL_FORMATTER_PROFILE,
+  {
+    keywords: POSTGRESQL_COMPATIBLE_KEYWORD_OVERLAYS,
+    clauseKeywords: ["GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET", "RETURNING"],
+    newlineBeforeKeywords: ["GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET", "RETURNING"],
+    joinModifiers: ["LATERAL"],
+  },
+);
 
 const postgresqlCompatibleValidationProfile: DatabaseSqlValidationProfile = {
-  builtinFunctions: new Set([
-    "ABS",
-    "AVG",
-    "ARRAY_AGG",
-    "COALESCE",
-    "COUNT",
-    "CURRENT_DATE",
-    "CURRENT_CATALOG",
-    "CURRENT_SCHEMA",
-    "CURRENT_TIME",
-    "CURRENT_TIMESTAMP",
-    "CURRENT_USER",
-    "DATE_TRUNC",
-    "DENSE_RANK",
-    "EXTRACT",
-    "GENERATE_SERIES",
-    "JSONB_AGG",
-    "JSONB_BUILD_OBJECT",
-    "JSON_BUILD_OBJECT",
-    "LAG",
-    "LEAD",
-    "LOWER",
-    "MAX",
-    "MIN",
-    "NOW",
-    "NULLIF",
-    "RANK",
-    "REGEXP_REPLACE",
-    "ROW_NUMBER",
-    "ROUND",
-    "STRING_AGG",
-    "SUBSTRING",
-    "SUM",
-    "TO_CHAR",
-    "UPPER",
-  ]),
+  builtinFunctions: mergeStringSets(
+    BASE_SQL_BUILTIN_FUNCTIONS,
+    POSTGRESQL_COMPATIBLE_BUILTIN_FUNCTION_OVERLAYS,
+  ),
   systemColumns: new Set(["CTID", "TABLEOID", "XMIN", "XMAX", "CMIN", "CMAX"]),
-  specialBuiltinValues: new Set([
-    "NULL",
-    "TRUE",
-    "FALSE",
-    "CURRENT_DATE",
-    "CURRENT_TIME",
-    "CURRENT_TIMESTAMP",
-    "CURRENT_USER",
-    "CURRENT_SCHEMA",
-    "CURRENT_CATALOG",
-  ]),
+  specialBuiltinValues: mergeStringSets(
+    BASE_SQL_SPECIAL_BUILTIN_VALUES,
+    POSTGRESQL_COMPATIBLE_SPECIAL_BUILTIN_VALUE_OVERLAYS,
+  ),
   getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
     if (!typeName) return undefined;
     return POSTGRESQL_COMPATIBLE_TYPE_SPECS[typeName.trim().toUpperCase()];
@@ -293,7 +246,10 @@ const postgresqlCompatibleValidationProfile: DatabaseSqlValidationProfile = {
 
 export const postgresqlCompatibleSqlAuthoring: DatabaseSqlAuthoring = {
   completionKeywords: POSTGRESQL_COMPATIBLE_KEYWORDS,
-  signatures: POSTGRESQL_COMPATIBLE_SIGNATURES,
+  signatures: mergeFunctionSignatures(
+    BASE_SQL_FUNCTION_SIGNATURES,
+    POSTGRESQL_COMPATIBLE_SIGNATURE_OVERLAYS,
+  ),
   formatter: postgresqlCompatibleFormatterProfile,
   validation: postgresqlCompatibleValidationProfile,
   qualityRules: [],

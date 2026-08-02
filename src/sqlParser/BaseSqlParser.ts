@@ -99,6 +99,7 @@ export class BaseSqlParser extends CstParser {
   orderByItem!: AnyRule;
   limitClause!: AnyRule;
   fetchFirstClause!: AnyRule;
+  offsetFetchClause!: AnyRule;
   parenthesizedSetStatement!: AnyRule;
   comparisonRhs!: AnyRule;
   expression!: AnyRule;
@@ -413,6 +414,7 @@ export class BaseSqlParser extends CstParser {
       Extract,
       Cast,
       Fetch,
+      Next,
       First,
       Only,
       Any,
@@ -644,7 +646,9 @@ export class BaseSqlParser extends CstParser {
 
     this.RULE("mergeStatement", () => {
       this.CONSUME(Merge);
-      this.SUBRULE(this.commandTail);
+      this.OPTION(() => this.CONSUME(Into));
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION1(() => this.SUBRULE(this.commandTail));
     });
 
     this.RULE("reindexStatement", () => {
@@ -1540,6 +1544,7 @@ export class BaseSqlParser extends CstParser {
       NumberLiteral,
       Offset,
       Fetch,
+      Next,
       Rows,
       Row,
       Only,

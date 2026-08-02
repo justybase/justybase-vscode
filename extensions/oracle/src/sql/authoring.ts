@@ -1,46 +1,36 @@
 import type {
     DatabaseSqlAuthoring,
-    DatabaseSqlFormatterProfile,
     DatabaseSqlFunctionSignature,
     DatabaseSqlTypeSpec,
     DatabaseSqlValidationProfile
 } from '../../../../src/sql/authoring/types';
+import {
+    BASE_SQL_BUILTIN_FUNCTIONS,
+    BASE_SQL_COMPLETION_KEYWORDS,
+    BASE_SQL_FORMATTER_PROFILE,
+    BASE_SQL_FUNCTION_SIGNATURES,
+    BASE_SQL_SPECIAL_BUILTIN_VALUES,
+    extendFormatterProfile,
+    mergeFunctionSignatures,
+    mergeStringSets,
+    mergeUniqueStrings,
+    replaceFunctionSignatures
+} from '../../../../src/sql/authoring/baseProfiles';
 import { oracleSqlQualityRules } from './qualityRules';
 
-const ORACLE_COMPLETION_KEYWORDS = [
-    'SELECT',
-    'FROM',
-    'WHERE',
-    'INSERT',
-    'UPDATE',
-    'DELETE',
-    'MERGE',
-    'BEGIN',
-    'DECLARE',
-    'CALL',
-    'CREATE',
-    'ALTER',
-    'DROP',
-    'TABLE',
-    'VIEW',
-    'SEQUENCE',
-    'PROCEDURE',
+const ORACLE_COMPLETION_KEYWORD_OVERLAYS = [
     'FUNCTION',
     'PACKAGE',
     'TRIGGER',
     'SYNONYM',
     'INDEX',
     'MATERIALIZED VIEW',
-    'GRANT',
-    'REVOKE',
     'COMMIT',
     'ROLLBACK',
     'SAVEPOINT',
     'RETURNING INTO',
     'PIVOT',
     'UNPIVOT',
-    'ORDER BY',
-    'GROUP BY',
     'CONNECT BY',
     'START WITH',
     'FETCH FIRST',
@@ -48,6 +38,33 @@ const ORACLE_COMPLETION_KEYWORDS = [
     'ROWNUM',
     'DUAL'
 ] as const;
+
+const ORACLE_COMPLETION_KEYWORDS = mergeUniqueStrings(
+    BASE_SQL_COMPLETION_KEYWORDS,
+    ORACLE_COMPLETION_KEYWORD_OVERLAYS
+);
+
+const ORACLE_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
+    'CAST',
+    'CURRENT_DATE',
+    'CURRENT_TIMESTAMP',
+    'INSTR',
+    'DBMS_METADATA.GET_DDL',
+    'REGEXP_LIKE',
+    'REGEXP_REPLACE',
+    'REGEXP_SUBSTR',
+    'SYSDATE',
+    'SYSTIMESTAMP',
+    'SYS_CONTEXT',
+    'TO_CLOB',
+    'UID'
+]);
+
+const ORACLE_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>([
+    'NULL',
+    'SYSDATE',
+    'SYSTIMESTAMP'
+]);
 
 const ORACLE_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     NUMBER: { canonical: 'NUMBER', paramsMin: 0, paramsMax: 2 },
@@ -77,15 +94,37 @@ const ORACLE_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     'INTERVAL DAY TO SECOND': { canonical: 'INTERVAL DAY TO SECOND', paramsMin: 1, paramsMax: 1 }
 };
 
-const ORACLE_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
-    [
-        'COUNT',
-        [{
-            name: 'COUNT',
-            parameters: ['expression'],
-            description: 'Returns the number of non-null values for the expression.'
-        }]
-    ],
+/** Functions whose Oracle signature supersedes the ANSI base signature (same name, different arity/defaults). */
+const ORACLE_SIGNATURE_REPLACEMENTS: ReadonlyMap<string, readonly DatabaseSqlFunctionSignature[]> = new Map([
+    ['COUNT', [{
+        name: 'COUNT',
+        parameters: ['expression'],
+        description: 'Returns the number of non-null values for the expression.'
+    }]],
+    ['COALESCE', [{
+        name: 'COALESCE',
+        parameters: ['value1', 'value2', '...'],
+        description: 'Returns the first non-null argument.'
+    }]],
+    ['TO_CHAR', [{
+        name: 'TO_CHAR',
+        parameters: ['value', 'format?'],
+        description: 'Converts a value to VARCHAR2 using an optional format mask.'
+    }]],
+    ['SUBSTR', [{
+        name: 'SUBSTR',
+        parameters: ['value', 'start', 'length?'],
+        description: 'Returns a substring starting at the given offset.'
+    }]],
+    ['TO_DATE', [{
+        name: 'TO_DATE',
+        parameters: ['value', 'format?'],
+        description: 'Converts text to an Oracle DATE using an optional format mask.',
+        example: "TO_DATE('2026-01-31', 'YYYY-MM-DD')",
+    }]]
+]);
+
+const ORACLE_SIGNATURE_OVERLAYS: ReadonlyMap<string, readonly DatabaseSqlFunctionSignature[]> = new Map([
     [
         'NVL',
         [{
@@ -95,44 +134,11 @@ const ORACLE_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[
         }]
     ],
     [
-        'COALESCE',
-        [{
-            name: 'COALESCE',
-            parameters: ['value1', 'value2', '...'],
-            description: 'Returns the first non-null argument.'
-        }]
-    ],
-    [
-        'TO_CHAR',
-        [{
-            name: 'TO_CHAR',
-            parameters: ['value', 'format?'],
-            description: 'Converts a value to VARCHAR2 using an optional format mask.'
-        }]
-    ],
-    [
-        'SUBSTR',
-        [{
-            name: 'SUBSTR',
-            parameters: ['value', 'start', 'length?'],
-            description: 'Returns a substring starting at the given offset.'
-        }]
-    ],
-    [
         'SYS_CONTEXT',
         [{
             name: 'SYS_CONTEXT',
             parameters: ['namespace', 'parameter'],
             description: 'Returns the value of an Oracle application or USERENV context.'
-        }]
-    ],
-    [
-        'TO_DATE',
-        [{
-            name: 'TO_DATE',
-            parameters: ['value', 'format?'],
-            description: 'Converts text to an Oracle DATE using an optional format mask.',
-            example: "TO_DATE('2026-01-31', 'YYYY-MM-DD')",
         }]
     ],
     [
@@ -153,128 +159,30 @@ const ORACLE_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[
     ]
 ]);
 
-const oracleFormatterProfile: DatabaseSqlFormatterProfile = {
-    keywords: new Set([
-        'SELECT',
-        'FROM',
-        'WHERE',
-        'GROUP',
-        'BY',
-        'ORDER',
-        'FETCH',
-        'FIRST',
+const ORACLE_SIGNATURES = replaceFunctionSignatures(
+    mergeFunctionSignatures(BASE_SQL_FUNCTION_SIGNATURES, ORACLE_SIGNATURE_OVERLAYS),
+    ORACLE_SIGNATURE_REPLACEMENTS
+);
+
+const oracleFormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE, {
+    keywords: [
+        ...ORACLE_COMPLETION_KEYWORD_OVERLAYS,
         'NEXT',
-        'ROWS',
-        'ROW',
-        'ONLY',
-        'INSERT',
-        'UPDATE',
-        'DELETE',
-        'MERGE',
-        'INTO',
-        'VALUES',
-        'SET',
-        'WITH',
         'CONNECT',
         'START',
-        'JOIN',
-        'INNER',
-        'LEFT',
-        'RIGHT',
-        'FULL',
-        'OUTER',
-        'CROSS',
-        'ON',
-        'AND',
-        'OR',
-        'NOT',
-        'NULL',
-        'AS',
-        'BEGIN',
-        'DECLARE',
-        'END',
-        'EXCEPTION',
-        'CREATE',
-        'ALTER',
-        'DROP',
-        'TABLE',
-        'VIEW',
-        'PACKAGE',
-        'PROCEDURE',
-        'FUNCTION',
-        'TRIGGER',
-        'SEQUENCE',
-        'SYNONYM',
-        'PIVOT',
-        'UNPIVOT',
         'RETURNING',
-        'INTO',
         'PRIOR',
         'NOCYCLE',
-        'SIBLINGS',
-        'GRANT',
-        'REVOKE',
-        'COMMIT',
-        'ROLLBACK'
-    ]),
-    clauseKeywords: new Set(['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'SET', 'VALUES', 'ON', 'CONNECT BY', 'START WITH']),
-    newlineBeforeKeywords: new Set(['FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'SET', 'VALUES', 'CONNECT BY', 'START WITH']),
-    joinModifiers: new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS']),
-    commaNewlineClauses: new Set(['SELECT']),
-    logicalBreakKeywords: new Set(['AND', 'OR'])
-};
+        'SIBLINGS'
+    ],
+    clauseKeywords: ['GROUP BY', 'ORDER BY', 'CONNECT BY', 'START WITH'],
+    newlineBeforeKeywords: ['GROUP BY', 'ORDER BY', 'CONNECT BY', 'START WITH']
+});
 
 const oracleValidationProfile: DatabaseSqlValidationProfile = {
-    builtinFunctions: new Set([
-        'ABS',
-        'ADD_MONTHS',
-        'AVG',
-        'CAST',
-        'COALESCE',
-        'COUNT',
-        'CURRENT_DATE',
-        'CURRENT_TIMESTAMP',
-        'DECODE',
-        'EXTRACT',
-        'GREATEST',
-        'INSTR',
-        'LAST_DAY',
-        'LEAST',
-        'DBMS_METADATA.GET_DDL',
-        'LOWER',
-        'MAX',
-        'MIN',
-        'NVL',
-        'NVL2',
-        'NULLIF',
-        'REGEXP_LIKE',
-        'REGEXP_REPLACE',
-        'REGEXP_SUBSTR',
-        'ROUND',
-        'SUBSTR',
-        'SUM',
-        'SYSDATE',
-        'SYSTIMESTAMP',
-        'SYS_CONTEXT',
-        'TO_CLOB',
-        'TO_CHAR',
-        'TO_DATE',
-        'TO_NUMBER',
-        'TO_TIMESTAMP',
-        'TRUNC',
-        'UID',
-        'UPPER'
-    ]),
+    builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, ORACLE_BUILTIN_FUNCTION_OVERLAYS),
     systemColumns: new Set(),
-    specialBuiltinValues: new Set([
-        'NULL',
-        'CURRENT_DATE',
-        'CURRENT_TIMESTAMP',
-        'CURRENT_SCHEMA',
-        'CURRENT_USER',
-        'SYSDATE',
-        'SYSTIMESTAMP'
-    ]),
+    specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, ORACLE_SPECIAL_BUILTIN_VALUE_OVERLAYS),
     getTypeSpec(typeName: string): DatabaseSqlTypeSpec | undefined {
         if (!typeName) return undefined;
         return ORACLE_TYPE_SPECS[typeName.trim().toUpperCase()];
