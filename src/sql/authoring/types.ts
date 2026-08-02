@@ -1,4 +1,5 @@
 import type { LintRule } from '../../providers/linterRules';
+import type { DatabaseKind } from '../../contracts/database';
 
 export interface DatabaseSqlFunctionSignature {
     name: string;
@@ -16,6 +17,8 @@ export interface DatabaseSqlTypeSpec {
 }
 
 export interface DatabaseSqlValidationProfile {
+    /** Dialect identity used by semantic validation where syntax alone is ambiguous. */
+    databaseKind?: DatabaseKind;
     builtinFunctions: ReadonlySet<string>;
     systemColumns: ReadonlySet<string>;
     specialBuiltinValues: ReadonlySet<string>;

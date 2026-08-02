@@ -5,6 +5,7 @@ import {
   Range,
 } from "vscode-languageserver/node";
 import type { ValidationError } from "../sqlParser";
+import type { DatabaseKind } from "../contracts/database";
 
 export interface TableReference {
   database?: string;
@@ -12,13 +13,16 @@ export interface TableReference {
   table: string;
 }
 
-export function extractTableReferences(sql: string): TableReference[] {
+export function extractTableReferences(
+  sql: string,
+  databaseKind?: DatabaseKind,
+): TableReference[] {
   const pattern =
-    /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TRUNCATE\s+TABLE|GROOM\s+TABLE|COMMENT\s+ON\s+(?:TABLE|VIEW|PROCEDURE)|DROP\s+TABLE|ALTER\s+TABLE|LOCK\s+TABLE)\s+([A-Za-z0-9_."$]+(?:\.\.[A-Za-z0-9_."$]+)?)/gi;
+    /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TRUNCATE\s+TABLE|GROOM\s+TABLE|COMMENT\s+ON\s+(?:TABLE|VIEW|PROCEDURE)|DROP\s+TABLE|ALTER\s+TABLE|LOCK\s+TABLE)\s+((?:`(?:``|[^`])*`|[A-Za-z0-9_."$])+)/gi;
   const references = new Map<string, TableReference>();
   let match = pattern.exec(sql);
   while (match) {
-    const parsed = parseQualifiedReference(match[1]);
+    const parsed = parseQualifiedReference(match[1], databaseKind);
     if (parsed) {
       const key = `${(parsed.database || "").toUpperCase()}|${(parsed.schema || "").toUpperCase()}|${parsed.table.toUpperCase()}`;
       references.set(key, parsed);
@@ -30,6 +34,7 @@ export function extractTableReferences(sql: string): TableReference[] {
 
 export function parseQualifiedReference(
   rawValue: string | undefined,
+  databaseKind?: DatabaseKind,
 ): TableReference | undefined {
   if (!rawValue) {
     return undefined;
@@ -65,6 +70,9 @@ export function parseQualifiedReference(
     return { table: parts[0] };
   }
   if (parts.length === 2) {
+    if (databaseKind === "mysql") {
+      return { database: parts[0], table: parts[1] };
+    }
     return { schema: parts[0], table: parts[1] };
   }
   return { database: parts[0], schema: parts[1], table: parts[2] };
@@ -82,6 +90,9 @@ export function normalizeIdentifier(
   }
   if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
     return trimmed.slice(1, -1);
+  }
+  if (trimmed.startsWith("`") && trimmed.endsWith("`") && trimmed.length >= 2) {
+    return trimmed.slice(1, -1).replace(/``/g, "`");
   }
   return trimmed;
 }

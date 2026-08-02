@@ -6,8 +6,8 @@ const repoRoot = path.resolve(__dirname, '..');
 const OPTIONAL_EXTENSIONS = Object.freeze([
     {
         id: 'db2',
-        displayName: 'Db2 Support',
-        marketplaceName: 'Db2 Tools (justybase)',
+        displayName: 'JustyBase Db2 Support',
+        marketplaceName: 'JustyBase Db2 Support',
         directory: path.join(repoRoot, 'extensions', 'db2'),
         packageJson: path.join(repoRoot, 'extensions', 'db2', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'db2', 'package-lock.json'),
@@ -16,8 +16,8 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'duckdb',
-        displayName: 'DuckDB Support',
-        marketplaceName: 'DuckDB Tools (justybase)',
+        displayName: 'JustyBase DuckDB Support',
+        marketplaceName: 'JustyBase DuckDB Support',
         directory: path.join(repoRoot, 'extensions', 'duckdb'),
         packageJson: path.join(repoRoot, 'extensions', 'duckdb', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'duckdb', 'package-lock.json'),
@@ -26,8 +26,8 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'oracle',
-        displayName: 'Oracle Support',
-        marketplaceName: 'Oracle Tools (justybase)',
+        displayName: 'JustyBase Oracle Support',
+        marketplaceName: 'JustyBase Oracle Support',
         directory: path.join(repoRoot, 'extensions', 'oracle'),
         packageJson: path.join(repoRoot, 'extensions', 'oracle', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'oracle', 'package-lock.json'),
@@ -36,8 +36,8 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'postgresql',
-        displayName: 'PostgreSQL Support',
-        marketplaceName: 'PostgreSQL Tools (justybase)',
+        displayName: 'JustyBase PostgreSQL Support',
+        marketplaceName: 'JustyBase PostgreSQL Support',
         directory: path.join(repoRoot, 'extensions', 'postgresql'),
         packageJson: path.join(repoRoot, 'extensions', 'postgresql', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'postgresql', 'package-lock.json'),
@@ -46,8 +46,8 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'vertica',
-        displayName: 'Vertica Support',
-        marketplaceName: 'Vertica Tools (justybase)',
+        displayName: 'JustyBase Vertica Support',
+        marketplaceName: 'JustyBase Vertica Support',
         directory: path.join(repoRoot, 'extensions', 'vertica'),
         packageJson: path.join(repoRoot, 'extensions', 'vertica', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'vertica', 'package-lock.json'),
@@ -56,8 +56,8 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'snowflake',
-        displayName: 'Snowflake Support',
-        marketplaceName: 'Snowflake Tools (justybase)',
+        displayName: 'JustyBase Snowflake Support',
+        marketplaceName: 'JustyBase Snowflake Support',
         directory: path.join(repoRoot, 'extensions', 'snowflake'),
         packageJson: path.join(repoRoot, 'extensions', 'snowflake', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'snowflake', 'package-lock.json'),
@@ -66,8 +66,8 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'mssql',
-        displayName: 'MS SQL Server Support',
-        marketplaceName: 'MSSQL Tools (justybase)',
+        displayName: 'JustyBase MS SQL Server Support',
+        marketplaceName: 'JustyBase MS SQL Server Support',
         directory: path.join(repoRoot, 'extensions', 'mssql'),
         packageJson: path.join(repoRoot, 'extensions', 'mssql', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'mssql', 'package-lock.json'),
@@ -76,8 +76,8 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'mysql',
-        displayName: 'MySQL Support',
-        marketplaceName: 'MySQL Tools (justybase)',
+        displayName: 'JustyBase MySQL Support',
+        marketplaceName: 'JustyBase MySQL Support',
         directory: path.join(repoRoot, 'extensions', 'mysql'),
         packageJson: path.join(repoRoot, 'extensions', 'mysql', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'mysql', 'package-lock.json'),

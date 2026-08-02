@@ -1,12 +1,12 @@
-# PostgreSQL Tools (justybase)
+# JustyBase PostgreSQL Support
 
-Optional PostgreSQL support for Netezza SQL Tools (justybase).
+Optional PostgreSQL support for JustyBase Core (NetezzaSQL).
 
-This extension adds a `PostgreSQL` dialect to Netezza SQL Tools (justybase) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds a `PostgreSQL` dialect to JustyBase Core (NetezzaSQL) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `Netezza SQL Tools (justybase)`
+- Install the core extension first: `JustyBase Core (NetezzaSQL)`
 - VS Code Desktop
 - Network access to your PostgreSQL server
 - Install runtime dependencies in this package before packaging:

@@ -7,7 +7,7 @@ import type { DatabaseSqlAuthoring } from "../sql/authoring/types";
 import { netezzaSqlAuthoring } from "../dialects/netezza/sql/authoring";
 import { sqliteSqlAuthoring } from "../dialects/sqlite/sql/authoring";
 import { duckdbSqlAuthoring } from "../dialects/duckdb/sql/authoring";
-import { postgresqlCompatibleSqlAuthoring } from "../shared/sql-authoring/postgresql-compatible";
+import { postgresqlSqlAuthoring } from "../../extensions/postgresql/src/postgresqlSqlAuthoring";
 import { db2SqlAuthoring } from "../../extensions/db2/src/sql/authoring";
 import { mssqlSqlAuthoring } from "../../extensions/mssql/src/sql/authoring";
 import { mysqlSqlAuthoring } from "../../extensions/mysql/src/sql/authoring";
@@ -19,7 +19,7 @@ const SQL_AUTHORING_BY_KIND = new Map<DatabaseKind, DatabaseSqlAuthoring>([
   ["netezza", netezzaSqlAuthoring],
   ["sqlite", sqliteSqlAuthoring],
   ["duckdb", duckdbSqlAuthoring],
-  ["postgresql", postgresqlCompatibleSqlAuthoring],
+  ["postgresql", postgresqlSqlAuthoring],
   ["db2", db2SqlAuthoring],
   ["mssql", mssqlSqlAuthoring],
   ["mysql", mysqlSqlAuthoring],
@@ -86,7 +86,7 @@ export function __TEST_ONLY_resetDatabaseSqlAuthoringRegistry(): void {
   SQL_AUTHORING_BY_KIND.set("netezza", netezzaSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("sqlite", sqliteSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("duckdb", duckdbSqlAuthoring);
-  SQL_AUTHORING_BY_KIND.set("postgresql", postgresqlCompatibleSqlAuthoring);
+  SQL_AUTHORING_BY_KIND.set("postgresql", postgresqlSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("db2", db2SqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("mssql", mssqlSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("mysql", mysqlSqlAuthoring);

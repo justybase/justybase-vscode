@@ -1580,7 +1580,10 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         document: vscode.TextDocument,
         diagnostic: vscode.Diagnostic,
     ): { database?: string; schema?: string; name: string } | undefined {
-        return parseTableReferenceText(document.getText(diagnostic.range));
+        return parseTableReferenceText(
+            document.getText(diagnostic.range),
+            this.resolveDatabaseKind?.(document.uri.toString()),
+        );
     }
 
     private getDiagnosticSuggestedFix(diagnostic: vscode.Diagnostic): string | undefined {

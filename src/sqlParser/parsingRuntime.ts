@@ -33,6 +33,18 @@ import {
   createSqlParserInstance as createMsSqlSqlParserInstance,
   getSqlParserInstance as getMsSqlSqlParserInstance,
 } from "../dialects/mssql/sql/parser";
+import { mysqlSqlAuthoring } from "../../extensions/mysql/src/sql/authoring";
+import { postgresqlSqlAuthoring } from "../../extensions/postgresql/src/postgresqlSqlAuthoring";
+import { SqlLexer as postgresqlSqlLexer } from "../dialects/postgresql/sql/lexer";
+import {
+  createSqlParserInstance as createPostgresqlSqlParserInstance,
+  getSqlParserInstance as getPostgresqlSqlParserInstance,
+} from "../dialects/postgresql/sql/parser";
+import { SqlLexer as mysqlSqlLexer } from "../dialects/mysql/sql/lexer";
+import {
+  createSqlParserInstance as createMysqlSqlParserInstance,
+  getSqlParserInstance as getMysqlSqlParserInstance,
+} from "../dialects/mysql/sql/parser";
 import type {
   DatabaseSqlAuthoring,
   DatabaseSqlValidationProfile,
@@ -642,6 +654,20 @@ export const MSSQL_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
   createSqlParserInstance: createMsSqlSqlParserInstance,
 };
 
+export const MYSQL_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "mysql",
+  SqlLexer: mysqlSqlLexer,
+  getSqlParserInstance: getMysqlSqlParserInstance,
+  createSqlParserInstance: createMysqlSqlParserInstance,
+};
+
+export const POSTGRESQL_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "postgresql",
+  SqlLexer: postgresqlSqlLexer,
+  getSqlParserInstance: getPostgresqlSqlParserInstance,
+  createSqlParserInstance: createPostgresqlSqlParserInstance,
+};
+
 const runtimeByKind = new Map<DatabaseKind, SqlParsingRuntime>();
 const runtimeByAuthoring = new WeakMap<object, SqlParsingRuntime>();
 const runtimeByValidationProfile = new WeakMap<object, SqlParsingRuntime>();
@@ -674,6 +700,20 @@ registerSqlParsingRuntime({
   kind: "netezza",
   authoring: netezzaSqlAuthoring,
   validationProfile: netezzaSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: MYSQL_SQL_PARSING_RUNTIME,
+  kind: "mysql",
+  authoring: mysqlSqlAuthoring,
+  validationProfile: mysqlSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: POSTGRESQL_SQL_PARSING_RUNTIME,
+  kind: "postgresql",
+  authoring: postgresqlSqlAuthoring,
+  validationProfile: postgresqlSqlAuthoring.validation,
 });
 
 registerSqlParsingRuntime({

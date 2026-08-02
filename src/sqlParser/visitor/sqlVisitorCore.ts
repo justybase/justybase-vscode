@@ -26,7 +26,10 @@ import * as queryScopeVisitor from "./queryScopeVisitor";
 import { type TypeComparisonVisitorHost } from "./typeComparisonVisitor";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 import type { DatabaseSqlValidationProfile } from "../../sql/authoring/types";
-import { unquoteIdentifier } from "../../utils/identifierUtils";
+import {
+  formatQualifiedObjectName,
+  stripIdentifierQuoting,
+} from "../../utils/identifierUtils";
 import { ProcedureScopeBuilder } from "../procedure/procedureScopeBuilder";
 
 // Base visitor class from Chevrotain - lazily initialized
@@ -305,10 +308,12 @@ export class SqlVisitor
     schema: string | undefined,
     name: string,
   ): string {
-    if (database && schema) return `${database}.${schema}.${name}`;
-    if (database && !schema) return `${database}..${name}`;
-    if (!database && schema) return `${schema}.${name}`;
-    return name;
+    return formatQualifiedObjectName(
+      database,
+      schema,
+      name,
+      this.validationProfile.databaseKind,
+    );
   }
 
   isDropTargetTableLike(): boolean {
@@ -938,7 +943,10 @@ export class SqlVisitor
     for (const key in ctx) {
       const tokens = ctx[key];
       if (Array.isArray(tokens) && tokens.length > 0) {
-        return unquoteIdentifier(this.getTokenText(tokens[0]));
+        return stripIdentifierQuoting(
+          this.getTokenText(tokens[0]),
+          this.validationProfile.databaseKind,
+        );
       }
     }
     return "";
@@ -953,19 +961,26 @@ export class SqlVisitor
 
   alias(ctx: Record<string, CstNode[] | IToken[]>): string {
     if (ctx.identifier) {
-      return unquoteIdentifier(
+      return stripIdentifierQuoting(
         this.visitAs<string>(ctx.identifier[0] as unknown as CstNode),
+        this.validationProfile.databaseKind,
       );
     }
     const relaxedNameNode = ctx.netezzaRelaxedName?.[0];
     if (relaxedNameNode && this.isCstNode(relaxedNameNode)) {
       const token = this.getFirstTokenFromCst(relaxedNameNode);
-      return unquoteIdentifier(this.getTokenText(token));
+      return stripIdentifierQuoting(
+        this.getTokenText(token),
+        this.validationProfile.databaseKind,
+      );
     }
     const token =
       (ctx.Identifier?.[0] as unknown as IToken | undefined) ||
       (ctx.QuotedIdentifier?.[0] as unknown as IToken | undefined);
-    return unquoteIdentifier(this.getTokenText(token));
+    return stripIdentifierQuoting(
+      this.getTokenText(token),
+      this.validationProfile.databaseKind,
+    );
   }
 
   netezzaRelaxedName(): void {

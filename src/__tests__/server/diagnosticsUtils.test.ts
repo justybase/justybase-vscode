@@ -99,6 +99,13 @@ describe("diagnosticsUtils", () => {
         table: "MyTable",
       });
     });
+
+    it("treats MySQL database.table as a complete reference", () => {
+      expect(parseQualifiedReference("`TESTDB`.`departments`", "mysql")).toEqual({
+        database: "TESTDB",
+        table: "departments",
+      });
+    });
   });
 
   describe("extractTableReferences", () => {
@@ -110,6 +117,12 @@ describe("diagnosticsUtils", () => {
       const refs = extractTableReferences("SELECT * FROM users");
       expect(refs).toHaveLength(1);
       expect(refs[0].table).toBe("users");
+    });
+
+    it("extracts a MySQL database.table reference without inventing a schema", () => {
+      expect(
+        extractTableReferences("SELECT * FROM `TESTDB`.`departments`", "mysql"),
+      ).toEqual([{ database: "TESTDB", table: "departments" }]);
     });
 
     it("extracts table from JOIN", () => {

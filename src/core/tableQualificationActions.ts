@@ -1,4 +1,6 @@
 import type { QualificationProposal } from "./tableQualificationResolver";
+import type { DatabaseKind } from "../contracts/database";
+import { stripIdentifierQuoting } from "../utils/identifierUtils";
 
 export const MAX_QUALIFICATION_PROPOSALS = 6;
 
@@ -9,6 +11,7 @@ export interface QualificationActionProposal {
 
 export function parseTableReferenceText(
   rawText: string,
+  databaseKind?: DatabaseKind,
 ): { database?: string; schema?: string; name: string } | undefined {
   const text = rawText.trim().replace(/[;,)]*$/g, "");
   if (!text || text.startsWith("(")) {
@@ -20,14 +23,23 @@ export function parseTableReferenceText(
     if (extra !== undefined || !database || !name) {
       return undefined;
     }
-    return { database, name };
+    return {
+      database: stripIdentifierQuoting(database, databaseKind),
+      name: stripIdentifierQuoting(name, databaseKind),
+    };
   }
 
-  const parts = text.split(".").filter(Boolean);
+  const parts = text
+    .split(".")
+    .filter(Boolean)
+    .map((part) => stripIdentifierQuoting(part, databaseKind));
   if (parts.length === 1) {
     return { name: parts[0] };
   }
   if (parts.length === 2) {
+    if (databaseKind === "mysql") {
+      return { database: parts[0], name: parts[1] };
+    }
     return { schema: parts[0], name: parts[1] };
   }
   if (parts.length >= 3) {

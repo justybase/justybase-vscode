@@ -1,6 +1,7 @@
 import type { ColumnInfo, TableInfo } from "../sqlParser/types";
 import type { SchemaProvider } from "../sqlParser/schemaProvider";
 import type { MetadataTableInfoResponse } from "../lsp/protocol";
+import type { DatabaseKind } from "../contracts/database";
 import type {
   QualificationProposal,
   TableQualificationRequest,
@@ -32,6 +33,7 @@ export class LspSchemaProvider implements SchemaProvider {
     private readonly metadataBridge: LspSchemaProviderBridge,
     private readonly documentUri: string,
     private readonly effectiveDatabase?: string,
+    private readonly databaseKind?: DatabaseKind,
   ) {}
 
   getTable(
@@ -100,6 +102,9 @@ export class LspSchemaProvider implements SchemaProvider {
     request: TableQualificationRequest,
   ): QualificationProposal[] {
     if (request.database && request.schema) {
+      return [];
+    }
+    if (this.databaseKind === "mysql" && request.database && !request.schema) {
       return [];
     }
 

@@ -122,4 +122,41 @@ describe("tableQualificationResolver", () => {
       "DB1.PUBLIC.EMPLOYEES",
     ]);
   });
+
+  it("treats MySQL DATABASE.TABLE as complete and never duplicates the database", () => {
+    const cache = createCache();
+    cache.setDatabases("conn1", [{ DATABASE: "TESTDB" }]);
+    cache.setTables(
+      "conn1",
+      "TESTDB.TESTDB",
+      [{ OBJNAME: "departments", SCHEMA: "TESTDB", label: "departments", objType: "TABLE" }],
+      new Map([["TESTDB.TESTDB.departments", 1]]),
+    );
+
+    const deps = {
+      metadataCache: cache,
+      connectionManager: createConnectionManager({
+        getConnectionDatabaseKind: jest.fn(() => "mysql"),
+        getConnectionMetadata: jest.fn(() => ({
+          name: "conn1",
+          host: "host",
+          database: "TESTDB",
+          user: "user",
+        })),
+      } as Partial<ConnectionManager>),
+    };
+
+    expect(proposeTableQualification(deps, {
+      database: "TESTDB",
+      name: "departments",
+    })).toEqual([]);
+
+    const proposals = proposeTableQualification(deps, {
+      name: "departments",
+    });
+    expect(proposals.map((proposal) => proposal.qualifiedText)).toEqual([
+      "TESTDB.departments",
+    ]);
+    expect(proposals.every((proposal) => !proposal.qualifiedText.includes("TESTDB.TESTDB"))).toBe(true);
+  });
 });

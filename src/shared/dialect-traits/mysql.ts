@@ -7,7 +7,7 @@ export const mysqlDialectTraits = createDatabaseDialectTraits({
   },
   qualification: {
     twoPartNameStyle: "database-object",
-    twoPartContainerPreference: "schema-over-database",
+    twoPartContainerPreference: "database-over-schema",
     supportsThreePartName: false,
     databaseOnlyReferenceStyle: "single-dot",
   },

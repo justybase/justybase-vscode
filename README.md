@@ -309,6 +309,8 @@ Optional database packs plug into the **shared core UX** (login UI, schema explo
 
 **Oracle (exception)** — with core + [Oracle pack](extensions/oracle): dedicated Oracle parser/PL/SQL validation, grammar/snippets, advanced data and schema workflows, explain/tuning/session monitor, and ORA quality rules. Documented in [docs/oracle.md](docs/oracle.md); internal parity labels in [plans/DIALECT_PARITY_MATRIX.md](plans/DIALECT_PARITY_MATRIX.md).
 
+**MySQL** — with core + [MySQL pack](extensions/mysql): a MySQL 8 preview companion with strict validation for common MySQL syntax, backtick identifiers, `DATABASE.TABLE` qualification, CTEs, MySQL `LIMIT` forms, `INSERT IGNORE`, `ON DUPLICATE KEY UPDATE`, and MySQL-specific types/functions. Query results use native `mysql2` streaming with typed columns and cancellation support. It remains a preview pack and does not provide Netezza-level SQL/NZPLSQL tooling.
+
 **What remains Netezza-only (or Netezza-first)**
 
 - NZ/NZP rule depth and NZPLSQL regex fallback paths beyond shared procedure-scope codes
@@ -324,7 +326,7 @@ Optional database packs plug into the **shared core UX** (login UI, schema explo
 | **Snowflake**     | Preview       | Separate optional extension | yes                   | Pure JS `snowflake-sdk`; connect, schema browser, stage helpers; limited SQL validation |
 | **Oracle**        | Near-full preview | Separate optional extension | yes               | Advanced SQL/PL/SQL editor in core + thin `oracledb` VSIX; dedicated live suite — [docs/oracle.md](docs/oracle.md) |
 | **Microsoft SQL** | Preview       | Separate optional extension | yes                   | Requires `mssql` npm package                                                           |
-| **MySQL**         | Preview       | Separate optional extension | yes                   | Requires `mysql2` npm package                                                          |
+| **MySQL**         | Preview       | Separate optional extension | yes                   | MySQL 8 parser/validation, metadata-aware tooling, and native `mysql2` streaming; requires `mysql2` |
 | **Vertica**       | Preview       | Separate optional extension | yes                   | Requires `vertica` npm package                                                         |
 
 All optional database extensions are published with `"preview": true` in their `package.json` (PostgreSQL included). Treat them as **preview companion runtimes** — not peers of the full Netezza-first stack. SQL editor depth varies by dialect; **Oracle** is closest to Netezza on the shared parser/LSP path.
@@ -476,6 +478,8 @@ For the full Oracle live suite (connection, metadata search, DDL extraction/gene
 
 For MS SQL Server, run `npm run test:mssql:integration` with the `MSSQL_LIVE_TEST_*` variables below. That suite covers streaming cancel, typed import/export round-trip, live completion, and MSS*/SQL004/SQL025 quality checks against catalog metadata.
 
+For MySQL, run `RUN_MYSQL_INTEGRATION=1 npx jest --config jest.live.config.js src/__tests__/integration/mysql.integration.test.ts --runInBand` with `MYSQL_LIVE_TEST_HOST`, `MYSQL_LIVE_TEST_PORT`, `MYSQL_LIVE_TEST_DATABASE`, `MYSQL_LIVE_TEST_USER`, and `MYSQL_LIVE_TEST_PASSWORD`. The suite covers MySQL 8 qualification, metadata, typed streaming reads, cancellation, explain parsing, and an isolated DDL fixture that is cleaned up after the run.
+
 For Db2, run `npm run test:db2:integration` with the `DB2_LIVE_TEST_*` variables below. That command rebuilds `ibm_db` for Node/Jest when live env is present, injects the **bundled** clidriver into the test process only (no system ODBC registration), and restores the Electron/F5 build afterward—same pattern as `npm run test:live:local`. Quick connectivity check: `npm run db2:connect-probe`. Persistent catalog fixture: see [docs/db2.md](docs/db2.md) (`npm run db2:seed-live-fixture`).
 
 The live tests are env-gated and stay skipped unless you provide credentials. Supported variables are:
@@ -485,6 +489,7 @@ The live tests are env-gated and stay skipped unless you provide credentials. Su
 - Oracle: `ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_PORT`, `ORACLE_LIVE_TEST_DATABASE` (service name), `ORACLE_LIVE_TEST_USER`, `ORACLE_LIVE_TEST_PASSWORD`, optional `ORACLE_LIVE_TEST_CURRENT_SCHEMA`
 - MS SQL Server: `MSSQL_LIVE_TEST_HOST`, `MSSQL_LIVE_TEST_PORT` (default 1433), `MSSQL_LIVE_TEST_DATABASE`, `MSSQL_LIVE_TEST_USER`, `MSSQL_LIVE_TEST_PASSWORD` (optional encrypt / trustServerCertificate via connection options)
 - PostgreSQL: `POSTGRES_LIVE_TEST_HOST`, `POSTGRES_LIVE_TEST_PORT`, `POSTGRES_LIVE_TEST_DATABASE`, `POSTGRES_LIVE_TEST_USER`, `POSTGRES_LIVE_TEST_PASSWORD`
+- MySQL: `MYSQL_LIVE_TEST_HOST`, `MYSQL_LIVE_TEST_PORT` (default 3306), `MYSQL_LIVE_TEST_DATABASE`, `MYSQL_LIVE_TEST_USER`, `MYSQL_LIVE_TEST_PASSWORD`; enable with `RUN_MYSQL_INTEGRATION=1` or `MYSQL_LIVE_TEST_ENABLED=1`
 
 When the full `DB2_LIVE_TEST_*` configuration is present, `npm run test:live:local` now automatically:
 

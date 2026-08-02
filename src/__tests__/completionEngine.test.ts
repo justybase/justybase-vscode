@@ -807,6 +807,7 @@ END;`);
       const items = await complete("SELECT * FROM TESTDB.|");
 
       expect(labels(items)).toEqual(expect.arrayContaining(["dbo", "HR"]));
+      expect(items.find((item) => item.label === "dbo")?.insertText).toBe("dbo");
       expect(metadataProvider.getSchemas).toHaveBeenCalledWith(
         expect.any(String),
         "TESTDB",
@@ -860,14 +861,16 @@ END;`);
     it("returns MSSQL tables for db.schema dot completion", async () => {
       metadataProvider.databaseKind = "mssql";
       metadataProvider.effectiveDatabase = "TESTDB";
-      metadataProvider.setTables("TESTDB", ["EMPLOYEES", "DEPARTMENTS"], "dbo");
+      metadataProvider.setTables("TESTDB", ["EMPLOYEES", "departments"], "dbo");
       metadataProvider.setViews("TESTDB", ["V_EMPLOYEES"], "dbo");
 
       const items = await complete("SELECT * FROM TESTDB.dbo.|");
 
       expect(labels(items)).toEqual(
-        expect.arrayContaining(["EMPLOYEES", "DEPARTMENTS", "V_EMPLOYEES"]),
+        expect.arrayContaining(["EMPLOYEES", "departments", "V_EMPLOYEES"]),
       );
+      expect(items.find((item) => item.label === "departments")?.insertText)
+        .toBe("departments");
       expect(metadataProvider.getTables).toHaveBeenCalledWith(
         expect.any(String),
         "TESTDB",

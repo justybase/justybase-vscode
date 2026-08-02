@@ -27,15 +27,22 @@ import {
 } from "./sqlAuthoringRegistry";
 
 const BUILTIN_DIALECTS = new Set<DatabaseKind>(["netezza", "sqlite"]);
-const OPTIONAL_EXTENSION_NAMES: Partial<Record<DatabaseKind, string>> = {
-  mssql: "MSSQL",
+const OPTIONAL_EXTENSION_NAMES: Readonly<Partial<Record<DatabaseKind, string>>> = {
+  db2: "JustyBase Db2 Support",
+  duckdb: "JustyBase DuckDB Support",
+  oracle: "JustyBase Oracle Support",
+  postgresql: "JustyBase PostgreSQL Support",
+  vertica: "JustyBase Vertica Support",
+  snowflake: "JustyBase Snowflake Support",
+  mssql: "JustyBase MS SQL Server Support",
+  mysql: "JustyBase MySQL Support",
 };
 
 function createInstallHint(kind: DatabaseKind): string {
   const connectionDisplayName = DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind;
   const extensionDisplayName =
     OPTIONAL_EXTENSION_NAMES[kind] ?? DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind;
-  return `Install the optional "${extensionDisplayName} Tools (justybase)" extension to use ${connectionDisplayName} connections.`;
+  return `Install the optional "${extensionDisplayName}" extension to use ${connectionDisplayName} connections.`;
 }
 
 export function resolveConnectionDatabaseKind(

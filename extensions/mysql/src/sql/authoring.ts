@@ -35,7 +35,28 @@ const MYSQL_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
     'CURRENT_DATE',
     'CURRENT_TIME',
     'CURRENT_TIMESTAMP',
-    'IFNULL'
+    'IF',
+    'IFNULL',
+    'CURDATE',
+    'CURTIME',
+    'DATE_FORMAT',
+    'STR_TO_DATE',
+    'TIMESTAMPDIFF',
+    'TIMESTAMPADD',
+    'GROUP_CONCAT',
+    'JSON_ARRAY',
+    'JSON_CONTAINS',
+    'JSON_EXTRACT',
+    'JSON_OBJECT',
+    'JSON_SET',
+    'JSON_UNQUOTE',
+    'REGEXP_LIKE',
+    'REGEXP_REPLACE',
+    'REGEXP_SUBSTR',
+    'FIND_IN_SET',
+    'LAST_INSERT_ID',
+    'UUID',
+    'VERSION',
 ]);
 
 const MYSQL_SPECIAL_BUILTIN_VALUE_OVERLAYS = new Set<string>(['NULL', 'TRUE', 'FALSE']);
@@ -69,7 +90,14 @@ const MYSQL_TYPE_SPECS: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     DATETIME: { canonical: 'DATETIME', paramsMin: 0, paramsMax: 1 },
     TIMESTAMP: { canonical: 'TIMESTAMP', paramsMin: 0, paramsMax: 1 },
     YEAR: { canonical: 'YEAR', paramsMin: 0, paramsMax: 0 },
-    JSON: { canonical: 'JSON', paramsMin: 0, paramsMax: 0 }
+    JSON: { canonical: 'JSON', paramsMin: 0, paramsMax: 0 },
+    ENUM: { canonical: 'ENUM', paramsMin: 0, paramsMax: 255 },
+    SET: { canonical: 'SET', paramsMin: 0, paramsMax: 255 },
+    BOOLEAN: { canonical: 'BOOLEAN', paramsMin: 0, paramsMax: 0 },
+    BOOL: { canonical: 'BOOL', paramsMin: 0, paramsMax: 0 },
+    REAL: { canonical: 'REAL', paramsMin: 0, paramsMax: 2 },
+    GEOMETRY: { canonical: 'GEOMETRY', paramsMin: 0, paramsMax: 0 },
+    POINT: { canonical: 'POINT', paramsMin: 0, paramsMax: 0 }
 };
 
 const MYSQL_SIGNATURE_OVERLAYS = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
@@ -98,6 +126,7 @@ const mysqlFormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE,
 });
 
 const mysqlValidationProfile: DatabaseSqlValidationProfile = {
+    databaseKind: 'mysql',
     builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, MYSQL_BUILTIN_FUNCTION_OVERLAYS),
     systemColumns: new Set(),
     specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, MYSQL_SPECIAL_BUILTIN_VALUE_OVERLAYS),
@@ -108,7 +137,7 @@ const mysqlValidationProfile: DatabaseSqlValidationProfile = {
     supportsProcedureAnySizeArgument(): boolean {
         return false;
     },
-    syntaxValidationMode: 'bestEffort'
+    syntaxValidationMode: 'strict'
 };
 
 export const mysqlSqlAuthoring: DatabaseSqlAuthoring = {

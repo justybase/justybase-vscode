@@ -186,6 +186,34 @@ SELECT * FROM USERS;`;
         expect(references[0].resolvedPath).toBe('DB1.ADMIN.USERS');
     });
 
+    it('treats MySQL database.table and backtick names as database-qualified', async () => {
+        const mysqlConnectionManager = {
+            ...mockConnectionManager,
+            getExecutionDatabaseKind: jest.fn().mockReturnValue('mysql'),
+        } as unknown as ConnectionManager;
+        const resolver = new SqlDataAffordanceResolver(
+            mockMetadataCache,
+            mysqlConnectionManager,
+        );
+
+        const references = await resolver.getResolvedReferences(
+            createDocument(
+                'SELECT * FROM `APPDB`.`ORDERS`;',
+                'sql',
+                'file:///resolver-mysql.sql',
+            ),
+        );
+
+        expect(references[0].notation).toBe('database-table');
+        expect(references[0].commandArgs).toEqual({
+            documentUri: 'file:///resolver-mysql.sql',
+            databaseName: 'APPDB',
+            schemaName: 'PUBLIC',
+            tableName: 'ORDERS',
+        });
+        expect(references[0].resolvedPath).toBe('APPDB.ORDERS');
+    });
+
     it('getReferenceAtPosition resolves only the hovered reference', async () => {
         const parseSpy = jest.spyOn(parsingRuntime, 'parseSqlStatements');
         const session = new DocumentParseSession();

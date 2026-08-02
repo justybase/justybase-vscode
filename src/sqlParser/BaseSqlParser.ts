@@ -203,6 +203,10 @@ export class BaseSqlParser extends CstParser {
     return [];
   }
 
+  protected getAdditionalPrimaryExpressionAlternatives(): OrAlternative[] {
+    return [];
+  }
+
   protected getAdditionalDropObjectAlternatives(): OrAlternative[] {
     return [];
   }
@@ -1661,6 +1665,7 @@ export class BaseSqlParser extends CstParser {
         { ALT: () => this.SUBRULE(this.existsExpression) },
         { ALT: () => this.SUBRULE(this.subquery) },
         { ALT: () => this.SUBRULE(this.expressionList) },
+        ...this.getAdditionalPrimaryExpressionAlternatives(),
         { ALT: () => this.SUBRULE(this.columnReference) },
         { ALT: () => this.CONSUME(Parameter) },
       ]);
