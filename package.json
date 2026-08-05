@@ -141,6 +141,14 @@
         "icon": "$(debug-continue)"
       },
       {
+        "command": "netezza.navigatePreviousStatement",
+        "title": "SQL: Go to Previous Statement"
+      },
+      {
+        "command": "netezza.navigateNextStatement",
+        "title": "SQL: Go to Next Statement"
+      },
+      {
         "command": "netezza.visualizeQueryFlow",
         "title": "JustyBase: Visualize Query Flow",
         "icon": "$(graph)"
@@ -4007,6 +4015,16 @@
         "mac": "cmd+shift+enter",
         "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql",
         "args": []
+      },
+      {
+        "command": "netezza.navigatePreviousStatement",
+        "key": "alt+up",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
+      },
+      {
+        "command": "netezza.navigateNextStatement",
+        "key": "alt+down",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
       },
       {
         "command": "netezza.lintSql",

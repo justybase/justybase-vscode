@@ -4,6 +4,7 @@ import { NetezzaDocumentSymbolProvider } from '../providers/documentSymbolProvid
 import { NetezzaSignatureHelpProvider } from '../providers/signatureHelpProvider';
 import { NetezzaSemanticTokensProvider } from '../providers/semanticTokensProvider';
 import { registerSqlShortcuts } from '../editors/sqlShortcuts';
+import { registerSqlStatementNavigation } from '../editors/sqlStatementNavigation';
 import { MetadataCache } from '../metadataCache';
 import { ConnectionManager } from '../core/connectionManager';
 import { NetezzaParserHoverProvider } from '../providers/parserHoverProvider';
@@ -80,6 +81,7 @@ export function registerSqlLanguageFeatures(params: SqlLanguageRegistrationParam
     }
 
     registerSqlShortcuts(context);
+    registerSqlStatementNavigation(context);
 
     context.subscriptions.push(dataAffordanceResolver, sqlCodeLensProvider);
 

@@ -13,6 +13,15 @@ import { SqlLexer } from '../sqlParser/lexer';
 import { affectsExtensionConfiguration, getExtensionConfiguration } from '../compatibility/configuration';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 import { isLargeScriptDocument } from '../sqlParser/validationConfig';
+import {
+    findProcedureBlocks,
+    findProcedureAndViewHeaders,
+    findViewBlocks,
+    type ProcedureBlock,
+    type ProcedureHeader,
+    type ViewBlock,
+    type ViewHeader,
+} from '../sqlParser/procedure/procedureCodeLens';
 
 const RUNNABLE_STATEMENT_TOKENS = new Set([
     'Select',
@@ -55,12 +64,6 @@ interface StatementLensSupport {
     canVisualize: boolean;
 }
 
-interface ProcedureBlock {
-    sql: string;
-    startOffset: number;
-    endOffset: number;
-}
-
 const STATEMENTS_TOGGLE_KEY = 'codeLens.statements';
 
 export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
@@ -70,9 +73,6 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
     private _enabled = true;
     private readonly _disposables: vscode.Disposable[] = [];
     private readonly _globalState: vscode.Memento;
-
-    private _scanOffset = 0;
-    private _scanState = { inSingleQuote: false, inDoubleQuote: false, inLineComment: false, inBlockComment: false };
 
     constructor(
         private readonly _connectionManager?: ConnectionManager,
@@ -128,21 +128,29 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
         }
 
         const text = document.getText();
-        // Large scripts: keep file-level Run/Batch lenses only — skip procedure
-        // / statement scans that re-walk the whole document while typing.
+        // Large scripts: skip procedure/view body scans that re-walk the whole
+        // document while typing. Headers remain visible; terminators are
+        // resolved when the lens is clicked.
         if (isLargeScriptDocument(document.lineCount, text.length)) {
-            return this.createFileLevelCodeLenses(document);
+            const headers = findProcedureAndViewHeaders(text);
+            return [
+                ...this.createProcedureHeaderCodeLenses(document, headers.procedures),
+                ...this.createViewHeaderCodeLenses(document, headers.views),
+                ...this.createFileLevelCodeLenses(document),
+            ];
         }
 
         const lenses: vscode.CodeLens[] = [];
 
         const procedureBlocks = this.findProcedureBlocks(text);
+        const viewBlocks = findViewBlocks(text);
         lenses.push(...this.createProcedureCodeLenses(document, procedureBlocks));
+        lenses.push(...this.createViewCodeLenses(document, viewBlocks));
         lenses.push(...this.createFileLevelCodeLenses(document));
 
         if (this._enabled) {
             if (this.getStatementsEnabled()) {
-                lenses.push(...this.createStatementCodeLenses(document, text, procedureBlocks));
+                lenses.push(...this.createStatementCodeLenses(document, text, [...procedureBlocks, ...viewBlocks]));
             }
         }
 
@@ -261,6 +269,68 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
         return lenses;
     }
 
+    private createProcedureHeaderCodeLenses(
+        document: vscode.TextDocument,
+        headers: readonly ProcedureHeader[],
+    ): vscode.CodeLens[] {
+        return headers.map((header) => {
+            const range = new vscode.Range(
+                document.positionAt(header.startOffset),
+                document.positionAt(header.endOffset),
+            );
+
+            return new vscode.CodeLens(range, {
+                title: '$(run-all) Compile Procedure',
+                command: 'netezza.compileProcedureFromLens',
+                arguments: [document.uri, header.startOffset],
+                tooltip: 'Compile this stored procedure',
+            });
+        });
+    }
+
+    private createViewCodeLenses(
+        document: vscode.TextDocument,
+        viewBlocks: readonly ViewBlock[],
+    ): vscode.CodeLens[] {
+        return viewBlocks.map((block) => this.createViewCodeLens(
+            document,
+            block.startOffset,
+            block.endOffset,
+            block.sql,
+        ));
+    }
+
+    private createViewHeaderCodeLenses(
+        document: vscode.TextDocument,
+        headers: readonly ViewHeader[],
+    ): vscode.CodeLens[] {
+        return headers.map((header) => this.createViewCodeLens(
+            document,
+            header.startOffset,
+            header.endOffset,
+            header.startOffset,
+        ));
+    }
+
+    private createViewCodeLens(
+        document: vscode.TextDocument,
+        startOffset: number,
+        endOffset: number,
+        statementOrOffset: string | number,
+    ): vscode.CodeLens {
+        const range = new vscode.Range(
+            document.positionAt(startOffset),
+            document.positionAt(endOffset),
+        );
+
+        return new vscode.CodeLens(range, {
+            title: '$(run-all) Compile View',
+            command: 'netezza.runStatementFromLens',
+            arguments: [document.uri, statementOrOffset],
+            tooltip: 'Compile this view',
+        });
+    }
+
     private createStatementCodeLenses(
         document: vscode.TextDocument,
         text: string,
@@ -332,114 +402,7 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
     }
 
     private findProcedureBlocks(text: string): ProcedureBlock[] {
-        const blocks: ProcedureBlock[] = [];
-        const createProcedureRegex = /\bCREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\b/gi;
-        let match: RegExpExecArray | null;
-
-        this._scanOffset = 0;
-        this._scanState = { inSingleQuote: false, inDoubleQuote: false, inLineComment: false, inBlockComment: false };
-
-        while ((match = createProcedureRegex.exec(text)) !== null) {
-            if (!this.isSqlCodeOffset(text, match.index)) {
-                continue;
-            }
-
-            const endProcMatch = this.findKeywordOutsideTrivia(
-                text,
-                /\bEND_PROC\b/gi,
-                match.index + match[0].length,
-            );
-            if (!endProcMatch) {
-                continue;
-            }
-
-            const startOffset = match.index;
-            let endOffset = endProcMatch.index + endProcMatch.text.length;
-            endOffset = this.includeOptionalTerminatingSemicolon(text, endOffset);
-
-            blocks.push({
-                sql: text.substring(startOffset, endOffset).trim(),
-                startOffset,
-                endOffset,
-            });
-            createProcedureRegex.lastIndex = endOffset;
-        }
-
-        return blocks;
-    }
-
-    private findKeywordOutsideTrivia(
-        text: string,
-        regex: RegExp,
-        startOffset: number,
-    ): { index: number; text: string } | undefined {
-        regex.lastIndex = startOffset;
-        let match: RegExpExecArray | null;
-        while ((match = regex.exec(text)) !== null) {
-            if (this.isSqlCodeOffset(text, match.index)) {
-                return { index: match.index, text: match[0] };
-            }
-        }
-
-        return undefined;
-    }
-
-    private includeOptionalTerminatingSemicolon(text: string, offset: number): number {
-        let current = offset;
-        while (current < text.length && /\s/.test(text[current])) {
-            current++;
-        }
-        return text[current] === ';' ? current + 1 : offset;
-    }
-
-    private isSqlCodeOffset(text: string, offset: number): boolean {
-        let { inSingleQuote, inDoubleQuote, inLineComment, inBlockComment } = this._scanState;
-
-        if (offset < this._scanOffset) {
-            this._scanOffset = 0;
-            this._scanState = { inSingleQuote: false, inDoubleQuote: false, inLineComment: false, inBlockComment: false };
-            return false;
-        }
-
-        for (let i = this._scanOffset; i < offset; i++) {
-            const char = text[i];
-            const nextChar = i + 1 < offset ? text[i + 1] : '';
-
-            if (inLineComment) {
-                if (char === '\n') {
-                    inLineComment = false;
-                }
-            } else if (inBlockComment) {
-                if (char === '*' && nextChar === '/') {
-                    inBlockComment = false;
-                    i++;
-                }
-            } else if (inSingleQuote) {
-                if (char === "'" && nextChar === "'") {
-                    i++;
-                } else if (char === "'") {
-                    inSingleQuote = false;
-                }
-            } else if (inDoubleQuote) {
-                if (char === '"') {
-                    inDoubleQuote = false;
-                }
-            } else if (char === '-' && nextChar === '-') {
-                inLineComment = true;
-                i++;
-            } else if (char === '/' && nextChar === '*') {
-                inBlockComment = true;
-                i++;
-            } else if (char === "'") {
-                inSingleQuote = true;
-            } else if (char === '"') {
-                inDoubleQuote = true;
-            }
-        }
-
-        this._scanOffset = offset;
-        this._scanState = { inSingleQuote, inDoubleQuote, inLineComment, inBlockComment };
-        return !inSingleQuote && !inDoubleQuote && !inLineComment && !inBlockComment;
+        return findProcedureBlocks(text);
     }
 
     private rangesOverlap(

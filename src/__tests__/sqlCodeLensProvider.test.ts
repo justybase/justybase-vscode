@@ -264,6 +264,50 @@ ${secondProcedure}`;
         expect(compileLenses[1].command?.arguments?.[1]).toBe(secondProcedure);
     });
 
+    it('should add a Compile View CodeLens and stop at the first semicolon outside trivia', async () => {
+        const sql = `-- CREATE VIEW NOT_A_VIEW AS SELECT 1;
+CREATE OR REPLACE VIEW REPORTING.ACTIVE_CUSTOMERS AS
+SELECT 'value; still inside a string' AS LABEL
+FROM CUSTOMERS /* ; this is a comment */;`;
+        const doc = createMockDocument(sql);
+        const compileLens = (await getLenses(provider, doc)).find(
+            lens => lens.command?.title === '$(run-all) Compile View',
+        );
+
+        expect(compileLens?.range.start.line).toBe(1);
+        expect(compileLens?.command?.command).toBe('netezza.runStatementFromLens');
+        expect(compileLens?.command?.arguments?.[1]).toBe(
+            sql.substring(sql.indexOf('CREATE OR REPLACE VIEW'), sql.length),
+        );
+    });
+
+    it('should keep procedure and view CodeLens entries in large scripts without scanning bodies', async () => {
+        const prefix = '/* filler */\n'.repeat(13_000);
+        const procedure = `CREATE PROCEDURE LARGE_PROC()
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`;
+        const view = `CREATE OR REPLACE VIEW LARGE_VIEW AS
+SELECT 'CREATE VIEW FAKE;';`;
+        const sql = `${prefix}${procedure}\n${view}`;
+        const doc = createMockDocument(sql);
+        const lenses = await getLenses(provider, doc);
+        const procedureLens = lenses.find(
+            lens => lens.command?.command === 'netezza.compileProcedureFromLens',
+        );
+        const viewLens = lenses.find(
+            lens => lens.command?.title === '$(run-all) Compile View',
+        );
+
+        expect(procedureLens?.command?.arguments?.[1]).toBe(prefix.length);
+        expect(viewLens?.command?.arguments?.[1]).toBe(sql.indexOf(view));
+        expect(lenses.filter(lens => lens.command?.command === 'netezza.compileProcedureFromLens')).toHaveLength(1);
+        expect(lenses.filter(lens => lens.command?.title === '$(run-all) Compile View')).toHaveLength(1);
+    });
+
     it('should show procedure CodeLens even when global CodeLens is disabled', async () => {
         (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue({
             get: jest.fn((key: string, defaultValue?: unknown) =>

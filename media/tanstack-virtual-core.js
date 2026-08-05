@@ -1025,12 +1025,15 @@ var VirtualCore = (() => {
           }
           this.itemSizeCache.set(key, size);
           this.itemSizeCacheVersion++;
+          let adjustedSync = false;
           if (wasAtEnd) {
-            this.applyScrollAdjustment(this.getTotalSize() - prevTotalSize);
+            adjustedSync = this.applyScrollAdjustment(
+              this.getTotalSize() - prevTotalSize
+            );
           } else if (shouldAdjustScroll) {
-            this.applyScrollAdjustment(delta);
+            adjustedSync = this.applyScrollAdjustment(delta);
           }
-          this.notify(false);
+          this.notify(adjustedSync);
         }
       };
       this.getVirtualItems = memo(
@@ -1253,13 +1256,18 @@ var VirtualCore = (() => {
       };
       this.setOptions(opts);
     }
+    // Returns `true` when it performed a synchronous `scrollTop` write this
+    // tick, `false` when the delta was zero or the write was deferred (iOS).
+    // `resizeItem` uses that to decide whether the follow-up `notify` must be
+    // synchronous so the grown transforms commit in the same paint (#1227).
     applyScrollAdjustment(delta, behavior) {
-      if (delta === 0) return;
+      if (delta === 0) return false;
       if (this.options.debug) {
         console.info("correction", delta);
       }
       if (isIOSWebKit() && (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)) {
         this._iosDeferredAdjustment += delta;
+        return false;
       } else {
         this._scrollToOffset(this.getScrollOffset(), {
           adjustments: this.scrollAdjustments += delta,
@@ -1270,6 +1278,7 @@ var VirtualCore = (() => {
           if (this.scrollOffset < 0) this.scrollOffset = 0;
           this.scrollAdjustments = 0;
         }
+        return true;
       }
     }
     scheduleScrollReconcile() {

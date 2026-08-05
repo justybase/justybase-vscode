@@ -9,9 +9,19 @@ export interface StatementAtOffset {
     end: number;
 }
 
-interface CachedStatementBoundaries {
+interface CachedStatementAtOffset {
+    start: number;
+    end: number;
+    contentStart: number;
+    contentEnd: number;
+    segmentIndex: number;
+}
+
+export interface CachedStatementBoundaries {
     textLength: number;
     semicolonOffsets: number[];
+    segments: Array<CachedStatementAtOffset | undefined>;
+    statements: CachedStatementAtOffset[];
 }
 
 const MAX_CACHE_ENTRIES = 50;
@@ -22,33 +32,63 @@ function buildCacheKey(documentKey: SqlParserDocumentKey): string {
 }
 
 export function findStatementAtOffset(
-    text: string,
+    _text: string,
     offset: number,
-    semicolonOffsets: number[],
+    boundaries: CachedStatementBoundaries,
 ): StatementAtOffset | null {
-    let start = 0;
-    for (const semicolonOffset of semicolonOffsets) {
-        if (semicolonOffset < offset) {
-            start = semicolonOffset + 1;
-        } else {
-            break;
+    const segmentIndex = findSegmentIndex(offset, boundaries.semicolonOffsets);
+    const statement = boundaries.segments[segmentIndex];
+    return statement
+        ? {
+            sql: _text.substring(statement.contentStart, statement.contentEnd),
+            start: statement.start,
+            end: statement.end,
         }
-    }
+        : null;
+}
 
-    let end = text.length;
-    for (const semicolonOffset of semicolonOffsets) {
-        if (semicolonOffset >= start) {
-            end = semicolonOffset;
-            break;
+export function findAdjacentStatementAtOffset(
+    _text: string,
+    offset: number,
+    direction: -1 | 1,
+    boundaries: CachedStatementBoundaries,
+): CachedStatementAtOffset | null {
+    const segmentIndex = findSegmentIndex(offset, boundaries.semicolonOffsets);
+    const currentStatement = boundaries.segments[segmentIndex];
+    const insertionIndex = lowerBoundStatementIndex(boundaries.statements, segmentIndex);
+    const targetIndex = currentStatement
+        ? insertionIndex + direction
+        : direction > 0
+            ? insertionIndex
+            : insertionIndex - 1;
+
+    return boundaries.statements[targetIndex] ?? null;
+}
+
+export function createStatementBoundaries(
+    text: string,
+    semicolonOffsets: number[],
+): CachedStatementBoundaries {
+    const segments: Array<CachedStatementAtOffset | undefined> = [];
+    const statements: CachedStatementAtOffset[] = [];
+    let segmentStart = 0;
+
+    for (let segmentIndex = 0; segmentIndex <= semicolonOffsets.length; segmentIndex += 1) {
+        const segmentEnd = semicolonOffsets[segmentIndex] ?? text.length;
+        const statement = createStatementAtRange(text, segmentStart, segmentEnd, segmentIndex);
+        segments.push(statement);
+        if (statement) {
+            statements.push(statement);
         }
+        segmentStart = segmentEnd + 1;
     }
 
-    const sql = text.substring(start, end).trim();
-    if (!sql) {
-        return null;
-    }
-
-    return { sql, start, end };
+    return {
+        textLength: text.length,
+        semicolonOffsets,
+        segments,
+        statements,
+    };
 }
 
 export function getCachedStatementBoundaries(
@@ -75,10 +115,7 @@ export function setCachedStatementBoundaries(
         }
     }
 
-    cache.set(buildCacheKey(documentKey), {
-        textLength: text.length,
-        semicolonOffsets,
-    });
+    cache.set(buildCacheKey(documentKey), createStatementBoundaries(text, semicolonOffsets));
 }
 
 export function clearDocumentStatementCache(documentId?: string): void {
@@ -92,4 +129,69 @@ export function clearDocumentStatementCache(documentId?: string): void {
             cache.delete(key);
         }
     }
+}
+
+function createStatementAtRange(
+    text: string,
+    start: number,
+    end: number,
+    segmentIndex: number,
+): CachedStatementAtOffset | undefined {
+    let contentStart = start;
+    while (contentStart < end && /\s/.test(text[contentStart] ?? '')) {
+        contentStart += 1;
+    }
+
+    let contentEnd = end;
+    while (contentEnd > contentStart && /\s/.test(text[contentEnd - 1] ?? '')) {
+        contentEnd -= 1;
+    }
+
+    if (contentStart >= contentEnd) {
+        return undefined;
+    }
+
+    return {
+        start,
+        end,
+        contentStart,
+        contentEnd,
+        segmentIndex,
+    };
+}
+
+function findSegmentIndex(offset: number, semicolonOffsets: number[]): number {
+    const boundedOffset = Math.max(0, offset);
+    let low = 0;
+    let high = semicolonOffsets.length;
+
+    while (low < high) {
+        const middle = low + Math.floor((high - low) / 2);
+        if (semicolonOffsets[middle] < boundedOffset) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return low;
+}
+
+function lowerBoundStatementIndex(
+    statements: CachedStatementAtOffset[],
+    segmentIndex: number,
+): number {
+    let low = 0;
+    let high = statements.length;
+
+    while (low < high) {
+        const middle = low + Math.floor((high - low) / 2);
+        if (statements[middle].segmentIndex < segmentIndex) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return low;
 }

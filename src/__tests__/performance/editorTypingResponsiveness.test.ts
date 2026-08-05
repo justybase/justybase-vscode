@@ -332,7 +332,8 @@ describe('Editor typing responsiveness', () => {
 
         expect(version).toBe(STREAM_LENGTH + 1);
         expect(editedSql).not.toBe(fixture.sql);
-        expect(tokenizeSpy).toHaveBeenCalledTimes(1);
+        const expectedTokenizeCalls = editedSql.length <= SqlParser.getFastPathThreshold() ? 1 : 0;
+        expect(tokenizeSpy).toHaveBeenCalledTimes(expectedTokenizeCalls);
       } finally {
         tokenizeSpy.mockRestore();
       }
@@ -388,6 +389,59 @@ describe('Editor typing responsiveness', () => {
       const key = { documentId: 'file:///cache-stress-100.sql', version: 1 };
       expect(() => SqlParser.getStatementAtPosition(base, 0, key)).not.toThrow();
       SqlParser.clearDocumentCache();
+    });
+
+    it('adjacent statement navigation stays cache-only across large scripts', () => {
+      const statements = Array.from(
+        { length: 10_000 },
+        (_, index) => `SELECT ${index} FROM table_${index};`,
+      );
+      const sql = statements.join('\n');
+      const documentKey = {
+        documentId: 'file:///adjacent-navigation-performance.sql',
+        version: 1,
+      };
+
+      SqlParser.clearDocumentCache(documentKey.documentId);
+      SqlParser.getAdjacentStatementAtPosition(sql, 0, 1, documentKey);
+
+      const tokenizeSpy = jest.spyOn(SqlLexer, 'tokenize');
+      const startedAt = performance.now();
+      try {
+        for (let index = 0; index < 1_000; index += 1) {
+          const offset = sql.indexOf(`SELECT ${index}`);
+          const direction = index % 2 === 0 ? 1 : -1;
+          expect(
+            SqlParser.getAdjacentStatementAtPosition(sql, offset, direction, documentKey),
+          ).not.toBeNull();
+        }
+      } finally {
+        tokenizeSpy.mockRestore();
+      }
+
+      expect(tokenizeSpy).not.toHaveBeenCalled();
+      expect(performance.now() - startedAt).toBeLessThan(100);
+    });
+
+    it('large single-line scripts do not call getText on every cursor move', () => {
+      const sql = 'SELECT 1;'.repeat(30_000);
+      const document = createLargeSqlDocument(sql, 'file:///large-single-line.sql');
+      const editor = makeEditor(document, 0);
+      const decoration = {} as vscode.TextEditorDecorationType;
+
+      updateSqlHighlight(decoration, editor);
+      const getTextSpy = jest.spyOn(document, 'getText');
+      const startedAt = performance.now();
+
+      for (let index = 0; index < 500; index += 1) {
+        const position = document.positionAt((index * 7) % sql.length);
+        editor.selection = new vscode.Selection(position, position);
+        updateSqlHighlight(decoration, editor);
+      }
+
+      expect(getTextSpy).not.toHaveBeenCalled();
+      expect(performance.now() - startedAt).toBeLessThan(50);
+      getTextSpy.mockRestore();
     });
   });
 });

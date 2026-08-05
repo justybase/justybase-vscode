@@ -246,6 +246,53 @@ comment */; SELECT 2;`;
             expect(v1?.sql).toBe('SELECT 2');
             expect(v2?.sql).toBe('SELECT 20');
         });
+
+        it('should navigate to adjacent non-empty statements', () => {
+            const sql = 'SELECT 1;;;  SELECT 2; SELECT 3';
+            const documentKey = { documentId: 'file:///adjacent.sql', version: 1 };
+
+            SqlParser.clearDocumentCache(documentKey.documentId);
+
+            expect(
+                SqlParser.getAdjacentStatementAtPosition(sql, sql.indexOf('1'), 1, documentKey),
+            ).toMatchObject({ sql: 'SELECT 2' });
+            expect(
+                SqlParser.getAdjacentStatementAtPosition(sql, sql.indexOf('2'), 1, documentKey),
+            ).toMatchObject({ sql: 'SELECT 3' });
+            expect(
+                SqlParser.getAdjacentStatementAtPosition(sql, sql.indexOf('2'), -1, documentKey),
+            ).toMatchObject({ sql: 'SELECT 1' });
+        });
+
+        it('should navigate from separator whitespace in the expected direction', () => {
+            const sql = 'SELECT 1;   ;   SELECT 2;';
+            const documentKey = { documentId: 'file:///separator.sql', version: 1 };
+            const separatorOffset = sql.indexOf(';') + 1;
+
+            SqlParser.clearDocumentCache(documentKey.documentId);
+
+            expect(
+                SqlParser.getAdjacentStatementAtPosition(sql, separatorOffset, 1, documentKey),
+            ).toMatchObject({ sql: 'SELECT 2' });
+            expect(
+                SqlParser.getAdjacentStatementAtPosition(sql, separatorOffset, -1, documentKey),
+            ).toMatchObject({ sql: 'SELECT 1' });
+        });
+
+        it('should preserve content offsets for cursor placement', () => {
+            const sql = '  SELECT 1;\n\n  SELECT 2;';
+            const statementStart = sql.indexOf('SELECT 2');
+            const result = SqlParser.getAdjacentStatementAtPosition(sql, 0, 1, {
+                documentId: 'file:///content-offsets.sql',
+                version: 1,
+            });
+
+            expect(result).toMatchObject({
+                sql: 'SELECT 2',
+                contentStart: statementStart,
+                contentEnd: statementStart + 'SELECT 2'.length,
+            });
+        });
     });
 
     describe('getObjectAtPosition', () => {

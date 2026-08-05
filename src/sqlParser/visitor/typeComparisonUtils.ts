@@ -2,33 +2,36 @@ export type SqlTypeFamily = "numeric" | "string" | "datetime" | "boolean" | "unk
 
 export type LiteralKind = "string" | "number" | "null" | "unknown";
 
-export function classifyNetezzaDataType(typeName?: string): SqlTypeFamily {
+export function classifySqlDataType(typeName?: string): SqlTypeFamily {
   if (!typeName) {
     return "unknown";
   }
   const upper = typeName.toUpperCase();
   if (
-    /\b(BYTEINT|INT1|INT2|INT4|INT8|INTEGER|BIGINT|SMALLINT|NUMERIC|DECIMAL|FLOAT|REAL|DOUBLE|MONEY)\b/.test(
+    /\b(BYTEINT|TINYINT|INT1|INT2|INT4|INT8|INT|INTEGER|BIGINT|SMALLINT|NUMERIC|DECIMAL|DECFLOAT|NUMBER|FLOAT|REAL|DOUBLE|MONEY)\b/.test(
       upper,
     )
   ) {
     return "numeric";
   }
   if (
-    /\b(CHAR|VARCHAR|NCHAR|NVARCHAR|TEXT|CHARACTER|BINARY|VARBYTE|BYTEA)\b/.test(
+    /\b(CHAR|VARCHAR|VARCHAR2|NCHAR|NVARCHAR|NVARCHAR2|TEXT|STRING|CLOB|NCLOB|CHARACTER|BINARY|VARBINARY|VARBYTE|BYTEA)\b/.test(
       upper,
     )
   ) {
     return "string";
   }
-  if (/\b(DATE|TIME|TIMESTAMP|INTERVAL|ABSTIME|TIMETZ|TIMESTAMPTZ)\b/.test(upper)) {
+  if (/\b(DATE|TIME|DATETIME|SMALLDATETIME|TIMESTAMP|INTERVAL|ABSTIME|TIMETZ|TIMESTAMPTZ)\b/.test(upper)) {
     return "datetime";
   }
-  if (/\b(BOOLEAN|BOOL)\b/.test(upper)) {
+  if (/\b(BOOLEAN|BOOL|BIT)\b/.test(upper)) {
     return "boolean";
   }
   return "unknown";
 }
+
+/** Backward-compatible name used by existing Netezza validation rules. */
+export const classifyNetezzaDataType = classifySqlDataType;
 
 export function classifyLiteralToken(tokenTypeName?: string): LiteralKind {
   if (tokenTypeName === "StringLiteral") {

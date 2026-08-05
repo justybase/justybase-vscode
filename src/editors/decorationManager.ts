@@ -7,6 +7,7 @@ import { SqlParser } from '../sql/sqlParser';
 import { affectsExtensionConfiguration, getExtensionConfiguration } from '../compatibility/configuration';
 import { LARGE_SCRIPT_CHAR_THRESHOLD, LARGE_SCRIPT_LINE_THRESHOLD } from '../sqlParser/validationConfig';
 import { getUxPerfSession } from '../services/perf/uxPerfSession';
+import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 
 const SELECTION_HIGHLIGHT_DEBOUNCE_MS = 100;
 const LARGE_SCRIPT_HIGHLIGHT_DEBOUNCE_MS = 500;
@@ -29,19 +30,23 @@ export function createSqlStatementDecoration(): vscode.TextEditorDecorationType 
 
 interface HighlightState {
     version: number;
-    offset: number;
     rangeStart: number;
     rangeEnd: number;
 }
 
+interface DocumentLengthState {
+    version: number;
+    length: number;
+}
+
 let lastHighlightState = new WeakMap<vscode.TextEditor, HighlightState>();
+let documentLengthState = new WeakMap<vscode.TextDocument, DocumentLengthState>();
 let selectionHighlightTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingHighlightEditor: vscode.TextEditor | undefined;
 
 function shouldSkipHighlightUpdate(
     editor: vscode.TextEditor,
     version: number,
-    offset: number,
     rangeStart: number,
     rangeEnd: number,
 ): boolean {
@@ -52,7 +57,6 @@ function shouldSkipHighlightUpdate(
 
     return (
         previous.version === version &&
-        previous.offset === offset &&
         previous.rangeStart === rangeStart &&
         previous.rangeEnd === rangeEnd
     );
@@ -61,13 +65,11 @@ function shouldSkipHighlightUpdate(
 function rememberHighlightState(
     editor: vscode.TextEditor,
     version: number,
-    offset: number,
     rangeStart: number,
     rangeEnd: number,
 ): void {
     lastHighlightState.set(editor, {
         version,
-        offset,
         rangeStart,
         rangeEnd,
     });
@@ -75,6 +77,65 @@ function rememberHighlightState(
 
 function clearHighlightState(editor: vscode.TextEditor): void {
     lastHighlightState.delete(editor);
+}
+
+function clearDecorations(
+    editor: vscode.TextEditor,
+    decoration: vscode.TextEditorDecorationType,
+): void {
+    editor.setDecorations(decoration, []);
+}
+
+function setEmptyDecorationsIfNeeded(
+    editor: vscode.TextEditor,
+    decoration: vscode.TextEditorDecorationType,
+): void {
+    const previous = lastHighlightState.get(editor);
+    if (previous?.rangeStart === -1 && previous.rangeEnd === -1) {
+        return;
+    }
+
+    clearDecorations(editor, decoration);
+    rememberHighlightState(editor, editor.document.version, -1, -1);
+}
+
+function applyStatementDecorations(
+    editor: vscode.TextEditor,
+    decoration: vscode.TextEditorDecorationType,
+    start: number,
+    end: number,
+): void {
+    editor.setDecorations(decoration, [
+        new vscode.Range(editor.document.positionAt(start), editor.document.positionAt(end)),
+    ]);
+}
+
+function getDocumentTextSnapshot(document: vscode.TextDocument): { text?: string; length: number } {
+    const known = documentLengthState.get(document);
+    if (known?.version === document.version) {
+        return { length: known.length };
+    }
+
+    const text = document.getText() ?? '';
+    documentLengthState.set(document, { version: document.version, length: text.length });
+    return { text, length: text.length };
+}
+
+function updateDocumentLengthFromChange(event: vscode.TextDocumentChangeEvent): void {
+    const previous = documentLengthState.get(event.document);
+    if (!previous || previous.version >= event.document.version) {
+        return;
+    }
+
+    let length = previous.length;
+    for (const change of event.contentChanges) {
+        length += change.text.length - change.rangeLength;
+    }
+
+    documentLengthState.set(event.document, {
+        version: event.document.version,
+        length,
+    });
 }
 
 /**
@@ -91,9 +152,9 @@ export function updateSqlHighlight(
         ? LARGE_SCRIPT_HIGHLIGHT_DEBOUNCE_MS
         : SELECTION_HIGHLIGHT_DEBOUNCE_MS;
 
-    if (!enabled || !editor || (editor.document.languageId !== 'sql' && editor.document.languageId !== 'mssql')) {
+    if (!enabled || !editor || !isSqlAuthoringLanguageId(editor.document.languageId)) {
         if (editor) {
-            editor.setDecorations(sqlStatementDecoration, []);
+            clearDecorations(editor, sqlStatementDecoration);
             clearHighlightState(editor);
         }
         return;
@@ -102,8 +163,7 @@ export function updateSqlHighlight(
     try {
         const document = editor.document;
         if (document.lineCount > LARGE_SCRIPT_LINE_THRESHOLD) {
-            editor.setDecorations(sqlStatementDecoration, []);
-            clearHighlightState(editor);
+            setEmptyDecorationsIfNeeded(editor, sqlStatementDecoration);
             emitHighlightUx(document, uxStartedAt, debounceMs, true, 'line_threshold');
             return;
         }
@@ -111,13 +171,13 @@ export function updateSqlHighlight(
         const documentId = document.uri.toString();
         const position = editor.selection.active;
         const offset = document.offsetAt(position);
-        const text = document.getText() ?? '';
-        if (text.length > LARGE_SCRIPT_CHAR_THRESHOLD) {
-            editor.setDecorations(sqlStatementDecoration, []);
-            clearHighlightState(editor);
+        const snapshot = getDocumentTextSnapshot(document);
+        if (snapshot.length > LARGE_SCRIPT_CHAR_THRESHOLD) {
+            setEmptyDecorationsIfNeeded(editor, sqlStatementDecoration);
             emitHighlightUx(document, uxStartedAt, debounceMs, true, 'char_threshold');
             return;
         }
+        const text = snapshot.text ?? document.getText() ?? '';
         const documentKey = {
             documentId,
             version: document.version,
@@ -126,22 +186,19 @@ export function updateSqlHighlight(
         const stmt = SqlParser.getStatementAtPosition(text, offset, documentKey);
 
         if (stmt) {
-            if (shouldSkipHighlightUpdate(editor, document.version, offset, stmt.start, stmt.end)) {
+            if (shouldSkipHighlightUpdate(editor, document.version, stmt.start, stmt.end)) {
                 return;
             }
 
-            const startPos = document.positionAt(stmt.start);
-            const endPos = document.positionAt(stmt.end);
-            const range = new vscode.Range(startPos, endPos);
-            editor.setDecorations(sqlStatementDecoration, [range]);
-            rememberHighlightState(editor, document.version, offset, stmt.start, stmt.end);
+            applyStatementDecorations(editor, sqlStatementDecoration, stmt.start, stmt.end);
+            rememberHighlightState(editor, document.version, stmt.start, stmt.end);
         } else {
-            if (shouldSkipHighlightUpdate(editor, document.version, offset, -1, -1)) {
+            if (shouldSkipHighlightUpdate(editor, document.version, -1, -1)) {
                 return;
             }
 
-            editor.setDecorations(sqlStatementDecoration, []);
-            rememberHighlightState(editor, document.version, offset, -1, -1);
+            clearDecorations(editor, sqlStatementDecoration);
+            rememberHighlightState(editor, document.version, -1, -1);
         }
         emitHighlightUx(document, uxStartedAt, debounceMs, false, 'updated');
     } catch (e) {
@@ -235,6 +292,7 @@ export function registerDecorationSubscriptions(
                 updateSqlHighlight(sqlStatementDecoration, vscode.window.activeTextEditor);
             }
         }),
+        vscode.workspace.onDidChangeTextDocument(updateDocumentLengthFromChange),
         vscode.workspace.onDidCloseTextDocument(doc => {
             SqlParser.clearDocumentCache(doc.uri.toString());
         }),
@@ -242,6 +300,7 @@ export function registerDecorationSubscriptions(
             dispose: () => {
                 clearSqlHighlightScheduling();
                 lastHighlightState = new WeakMap<vscode.TextEditor, HighlightState>();
+                documentLengthState = new WeakMap<vscode.TextDocument, DocumentLengthState>();
             },
         },
     );
