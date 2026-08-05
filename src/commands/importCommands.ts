@@ -17,6 +17,12 @@ import {
 } from '../import/importDispatcher';
 import { ImportWizardService } from '../import/wizard/ImportWizardService';
 import type { MetadataCache } from '../metadataCache';
+import { getCachedColumnsFromMetadataCacheAsync } from '../metadata/columnCacheLookup';
+import { formatInListPaste } from './inListPasteFormatter';
+import { parseSemanticScopeWithParser } from '../providers/parsers/parserSqlContext';
+import { classifySqlDataType } from '../sqlParser/visitor/typeComparisonUtils';
+import type { DatabaseKind } from '../contracts/database';
+import type { AliasInfo } from '../providers/types';
 import { ImportWizardView } from '../views/importWizardView';
 
 export interface ImportCommandsDependencies {
@@ -1290,16 +1296,21 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
         }),
 
         // Register paste detection for automatic file path detection
-        registerPasteDetection(context),
+        registerPasteDetection(context, connectionManager, metadataCache),
     ];
 }
 
 /**
  * Register paste detection listener to automatically detect file paths being pasted
  */
-function registerPasteDetection(_context: vscode.ExtensionContext): vscode.Disposable {
+function registerPasteDetection(
+    _context: vscode.ExtensionContext,
+    connectionManager: ConnectionManager,
+    metadataCache: MetadataCache,
+): vscode.Disposable {
     let lastPasteTime = 0;
     const PASTE_DEBOUNCE_MS = 500;
+    const internallyFormatted = new Set<string>();
 
     return vscode.workspace.onDidChangeTextDocument(async (event) => {
         // Only process SQL files
@@ -1307,14 +1318,47 @@ function registerPasteDetection(_context: vscode.ExtensionContext): vscode.Dispo
             return;
         }
 
+        const change = event.contentChanges[0];
+        if (!change) {
+            return;
+        }
+        const documentUri = event.document.uri?.toString?.() ?? '';
+        if (internallyFormatted.delete(documentUri)) {
+            return;
+        }
+
         // Check if this is a paste operation (single change, no deletion, text added)
         const isPaste =
             event.contentChanges.length === 1 &&
-            event.contentChanges[0].rangeLength === 0 &&
-            event.contentChanges[0].text.length > 0;
+            change.rangeLength === 0 &&
+            change.text.length > 0;
 
         if (!isPaste) {
             return;
+        }
+
+        const formatted = event.document.uri && typeof event.document.getText === 'function'
+            ? await formatPastedInList(event.document, change, connectionManager, metadataCache)
+            : undefined;
+        if (formatted !== undefined && formatted !== change.text) {
+            const editor = vscode.window.activeTextEditor;
+            if (editor?.document === event.document) {
+                internallyFormatted.add(documentUri);
+                const start = change.range.start;
+                // The edit must cover the original insertion. Using the
+                // formatted text here leaves the tail of a longer paste in
+                // the document (notably Markdown tables), producing apparent
+                // duplicate values.
+                const pastedLines = change.text.replace(/\r\n?/g, '\n').split('\n');
+                const end = start.translate(
+                    pastedLines.length - 1,
+                    (pastedLines[pastedLines.length - 1] ?? '').length,
+                );
+                await editor.edit((editBuilder) => {
+                    editBuilder.replace(new vscode.Range(start, end), formatted);
+                });
+                return;
+            }
         }
 
         // Debounce to avoid multiple detections
@@ -1324,7 +1368,7 @@ function registerPasteDetection(_context: vscode.ExtensionContext): vscode.Dispo
         }
         lastPasteTime = now;
 
-        const pastedText = event.contentChanges[0].text.trim();
+        const pastedText = change.text.trim();
 
         // Check if pasted text is a file path
         if (detectFilePath(pastedText)) {
@@ -1377,4 +1421,142 @@ function registerPasteDetection(_context: vscode.ExtensionContext): vscode.Dispo
             }
         }
     });
+}
+
+interface TextChangeLike {
+    range: vscode.Range;
+    text: string;
+}
+
+async function formatPastedInList(
+    document: vscode.TextDocument,
+    change: TextChangeLike,
+    connectionManager: ConnectionManager,
+    metadataCache: MetadataCache,
+): Promise<string | undefined> {
+    const text = document.getText();
+    const startOffset = document.offsetAt(change.range.start);
+    const insertedEndOffset = startOffset + change.text.length;
+    const originalSql = text.slice(0, startOffset) + text.slice(insertedEndOffset);
+    const context = findEmptyInContext(originalSql, startOffset);
+    if (!context) {
+        return undefined;
+    }
+
+    const documentUri = document.uri.toString();
+    const connectionName = connectionManager.getConnectionForExecution(documentUri);
+    const databaseKind = connectionManager.getExecutionDatabaseKind(documentUri);
+    const effectiveDatabase = await connectionManager.getEffectiveDatabase(documentUri);
+    const parsed = parseSemanticScopeWithParser(originalSql, startOffset, databaseKind);
+    const aliases = parsed.preferredAliasBindings;
+    const type = await resolveInListColumnType(
+        context,
+        aliases,
+        connectionName,
+        effectiveDatabase ?? undefined,
+        databaseKind,
+        metadataCache,
+    );
+    return formatInListPaste(change.text, { type });
+}
+
+interface InListContext {
+    qualifier?: string;
+    column: string;
+}
+
+function findEmptyInContext(sql: string, offset: number): InListContext | undefined {
+    const stack: number[] = [];
+    let quote: string | undefined;
+    let lineComment = false;
+    let blockComment = false;
+    for (let i = 0; i < offset; i++) {
+        const char = sql[i];
+        const next = sql[i + 1];
+        if (lineComment) {
+            if (char === '\n') lineComment = false;
+            continue;
+        }
+        if (blockComment) {
+            if (char === '*' && next === '/') { blockComment = false; i++; }
+            continue;
+        }
+        if (quote) {
+            if (char === quote) {
+                if (next === quote) i++;
+                else quote = undefined;
+            }
+            continue;
+        }
+        if (char === '-' && next === '-') { lineComment = true; i++; continue; }
+        if (char === '/' && next === '*') { blockComment = true; i++; continue; }
+        if (char === "'" || char === '"' || char === '`' || char === '[') {
+            quote = char === '[' ? ']' : char;
+            continue;
+        }
+        if (char === '(') stack.push(i);
+        else if (char === ')' && stack.length) stack.pop();
+    }
+    const open = stack[stack.length - 1];
+    if (open === undefined || sql.slice(open + 1, offset).trim() !== '') return undefined;
+    let close = offset;
+    while (/\s/.test(sql[close] ?? '')) close++;
+    if (sql[close] !== ')') return undefined;
+
+    const before = sql.slice(0, open);
+    const inMatch = /\b(?:NOT\s+)?IN\s*$/i.exec(before);
+    if (!inMatch) return undefined;
+    const identifier = '(?:[A-Za-z_$][\\w$]*|"(?:""|[^"])+"|`(?:``|[^`])+`|\\[(?:\\]\\]|[^\\]])+\\])';
+    const left = before.slice(0, inMatch.index).match(new RegExp(`${identifier}(?:\\s*\\.\\s*${identifier}){0,3}\\s*$`));
+    if (!left) return undefined;
+    const parts = left[0].trim().split(/\s*\.\s*/).map(unquoteIdentifier);
+    if (parts.length < 1 || parts.length > 4) return undefined;
+    return {
+        column: parts[parts.length - 1]!,
+        qualifier: parts.length > 1 ? parts[parts.length - 2] : undefined,
+    };
+}
+
+function unquoteIdentifier(value: string): string {
+    if (value.startsWith('"') && value.endsWith('"')) {
+        return value.slice(1, -1).replace(/""/g, '"');
+    }
+    if (value.startsWith('`') && value.endsWith('`')) {
+        return value.slice(1, -1).replace(/``/g, '`');
+    }
+    if (value.startsWith('[') && value.endsWith(']')) {
+        return value.slice(1, -1).replace(/\]\]/g, ']');
+    }
+    return value;
+}
+
+async function resolveInListColumnType(
+    context: InListContext,
+    aliases: Map<string, AliasInfo>,
+    connectionName: string | undefined,
+    effectiveDatabase: string | undefined,
+    databaseKind: DatabaseKind | undefined,
+    metadataCache: MetadataCache,
+): Promise<ReturnType<typeof classifySqlDataType>> {
+    if (!connectionName || !effectiveDatabase) return 'unknown';
+    const candidates: AliasInfo[] = [];
+    if (context.qualifier) {
+        const alias = aliases.get(context.qualifier.toUpperCase()) ?? aliases.get(context.qualifier);
+        if (alias) candidates.push(alias);
+    } else {
+        candidates.push(...aliases.values());
+    }
+    for (const alias of candidates) {
+        const columns = await getCachedColumnsFromMetadataCacheAsync(
+            metadataCache,
+            connectionName,
+            alias.db ?? effectiveDatabase,
+            alias.schema,
+            alias.table,
+            databaseKind,
+        );
+        const column = columns?.find((item) => item.ATTNAME.toUpperCase() === context.column.toUpperCase());
+        if (column) return classifySqlDataType(column.FORMAT_TYPE);
+    }
+    return 'unknown';
 }

@@ -1,6 +1,8 @@
 import { IToken } from 'chevrotain';
 import { Dot, Semicolon, SqlLexer } from '../sqlParser/lexer';
 import {
+    createStatementBoundaries,
+    findAdjacentStatementAtOffset,
     findStatementAtOffset,
     getCachedStatementBoundaries,
     setCachedStatementBoundaries,
@@ -103,12 +105,13 @@ export class SqlParser {
         if (documentKey) {
             const cached = getCachedStatementBoundaries(documentKey, text);
             if (cached) {
-                return findStatementAtOffset(text, offset, cached.semicolonOffsets);
+                return findStatementAtOffset(text, offset, cached);
             }
 
             const semicolonOffsets = this.getStatementBoundarySemicolonOffsets(text);
             setCachedStatementBoundaries(documentKey, text, semicolonOffsets);
-            return findStatementAtOffset(text, offset, semicolonOffsets);
+            const boundaries = getCachedStatementBoundaries(documentKey, text);
+            return boundaries ? findStatementAtOffset(text, offset, boundaries) : null;
         }
 
         if (this.shouldUseFastPath(text)) {
@@ -119,6 +122,30 @@ export class SqlParser {
         }
 
         return this.getStatementAtPositionLegacy(text, offset);
+    }
+
+    /**
+     * Finds the nearest non-empty statement before or after the cursor.
+     * Boundary discovery is cached per document version, and the cached
+     * statement list is searched with binary search on subsequent calls.
+     */
+    public static getAdjacentStatementAtPosition(
+        text: string,
+        offset: number,
+        direction: -1 | 1,
+        documentKey?: SqlParserDocumentKey,
+    ): { sql: string; start: number; end: number; contentStart: number; contentEnd: number } | null {
+        const boundaries = this.getStatementBoundaries(text, documentKey);
+        const statement = findAdjacentStatementAtOffset(text, offset, direction, boundaries);
+        return statement
+            ? {
+                sql: text.substring(statement.contentStart, statement.contentEnd),
+                start: statement.start,
+                end: statement.end,
+                contentStart: statement.contentStart,
+                contentEnd: statement.contentEnd,
+            }
+            : null;
     }
 
     public static clearDocumentCache(documentId?: string): void {
@@ -194,7 +221,11 @@ export class SqlParser {
             return null;
         }
 
-        return findStatementAtOffset(text, offset, semicolonOffsets);
+        return findStatementAtOffset(
+            text,
+            offset,
+            createStatementBoundaries(text, semicolonOffsets),
+        );
     }
 
     private static getObjectAtPositionFast(
@@ -263,6 +294,30 @@ export class SqlParser {
         }
 
         return this.collectSemicolonOffsetsLegacy(text);
+    }
+
+    private static getStatementBoundaries(
+        text: string,
+        documentKey?: SqlParserDocumentKey,
+    ) {
+        if (documentKey) {
+            const cached = getCachedStatementBoundaries(documentKey, text);
+            if (cached) {
+                return cached;
+            }
+
+            const semicolonOffsets = this.getStatementBoundarySemicolonOffsets(text);
+            setCachedStatementBoundaries(documentKey, text, semicolonOffsets);
+            const boundaries = getCachedStatementBoundaries(documentKey, text);
+            if (boundaries) {
+                return boundaries;
+            }
+        }
+
+        return createStatementBoundaries(
+            text,
+            this.getStatementBoundarySemicolonOffsets(text),
+        );
     }
 
     private static collectSemicolonOffsetsFast(text: string): number[] | null {

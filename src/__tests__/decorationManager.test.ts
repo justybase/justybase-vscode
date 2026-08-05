@@ -65,16 +65,14 @@ describe("decorationManager", () => {
   });
 
   describe("createSqlStatementDecoration", () => {
-    it("should create decoration type with correct configuration", () => {
+    it("should create a subtle background decoration", () => {
       createSqlStatementDecoration();
 
-      expect(vscode.window.createTextEditorDecorationType).toHaveBeenCalledWith(
-        {
-          backgroundColor: "rgba(5, 115, 201, 0.10)",
-          isWholeLine: false,
-          rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
-        },
-      );
+      expect(vscode.window.createTextEditorDecorationType).toHaveBeenCalledWith({
+        backgroundColor: "rgba(5, 115, 201, 0.10)",
+        isWholeLine: false,
+        rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+      });
     });
   });
 
@@ -189,6 +187,24 @@ describe("decorationManager", () => {
       expect(mockEditor.setDecorations).toHaveBeenCalled();
     });
 
+    it("should handle netezza-sql language files", () => {
+      (mockDocument as any).languageId = "netezza-sql";
+      (mockDocument.offsetAt as jest.Mock).mockReturnValue(20);
+      (mockDocument.getText as jest.Mock).mockReturnValue("SELECT 1");
+      (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
+        sql: "SELECT 1",
+        start: 0,
+        end: 8,
+      });
+      (mockDocument.positionAt as jest.Mock)
+        .mockReturnValueOnce(new vscode.Position(0, 0))
+        .mockReturnValueOnce(new vscode.Position(0, 8));
+
+      updateSqlHighlight(mockDecorationType, mockEditor);
+
+      expect(mockEditor.setDecorations).toHaveBeenCalled();
+    });
+
     it("should skip redundant decoration updates for the same cursor state", () => {
       const mockStatement = {
         sql: "SELECT * FROM users",
@@ -205,6 +221,27 @@ describe("decorationManager", () => {
       (mockDocument.positionAt as jest.Mock)
         .mockReturnValue(new vscode.Position(0, 10))
         .mockReturnValue(new vscode.Position(0, 30));
+
+      updateSqlHighlight(mockDecorationType, mockEditor);
+      updateSqlHighlight(mockDecorationType, mockEditor);
+
+      expect(SqlParser.getStatementAtPosition).toHaveBeenCalledTimes(2);
+      expect(mockEditor.setDecorations).toHaveBeenCalledTimes(1);
+    });
+
+    it("should not reapply the decoration when the cursor stays in one statement", () => {
+      const mockStatement = {
+        sql: "SELECT * FROM users",
+        start: 10,
+        end: 30,
+      };
+      (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue(mockStatement);
+      (mockDocument.getText as jest.Mock).mockReturnValue("SELECT * FROM users;");
+      (mockDocument.offsetAt as jest.Mock)
+        .mockReturnValueOnce(20)
+        .mockReturnValueOnce(25);
+      (mockDocument.positionAt as jest.Mock)
+        .mockReturnValue(new vscode.Position(0, 10));
 
       updateSqlHighlight(mockDecorationType, mockEditor);
       updateSqlHighlight(mockDecorationType, mockEditor);
@@ -321,7 +358,7 @@ describe("decorationManager", () => {
       expect(vscode.window.onDidChangeActiveTextEditor).toHaveBeenCalled();
       expect(vscode.workspace.onDidChangeConfiguration).toHaveBeenCalled();
       expect(vscode.workspace.onDidCloseTextDocument).toHaveBeenCalled();
-      expect(mockContext.subscriptions).toHaveLength(5);
+      expect(mockContext.subscriptions).toHaveLength(6);
     });
 
     it("should debounce highlight updates on text editor selection change", () => {
@@ -352,7 +389,7 @@ describe("decorationManager", () => {
       jest.advanceTimersByTime(100);
 
       expect(SqlParser.getStatementAtPosition).toHaveBeenCalledTimes(1);
-      expect(mockEditor.setDecorations).toHaveBeenCalledTimes(1);
+      expect(mockEditor.setDecorations).toHaveBeenCalledTimes(0);
       jest.useRealTimers();
     });
 
@@ -378,7 +415,7 @@ describe("decorationManager", () => {
 
       eventHandlers["activeEditor"](mockEditor);
 
-      expect(mockEditor.setDecorations).toHaveBeenCalled();
+      expect(mockEditor.setDecorations).not.toHaveBeenCalled();
     });
 
     it("should flush pending selection highlight before active editor change", () => {
@@ -406,7 +443,7 @@ describe("decorationManager", () => {
       eventHandlers["selection"]({ textEditor: mockEditor });
       eventHandlers["activeEditor"](splitEditor);
 
-      expect(mockEditor.setDecorations).toHaveBeenCalledTimes(1);
+      expect(mockEditor.setDecorations).toHaveBeenCalledTimes(0);
       expect(splitEditor.setDecorations).toHaveBeenCalledTimes(1);
 
       jest.useRealTimers();

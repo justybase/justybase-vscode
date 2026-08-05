@@ -33,6 +33,10 @@ import type { QueryFlowNode } from '../sqlParser';
 import type { TableDdlSynchronizer } from '../metadata/tableDdlSynchronizer';
 import type { BatchQueryRunOptions } from '../core/queryRunner';
 import { confirmSafeExecute } from './query/queryCommandSafety';
+import {
+    extractProcedureBlock,
+    extractViewStatement,
+} from '../sqlParser/procedure/procedureCodeLens';
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -806,10 +810,14 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
         // Run single statement from CodeLens
         vscode.commands.registerCommand(
             'netezza.runStatementFromLens',
-            async (uri: vscode.Uri, statementSql: string) => {
+            async (uri: vscode.Uri, statementSqlOrOffset: string | number) => {
                 if (uri.scheme === 'vscode-notebook-cell') {
                     return;
                 }
+
+                const statementSql = typeof statementSqlOrOffset === 'number'
+                    ? extractViewStatement((await vscode.workspace.openTextDocument(uri)).getText(), statementSqlOrOffset)
+                    : statementSqlOrOffset;
                 if (!statementSql || !statementSql.trim()) {
                     vscode.window.showWarningMessage('No SQL statement to execute');
                     return;
@@ -922,10 +930,13 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
         // Compile full CREATE PROCEDURE block from CodeLens
         vscode.commands.registerCommand(
             'netezza.compileProcedureFromLens',
-            async (uri: vscode.Uri, procedureSql: string) => {
+            async (uri: vscode.Uri, procedureSqlOrOffset: string | number) => {
                 if (uri.scheme === 'vscode-notebook-cell') {
                     return;
                 }
+                const procedureSql = typeof procedureSqlOrOffset === 'number'
+                    ? extractProcedureBlock((await vscode.workspace.openTextDocument(uri)).getText(), procedureSqlOrOffset)
+                    : procedureSqlOrOffset;
                 if (!procedureSql || !procedureSql.trim()) {
                     vscode.window.showWarningMessage('No procedure block to compile');
                     return;
