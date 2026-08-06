@@ -1,12 +1,12 @@
-# JustyBase MySQL Support
+# JustyBase SQL Editor (MySQL)
 
-Optional MySQL support for JustyBase Core (NetezzaSQL).
+Optional MySQL support for JustyBase SQL Editor (Netezza).
 
-This extension adds the `MySQL` dialect to JustyBase Core (NetezzaSQL) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `MySQL` dialect to JustyBase SQL Editor (Netezza) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase Core (NetezzaSQL)`
+- Install the core extension first: `JustyBase SQL Editor (Netezza)`
 - VS Code Desktop
 - Network access to your MySQL instance
 
@@ -28,10 +28,10 @@ This extension adds the `MySQL` dialect to JustyBase Core (NetezzaSQL) and integ
 
 Marketplace or manual VSIX installation should end with both extensions installed:
 
-1. Install `JustyBase Core (NetezzaSQL)`
-2. Install `JustyBase MySQL Support`
+1. Install `JustyBase SQL Editor (Netezza)`
+2. Install `JustyBase SQL Editor (MySQL)`
 
-`JustyBase MySQL Support` can declare `extensionDependencies` on the core extension so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`JustyBase SQL Editor (MySQL)` can declare `extensionDependencies` on the core extension so VS Code can resolve the dependency automatically in Marketplace scenarios.
 
 ## Development Notes
 

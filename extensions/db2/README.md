@@ -1,12 +1,12 @@
-# JustyBase Db2 Support
+# JustyBase SQL Editor (Db2)
 
-Optional Db2 LUW support for JustyBase Core (NetezzaSQL).
+Optional Db2 LUW support for JustyBase SQL Editor (Netezza).
 
 This extension adds the `Db2 LUW` dialect and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry. Core ships a dedicated Db2 SQL lexer/parser (strict), grammar, snippets, dialect-aware semantic tokens, and **DB2001–DB2008** quality rules; this VSIX supplies the native `ibm_db` driver and runtime providers.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase Core (NetezzaSQL)`
+- Install the core extension first: `JustyBase SQL Editor (Netezza)`
 - VS Code Desktop
 - Network access to your Db2 LUW server
 
@@ -51,8 +51,8 @@ The extension **never** registers an ODBC driver or changes the Windows registry
 
 ## Installation Order
 
-1. Install `JustyBase Core (NetezzaSQL)`
-2. Install `JustyBase Db2 Support`
+1. Install `JustyBase SQL Editor (Netezza)`
+2. Install `JustyBase SQL Editor (Db2)`
 
 `extensionDependencies` on the core extension allow Marketplace resolution.
 

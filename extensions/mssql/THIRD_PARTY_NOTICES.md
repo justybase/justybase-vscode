@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This file lists third-party software distributed with **JustyBase MS SQL Server Support**.
+This file lists third-party software distributed with **JustyBase SQL Editor (MS SQL Server)**.
 It is generated from the locked runtime dependency graph and packaged bundle source maps.
 
 ## Components

@@ -6,8 +6,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const OPTIONAL_EXTENSIONS = Object.freeze([
     {
         id: 'db2',
-        displayName: 'JustyBase Db2 Support',
-        marketplaceName: 'JustyBase Db2 Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (Db2)',
         directory: path.join(repoRoot, 'extensions', 'db2'),
         packageJson: path.join(repoRoot, 'extensions', 'db2', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'db2', 'package-lock.json'),
@@ -16,8 +15,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'duckdb',
-        displayName: 'JustyBase DuckDB Support',
-        marketplaceName: 'JustyBase DuckDB Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (DuckDB)',
         directory: path.join(repoRoot, 'extensions', 'duckdb'),
         packageJson: path.join(repoRoot, 'extensions', 'duckdb', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'duckdb', 'package-lock.json'),
@@ -26,8 +24,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'oracle',
-        displayName: 'JustyBase Oracle Support',
-        marketplaceName: 'JustyBase Oracle Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (Oracle)',
         directory: path.join(repoRoot, 'extensions', 'oracle'),
         packageJson: path.join(repoRoot, 'extensions', 'oracle', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'oracle', 'package-lock.json'),
@@ -36,8 +33,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'postgresql',
-        displayName: 'JustyBase PostgreSQL Support',
-        marketplaceName: 'JustyBase PostgreSQL Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (PostgreSQL)',
         directory: path.join(repoRoot, 'extensions', 'postgresql'),
         packageJson: path.join(repoRoot, 'extensions', 'postgresql', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'postgresql', 'package-lock.json'),
@@ -46,8 +42,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'vertica',
-        displayName: 'JustyBase Vertica Support',
-        marketplaceName: 'JustyBase Vertica Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (Vertica)',
         directory: path.join(repoRoot, 'extensions', 'vertica'),
         packageJson: path.join(repoRoot, 'extensions', 'vertica', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'vertica', 'package-lock.json'),
@@ -56,8 +51,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'snowflake',
-        displayName: 'JustyBase Snowflake Support',
-        marketplaceName: 'JustyBase Snowflake Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (Snowflake)',
         directory: path.join(repoRoot, 'extensions', 'snowflake'),
         packageJson: path.join(repoRoot, 'extensions', 'snowflake', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'snowflake', 'package-lock.json'),
@@ -66,8 +60,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'mssql',
-        displayName: 'JustyBase MS SQL Server Support',
-        marketplaceName: 'JustyBase MS SQL Server Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (MS SQL Server)',
         directory: path.join(repoRoot, 'extensions', 'mssql'),
         packageJson: path.join(repoRoot, 'extensions', 'mssql', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'mssql', 'package-lock.json'),
@@ -76,8 +69,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
     },
     {
         id: 'mysql',
-        displayName: 'JustyBase MySQL Support',
-        marketplaceName: 'JustyBase MySQL Support',
+        fallbackDisplayName: 'JustyBase SQL Editor (MySQL)',
         directory: path.join(repoRoot, 'extensions', 'mysql'),
         packageJson: path.join(repoRoot, 'extensions', 'mysql', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'mysql', 'package-lock.json'),
@@ -85,6 +77,21 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
         srcDir: path.join(repoRoot, 'extensions', 'mysql', 'src')
     }
 ]);
+
+function readManifestDisplayName(extension) {
+    try {
+        const manifest = JSON.parse(fs.readFileSync(extension.packageJson, 'utf8'));
+        return manifest.displayName || extension.fallbackDisplayName;
+    } catch {
+        return extension.fallbackDisplayName;
+    }
+}
+
+for (const extension of OPTIONAL_EXTENSIONS) {
+    const displayName = readManifestDisplayName(extension);
+    extension.displayName = displayName;
+    extension.marketplaceName = displayName;
+}
 
 function getOptionalExtension(id) {
     return OPTIONAL_EXTENSIONS.find(extension => extension.id === id);

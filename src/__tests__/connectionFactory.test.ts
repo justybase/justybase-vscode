@@ -19,37 +19,37 @@ const OPTIONAL_DIALECT_EXPECTATIONS = [
   {
     kind: "duckdb" as const,
     installHint:
-      'Install the optional "JustyBase DuckDB Support" extension to use DuckDB connections.',
+      'Install the optional "JustyBase SQL Editor (DuckDB)" extension to use DuckDB connections.',
   },
   {
     kind: "db2" as const,
     installHint:
-      'Install the optional "JustyBase Db2 Support" extension to use Db2 connections.',
+      'Install the optional "JustyBase SQL Editor (Db2)" extension to use Db2 connections.',
   },
   {
     kind: "oracle" as const,
     installHint:
-      'Install the optional "JustyBase Oracle Support" extension to use Oracle connections.',
+      'Install the optional "JustyBase SQL Editor (Oracle)" extension to use Oracle connections.',
   },
   {
     kind: "vertica" as const,
     installHint:
-      'Install the optional "JustyBase Vertica Support" extension to use Vertica connections.',
+      'Install the optional "JustyBase SQL Editor (Vertica)" extension to use Vertica connections.',
   },
   {
     kind: "postgresql" as const,
     installHint:
-      'Install the optional "JustyBase PostgreSQL Support" extension to use PostgreSQL connections.',
+      'Install the optional "JustyBase SQL Editor (PostgreSQL)" extension to use PostgreSQL connections.',
   },
   {
     kind: "mssql" as const,
     installHint:
-      'Install the optional "JustyBase MS SQL Server Support" extension to use MS SQL Server connections.',
+      'Install the optional "JustyBase SQL Editor (MS SQL Server)" extension to use MS SQL Server connections.',
   },
   {
     kind: "mysql" as const,
     installHint:
-      'Install the optional "JustyBase MySQL Support" extension to use MySQL connections.',
+      'Install the optional "JustyBase SQL Editor (MySQL)" extension to use MySQL connections.',
   },
 ] as const;
 

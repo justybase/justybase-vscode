@@ -1,7 +1,7 @@
 {
     "name": "justybaselite-duckdb",
-    "displayName": "JustyBase DuckDB Support",
-    "description": "Optional DuckDB Support for JustyBase Core",
+    "displayName": "JustyBase SQL Editor (DuckDB)",
+    "description": "Optional DuckDB companion for JustyBase SQL Editor (Netezza)",
     "version": "3.16.20",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",

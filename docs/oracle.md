@@ -43,7 +43,7 @@ The Oracle pack is published with `"preview": true` in `extensions/oracle/packag
 ## Installation
 
 1. Install the core extension: `krzysztof-d.justybaselite-netezza`
-2. Install `JustyBase Oracle Support` from the Marketplace (or VSIX from releases)
+2. Install `JustyBase SQL Editor (Oracle)` from the Marketplace (or VSIX from releases)
 3. For local packaging or development:
 
 ```bash
