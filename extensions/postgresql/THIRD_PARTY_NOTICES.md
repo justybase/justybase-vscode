@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This file lists third-party software distributed with **JustyBase PostgreSQL Support**.
+This file lists third-party software distributed with **JustyBase SQL Editor (PostgreSQL)**.
 It is generated from the locked runtime dependency graph and packaged bundle source maps.
 
 ## Components

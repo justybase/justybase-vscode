@@ -1,12 +1,12 @@
-# JustyBase PostgreSQL Support
+# JustyBase SQL Editor (PostgreSQL)
 
-Optional PostgreSQL support for JustyBase Core (NetezzaSQL).
+Optional PostgreSQL support for JustyBase SQL Editor (Netezza).
 
-This extension adds a `PostgreSQL` dialect to JustyBase Core (NetezzaSQL) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds a `PostgreSQL` dialect to JustyBase SQL Editor (Netezza) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase Core (NetezzaSQL)`
+- Install the core extension first: `JustyBase SQL Editor (Netezza)`
 - VS Code Desktop
 - Network access to your PostgreSQL server
 - Install runtime dependencies in this package before packaging:

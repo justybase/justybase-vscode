@@ -1,7 +1,7 @@
 {
     "name": "justybaselite-snowflake",
-    "displayName": "JustyBase Snowflake Support",
-    "description": "Optional Snowflake Support for JustyBase Core",
+    "displayName": "JustyBase SQL Editor (Snowflake)",
+    "description": "Optional Snowflake companion for JustyBase SQL Editor (Netezza)",
     "version": "3.16.20",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",

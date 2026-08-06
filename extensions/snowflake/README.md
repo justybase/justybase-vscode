@@ -1,6 +1,6 @@
-# JustyBase Snowflake Support
+# JustyBase SQL Editor (Snowflake)
 
-Optional Snowflake support for JustyBase Core (NetezzaSQL).
+Optional Snowflake support for JustyBase SQL Editor (Netezza).
 
 ## Purpose and status
 
@@ -16,7 +16,7 @@ Current highlights:
 
 ## Requirements
 
-- install the core extension first: `JustyBase Core (NetezzaSQL)`
+- install the core extension first: `JustyBase SQL Editor (Netezza)`
 - VS Code Desktop
 - network access to your Snowflake account
 - for real runtime connectivity or packaging, install the pure-JavaScript Snowflake driver inside this package:
@@ -106,13 +106,13 @@ See [../../docs/snowflake.md](../../docs/snowflake.md) for the fuller implementa
 
 To enable Snowflake support:
 
-1. install `JustyBase Core (NetezzaSQL)`
+1. install `JustyBase SQL Editor (Netezza)`
 2. install or launch this Snowflake support extension
 3. reload VS Code if needed so the optional dialect registers on startup
 
 To disable Snowflake support:
 
-- disable or uninstall `JustyBase Snowflake Support` in VS Code, or
+- disable or uninstall `JustyBase SQL Editor (Snowflake)` in VS Code, or
 - remove the `extensions/snowflake` package from your development workspace when testing the core extension without Snowflake
 
 ## License and third-party software
