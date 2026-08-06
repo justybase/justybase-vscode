@@ -2,7 +2,7 @@
     "name": "justybaselite-postgresql",
     "displayName": "JustyBase SQL Editor (PostgreSQL)",
     "description": "Optional PostgreSQL companion for JustyBase SQL Editor (Netezza)",
-    "version": "3.16.20",
+    "version": "3.16.21",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
