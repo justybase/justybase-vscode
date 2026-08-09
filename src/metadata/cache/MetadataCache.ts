@@ -815,7 +815,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   invalidateTableColumns(
     connectionName: string,
     database: string,
-    schema: string,
+    schema: string | undefined,
     tableName: string,
   ): void {
     const directKey = buildColumnCacheKey(database, schema, tableName);

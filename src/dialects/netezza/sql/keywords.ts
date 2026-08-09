@@ -21,23 +21,7 @@ export const NETEZZA_COMPLETION_KEYWORD_OVERLAYS = [
     'STATISTICS',
     'VALUE',
     'FOR',
-    'SESSION',
-    // Netezza system views (_V_*)
-    '_V_SESSION',
-    '_V_TABLE_STORAGE_STAT',
-    '_V_OBJECT_DATA',
-    '_V_TABLE',
-    '_V_VIEW',
-    '_V_PROCEDURE',
-    '_V_SYNONYM',
-    '_V_RELATION_COLUMN',
-    '_V_RELATION_KEYDATA',
-    '_V_TABLE_DIST_MAP',
-    '_V_TABLE_ORGANIZE_COLUMN',
-    '_V_EXTERNAL',
-    '_V_EXTOBJECT',
-    '_V_DATABASE',
-    '_V_SCHEMA'
+    'SESSION'
 ] as const;
 
 export const NETEZZA_COMPLETION_KEYWORDS = mergeUniqueStrings(

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { queryResultToRows, runQueryRaw } from '../../core/queryRunner';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../../utils/identifierUtils';
+import { escapeSqlString as escapeSqlLiteral } from '../../utils/sqlUtils';
 import type { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getItemObjectName } from './helpers';
 
@@ -15,10 +16,6 @@ interface SqliteIndexRow extends Record<string, unknown> {
     IS_UNIQUE?: number;
     ORIGIN?: string;
     IS_PARTIAL?: number;
-}
-
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
 }
 
 function formatSqliteCatalogIdentifier(catalog: string): string {

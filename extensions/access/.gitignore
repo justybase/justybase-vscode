@@ -1,0 +1,7 @@
+dist/
+dist-types/
+node_modules/
+java-bridge/target/
+java-bridge/.mvn/wrapper/maven-wrapper.jar
+*.vsix
+coverage/

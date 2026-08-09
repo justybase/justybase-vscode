@@ -9,6 +9,7 @@ import type { DiskColumnFilterSpec, DiskQuerySpec } from '../core/resultDataProv
 import type { ColumnDefinition } from '../types';
 import { isNumericSqlColumnType, isTemporalSqlColumnType } from './sqlColumnTypeUtils';
 import { findTrailingLimitClause, removeTrailingLimitClause } from './refreshSqlLimit';
+import { quoteIdentifier } from '../utils/identifierUtils';
 
 export interface DatabaseDistinctValue {
     raw: unknown;
@@ -20,10 +21,6 @@ export interface DatabaseFilterBuildOptions {
 }
 
 const DISTINCT_LIMIT = 10_001;
-
-function quoteIdentifier(identifier: string): string {
-    return `"${identifier.replace(/"/g, '""')}"`;
-}
 
 function quoteStringLiteral(value: string): string {
     return `'${value.replace(/'/g, "''")}'`;

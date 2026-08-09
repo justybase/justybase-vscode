@@ -293,17 +293,24 @@ export type LoginPanelInboundMessage =
         passwordChanged?: boolean;
     }
     | { command: 'delete'; name: string }
-    | { command: 'loadConnections' };
+    | { command: 'loadConnections' }
+    | { command: 'browseFile'; fieldKey: string };
 
 // ============================================================================
 // Login Panel — Outbound (Extension Host → Webview)
 // ============================================================================
 
-export type LoginPanelOutboundMessage = {
-    command: 'updateConnections';
-    connections: ConnectionDetails[];
-    activeName: string | undefined;
-};
+export type LoginPanelOutboundMessage =
+    | {
+        command: 'updateConnections';
+        connections: ConnectionDetails[];
+        activeName: string | undefined;
+    }
+    | {
+        command: 'browseFileResult';
+        fieldKey: string;
+        path: string | undefined;
+    };
 
 export const RESULT_PANEL_INBOUND_COMMANDS = [
     'ready',
@@ -431,9 +438,11 @@ export const LOGIN_PANEL_INBOUND_COMMANDS = [
     'save',
     'test',
     'delete',
-    'loadConnections'
+    'loadConnections',
+    'browseFile'
 ] as const satisfies readonly LoginPanelInboundMessage['command'][];
 
 export const LOGIN_PANEL_OUTBOUND_COMMANDS = [
-    'updateConnections'
+    'updateConnections',
+    'browseFileResult'
 ] as const satisfies readonly LoginPanelOutboundMessage['command'][];

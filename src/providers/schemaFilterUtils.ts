@@ -18,14 +18,14 @@ export function buildSchemaFilterRegex(filter: string): RegExp | undefined {
 
 export function matchesSchemaFilter(
     regex: RegExp | undefined,
-    ...values: Array<string | undefined | null>
+    ...values: Array<unknown>
 ): boolean {
     if (!regex) {
         return true;
     }
 
     return values.some((value) => {
-        const trimmed = value?.trim();
+        const trimmed = typeof value === 'string' ? value.trim() : undefined;
         return trimmed ? regex.test(trimmed) : false;
     });
 }

@@ -304,7 +304,7 @@ export class SchemaObjectSearchService {
             }
         };
 
-        pushUnique(kind === 'sqlite' ? 'main' : details.database);
+        pushUnique(kind === 'sqlite' ? 'main' : kind === 'access' ? 'default' : details.database);
         for (const databaseName of databases) {
             pushUnique(databaseName);
         }
@@ -338,7 +338,7 @@ export class SchemaObjectSearchService {
         }
 
         if (databases.length === 0 && details?.database) {
-            databases = [kind === 'sqlite' ? 'main' : details.database];
+            databases = [kind === 'sqlite' ? 'main' : kind === 'access' ? 'default' : details.database];
         }
 
         return databases;
@@ -366,7 +366,7 @@ export class SchemaObjectSearchService {
     ): Promise<QueryResult> {
         const conn = await createConnectedDatabaseConnectionFromDetails(
             details,
-            kind === 'sqlite' ? undefined : db,
+            kind === 'sqlite' || kind === 'access' ? undefined : db,
         );
 
         try {

@@ -262,7 +262,7 @@ export class MetadataProvider {
                     objType: normalizedObjectType,
                     detail: schemaName ? typeLabel : (schema ? `${typeLabel} (${schema})` : typeLabel),
                     sortText: row.OBJNAME,
-                    DESCRIPTION: row.DESCRIPTION,
+                    DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
                     REFOBJNAME: row.REFOBJNAME
                 };
             });
@@ -391,7 +391,7 @@ export class MetadataProvider {
                 objType: 'VIEW',
                 detail: schemaName ? 'View' : `View${row.SCHEMA ? ` (${row.SCHEMA})` : ''}`,
                 sortText: row.OBJNAME,
-                DESCRIPTION: row.DESCRIPTION
+                DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION)
             }));
 
             const itemsWithSystemCatalog = schemaName
@@ -797,7 +797,7 @@ export class MetadataProvider {
                     label: row.ATTNAME,
                     kind: 5,
                     detail: row.FORMAT_TYPE,
-                    documentation: row.DESCRIPTION || '',
+                    documentation: normalizeCompletionDescription(row.DESCRIPTION) || '',
                 }));
             }
 
@@ -1033,7 +1033,7 @@ export class MetadataProvider {
                 objType: row.OBJTYPE,
                 detail: isView ? 'System View' : 'System Table',
                 sortText: row.OBJNAME,
-                DESCRIPTION: row.DESCRIPTION
+                DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION)
             };
         });
 

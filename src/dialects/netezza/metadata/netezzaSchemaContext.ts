@@ -6,12 +6,9 @@ import type { ConnectionManager } from "../../../core/connectionManager";
 import { runQueryRaw, queryResultToRows } from "../../../core/queryRunner";
 import type { MetadataCache } from "../../../metadataCache";
 import { detectNetezzaSchemasEnabled } from "./schemasOn";
+import { escapeSqlString as escapeSqlLiteral } from "../../../utils/sqlUtils";
 
 const DEFAULT_SCHEMA_FALLBACK = "ADMIN";
-
-function escapeSqlLiteral(value: string): string {
-  return value.replace(/'/g, "''");
-}
 
 function normalizeDatabaseName(database: string): string {
   return database.replace(/^"|"$/g, "").trim().toUpperCase();

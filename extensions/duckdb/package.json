@@ -1,7 +1,7 @@
 {
     "name": "justybaselite-duckdb",
-    "displayName": "JustyBase SQL Editor (DuckDB)",
-    "description": "Optional DuckDB companion for JustyBase SQL Editor (Netezza)",
+    "displayName": "JustyBase SQL Editor (DuckDB + Files)",
+    "description": "Optional DuckDB companion for JustyBase SQL Editor (Netezza). Query Excel, CSV, Parquet and Avro files with SQL.",
     "version": "3.16.21",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
@@ -27,12 +27,100 @@
         "SQL",
         "duckdb",
         "analytics",
-        "database"
+        "database",
+        "xlsx",
+        "excel",
+        "csv",
+        "parquet",
+        "avro",
+        "files",
+        "spreadsheet",
+        "data files"
     ],
     "main": "./dist/extension.js",
     "activationEvents": [
-        "onStartupFinished"
+        "onStartupFinished",
+        "onCommand:justybase.duckdb.queryFile",
+        "onCommand:justybase.duckdb.queryFiles",
+        "onCommand:justybase.duckdb.addFiles",
+        "onCommand:justybase.duckdb.openWorkspace",
+        "onCommand:justybase.duckdb.saveFileEdits"
     ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "justybase.duckdb.queryFile",
+                "title": "Query File with SQL (DuckDB)",
+                "icon": "$(file-binary)",
+                "category": "JustyBase"
+            },
+            {
+                "command": "justybase.duckdb.queryFiles",
+                "title": "Query Multiple Files with SQL (DuckDB)",
+                "icon": "$(files)",
+                "category": "JustyBase"
+            },
+            {
+                "command": "justybase.duckdb.openWorkspace",
+                "title": "Open Saved File SQL Workspace",
+                "icon": "$(folder-opened)",
+                "category": "JustyBase"
+            },
+            {
+                "command": "justybase.duckdb.addFiles",
+                "title": "Add Files to Active File SQL Workspace (DuckDB)",
+                "icon": "$(diff-added)",
+                "category": "JustyBase"
+            },
+            {
+                "command": "justybase.duckdb.saveFileEdits",
+                "title": "Save File Edits (DuckDB)",
+                "icon": "$(save)",
+                "category": "JustyBase"
+            }
+        ],
+        "menus": {
+            "explorer/context": [
+                {
+                    "command": "justybase.duckdb.queryFile",
+                    "when": "resourceExtname =~ /\\.(xlsx|csv|tsv|parquet|avro)$/",
+                    "group": "JustyBase"
+                },
+                {
+                    "command": "justybase.duckdb.queryFiles",
+                    "when": "resourceExtname =~ /\\.(xlsx|csv|tsv|parquet|avro)$/",
+                    "group": "JustyBase"
+                },
+                {
+                    "command": "justybase.duckdb.addFiles",
+                    "when": "resourceExtname =~ /\\.(xlsx|csv|tsv|parquet|avro)$/",
+                    "group": "JustyBase"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "justybase.duckdb.queryFile",
+                    "when": "false"
+                },
+                {
+                    "command": "justybase.duckdb.queryFiles"
+                },
+                {
+                    "command": "justybase.duckdb.openWorkspace"
+                },
+                {
+                    "command": "justybase.duckdb.addFiles"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "justybase.duckdb.addFiles",
+                    "when": "view == netezza.schema && viewItem == netezza:VIEW && justybase.schemaDatabaseKind == file",
+                    "group": "JustyBase"
+                }
+            ]
+        }
+    },
     "extensionDependencies": [
         "krzysztof-d.justybaselite-netezza"
     ],

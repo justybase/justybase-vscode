@@ -131,8 +131,30 @@ export class MetadataPrefetchCoordinator {
             this.services.connectionManager.getConnectionForExecution(documentUri)
             || this.services.connectionManager.getActiveConnectionName()
             || undefined;
+        this.primeAccessConnection(connectionName, documentUri);
         void this.refreshCurrentSchema(connectionName, documentUri);
         this.triggerForConnection(connectionName);
+    }
+
+    /**
+     * Access metadata and authoring requests can arrive before the first SQL
+     * execution. Establish the persistent lease while the SQL document enters
+     * focus so autocomplete/reveal do not become the first operation that has
+     * to start Java/UCanAccess.
+     */
+    private primeAccessConnection(connectionName: string | undefined, documentUri: string): void {
+        if (!connectionName
+            || this.services.connectionManager.getConnectionDatabaseKind(connectionName) !== 'access'
+            || !this.services.connectionManager.getDocumentKeepConnectionOpen(documentUri)) {
+            return;
+        }
+
+        void this.services.connectionManager
+            .getDocumentPersistentConnection(documentUri, connectionName)
+            .catch((error: unknown) => {
+                const message = error instanceof Error ? error.message : String(error);
+                this.logger.warn(`Access connection initialization failed for ${connectionName}: ${message}`);
+            });
     }
 
     refreshCurrentSchemaForDocument(documentUri: string, forceRefresh = false): void {

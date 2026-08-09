@@ -2196,6 +2196,690 @@ tfoot {
     font-style: italic;
 }
 
+/* ============================================
+   Explore view (column overview cards)
+   ============================================ */
+.explore-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+    align-content: start;
+}
+
+.explore-column-card {
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background-color: var(--vscode-editor-background);
+    min-width: 0;
+}
+
+.explore-column-card:hover {
+    border-color: var(--vscode-focusBorder);
+}
+
+.explore-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.explore-card-name {
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+}
+
+.explore-card-type {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.75;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    text-align: right;
+}
+
+.explore-role-badge {
+    flex-shrink: 0;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.explore-role-badge.explore-role-measure {
+    background: var(--vscode-charts-blue, #519aba);
+    color: #ffffff;
+}
+
+.explore-role-badge.explore-role-dimension {
+    background: var(--vscode-charts-green, #89d185);
+    color: #1e1e1e;
+}
+
+.explore-role-badge.explore-role-date {
+    background: var(--vscode-charts-purple, #b180d7);
+    color: #ffffff;
+}
+
+.explore-role-badge.explore-role-unknown {
+    background: var(--vscode-descriptionForeground);
+    color: #ffffff;
+}
+
+.explore-card-stats {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.explore-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.explore-stat-value {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 130px;
+}
+
+.explore-stat-value.explore-stat-wide {
+    max-width: 180px;
+    font-size: 11px;
+}
+
+.explore-stat-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.explore-null-bar {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--vscode-panel-border);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.explore-null-bar-fill {
+    height: 100%;
+    background: var(--vscode-progressBar-background);
+    border-radius: 2px;
+}
+
+.explore-histogram {
+    width: 100%;
+    height: 46px;
+    color: var(--vscode-charts-blue);
+    flex-shrink: 0;
+}
+
+.explore-histogram svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.explore-histogram rect {
+    fill: currentColor;
+}
+
+.explore-top-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.explore-top-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+}
+
+.explore-top-value {
+    flex: 0 0 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.explore-top-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--vscode-panel-border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.explore-top-bar span {
+    display: block;
+    height: 100%;
+    background: var(--vscode-charts-green, #89d185);
+    border-radius: 3px;
+}
+
+.explore-top-count {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--vscode-descriptionForeground);
+}
+
+.explore-empty {
+    padding: 24px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    text-align: center;
+}
+
+/* Explore tabs + toolbar */
+.explore-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    flex-shrink: 0;
+}
+
+.explore-tab-btn {
+    padding: 6px 14px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.explore-tab-btn:hover {
+    color: var(--vscode-foreground);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.explore-tab-btn.active {
+    color: var(--vscode-foreground);
+    border-bottom-color: var(--vscode-focusBorder);
+    font-weight: 600;
+}
+
+/* Quality banner */
+.explore-quality-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+}
+
+.explore-quality-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    white-space: nowrap;
+}
+
+.explore-quality-chip.warn {
+    background: var(--vscode-inputValidation-warningBackground);
+    color: var(--vscode-inputValidation-warningForeground, var(--vscode-editor-foreground));
+    border: 1px solid var(--vscode-inputValidation-warningBorder);
+}
+
+.explore-quality-chip.correlation {
+    background: var(--vscode-charts-purple, #b180d7);
+    color: #ffffff;
+}
+
+/* Filter bar */
+.explore-filter-bar-container {
+    flex-shrink: 0;
+}
+
+.explore-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: var(--vscode-sideBar-background);
+}
+
+.explore-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
+.explore-filter-hint {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+.explore-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    border-radius: 3px;
+    font-size: 11px;
+    max-width: 260px;
+    cursor: default;
+}
+
+.explore-filter-chip-dimension {
+    background: var(--vscode-charts-green, #89d185);
+    color: #1e1e1e;
+}
+
+.explore-filter-chip-date {
+    background: var(--vscode-charts-purple, #b180d7);
+    color: #ffffff;
+}
+
+.explore-filter-chip-measure {
+    background: var(--vscode-charts-blue, #519aba);
+    color: #ffffff;
+}
+
+.explore-filter-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.explore-filter-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+    border-radius: 2px;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.explore-filter-chip-remove:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.explore-filter-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.explore-filter-action {
+    padding: 3px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.explore-filter-action:hover:not(:disabled) {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.explore-filter-action:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/* Card actions + inline forms */
+.explore-card-actions {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.explore-card-action {
+    padding: 2px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-textLink-foreground);
+    cursor: pointer;
+    font-size: 10px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.explore-card-action:hover {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-hoverBackground);
+}
+
+.explore-card-inline-form {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding-top: 2px;
+}
+
+.explore-inline-input {
+    flex: 1;
+    min-width: 70px;
+    padding: 2px 6px;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 3px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-size: 11px;
+    font-family: inherit;
+}
+
+.explore-inline-apply,
+.explore-inline-clear {
+    padding: 2px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 10px;
+    font-family: inherit;
+}
+
+.explore-inline-apply {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background);
+}
+
+/* Full stats block on measure cards */
+.explore-full-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.explore-full-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px 10px;
+}
+
+.explore-full-stat {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.explore-full-stat-label {
+    color: var(--vscode-descriptionForeground);
+}
+
+.explore-full-stat-value {
+    font-variant-numeric: tabular-nums;
+    color: var(--vscode-foreground);
+}
+
+.explore-sql-link {
+    border: none;
+    background: transparent;
+    color: var(--vscode-textLink-foreground);
+    cursor: pointer;
+    font-size: 10px;
+    font-family: inherit;
+    padding: 0;
+    text-align: left;
+}
+
+.explore-sql-link:hover {
+    text-decoration: underline;
+}
+
+/* Top values: active filter highlight */
+.explore-top-row.is-active {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+    border-radius: 3px;
+}
+
+/* Tab config forms (pivot / composer) */
+.explore-tab-config {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+    padding: 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: var(--vscode-sideBar-background);
+    flex-shrink: 0;
+}
+
+.explore-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    min-width: 90px;
+}
+
+.explore-config-field select {
+    padding: 3px 6px;
+    border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+    border-radius: 3px;
+    background: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    font-size: 11px;
+    font-family: inherit;
+    max-width: 180px;
+}
+
+.explore-config-field select[multiple] {
+    min-height: 72px;
+}
+
+.explore-config-field.explore-config-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+    text-transform: none;
+    letter-spacing: 0;
+    padding-bottom: 5px;
+}
+
+.explore-config-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding-bottom: 2px;
+}
+
+.explore-primary-btn {
+    padding: 4px 14px;
+    border: 1px solid var(--vscode-button-background);
+    border-radius: 3px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background 0.15s ease;
+}
+
+.explore-primary-btn:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.explore-secondary-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.explore-secondary-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+/* Tab results */
+.explore-tab-results {
+    min-height: 120px;
+}
+
+.explore-loading {
+    padding: 24px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    text-align: center;
+}
+
+.explore-error {
+    padding: 12px;
+    color: var(--vscode-errorForeground);
+    font-size: 11px;
+    background: var(--vscode-inputValidation-errorBackground);
+    border: 1px solid var(--vscode-inputValidation-errorBorder);
+    border-radius: 3px;
+    white-space: pre-wrap;
+}
+
+.explore-note {
+    padding: 6px 8px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    font-style: italic;
+}
+
+.explore-table-wrapper {
+    overflow: auto;
+    max-height: 480px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+}
+
+.explore-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.explore-table th,
+.explore-table td {
+    padding: 4px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    white-space: nowrap;
+    text-align: left;
+}
+
+.explore-table th {
+    position: sticky;
+    top: 0;
+    background: var(--vscode-editorGroupHeader-tabsBackground);
+    z-index: 1;
+}
+
+.explore-pivot-table .explore-pivot-row-name {
+    font-weight: 500;
+}
+
+.explore-pivot-table .explore-pivot-total {
+    font-weight: 600;
+    background: var(--vscode-sideBar-background);
+    font-variant-numeric: tabular-nums;
+}
+
+.explore-pivot-table tfoot .explore-pivot-total {
+    position: sticky;
+    bottom: 0;
+}
+
+.explore-pivot-table .explore-pivot-cell.is-null {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+.explore-pivot-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+}
+
+/* Composer chart */
+.explore-chart-area {
+    min-height: 240px;
+}
+
+.explore-composer-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+}
+
+.explore-composer-chart {
+    width: 100%;
+    height: 320px;
+}
+
 .diff-analysis-table .diff-row-added {
     background-color: var(--vscode-diffEditor-insertedTextBackground);
 }

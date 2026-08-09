@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+    <title>Microsoft Access database</title>
+    <defs>
+        <linearGradient id="accessFill" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#e66a72" />
+            <stop offset="100%" stop-color="#a51f2b" />
+        </linearGradient>
+    </defs>
+    <rect x="5" y="5" width="54" height="54" rx="13" fill="url(#accessFill)" />
+    <path d="M16 44 25 17h7l10 27h-7l-2-6H24l-2 6zM26 33h5l-2.5-8z" fill="#fff" />
+    <path d="M38 39h10v10H38z" fill="#fff" opacity=".18" />
+    <path d="M40 40c0 1.7 3.6 3 8 3s8-1.3 8-3-3.6-3-8-3-8 1.3-8 3zm0 5c0 1.7 3.6 3 8 3s8-1.3 8-3m-16-5v5m16-5v5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
+</svg>

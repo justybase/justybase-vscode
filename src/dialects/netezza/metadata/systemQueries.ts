@@ -675,6 +675,7 @@ SELECT * FROM  SAMPLE_DB.._V_EXTOBJECT WHERE DATABASE = 'SAMPLE_DB';
 // =============================================================================
 
 import { isQuotedIdentifier, requiresIdentifierQuoting, unquoteIdentifier } from '../../../utils/identifierUtils';
+import { escapeSqlString as escapeSqlLiteral } from '../../../utils/sqlUtils';
 
 export const NZ_SYSTEM_VIEWS = {
     // Object/table related
@@ -766,10 +767,6 @@ export const NZ_CONSTRAINT_TYPES = {
  */
 export function qualifySystemView(database: string, viewName: string): string {
     return `${database.toUpperCase()}..${viewName}`;
-}
-
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
 }
 
 function buildIdentifierCondition(columnExpression: string, identifier: string): string {

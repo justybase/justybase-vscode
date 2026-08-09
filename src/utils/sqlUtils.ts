@@ -42,6 +42,17 @@ export function escapeSqlLiteral(value: string): string {
 }
 
 /**
+ * Escapes single quotes inside a SQL string-value by doubling them (ANSI/ISO).
+ * Unlike {@link escapeSqlLiteral}, this does NOT wrap the result in quotes,
+ * so callers can compose their own quoting (e.g. `N'...'`, backticks).
+ * @param value - The raw string value to escape.
+ * @returns The escaped string without surrounding quotes.
+ */
+export function escapeSqlString(value: string): string {
+    return value.replace(/'/g, "''");
+}
+
+/**
  * Builds a safe WHERE clause from conditions
  * 
  * @param conditions - Object with column names as keys and values as values

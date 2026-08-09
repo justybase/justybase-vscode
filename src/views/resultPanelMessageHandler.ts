@@ -117,6 +117,64 @@ export interface MessageHandlerCallbacks {
         resultSetIndex: number,
         grouping: DatabaseGroupingRequestType,
     ) => Promise<string>;
+    onRequestExploreFullStats?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        columnIndex: number,
+        filters?: import('../results/explore/exploreFilters').ExploreFilterModel,
+        timeoutSeconds?: number,
+    ) => Promise<{
+        values: Partial<Record<import('../results/explore/fullStatisticsSql').FullStatisticName, number | null>>;
+        percentilesUnavailable: boolean;
+        stddevUnavailable: boolean;
+        sql: string;
+    }>;
+    onRequestExplorePivot?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        pivot: import('../results/explore/pivotSqlBuilder').ExplorePivotConfig,
+        timeoutSeconds?: number,
+    ) => Promise<{
+        columns: Array<{ name: string; type?: string; kind: 'row' | 'value' }>;
+        rows: unknown[][];
+        totalRows: number;
+        pivotValues: string[];
+        truncated?: boolean;
+        sql: string;
+    }>;
+    onPreviewExplorePivot?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        pivot: import('../results/explore/pivotSqlBuilder').ExplorePivotConfig,
+        pivotValues: string[],
+    ) => Promise<string>;
+    onRequestExploreComposer?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        composer: import('../results/explore/composerSql').ExploreComposerConfig,
+        timeoutSeconds?: number,
+    ) => Promise<{
+        columnIndexes: {
+            bucket: number;
+            dimension: number | undefined;
+            split: number | undefined;
+            measure: number;
+            previous: number | undefined;
+        };
+        rows: unknown[][];
+        sql: string;
+    }>;
+    onPreviewExploreComposer?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        composer: import('../results/explore/composerSql').ExploreComposerConfig,
+    ) => Promise<string>;
+    onPreviewExploreFilteredSql?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        filters: import('../results/explore/exploreFilters').ExploreFilterModel,
+    ) => Promise<string>;
+    onOpenExploreSqlInEditor?: (sql: string, label?: string) => Promise<void>;
 }
 
 export type SelectionStats = SelectionStatsPayload;
@@ -235,6 +293,75 @@ export class ResultPanelMessageHandler {
                     message.requestId,
                     message.grouping,
                 );
+                return;
+
+            case 'requestExploreFullStats':
+                void this._handleRequestExploreFullStats(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.columnIndex,
+                    message.filters,
+                    message.timeoutSeconds,
+                );
+                return;
+
+            case 'requestExplorePivot':
+                void this._handleRequestExplorePivot(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.pivot,
+                    message.timeoutSeconds,
+                );
+                return;
+
+            case 'previewExplorePivot':
+                void this._handlePreviewExplorePivot(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.pivot,
+                    message.pivotValues,
+                );
+                return;
+
+            case 'requestExploreComposer':
+                void this._handleRequestExploreComposer(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.composer,
+                    message.timeoutSeconds,
+                );
+                return;
+
+            case 'previewExploreComposer':
+                void this._handlePreviewExploreComposer(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.composer,
+                );
+                return;
+
+            case 'previewExploreFilteredSql':
+                void this._handlePreviewExploreFilteredSql(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.requestId,
+                    message.filters,
+                );
+                return;
+
+            case 'openExploreSqlInEditor':
+                if (!this._callbacks.onOpenExploreSqlInEditor) {
+                    vscode.window.showErrorMessage('Opening Explore SQL in an editor is not available in this context.');
+                    return;
+                }
+                void this._callbacks.onOpenExploreSqlInEditor(message.sql, message.label).catch(error => {
+                    vscode.window.showErrorMessage(`Failed to open Explore SQL: ${error instanceof Error ? error.message : String(error)}`);
+                });
                 return;
 
             case 'cancelDatabaseGrouping':
@@ -1060,6 +1187,221 @@ export class ResultPanelMessageHandler {
             this._callbacks.onPostMessage({
                 command: 'switchToResultSet',
                 resultSetIndex: resultSetIndex
+            });
+        }
+    }
+
+    private async _handleRequestExploreFullStats(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        columnIndex: number,
+        filters?: import('../results/explore/exploreFilters').ExploreFilterModel,
+        timeoutSeconds?: number,
+    ): Promise<void> {
+        if (!this._callbacks.onRequestExploreFullStats) {
+            this._callbacks.onPostMessage({
+                command: 'exploreFullStatsResult',
+                requestId,
+                columnIndex,
+                error: 'Full statistics are not available in this context.',
+            });
+            return;
+        }
+        try {
+            const result = await this._callbacks.onRequestExploreFullStats(
+                sourceUri,
+                resultSetIndex,
+                columnIndex,
+                filters,
+                timeoutSeconds,
+            );
+            this._callbacks.onPostMessage({
+                command: 'exploreFullStatsResult',
+                requestId,
+                columnIndex,
+                values: result.values,
+                percentilesUnavailable: result.percentilesUnavailable,
+                stddevUnavailable: result.stddevUnavailable,
+                sql: result.sql,
+            });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'exploreFullStatsResult',
+                requestId,
+                columnIndex,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handleRequestExplorePivot(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        pivot: import('../results/explore/pivotSqlBuilder').ExplorePivotConfig,
+        timeoutSeconds?: number,
+    ): Promise<void> {
+        if (!this._callbacks.onRequestExplorePivot) {
+            this._callbacks.onPostMessage({
+                command: 'explorePivotResult',
+                requestId,
+                error: 'Pivot is not available in this context.',
+            });
+            return;
+        }
+        try {
+            const result = await this._callbacks.onRequestExplorePivot(
+                sourceUri,
+                resultSetIndex,
+                pivot,
+                timeoutSeconds,
+            );
+            this._callbacks.onPostMessage({
+                command: 'explorePivotResult',
+                requestId,
+                columns: result.columns,
+                rows: this._encoder.sanitizeForMessagePack(result.rows) as unknown[][],
+                totalRows: result.totalRows,
+                pivotValues: result.pivotValues,
+                truncated: result.truncated,
+                sql: result.sql,
+            });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'explorePivotResult',
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handlePreviewExplorePivot(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        pivot: import('../results/explore/pivotSqlBuilder').ExplorePivotConfig,
+        pivotValues: string[],
+    ): Promise<void> {
+        if (!this._callbacks.onPreviewExplorePivot) {
+            this._callbacks.onPostMessage({
+                command: 'explorePivotPreviewResult',
+                requestId,
+                error: 'Pivot preview is not available in this context.',
+            });
+            return;
+        }
+        try {
+            const sql = await this._callbacks.onPreviewExplorePivot(
+                sourceUri,
+                resultSetIndex,
+                pivot,
+                pivotValues,
+            );
+            this._callbacks.onPostMessage({ command: 'explorePivotPreviewResult', requestId, sql });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'explorePivotPreviewResult',
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handleRequestExploreComposer(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        composer: import('../results/explore/composerSql').ExploreComposerConfig,
+        timeoutSeconds?: number,
+    ): Promise<void> {
+        if (!this._callbacks.onRequestExploreComposer) {
+            this._callbacks.onPostMessage({
+                command: 'exploreComposerResult',
+                requestId,
+                error: 'Composer is not available in this context.',
+            });
+            return;
+        }
+        try {
+            const result = await this._callbacks.onRequestExploreComposer(
+                sourceUri,
+                resultSetIndex,
+                composer,
+                timeoutSeconds,
+            );
+            this._callbacks.onPostMessage({
+                command: 'exploreComposerResult',
+                requestId,
+                columnIndexes: result.columnIndexes,
+                rows: this._encoder.sanitizeForMessagePack(result.rows) as unknown[][],
+                sql: result.sql,
+            });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'exploreComposerResult',
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handlePreviewExploreComposer(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        composer: import('../results/explore/composerSql').ExploreComposerConfig,
+    ): Promise<void> {
+        if (!this._callbacks.onPreviewExploreComposer) {
+            this._callbacks.onPostMessage({
+                command: 'exploreComposerPreviewResult',
+                requestId,
+                error: 'Composer preview is not available in this context.',
+            });
+            return;
+        }
+        try {
+            const sql = await this._callbacks.onPreviewExploreComposer(
+                sourceUri,
+                resultSetIndex,
+                composer,
+            );
+            this._callbacks.onPostMessage({ command: 'exploreComposerPreviewResult', requestId, sql });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'exploreComposerPreviewResult',
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async _handlePreviewExploreFilteredSql(
+        sourceUri: string,
+        resultSetIndex: number,
+        requestId: number,
+        filters: import('../results/explore/exploreFilters').ExploreFilterModel,
+    ): Promise<void> {
+        if (!this._callbacks.onPreviewExploreFilteredSql) {
+            this._callbacks.onPostMessage({
+                command: 'exploreFilteredSqlPreviewResult',
+                requestId,
+                error: 'Filtered SQL preview is not available in this context.',
+            });
+            return;
+        }
+        try {
+            const sql = await this._callbacks.onPreviewExploreFilteredSql(
+                sourceUri,
+                resultSetIndex,
+                filters,
+            );
+            this._callbacks.onPostMessage({ command: 'exploreFilteredSqlPreviewResult', requestId, sql });
+        } catch (error) {
+            this._callbacks.onPostMessage({
+                command: 'exploreFilteredSqlPreviewResult',
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
             });
         }
     }

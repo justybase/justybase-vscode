@@ -179,7 +179,10 @@ export class LoginPanel {
                             }
 
                             await this.connectionManager.saveConnection(data);
-                            vscode.window.showInformationMessage(`Connection '${data.name}' saved and activated!`);
+                            const savedMessage = data.dbType === 'access'
+                                ? `Connection '${data.name}' saved. Reconnect any open Access SQL tab for the new read/write mode.`
+                                : `Connection '${data.name}' saved and activated!`;
+                            vscode.window.showInformationMessage(savedMessage);
                             await this.sendConnectionsToWebview();
                         } catch (e: unknown) {
                             const errorMsg = e instanceof Error ? e.message : String(e);
@@ -233,6 +236,30 @@ export class LoginPanel {
                     case 'loadConnections':
                         await this.sendConnectionsToWebview();
                         return;
+                    case 'browseFile': {
+                        try {
+                            const result = await vscode.window.showOpenDialog({
+                                canSelectMany: false,
+                                canSelectFolders: false,
+                                openLabel: 'Select File',
+                                filters: {
+                                    'Data files': ['xlsx', 'csv', 'tsv', 'parquet', 'avro'],
+                                    'Access databases': ['mdb', 'accdb'],
+                                    'All files': ['*'],
+                                },
+                            });
+                            const path = result?.[0]?.fsPath;
+                            await this._postMessage({
+                                command: 'browseFileResult',
+                                fieldKey: typeof message.fieldKey === 'string' ? message.fieldKey : 'filePath',
+                                path,
+                            });
+                        } catch (e: unknown) {
+                            const errorMsg = e instanceof Error ? e.message : String(e);
+                            vscode.window.showErrorMessage(`File picker failed: ${errorMsg}`);
+                        }
+                        return;
+                    }
                 }
             },
             null,
@@ -278,12 +305,15 @@ export class LoginPanel {
                 delete normalizedOptions.clientCodepageExplicit;
             }
         }
+        const filePath = (data as { filePath?: string }).filePath ?? data.database ?? '';
         const normalizedDatabase =
-            (dialect.kind === 'sqlite' || dialect.kind === 'duckdb')
-            && normalizedOptions?.mode === 'memory'
-            && (!data.database || data.database.trim() === '')
-                ? ':memory:'
-                : data.database ?? '';
+            dialect.kind === 'file' || dialect.kind === 'access'
+                ? filePath.trim()
+                : (dialect.kind === 'sqlite' || dialect.kind === 'duckdb')
+                    && normalizedOptions?.mode === 'memory'
+                    && (!data.database || data.database.trim() === '')
+                    ? ':memory:'
+                    : data.database ?? '';
 
         return {
             name: data.name ?? '',
@@ -293,9 +323,11 @@ export class LoginPanel {
             user: data.user ?? '',
             password: data.password,
             ...(normalizedOptions ? { options: normalizedOptions } : {}),
+            // Keep the picker key so required-field validation sees the value.
+            ...(dialect.kind === 'file' || dialect.kind === 'access' ? { filePath: filePath.trim() } : {}),
             dbType: dialect.kind,
             accentColor: data.accentColor
-        };
+        } as ConnectionDetails & { filePath?: string };
     }
 
     private async _preserveStoredPassword(
@@ -654,6 +686,30 @@ export class LoginPanel {
                     font-size: 12px;
                     color: var(--vscode-descriptionForeground);
                 }
+                .file-field-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                }
+                .file-field-row input {
+                    flex: 1;
+                    min-width: 0;
+                }
+                .file-browse-btn {
+                    flex-shrink: 0;
+                    padding: 5px 12px;
+                    border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+                    border-radius: 3px;
+                    background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+                    color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+                    cursor: pointer;
+                    font-size: 12px;
+                    font-family: inherit;
+                    white-space: nowrap;
+                }
+                .file-browse-btn:hover {
+                    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+                }
                 .accent-input-row {
                     display: flex;
                     align-items: center;
@@ -979,6 +1035,19 @@ export class LoginPanel {
                     if (field.type === 'select') {
                         inputMarkup =
                             '<select id="' + escapeHtml(field.key) + '">' + renderFieldOptions(field, safeValue) + '</select>';
+                    } else if (field.type === 'file') {
+                        inputMarkup =
+                            '<div class="file-field-row">'
+                            + '<input type="text" id="'
+                            + escapeHtml(field.key)
+                            + '"'
+                            + placeholder
+                            + valueAttribute
+                            + ' readonly>'
+                            + '<button type="button" class="file-browse-btn" data-field-key="'
+                            + escapeHtml(field.key)
+                            + '" title="Browse for a data file">Browse…</button>'
+                            + '</div>';
                     } else {
                         const inputType = field.type === 'number' ? 'number' : field.type;
                         inputMarkup =
@@ -1047,7 +1116,8 @@ export class LoginPanel {
                     const values = {};
 
                     dialect.connectionForm.fields.forEach(field => {
-                        values[field.key] = getConnectionFieldValue(connection, field);
+                        values[field.key] = getConnectionFieldValue(connection, field)
+                            ?? (field.key === 'filePath' ? connection.database : undefined);
                     });
 
                     return values;
@@ -1111,8 +1181,28 @@ export class LoginPanel {
                             activeName = message.activeName;
                             renderList();
                             break;
+                        case 'browseFileResult': {
+                            const input = document.getElementById(message.fieldKey);
+                            if (input && typeof message.path === 'string') {
+                                input.value = message.path;
+                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                            break;
+                        }
                     }
                 });
+
+                if (typeof document.addEventListener === 'function') {
+                    document.addEventListener('click', event => {
+                        const button = event.target && event.target.closest
+                            ? event.target.closest('.file-browse-btn')
+                            : null;
+                        if (!button) {
+                            return;
+                        }
+                        vscode.postMessage({ command: 'browseFile', fieldKey: button.dataset.fieldKey });
+                    });
+                }
 
                 vscode.postMessage({ command: 'loadConnections' });
                 initializeAccentOptions();
@@ -1232,6 +1322,21 @@ export class LoginPanel {
 
                     if (Object.keys(options).length > 0) {
                         data.options = options;
+                    }
+
+                    // A multi-file File SQL workspace is represented by the
+                    // first file in the standard form plus a hidden,
+                    // versioned workspace option. Preserve that option when
+                    // the profile is edited in the generic connection panel.
+                    const existingConnection = currentEditName
+                        ? connections.find(connection => connection.name === currentEditName)
+                        : undefined;
+                    const workspaceOption = existingConnection
+                        && dialect.kind === 'file'
+                        && existingConnection.options
+                        && existingConnection.options.fileWorkspace;
+                    if (workspaceOption) {
+                        data.options = { ...(data.options || {}), fileWorkspace: workspaceOption };
                     }
 
                     if (includeNameFallback && !data.name) {

@@ -30,12 +30,14 @@ const BUILTIN_DIALECTS = new Set<DatabaseKind>(["netezza", "sqlite"]);
 const OPTIONAL_EXTENSION_NAMES: Readonly<Partial<Record<DatabaseKind, string>>> = {
   db2: "JustyBase SQL Editor (Db2)",
   duckdb: "JustyBase SQL Editor (DuckDB)",
+  file: "JustyBase SQL Editor (DuckDB + Files)",
   oracle: "JustyBase SQL Editor (Oracle)",
   postgresql: "JustyBase SQL Editor (PostgreSQL)",
   vertica: "JustyBase SQL Editor (Vertica)",
   snowflake: "JustyBase SQL Editor (Snowflake)",
   mssql: "JustyBase SQL Editor (MS SQL Server)",
   mysql: "JustyBase SQL Editor (MySQL)",
+  access: "JustyBase SQL Editor (Microsoft Access)",
 };
 
 function createInstallHint(kind: DatabaseKind): string {

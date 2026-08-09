@@ -58,6 +58,7 @@ interface ImportExecutionInput {
     targetTable: string;
     connectionDetails: ConnectionDetails;
     columns: ImportColumnDescriptor[];
+    appendToExistingTable?: boolean;
     rows: Iterable<string[]>;
     totalRows: number;
     decimalDelimiter: string;
@@ -297,9 +298,7 @@ function normalizeBooleanValue(value: string): string {
     return value.trim();
 }
 
-export function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
-}
+export { escapeSqlString as escapeSqlLiteral } from '../utils/sqlUtils';
 
 export function normalizeImportedLiteralValue(
     value: string,
@@ -525,9 +524,11 @@ async function executeBatchImport(
             await executeStatement(connection, config.beginTransactionSql);
         }
 
-        input.progressCallback?.(`Creating target table ${target.displayName}...`);
-        await executeStatement(connection, buildCreateTableSql(target, columns, config.kind), 3600);
-        createdTargetTable = true;
+        if (!input.appendToExistingTable) {
+            input.progressCallback?.(`Creating target table ${target.displayName}...`);
+            await executeStatement(connection, buildCreateTableSql(target, columns, config.kind), 3600);
+            createdTargetTable = true;
+        }
 
         const insertedRows = await insertRowsInBatches(
             connection,
@@ -648,6 +649,7 @@ export async function importDataWithBatching(
         targetTable,
         connectionDetails,
         columns: importer.getEffectiveColumnDescriptors(),
+        appendToExistingTable: columnOptions?.appendToExistingTable,
         rows,
         totalRows: rows.length,
         decimalDelimiter: importer.getDecimalDelimiter(),

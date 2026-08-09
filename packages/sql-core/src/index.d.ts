@@ -12,7 +12,25 @@ export interface WebLspMetadataRequestParams {
 }
 export interface CorePosition { line: number; character: number; }
 export interface CoreCompletionItem { label: string; kind?: number; detail?: string; insertText?: string; }
-export interface CoreDiagnostic { range: { start: CorePosition; end: CorePosition }; severity?: number; code?: string | number; source?: string; message: string; }
+export interface CoreDiagnostic { range: { start: CorePosition; end: CorePosition }; severity?: number; code?: string | number; source?: string; message: string; data?: { suggestedFix?: string }; }
+export interface CoreRange { start: CorePosition; end: CorePosition; }
+export interface CoreMarkupContent { kind: 'markdown' | 'plaintext'; value: string; }
+export interface CoreHover { range?: CoreRange; contents: CoreMarkupContent; }
+export interface CoreLocation { uri: string; range: CoreRange; }
+export interface CoreTextEdit { range: CoreRange; newText: string; }
+export interface CoreWorkspaceEdit { changes: Record<string, CoreTextEdit[]>; }
+export interface CoreRenamePrepare { range: CoreRange; placeholder: string; }
+export interface CoreInlayHint { position: CorePosition; label: string; kind?: 'type' | 'parameter'; }
+export interface CoreSignatureParameter { label: string; documentation?: string; }
+export interface CoreSignatureInformation { label: string; documentation?: string; parameters: CoreSignatureParameter[]; }
+export interface CoreSignatureHelp { signatures: CoreSignatureInformation[]; activeSignature: number; activeParameter: number; }
+export interface CoreDocumentSymbol { name: string; detail: string; kind: number; range: CoreRange; selectionRange: CoreRange; children?: CoreDocumentSymbol[]; }
+export type CoreKeywordCase = 'upper' | 'lower' | 'preserve';
+export interface CoreFormatOptions { tabWidth?: number; keywordCase?: CoreKeywordCase; linesBetweenQueries?: number; }
+export type CoreSemanticTokenType = 'enumMember' | 'function' | 'keyword' | 'macro' | 'modifier' | 'variable' | 'type' | 'column' | 'table' | 'alias' | 'schema' | 'database' | 'localVariable';
+export type CoreSemanticTokenModifier = 'readonly' | 'defaultLibrary' | 'italic';
+export interface CoreSemanticToken { line: number; character: number; length: number; type: CoreSemanticTokenType; modifiers: CoreSemanticTokenModifier[]; }
+export interface CoreSemanticTokenResult { types: CoreSemanticTokenType[]; modifiers: CoreSemanticTokenModifier[]; tokens: CoreSemanticToken[]; }
 
 export interface WebLspContext {
   connectionName?: string;
@@ -33,5 +51,16 @@ export declare class NetezzaWebLspCore {
   clearConnection(connectionName: string): void;
   completion(documentUri: string, version: number, sql: string, position: Position): Promise<CoreCompletionItem[]>;
   diagnostics(documentUri: string, version: number, sql: string): Promise<CoreDiagnostic[]>;
+  hover(documentUri: string, version: number, sql: string, position: Position): Promise<CoreHover | null>;
+  definition(documentUri: string, version: number, sql: string, position: Position): Promise<CoreLocation | null>;
+  references(documentUri: string, version: number, sql: string, position: Position, includeDeclaration: boolean): Promise<CoreLocation[] | null>;
+  prepareRename(documentUri: string, version: number, sql: string, position: Position): Promise<CoreRenamePrepare | null>;
+  rename(documentUri: string, version: number, sql: string, position: Position, newName: string): Promise<CoreWorkspaceEdit | null>;
+  inlayHints(documentUri: string, version: number, sql: string, range?: CoreRange): Promise<CoreInlayHint[]>;
+  signatureHelp(documentUri: string, version: number, sql: string, position: Position): Promise<CoreSignatureHelp | null>;
+  documentSymbols(documentUri: string, version: number, sql: string): Promise<CoreDocumentSymbol[]>;
+  format(sql: string, databaseKind?: DatabaseKind, options?: CoreFormatOptions): Promise<string>;
+  semanticTokens(documentUri: string, version: number, sql: string): Promise<CoreSemanticTokenResult>;
+  window(documentUri: string, version: number, sql: string, offset: number, units: 'sentence', direction: 'before' | 'after'): Promise<number | null>;
   close(documentUri: string): void;
 }

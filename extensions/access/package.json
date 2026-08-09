@@ -1,0 +1,64 @@
+{
+    "name": "justybaselite-access",
+    "displayName": "JustyBase SQL Editor (Microsoft Access)",
+    "description": "Optional Microsoft Access (.mdb/.accdb) companion for JustyBase SQL Editor (Netezza). Query and edit Access databases with real SQL through a Java/UCanAccess bridge.",
+    "version": "1.0.0",
+    "publisher": "krzysztof-d",
+    "license": "Apache-2.0",
+    "engines": {
+        "vscode": "^1.103.2",
+        "node": ">=22.0.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Data Science",
+        "Other"
+    ],
+    "homepage": "https://github.com/justybase/justybase-vscode",
+    "bugs": {
+        "url": "https://github.com/justybase/justybase-vscode/issues"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/justybase/justybase-vscode"
+    },
+    "keywords": [
+        "SQL",
+        "access",
+        "mdb",
+        "accdb",
+        "microsoft access",
+        "database",
+        "data files"
+    ],
+    "main": "./dist/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "extensionDependencies": [
+        "krzysztof-d.justybaselite-netezza"
+    ],
+    "configuration": {
+        "title": "Microsoft Access",
+        "properties": {
+            "justybase.access.javaPath": {
+                "type": "string",
+                "default": "",
+                "scope": "machine",
+                "description": "Absolute path to the java/java.exe executable used to launch the Access bridge (leave empty to use JAVA_HOME or java on PATH)."
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
+        "build": "node esbuild.access.js",
+        "build:minified": "node esbuild.access.js --minify",
+        "build:dev": "node esbuild.access.js",
+        "build:jar": "node scripts/build-jar.js",
+        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "verify:runtime-deps": "node ../../scripts/verify-access-release-snapshot.js",
+        "prepackage": "npm run verify:runtime-deps && node ../../scripts/generate-third-party-notices.js .",
+        "package": "node ../../scripts/package-optional-vsix.js package"
+    },
+    "preview": true
+}

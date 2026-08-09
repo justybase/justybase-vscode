@@ -9,6 +9,8 @@ import { db2Dialect } from './db2';
 import { mssqlDialect } from './mssql';
 import { mysqlDialect } from './mysql';
 import { duckdbDialect } from './duckdb';
+import { fileDialectStub } from './file';
+import { accessDialectStub } from './access';
 
 let builtInDialectsRegistered = false;
 
@@ -23,7 +25,9 @@ export const allAvailableDialects = [
     db2Dialect,
     mssqlDialect,
     mysqlDialect,
-    duckdbDialect
+    duckdbDialect,
+    fileDialectStub,
+    accessDialectStub
 ];
 
 export function ensureBuiltInDialectsRegistered(): void {

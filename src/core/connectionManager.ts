@@ -40,6 +40,13 @@ const LEGACY_SQLITE_OPTION_KEYS = new Set([
     'mode'
 ]);
 
+/** Data-file extensions handled by the File SQL dialect (DuckDB). */
+const FILE_SQL_EXTENSION_PATTERN = /\.(xlsx|csv|tsv|parquet|avro)$/i;
+
+function isLikelyFileSqlDatabaseName(database: string | undefined): boolean {
+    return Boolean(database && FILE_SQL_EXTENSION_PATTERN.test(database.trim()));
+}
+
 const LEGACY_MSSQL_OPTION_KEYS = new Set([
     'domain',
     'encrypt',
@@ -67,7 +74,7 @@ const LEGACY_PORT_KIND_MAP = new Map<number, DatabaseKind>([
     [3306, 'mysql']
 ]);
 
-const LOCAL_FILE_DIALECT_KINDS = new Set<DatabaseKind>(['sqlite', 'duckdb']);
+const LOCAL_FILE_DIALECT_KINDS = new Set<DatabaseKind>(['sqlite', 'duckdb', 'file', 'access']);
 
 function isLocalFileDialect(kind: DatabaseKind | undefined): boolean {
     return kind ? LOCAL_FILE_DIALECT_KINDS.has(kind) : false;
@@ -119,6 +126,11 @@ function isLikelySqliteDatabaseName(database: string | undefined): boolean {
 
 function inferLegacyLoadedDatabaseKind(details: SharedConnectionDetails): DatabaseKind | undefined {
     const optionKeys = Object.keys(details.options ?? {});
+    // Data files (xlsx/csv/tsv/parquet/avro) must resolve to the File SQL
+    // dialect — path heuristics below would otherwise classify them as SQLite.
+    if (isLikelyFileSqlDatabaseName(details.database)) {
+        return 'file';
+    }
     if (isLikelyDuckDbDatabaseName(details.database)) {
         return 'duckdb';
     }
@@ -153,6 +165,16 @@ function inferLegacyLoadedDatabaseKind(details: SharedConnectionDetails): Databa
 function resolveStoredDatabaseKind(details: SharedConnectionDetails | undefined): DatabaseKind | undefined {
     if (!details) {
         return undefined;
+    }
+
+    // Data-file paths (xlsx/csv/tsv/parquet/avro) can never be valid SQLite
+    // or DuckDB database files — correct profiles saved before the 'file'
+    // dialect existed (or created against the wrong dialect) to 'file'.
+    if (isLikelyFileSqlDatabaseName(details.database)) {
+        const explicitKind = tryNormalizeDatabaseKind(details.dbType);
+        if (explicitKind !== 'file' && explicitKind !== undefined) {
+            return 'file';
+        }
     }
 
     const explicitKind = tryNormalizeDatabaseKind(details.dbType);
@@ -223,8 +245,15 @@ function getLogicalDefaultDatabase(details: SharedConnectionDetails | undefined)
     if (resolvedKind === 'sqlite') {
         return 'main';
     }
+    if (resolvedKind === 'access') {
+        return 'default';
+    }
     if (resolvedKind === 'duckdb') {
         return getDuckDbCatalogHint(details);
+    }
+    if (resolvedKind === 'file') {
+        // File SQL opens an in-memory DuckDB whose catalog is always 'memory'.
+        return 'memory';
     }
 
     return details.database;
@@ -240,8 +269,22 @@ export class ConnectionManager {
     // Per-document connection selection: Map<documentUri, connectionName>
     private _documentConnections: Map<string, string> = new Map();
 
-    // Map of active promises establishing persistent connections to prevent concurrent sockets to the same URI
-    private _documentConnectionPromises: Map<string, Promise<NzConnection>> = new Map();
+    // Map of active promises establishing persistent connections to prevent concurrent sockets to the same URI.
+    // The target is part of the entry so a promise for a previous tab connection
+    // can never be reused after the tab switches to another connection.
+    private _documentConnectionPromises: Map<string, {
+        connectionName: string;
+        database: string;
+        generation: number;
+        promise: Promise<NzConnection>;
+    }> = new Map();
+
+    // Incremented whenever a tab connection is changed or explicitly reset.
+    // In-flight connections from an older generation are never published.
+    private _documentConnectionGenerations: Map<string, number> = new Map();
+
+    // Deduplicate concurrent close requests for the same tab.
+    private _documentConnectionClosePromises: Map<string, Promise<void>> = new Map();
 
     // Per-document persistent connections: Map<documentUri, NzConnection>
     private _documentPersistentConnections: Map<string, NzConnection> = new Map();
@@ -587,6 +630,11 @@ export class ConnectionManager {
             throw new Error('No connection selected for this document');
         }
 
+        const pendingClose = this._documentConnectionClosePromises.get(normalizedUri);
+        if (pendingClose) {
+            await pendingClose;
+        }
+
         const details = await this.getConnection(targetName);
         if (!details) {
             throw new Error(`Connection '${targetName}' not found or invalid`);
@@ -621,13 +669,25 @@ export class ConnectionManager {
             await this.closeDocumentPersistentConnection(normalizedUri);
         }
 
-        // Check if there is an in-flight connection promise for this document
-        if (this._documentConnectionPromises.has(normalizedUri)) {
-            const inFlightPromise = this._documentConnectionPromises.get(normalizedUri);
-            if (inFlightPromise) {
-                return inFlightPromise;
+        const generation = this._documentConnectionGenerations.get(normalizedUri) ?? 0;
+
+        // Check if there is an in-flight connection promise for this document.
+        // Do not reuse a promise opened for a different connection/database.
+        const inFlight = this._documentConnectionPromises.get(normalizedUri);
+        if (inFlight) {
+            if (
+                inFlight.connectionName === targetName
+                && inFlight.database === effectiveDatabase
+                && inFlight.generation === generation
+            ) {
+                return inFlight.promise;
             }
+
+            this._documentConnectionPromises.delete(normalizedUri);
+            this.bumpDocumentConnectionGeneration(normalizedUri);
         }
+
+        const connectionGeneration = this._documentConnectionGenerations.get(normalizedUri) ?? 0;
 
         // Create new connection for this document with effective database
         const connectPromise = (async () => {
@@ -645,6 +705,15 @@ export class ConnectionManager {
                         `SET CATALOG ${formatCatalogTarget(databaseOverride, resolvedKind)}`
                     );
                     await setCatalogCommand.execute();
+                }
+
+                const currentGeneration = this._documentConnectionGenerations.get(normalizedUri) ?? 0;
+                const currentConnectionName = this.getConnectionForExecution(documentUri);
+                if (
+                    currentGeneration !== connectionGeneration
+                    || currentConnectionName !== targetName
+                ) {
+                    throw new Error(`Connection selection changed while opening tab connection for ${normalizedUri}`);
                 }
 
                 this._documentPersistentConnections.set(normalizedUri, conn);
@@ -666,13 +735,31 @@ export class ConnectionManager {
                 throw error;
             } finally {
                 // Clear the promise once resolution is complete
-                this._documentConnectionPromises.delete(normalizedUri);
+                const currentPromise = this._documentConnectionPromises.get(normalizedUri);
+                if (
+                    currentPromise?.generation === connectionGeneration
+                    && currentPromise.connectionName === targetName
+                    && currentPromise.database === effectiveDatabase
+                ) {
+                    this._documentConnectionPromises.delete(normalizedUri);
+                }
             }
         })();
 
         // Cache the promise immediately so parallel callers wait on the same setup
-        this._documentConnectionPromises.set(normalizedUri, connectPromise);
+        this._documentConnectionPromises.set(normalizedUri, {
+            connectionName: targetName,
+            database: effectiveDatabase,
+            generation: connectionGeneration,
+            promise: connectPromise,
+        });
         return connectPromise;
+    }
+
+    private bumpDocumentConnectionGeneration(normalizedUri: string): number {
+        const nextGeneration = (this._documentConnectionGenerations.get(normalizedUri) ?? 0) + 1;
+        this._documentConnectionGenerations.set(normalizedUri, nextGeneration);
+        return nextGeneration;
     }
 
     /**
@@ -680,15 +767,41 @@ export class ConnectionManager {
      */
     async closeDocumentPersistentConnection(documentUri: string): Promise<void> {
         const normalizedUri = normalizeUriKey(documentUri);
+        this.bumpDocumentConnectionGeneration(normalizedUri);
+
+        const existingClose = this._documentConnectionClosePromises.get(normalizedUri);
+        if (existingClose) {
+            await existingClose;
+            return;
+        }
+
         const conn = this._documentPersistentConnections.get(normalizedUri);
-        if (conn) {
+        if (!conn) {
+            return;
+        }
+
+        const closePromise = (async () => {
             try {
                 await conn.close();
             } catch (e: unknown) {
                 logWithFallback('error', `[ConnectionManager] Error closing document connection for ${documentUri}:`, e);
             }
-            this._documentPersistentConnections.delete(normalizedUri);
-            this._documentPersistentConnectionMeta.delete(normalizedUri);
+
+            // A new connection may have been created while the old one was
+            // closing. Only remove the entry that this call actually closed.
+            if (this._documentPersistentConnections.get(normalizedUri) === conn) {
+                this._documentPersistentConnections.delete(normalizedUri);
+                this._documentPersistentConnectionMeta.delete(normalizedUri);
+            }
+        })();
+
+        this._documentConnectionClosePromises.set(normalizedUri, closePromise);
+        try {
+            await closePromise;
+        } finally {
+            if (this._documentConnectionClosePromises.get(normalizedUri) === closePromise) {
+                this._documentConnectionClosePromises.delete(normalizedUri);
+            }
         }
     }
 
@@ -850,18 +963,26 @@ export class ConnectionManager {
         return this._documentConnections.get(normalizedUri);
     }
 
-    setDocumentConnection(documentUri: string, connectionName: string) {
+    setDocumentConnection(documentUri: string, connectionName: string): Promise<void> {
         const normalizedUri = normalizeUriKey(documentUri);
         this._documentConnections.set(normalizedUri, connectionName);
-        // If connection changes, close existing persistent connection for this document
-        this.closeDocumentPersistentConnection(normalizedUri);
+        this.bumpDocumentConnectionGeneration(normalizedUri);
+        // Invalidate an in-flight connection for the previous selection too.
+        this._documentConnectionPromises.delete(normalizedUri);
+        // If connection changes, close existing persistent connection for this document.
+        // Callers that are about to execute SQL can await this promise so the old
+        // Access/file connection is fully released first.
+        const closePromise = this.closeDocumentPersistentConnection(normalizedUri);
         this._onDidChangeDocumentConnection.fire(documentUri);
+        return closePromise;
     }
 
     clearDocumentConnection(documentUri: string) {
         const normalizedUri = normalizeUriKey(documentUri);
         this._documentConnections.delete(normalizedUri);
         this._documentDatabaseOverride.delete(normalizedUri);
+        this._documentConnectionPromises.delete(normalizedUri);
+        this.bumpDocumentConnectionGeneration(normalizedUri);
         this.closeDocumentPersistentConnection(normalizedUri);
         this._documentKeepConnectionOpen.delete(normalizedUri);
         this._documentPersistentConnectionMeta.delete(normalizedUri);
@@ -922,8 +1043,13 @@ export class ConnectionManager {
             return undefined;
         }
 
+        const resolvedKind = resolveStoredDatabaseKind(details);
         let resolvedDetails = details;
-        if (documentUri) {
+        // Local-file dialects use `database` as the physical file path. Their
+        // effective database is only a logical catalog name (for example,
+        // `default`, `main`, or `memory`) and must never be passed to the
+        // connection/import path in place of the configured file.
+        if (documentUri && !isLocalFileDialect(resolvedKind)) {
             const effectiveDb = await this.getEffectiveDatabase(documentUri);
             if (effectiveDb) {
                 resolvedDetails = { ...resolvedDetails, database: effectiveDb };
@@ -931,7 +1057,7 @@ export class ConnectionManager {
         }
 
         const normalizedDroppedDatabase = droppedDatabase?.trim();
-        if (normalizedDroppedDatabase) {
+        if (normalizedDroppedDatabase && !isLocalFileDialect(resolvedKind)) {
             resolvedDetails = { ...resolvedDetails, database: normalizedDroppedDatabase };
         }
 

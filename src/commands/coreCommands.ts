@@ -37,6 +37,7 @@ import {
     extractProcedureBlock,
     extractViewStatement,
 } from '../sqlParser/procedure/procedureCodeLens';
+import { registerSaveAccessFileAsConnectionCommand } from './saveAccessFileAsConnection';
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -261,6 +262,11 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
     };
 
     return [
+        registerSaveAccessFileAsConnectionCommand({
+            connectionManager,
+            metadataCache,
+            schemaProvider,
+        }),
         // View / Edit Data
         vscode.commands.registerCommand('netezza.viewEditData', (item: EditDataItem) => {
             EditDataProvider.createOrShow(context.extensionUri, item, context, connectionManager);
@@ -334,7 +340,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
             });
 
             if (selected) {
-                connectionManager.setDocumentConnection(documentUri, selected.name);
+                await connectionManager.setDocumentConnection(documentUri, selected.name);
                 vscode.window.showInformationMessage(`Connection for this tab set to: ${selected.name}`);
             }
         }),

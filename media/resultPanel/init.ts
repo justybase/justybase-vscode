@@ -2660,6 +2660,7 @@ getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent)
 
   if (action === "view-chart") { setViewMode("chart"); return; }
   if (action === "view-diff") { setViewMode("diff"); return; }
+  if (action === "view-explore") { setViewMode("explore"); return; }
   if (action === "formatting") {
     callPanelMethod('openResultFormattingPanel', { scope: "result" });
     return;

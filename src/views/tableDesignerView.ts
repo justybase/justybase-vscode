@@ -288,7 +288,7 @@ function getTableDesignerTargetDisplay(
     dbName: string,
     schemaName: string | undefined
 ): string {
-    if (databaseKind === 'sqlite' || !schemaName) {
+    if (databaseKind === 'sqlite' || databaseKind === 'access' || !schemaName) {
         return dbName;
     }
     if (databaseKind === 'db2') {

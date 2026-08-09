@@ -8,6 +8,7 @@ import { ConnectionManager } from '../core/connectionManager';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { getTemplatesByCategory, getTemplateById } from '../providers/procedureTemplates';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
+import { escapeSqlString as escapeSqlLiteral } from '../utils/sqlUtils';
 import {
     generateBasicExternalTableSQL,
     generateAdvancedExternalTableSQL,
@@ -36,10 +37,6 @@ interface SnowflakeObjectItem {
 function normalizeIdentifier(value: string | undefined, fallback: string): string {
     const normalized = (value || '').replace(/"/g, '').trim().toUpperCase();
     return normalized.length > 0 ? normalized : fallback;
-}
-
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
 }
 
 function isSnowflakeConnection(deps: WizardCommandsContext, connectionName?: string): boolean {

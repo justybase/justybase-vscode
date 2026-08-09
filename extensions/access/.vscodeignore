@@ -1,0 +1,17 @@
+src/
+java-bridge/
+scripts/
+tsconfig.json
+esbuild.access.js
+*.vsix
+package-lock.json
+coverage/
+*.log
+.env
+.env.*
+.vscode/
+.gitignore
+docker-compose*.yml
+java-bridge/
+scripts/
+node_modules/

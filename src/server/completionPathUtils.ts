@@ -79,7 +79,9 @@ function resolveMetadataLookupTarget(
 ): CompletionMetadataLookupTarget {
   if (usesDatabaseObjectTwoPartName(databaseKind)) {
     return {
-      database: source.db || source.schema || effectiveDb,
+      database:
+        source.db || source.schema || effectiveDb ||
+        (databaseKind === "access" ? "default" : undefined),
       table: source.table,
     };
   }

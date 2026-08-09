@@ -53,6 +53,14 @@ const inlayHintEngine = new LspInlayHintEngine(
   metadataBridge,
   documentParseSession,
 );
+
+// Re-run completion while an object name is being typed so metadata-backed
+// paths such as `FROM DIM|` can open automatically. Keep whitespace out of
+// this list: the completion engine intentionally requires a non-empty prefix
+// for automatic suggestions after a completed FROM/JOIN target.
+const completionWordTriggerCharacters = [
+  ..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+];
 const diagnosticsHandler = createDiagnosticsHandler({
   connection,
   metadataBridge,
@@ -65,7 +73,17 @@ connection.onInitialize((_params: InitializeParams): InitializeResult => {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       completionProvider: {
-        triggerCharacters: [".", " ", "*", "$", "%", "&"],
+        // Whitespace intentionally omitted: it never opens the completion
+        // list (see LspCompletionEngine whitespace gate); Ctrl+Space always
+        // works.
+        triggerCharacters: [
+          ".",
+          "*",
+          "$",
+          "%",
+          "&",
+          ...completionWordTriggerCharacters,
+        ],
       },
       hoverProvider: true,
       definitionProvider: true,

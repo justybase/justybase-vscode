@@ -1,5 +1,6 @@
 import {
     createDatabaseCapabilities,
+    DatabaseAdvancedFeatures,
     DatabaseConnection,
     DatabaseConnectionConfig,
     DatabaseConnectionStaticConstructor,
@@ -9,22 +10,38 @@ import { sqliteConnectionForm } from './connectionForm';
 import { sqliteMetadataProvider } from './metadata/provider';
 import { sqliteSqlAuthoring } from './sql/authoring';
 import { SqliteConnection } from './runtime';
-import { sqliteAdvancedFeatures } from './advancedFeatures';
 import { sqliteDialectTraits } from './traits';
 
 export { SqliteConnection } from './runtime';
 
 const sqliteConnectionConstructor = SqliteConnection as unknown as DatabaseConnectionStaticConstructor;
 
+let _cachedAdvancedFeatures: DatabaseAdvancedFeatures | undefined;
+
+function getAdvancedFeatures(): DatabaseAdvancedFeatures {
+    if (!_cachedAdvancedFeatures) {
+        const { sqliteAdvancedFeatures } = require('./advancedFeatures');
+        _cachedAdvancedFeatures = sqliteAdvancedFeatures;
+    }
+    return _cachedAdvancedFeatures!;
+}
+
 export const sqliteDialect: DatabaseDialect = {
     kind: 'sqlite',
     displayName: 'SQLite',
-    capabilities: createDatabaseCapabilities(),
+    capabilities: createDatabaseCapabilities({
+        supportsExplainPlan: true,
+        supportsExplainGraph: true,
+        supportsTuningAdvisor: true,
+        supportsTableMaintenance: true,
+    }),
     connectionForm: sqliteConnectionForm,
     traits: sqliteDialectTraits,
     metadataProvider: sqliteMetadataProvider,
     sqlAuthoring: sqliteSqlAuthoring,
-    advancedFeatures: sqliteAdvancedFeatures,
+    get advancedFeatures(): DatabaseAdvancedFeatures {
+        return getAdvancedFeatures();
+    },
     getConnectionConstructor(): DatabaseConnectionStaticConstructor {
         return sqliteConnectionConstructor;
     },

@@ -37,6 +37,7 @@ import { syncAnalysisView } from './analysis.js';
 import { updateResultLimitBanner } from './banners.js';
 import { handleDatabaseAggregationResult, clearAllDatabaseAggregationPending } from './databaseAggregations.js';
 import { handleDatabaseGroupingResult, handleDatabaseGroupingPreviewResult } from './databaseGrouping.js';
+import { handleExploreHostMessage } from './explore/hostBridge.js';
 import { handleDatabaseFilterValuesResult, handleDatabaseFilterApplyResult, clearAllDatabaseFilterPending } from './databaseFilters.js';
 import { updateAllRefreshFailureBanners } from './refreshFailureBanner.js';
 import {
@@ -488,6 +489,18 @@ export function setupStreamingMessageHandler(): void {
                 handleDatabaseGroupingPreviewResult(message as {
                     requestId: number;
                     sql?: string;
+                    error?: string;
+                });
+                break;
+            case 'exploreFullStatsResult':
+            case 'explorePivotResult':
+            case 'explorePivotPreviewResult':
+            case 'exploreComposerResult':
+            case 'exploreComposerPreviewResult':
+            case 'exploreFilteredSqlPreviewResult':
+                handleExploreHostMessage(message as {
+                    command: string;
+                    requestId?: number;
                     error?: string;
                 });
                 break;

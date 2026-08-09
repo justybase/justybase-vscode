@@ -1,15 +1,12 @@
 import type { ExtensionContext } from "vscode";
 import type { ConnectionManager } from "./connectionManager";
 import { queryResultToRows, runQueryRaw } from "./queryRunner";
+export { escapeSqlString as escapeSqlLiteral } from "../utils/sqlUtils";
 
 export interface SessionMonitorResources {
   gra: unknown[];
   systemUtil: unknown[];
   sysUtilSummary: unknown;
-}
-
-export function escapeSqlLiteral(value: string): string {
-  return value.replace(/'/g, "''");
 }
 
 export function normalizeDatabaseFilter(

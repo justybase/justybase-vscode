@@ -1,5 +1,6 @@
 import { unquoteIdentifier } from '../utils/identifierUtils';
 import type { ColumnMetadata } from './types';
+import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 
 export interface RawColumnRowWithKeys {
     TABLENAME: string;
@@ -21,7 +22,7 @@ export function mapRawColumnRowToMetadata(row: RawColumnRowWithKeys): ColumnMeta
         label: row.ATTNAME,
         kind: 5,
         detail: row.FORMAT_TYPE,
-        documentation: row.DESCRIPTION || '',
+        documentation: normalizeCompletionDescription(row.DESCRIPTION) || '',
         isPk: Number(row.IS_PK) === 1,
         isFk: Number(row.IS_FK) === 1,
         isDistributionKey:

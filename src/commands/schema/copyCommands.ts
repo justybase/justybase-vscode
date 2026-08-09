@@ -37,6 +37,14 @@ export function registerCopyCommands(deps: SchemaCommandsDependencies): vscode.D
                             content: sql,
                             language: 'sql'
                         });
+                        // Bind the document to the connection it was generated
+                        // from so the query runs against the same database.
+                        if (item.connectionName) {
+                            connectionManager.setDocumentConnection(doc.uri.toString(), item.connectionName);
+                            if (item.dbName) {
+                                await connectionManager.setDocumentDatabase(doc.uri.toString(), item.dbName);
+                            }
+                        }
                         await vscode.window.showTextDocument(doc);
                     } else {
                         await vscode.env.clipboard.writeText(sql);

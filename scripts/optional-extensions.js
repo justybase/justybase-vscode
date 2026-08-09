@@ -75,6 +75,16 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
         packageLock: path.join(repoRoot, 'extensions', 'mysql', 'package-lock.json'),
         tsconfig: path.join(repoRoot, 'extensions', 'mysql', 'tsconfig.json'),
         srcDir: path.join(repoRoot, 'extensions', 'mysql', 'src')
+    },
+    {
+        id: 'access',
+        fallbackDisplayName: 'JustyBase SQL Editor (Microsoft Access)',
+        directory: path.join(repoRoot, 'extensions', 'access'),
+        packageJson: path.join(repoRoot, 'extensions', 'access', 'package.json'),
+        packageLock: path.join(repoRoot, 'extensions', 'access', 'package-lock.json'),
+        tsconfig: path.join(repoRoot, 'extensions', 'access', 'tsconfig.json'),
+        srcDir: path.join(repoRoot, 'extensions', 'access', 'src'),
+        javaBridgeDir: path.join(repoRoot, 'extensions', 'access', 'java-bridge')
     }
 ]);
 

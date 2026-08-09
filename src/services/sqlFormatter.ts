@@ -1,5 +1,5 @@
 import type { DatabaseKind } from "../contracts/database";
-import { getDatabaseSqlAuthoring } from "../core/connectionFactory";
+import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
 
 export type SqlKeywordCase = "upper" | "lower" | "preserve";
 

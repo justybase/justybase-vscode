@@ -2,10 +2,10 @@
  * DDL Generator - External Table DDL Generation
  */
 
-import { ExternalTableInfo } from './types';
+import type { ExternalTableInfo } from './types';
 import { executeQueryHelper, quoteNameIfNeeded } from './helpers';
 import { getColumns } from './metadata';
-import { NzConnection } from '../../../types';
+import type { NzConnection } from '../../../types';
 
 /**
  * Build external table DDL from metadata
@@ -145,7 +145,7 @@ export function buildExternalTableDDLFromCache(
     return ddlLines.join('\n');
 }
 
-import { ColumnInfo } from './types';
+import type { ColumnInfo } from './types';
 
 /**
  * Generate DDL code for creating an external table in Netezza

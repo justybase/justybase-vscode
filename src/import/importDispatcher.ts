@@ -12,6 +12,7 @@ export type SupportedImportDialect =
     | 'mysql'
     | 'duckdb'
     | 'sqlite'
+    | 'access'
     | 'unsupported';
 
 export function resolveImportDialect(dbType?: string): SupportedImportDialect {
@@ -46,6 +47,9 @@ export function resolveImportDialect(dbType?: string): SupportedImportDialect {
     if (normalized === 'snowflake') {
         return 'snowflake';
     }
+    if (normalized === 'access' || normalized === 'mdb' || normalized === 'accdb') {
+        return 'access';
+    }
     return 'unsupported';
 }
 
@@ -71,6 +75,8 @@ export function getImportDialectLabel(dbType?: string): string {
             return 'DuckDB';
         case 'sqlite':
             return 'SQLite';
+        case 'access':
+            return 'Microsoft Access';
         default:
             return 'database';
     }
@@ -84,7 +90,18 @@ function buildValidationError(message: string): ImportResult {
 }
 
 function validateImportConnection(connectionDetails?: ConnectionDetails): ImportResult | undefined {
-    if (!connectionDetails || !connectionDetails.host) {
+    if (!connectionDetails) {
+        return buildValidationError('Connection details are required.');
+    }
+    const dialect = resolveImportDialect(connectionDetails.dbType);
+    // SQLite and DuckDB are local connections; their forms intentionally do
+    // not collect a network host.  The database path (or :memory:) is the
+    // connection identity, and the runtime creates a missing SQLite file on
+    // first connect.
+    if (dialect === 'access' || dialect === 'sqlite' || dialect === 'duckdb') {
+        return undefined;
+    }
+    if (!connectionDetails.host) {
         return buildValidationError('Connection details are required.');
     }
 
@@ -223,6 +240,17 @@ export async function importDataForConnection(
                 columnOptions
             );
         }
+        case 'access': {
+            const { importDataToAccess } = await import('./accessImporter');
+            return importDataToAccess(
+                normalizedFilePath,
+                normalizedTargetTable,
+                connectionDetails,
+                progressCallback,
+                timeoutSeconds,
+                columnOptions
+            );
+        }
         default:
             return {
                 success: false,
@@ -343,6 +371,16 @@ export async function importClipboardDataForConnection(
         case 'snowflake': {
             const { createSnowflakeClipboardImportResult } = await import('../../extensions/snowflake/src/snowflakeImportPlanner');
             return createSnowflakeClipboardImportResult(normalizedTargetTable);
+        }
+        case 'access': {
+            const { importClipboardDataToAccess } = await import('./accessImporter');
+            return importClipboardDataToAccess(
+                normalizedTargetTable,
+                connectionDetails,
+                formatPreference,
+                options,
+                progressCallback
+            );
         }
         default:
             return {

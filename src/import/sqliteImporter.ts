@@ -8,29 +8,10 @@ import {
     type PreparedImportColumnDescriptor
 } from './batchImportSupport';
 import { getBaseDataType, normalizeDataType } from './dataImporter';
+import { sqliteImportTypeMapper } from '../dialects/sqlite/importTypeMapper';
 
 function mapImportTypeToSqliteType(typeName: string): string {
-    const normalized = normalizeDataType(typeName);
-    const baseType = getBaseDataType(normalized);
-
-    if (['BIGINT', 'INT', 'INTEGER', 'SMALLINT'].includes(baseType)) {
-        return 'INTEGER';
-    }
-    if (baseType === 'BOOLEAN') {
-        return 'INTEGER';
-    }
-    if (baseType === 'NUMERIC' || baseType === 'DECIMAL') {
-        const match = normalized.match(/^(NUMERIC|DECIMAL)\(\s*(\d+)\s*,\s*(\d+)\s*\)$/);
-        return match ? `NUMERIC(${match[2]},${match[3]})` : 'NUMERIC';
-    }
-    if (baseType === 'DATE') {
-        return 'DATE';
-    }
-    if (baseType === 'DATETIME' || baseType === 'TIMESTAMP') {
-        return 'TIMESTAMP';
-    }
-
-    return 'TEXT';
+    return sqliteImportTypeMapper.createDataType(normalizeDataType(typeName)).toString();
 }
 
 function toSqliteLiteral(value: string | null, column: PreparedImportColumnDescriptor): string {

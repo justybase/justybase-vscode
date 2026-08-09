@@ -66,6 +66,25 @@ export function parseTablePathFragment(
     return undefined;
   }
 
+  // File SQL workspace views use normalized absolute paths as identifiers,
+  // e.g. "/home/user/data.xlsx#sheet=Orders". Dots in a filesystem path
+  // must not be interpreted as database/schema separators.
+  const unquotedFragment = stripQuotes(fragment);
+  const isQuoted =
+    fragment.startsWith('"') || fragment.startsWith('`') || fragment.startsWith('[');
+  if (
+    fragment.includes("/") ||
+    fragment.includes("\\") ||
+    /^[A-Za-z]:[\\/]/.test(unquotedFragment)
+  ) {
+    return {
+      kind: "from_join_name",
+      partial: unquotedFragment,
+      isFilePath: true,
+      isQuoted,
+    };
+  }
+
   const doubleDotIndex = fragment.indexOf("..");
   if (doubleDotIndex > 0) {
     if (!supportsDoubleDotPath(databaseKind)) {

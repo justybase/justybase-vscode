@@ -1,8 +1,5 @@
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
 const XlsbWriter = require('@justybase/spreadsheet-tasks').XlsbWriter as new (filePath: string) => {
     addSheet(sheetName: string, hidden?: boolean): void;
     writeSheet(rows: unknown[][], headers: string[] | null, doAutofilter?: boolean): void;
@@ -22,7 +19,15 @@ import {
     convertToExcelNumberIfNumericString,
     shouldConvertToExcelNumber
 } from './excelNumericUtils';
-import { validateExportPath } from './exportUtils';
+import { validateExportPath, copyFileToClipboard, getTempFilePath as createExportTempPath } from './exportUtils';
+export { copyFileToClipboard } from './exportUtils';
+
+/**
+ * Generate temporary file path for XLSB file.
+ */
+export function getTempFilePath(): string {
+    return createExportTempPath('xlsb');
+}
 
 /**
  * Remove CR, LF and TAB from the beginning and end of a string,
@@ -722,67 +727,4 @@ export async function exportStructuredToXlsb(
             message: `Export failed: ${errorMsg}`
         };
     }
-}
-
-/**
- * Copy file to Windows clipboard using PowerShell
- * This allows pasting the file in Windows Explorer or other applications
- * @param filePath Absolute path to the file to copy
- * @returns True if successful, false otherwise
- */
-export async function copyFileToClipboard(filePath: string): Promise<boolean> {
-    // Only works on Windows
-    if (os.platform() !== 'win32') {
-        console.error('Clipboard file copy is only supported on Windows');
-        return false;
-    }
-
-    return new Promise<boolean>(resolve => {
-        try {
-            const normalizedPath = path.normalize(path.resolve(filePath));
-
-            // Use PowerShell to copy file to clipboard
-            // The Set-Clipboard -Path command copies the file object, not the content
-            const powershellCommand = `Set-Clipboard -Path "${normalizedPath.replace(/"/g, '`"')}"`;
-
-            const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', powershellCommand]);
-
-            let errorOutput = '';
-
-            ps.stderr.on('data', (data: Buffer) => {
-                errorOutput += data.toString();
-            });
-
-            ps.on('close', (code: number) => {
-                if (code !== 0) {
-                    console.error(`PowerShell clipboard copy failed: ${errorOutput}`);
-                    resolve(false);
-                } else {
-                    console.log(`File copied to clipboard: ${normalizedPath}`);
-                    resolve(true);
-                }
-            });
-
-            ps.on('error', (err: Error) => {
-                console.error(`Error spawning PowerShell: ${err.message}`);
-                resolve(false);
-            });
-        } catch (error: unknown) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            console.error(`Error copying file to clipboard: ${errorMsg}`);
-            resolve(false);
-        }
-    });
-}
-
-/**
- * Generate temporary file path for XLSB file
- * @returns Temporary file path
- */
-export function getTempFilePath(): string {
-    const tempDir = os.tmpdir();
-    const timestamp = Date.now();
-    // Using .xlsb extension for correct binary format
-    const tempFilename = `netezza_export_${timestamp}.xlsb`;
-    return path.join(tempDir, tempFilename);
 }

@@ -10,6 +10,7 @@ import { postgreSqlImportWizardAdapter } from './PostgreSqlImportWizardAdapter';
 import { snowflakeImportWizardAdapter } from './SnowflakeImportWizardAdapter';
 import { sqliteImportWizardAdapter } from './SqliteImportWizardAdapter';
 import { verticaImportWizardAdapter } from './VerticaImportWizardAdapter';
+import { accessImportWizardAdapter } from './AccessImportWizardAdapter';
 
 const IMPORT_WIZARD_ADAPTERS: Readonly<Record<DatabaseKind, DatabaseImportWizardAdapter>> = {
     netezza: netezzaImportWizardAdapter,
@@ -22,6 +23,7 @@ const IMPORT_WIZARD_ADAPTERS: Readonly<Record<DatabaseKind, DatabaseImportWizard
     mysql: mySqlImportWizardAdapter,
     sqlite: sqliteImportWizardAdapter,
     duckdb: duckDbImportWizardAdapter,
+    access: accessImportWizardAdapter,
 };
 
 export function getImportWizardAdapter(kind?: string | DatabaseKind): DatabaseImportWizardAdapter {

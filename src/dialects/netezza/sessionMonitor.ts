@@ -8,6 +8,7 @@ import type {
   ConnectionManager,
   ConnectionDetails,
 } from "../../core/connectionManager";
+import { escapeSqlString as escapeSqlLiteral } from "../../utils/sqlUtils";
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") {
@@ -30,10 +31,6 @@ function normalizeDatabaseFilter(
   if (!database) return undefined;
   const normalized = database.trim().toUpperCase();
   return normalized.length > 0 ? normalized : undefined;
-}
-
-function escapeSqlLiteral(value: string): string {
-  return value.replace(/'/g, "''");
 }
 
 function validateSessionId(sessionId: number): void {

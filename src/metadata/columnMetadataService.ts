@@ -3,6 +3,7 @@ import { DatabaseKind } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { QueryResult } from '../types';
 import { ColumnMetadata as CacheColumnMetadata } from './types';
+import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 
 export interface CanonicalColumnMetadata {
     database: string;
@@ -113,7 +114,7 @@ export function mapColumnsWithKeysRows(rows: RawColumnsWithKeysRow[], fallbackDa
             tableName: tableName.toUpperCase(),
             columnName,
             dataType: String(row.FORMAT_TYPE || row.DATA_TYPE || '').trim(),
-            description: String(row.DESCRIPTION || ''),
+            description: normalizeCompletionDescription(row.DESCRIPTION) || '',
             defaultValue: null,
             isNotNull: false,
             isPk: normalizeBooleanFlag(row.IS_PK),
@@ -143,7 +144,7 @@ export function mapTableColumnsRows(rows: RawTableColumnsRow[], location: Column
             tableName,
             columnName,
             dataType: String(row.FULL_TYPE || row.FORMAT_TYPE || '').trim(),
-            description: String(row.DESCRIPTION || ''),
+            description: normalizeCompletionDescription(row.DESCRIPTION) || '',
             defaultValue: row.COLDEFAULT ? String(row.COLDEFAULT) : null,
             isNotNull: normalizeBooleanFlag(row.ATTNOTNULL),
             isPk: normalizeBooleanFlag(row.IS_PK),

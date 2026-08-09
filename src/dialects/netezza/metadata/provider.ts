@@ -14,10 +14,7 @@ import {
     SYSTEM_CATALOG_SOURCE_DATABASE,
     isMirroredSystemCatalogObjectName
 } from './systemCatalogUtils';
-
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
-}
+import { escapeSqlString as escapeSqlLiteral } from '../../../utils/sqlUtils';
 
 function buildSchemaPredicate(schemaName: string): string {
     return `UPPER(SCHEMA) = UPPER('${escapeSqlLiteral(schemaName)}')`;

@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { createRequire } from 'module';
@@ -55,12 +56,32 @@ function resolveSqliteDatabaseLocation(config: DatabaseConnectionConfig): string
         return ':memory:';
     }
 
-    const requestedDatabase = config.database.trim();
+    let requestedDatabase = config.database.trim();
     if (!requestedDatabase || requestedDatabase === ':memory:') {
         return ':memory:';
     }
 
+    // Tolerate file:// URIs pasted into the connection form.
+    if (requestedDatabase.startsWith('file://')) {
+        requestedDatabase = requestedDatabase.slice('file://'.length);
+    }
+
     return path.isAbsolute(requestedDatabase) ? requestedDatabase : path.resolve(requestedDatabase);
+}
+
+/**
+ * Creates the parent directory of a file-backed SQLite database so that a
+ * new database file can be created on first connect (SQLite reports
+ * "unable to open database file" when the parent directory is missing).
+ */
+function ensureDatabaseParentDirectory(databaseLocation: string): void {
+    if (databaseLocation === ':memory:') {
+        return;
+    }
+    const parent = path.dirname(databaseLocation);
+    if (parent && parent !== databaseLocation) {
+        fs.mkdirSync(parent, { recursive: true });
+    }
 }
 
 function normalizeCatalogIdentifier(value: string): string {
@@ -175,6 +196,7 @@ export class SqliteConnection extends EventEmitter implements DatabaseConnection
 
         try {
             const { DatabaseSync } = loadSqliteModule();
+            ensureDatabaseParentDirectory(this._databaseLocation);
             this._database = new DatabaseSync(this._databaseLocation);
             this._connected = true;
         } catch (error) {

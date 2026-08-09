@@ -3,6 +3,7 @@ import { buildIdLookupKey, extractLabel, inferCachedTableLikeType } from '../hel
 import type { TableMetadata } from '../types';
 import type { MetadataCache } from './MetadataCache';
 import { buildSchemaCacheKey } from './schemaTreeDataSource';
+import { normalizeCompletionDescription } from '../../utils/completionDescriptionUtils';
 
 function getObjectName(item: TableMetadata): string | undefined {
     return extractLabel(item) || item.OBJNAME || item.TABLENAME;
@@ -10,7 +11,7 @@ function getObjectName(item: TableMetadata): string | undefined {
 
 function buildIdMap(
     database: string,
-    defaultSchema: string,
+    defaultSchema: string | undefined,
     tables: readonly TableMetadata[],
 ): Map<string, number> {
     const result = new Map<string, number>();
@@ -58,7 +59,7 @@ function mergeUpsertedTableObject(
 
 export function toTableMetadata(row: {
     OBJNAME: string;
-    SCHEMA?: string;
+    SCHEMA?: string | null;
     OBJID?: number;
     OBJTYPE?: string;
     OWNER?: string;
@@ -68,9 +69,9 @@ export function toTableMetadata(row: {
     return {
         OBJNAME: row.OBJNAME,
         OBJID: row.OBJID,
-        SCHEMA: row.SCHEMA,
+        SCHEMA: row.SCHEMA || undefined,
         OWNER: row.OWNER,
-        DESCRIPTION: row.DESCRIPTION,
+        DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
         label: row.OBJNAME,
         kind: vscode.CompletionItemKind.Class,
         objType: objectType,
@@ -84,7 +85,7 @@ export function upsertTableObject(
     cache: MetadataCache,
     connectionName: string,
     database: string,
-    schema: string,
+    schema: string | undefined,
     table: TableMetadata,
 ): void {
     const cacheKey = buildSchemaCacheKey(database, schema);
@@ -102,7 +103,7 @@ export function removeTableObject(
     cache: MetadataCache,
     connectionName: string,
     database: string,
-    schema: string,
+    schema: string | undefined,
     tableName: string,
 ): boolean {
     const cacheKey = buildSchemaCacheKey(database, schema);
@@ -125,26 +126,33 @@ export function replaceTableObjectTypeForDatabase(
     database: string,
     objectType: string,
     rows: readonly TableMetadata[],
+    options?: { flatCatalog?: boolean },
 ): void {
     const schemas = new Set<string>();
+    if (options?.flatCatalog) {
+        schemas.add('');
+    }
     for (const cached of cache.getTablesAllSchemas(connectionName, database) ?? []) {
-        if (cached.SCHEMA) {
-            schemas.add(cached.SCHEMA);
+        const schema = cached.SCHEMA?.trim().toUpperCase();
+        if (schema || options?.flatCatalog) {
+            schemas.add(schema || '');
         }
     }
     for (const row of rows) {
-        if (row.SCHEMA) {
-            schemas.add(row.SCHEMA);
+        const schema = row.SCHEMA?.trim().toUpperCase();
+        if (schema || options?.flatCatalog) {
+            schemas.add(schema || '');
         }
     }
 
     for (const schema of schemas) {
-        const cacheKey = buildSchemaCacheKey(database, schema);
+        const schemaName = schema || undefined;
+        const cacheKey = buildSchemaCacheKey(database, schemaName);
         const existing = cache.getTables(connectionName, cacheKey) ?? [];
-        const retained = existing.filter(item => item.objType?.toUpperCase() !== objectType.toUpperCase());
-        const replacements = rows.filter(row => row.SCHEMA?.toUpperCase() === schema.toUpperCase());
+        const retained = existing.filter(item => inferCachedTableLikeType(item).toUpperCase() !== objectType.toUpperCase());
+        const replacements = rows.filter(row => (row.SCHEMA?.trim().toUpperCase() || '') === schema);
         const merged = [...retained, ...replacements];
-        cache.setTables(connectionName, cacheKey, merged, buildIdMap(database, schema, merged));
+        cache.setTables(connectionName, cacheKey, merged, buildIdMap(database, schemaName, merged));
         cache.markObjectsCatalogLoaded(connectionName, cacheKey, objectType);
     }
 }

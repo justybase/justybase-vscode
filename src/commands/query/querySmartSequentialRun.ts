@@ -16,6 +16,10 @@ import {
 import { toPerfErrorCode } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { tryAcquireQueryExecution } from './queryExecutionGate';
+import {
+    formatAccessFailureMessage,
+    presentAccessError,
+} from '../../utils/accessErrorHandling';
 
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
@@ -68,11 +72,16 @@ function resolveSmartSequentialQueries(
     return { queries, sourceUri };
 }
 
-function buildQueryErrorResult(sql: string | undefined, message: string) {
+function buildQueryErrorResult(
+    sql: string | undefined,
+    message: string,
+    databaseKind?: string,
+) {
+    const userMessage = formatAccessFailureMessage(message, { databaseKind, sql }) ?? message;
     return {
         columns: [],
         data: [],
-        message,
+        message: userMessage,
         isError: true,
         sql,
     };
@@ -90,6 +99,11 @@ export async function runSmartSequentialQuery(
     }
 
     const sourceUri = editor.document.uri.toString();
+    const connectionName = connectionManager.getConnectionForExecution(sourceUri)
+        || connectionManager.getActiveConnectionName();
+    const databaseKind = connectionName
+        ? connectionManager.getConnectionDatabaseKind(connectionName)
+        : undefined;
     const executionGate = tryAcquireQueryExecution(sourceUri, resultPanelProvider);
     if (!executionGate) {
         return;
@@ -159,8 +173,13 @@ export async function runSmartSequentialQuery(
             ? {
                 continueOnError: true,
                 onQueryError: (queryIndex, sql, errorMessage) => {
+                    void presentAccessError(errorMessage, {
+                        databaseKind,
+                        sql: queries[queryIndex] ?? sql,
+                        operation: 'SQL execution',
+                    });
                     resultPanelProvider.updateResults(
-                        [buildQueryErrorResult(queries[queryIndex] ?? sql, errorMessage)],
+                        [buildQueryErrorResult(queries[queryIndex] ?? sql, errorMessage, databaseKind)],
                         sourceUri,
                         true,
                     );
@@ -300,7 +319,11 @@ export async function runSmartSequentialQuery(
 
         if (executionStarted) {
             resultPanelProvider.updateResults(
-                [buildQueryErrorResult(queriesForError.length === 1 ? queriesForError[0] : undefined, msg)],
+                [buildQueryErrorResult(
+                    queriesForError.length === 1 ? queriesForError[0] : undefined,
+                    msg,
+                    databaseKind,
+                )],
                 sourceUri,
                 true,
             );
@@ -317,7 +340,13 @@ export async function runSmartSequentialQuery(
             });
             console.log(formatPerformanceEvent(errorEvent));
         }
-        vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+        if (!(await presentAccessError(msg, {
+            databaseKind,
+            sql: queriesForError.length === 1 ? queriesForError[0] : undefined,
+            operation: 'SQL execution',
+        }))) {
+            vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+        }
     } finally {
         executionGate.dispose();
     }

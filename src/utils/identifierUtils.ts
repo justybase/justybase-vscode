@@ -241,7 +241,7 @@ function normalizeFormattedIdentifier(identifier: string, kind?: string | Databa
     return unquoteIdentifier(trimmed);
 }
 
-function quoteIdentifierForKind(identifier: string, kind?: string | DatabaseKind): string {
+export function quoteIdentifierForKind(identifier: string, kind?: string | DatabaseKind): string {
     if (usesBacktickIdentifiers(kind)) {
         return `\`${identifier.replace(/`/g, '``')}\``;
     }

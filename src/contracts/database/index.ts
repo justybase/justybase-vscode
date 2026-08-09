@@ -87,6 +87,13 @@ const DATABASE_KIND_ALIASES: Readonly<Record<string, DatabaseKindType>> = {
   "duck db": "duckdb",
   "duck-db": "duckdb",
   duck_db: "duckdb",
+  file: "file",
+  files: "file",
+  "file sql": "file",
+  xlsx: "file",
+  csv: "file",
+  parquet: "file",
+  avro: "file",
   db2: "db2",
   db2luw: "db2",
   ibmdb2: "db2",
@@ -94,6 +101,11 @@ const DATABASE_KIND_ALIASES: Readonly<Record<string, DatabaseKindType>> = {
   sqlserver: "mssql",
   "sql server": "mssql",
   mysql: "mysql",
+  access: "access",
+  mdb: "access",
+  accdb: "access",
+  msaccess: "access",
+  "ms access": "access",
 };
 
 export function normalizeDatabaseKind(value?: string): DatabaseKindType {

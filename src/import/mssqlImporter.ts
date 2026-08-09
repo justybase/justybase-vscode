@@ -12,6 +12,7 @@ import {
 } from './dataImporter';
 import { normalizeAndDeduplicateHeaders } from './importHeaderUtils';
 import { createTabularDataImporter } from './tabularDataImporter';
+import { escapeSqlString as escapeSqlLiteral } from '../utils/sqlUtils';
 
 const MSSQL_MAX_VARCHAR_LENGTH = 8000;
 const MSSQL_MAX_NVARCHAR_LENGTH = 4000;
@@ -221,10 +222,6 @@ function normalizeValueForType(value: string, dataType: string, decimalDelimiter
     }
 
     return trimmed;
-}
-
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
 }
 
 function toSqlLiteral(value: string | null, dataType: string): string {

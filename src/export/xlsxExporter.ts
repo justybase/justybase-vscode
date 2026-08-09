@@ -1,10 +1,14 @@
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { spawn } from 'child_process';
 import * as vscode from 'vscode';
-import { validateExportPath } from './exportUtils';
-export { validateExportPath } from './exportUtils';
+import { validateExportPath, copyFileToClipboard, getTempFilePath as createExportTempPath } from './exportUtils';
+export { validateExportPath, copyFileToClipboard } from './exportUtils';
+
+/**
+ * Generate temporary file path for XLSX file
+ */
+export function getTempFilePath(): string {
+    return createExportTempPath('xlsx');
+}
 import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { getEffectiveResultColumnType } from '../core/streaming/resultColumnMetadata';
@@ -691,58 +695,4 @@ export async function exportQueryToXlsx(
             }
         }
     }
-}
-
-/**
- * Copy file to Windows clipboard using PowerShell
- */
-export async function copyFileToClipboard(filePath: string): Promise<boolean> {
-    if (os.platform() !== 'win32') {
-        console.error('Clipboard file copy is only supported on Windows');
-        return false;
-    }
-
-    return new Promise<boolean>(resolve => {
-        try {
-            const normalizedPath = path.normalize(path.resolve(filePath));
-            const powershellCommand = `Set-Clipboard -Path "${normalizedPath.replace(/"/g, '`"')}"`;
-
-            const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', powershellCommand]);
-
-            let errorOutput = '';
-
-            ps.stderr.on('data', (data: Buffer) => {
-                errorOutput += data.toString();
-            });
-
-            ps.on('close', (code: number) => {
-                if (code !== 0) {
-                    console.error(`PowerShell clipboard copy failed: ${errorOutput}`);
-                    resolve(false);
-                } else {
-                    console.log(`File copied to clipboard: ${normalizedPath}`);
-                    resolve(true);
-                }
-            });
-
-            ps.on('error', (err: Error) => {
-                console.error(`Error spawning PowerShell: ${err.message}`);
-                resolve(false);
-            });
-        } catch (error: unknown) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            console.error(`Error copying file to clipboard: ${errorMsg}`);
-            resolve(false);
-        }
-    });
-}
-
-/**
- * Generate temporary file path for XLSX file
- */
-export function getTempFilePath(): string {
-    const tempDir = os.tmpdir();
-    const timestamp = Date.now();
-    const tempFilename = `netezza_export_${timestamp}.xlsx`;
-    return path.join(tempDir, tempFilename);
 }

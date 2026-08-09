@@ -26,7 +26,7 @@ function objectKind(value: string | undefined): 'table' | 'view' | 'procedure' {
   return normalized === 'VIEW' ? 'view' : normalized === 'PROCEDURE' ? 'procedure' : 'table';
 }
 
-async function requestMetadata(params: WebLspMetadataRequestParams, documents: Map<string, DocumentState>, store: AppStore, config: ApiConfig, userId: string): Promise<unknown> {
+export async function requestMetadata(params: WebLspMetadataRequestParams, documents: Map<string, DocumentState>, store: AppStore, config: ApiConfig, userId: string): Promise<unknown> {
   const document = documents.get(params.documentUri);
   const context = document?.context;
   if (params.kind === 'context') return contextFor(context);
@@ -44,12 +44,17 @@ async function requestMetadata(params: WebLspMetadataRequestParams, documents: M
   }
   if (params.kind === 'columns' || params.kind === 'tableInfo') {
     if (!params.table) return params.kind === 'columns' ? [] : null;
-    const schema = params.schema ?? context?.schema ?? '';
+    const schema = params.schema ?? context?.schema;
     if (params.kind === 'tableInfo') {
       const objects = await listObjects(profile, database, schema || undefined, config.masterKey);
       const exists = objects.some(item => item.name.toUpperCase() === params.table!.toUpperCase()
         && (!schema || item.schema?.toUpperCase() === schema.toUpperCase()));
-      if (!exists) return { exists: false, table: params.table, database, schema, columns: [] };
+      if (!exists) return { exists: false, table: params.table, database, schema: schema ?? '', columns: [] };
+    }
+    if (!schema) {
+      return params.kind === 'columns'
+        ? []
+        : { exists: true, table: params.table, database, schema: '', columns: [] };
     }
     const columns = await listColumns(profile, database, schema, params.table, config.masterKey);
     if (params.kind === 'columns') return columns;
@@ -61,11 +66,31 @@ async function requestMetadata(params: WebLspMetadataRequestParams, documents: M
 }
 
 function diagnosticResponse(items: CoreDiagnostic[]): Array<Record<string, unknown>> {
-  return items.map(item => ({ range: item.range, severity: item.severity ?? 2, code: item.code, source: item.source ?? 'justybase-netezza', message: item.message }));
+  return items.map(item => ({ range: item.range, severity: item.severity ?? 2, code: item.code, source: item.source ?? 'justybase-netezza', message: item.message, data: item.data }));
 }
 
 function completionResponse(items: CoreCompletionItem[]): Array<Record<string, unknown>> {
   return items.map(item => ({ label: item.label, kind: item.kind, detail: item.detail, insertText: item.insertText ?? item.label }));
+}
+
+function hoverResponse(hover: { range?: { start: { line: number; character: number }; end: { line: number; character: number } }; contents: { kind: string; value: string } } | null): Record<string, unknown> | null {
+  if (!hover) return null;
+  return { range: hover.range, contents: { kind: hover.contents.kind, value: hover.contents.value } };
+}
+
+function locationResponse(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } } | null): Record<string, unknown> | null {
+  if (!location) return null;
+  return { uri: location.uri, range: location.range };
+}
+
+function locationsResponse(locations: Array<{ uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }> | null): Array<Record<string, unknown>> | null {
+  if (!locations) return null;
+  return locations.map(location => ({ uri: location.uri, range: location.range }));
+}
+
+function workspaceEditResponse(edit: { changes: Record<string, Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }>> } | null): Record<string, unknown> | null {
+  if (!edit) return null;
+  return { changes: edit.changes };
 }
 
 export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: ApiConfig, userId: string, onClose?: (session: LspSession) => void): LspSession {
@@ -98,7 +123,7 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
     void (async () => {
       try {
         if (request.method === 'initialize') {
-          response(request.id, { capabilities: { textDocumentSync: 1, completionProvider: { triggerCharacters: ['.', ' ', '\n', '*'] }, diagnosticProvider: { interFileDependencies: false, workspaceDiagnostics: false } } });
+          response(request.id, { capabilities: { textDocumentSync: 1, completionProvider: { triggerCharacters: ['.', ' ', '\n', '*'] }, diagnosticProvider: { interFileDependencies: false, workspaceDiagnostics: false }, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: { prepareProvider: true }, inlayHintProvider: true, signatureHelpProvider: { triggerCharacters: ['(', ','] }, documentSymbolProvider: true, documentFormattingProvider: true, semanticTokensProvider: { full: true, legend: { tokenTypes: ['enumMember', 'function', 'keyword', 'macro', 'modifier', 'variable', 'type', 'column', 'table', 'alias', 'schema', 'database', 'localVariable'], tokenModifiers: ['readonly', 'defaultLibrary', 'italic'] } } } });
           return;
         }
         if (request.method === 'initialized' || request.method === 'shutdown') { if (request.method === 'shutdown') response(request.id, null); return; }
@@ -147,6 +172,105 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
           const textDocument = params.textDocument as { uri?: string } | undefined;
           const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
           response(request.id, { kind: 'full', items: document ? diagnosticResponse(await core.diagnostics(textDocument!.uri!, document.version, document.text)) : [] });
+          return;
+        }
+        if (request.method === 'textDocument/hover') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const position = params.position as { line?: number; character?: number } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document || !position) { response(request.id, null); return; }
+          const hover = await core.hover(textDocument!.uri!, document.version, document.text, { line: position.line ?? 0, character: position.character ?? 0 });
+          response(request.id, hoverResponse(hover));
+          return;
+        }
+        if (request.method === 'textDocument/definition') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const position = params.position as { line?: number; character?: number } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document || !position) { response(request.id, null); return; }
+          const location = await core.definition(textDocument!.uri!, document.version, document.text, { line: position.line ?? 0, character: position.character ?? 0 });
+          response(request.id, locationResponse(location));
+          return;
+        }
+        if (request.method === 'textDocument/references') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const position = params.position as { line?: number; character?: number } | undefined;
+          const context = params.context as { includeDeclaration?: boolean } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document || !position) { response(request.id, null); return; }
+          const locations = await core.references(textDocument!.uri!, document.version, document.text, { line: position.line ?? 0, character: position.character ?? 0 }, context?.includeDeclaration ?? true);
+          response(request.id, locationsResponse(locations));
+          return;
+        }
+        if (request.method === 'textDocument/prepareRename') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const position = params.position as { line?: number; character?: number } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document || !position) { response(request.id, null); return; }
+          const prepare = await core.prepareRename(textDocument!.uri!, document.version, document.text, { line: position.line ?? 0, character: position.character ?? 0 });
+          response(request.id, prepare ? { range: prepare.range, placeholder: prepare.placeholder } : null);
+          return;
+        }
+        if (request.method === 'textDocument/rename') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const position = params.position as { line?: number; character?: number } | undefined;
+          const newName = typeof params.newName === 'string' ? params.newName : '';
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document || !position) { response(request.id, null); return; }
+          const edit = await core.rename(textDocument!.uri!, document.version, document.text, { line: position.line ?? 0, character: position.character ?? 0 }, newName);
+          response(request.id, workspaceEditResponse(edit));
+          return;
+        }
+        if (request.method === 'textDocument/inlayHint') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document) { response(request.id, []); return; }
+          const hints = await core.inlayHints(textDocument!.uri!, document.version, document.text);
+          response(request.id, hints.map(hint => ({ position: hint.position, label: hint.label, kind: hint.kind ? { value: hint.kind, tooltip: undefined } : { value: 'type', tooltip: undefined } })));
+          return;
+        }
+        if (request.method === 'textDocument/signatureHelp') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const position = params.position as { line?: number; character?: number } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document || !position) { response(request.id, null); return; }
+          const help = await core.signatureHelp(textDocument!.uri!, document.version, document.text, { line: position.line ?? 0, character: position.character ?? 0 });
+          response(request.id, help ? { signatures: help.signatures, activeSignature: help.activeSignature, activeParameter: help.activeParameter } : null);
+          return;
+        }
+        if (request.method === 'textDocument/documentSymbol') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document) { response(request.id, []); return; }
+          const symbols = await core.documentSymbols(textDocument!.uri!, document.version, document.text);
+          response(request.id, symbols.map(symbol => ({ name: symbol.name, detail: symbol.detail, kind: symbol.kind, range: symbol.range, selectionRange: symbol.selectionRange, children: symbol.children })));
+          return;
+        }
+        if (request.method === 'textDocument/formatting') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document) { response(request.id, []); return; }
+          const options = params.options as { tabSize?: number; insertSpaces?: boolean } | undefined;
+          const formatted = await core.format(document.text, 'netezza', { tabWidth: options?.insertSpaces === false ? 4 : Math.max(1, options?.tabSize ?? 4) });
+          const lineCount = document.text.split('\n').length;
+          response(request.id, [{ range: { start: { line: 0, character: 0 }, end: { line: Math.max(0, lineCount - 1), character: Number.MAX_SAFE_INTEGER } }, newText: formatted }]);
+          return;
+        }
+        if (request.method === 'textDocument/semanticTokens/full') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document) { response(request.id, { types: [], modifiers: [], tokens: [] }); return; }
+          response(request.id, await core.semanticTokens(textDocument!.uri!, document.version, document.text));
+          return;
+        }
+        if (request.method === 'justybase/statementNav') {
+          const uri = typeof params.uri === 'string' ? params.uri : '';
+          const offset = typeof params.offset === 'number' ? params.offset : 0;
+          const direction = params.direction === 'before' ? 'before' : 'after';
+          const document = uri ? documents.get(uri) : undefined;
+          if (!document) { response(request.id, null); return; }
+          const result = await core.window(uri, document.version, document.text, offset, 'sentence', direction);
+          response(request.id, result);
           return;
         }
         if (request.id !== undefined) response(request.id, null);

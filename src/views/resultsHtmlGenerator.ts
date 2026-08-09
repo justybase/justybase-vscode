@@ -107,6 +107,7 @@ export class ResultsHtmlGenerator {
                             <button type="button" class="layout-switcher__btn active" data-layout="table" aria-pressed="true" title="Standard table layout">Table</button>
                             <button type="button" class="layout-switcher__btn" data-layout="table2" aria-pressed="false" title="Sidebar layout with schema and grouping">Table2</button>
                             <button type="button" class="layout-switcher__btn" data-layout="charts" aria-pressed="false" title="Professional range charts (ECharts)">Charts</button>
+                            <button type="button" class="layout-switcher__btn" data-layout="explore" aria-pressed="false" title="Explore columns, pivot and time composer">Explore</button>
                         </div>
                         <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter rows..." onkeyup="onFilterChanged()" aria-label="Filter rows">
                         <div class="column-search-group">
@@ -146,6 +147,7 @@ export class ResultsHtmlGenerator {
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">View mode</div>
                                 <div class="split-btn__menu-item" data-action="view-chart">Trend charts</div>
                                 <div class="split-btn__menu-item" data-action="view-diff">Diff</div>
+                                <div class="split-btn__menu-item" data-action="view-explore">Explore</div>
                                 <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item" data-action="formatting">Formatting…</div>
                                 <div class="split-btn__menu-separator"></div>
@@ -163,11 +165,13 @@ export class ResultsHtmlGenerator {
                                 <div class="split-btn__menu-item" data-mode="table">Table</div>
                                 <div class="split-btn__menu-item" data-mode="chart">Charts</div>
                                 <div class="split-btn__menu-item" data-mode="diff">Diff</div>
+                                <div class="split-btn__menu-item" data-mode="explore">Explore</div>
                             </div>
                             <select id="viewModeSelect" class="view-mode-select-hidden" aria-hidden="true">
                                 <option value="table">Table</option>
                                 <option value="chart">Charts</option>
                                 <option value="diff">Diff</option>
+                                <option value="explore">Explore</option>
                             </select>
                             <select id="diffBaselineSelect" class="view-mode-select-hidden" title="Choose baseline result set" style="display: none;" aria-hidden="true"></select>
                         </div>
@@ -318,7 +322,7 @@ export class ResultsHtmlGenerator {
                     if (sel) { sel.value = mode; sel.dispatchEvent(new Event('change')); }
                     var label = document.getElementById('viewModeLabel');
                     if (label) {
-                        var names = { table:'Table', chart:'Charts', diff:'Diff' };
+                        var names = { table:'Table', chart:'Charts', diff:'Diff', explore:'Explore' };
                         label.textContent = names[mode] || mode;
                     }
                     document.getElementById('viewSplitMenu').style.display = 'none';
@@ -350,7 +354,7 @@ export class ResultsHtmlGenerator {
                 window.syncViewModeBar = function(mode) {
                     var label = document.getElementById('viewModeLabel');
                     if (label) {
-                        var names = { table:'Table', chart:'Charts', diff:'Diff' };
+                        var names = { table:'Table', chart:'Charts', diff:'Diff', explore:'Explore' };
                         label.textContent = names[mode] || mode;
                     }
                     if (typeof window.syncLayoutSwitcher === 'function') {
@@ -408,6 +412,8 @@ export class ResultsHtmlGenerator {
                         activeLayout = 'charts';
                     } else if (viewMode === 'table') {
                         activeLayout = document.body.classList.contains('sidebar-layout') ? 'table2' : 'table';
+                    } else if (viewMode === 'explore') {
+                        activeLayout = 'explore';
                     }
                     switcher.querySelectorAll('.layout-switcher__btn').forEach(function(btn) {
                         var isActive = !!activeLayout && btn.dataset.layout === activeLayout;
@@ -439,6 +445,10 @@ export class ResultsHtmlGenerator {
                             var modeSelect = document.getElementById('viewModeSelect');
                             window.syncLayoutSwitcher(modeSelect && modeSelect.value === 'table' ? 'table' : 'table');
                         }
+                    } else if (layout === 'explore') {
+                        if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
+                        window.setLayoutMode('top');
+                        setViewMode('explore');
                     }
                 };
                 (function initLayoutSwitcher() {

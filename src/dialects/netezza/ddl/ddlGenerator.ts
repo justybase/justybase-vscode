@@ -3,14 +3,14 @@
  * Orchestrates DDL generation for different object types
  */
 
-import { DDLResult } from './types';
+import type { DDLResult } from './types';
 import { createConnectionFromDetails } from './helpers';
 import { generateTableDDL } from './tableDDL';
 import { generateViewDDL } from './viewDDL';
 import { generateProcedureDDL } from './procedureDDL';
 import { generateExternalTableDDL } from './externalTableDDL';
 import { generateSynonymDDL } from './synonymDDL';
-import { NzConnection, ConnectionDetails } from '../../../types';
+import type { NzConnection, ConnectionDetails } from '../../../types';
 
 /**
  * Generate DDL code for a database object

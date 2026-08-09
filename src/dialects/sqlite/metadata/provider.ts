@@ -4,13 +4,10 @@ import type {
     DatabaseMetadataProvider,
     DatabaseSourceSearchQueryOptions
 } from '../../../contracts/database';
+import { quoteIdentifier } from '../../../utils/identifierUtils';
 
 function quoteLiteral(value: string | undefined): string {
     return `'${(value ?? '').replace(/'/g, "''")}'`;
-}
-
-function quoteIdentifier(value: string | undefined): string {
-    return `"${(value ?? '').replace(/"/g, '""')}"`;
 }
 
 function normalizeDatabaseName(database: string | undefined): string {
@@ -22,13 +19,18 @@ function resolveLookupDatabase(database: string | undefined, schema?: string): s
     return normalizeDatabaseName(schemaOverride && schemaOverride.length > 0 ? schemaOverride : database);
 }
 
-function normalizeObjectType(objectType: string): 'table' | 'view' {
-    return objectType.trim().toLowerCase() === 'view' ? 'view' : 'table';
+type SqliteMasterObjectType = 'table' | 'view' | 'index' | 'trigger';
+
+function normalizeObjectType(objectType: string): SqliteMasterObjectType | undefined {
+    const normalized = objectType.trim().toLowerCase();
+    return normalized === 'table' || normalized === 'view' || normalized === 'index' || normalized === 'trigger'
+        ? normalized
+        : undefined;
 }
 
 function buildTableInfoQuery(database: string | undefined, tableName: string | undefined, schema?: string): string {
     const databaseName = quoteIdentifier(resolveLookupDatabase(database, schema));
-    return `SELECT * FROM ${databaseName}.pragma_table_info(${quoteLiteral(tableName)})`;
+    return `SELECT * FROM ${databaseName}.pragma_table_xinfo(${quoteLiteral(tableName)})`;
 }
 
 function buildColumnsProjection(database: string, schema?: string, tableName?: string, objectTypes?: readonly string[]): string {
@@ -50,13 +52,13 @@ function buildColumnsProjection(database: string, schema?: string, tableName?: s
             '' AS SCHEMA,
             tbl.name AS TABLENAME,
             col.name AS ATTNAME,
-            COALESCE(NULLIF(col.type, ''), 'TEXT') AS FORMAT_TYPE,
+            COALESCE(NULLIF(col.type, ''), 'BLOB') AS FORMAT_TYPE,
             '' AS DESCRIPTION,
             CASE WHEN col.pk > 0 THEN 1 ELSE 0 END AS IS_PK,
             0 AS IS_FK,
             col.cid + 1 AS ATTNUM
         FROM ${databaseIdentifier}.sqlite_master AS tbl
-        JOIN ${databaseIdentifier}.pragma_table_info(tbl.name) AS col
+        JOIN ${databaseIdentifier}.pragma_table_xinfo(tbl.name) AS col
         WHERE tbl.name NOT LIKE 'sqlite_%'
           AND tbl.type IN ('table', 'view')
           ${tableFilter}
@@ -77,8 +79,8 @@ function buildDetailedColumnQuery(
     return `
         SELECT
             name AS ATTNAME,
-            COALESCE(NULLIF(type, ''), 'TEXT') AS FORMAT_TYPE,
-            COALESCE(NULLIF(type, ''), 'TEXT') AS FULL_TYPE,
+            COALESCE(NULLIF(type, ''), 'BLOB') AS FORMAT_TYPE,
+            COALESCE(NULLIF(type, ''), 'BLOB') AS FULL_TYPE,
             "notnull" AS ${notNullAlias},
             "notnull" AS IS_NOT_NULL,
             dflt_value AS COLDEFAULT,
@@ -103,12 +105,12 @@ function buildObjectSearchQuery(database: string, likePattern: string): string {
                 name AS NAME,
                 '' AS SCHEMA,
                 ${databaseLiteral} AS DATABASE,
-                CASE type WHEN 'view' THEN 'VIEW' ELSE 'TABLE' END AS TYPE,
-                '' AS PARENT,
+                UPPER(type) AS TYPE,
+                COALESCE(tbl_name, '') AS PARENT,
                 COALESCE(sql, '') AS DESCRIPTION,
                 'NAME' AS MATCH_TYPE
             FROM ${databaseIdentifier}.sqlite_master
-            WHERE type IN ('table', 'view')
+            WHERE type IN ('table', 'view', 'index', 'trigger')
               AND name NOT LIKE 'sqlite_%'
               AND UPPER(name) LIKE '${likePattern}' ESCAPE '\\'
             UNION ALL
@@ -117,12 +119,12 @@ function buildObjectSearchQuery(database: string, likePattern: string): string {
                 name AS NAME,
                 '' AS SCHEMA,
                 ${databaseLiteral} AS DATABASE,
-                CASE type WHEN 'view' THEN 'VIEW' ELSE 'TABLE' END AS TYPE,
-                '' AS PARENT,
+                UPPER(type) AS TYPE,
+                COALESCE(tbl_name, '') AS PARENT,
                 COALESCE(sql, '') AS DESCRIPTION,
                 'DDL' AS MATCH_TYPE
             FROM ${databaseIdentifier}.sqlite_master
-            WHERE type IN ('table', 'view')
+            WHERE type IN ('table', 'view', 'index', 'trigger')
               AND name NOT LIKE 'sqlite_%'
               AND UPPER(COALESCE(sql, '')) LIKE '${likePattern}' ESCAPE '\\'
               AND UPPER(name) NOT LIKE '${likePattern}' ESCAPE '\\'
@@ -137,7 +139,7 @@ function buildObjectSearchQuery(database: string, likePattern: string): string {
                 COALESCE(master.sql, '') AS DESCRIPTION,
                 'NAME' AS MATCH_TYPE
             FROM ${databaseIdentifier}.pragma_table_list AS tbl
-            JOIN ${databaseIdentifier}.pragma_table_info(tbl.name) AS col
+            JOIN ${databaseIdentifier}.pragma_table_xinfo(tbl.name) AS col
             LEFT JOIN ${databaseIdentifier}.sqlite_master AS master
               ON master.name = tbl.name
              AND master.type = tbl.type
@@ -176,7 +178,7 @@ function buildProcedureSourceSearchQuery(): string {
 }
 
 export const sqliteMetadataProvider: DatabaseMetadataProvider = {
-    defaultObjectTypes: ['TABLE', 'VIEW'],
+    defaultObjectTypes: ['TABLE', 'VIEW', 'INDEX', 'TRIGGER'],
     defaultColumnObjectTypes: ['TABLE', 'VIEW'],
     buildListDatabasesQuery(): string {
         return `
@@ -233,6 +235,9 @@ export const sqliteMetadataProvider: DatabaseMetadataProvider = {
         const databaseName = normalizeDatabaseName(database);
         const databaseIdentifier = quoteIdentifier(databaseName);
         const normalizedType = normalizeObjectType(objectType);
+        if (!normalizedType) {
+            return 'SELECT NULL AS OBJNAME, NULL AS OBJID, NULL AS DESCRIPTION, NULL AS OWNER WHERE 1 = 0;';
+        }
         return `
             SELECT
                 name AS OBJNAME,
@@ -246,7 +251,7 @@ export const sqliteMetadataProvider: DatabaseMetadataProvider = {
         `;
     },
     buildTypeGroupsQuery(_database: string): string {
-        return "SELECT 'TABLE' AS OBJTYPE UNION ALL SELECT 'VIEW' AS OBJTYPE;";
+        return "SELECT 'TABLE' AS OBJTYPE UNION ALL SELECT 'VIEW' AS OBJTYPE UNION ALL SELECT 'INDEX' AS OBJTYPE UNION ALL SELECT 'TRIGGER' AS OBJTYPE;";
     },
     buildColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string {
         return buildColumnsProjection(database, options?.schema, options?.tableName, options?.objTypes);

@@ -142,7 +142,7 @@ function isUseStatement(sql: string): boolean {
     return /^USE\b/i.test(sql.trim());
 }
 
-async function loadDuckDb(): Promise<DuckDbModule> {
+export async function loadDuckDb(): Promise<DuckDbModule> {
     if (!_duckdbModulePromise) {
         _duckdbModulePromise = Promise.resolve()
             .then(() => _extensionRequire('@duckdb/node-api') as DuckDbModule)
@@ -161,8 +161,8 @@ async function loadDuckDb(): Promise<DuckDbModule> {
 
 export class DuckDbConnection extends EventEmitter implements DatabaseConnection {
     public _connected = false;
-    private _instance?: DuckDBInstance;
-    private _connection?: DuckDbRuntimeConnection;
+    protected _instance?: DuckDBInstance;
+    protected _connection?: DuckDbRuntimeConnection;
     private _currentCatalog = '';
     private _currentSchema = 'main';
     private readonly _sessionId = `duckdb-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -278,7 +278,7 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
         this._connection?.interrupt();
     }
 
-    private requireConnection(): DuckDbRuntimeConnection {
+    protected requireConnection(): DuckDbRuntimeConnection {
         if (!this._connection) {
             throw new Error('DuckDB connection is not open.');
         }
@@ -286,7 +286,7 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
         return this._connection;
     }
 
-    private async refreshSessionContext(): Promise<void> {
+    protected async refreshSessionContext(): Promise<void> {
         const reader = await this.requireConnection().runAndReadAll(
             'SELECT current_catalog() AS CURRENT_CATALOG, current_schema() AS CURRENT_SCHEMA'
         );

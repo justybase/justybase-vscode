@@ -1,0 +1,24 @@
+{
+  "scopeName": "sqlite.injection",
+  "name": "SQLite SQL",
+  "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block)",
+  "patterns": [
+    {
+      "name": "keyword.other.sqlite.sql",
+      "match": "(?i)\\b(ATTACH|AUTOINCREMENT|COLLATE|CONFLICT|CREATE|DETACH|EXPLAIN|GENERATED|INDEX|PRAGMA|REINDEX|RETURNING|SAVEPOINT|STRICT|TRIGGER|VACUUM|VIRTUAL|WINDOW|WITHOUT)\\b"
+    },
+    {
+      "name": "storage.type.sqlite.sql",
+      "match": "(?i)\\b(BLOB|BOOLEAN|CHAR|CLOB|DATE|DATETIME|DECIMAL|DOUBLE|FLOAT|INTEGER|INT|NUMERIC|REAL|TEXT|TIME|TIMESTAMP|VARCHAR)\\b"
+    },
+    {
+      "name": "support.function.sqlite.sql",
+      "match": "(?i)\\b(DATE|DATETIME|GROUP_CONCAT|HEX|IFNULL|IIF|JSON(?:_ARRAY|_ARRAY_LENGTH|_EXTRACT|_OBJECT|_REMOVE|_SET|_TYPE)?|JULIANDAY|PRINTF|QUOTE|RANDOMBLOB|STRFTIME|TOTAL|UNICODE|ZEROBLOB)\\b(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.control.sqlite.sql",
+      "match": "(?i)\\b(EXPLAIN\\s+QUERY\\s+PLAN|IF\\s+NOT\\s+EXISTS|ON\\s+CONFLICT|VACUUM\\s+INTO|WITHOUT\\s+ROWID)\\b"
+    }
+  ],
+  "repository": {}
+}

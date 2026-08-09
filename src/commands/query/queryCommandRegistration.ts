@@ -15,7 +15,11 @@ import { formatSql } from '../../services/sqlFormatter';
 import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
 import type { ViewTableDataCommandArgs } from '../../providers/sqlDataAffordanceResolver';
 import { QueryCommandsDependencies } from './queryCommandTypes';
-import { formatQualifiedObjectName, formatQualifiedObjectPathForDisplay } from '../../utils/identifierUtils';
+import { formatQualifiedObjectName, formatQualifiedObjectPathForDisplay, quoteIdentifier } from '../../utils/identifierUtils';
+import {
+    formatAccessFailureMessage,
+    presentAccessError,
+} from '../../utils/accessErrorHandling';
 import {
     confirmSafeExecute,
     confirmSafeExecuteForExpandedQuery,
@@ -32,17 +36,13 @@ import { tryAcquireQueryExecution } from './queryExecutionGate';
 
 const VIEW_DATA_ROW_LIMIT = 100;
 
-function quoteIdentifier(identifier: string): string {
-    return `"${identifier.replace(/"/g, '""')}"`;
-}
-
 function buildQualifiedObjectPath(
     databaseName: string | undefined,
     schemaName: string | undefined,
     tableName: string,
     kind?: string | DatabaseKind
 ): string {
-    if (kind !== 'sqlite') {
+    if (kind !== 'sqlite' && kind !== 'access') {
         if (databaseName && schemaName) {
             return `${quoteIdentifier(databaseName)}.${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
         }
@@ -472,10 +472,19 @@ export function registerQueryCommands(
                     console.log(formatPerformanceEvent(successEvent));
                 }
             } catch (err: unknown) {
-                const msg = err instanceof Error ? err.message : String(err);
+                const rawMsg = err instanceof Error ? err.message : String(err);
+                const connectionName = connectionManager.getConnectionForExecution(sourceUri)
+                    || connectionManager.getActiveConnectionName();
+                const databaseKind = connectionName
+                    ? connectionManager.getConnectionDatabaseKind(connectionName)
+                    : undefined;
+                const msg = formatAccessFailureMessage(err, {
+                    databaseKind,
+                    sql: text,
+                }) ?? rawMsg;
 
                 // If it's a cancellation error, log info but don't show error dialog or error result
-                if (msg.includes('Query cancelled')) {
+                if (rawMsg.includes('Query cancelled')) {
                     if (executionStarted) {
                         resultPanelProvider.log(
                             sourceUri,
@@ -519,7 +528,13 @@ export function registerQueryCommands(
                     });
                     console.log(formatPerformanceEvent(errorEvent));
                 }
-                vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+                if (!(await presentAccessError(err, {
+                    databaseKind,
+                    sql: text,
+                    operation: 'SQL execution',
+                }))) {
+                    vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+                }
             } finally {
                 executionGate.dispose();
             }

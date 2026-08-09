@@ -17,6 +17,18 @@ import type {
     DatabaseGroupingRequest,
     DatabaseGroupingResultColumn,
 } from '../../results/databaseGroupingSql';
+import type {
+    ExploreFilterModel,
+} from '../../results/explore/exploreFilters';
+import type {
+    FullStatisticName,
+} from '../../results/explore/fullStatisticsSql';
+import type {
+    ExplorePivotConfig,
+} from '../../results/explore/pivotSqlBuilder';
+import type {
+    ExploreComposerConfig,
+} from '../../results/explore/composerSql';
 
 export type ResultPanelExportFormat = 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'xml' | 'sql' | 'markdown' | 'parquet';
 export type ResultPanelExportRowScope = 'loaded' | 'all';
@@ -233,6 +245,58 @@ export type ResultPanelWebviewToHostMessage =
         resultSetIndex: number;
         requestId: number;
         grouping: DatabaseGroupingRequest;
+    }
+    | {
+        command: 'requestExploreFullStats';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        columnIndex: number;
+        filters?: ExploreFilterModel;
+        timeoutSeconds?: number;
+    }
+    | {
+        command: 'requestExplorePivot';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        pivot: ExplorePivotConfig;
+        timeoutSeconds?: number;
+    }
+    | {
+        command: 'previewExplorePivot';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        pivot: ExplorePivotConfig;
+        pivotValues: string[];
+    }
+    | {
+        command: 'requestExploreComposer';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        composer: ExploreComposerConfig;
+        timeoutSeconds?: number;
+    }
+    | {
+        command: 'previewExploreComposer';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        composer: ExploreComposerConfig;
+    }
+    | {
+        command: 'previewExploreFilteredSql';
+        sourceUri: string;
+        resultSetIndex: number;
+        requestId: number;
+        filters: ExploreFilterModel;
+    }
+    | {
+        command: 'openExploreSqlInEditor';
+        sql: string;
+        label?: string;
     };
 
 export type ResultPanelHostToWebviewMessage =
@@ -371,6 +435,59 @@ export type ResultPanelHostToWebviewMessage =
         requestId: number;
         sql?: string;
         error?: string;
+    }
+    | {
+        command: 'exploreFullStatsResult';
+        requestId: number;
+        columnIndex: number;
+        values?: Partial<Record<FullStatisticName, number | null>>;
+        percentilesUnavailable?: boolean;
+        stddevUnavailable?: boolean;
+        sql?: string;
+        error?: string;
+    }
+    | {
+        command: 'explorePivotResult';
+        requestId: number;
+        columns?: Array<{ name: string; type?: string; kind: 'row' | 'value' }>;
+        rows?: unknown[][];
+        totalRows?: number;
+        pivotValues?: string[];
+        truncated?: boolean;
+        sql?: string;
+        error?: string;
+    }
+    | {
+        command: 'explorePivotPreviewResult';
+        requestId: number;
+        sql?: string;
+        error?: string;
+    }
+    | {
+        command: 'exploreComposerResult';
+        requestId: number;
+        columnIndexes?: {
+            bucket: number;
+            dimension: number | undefined;
+            split: number | undefined;
+            measure: number;
+            previous: number | undefined;
+        };
+        rows?: unknown[][];
+        sql?: string;
+        error?: string;
+    }
+    | {
+        command: 'exploreComposerPreviewResult';
+        requestId: number;
+        sql?: string;
+        error?: string;
+    }
+    | {
+        command: 'exploreFilteredSqlPreviewResult';
+        requestId: number;
+        sql?: string;
+        error?: string;
     };
 
 export type ResultPanelInboundMessage = ResultPanelWebviewToHostMessage;
@@ -437,7 +554,14 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'moveAllToDisk',
   'requestDatabaseGrouping',
   'cancelDatabaseGrouping',
-  'previewDatabaseGrouping'
+  'previewDatabaseGrouping',
+  'requestExploreFullStats',
+  'requestExplorePivot',
+  'previewExplorePivot',
+  'requestExploreComposer',
+  'previewExploreComposer',
+  'previewExploreFilteredSql',
+  'openExploreSqlInEditor'
 ] as const satisfies readonly ResultPanelWebviewToHostMessage['command'][];
 
 export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
@@ -463,7 +587,13 @@ export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
   'databaseFilterValuesResult',
   'databaseFilterApplyResult',
   'databaseGroupingResult',
-  'databaseGroupingPreviewResult'
+  'databaseGroupingPreviewResult',
+  'exploreFullStatsResult',
+  'explorePivotResult',
+  'explorePivotPreviewResult',
+  'exploreComposerResult',
+  'exploreComposerPreviewResult',
+  'exploreFilteredSqlPreviewResult'
 ] as const satisfies readonly ResultPanelHostToWebviewMessage['command'][];
 
 export const RESULT_PANEL_INBOUND_COMMANDS = RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS;

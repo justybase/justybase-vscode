@@ -107,7 +107,7 @@ function stripExplainPrefix(sql: string): string {
     if (!trimmed.toUpperCase().startsWith('EXPLAIN')) {
         return trimmed;
     }
-    return trimmed.replace(/^EXPLAIN\s+(?:VERBOSE\s+)?/i, '').trim();
+    return trimmed.replace(/^EXPLAIN\s+(?:(?:QUERY\s+PLAN)|VERBOSE)?\s*/i, '').trim();
 }
 
 async function buildExplainSqlForDialect(
@@ -136,6 +136,10 @@ async function buildExplainSqlForDialect(
     if (databaseKind === 'snowflake') {
         const { buildSnowflakeExplainQuery } = await import('../../../extensions/snowflake/src/snowflakeQueryProfile');
         return buildSnowflakeExplainQuery(strippedSql);
+    }
+
+    if (databaseKind === 'sqlite') {
+        return `EXPLAIN QUERY PLAN ${strippedSql}`;
     }
 
     return options.verbose ? `EXPLAIN VERBOSE ${strippedSql}` : `EXPLAIN ${strippedSql}`;
@@ -176,6 +180,11 @@ async function normalizeExplainOutputForDisplay(
         }
 
         return renderSnowflakeExplainPlan(parseSnowflakeExplainJson(explainOutput));
+    }
+
+    if (databaseKind === 'sqlite') {
+        const { normalizeSqliteExplainPlan } = await import('../../dialects/sqlite/explainParser');
+        return normalizeSqliteExplainPlan(explainOutput);
     }
 
     return explainOutput;

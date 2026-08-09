@@ -68,6 +68,25 @@ import {
     buildDatabaseDistinctValuesSql,
     buildDatabaseFilteredSql,
 } from '../results/databaseFilterSql';
+import {
+    buildFullStatisticsSql,
+    mapFullStatisticsRow,
+    type FullStatisticName,
+} from '../results/explore/fullStatisticsSql';
+import {
+    buildExplorePivotSql,
+    buildDistinctValuesSql,
+    EXPLORE_PIVOT_MAX_COLUMN_VALUES,
+    type ExplorePivotConfig,
+} from '../results/explore/pivotSqlBuilder';
+import {
+    buildComposerSql,
+    type ExploreComposerConfig,
+} from '../results/explore/composerSql';
+import {
+    wrapSourceSqlWithFilters,
+    type ExploreFilterModel,
+} from '../results/explore/exploreFilters';
 
 interface HydratePayloadMetrics {
     activeSource: string | null;
@@ -172,6 +191,19 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 this._handleDatabaseGrouping(sourceUri, resultSetIndex, grouping, timeoutSeconds),
             onPreviewDatabaseGrouping: (sourceUri, resultSetIndex, grouping) =>
                 this._previewDatabaseGrouping(sourceUri, resultSetIndex, grouping),
+            onRequestExploreFullStats: (sourceUri, resultSetIndex, columnIndex, filters, timeoutSeconds) =>
+                this._handleExploreFullStats(sourceUri, resultSetIndex, columnIndex, filters, timeoutSeconds),
+            onRequestExplorePivot: (sourceUri, resultSetIndex, pivot, timeoutSeconds) =>
+                this._handleExplorePivot(sourceUri, resultSetIndex, pivot, timeoutSeconds),
+            onPreviewExplorePivot: (sourceUri, resultSetIndex, pivot, pivotValues) =>
+                this._previewExplorePivot(sourceUri, resultSetIndex, pivot, pivotValues),
+            onRequestExploreComposer: (sourceUri, resultSetIndex, composer, timeoutSeconds) =>
+                this._handleExploreComposer(sourceUri, resultSetIndex, composer, timeoutSeconds),
+            onPreviewExploreComposer: (sourceUri, resultSetIndex, composer) =>
+                this._previewExploreComposer(sourceUri, resultSetIndex, composer),
+            onPreviewExploreFilteredSql: (sourceUri, resultSetIndex, filters) =>
+                this._previewExploreFilteredSql(sourceUri, resultSetIndex, filters),
+            onOpenExploreSqlInEditor: (sql, label) => this._openExploreSqlInEditor(sql, label),
         };
 
         this._messageHandler = new ResultPanelMessageHandler(
@@ -987,6 +1019,306 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
      */
     private _resolveGroupingResultSql(resultSet: ResultSet | undefined): string {
         return (resultSet?.sql || resultSet?.refreshSql || '').trim();
+    }
+
+    private _resolveExploreResultSet(sourceUri: string, resultSetIndex: number): ResultSet {
+        const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
+        if (!resultSet || resultSet.isLog || resultSet.isTextContent || resultSet.isError) {
+            throw new Error('This result set does not have SQL that can be analyzed.');
+        }
+        return resultSet;
+    }
+
+    private _resolveExploreConnectionKind(sourceUri: string): string | undefined {
+        if (!this._connectionManager) {
+            return undefined;
+        }
+        const connectionName = this._resolveConnectionForSource(sourceUri);
+        return this._connectionManager.getConnectionDatabaseKind(connectionName);
+    }
+
+    private _exploreTimeoutSeconds(timeoutSeconds: number | undefined, fallback: number): number {
+        return resolveAllRowsOperationTimeout(
+            fallback,
+            timeoutSeconds,
+            false,
+        );
+    }
+
+    private async _handleExploreFullStats(
+        sourceUri: string,
+        resultSetIndex: number,
+        columnIndex: number,
+        filters?: import('../results/explore/exploreFilters').ExploreFilterModel,
+        timeoutSeconds?: number,
+    ): Promise<{
+        values: Partial<Record<FullStatisticName, number | null>>;
+        percentilesUnavailable: boolean;
+        stddevUnavailable: boolean;
+        sql: string;
+    }> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Full statistics are not available in this view.');
+        }
+        const resultSet = this._resolveExploreResultSet(sourceUri, resultSetIndex);
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSql) {
+            throw new Error('This result set does not have refresh SQL for full statistics.');
+        }
+
+        const databaseKind = this._resolveExploreConnectionKind(sourceUri);
+        const built = buildFullStatisticsSql(
+            resultSql,
+            resultSet.columns,
+            { columnIndex },
+            filters,
+            databaseKind,
+        );
+
+        const queryResult = await runQueryRaw({
+            context: this._context,
+            query: built.sql,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName: this._resolveConnectionForSource(sourceUri),
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            maxRows: 10,
+            isUserQuery: false,
+            timeoutSeconds: this._exploreTimeoutSeconds(timeoutSeconds, 120),
+        });
+
+        return {
+            values: mapFullStatisticsRow(queryResult.data[0], built.aliases),
+            percentilesUnavailable: built.percentilesUnavailable,
+            stddevUnavailable: built.stddevUnavailable,
+            sql: built.sql,
+        };
+    }
+
+    private async _handleExplorePivot(
+        sourceUri: string,
+        resultSetIndex: number,
+        pivot: ExplorePivotConfig,
+        timeoutSeconds?: number,
+    ): Promise<{
+        columns: Array<{ name: string; type?: string; kind: 'row' | 'value' }>;
+        rows: unknown[][];
+        totalRows: number;
+        pivotValues: string[];
+        truncated?: boolean;
+        sql: string;
+    }> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Pivot is not available in this view.');
+        }
+        const resultSet = this._resolveExploreResultSet(sourceUri, resultSetIndex);
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSql) {
+            throw new Error('This result set does not have refresh SQL for pivoting.');
+        }
+
+        const databaseKind = this._resolveExploreConnectionKind(sourceUri);
+        const resolvedPivotValues = await this._resolveExplorePivotValues(
+            sourceUri,
+            resultSql,
+            resultSet.columns,
+            pivot,
+            databaseKind,
+            timeoutSeconds,
+        );
+        const built = buildExplorePivotSql(resultSql, resultSet.columns, pivot, resolvedPivotValues, databaseKind);
+
+        const queryResult = await runQueryRaw({
+            context: this._context,
+            query: built.sql,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName: this._resolveConnectionForSource(sourceUri),
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            maxRows: 5001,
+            isUserQuery: false,
+            timeoutSeconds: this._exploreTimeoutSeconds(timeoutSeconds, 300),
+        });
+
+        const MAX_PIVOT_ROWS = 5000;
+        const truncated = queryResult.data.length > MAX_PIVOT_ROWS;
+        const safeRows = truncated ? queryResult.data.slice(0, MAX_PIVOT_ROWS) : queryResult.data;
+
+        const columns = [
+            ...pivot.rowColumnIndexes.map((_, index) => ({
+                name: queryResult.columns[index]?.name ?? `Row${index + 1}`,
+                type: queryResult.columns[index]?.type ?? 'string',
+                kind: 'row' as const,
+            })),
+            ...built.pivotColumnNames.map(value => ({
+                name: value.length > 80 ? `${value.slice(0, 77)}…` : value,
+                type: 'string' as const,
+                kind: 'value' as const,
+            })),
+        ];
+
+        return {
+            columns,
+            rows: safeRows,
+            totalRows: safeRows.length,
+            pivotValues: built.pivotColumnNames,
+            truncated,
+            sql: built.sql,
+        };
+    }
+
+    private async _resolveExplorePivotValues(
+        sourceUri: string,
+        resultSql: string,
+        columns: ResultSet['columns'],
+        pivot: ExplorePivotConfig,
+        databaseKind: string | undefined,
+        timeoutSeconds?: number,
+    ): Promise<string[]> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Pivot is not available in this view.');
+        }
+        const distinctSql = buildDistinctValuesSql(
+            resultSql,
+            columns,
+            { columnIndex: pivot.columnColumnIndex },
+            pivot.filters,
+            databaseKind,
+        );
+        const queryResult = await runQueryRaw({
+            context: this._context,
+            query: distinctSql,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName: this._resolveConnectionForSource(sourceUri),
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            maxRows: EXPLORE_PIVOT_MAX_COLUMN_VALUES,
+            isUserQuery: false,
+            timeoutSeconds: this._exploreTimeoutSeconds(timeoutSeconds, 300),
+        });
+        return Array.from(new Set(
+            queryResult.data
+                .map(row => row[0])
+                .filter(value => value !== null && value !== undefined)
+                .map(value => String(value)),
+        )).slice(0, EXPLORE_PIVOT_MAX_COLUMN_VALUES);
+    }
+
+    private async _previewExplorePivot(
+        sourceUri: string,
+        resultSetIndex: number,
+        pivot: ExplorePivotConfig,
+        pivotValues: string[],
+    ): Promise<string> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Pivot preview is not available in this view.');
+        }
+        const resultSet = this._resolveExploreResultSet(sourceUri, resultSetIndex);
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSql) {
+            throw new Error('This result set does not have refresh SQL for pivoting.');
+        }
+        const databaseKind = this._resolveExploreConnectionKind(sourceUri);
+        const built = buildExplorePivotSql(resultSql, resultSet.columns, pivot, pivotValues, databaseKind);
+        return built.sql;
+    }
+
+    private async _handleExploreComposer(
+        sourceUri: string,
+        resultSetIndex: number,
+        composer: ExploreComposerConfig,
+        timeoutSeconds?: number,
+    ): Promise<{
+        columnIndexes: {
+            bucket: number;
+            dimension: number | undefined;
+            split: number | undefined;
+            measure: number;
+            previous: number | undefined;
+        };
+        rows: unknown[][];
+        sql: string;
+    }> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Composer is not available in this view.');
+        }
+        const resultSet = this._resolveExploreResultSet(sourceUri, resultSetIndex);
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSql) {
+            throw new Error('This result set does not have refresh SQL for composing.');
+        }
+
+        const databaseKind = this._resolveExploreConnectionKind(sourceUri);
+        const built = buildComposerSql(resultSql, resultSet.columns, composer, databaseKind);
+
+        const queryResult = await runQueryRaw({
+            context: this._context,
+            query: built.sql,
+            silent: true,
+            connectionManager: this._connectionManager,
+            connectionName: this._resolveConnectionForSource(sourceUri),
+            documentUri: sourceUri,
+            logCallback: message => this.log(sourceUri, message),
+            maxRows: 5001,
+            isUserQuery: false,
+            timeoutSeconds: this._exploreTimeoutSeconds(timeoutSeconds, 300),
+        });
+
+        return {
+            columnIndexes: built.columnIndexes,
+            rows: queryResult.data,
+            sql: built.sql,
+        };
+    }
+
+    private async _previewExploreComposer(
+        sourceUri: string,
+        resultSetIndex: number,
+        composer: ExploreComposerConfig,
+    ): Promise<string> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Composer preview is not available in this view.');
+        }
+        const resultSet = this._resolveExploreResultSet(sourceUri, resultSetIndex);
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSql) {
+            throw new Error('This result set does not have refresh SQL for composing.');
+        }
+        const databaseKind = this._resolveExploreConnectionKind(sourceUri);
+        const built = buildComposerSql(resultSql, resultSet.columns, composer, databaseKind);
+        return built.sql;
+    }
+
+    private async _previewExploreFilteredSql(
+        sourceUri: string,
+        resultSetIndex: number,
+        filters: ExploreFilterModel,
+    ): Promise<string> {
+        if (!this._context || !this._connectionManager) {
+            throw new Error('Filtered SQL preview is not available in this view.');
+        }
+        const resultSet = this._resolveExploreResultSet(sourceUri, resultSetIndex);
+        const resultSql = this._resolveGroupingResultSql(resultSet);
+        if (!resultSql) {
+            throw new Error('This result set does not have refresh SQL.');
+        }
+        const databaseKind = this._resolveExploreConnectionKind(sourceUri);
+        const wrapped = wrapSourceSqlWithFilters(resultSql, filters, resultSet.columns, databaseKind);
+        return `SELECT *\n${wrapped.sql}`;
+    }
+
+    private async _openExploreSqlInEditor(sql: string, label?: string): Promise<void> {
+        if (!this._context) {
+            throw new Error('Opening an editor is not available in this view.');
+        }
+        const document = await vscode.workspace.openTextDocument({
+            content: `${label ? `-- ${label}\n` : ''}${sql}`,
+            language: 'sql',
+        });
+        await vscode.window.showTextDocument(document, { preview: false });
     }
 
     private async _handleDatabaseAggregations(

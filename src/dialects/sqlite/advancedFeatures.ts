@@ -9,7 +9,12 @@ import type {
 } from '../../contracts/database';
 import type { ConnectionDetails } from '../../types';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../../utils/identifierUtils';
+import { escapeSqlString as escapeSqlLiteral } from '../../utils/sqlUtils';
 import { SqliteConnection } from './runtime';
+import { sqliteImportTypeMapper } from './importTypeMapper';
+import { sqliteMaintenanceProvider } from './maintenanceProvider';
+import { sqliteTuningAdvisor } from './tuningAdvisor';
+import { sqliteCopilotReferenceProvider } from './copilotReferenceProvider';
 
 type SqliteMasterType = 'table' | 'view' | 'index' | 'trigger';
 
@@ -37,8 +42,9 @@ interface SqliteForeignKeyRow {
     DELETE_TYPE?: string;
 }
 
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
+interface SqliteIndexRow {
+    INDEX_NAME?: string;
+    IS_UNIQUE?: number;
 }
 
 function normalizeSqliteCatalog(database?: string, schema?: string): string {
@@ -164,6 +170,10 @@ function buildConstraintClauses(keysInfo: Map<string, DatabaseDdlKeyInfo>): stri
 }
 
 export const sqliteAdvancedFeatures: DatabaseAdvancedFeatures = {
+    importTypeMapper: sqliteImportTypeMapper,
+    tuningAdvisor: sqliteTuningAdvisor,
+    maintenance: sqliteMaintenanceProvider,
+    copilotReferenceProvider: sqliteCopilotReferenceProvider,
     ddl: {
         quoteNameIfNeeded(name: string): string {
             return formatIdentifierForSql(name, 'sqlite');
@@ -202,10 +212,10 @@ export const sqliteAdvancedFeatures: DatabaseAdvancedFeatures = {
                     SELECT
                         name AS NAME,
                         type AS TYPE,
-                        notnull AS IS_NOT_NULL,
+                        "notnull" AS IS_NOT_NULL,
                         dflt_value AS DEFAULT_VALUE,
                         pk AS PK_ORDER
-                    FROM ${catalogIdentifier}.pragma_table_info('${escapeSqlLiteral(tableName)}')
+                    FROM ${catalogIdentifier}.pragma_table_xinfo('${escapeSqlLiteral(tableName)}')
                     ORDER BY cid
                 `
             );
@@ -213,7 +223,7 @@ export const sqliteAdvancedFeatures: DatabaseAdvancedFeatures = {
             return rows.map(row => ({
                 name: row.NAME || '',
                 description: null,
-                fullTypeName: row.TYPE?.trim() || 'TEXT',
+                fullTypeName: row.TYPE?.trim() || 'BLOB',
                 notNull: row.IS_NOT_NULL === 1,
                 defaultValue: row.DEFAULT_VALUE ?? null
             }));
@@ -307,6 +317,46 @@ export const sqliteAdvancedFeatures: DatabaseAdvancedFeatures = {
             foreignKeys.forEach((value, key) => {
                 keysInfo.set(`FK_${key}`, value);
             });
+
+            const uniqueIndexRows = await executeRows<SqliteIndexRow>(
+                connection,
+                `
+                    SELECT name AS INDEX_NAME, "unique" AS IS_UNIQUE
+                    FROM ${catalogIdentifier}.pragma_index_list('${escapeSqlLiteral(tableName)}')
+                    WHERE "unique" = 1
+                    ORDER BY name
+                `
+            );
+            for (const indexRow of uniqueIndexRows) {
+                const indexName = indexRow.INDEX_NAME?.trim();
+                if (!indexName || keysInfo.has(`UNIQUE_${indexName}`)) {
+                    continue;
+                }
+                const indexColumns = await executeRows<{ COLUMN_NAME?: string }>(
+                    connection,
+                    `
+                        SELECT name AS COLUMN_NAME
+                        FROM ${catalogIdentifier}.pragma_index_info('${escapeSqlLiteral(indexName)}')
+                        ORDER BY seqno
+                    `
+                );
+                const columns = indexColumns
+                    .map(column => column.COLUMN_NAME || '')
+                    .filter(column => column.length > 0);
+                if (columns.length > 0) {
+                    keysInfo.set(`UNIQUE_${indexName}`, {
+                        type: 'UNIQUE',
+                        typeChar: 'U',
+                        columns,
+                        pkDatabase: null,
+                        pkSchema: null,
+                        pkRelation: null,
+                        pkColumns: [],
+                        updateType: '',
+                        deleteType: ''
+                    });
+                }
+            }
 
             return keysInfo;
         },

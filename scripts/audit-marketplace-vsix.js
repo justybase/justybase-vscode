@@ -53,6 +53,10 @@ function sha256(filePath) {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
+function sha256Buffer(buffer) {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -256,7 +260,27 @@ function inspectVsix(filePath) {
   });
   const executablePackages = new Set();
   for (const asset of executableAssets) {
-    assert(isNodeModule(asset), `${filePath}: executable asset outside runtime dependency: ${asset}`);
+    const isAccessBridge = manifest.name === 'justybaselite-access'
+      && asset === 'extension/resources/access-bridge.jar';
+    assert(isNodeModule(asset) || isAccessBridge, `${filePath}: executable asset outside runtime dependency: ${asset}`);
+    if (isAccessBridge) {
+      const jarBytes = zip.readFile(zip.getEntry(asset));
+      const checksumText = readEntryText(zip, 'extension/resources/access-bridge.jar.sha256');
+      const expected = checksumText.trim().split(/\s+/)[0]?.toLowerCase();
+      const actual = sha256Buffer(jarBytes);
+      assert(/^[0-9a-f]{64}$/.test(expected || '') && expected === actual,
+        `${filePath}: Access bridge JAR checksum mismatch`);
+      const sbom = JSON.parse(readEntryText(zip, 'extension/resources/access-bridge.sbom.json'));
+      assert(sbom.bomFormat === 'CycloneDX' && Array.isArray(sbom.components) && sbom.components.length > 0,
+        `${filePath}: Access bridge SBOM is missing or malformed`);
+      for (const component of sbom.components.filter(item => item.name !== 'ucanaccess-bridge')) {
+        assert(
+          notices.includes(`| ${component.group}:${component.name} | ${component.version} |`),
+          `${filePath}: missing Access bridge notice for ${component.group}:${component.name}@${component.version}`,
+        );
+      }
+      continue;
+    }
     const packageRoot = packageRootForNodeModule(files, asset);
     assert(packageRoot, `${filePath}: ${asset} has no owning package directory`);
     const packageManifestName = `${packageRoot}/package.json`;

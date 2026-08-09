@@ -819,9 +819,7 @@ export class MetadataBridge {
     if (!Array.isArray(response)) {
       return [];
     }
-    return response.filter((item): item is MetadataColumnItem => {
-      return typeof item === "object" && item !== null && "name" in item;
-    });
+    return response.flatMap((item) => this.asColumnItem(item));
   }
 
   private asTableInfo(
@@ -837,7 +835,47 @@ export class MetadataBridge {
     ) {
       return undefined;
     }
-    return response as MetadataTableInfoResponse;
+    const columns = this.asColumnList(response.columns);
+    return {
+      exists: response.exists === true,
+      table: typeof response.table === "string" ? response.table : "",
+      database:
+        typeof response.database === "string" ? response.database : undefined,
+      schema: typeof response.schema === "string" ? response.schema : undefined,
+      description:
+        typeof response.description === "string"
+          ? response.description.trim() || undefined
+          : undefined,
+      columns,
+    };
+  }
+
+  private asColumnItem(value: unknown): MetadataColumnItem[] {
+    if (typeof value !== "object" || value === null || !("name" in value)) {
+      return [];
+    }
+
+    const item = value as {
+      name?: unknown;
+      type?: unknown;
+      description?: unknown;
+      isPk?: unknown;
+      isFk?: unknown;
+    };
+    if (typeof item.name !== "string" || item.name.length === 0) {
+      return [];
+    }
+
+    return [{
+      name: item.name,
+      type: typeof item.type === "string" ? item.type : undefined,
+      description:
+        typeof item.description === "string"
+          ? item.description.trim() || undefined
+          : undefined,
+      isPk: typeof item.isPk === "boolean" ? item.isPk : undefined,
+      isFk: typeof item.isFk === "boolean" ? item.isFk : undefined,
+    }];
   }
 }
 

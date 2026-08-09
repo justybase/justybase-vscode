@@ -1,0 +1,33 @@
+{
+  "SQLite EXPLAIN QUERY PLAN": {
+    "prefix": "sqlite-explain",
+    "body": [
+      "EXPLAIN QUERY PLAN",
+      "SELECT ${1:*}",
+      "FROM ${2:table_name}",
+      "WHERE ${3:column_name} = ${4:value};"
+    ],
+    "description": "Inspect a SQLite query plan"
+  },
+  "SQLite table": {
+    "prefix": "sqlite-table",
+    "body": [
+      "CREATE TABLE IF NOT EXISTS ${1:table_name} (",
+      "  ${2:id} INTEGER PRIMARY KEY,",
+      "  ${3:name} TEXT NOT NULL",
+      ");"
+    ],
+    "description": "Create a SQLite table"
+  },
+  "SQLite trigger": {
+    "prefix": "sqlite-trigger",
+    "body": [
+      "CREATE TRIGGER ${1:trigger_name}",
+      "AFTER ${2:INSERT} ON ${3:table_name}",
+      "BEGIN",
+      "  ${4:SELECT 1};",
+      "END;"
+    ],
+    "description": "Create a SQLite trigger"
+  }
+}

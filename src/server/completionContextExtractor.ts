@@ -289,10 +289,12 @@ export class CompletionContextExtractor {
 
     const sameLineFragment =
       this.getSameLineFromJoinFragment(normalizedLinePrefix);
+    const sameLineTrimmed = sameLineFragment ? sameLineFragment.trim() : "";
     const hasCompletedSameLineTarget =
       sameLineFragment !== undefined &&
       /\s$/.test(sameLineFragment) &&
-      sameLineFragment.trim().length > 0;
+      sameLineTrimmed.length > 0 &&
+      !/,$/.test(sameLineTrimmed);
     const hasCompletedMultiLineTarget =
       /\s$/.test(normalizedLinePrefix) &&
       /(?:FROM|JOIN)\s*$/i.test(normalizedPrevLine) &&
@@ -354,7 +356,10 @@ export class CompletionContextExtractor {
     const fragmentStart =
       (fromJoinToken.endOffset ?? fromJoinToken.startOffset ?? 0) + 1;
     const fragment = normalizedStatementPrefix.substring(fragmentStart);
-    const parsedFragment = parseTablePathFragment(fragment, databaseKind);
+    const parsedFragment = parseTablePathFragment(
+      this.stripFromJoinListContinuation(fragment),
+      databaseKind,
+    );
     if (!parsedFragment) {
       return this.parseFromJoinContextFromLineFallback(
         normalizedLinePrefix,
@@ -373,7 +378,7 @@ export class CompletionContextExtractor {
     const sameLineFragment = this.getSameLineFromJoinFragment(linePrefix);
     if (sameLineFragment !== undefined) {
       const parsed = parseTablePathFragment(
-        sameLineFragment.replace(/^\s+/, ""),
+        this.stripFromJoinListContinuation(sameLineFragment.replace(/^\s+/, "")),
         databaseKind,
       );
       if (parsed) {
@@ -383,7 +388,7 @@ export class CompletionContextExtractor {
 
     if (/(?:FROM|JOIN)\s*$/i.test(prevLine)) {
       const parsed = parseTablePathFragment(
-        linePrefix.replace(/^\s+/, ""),
+        this.stripFromJoinListContinuation(linePrefix.replace(/^\s+/, "")),
         databaseKind,
       );
       if (parsed) {
@@ -731,6 +736,58 @@ export class CompletionContextExtractor {
       return undefined;
     }
     return linePrefix.substring(lastMatch.index + lastMatch[0].length);
+  }
+
+  /**
+   * When the FROM/JOIN fragment contains a comma (multi-table list), only the
+   * part after the last comma is the pending target. `FROM A, |` must suggest
+   * the next table instead of being treated as a completed target.
+   */
+  private stripFromJoinListContinuation(fragment: string): string {
+    let parenthesisDepth = 0;
+    let quoteEnd: string | undefined;
+    let commaIndex = -1;
+
+    for (let index = 0; index < fragment.length; index += 1) {
+      const character = fragment[index];
+
+      if (quoteEnd) {
+        if (character === quoteEnd) {
+          const escapedQuote = fragment[index + 1] === quoteEnd;
+          if (escapedQuote) {
+            index += 1;
+          } else {
+            quoteEnd = undefined;
+          }
+        }
+        continue;
+      }
+
+      if (character === '"' || character === "'" || character === "`") {
+        quoteEnd = character;
+        continue;
+      }
+      if (character === "[") {
+        quoteEnd = "]";
+        continue;
+      }
+      if (character === "(") {
+        parenthesisDepth += 1;
+        continue;
+      }
+      if (character === ")") {
+        parenthesisDepth = Math.max(0, parenthesisDepth - 1);
+        continue;
+      }
+      if (character === "," && parenthesisDepth === 0) {
+        commaIndex = index;
+      }
+    }
+
+    if (commaIndex < 0) {
+      return fragment;
+    }
+    return fragment.substring(commaIndex + 1);
   }
 
   private isFromJoinCursorContext(

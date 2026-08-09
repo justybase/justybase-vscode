@@ -45,6 +45,19 @@ import {
   createSqlParserInstance as createMysqlSqlParserInstance,
   getSqlParserInstance as getMysqlSqlParserInstance,
 } from "../dialects/mysql/sql/parser";
+import { duckdbSqlAuthoring } from "../dialects/duckdb/sql/authoring";
+import { fileSqlAuthoring } from "../dialects/file/sql/authoring";
+import { SqlLexer as duckdbSqlLexer } from "../dialects/duckdb/sql/lexer";
+import {
+  createSqlParserInstance as createDuckDbSqlParserInstance,
+  getSqlParserInstance as getDuckDbSqlParserInstance,
+} from "../dialects/duckdb/sql/parser";
+import { sqliteSqlAuthoring } from "../dialects/sqlite/sql/authoring";
+import { SqlLexer as sqliteSqlLexer } from "../dialects/sqlite/sql/lexer";
+import {
+  createSqlParserInstance as createSqliteSqlParserInstance,
+  getSqlParserInstance as getSqliteSqlParserInstance,
+} from "../dialects/sqlite/sql/parser";
 import type {
   DatabaseSqlAuthoring,
   DatabaseSqlValidationProfile,
@@ -668,6 +681,20 @@ export const POSTGRESQL_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
   createSqlParserInstance: createPostgresqlSqlParserInstance,
 };
 
+export const DUCKDB_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "duckdb",
+  SqlLexer: duckdbSqlLexer,
+  getSqlParserInstance: getDuckDbSqlParserInstance,
+  createSqlParserInstance: createDuckDbSqlParserInstance,
+};
+
+export const SQLITE_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "sqlite",
+  SqlLexer: sqliteSqlLexer,
+  getSqlParserInstance: getSqliteSqlParserInstance,
+  createSqlParserInstance: createSqliteSqlParserInstance,
+};
+
 const runtimeByKind = new Map<DatabaseKind, SqlParsingRuntime>();
 const runtimeByAuthoring = new WeakMap<object, SqlParsingRuntime>();
 const runtimeByValidationProfile = new WeakMap<object, SqlParsingRuntime>();
@@ -735,6 +762,27 @@ registerSqlParsingRuntime({
   kind: "mssql",
   authoring: mssqlSqlAuthoring,
   validationProfile: mssqlSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: DUCKDB_SQL_PARSING_RUNTIME,
+  kind: "duckdb",
+  authoring: duckdbSqlAuthoring,
+  validationProfile: duckdbSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: DUCKDB_SQL_PARSING_RUNTIME,
+  kind: "file",
+  authoring: fileSqlAuthoring,
+  validationProfile: fileSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: SQLITE_SQL_PARSING_RUNTIME,
+  kind: "sqlite",
+  authoring: sqliteSqlAuthoring,
+  validationProfile: sqliteSqlAuthoring.validation,
 });
 
 function resolveDatabaseKind(

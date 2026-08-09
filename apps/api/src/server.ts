@@ -15,6 +15,7 @@ import { QuerySessionManager } from './querySessions';
 import { getSchemaTree, invalidateSchemaCache, searchSchema } from './schemaService';
 import { attachLspSocket, type LspSession } from './lspProtocol';
 import { createQueryExportStream } from './queryExport';
+import { loadNetezzaSnippets } from './snippets';
 
 const SESSION_COOKIE = 'justybase_session';
 const CSRF_COOKIE = 'justybase_csrf';
@@ -214,6 +215,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
     try { return await provideSqlDiagnostics(store, apiConfig, request.user!.id, request.body as import('@justybase/contracts').SqlDiagnosticsRequest); }
     catch (error: unknown) { return reply.code(400).send({ code: 'LSP_DIAGNOSTICS_FAILED', message: error instanceof Error ? error.message : 'Diagnostics failed.' }); }
   });
+  app.get('/api/lsp/snippets', { preHandler: authenticate }, async () => ({ snippets: loadNetezzaSnippets() }));
   app.post<{ Params: { id: string } }>('/api/query/:id/page', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
     const job = app.queryJobs.get(request.params.id);
     const sessionId = job?.sessionId ?? app.querySessions.querySessionId(request.user!.id, request.params.id);

@@ -14,11 +14,16 @@ import { mysqlSqlAuthoring } from "../../extensions/mysql/src/sql/authoring";
 import { oracleSqlAuthoring } from "../../extensions/oracle/src/sql/authoring";
 import { snowflakeSqlAuthoring } from "../../extensions/snowflake/src/sql/authoring";
 import { verticaSqlAuthoring } from "../../extensions/vertica/src/sql/authoring";
+import { accessSqlAuthoring } from "../dialects/access/sql/authoring";
+import { fileSqlAuthoring } from "../dialects/file/sql/authoring";
 
 const SQL_AUTHORING_BY_KIND = new Map<DatabaseKind, DatabaseSqlAuthoring>([
   ["netezza", netezzaSqlAuthoring],
   ["sqlite", sqliteSqlAuthoring],
   ["duckdb", duckdbSqlAuthoring],
+  // File SQL (Excel/CSV/Parquet/Avro) is DuckDB under the hood — the LSP
+  // server process needs the authoring entry without the companion pack.
+  ["file", fileSqlAuthoring],
   ["postgresql", postgresqlSqlAuthoring],
   ["db2", db2SqlAuthoring],
   ["mssql", mssqlSqlAuthoring],
@@ -26,6 +31,7 @@ const SQL_AUTHORING_BY_KIND = new Map<DatabaseKind, DatabaseSqlAuthoring>([
   ["oracle", oracleSqlAuthoring],
   ["snowflake", snowflakeSqlAuthoring],
   ["vertica", verticaSqlAuthoring],
+  ["access", accessSqlAuthoring],
 ]);
 
 function resolveSqlAuthoringDatabaseKind(
@@ -86,6 +92,7 @@ export function __TEST_ONLY_resetDatabaseSqlAuthoringRegistry(): void {
   SQL_AUTHORING_BY_KIND.set("netezza", netezzaSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("sqlite", sqliteSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("duckdb", duckdbSqlAuthoring);
+  SQL_AUTHORING_BY_KIND.set("file", fileSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("postgresql", postgresqlSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("db2", db2SqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("mssql", mssqlSqlAuthoring);
@@ -93,4 +100,5 @@ export function __TEST_ONLY_resetDatabaseSqlAuthoringRegistry(): void {
   SQL_AUTHORING_BY_KIND.set("oracle", oracleSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("snowflake", snowflakeSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("vertica", verticaSqlAuthoring);
+  SQL_AUTHORING_BY_KIND.set("access", accessSqlAuthoring);
 }

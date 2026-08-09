@@ -7,6 +7,15 @@
 import * as vscode from 'vscode';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import { FavoritesManager } from '../core/favoritesManager';
+import type { ConnectionManager } from '../core/connectionManager';
+import {
+    getAvailableNetezzaConnectionNames,
+    getConfiguredMcpConnectionName,
+    getMcpConnectionSelectionError
+} from '../mcp/mcpConnection';
+import type { McpHttpServerManager } from '../mcp/mcpHttpServerManager';
+import type { NetezzaMcpServerDefinitionProvider } from '../mcp/mcpServerDefinitionProvider';
+import { MCP_TOOL_CATALOG } from '../mcp/mcpToolCatalog';
 import {
     isSettingsWebviewMessage,
     type SettingsHostMessage
@@ -36,6 +45,12 @@ interface SettingsSection {
     settings: SettingItem[];
 }
 
+export interface SettingsMcpIntegration {
+    connectionManager: ConnectionManager;
+    definitionProvider?: NetezzaMcpServerDefinitionProvider;
+    httpManager: McpHttpServerManager;
+}
+
 /** Mirrors numeric limits registered in package.json. Keep this close to the webview registry. */
 const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     cacheTTL: { min: 1, max: 168 },
@@ -59,7 +74,8 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     'importWizard.validationSampleSize': { min: 5, max: 200 },
     'importWizard.backgroundValidationSampleSize': { min: 100, max: 50000 },
     'copilot.requestTimeout': { min: 5000, max: 300000 },
-    'copilot.maxWorkspaceProfilesInContext': { min: 1, max: 20 }
+    'copilot.maxWorkspaceProfilesInContext': { min: 1, max: 20 },
+    'mcp.port': { min: 1024, max: 65535 }
 };
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -767,6 +783,46 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
         ]
     },
     {
+        id: 'mcp',
+        title: 'MCP Server',
+        description: 'Configure the read-only Netezza MCP server for Copilot Chat and local MCP clients',
+        settings: [
+            {
+                id: 'mcp-enabled',
+                label: 'Enable for Copilot Chat',
+                description: 'Register the read-only MCP server for Copilot Chat in VS Code',
+                type: 'toggle',
+                configKey: 'mcp.enabled',
+                defaultValue: false
+            },
+            {
+                id: 'mcp-connection-name',
+                label: 'Selected MCP Connection',
+                description: 'Netezza connection used by both MCP transports. The active editor connection is not used.',
+                type: 'select',
+                configKey: 'mcp.connectionName',
+                defaultValue: '',
+                options: [{ label: 'Select an Netezza connection…', value: '' }]
+            },
+            {
+                id: 'mcp-external-enabled',
+                label: 'Enable Local HTTP Server',
+                description: 'Run the read-only MCP server on 127.0.0.1 for local clients such as Cursor or Claude Desktop',
+                type: 'toggle',
+                configKey: 'mcp.externalEnabled',
+                defaultValue: false
+            },
+            {
+                id: 'mcp-port',
+                label: 'HTTP Port',
+                description: 'Port used by the local MCP HTTP server (1024–65535)',
+                type: 'number',
+                configKey: 'mcp.port',
+                defaultValue: 37210
+            }
+        ]
+    },
+    {
         id: 'snippets',
         title: 'SQL Snippets',
         description: 'Browse predefined Netezza snippets and manage your custom SQL snippets',
@@ -794,9 +850,11 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
 export class SettingsView {
     public static readonly viewType = 'netezza.settings';
     private static currentPanel: SettingsView | undefined;
+    private static mcpIntegration: SettingsMcpIntegration | undefined;
     private readonly _panel: vscode.WebviewPanel;
     private readonly _context: vscode.ExtensionContext;
     private _disposables: vscode.Disposable[] = [];
+    private _mcpIntegration: SettingsMcpIntegration | undefined;
 
     private constructor(
         panel: vscode.WebviewPanel,
@@ -804,6 +862,7 @@ export class SettingsView {
     ) {
         this._context = context;
         this._panel = panel;
+        this._setMcpIntegration(SettingsView.mcpIntegration);
 
         this._update();
 
@@ -924,6 +983,20 @@ export class SettingsView {
             null,
             this._disposables
         );
+
+        this._disposables.push(
+            vscode.workspace.onDidChangeConfiguration(event => {
+                if (event.affectsConfiguration('justybase.mcp')) {
+                    void this._sendCurrentSettings();
+                }
+            })
+        );
+    }
+
+    public static configureMcp(integration: SettingsMcpIntegration): void {
+        SettingsView.mcpIntegration = integration;
+        SettingsView.currentPanel?._setMcpIntegration(integration);
+        void SettingsView.currentPanel?._sendCurrentSettings();
     }
 
     public static createOrShow(
@@ -964,6 +1037,25 @@ export class SettingsView {
             const x = this._disposables.pop();
             if (x) { x.dispose(); }
         }
+    }
+
+    private _setMcpIntegration(integration: SettingsMcpIntegration | undefined): void {
+        if (this._mcpIntegration === integration) {
+            return;
+        }
+        this._mcpIntegration = integration;
+        if (!integration) {
+            return;
+        }
+
+        this._disposables.push(
+            integration.connectionManager.onDidChangeConnections(() => {
+                void this._sendCurrentSettings();
+            }),
+            integration.httpManager.onDidChangeStatus(() => {
+                void this._sendCurrentSettings();
+            })
+        );
     }
 
     private _getSetting(key: string): SettingItem {
@@ -1013,7 +1105,28 @@ export class SettingsView {
 
     private async _updateSetting(key: string, value: unknown): Promise<void> {
         const setting = this._getSetting(key);
-        this._validateSettingValue(setting, value);
+        if (setting.configKey === 'mcp.connectionName') {
+            if (typeof value !== 'string') {
+                throw new Error(`${setting.label} must be selected from the available Netezza connections.`);
+            }
+            const availableConnections = this._mcpIntegration
+                ? await getAvailableNetezzaConnectionNames(this._mcpIntegration.connectionManager)
+                : [];
+            if (value && !availableConnections.includes(value)) {
+                throw new Error(`${setting.label} must be selected from the available Netezza connections.`);
+            }
+        } else {
+            this._validateSettingValue(setting, value);
+        }
+        if ((key === 'mcp.enabled' || key === 'mcp.externalEnabled') && value === true && this._mcpIntegration) {
+            const selectionError = getMcpConnectionSelectionError(
+                this._mcpIntegration.connectionManager,
+                getConfiguredMcpConnectionName()
+            );
+            if (selectionError) {
+                throw new Error(selectionError);
+            }
+        }
         const config = getExtensionConfiguration();
         await config.update(key, value, this._getConfigurationTarget(key));
     }
@@ -1226,6 +1339,38 @@ Respond as the AI assistant would with this prompt. Show the full response.`;
         }
     }
 
+    private async _getMcpSettingsData(): Promise<Record<string, unknown>> {
+        const integration = this._mcpIntegration;
+        const selectedConnection = getConfiguredMcpConnectionName() ?? '';
+        let availableConnections: string[] = [];
+        let selectionError: string | undefined;
+
+        if (integration) {
+            try {
+                availableConnections = await getAvailableNetezzaConnectionNames(integration.connectionManager);
+                selectionError = getMcpConnectionSelectionError(
+                    integration.connectionManager,
+                    selectedConnection
+                );
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                selectionError = `MCP connections could not be loaded: ${message}`;
+            }
+        }
+
+        const config = getExtensionConfiguration('mcp');
+        return {
+            availableConnections,
+            selectedConnection,
+            selectionError,
+            apiAvailable: integration?.definitionProvider !== undefined,
+            copilotEnabled: integration?.definitionProvider?.isEnabled() === true,
+            externalEnabled: config.get<boolean>('externalEnabled', false) === true,
+            httpStatus: integration?.httpManager.getStatus() ?? { running: false },
+            tools: MCP_TOOL_CATALOG
+        };
+    }
+
     private async _sendCurrentSettings(): Promise<void> {
         const settingsData: Record<string, unknown> = {};
         for (const section of SETTINGS_SECTIONS) {
@@ -1235,6 +1380,15 @@ Respond as the AI assistant would with this prompt. Show the full response.`;
                 }
             }
         }
+        const mcpSettingsData = await this._getMcpSettingsData();
+        settingsData.mcpConnectionOptions = [
+            { label: 'Select an Netezza connection…', value: '' },
+            ...((mcpSettingsData.availableConnections as string[]).map(connectionName => ({
+                label: connectionName,
+                value: connectionName
+            })))
+        ];
+        settingsData.mcpStatus = mcpSettingsData;
         this._postMessage({ command: 'settingsData', data: settingsData });
     }
 

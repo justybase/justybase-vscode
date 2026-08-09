@@ -47,6 +47,10 @@ export async function executeDropSession(
                     vscode.window.showInformationMessage('Session cancellation is not supported for SQLite connections.');
                     return;
                 }
+                if (resolveConnectionDatabaseKind(details.dbType) === 'access') {
+                    vscode.window.showInformationMessage('Session cancellation is not supported for Microsoft Access connections.');
+                    return;
+                }
                 const connection = await createConnectedDatabaseConnectionFromDetails(details) as NzConnection;
                 try {
                     const dropCmd = connection.createCommand(`DROP SESSION ${sessionId}`);

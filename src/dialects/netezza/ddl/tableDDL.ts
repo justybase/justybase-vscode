@@ -2,11 +2,11 @@
  * DDL Generator - Table DDL Generation
  */
 
-import { ColumnInfo, KeyInfo } from './types';
+import type { ColumnInfo, KeyInfo } from './types';
 import { quoteNameIfNeeded } from './helpers';
 import { getColumns, getDistributionInfo, getOrganizeInfo, getKeysInfo, getTableComment } from './metadata';
 
-import { NzConnection } from '../../../types';
+import type { NzConnection } from '../../../types';
 
 /**
  * Generate complete DDL code for creating a table in Netezza

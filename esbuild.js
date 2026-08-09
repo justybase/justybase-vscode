@@ -109,6 +109,21 @@ async function main() {
     logLevel: 'info',
   });
 
+  // Netezza MCP server (stdio + http transports). Runs as a child process of
+  // the extension host; connection details arrive via environment variables.
+  const mcpServerCtx = await esbuild.context({
+    entryPoints: ['./src/mcp/mcpServerEntry.ts'],
+    bundle: true,
+    format: 'cjs',
+    minify,
+    sourcemap: true,
+    sourcesContent: true,
+    platform: 'node',
+    outfile: 'dist/mcp/mcpServer.js',
+    external: ['vscode'],
+    logLevel: 'info',
+  });
+
   const watch = process.argv.includes('--watch');
 
   if (watch) {
@@ -119,6 +134,7 @@ async function main() {
       webviewCtx.watch(),
       serverCtx.watch(),
       metadataWorkerCtx.watch(),
+      mcpServerCtx.watch(),
     ]);
   } else {
     await Promise.all([
@@ -128,6 +144,7 @@ async function main() {
       webviewCtx.rebuild(),
       serverCtx.rebuild(),
       metadataWorkerCtx.rebuild(),
+      mcpServerCtx.rebuild(),
     ]);
     await Promise.all([
       tanStackTableCtx.dispose(),
@@ -136,6 +153,7 @@ async function main() {
       webviewCtx.dispose(),
       serverCtx.dispose(),
       metadataWorkerCtx.dispose(),
+      mcpServerCtx.dispose(),
     ]);
   }
 }

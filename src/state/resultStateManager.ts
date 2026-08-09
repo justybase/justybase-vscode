@@ -165,6 +165,9 @@ export class ResultStateManager {
         this._idleSpillTimer = setInterval(() => {
             this._runIdleSpillCheck();
         }, 60_000);
+        // Do not keep the process (or test workers) alive on account of the
+        // background idle-spill timer; dispose() still clears it explicitly.
+        this._idleSpillTimer.unref?.();
     }
 
     public dispose(): void {

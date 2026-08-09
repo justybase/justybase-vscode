@@ -1,4 +1,6 @@
 import type { DatabaseConnection } from '../../contracts/database';
+import type { DatabaseKind } from '../../contracts/database';
+import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
 import { netezzaMetadataProvider } from '../../dialects/netezza/metadata/provider';
 import { logWithFallback } from '../../utils/logger';
 import {
@@ -10,7 +12,7 @@ import type { MetadataCache } from './MetadataCache';
 
 export interface TableColumnWarmupTarget {
     database: string;
-    schema: string;
+    schema?: string;
     table: string;
 }
 
@@ -43,8 +45,12 @@ export async function warmTableColumnsFromCatalog(
     connectionName: string,
     target: TableColumnWarmupTarget,
     readRows: CatalogRowReader,
+    databaseKind?: DatabaseKind,
 ): Promise<void> {
-    const query = netezzaMetadataProvider.buildColumnsWithKeysQuery(target.database, {
+    const provider = databaseKind
+        ? getDatabaseMetadataProvider(databaseKind)
+        : netezzaMetadataProvider;
+    const query = provider.buildColumnsWithKeysQuery(target.database, {
         schema: target.schema,
         tableName: target.table,
     });
