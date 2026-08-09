@@ -59,6 +59,7 @@ import {
 } from './editors/decorationManager';
 import { ConnectionAccentDecorationProvider } from './decorations/connectionAccentDecorationProvider';
 import { Logger, logWithFallback } from './utils/logger';
+import { registerMcpFeatures } from './activation/mcpRegistration';
 import { createPerformanceTimer, formatPerformanceEvent } from './services/perf/performanceEvents';
 import { SQL_AUTHORING_LANGUAGE_IDS } from './utils/sqlLanguage';
 import { TableDdlSynchronizer } from './metadata/tableDdlSynchronizer';
@@ -305,6 +306,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         );
     }
 
+    try {
+        registerMcpFeatures({ context, connectionManager, logger });
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.warn(`Netezza extension: MCP server registration failed but activation will continue: ${errorMessage}`);
+    }
+
     if (!skipDeferredFeatureInit) {
         void showSensitiveCopilotToolNotice(context).catch((error: unknown) => {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -357,7 +365,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     } catch (e) {
         logWithFallback('warn', 'Failed to cleanup orphaned disk-backed result files:', e);
     }
-    return createJustyBaseLiteApi();
+    return createJustyBaseLiteApi(context, connectionManager);
 }
 
 export async function deactivate() {

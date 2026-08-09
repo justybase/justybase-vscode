@@ -15,4 +15,5 @@ export * from './historyCommands';
 export * from './favoritesCommands';
 export * from './editorInsertCommands';
 export * from './utilityCommands';
+export * from './accessCommands';
 export { registerSchemaCommands } from './schemaCommands';

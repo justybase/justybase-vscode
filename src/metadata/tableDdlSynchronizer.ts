@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { DatabaseConnection } from '../contracts/database';
+import type { DatabaseConnection, DatabaseKind } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import type { ConnectionManager } from '../core/connectionManager';
 import { queryResultToRows, runQueryRaw } from '../core/queryRunner';
@@ -10,6 +10,7 @@ import {
     type TableDdlImpact,
 } from '../providers/parsers/tableDdlImpact';
 import { logWithFallback } from '../utils/logger';
+import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 import { netezzaMetadataProvider } from '../dialects/netezza/metadata/provider';
 import {
     createConnectionRowReader,
@@ -30,7 +31,7 @@ const CATALOG_TABLE_TYPES = ['TABLE', 'GLOBAL TEMP TABLE'] as const;
 
 interface RuntimeCatalogContext {
     database: string;
-    schema: string;
+    schema?: string;
 }
 
 export interface ResolvedTableTarget extends RuntimeCatalogContext {
@@ -88,7 +89,16 @@ async function readRows<T extends object>(
 function resolveTarget(
     target: QualifiedTableTarget,
     context: RuntimeCatalogContext,
+    databaseKind: DatabaseKind,
 ): ResolvedTableTarget {
+    if (databaseKind === 'access') {
+        return {
+            database: target.database || context.database || 'default',
+            schema: undefined,
+            table: target.table,
+        };
+    }
+
     return {
         database: target.database || context.database,
         schema: target.schema || context.schema,
@@ -99,18 +109,19 @@ function resolveTarget(
 function resolveImpact(
     impact: TableDdlImpact,
     context: RuntimeCatalogContext,
+    databaseKind: DatabaseKind,
 ): ResolvedTableDdlImpact {
     if (impact.kind === 'create') {
-        return { kind: 'create', target: resolveTarget(impact.target, context) };
+        return { kind: 'create', target: resolveTarget(impact.target, context, databaseKind) };
     }
     if (impact.kind === 'drop') {
-        return { kind: 'drop', target: resolveTarget(impact.target, context) };
+        return { kind: 'drop', target: resolveTarget(impact.target, context, databaseKind) };
     }
     return {
         kind: 'alter',
-        target: resolveTarget(impact.target, context),
+        target: resolveTarget(impact.target, context, databaseKind),
         renamedTarget: impact.renamedTarget
-            ? resolveTarget(impact.renamedTarget, context)
+            ? resolveTarget(impact.renamedTarget, context, databaseKind)
             : undefined,
     };
 }
@@ -119,7 +130,7 @@ function transactionKey(connectionName: string, documentUri?: string): string {
     return `${connectionName}|${documentUri || '<no-document>'}`;
 }
 
-/** Keeps Netezza table metadata coherent after successful top-level SQL DDL. */
+/** Keeps table metadata coherent after successful top-level SQL DDL. */
 export class TableDdlSynchronizer {
     private readonly transactions = new Map<string, TransactionState>();
 
@@ -131,11 +142,12 @@ export class TableDdlSynchronizer {
     ) {}
 
     async handleStatementSucceeded(event: SuccessfulStatementContext): Promise<void> {
-        if (this.connectionManager.getConnectionDatabaseKind(event.connectionName) !== 'netezza') {
+        const databaseKind = this.connectionManager.getConnectionDatabaseKind(event.connectionName);
+        if (databaseKind !== 'netezza' && databaseKind !== 'access') {
             return;
         }
 
-        const effect = extractTableDdlStatementEffect(event.sql, 'netezza');
+        const effect = extractTableDdlStatementEffect(event.sql, databaseKind);
         const key = transactionKey(event.connectionName, event.documentUri);
         try {
             if (effect.transactionControl === 'begin') {
@@ -150,7 +162,7 @@ export class TableDdlSynchronizer {
                 const state = this.transactions.get(key);
                 this.transactions.delete(key);
                 if (state?.pending.length) {
-                    await this.applyImpacts(event.connectionName, event.connection, state.pending);
+                    await this.applyImpacts(event.connectionName, event.connection, state.pending, databaseKind);
                 }
                 return;
             }
@@ -158,14 +170,14 @@ export class TableDdlSynchronizer {
                 return;
             }
 
-            const runtimeContext = await this.readRuntimeContext(event.connection);
-            const resolved = effect.impacts.map(impact => resolveImpact(impact, runtimeContext));
+            const runtimeContext = await this.readRuntimeContext(event.connection, databaseKind);
+            const resolved = effect.impacts.map(impact => resolveImpact(impact, runtimeContext, databaseKind));
             const transaction = this.transactions.get(key);
             if (transaction?.active) {
                 transaction.pending.push(...resolved);
                 return;
             }
-            await this.applyImpacts(event.connectionName, event.connection, resolved);
+            await this.applyImpacts(event.connectionName, event.connection, resolved, databaseKind);
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
             logWithFallback('warn', `[TableDdlSynchronizer] Metadata sync skipped: ${message}`);
@@ -200,7 +212,7 @@ export class TableDdlSynchronizer {
                 PROCEDURESIGNATURE: row.OBJNAME,
                 SCHEMA: row.SCHEMA,
                 OWNER: row.OWNER,
-                DESCRIPTION: row.DESCRIPTION,
+                DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
                 label: row.OBJNAME,
                 kind: vscode.CompletionItemKind.Function,
                 objType: 'PROCEDURE',
@@ -216,6 +228,7 @@ export class TableDdlSynchronizer {
                 database,
                 normalizedType,
                 rows.map(row => toTableMetadata({ ...row, OBJTYPE: normalizedType })),
+                { flatCatalog: databaseKind === 'access' },
             );
         }
 
@@ -235,7 +248,7 @@ export class TableDdlSynchronizer {
         const provider = netezzaMetadataProvider;
         const query = provider.buildObjectByNameQuery(
             target.database,
-            target.schema,
+            target.schema ?? '',
             target.table,
             CATALOG_TABLE_TYPES,
         );
@@ -268,7 +281,14 @@ export class TableDdlSynchronizer {
         this.schemaProvider.refresh();
     }
 
-    private async readRuntimeContext(connection: DatabaseConnection): Promise<RuntimeCatalogContext> {
+    private async readRuntimeContext(
+        connection: DatabaseConnection,
+        databaseKind: DatabaseKind,
+    ): Promise<RuntimeCatalogContext> {
+        if (databaseKind === 'access') {
+            return { database: 'default' };
+        }
+
         const rows = await readRows<{ DATABASE: string; SCHEMA: string }>(
             connection,
             'SELECT CURRENT_CATALOG AS DATABASE, CURRENT_SCHEMA AS SCHEMA',
@@ -284,7 +304,13 @@ export class TableDdlSynchronizer {
         connectionName: string,
         connection: DatabaseConnection,
         impacts: readonly ResolvedTableDdlImpact[],
+        databaseKind: DatabaseKind,
     ): Promise<void> {
+        if (databaseKind === 'access') {
+            await this.applyAccessImpacts(connectionName, connection, impacts);
+            return;
+        }
+
         const warmTargets: ResolvedTableTarget[] = [];
         const readRows = createConnectionRowReader(connection);
 
@@ -328,7 +354,7 @@ export class TableDdlSynchronizer {
         const provider = netezzaMetadataProvider;
         const query = provider.buildObjectByNameQuery(
             target.database,
-            target.schema,
+            target.schema ?? '',
             target.table,
             CATALOG_TABLE_TYPES,
         );
@@ -383,5 +409,72 @@ export class TableDdlSynchronizer {
             target.schema,
             target.table,
         );
+    }
+
+    private async applyAccessImpacts(
+        connectionName: string,
+        connection: DatabaseConnection,
+        impacts: readonly ResolvedTableDdlImpact[],
+    ): Promise<void> {
+        const provider = getDatabaseMetadataProvider('access');
+        const warmTargets: ResolvedTableTarget[] = [];
+
+        for (const impact of impacts) {
+            if (impact.kind === 'drop') {
+                this.removeTarget(connectionName, impact.target);
+                continue;
+            }
+
+            if (impact.kind === 'alter' && impact.renamedTarget) {
+                this.removeTarget(connectionName, impact.target);
+            }
+
+            const target = impact.kind === 'alter' && impact.renamedTarget
+                ? impact.renamedTarget
+                : impact.target;
+            this.metadataCache.invalidateTableColumns(
+                connectionName,
+                target.database,
+                undefined,
+                target.table,
+            );
+            warmTargets.push(target);
+        }
+
+        const databases = new Set(impacts.map(impact => impact.target.database));
+        const catalogRowsByDatabase = new Map<string, CatalogObjectRow[]>();
+        for (const database of databases) {
+            const rows = await readRows<CatalogObjectRow>(
+                connection,
+                provider.buildObjectTypeQuery(database, 'TABLE'),
+            );
+            catalogRowsByDatabase.set(database, rows);
+            replaceTableObjectTypeForDatabase(
+                this.metadataCache,
+                connectionName,
+                database,
+                'TABLE',
+                rows.map(row => toTableMetadata({ ...row, OBJTYPE: 'TABLE' })),
+                { flatCatalog: true },
+            );
+        }
+
+        const readColumnRows = createConnectionRowReader(connection);
+        await Promise.all(
+            warmTargets
+                .filter(target => catalogRowsByDatabase.get(target.database)?.some(
+                    row => row.OBJNAME.toUpperCase() === target.table.toUpperCase(),
+                ))
+                .map(target => warmTableColumnsFromCatalog(
+                    this.metadataCache,
+                    connectionName,
+                    target,
+                    readColumnRows,
+                    'access',
+                )),
+        );
+
+        this.metadataCache.notifyMetadataChanged();
+        this.schemaProvider.refresh();
     }
 }

@@ -7,14 +7,19 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
 import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { getEffectiveResultColumnType } from '../core/streaming/resultColumnMetadata';
-import { validateExportPath } from './exportUtils';
+import { validateExportPath, copyFileToClipboard, getTempFilePath as createExportTempPath } from './exportUtils';
+export { copyFileToClipboard } from './exportUtils';
+
+/**
+ * Generate temporary file path for XPT export.
+ */
+export function getTempFilePath(): string {
+    return createExportTempPath('xpt');
+}
 import { ExportCancelledError } from '../core/cancellation';
 import type { ProgressCallback } from './xlsbExporter';
 import type { ExportResult } from './xlsbExporter';
@@ -595,29 +600,4 @@ function checkEncoding(value: string): string | null {
     return result.warned
         ? `Value "${value}" contains non-ASCII characters that will be replaced with '?'`
         : null;
-}
-
-/**
- * Copy a file path to the clipboard (Windows only).
- */
-export async function copyFileToClipboard(filePath: string): Promise<boolean> {
-    if (os.platform() !== 'win32') return false;
-    return new Promise<boolean>(resolve => {
-        try {
-            const normalizedPath = path.normalize(path.resolve(filePath));
-            const ps = spawn('powershell.exe', [
-                '-NoProfile', '-NonInteractive', '-Command',
-                `Set-Clipboard -Path "${normalizedPath.replace(/"/g, '`"')}"`,
-            ]);
-            ps.stderr.on('data', () => { /* ignore PowerShell stderr */ });
-            ps.on('close', (code: number) => resolve(code === 0));
-            ps.on('error', () => resolve(false));
-        } catch {
-            resolve(false);
-        }
-    });
-}
-
-export function getTempFilePath(): string {
-    return path.join(os.tmpdir(), `netezza_export_${Date.now()}.xpt`);
 }

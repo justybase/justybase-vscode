@@ -71,6 +71,7 @@ export const api = {
   searchSchema: (input: SchemaSearchRequest) => request<SchemaSearchResponse>('/api/schema/search', { method: 'POST', body: JSON.stringify(input) }),
   completion: (input: SqlCompletionRequest) => request<SqlCompletionResponse>('/api/lsp/completion', { method: 'POST', body: JSON.stringify(input) }),
   diagnostics: (input: SqlDiagnosticsRequest) => request<SqlDiagnosticsResponse>('/api/lsp/diagnostics', { method: 'POST', body: JSON.stringify(input) }),
+  snippets: () => request<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>('/api/lsp/snippets'),
 };
 
 export function connectToQueryEvents(queryId: string, onEvent: (event: QueryEvent) => void, onError?: () => void): WebSocket {

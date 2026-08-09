@@ -67,6 +67,16 @@ function buildEscapedLikePattern(term: string): string {
         .toUpperCase()}%`;
 }
 
+function formatRevealError(message: string, kind: DatabaseKind | undefined): string {
+    if (kind !== 'access') {
+        return message;
+    }
+
+    return `Microsoft Access schema could not be initialized or revealed. `
+        + 'Check that the .mdb/.accdb file is accessible, the password is correct, and Java 11+ is available. '
+        + `Details: ${message}`;
+}
+
 function normalizeRoutineLookupName(value: string): string {
     const trimmed = value.trim();
     const signatureIndex = trimmed.indexOf('(');
@@ -124,6 +134,7 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                 payloadSize: data.name?.length ?? 0
             });
             let telemetryDone = false;
+            let revealConnectionKind: DatabaseKind | undefined;
             const emitRevealTelemetry = (
                 result: 'ok' | 'error' | 'cancelled',
                 options?: { errorCode?: string; metadata?: Record<string, string | number | boolean | null> }
@@ -163,6 +174,7 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                 }
 
                 const connectionKind = getConnectionKind(connectionManager, targetConnectionName);
+                revealConnectionKind = connectionKind;
 
                 // Accept either `objType` (old callers) or `type` (webview payload)
                 const searchType = (data.objType || data.type)?.trim().toUpperCase();
@@ -537,7 +549,9 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                 const message = err instanceof Error ? err.message : String(err);
                 logger?.error('[CQ01-REVEAL-005] Error revealing item', err);
                 emitRevealTelemetry('error', { errorCode: 'CQ01-REVEAL-005' });
-                vscode.window.showErrorMessage(`Error revealing item (CQ01-REVEAL-005): ${message}`);
+                vscode.window.showErrorMessage(
+                    `Error revealing item (CQ01-REVEAL-005): ${formatRevealError(message, revealConnectionKind)}`,
+                );
             }
         })
     ];

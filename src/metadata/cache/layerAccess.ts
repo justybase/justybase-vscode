@@ -5,6 +5,7 @@
 import type { ConnectionManager } from '../../core/connectionManager';
 import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
 import { Logger } from '../../utils/logger';
+import { normalizeCompletionDescription } from '../../utils/completionDescriptionUtils';
 import type { CacheStatsTracker } from '../cacheStats';
 import {
   extractLabel,
@@ -648,7 +649,7 @@ export class MetadataLayerAccess {
               schema: resolvedSchemaName,
               objId,
               owner: item.OWNER,
-              description: item.DESCRIPTION,
+              description: normalizeCompletionDescription(item.DESCRIPTION),
             });
           }
         }
@@ -740,7 +741,7 @@ export class MetadataLayerAccess {
             schema: resolvedSchemaName,
             objId,
             owner: item.OWNER,
-            description: item.DESCRIPTION,
+            description: normalizeCompletionDescription(item.DESCRIPTION),
           });
         }
       }

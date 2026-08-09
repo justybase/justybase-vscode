@@ -20,6 +20,7 @@ import {
     formatCellValue,
     debounce,
     getNumericTypeInfo,
+    isBinaryColumnType,
 } from '../utils.js';
 import { getSavedStateFor, saveAllGridStates, resolveScrollStateForResultSet } from './persistence.js';
 import { createHeaderCellWithFilter, reorderColumnsForPinning, renderRowCountInfo } from '../filter.js';
@@ -1213,6 +1214,12 @@ export function createResultSetGrid(
             if (isNaN(rowIdx)) return;
             const cellIdx2 = Array.from(cellTr.children).indexOf(cellTd) - 1;
             if (cellIdx2 < 0) return;
+
+            // Binary columns cannot be edited inline (values are base64/placeholders).
+            const cellColumn = columns[cellIdx2];
+            if (isBinaryColumnType(cellColumn?.dataType)) {
+                return;
+            }
 
             const currentText = editCellTd.textContent;
             const isNull = currentText === 'NULL';

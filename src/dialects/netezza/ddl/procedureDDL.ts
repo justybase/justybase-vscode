@@ -4,8 +4,8 @@
 
 import { ProcedureInfo } from './types';
 import { executeQueryHelper, quoteNameIfNeeded, fixProcReturnType } from './helpers';
-import { NzConnection } from '../../../types';
-import { NZ_SYSTEM_VIEWS } from '../../../metadata';
+import type { NzConnection } from '../../../types';
+import { NZ_SYSTEM_VIEWS } from '../metadata/systemQueries';
 
 /**
  * Generate DDL code for creating a procedure in Netezza from a metadata object

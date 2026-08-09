@@ -148,8 +148,49 @@ const RIGHT_ALIGNED_TEMPORAL_TYPE_ALIASES = new Set([
 const DECIMAL_TYPE_ALIASES = new Set([
     ...SCALE_SENSITIVE_DECIMAL_TYPE_ALIASES,
     ...DEFAULT_SCALE_DECIMAL_TYPE_ALIASES,
-    ...ALWAYS_DECIMAL_TYPE_ALIASES
+    ...ALWAYS_DECIMAL_TYPE_ALIASES,
 ]);
+
+const BINARY_TYPE_ALIASES = new Set([
+    'binary',
+    'varbinary',
+    'longvarbinary',
+    'blob',
+    'tinyblob',
+    'mediumblob',
+    'longblob',
+    'bytea',
+    'raw',
+    'image',
+    'ole',
+    'ole object',
+    'oid',
+    'byte',
+]);
+
+export function isBinaryColumnType(type: string | undefined | null): boolean {
+    return BINARY_TYPE_ALIASES.has(extractBaseTypeName(type));
+}
+
+function formatBytes(byteCount: number): string {
+    if (byteCount < 1024) {
+        return `${byteCount} B`;
+    }
+    if (byteCount < 1024 * 1024) {
+        return `${(byteCount / 1024).toFixed(1)} KB`;
+    }
+    return `${(byteCount / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function formatBinaryPlaceholder(value: unknown, type?: string | null): string {
+    const label = extractBaseTypeName(type) === 'ole' ? 'OLE Object' : 'BLOB';
+    if (typeof value !== 'string' || value.length === 0) {
+        return `[${label}]`;
+    }
+    const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+    const byteCount = Math.max(0, Math.floor((value.length * 3) / 4) - padding);
+    return `[${label} · ${formatBytes(byteCount)}]`;
+}
 
 const SIMPLE_SQL_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)*$/;
 const YYYYMMDD_INTEGER_DATE_MIN = 10000101;
@@ -854,6 +895,10 @@ export function formatCellValue(
 
     const lowerType = normalizeTypeName(type);
     const numericScale = normalizeDeclaredScale(scale) ?? getNumericScale(type);
+
+    if (isBinaryColumnType(type)) {
+        return formatBinaryPlaceholder(value, type);
+    }
 
     if (context.inferredDateInteger) {
         const inferredDateDisplay = formatParsedYyyymmddIntegerDate(parseYyyymmddIntegerDate(value));

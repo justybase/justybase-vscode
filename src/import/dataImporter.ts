@@ -17,6 +17,7 @@ import {
   type ColumnTypeChooserOptions,
 } from "../dialects/netezza/import/typeMapping";
 import { headerForcesTextImportType } from "./importTypeInferenceUtils";
+import { quoteIdentifier } from "../utils/identifierUtils";
 
 // Helper to unblock event loop
 const delay = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -66,6 +67,8 @@ export interface ImportColumnOptions {
   selectedColumnIndexes?: number[];
   forcedColumnTypes?: Record<number, string>;
   columnNameOverrides?: Record<number, string>;
+  /** Insert into an already existing target table instead of creating it. */
+  appendToExistingTable?: boolean;
 }
 
 export interface ImportColumnDescriptor {
@@ -505,7 +508,7 @@ export class NetezzaImporter {
    */
   private quoteIdentifier(name: string): string {
     if (!name) return '""';
-    return `"${name.replace(/"/g, '""')}"`;
+    return quoteIdentifier(name);
   }
 
   /**

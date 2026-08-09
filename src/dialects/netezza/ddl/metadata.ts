@@ -3,11 +3,39 @@
  * Functions to fetch table/view metadata from Netezza system views
  */
 
-import { ColumnInfo, KeyInfo } from './types';
+import type { ColumnInfo, KeyInfo } from './types';
 import { executeQueryHelper } from './helpers';
-import { NzConnection } from '../../../types';
-import { buildTableColumnsQuery, mapTableColumnsRows, RawTableColumnsRow } from '../../../metadata/columnMetadataService';
-import { NZ_QUERIES } from '../../../metadata/systemQueries';
+import type { NzConnection } from '../../../types';
+import { normalizeCompletionDescription } from '../../../utils/completionDescriptionUtils';
+import { NZ_QUERIES } from '../metadata/systemQueries';
+
+interface RawTableColumnsRow {
+    ATTNAME?: string;
+    DESCRIPTION?: string | null;
+    FULL_TYPE?: string;
+    ATTNOTNULL?: boolean | number | string | null;
+    COLDEFAULT?: string | null;
+}
+
+function mapTableColumnsRows(rows: RawTableColumnsRow[]): Array<{
+    columnName: string;
+    dataType: string;
+    description?: string;
+    isNotNull: boolean;
+    defaultValue: string | null;
+}> {
+    return rows
+        .map(row => ({
+            columnName: String(row.ATTNAME ?? '').trim(),
+            dataType: String(row.FULL_TYPE ?? '').trim(),
+            description: normalizeCompletionDescription(row.DESCRIPTION),
+            isNotNull: row.ATTNOTNULL === true
+                || row.ATTNOTNULL === 1
+                || ['1', 't', 'true', 'yes', 'on'].includes(String(row.ATTNOTNULL ?? '').trim().toLowerCase()),
+            defaultValue: row.COLDEFAULT ? String(row.COLDEFAULT) : null
+        }))
+        .filter(row => row.columnName.length > 0);
+}
 
 /**
  * Get table column information from Netezza system views
@@ -18,9 +46,9 @@ export async function getColumns(
     schema: string,
     tableName: string
 ): Promise<ColumnInfo[]> {
-    const sql = buildTableColumnsQuery(database, schema, tableName);
+    const sql = NZ_QUERIES.getTableColumns(database, schema, tableName);
     const rows = await executeQueryHelper<RawTableColumnsRow>(connection, sql);
-    const canonicalColumns = mapTableColumnsRows(rows, { database, schema, tableName });
+    const canonicalColumns = mapTableColumnsRows(rows);
 
     return canonicalColumns.map(column => ({
         name: column.columnName,

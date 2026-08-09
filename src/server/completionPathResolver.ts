@@ -1,4 +1,4 @@
-import type { CompletionItem } from "vscode-languageserver/node";
+import { CompletionItem, Position, Range } from "vscode-languageserver/node";
 import type { DatabaseKind } from "../contracts/database";
 import type { LocalDefinition } from "../providers/types";
 import { parseAlterTableContext } from "./completionAlterTableContext";
@@ -7,12 +7,14 @@ import { normalizeDialectQuotedIdentifiers } from "./completionDialectAdapter";
 import { CompletionContextExtractor } from "./completionContextExtractor";
 import { CompletionMetadataResolver } from "./completionMetadataResolver";
 import {
+  toKeywordItems,
   toLocalDefinitionItems,
   toTableTargetLocalItems,
 } from "./completionRenderer";
 import { parseCallArgumentContext } from "./catalogNavigation";
 import type {
   CompletionRequestContext,
+  FromJoinContext,
   TableTargetPathContext,
 } from "./completionTypes";
 
@@ -77,7 +79,7 @@ export class CompletionPathResolver {
       databaseKind,
     );
     if (fromJoinContext) {
-      return this.metadataResolver.resolveTablePathCompletions(
+      const items = await this.metadataResolver.resolveTablePathCompletions(
         fromJoinContext,
         toLocalDefinitionItems(localDefs),
         documentUri,
@@ -85,6 +87,7 @@ export class CompletionPathResolver {
         databaseKind,
         true,
       );
+      return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }
 
     const callArgContext = parseCallArgumentContext(
@@ -98,6 +101,14 @@ export class CompletionPathResolver {
         effectiveDb,
         databaseKind,
       );
+    }
+
+    if (this.isUpdateSetContext(linePrefix)) {
+      return toKeywordItems("", position, ["SET"]);
+    }
+
+    if (this.isBareGroomContext(linePrefix)) {
+      return toKeywordItems("", position, ["TABLE", "VIEWS"]);
     }
 
     const insertColumnContext =
@@ -168,7 +179,7 @@ export class CompletionPathResolver {
         databaseKind,
       );
     if (fromJoinContext) {
-      return this.metadataResolver.resolveTablePathCompletions(
+      const items = await this.metadataResolver.resolveTablePathCompletions(
         fromJoinContext,
         toLocalDefinitionItems(localDefs),
         documentUri,
@@ -176,6 +187,7 @@ export class CompletionPathResolver {
         databaseKind,
         true,
       );
+      return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }
 
     const objectTargetContext =
@@ -194,6 +206,51 @@ export class CompletionPathResolver {
       effectiveDb,
       databaseKind,
     );
+  }
+
+  private applyFilePathCompletionEdit(
+    items: CompletionItem[],
+    context: FromJoinContext,
+    requestContext: CompletionRequestContext,
+  ): CompletionItem[] {
+    if (
+      context.kind !== "from_join_name"
+      || !context.isFilePath
+      || !context.isQuoted
+      || context.partial.length === 0
+    ) {
+      return items;
+    }
+
+    const startCharacter = Math.max(
+      0,
+      requestContext.position.character - context.partial.length - 1,
+    );
+    const nextCharacter = requestContext.documentText[requestContext.cursorOffset] ?? "";
+    const endCharacter = requestContext.position.character + (nextCharacter === '"' ? 1 : 0);
+
+    return items.map((item) => ({
+      ...item,
+      textEdit: {
+        range: Range.create(
+          Position.create(requestContext.position.line, startCharacter),
+          Position.create(requestContext.position.line, endCharacter),
+        ),
+        newText: typeof item.insertText === "string" ? item.insertText : `"${item.label}"`,
+      },
+    }));
+  }
+
+  private isUpdateSetContext(linePrefix: string): boolean {
+    const trimmed = linePrefix.trimEnd();
+    if (/\.$/.test(trimmed)) {
+      return false;
+    }
+    return /^UPDATE\s+[^\s,]+(?:\s+AS\s+[^\s.,]+)?$/i.test(trimmed);
+  }
+
+  private isBareGroomContext(linePrefix: string): boolean {
+    return /^GROOM\s*$/i.test(linePrefix);
   }
 
   private resolveObjectTargetPathCompletions(

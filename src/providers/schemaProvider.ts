@@ -3,6 +3,7 @@ import * as path from 'path';
 import { DatabaseKind } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
+import { normalizeDatabaseKind } from '../contracts/database';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
 import type { DocumentParseSession } from '../sqlParser/documentParseSession';
@@ -26,6 +27,7 @@ import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
 import { logWithFallback } from '../utils/logger';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 import { isLargeScriptDocument } from '../sqlParser/validationConfig';
+import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 import {
     buildSchemaFilterRegex,
     columnVisibleInSchemaFilter,
@@ -122,6 +124,8 @@ async function runQueryWithTimeout(
 /**
  * Extracts pure function for generating auto table name - testable without VS Code dependencies
  */
+const FLAT_FILE_DIALECTS = new Set(['sqlite', 'access']);
+
 export function generateAutoTableNameFromDbInfo(
     dbInfo: { CURRENT_CATALOG?: string; CURRENT_SCHEMA?: string } | undefined,
     kind?: string | DatabaseKind,
@@ -137,6 +141,12 @@ export function generateAutoTableNameFromDbInfo(
     const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
     const random = randomGenerator().toString().padStart(4, '0');
     const generatedTableName = applyGeneratedIdentifierCase(`IMPORT_${dateStr}_${random}`, kind);
+
+    // Flat file dialects (SQLite, Microsoft Access) have no database/schema
+    // hierarchy, so qualified three-part targets would be rejected downstream.
+    if (kind && FLAT_FILE_DIALECTS.has(normalizeDatabaseKind(kind))) {
+        return generatedTableName;
+    }
 
     return `${database}.${schema}.${generatedTableName}`;
 }
@@ -228,8 +238,9 @@ export function isExpandableType(objType: string | undefined): boolean {
     return objType ? expandableTypes.includes(objType) : false;
 }
 
-export function normalizeInlineTreeMetadata(value: string | undefined): string {
-    return value ? value.replace(/\s+/g, ' ').trim() : '';
+export function normalizeInlineTreeMetadata(value: unknown): string {
+    const normalized = normalizeCompletionDescription(value);
+    return normalized ? normalized.replace(/\s+/g, ' ').trim() : '';
 }
 
 export function getTypeGroupInlineDescription(objType: string | undefined, kind?: string | DatabaseKind): string {
@@ -293,7 +304,7 @@ export function getColumnTypeIndicator(dataType: string | undefined): string {
 export function buildInlineTreeDescription(
     contextValue: string,
     schema?: string,
-    objectDescription?: string,
+    objectDescription?: unknown,
     dataType?: string,
 ): string {
     const inlineDescription = normalizeInlineTreeMetadata(objectDescription);
@@ -2277,7 +2288,7 @@ export class SchemaProvider
                             element.dbName,
                             obj.SCHEMA,
                             obj.OBJNAME,
-                            obj.DESCRIPTION || obj.detail,
+                            normalizeCompletionDescription(obj.DESCRIPTION) || obj.detail,
                         ),
                     );
                 }
@@ -2320,7 +2331,7 @@ export class SchemaProvider
                             element.objType,
                             obj.SCHEMA,
                             obj.OBJID,
-                            obj.DESCRIPTION || obj.detail,
+                            normalizeCompletionDescription(obj.DESCRIPTION) || obj.detail,
                             element.connectionName,
                             undefined, // parentName
                             undefined, // customIconPath
@@ -2532,6 +2543,7 @@ export class SchemaItem extends vscode.TreeItem {
      */
     public sourceContext?: string;
     public readonly rawLabel: string;
+    public readonly objectDescription?: string;
 
     constructor(
         public readonly label: string,
@@ -2541,7 +2553,7 @@ export class SchemaItem extends vscode.TreeItem {
         public readonly objType?: string,
         public readonly schema?: string,
         public readonly objId?: number,
-        public readonly objectDescription?: string,
+        objectDescription?: unknown,
         public readonly connectionName?: string,
         public readonly parentName?: string, // Add parent (Table) name for stable ID
         customIconPath?: vscode.Uri,
@@ -2555,6 +2567,7 @@ export class SchemaItem extends vscode.TreeItem {
     ) {
         super(label, collapsibleState);
         this.rawLabel = rawLabel ?? label;
+        this.objectDescription = normalizeCompletionDescription(objectDescription);
 
         // Build tooltip with Description if available
         let tooltipText = this.label;
@@ -2574,13 +2587,13 @@ export class SchemaItem extends vscode.TreeItem {
         if (this.isPk) tooltipText += `\n🔑 Primary Key`;
         if (this.isFk) tooltipText += `\n🔗 Foreign Key`;
         if (this.isDistributionKey) tooltipText += `\n📊 Distribution Key`;
-        if (objectDescription && objectDescription.trim()) {
-            tooltipText += `\n\n${objectDescription.trim()}`;
+        if (this.objectDescription) {
+            tooltipText += `\n\n${this.objectDescription}`;
         }
 
         this.tooltip = tooltipText;
 
-        this.description = buildInlineTreeDescription(contextValue, schema, objectDescription, dataType);
+        this.description = buildInlineTreeDescription(contextValue, schema, this.objectDescription, dataType);
 
         if (contextValue === 'serverInstance') {
             this.resourceUri = getConnectionAccentResourceUri(connectionName || this.rawLabel);

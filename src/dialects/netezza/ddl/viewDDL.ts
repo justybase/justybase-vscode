@@ -3,8 +3,8 @@
  */
 
 import { executeQueryHelper, quoteNameIfNeeded } from './helpers';
-import { NzConnection } from '../../../types';
-import { NZ_SYSTEM_VIEWS } from '../../../metadata';
+import type { NzConnection } from '../../../types';
+import { NZ_SYSTEM_VIEWS } from '../metadata/systemQueries';
 
 /**
  * Build view DDL from definition string

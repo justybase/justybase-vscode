@@ -1,0 +1,69 @@
+{
+  "DuckDB QUALIFY": {
+    "prefix": "duckdb-qualify",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM ${2:table_name}",
+      "QUALIFY row_number() OVER (PARTITION BY ${3:group_col} ORDER BY ${4:sort_col}) = ${5:1};"
+    ],
+    "description": "Filter window-function results with DuckDB QUALIFY"
+  },
+  "DuckDB read_parquet": {
+    "prefix": "duckdb-read-parquet",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM read_parquet('${2:path/to/file.parquet}')${3:};"
+    ],
+    "description": "Query a Parquet file through DuckDB"
+  },
+  "DuckDB read_csv": {
+    "prefix": "duckdb-read-csv",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM read_csv('${2:path/to/file.csv}', header = true)${3:};"
+    ],
+    "description": "Query a CSV file through DuckDB"
+  },
+  "DuckDB sample": {
+    "prefix": "duckdb-sample",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM ${2:table_name} USING SAMPLE reservoir(${3:10}%)${4:};"
+    ],
+    "description": "Read a reproducible-sized DuckDB sample"
+  },
+  "DuckDB pivot": {
+    "prefix": "duckdb-pivot",
+    "body": [
+      "PIVOT ${1:source_table}",
+      "ON ${2:pivot_column}",
+      "USING ${3:sum(value_column)}",
+      "GROUP BY ${4:group_column};"
+    ],
+    "description": "DuckDB PIVOT statement"
+  },
+  "DuckDB macro": {
+    "prefix": "duckdb-macro",
+    "body": [
+      "CREATE OR REPLACE MACRO ${1:macro_name}(${2:value}) AS ${3:value} + 1;"
+    ],
+    "description": "DuckDB scalar macro"
+  },
+  "DuckDB attach": {
+    "prefix": "duckdb-attach",
+    "body": [
+      "ATTACH '${1:path/to/database.duckdb}' AS ${2:database_name};"
+    ],
+    "description": "Attach another DuckDB database"
+  },
+  "DuckDB window qualify": {
+    "prefix": "duckdb-window-qualify",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM ${2:table_name}",
+      "WINDOW ${3:window_name} AS (PARTITION BY ${4:group_col} ORDER BY ${5:sort_col})",
+      "QUALIFY row_number() OVER ${3:window_name} = ${6:1};"
+    ],
+    "description": "Define and filter a DuckDB named window"
+  }
+}

@@ -2,7 +2,7 @@ export type DatabaseConnectionOptionValue = string | number | boolean;
 
 export type DatabaseConnectionOptions = Record<string, DatabaseConnectionOptionValue>;
 
-export type DatabaseConnectionFieldType = 'text' | 'password' | 'number' | 'select' | 'checkbox';
+export type DatabaseConnectionFieldType = 'text' | 'password' | 'number' | 'select' | 'checkbox' | 'file';
 
 export interface DatabaseConnectionFieldOption {
   value: string;

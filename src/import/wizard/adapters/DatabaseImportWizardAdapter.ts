@@ -29,6 +29,7 @@ const DEFAULT_TYPE_OPTIONS_BY_KIND: Record<DatabaseKind, string[]> = {
     mysql: ['INTEGER', 'BIGINT', 'DECIMAL(18,2)', 'DATE', 'DATETIME', 'BOOLEAN', 'VARCHAR(255)', 'TEXT'],
     sqlite: ['INTEGER', 'NUMERIC', 'REAL', 'DATE', 'TIMESTAMP', 'TEXT'],
     duckdb: ['INTEGER', 'BIGINT', 'DECIMAL(18,2)', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'VARCHAR', 'DOUBLE'],
+    access: ['INTEGER', 'BIGINT', 'DECIMAL(18,2)', 'CURRENCY', 'DATETIME', 'BOOLEAN', 'TEXT(255)', 'MEMO'],
 };
 
 export interface ImportWizardValidationIssue {

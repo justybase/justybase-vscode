@@ -27,7 +27,10 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
             const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
             const dbName = item.dbName || 'SYSTEM';
-            const schemaName = databaseKind === 'sqlite' ? item.schema : item.schema || 'ADMIN';
+            const schemaName =
+                databaseKind === 'sqlite' || databaseKind === 'access'
+                    ? item.schema
+                    : item.schema || 'ADMIN';
             const connectionName = item.connectionName;
 
             if (!await requireConnection(connectionManager)) return;

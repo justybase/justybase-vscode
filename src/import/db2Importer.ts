@@ -12,6 +12,8 @@ import {
 } from './dataImporter';
 import { normalizeAndDeduplicateHeaders } from './importHeaderUtils';
 import { createTabularDataImporter } from './tabularDataImporter';
+import { quoteIdentifier } from '../utils/identifierUtils';
+import { escapeSqlString as escapeSqlLiteral } from '../utils/sqlUtils';
 
 const DB2_MAX_VARCHAR_LENGTH = 32672;
 const DB2_MAX_CHAR_LENGTH = 254;
@@ -31,10 +33,6 @@ interface Db2TargetTable {
     table: string;
     qualifiedName: string;
     displayName: string;
-}
-
-function quoteIdentifier(identifier: string): string {
-    return `"${identifier.replace(/"/g, '""')}"`;
 }
 
 function formatIdentifier(identifier: string): string {
@@ -214,10 +212,6 @@ function normalizeValueForType(value: string, dataType: string, decimalDelimiter
     }
 
     return trimmed;
-}
-
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
 }
 
 function toSqlLiteral(value: string | null, dataType: string): string {

@@ -1,9 +1,12 @@
 const MAX_INLINE_DESCRIPTION_LENGTH = 96;
 
 export function normalizeCompletionDescription(
-  description: string | undefined,
+  description: unknown,
 ): string | undefined {
-  const trimmed = description?.trim();
+  if (typeof description !== "string") {
+    return undefined;
+  }
+  const trimmed = description.trim();
   return trimmed || undefined;
 }
 

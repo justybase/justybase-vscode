@@ -1,4 +1,5 @@
 import { ColumnDefinition } from "../types";
+import { isBinarySqlColumnType } from "./sqlColumnTypeUtils";
 import {
   ColumnFormattingOverride,
   DEFAULT_RESULT_FORMATTING_SETTINGS,
@@ -351,6 +352,26 @@ function applyColumnOverride(
   return merged;
 }
 
+function formatBytes(byteCount: number): string {
+  if (byteCount < 1024) {
+    return `${byteCount} B`;
+  }
+  if (byteCount < 1024 * 1024) {
+    return `${(byteCount / 1024).toFixed(1)} KB`;
+  }
+  return `${(byteCount / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatBinaryPlaceholder(value: unknown, type?: string): string {
+  const label = extractBaseTypeName(type) === "ole" ? "OLE Object" : "BLOB";
+  if (typeof value !== "string" || value.length === 0) {
+    return `[${label}]`;
+  }
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const byteCount = Math.max(0, Math.floor((value.length * 3) / 4) - padding);
+  return `[${label} · ${formatBytes(byteCount)}]`;
+}
+
 export function formatResultValueForDisplay(
   value: unknown,
   column: ColumnDefinition,
@@ -362,6 +383,10 @@ export function formatResultValueForDisplay(
 ): string {
   if (value === null || value === undefined) {
     return "";
+  }
+
+  if (isBinarySqlColumnType(column.type)) {
+    return formatBinaryPlaceholder(value, column.type);
   }
 
   if (value instanceof Date) {

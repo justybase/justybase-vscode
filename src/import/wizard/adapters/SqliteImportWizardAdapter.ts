@@ -3,8 +3,9 @@ import {
     buildBatchLoadPreview,
 } from '../../batchImportSupport';
 import { sqliteBatchImportConfig } from '../../sqliteImporter';
+import { sqliteImportTypeMapper } from '../../../dialects/sqlite/importTypeMapper';
 import type { CreateTablePreviewInput, LoadSqlPreviewInput } from './DatabaseImportWizardAdapter';
-import { BaseImportWizardAdapter, getBaseImportTypeName, normalizeImportTypeName } from './DatabaseImportWizardAdapter';
+import { BaseImportWizardAdapter, normalizeImportTypeName } from './DatabaseImportWizardAdapter';
 
 export class SqliteImportWizardAdapter extends BaseImportWizardAdapter {
     public readonly kind = 'sqlite' as const;
@@ -15,14 +16,7 @@ export class SqliteImportWizardAdapter extends BaseImportWizardAdapter {
 
     public mapInferredType(typeName: string): string {
         const normalized = normalizeImportTypeName(typeName);
-        const baseType = getBaseImportTypeName(normalized);
-        if (baseType === 'BOOLEAN') {
-            return 'INTEGER';
-        }
-        if (baseType === 'VARCHAR' || baseType === 'NVARCHAR') {
-            return 'TEXT';
-        }
-        return normalized;
+        return sqliteImportTypeMapper.createDataType(normalized).toString();
     }
 
     public buildCreateTableSql(input: CreateTablePreviewInput): string {

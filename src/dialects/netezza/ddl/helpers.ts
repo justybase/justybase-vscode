@@ -1,7 +1,7 @@
 /**
  * DDL Generator - Helper Functions
  */
-import { NzConnection, ConnectionDetails } from '../../../types';
+import type { NzConnection, ConnectionDetails } from '../../../types';
 
 /**
  * Execute query and return array of objects (shim for NzConnection)

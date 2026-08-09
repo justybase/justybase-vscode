@@ -62,6 +62,23 @@ const TEMPORAL_TYPE_ALIASES = new Set([
     'interval',
 ]);
 
+const BINARY_TYPE_ALIASES = new Set([
+    'binary',
+    'varbinary',
+    'longvarbinary',
+    'blob',
+    'tinyblob',
+    'mediumblob',
+    'longblob',
+    'bytea',
+    'raw',
+    'image',
+    'ole',
+    'ole object',
+    'oid',
+    'byte',
+]);
+
 function extractBaseTypeName(type: string | undefined | null): string {
     const normalizedType = String(type || '').trim().toLowerCase().replace(/\s+/g, ' ');
     const parenIndex = normalizedType.indexOf('(');
@@ -75,4 +92,8 @@ export function isNumericSqlColumnType(dataType: string | undefined): boolean {
 
 export function isTemporalSqlColumnType(dataType: string | undefined): boolean {
     return TEMPORAL_TYPE_ALIASES.has(extractBaseTypeName(dataType));
+}
+
+export function isBinarySqlColumnType(dataType: string | undefined): boolean {
+    return BINARY_TYPE_ALIASES.has(extractBaseTypeName(dataType));
 }

@@ -150,11 +150,40 @@ export class CompletionMetadataResolver {
       ...localItems.filter((item) => matchesPrefix(item.label, partial)),
     ];
     const databases = await this.metadataProvider.getDatabases(documentUri);
-    result.push(
-      ...filterMetadataItems(databases, partial, CompletionItemKind.Module, databaseKind),
+    const databaseItems = filterMetadataItems(
+      databases,
+      partial,
+      CompletionItemKind.Module,
+      databaseKind,
     );
+    result.push(...databaseItems);
 
-    if (effectiveDb) {
+    if (databaseKind === "netezza") {
+      // Unqualified Netezza names resolve in the active database. Objects in
+      // another database must be completed through an explicit DB..TABLE or
+      // DB.SCHEMA.TABLE path; returning them as plain table names would
+      // produce SQL that resolves in the wrong database.
+      if (effectiveDb) {
+        result.push(
+          ...(await this.getSchemaPathCompletions(
+            documentUri,
+            effectiveDb,
+            partial,
+            databaseKind,
+          )),
+        );
+        result.push(
+          ...(await this.getTableLikeCompletions(
+            documentUri,
+            effectiveDb,
+            undefined,
+            partial,
+            includeViews,
+            databaseKind,
+          )),
+        );
+      }
+    } else if (effectiveDb) {
       if (databaseKind === "db2" || databaseKind === "mssql") {
         result.push(
           ...(await this.getSchemaPathCompletions(
@@ -594,8 +623,12 @@ export class CompletionMetadataResolver {
         isNetezzaDoubleDotSource(source, databaseKind) &&
         lookupTarget.schema === undefined;
 
+      const omitSchemaForFlatCatalog =
+        databaseKind === "access" && lookupTarget.schema === undefined;
+
       const columns =
         omitSchemaArgument ||
+        omitSchemaForFlatCatalog ||
         (options?.omitSchemaArgumentWhenUndefined &&
           lookupTarget.schema === undefined)
           ? await this.metadataProvider.getColumns(
@@ -792,7 +825,7 @@ export class CompletionMetadataResolver {
               label: viewName,
               kind: CompletionItemKind.Interface,
               detail: 'System View (Netezza)',
-              sortText: viewName,
+              sortText: `9_${viewName}`,
             });
           }
         }

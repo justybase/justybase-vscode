@@ -23,6 +23,7 @@ function renderNav() {
         'filepreview': '<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
         'importwizard': '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
         'copilot': '<svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM8 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm8 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>',
+        'mcp': '<svg viewBox="0 0 24 24"><path d="M8 8.5 12 4l4 4.5"/><path d="M12 4v11"/><path d="M7 12H4v7h16v-7h-3"/><path d="M8 19v2h8v-2"/></svg>',
         'snippets': '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="8 10 12 14 16 10"/></svg>'
     };
     nav.innerHTML = SECTIONS.map(s =>
@@ -75,6 +76,10 @@ function renderContent() {
     }
     html += '</div>';
 
+    if (currentSection === 'mcp') {
+        html += renderMcpStatus();
+    }
+
     // Quick Actions section
     if (currentSection === 'general') {
         html += renderQuickActions();
@@ -94,6 +99,55 @@ function renderContent() {
         }
         vscode.postMessage({ command: 'getSnippets' });
     }
+}
+
+function renderMcpStatus() {
+    const status = settingsValues.mcpStatus || {};
+    const http = status.httpStatus || {};
+    const tools = status.tools || [];
+    let html = '<div class="mcp-status-card">';
+    html += '<div class="mcp-status-title">MCP status</div>';
+
+    if (status.selectionError) {
+        html += '<div class="mcp-status-line error">⚠ ' + escapeHtml(status.selectionError) + '</div>';
+    } else if (status.selectedConnection) {
+        html += '<div class="mcp-status-line success">✓ Selected connection: <strong>' + escapeHtml(status.selectedConnection) + '</strong></div>';
+    } else {
+        html += '<div class="mcp-status-line warning">⚠ Select a Netezza connection before starting MCP.</div>';
+    }
+
+    html += '<div class="mcp-status-line">Copilot Chat: ' +
+        (status.apiAvailable
+            ? (status.copilotEnabled ? '<span class="status-good">enabled</span>' : 'disabled')
+            : '<span class="status-muted">not available in this VS Code version</span>') +
+        '</div>';
+
+    if (status.externalEnabled && http.running) {
+        html += '<div class="mcp-status-line success">✓ Local HTTP: running on <code>http://127.0.0.1:' +
+            escapeHtml(String(http.port || settingsValues['mcp-port'] || 37210)) +
+            '</code>' + (http.connectionName ? ' · ' + escapeHtml(http.connectionName) : '') + '</div>';
+    } else if (status.externalEnabled) {
+        html += '<div class="mcp-status-line error">⚠ Local HTTP: ' +
+            escapeHtml(http.lastError || 'server is not running') + '</div>';
+    } else {
+        html += '<div class="mcp-status-line">Local HTTP: stopped</div>';
+    }
+
+    if (status.externalEnabled) {
+        const port = http.port || settingsValues['mcp-port'] || 37210;
+        const snippet = JSON.stringify({
+            mcp: { 'netezza-schema': { type: 'remote', url: 'http://127.0.0.1:' + port } }
+        }, null, 2);
+        html += '<div class="mcp-snippet-label">OpenCode Streamable HTTP configuration</div>';
+        html += '<pre class="mcp-snippet"><code>' + escapeHtml(snippet) + '</code></pre>';
+    }
+
+    html += '<details class="mcp-tools"><summary>Available read-only tools (' + tools.length + ')</summary><ul>';
+    for (const tool of tools) {
+        html += '<li><strong>' + escapeHtml(tool.name || '') + '</strong> — ' + escapeHtml(tool.description || '') + '</li>';
+    }
+    html += '</ul></details></div>';
+    return html;
 }
 
 // ── Render User Snippets ──
@@ -239,9 +293,12 @@ function renderControl(setting) {
             controlHtml = '<label class="toggle"><input type="checkbox" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '"' + (val ? ' checked' : '') + '><span class="toggle-slider"></span></label>';
             break;
         case 'select':
-            const valueType = (setting.options || []).some(opt => typeof opt.value === 'number') ? 'number' : 'string';
+            const options = setting.id === 'mcp-connection-name'
+                ? (settingsValues.mcpConnectionOptions || setting.options || [])
+                : (setting.options || []);
+            const valueType = options.some(opt => typeof opt.value === 'number') ? 'number' : 'string';
             let selHtml = '<select class="select-control" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '" data-value-type="' + valueType + '">';
-            for (const opt of (setting.options || [])) {
+            for (const opt of options) {
                 selHtml += '<option value="' + opt.value + '"' + (String(val) === String(opt.value) ? ' selected' : '') + '>' + opt.label + '</option>';
             }
             selHtml += '</select>';

@@ -6,6 +6,7 @@ const DIALECT_ICON_PATHS: Readonly<Partial<Record<DatabaseKind, readonly string[
     netezza: ['netezza_icon64.png'],
     sqlite: ['media', 'sqlite-dialect.svg'],
     duckdb: ['media', 'duckdb-dialect.svg'],
+    file: ['media', 'file-dialect.svg'],
     db2: ['media', 'db2-dialect.svg'],
     postgresql: ['media', 'postgresql-dialect.svg'],
     vertica: ['media', 'vertica-dialect.svg'],
@@ -13,6 +14,7 @@ const DIALECT_ICON_PATHS: Readonly<Partial<Record<DatabaseKind, readonly string[
     mssql: ['media', 'mssql-dialect.svg'],
     mysql: ['media', 'mysql-dialect.svg'],
     snowflake: ['media', 'snowflake-dialect.svg'],
+    access: ['media', 'access-dialect.svg'],
 };
 
 const DEFAULT_ICON_PATH: readonly string[] = ['icon.svg'];

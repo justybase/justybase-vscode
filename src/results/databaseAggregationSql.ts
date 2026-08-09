@@ -2,6 +2,7 @@ import type { ColumnDefinition } from '../types';
 import type { DiskQuerySpec } from '../core/resultDataProvider/types';
 import { buildDatabaseWhereSql } from './databaseFilterSql';
 import { removeTrailingLimitClause } from './refreshSqlLimit';
+import { quoteIdentifier } from '../utils/identifierUtils';
 
 export interface DatabaseAggregationRequest {
     columnIndex: number;
@@ -29,10 +30,6 @@ const VALID_AGGREGATION_FUNCTIONS = new Set([
     'stdev',
     'median',
 ]);
-
-function quoteIdentifier(identifier: string): string {
-    return `"${identifier.replace(/"/g, '""')}"`;
-}
 
 function normalizeSqlForSubquery(sql: string): string {
     const withoutLimit = removeTrailingLimitClause(sql).trim();

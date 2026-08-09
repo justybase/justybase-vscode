@@ -14,6 +14,7 @@ import { postgresqlCompatibleDialectTraits } from "../shared/dialect-traits/post
 import { snowflakeDialectTraits } from "../shared/dialect-traits/snowflake";
 import { sqliteDialectTraits } from "../dialects/sqlite/traits";
 import { verticaDialectTraits } from "../shared/dialect-traits/vertica";
+import { accessDialectTraits } from "../dialects/access/traits";
 
 const DIALECT_TRAITS_BY_KIND: Readonly<
   Record<DatabaseKind, DatabaseDialectTraits>
@@ -25,9 +26,11 @@ const DIALECT_TRAITS_BY_KIND: Readonly<
   snowflake: snowflakeDialectTraits,
   sqlite: sqliteDialectTraits,
   duckdb: duckdbDialectTraits,
+  file: duckdbDialectTraits,
   db2: db2DialectTraits,
   mssql: mssqlDialectTraits,
   mysql: mysqlDialectTraits,
+  access: accessDialectTraits,
 };
 
 export function getDatabaseDialectTraits(

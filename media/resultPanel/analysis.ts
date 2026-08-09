@@ -3,6 +3,8 @@ import { formatCellValue } from './utils.js';
 import { getHostState, setHostState } from './protocol.js';
 import { getElementById } from './dom.js';
 import { closeRowView } from './rowView.js';
+import { renderExploreView } from './explore/explorePanel.js';
+import { disposeComposerChart } from './explore/composerTab.js';
 import {
     callPanelMethod,
     getActiveSourceUri,
@@ -11,7 +13,7 @@ import {
 } from './types.js';
 import type { ResultSet, ResultSetColumn } from './types.js';
 
-type ResultViewMode = 'table' | 'chart' | 'diff';
+type ResultViewMode = 'table' | 'chart' | 'diff' | 'explore';
 
 interface AnalysisField {
     id: string;
@@ -81,7 +83,7 @@ function getResultKey(rsIndex: number = getActiveGridIndex()): string {
 
 function normalizeMode(mode: string | undefined | null): ResultViewMode {
     const normalized = (mode || '').toLowerCase();
-    if (normalized === 'chart' || normalized === 'diff' || normalized === 'table') {
+    if (normalized === 'chart' || normalized === 'diff' || normalized === 'table' || normalized === 'explore') {
         return normalized;
     }
     return DEFAULT_VIEW_MODE;
@@ -276,6 +278,7 @@ function applyViewMode(mode: string, rsIndex: number = getActiveGridIndex()): vo
 
     if (effectiveMode === 'table') {
         activeDiffTruncated = false;
+        disposeComposerChart();
         gridContainer.style.display = '';
         analysisContainer.style.display = 'none';
         analysisContainer.innerHTML = '';
@@ -304,6 +307,9 @@ function applyViewMode(mode: string, rsIndex: number = getActiveGridIndex()): vo
         renderMiniChartsView(rsIndex);
     } else if (effectiveMode === 'diff') {
         renderDiffView(rsIndex);
+    } else if (effectiveMode === 'explore') {
+        activeDiffTruncated = false;
+        renderExploreView(rsIndex);
     }
 }
 

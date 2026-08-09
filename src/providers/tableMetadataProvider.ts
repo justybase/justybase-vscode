@@ -2,6 +2,7 @@ import { QueryResult, queryResultToRows } from '../core/queryRunner';
 import { DatabaseKind } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { normalizeBooleanFlag } from '../metadata/columnMetadataService';
+import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 
 /**
  * Column metadata structure
@@ -78,7 +79,7 @@ export function parseColumnRow(row: RawColumnRow): ColumnMetadata {
         formatType: row.FORMAT_TYPE,
         isNotNull,
         colDefault: row.COLDEFAULT || null,
-        description: row.DESCRIPTION || '',
+        description: normalizeCompletionDescription(row.DESCRIPTION) || '',
         isPk: normalizeBooleanFlag(row.IS_PK),
         isFk: normalizeBooleanFlag(row.IS_FK),
         isDistributionKey: row.IS_DISTRIBUTION_KEY !== undefined 
@@ -96,8 +97,9 @@ export function parseColumnRow(row: RawColumnRow): ColumnMetadata {
 export function parseTableComment(result: QueryResult | undefined): string | null {
     if (!result) return null;
     const rows = queryResultToRows<{ DESCRIPTION: string }>(result);
-    if (rows.length > 0 && rows[0].DESCRIPTION) {
-        return rows[0].DESCRIPTION;
+    const description = normalizeCompletionDescription(rows[0]?.DESCRIPTION);
+    if (description) {
+        return description;
     }
     return null;
 }

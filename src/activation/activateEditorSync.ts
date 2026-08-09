@@ -95,6 +95,9 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
             clearResultPanelFocusContexts();
             syncResultPanelSourceWithEditor(editor, { fromEditorSwitch: true });
             refreshConnectionAccentForDocument(editor?.document);
+            if (editor) {
+                metadataPrefetchCoordinator.triggerForDocument(editor.document);
+            }
         }),
         vscode.window.onDidChangeTextEditorSelection(event => {
             if (event.textEditor === vscode.window.activeTextEditor) {

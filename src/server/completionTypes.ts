@@ -9,7 +9,12 @@ import type { LocalDefinition } from "../providers/types";
  * Shared completion-engine types used across the extracted server modules.
  */
 export type FromJoinContext =
-  | { kind: "from_join_name"; partial: string }
+  | {
+      kind: "from_join_name";
+      partial: string;
+      isFilePath?: boolean;
+      isQuoted?: boolean;
+    }
   | { kind: "db_dot"; dbName: string; partial: string }
   | { kind: "db_double_dot"; dbName: string; partial: string }
   | {

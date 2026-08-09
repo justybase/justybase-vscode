@@ -4,6 +4,7 @@
  */
 
 import type { MetadataPrefetchTarget } from './cache/MetadataPrefetchTarget';
+import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 
 /**
  * Returns true for expected errors that occur during DDL scripts when metadata is
@@ -161,7 +162,7 @@ function mapPrefetchObjectRow(row: RawObjectRow): TableMetadata {
         OBJID: row.OBJID,
         SCHEMA: row.SCHEMA,
         OWNER: row.OWNER,
-        DESCRIPTION: row.DESCRIPTION,
+        DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
         REFOBJNAME: row.REFOBJNAME,
     };
 }

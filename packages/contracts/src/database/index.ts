@@ -15,6 +15,7 @@ export type DatabaseKind =
   | 'db2'
   | 'mssql'
   | 'mysql'
+  | 'access'
   | (string & {});
 
 export const DEFAULT_DATABASE_KIND: DatabaseKind = 'netezza';
@@ -30,6 +31,7 @@ export const SUPPORTED_DATABASE_KINDS = [
   'db2',
   'mssql',
   'mysql',
+  'access',
 ] as const;
 
 export const DATABASE_KIND_DISPLAY_NAMES: Readonly<Partial<Record<DatabaseKind, string>>> = {
@@ -40,9 +42,11 @@ export const DATABASE_KIND_DISPLAY_NAMES: Readonly<Partial<Record<DatabaseKind, 
   snowflake: 'Snowflake',
   sqlite: 'SQLite',
   duckdb: 'DuckDB',
+  file: 'File SQL (DuckDB)',
   db2: 'Db2',
   mssql: 'MS SQL Server',
   mysql: 'MySQL',
+  access: 'Microsoft Access',
 };
 
 export { DatabaseConnection, DatabaseCommand, DatabaseDataReader };

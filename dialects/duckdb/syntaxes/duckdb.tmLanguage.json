@@ -1,0 +1,28 @@
+{
+  "scopeName": "duckdb.injection",
+  "name": "DuckDB SQL",
+  "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block)",
+  "patterns": [
+    {
+      "name": "keyword.other.duckdb.sql",
+      "match": "(?i)\\b(ANTI|ASOF|ATTACH|COLUMNS|CREATE|DETACH|FUNCTION|INSTALL|LATERAL|LOAD|MACRO|PIVOT(?:_WIDER|_LONGER)?|POSITIONAL|QUALIFY|REPEATABLE|SAMPLE|SEMI|TABLESAMPLE|UNPIVOT|USE|WINDOW|WITH\\s+ORDINALITY)\\b"
+    },
+    {
+      "name": "keyword.control.duckdb.sql",
+      "match": "(?i)\\bUSING\\s+SAMPLE\\b"
+    },
+    {
+      "name": "storage.type.duckdb.sql",
+      "match": "(?i)\\b(BIGINT|BLOB|BOOLEAN|DATE|DECIMAL|DOUBLE|HUGEINT|INTEGER|INTERVAL|JSON|LIST|MAP|REAL|SMALLINT|STRUCT|TIME|TIMESTAMP|TIMESTAMPTZ|TIMETZ|TINYINT|UBIGINT|UINTEGER|UHUGEINT|USMALLINT|UTINYINT|UUID|VARCHAR)\\b"
+    },
+    {
+      "name": "support.function.duckdb.sql",
+      "match": "(?i)\\b(READ_AVRO|READ_CSV(?:_AUTO)?|READ_JSON(?:_AUTO)?|READ_PARQUET|READ_XLSX|STRFTIME|STRPTIME|STRUCT_PACK|UNNEST)\\b(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.operator.duckdb.sql",
+      "match": "(?i)\\b(EXCLUDE|INCLUDE|PERCENT|RENAME|REPLACE)\\b"
+    }
+  ],
+  "repository": {}
+}

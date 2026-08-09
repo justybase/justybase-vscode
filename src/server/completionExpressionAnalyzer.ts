@@ -6,9 +6,6 @@ import { toFunctionItems, toKeywordItems, toSpecialValueItems } from "./completi
 /**
  * Expression-clause helpers for function and clause-keyword completions.
  */
-export function isExpressionClauseContext(statementPrefix: string): boolean {
-  return !!resolveExpressionClauseContext(statementPrefix);
-}
 
 export function buildExpressionFunctionItems(
   statementPrefix: string,
@@ -19,8 +16,9 @@ export function buildExpressionFunctionItems(
     string,
     readonly DatabaseSqlFunctionSignature[]
   >,
+  allowOnEmptyPrefix = false,
 ): CompletionItem[] {
-  if (!shouldSuggestFunctions(statementPrefix, typedPrefix)) {
+  if (!shouldSuggestFunctions(statementPrefix, typedPrefix, allowOnEmptyPrefix)) {
     return [];
   }
   return toFunctionItems(
@@ -36,8 +34,9 @@ export function buildExpressionSpecialValueItems(
   typedPrefix: string,
   position: Position,
   specialValues: readonly string[],
+  allowOnEmptyPrefix = false,
 ): CompletionItem[] {
-  if (!shouldSuggestFunctions(statementPrefix, typedPrefix)) {
+  if (!shouldSuggestFunctions(statementPrefix, typedPrefix, allowOnEmptyPrefix)) {
     return [];
   }
   return toSpecialValueItems(typedPrefix, position, specialValues);
@@ -68,13 +67,20 @@ export function buildExpressionClauseKeywordItems(
 
 const CLAUSE_KEYWORD_MAP: Record<string, readonly string[]> = {
   select: ["DISTINCT", "ALL", "FROM", "WHERE", "GROUP", "ORDER", "HAVING", "UNION", "EXCEPT", "INTERSECT"],
-  from: ["JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "WHERE", "GROUP", "ORDER"],
+  // Verified against a live Netezza instance (see
+  // netezzaCompletionKeywordLegality.live.integration.test.ts): standalone
+  // OUTER and FETCH FIRST are rejected by NPS, OFFSET (even without LIMIT) and
+  // UNION/INTERSECT/EXCEPT are accepted.
+  from: ["JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "AS"],
   where: ["AND", "OR", "NOT", "GROUP", "ORDER", "HAVING"],
   on: ["AND", "OR"],
   having: ["AND", "OR", "ORDER", "GROUP"],
   group: ["BY", "HAVING", "ORDER"],
   order: ["BY", "ASC", "DESC", "NULLS", "FIRST", "LAST"],
   set: ["AND", "OR", ","],
+  union: ["SELECT", "WITH", "EXCEPT", "INTERSECT", "UNION", "ALL"],
+  limit: [],
+  offset: [],
 };
 
 export function buildContextualKeywordItems(
@@ -110,6 +116,10 @@ export function resolveExpressionClauseContext(
   | "group"
   | "order"
   | "set"
+  | "values"
+  | "union"
+  | "limit"
+  | "offset"
   | "plsql"
   | undefined {
   const lexResult = SqlLexer.tokenize(statementPrefix);
@@ -126,6 +136,10 @@ export function resolveExpressionClauseContext(
     | "group"
     | "order"
     | "set"
+    | "values"
+    | "union"
+    | "limit"
+    | "offset"
     | "plsql"
     | undefined;
   for (const token of lexResult.tokens) {
@@ -150,16 +164,32 @@ export function resolveExpressionClauseContext(
       clause = "having";
       continue;
     }
-    if (name === "Group") {
+    if (name === "Group" || name === "GroupBy") {
       clause = "group";
       continue;
     }
-    if (name === "Order") {
+    if (name === "Order" || name === "OrderBy") {
       clause = "order";
       continue;
     }
     if (name === "Set") {
       clause = "set";
+      continue;
+    }
+    if (name === "Values") {
+      clause = "values";
+      continue;
+    }
+    if (name === "Union" || name === "Intersect" || name === "Except") {
+      clause = "union";
+      continue;
+    }
+    if (name === "Limit") {
+      clause = "limit";
+      continue;
+    }
+    if (name === "Offset") {
+      clause = "offset";
       continue;
     }
     if (
@@ -175,12 +205,17 @@ export function resolveExpressionClauseContext(
 
   if (
     clause === "select" ||
+    clause === "from" ||
     clause === "where" ||
     clause === "on" ||
     clause === "having" ||
     clause === "group" ||
     clause === "order" ||
     clause === "set" ||
+    clause === "values" ||
+    clause === "union" ||
+    clause === "limit" ||
+    clause === "offset" ||
     clause === "plsql"
   ) {
     return clause;
@@ -192,28 +227,35 @@ export function resolveExpressionClauseContext(
 function shouldSuggestFunctions(
   statementPrefix: string,
   typedPrefix: string,
+  allowOnEmptyPrefix = false,
 ): boolean {
   const lexResult = SqlLexer.tokenize(statementPrefix);
   if (lexResult.errors.length > 0 || lexResult.tokens.length === 0) {
-    return !!typedPrefix;
+    return typedPrefix !== "" || allowOnEmptyPrefix;
   }
 
   const tokens = lexResult.tokens;
   const lastToken = tokens[tokens.length - 1];
   const previousToken = tokens.length > 1 ? tokens[tokens.length - 2] : undefined;
   if (!lastToken) {
-    return !!typedPrefix;
+    return true;
   }
 
   const lastTokenName = lastToken.tokenType.name;
   if (!typedPrefix) {
+    if (!allowOnEmptyPrefix) {
+      return false;
+    }
     if (lastTokenName === "As") {
       return false;
     }
     return isExpressionStartToken(lastTokenName);
   }
 
-  if (previousToken?.tokenType.name === "As") {
+  if (
+    previousToken?.tokenType.name === "As" ||
+    lastTokenName === "As"
+  ) {
     return false;
   }
 

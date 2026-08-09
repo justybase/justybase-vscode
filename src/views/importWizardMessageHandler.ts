@@ -5,6 +5,7 @@ import type {
   ImportWizardPreviewKind,
 } from "../contracts/webviews";
 import type { ConnectionManager } from "../core/connectionManager";
+import { getOutputChannel } from "../core/queryRunnerUtils";
 import type { ImportResult } from "../import/dataImporter";
 import { ImportWizardService } from "../import/wizard/ImportWizardService";
 import { ImportTargetCatalogService } from "../import/wizard/ImportTargetCatalogService";
@@ -14,6 +15,7 @@ import type {
   ImportWizardState,
   ImportWizardValidationSummary,
 } from "../import/wizard/ImportWizardState";
+import { presentAccessError } from "../utils/accessErrorHandling";
 
 interface ImportWizardMessageHandlerDependencies {
   service: ImportWizardService;
@@ -448,6 +450,16 @@ export class ImportWizardMessageHandler {
 
       await this.deps.postMessage({ type: "executionFinished", result });
     } catch (error) {
+      if (await presentAccessError(error, {
+        outputChannel: getOutputChannel(),
+        operation: "Advanced import",
+      })) {
+        await this.deps.postMessage({
+          type: "executionFailed",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       vscode.window.showErrorMessage(`Advanced import failed: ${message}`);
       await this.deps.postMessage({ type: "executionFailed", message });

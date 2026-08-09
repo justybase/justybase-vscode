@@ -1,0 +1,77 @@
+{
+  "format": 1,
+  "java": ">=11",
+  "wrapper": {
+    "version": "3.3.4",
+    "distribution": "apache-maven-3.9.11"
+  },
+  "plugins": [
+    {
+      "name": "org.apache.maven.plugins:maven-clean-plugin",
+      "version": "3.2.0",
+      "sha256": "b657bef2e1eb11e029a70cd688bde6adad29e4e99dacb18516bf651ecca32435"
+    },
+    {
+      "name": "org.apache.maven.plugins:maven-resources-plugin",
+      "version": "3.4.0",
+      "sha256": "72c7d66ea49256ea64a82b28a15df69177d13066d12afeb4a1ee0616da4648f1"
+    },
+    {
+      "name": "org.apache.maven.plugins:maven-compiler-plugin",
+      "version": "3.13.0",
+      "sha256": "6f819947a2a773792dc91d17f906e22113bfb2fefb6b64dec836175715d7402a"
+    },
+    {
+      "name": "org.apache.maven.plugins:maven-jar-plugin",
+      "version": "3.4.1",
+      "sha256": "25e0a5b55b872d95e3a09a5d825bc1061f5ce25ee81f147e623405d8ebedfa5f"
+    },
+    {
+      "name": "org.apache.maven.plugins:maven-shade-plugin",
+      "version": "3.5.1",
+      "sha256": "678b47ab1ce1017d2eb767c3f0d273c52febd29b059f0491532e660ea7cbc083"
+    },
+    {
+      "name": "org.apache.maven.plugins:maven-surefire-plugin",
+      "version": "3.5.4",
+      "sha256": "d25d73f73b70bfc85dcf949c9c58eaa9ecf79709dd8be19d6f92d72b8720dd61"
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "net.sf.ucanaccess:ucanaccess",
+      "version": "5.0.1",
+      "sha256": "0ef4b22ad9c6c44c37c3c3e3e04cde384c1ffe1ce93b43cc68b79cf892495e45",
+      "license": "Apache-2.0",
+      "repository": "https://ucanaccess.sourceforge.net/"
+    },
+    {
+      "name": "com.healthmarketscience.jackcess:jackcess",
+      "version": "3.0.1",
+      "sha256": "743bfe830de83f2a64b0ff23337c18f1412c3caf35f98c5f6668f65c109993d7",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/jahlborn/jackcess"
+    },
+    {
+      "name": "org.hsqldb:hsqldb",
+      "version": "2.5.0",
+      "sha256": "acda459cc9d6a07b39b284364e93b5f29e11877d687e9544b91778d3554d2b38",
+      "license": "BSD-3-Clause",
+      "repository": "https://hsqldb.org/"
+    },
+    {
+      "name": "org.apache.commons:commons-lang3",
+      "version": "3.8.1",
+      "sha256": "dac807f65b07698ff39b1b07bfef3d87ae3fd46d91bbf8a2bc02b2a831616f68",
+      "license": "Apache-2.0",
+      "repository": "https://commons.apache.org/proper/commons-lang/"
+    },
+    {
+      "name": "commons-logging:commons-logging",
+      "version": "1.2",
+      "sha256": "daddea1ea0be0f56978ab3006b8ac92834afeefbd9b7e4e6316fca57df0fa636",
+      "license": "Apache-2.0",
+      "repository": "https://commons.apache.org/proper/commons-logging/"
+    }
+  ]
+}

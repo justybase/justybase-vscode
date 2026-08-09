@@ -607,7 +607,7 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
     ): Promise<QueryResult> {
         const conn = await createConnectedDatabaseConnectionFromDetails(
             details,
-            kind === 'sqlite' ? undefined : db
+            kind === 'sqlite' || kind === 'access' ? undefined : db
         );
 
         try {

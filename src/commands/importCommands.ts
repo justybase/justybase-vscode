@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
+import { normalizeDatabaseKind } from '../contracts/database';
 import { ConnectionManager, type ConnectionDetails as ManagedConnectionDetails } from '../core/connectionManager';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import type { ImportColumnOptions } from '../import/dataImporter';
@@ -24,6 +25,7 @@ import { classifySqlDataType } from '../sqlParser/visitor/typeComparisonUtils';
 import type { DatabaseKind } from '../contracts/database';
 import type { AliasInfo } from '../providers/types';
 import { ImportWizardView } from '../views/importWizardView';
+import { presentAccessError } from '../utils/accessErrorHandling';
 
 export interface ImportCommandsDependencies {
     context: vscode.ExtensionContext;
@@ -83,6 +85,12 @@ export async function generateAutoTableName(
                     .toString()
                     .padStart(4, '0');
                 const generatedTableName = applyGeneratedIdentifierCase(`IMPORT_${dateStr}_${random}`, dbType);
+
+                // Flat file dialects (SQLite, Microsoft Access) have no database/schema
+                // hierarchy, so qualified three-part targets would be rejected downstream.
+                if (FLAT_IMPORT_DIALECTS.has(normalizeDatabaseKind(dbType))) {
+                    return generatedTableName;
+                }
 
                 return `${database}.${schema}.${generatedTableName}`;
             }
@@ -223,6 +231,9 @@ interface ColumnQuickPickItem extends vscode.QuickPickItem {
 
 const FORCED_DATA_TYPE_PATTERN = /^[A-Za-z][A-Za-z0-9_ ]*(\(\s*\d+\s*(,\s*\d+\s*)?\))?$/;
 
+/** File-backed dialects with no database/schema hierarchy for import targets. */
+const FLAT_IMPORT_DIALECTS = new Set(['sqlite', 'access']);
+
 interface ImportCommandContext {
     connectionName: string | undefined;
     connectionDetails: ManagedConnectionDetails;
@@ -312,6 +323,13 @@ const IMPORT_TARGET_PROMPT_PROFILES: Readonly<Record<SupportedImportDialect, Imp
         label: 'SQLite',
         formatHint: 'TABLE or DATABASE.TABLE',
         placeholder: 'TABLE or DATABASE.TABLE',
+        supportsThreePartName: false,
+        enforceActiveDatabaseMatch: false,
+    },
+    access: {
+        label: 'Microsoft Access',
+        formatHint: 'TABLE',
+        placeholder: 'Table name',
         supportsThreePartName: false,
         enforceActiveDatabaseMatch: false,
     },
@@ -918,6 +936,12 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                     });
                 void vscode.commands.executeCommand('netezza.refreshSchema');
             } catch (err: unknown) {
+                if (await presentAccessError(err, {
+                    outputChannel,
+                    operation: 'Clipboard import',
+                })) {
+                    return;
+                }
                 vscode.window.showErrorMessage(
                     `Error importing clipboard data: ${err instanceof Error ? err.message : String(err)}`,
                 );
@@ -933,6 +957,12 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
 
                 await openAdvancedImportWizard(context, connectionManager, metadataCache, importWizardService, resolvedContext);
             } catch (err: unknown) {
+                if (await presentAccessError(err, {
+                    outputChannel,
+                    operation: 'Advanced import wizard',
+                })) {
+                    return;
+                }
                 vscode.window.showErrorMessage(
                     `Error opening advanced import wizard: ${err instanceof Error ? err.message : String(err)}`,
                 );
@@ -1061,6 +1091,12 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                     });
                 void vscode.commands.executeCommand('netezza.refreshSchema');
             } catch (err: unknown) {
+                if (await presentAccessError(err, {
+                    outputChannel,
+                    operation: 'Import',
+                })) {
+                    return;
+                }
                 vscode.window.showErrorMessage(
                     `Error importing data: ${err instanceof Error ? err.message : String(err)}`,
                 );
@@ -1324,6 +1360,16 @@ function registerPasteDetection(
         }
         const documentUri = event.document.uri?.toString?.() ?? '';
         if (internallyFormatted.delete(documentUri)) {
+            return;
+        }
+
+        // File SQL uses absolute file paths as quoted SQL view identifiers.
+        // Completion inserts them through the same text-document event as a
+        // paste, so the generic file-path import detector must not run here.
+        const executionDatabaseKind = typeof connectionManager.getExecutionDatabaseKind === 'function'
+            ? connectionManager.getExecutionDatabaseKind(documentUri)
+            : undefined;
+        if (executionDatabaseKind === 'file') {
             return;
         }
 

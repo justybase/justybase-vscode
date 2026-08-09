@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../../core/connectionManager';
 import { SchemaItemData } from './types';
 import { formatQualifiedObjectName } from '../../utils/identifierUtils';
+export { escapeSqlString } from '../../utils/sqlUtils';
 
 export function getItemObjectName(item: SchemaItemData): string {
     return item.rawLabel || item.label || '';
@@ -61,13 +62,6 @@ export async function executeWithProgress<T>(
         },
         task
     );
-}
-
-/**
- * Escape single quotes in SQL strings
- */
-export function escapeSqlString(value: string): string {
-    return value.replace(/'/g, "''");
 }
 
 /**

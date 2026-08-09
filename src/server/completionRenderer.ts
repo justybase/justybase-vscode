@@ -286,12 +286,17 @@ export function filterMetadataItems(
     .filter((item) => matchesPrefix(item.name, prefix))
     .map((item) => {
       const insertText = formatIdentifierForSql(item.name, databaseKind);
+      // Netezza system views (_V_*) stay available but sort after user objects.
+      const sortPrefix =
+        databaseKind === "netezza" && item.name.startsWith("_V_")
+          ? "9_"
+          : "3_";
       return attachCompletionDescription(
         {
           label: item.name,
           kind: kindOverride || toCompletionKind(item.objectType),
           detail: item.detail,
-          sortText: `3_${item.name}`,
+          sortText: `${sortPrefix}${item.name}`,
           insertText,
         },
         item.description,

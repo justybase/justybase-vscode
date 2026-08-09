@@ -25,6 +25,11 @@ import {
 import { simpleHash } from "./parsers/hashUtils";
 import { tryGetLogger } from "../utils/logger";
 import { getUxPerfSession } from "../services/perf/uxPerfSession";
+import {
+  KEYWORD_TOKEN_NAMES,
+  MACRO_TOKEN_NAMES,
+  MODIFIER_TOKEN_NAMES,
+} from "../sql/semanticTokenNames";
 
 const SEMANTIC_TOKEN_DEBOUNCE_MS = 150;
 /** Longer coalesce window while typing in multi-thousand-line CTE scripts. */
@@ -89,106 +94,6 @@ const enum ModifierMask {
   defaultLibrary = 1 << 1,
   italic = 1 << 2,
 }
-
-const KEYWORD_TOKEN_NAMES = new Set([
-  "Groom",
-  "Versions",
-  "Records",
-  "Pages",
-  "Ready",
-  "Reclaim",
-  "Backupset",
-  "Organize",
-  "Distribute",
-  "Random",
-  "SameAs",
-  "Express",
-  "None",
-  "Show",
-  "Copy",
-  "Lock",
-  "Reindex",
-  "Reset",
-  "Merge",
-  "External",
-  "Comment",
-  "Synonym",
-  "Cascade",
-  "Restrict",
-  "Groups",
-  "Filter",
-  "Exclude",
-  "Ties",
-  "Plantext",
-  "Plangraph",
-  "Verbose",
-  "Distribution",
-  "Ilike",
-  "Views",
-  "Explain",
-  "Nzplsql",
-  "Returns",
-  "Language",
-  "Owner",
-  "Caller",
-  "RefTable",
-  "Varargs",
-  "Alias",
-  "Constant",
-  "Execute",
-  "Exec",
-  "Call",
-  "Immediate",
-  "Hash",
-  "Deferrable",
-  "Initially",
-  "Generate",
-  "Next",
-  "Statistics",
-  "Start",
-  // Db2 LUW phrase tokens
-  "Db2OptimizeFor",
-  "Db2WithUr",
-  "Db2WithCs",
-  "Db2WithRs",
-  "Db2WithRr",
-  "Db2ForReadOnly",
-  "Db2ForUpdate",
-  "Db2FinalTable",
-  "Db2OldTable",
-  "Db2NewTable",
-  "Db2ModifiedBy",
-  "Db2DeclareGlobalTemporary",
-  "Db2GeneratedAlways",
-  "Db2GeneratedByDefault",
-  "Db2Identity",
-  "Db2OrganizeBy",
-  "Db2DataCapture",
-  "Db2CurrentSchema",
-  "Db2CurrentServer",
-  "Db2CurrentDate",
-  "Db2CurrentTime",
-  "Db2CurrentTimestamp",
-  "Db2CurrentUser",
-  "Db2LanguageSql",
-  "Db2Nickname",
-]);
-
-const MACRO_TOKEN_NAMES = new Set([
-  "BeginProc",
-  "EndProc",
-  "Exception",
-  "Raise",
-  "Notice",
-  "Debug",
-  "Declare",
-  "Elsif",
-  "Loop",
-  "While",
-  "Exit",
-]);
-
-const MODIFIER_TOKEN_NAMES = new Set(["Temp", "Temporary", "Global"]);
 
 function isNetezzaType(text: string): boolean {
   return getNetezzaTypeSpec(text) !== undefined;

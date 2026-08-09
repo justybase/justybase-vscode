@@ -80,6 +80,31 @@ export function isSqlLanguageClientReady(): boolean {
   return sqlLanguageClientReady;
 }
 
+/**
+ * Sends a notification to the language client, tolerating a client that is
+ * still starting, already stopped, or failed to boot (sendNotification throws
+ * "Client is not running" and may reject when the server process died).
+ */
+function sendNotificationSafely(
+  client: LanguageClientLike,
+  method: string,
+  params?: unknown,
+): void {
+  try {
+    const result = (
+      params === undefined
+        ? client.sendNotification(method)
+        : client.sendNotification(method, params)
+    ) as unknown;
+    if (result instanceof Promise) {
+      void result.catch(() => undefined);
+    }
+  } catch {
+    // Client is stopped or in a failed state; the extension host re-syncs
+    // context once the language server is reachable again.
+  }
+}
+
 const LSP_DOCUMENT_SCHEMES = new Set([
   "file",
   "untitled",
@@ -177,20 +202,21 @@ export async function startSqlLanguageClient(
 
     context.subscriptions.push(
       connectionManager.onDidChangeDocumentConnection((documentUri: string) => {
-        client.sendNotification(NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION, {
+        sendNotificationSafely(client, NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION, {
           documentUri,
         } satisfies DocumentContextChangedParams);
       }),
       connectionManager.onDidChangeDocumentDatabase((documentUri: string) => {
-        client.sendNotification(NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION, {
+        sendNotificationSafely(client, NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION, {
           documentUri,
         } satisfies DocumentContextChangedParams);
       }),
       metadataCache.onDidInvalidate(() => {
-        client.sendNotification(NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION);
+        sendNotificationSafely(client, NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION);
       }),
       metadataCache.onDidExternalRefresh((connectionName) => {
-        client.sendNotification(
+        sendNotificationSafely(
+          client,
           NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
           { connectionName } satisfies MetadataCacheInvalidatedParams,
         );
@@ -227,7 +253,12 @@ export async function stopSqlLanguageClient(): Promise<void> {
   sqlLanguageClient = undefined;
   sqlLanguageClientStartPromise = undefined;
   sqlLanguageClientReady = false;
-  await client.stop();
+  try {
+    await client.stop();
+  } catch {
+    // Client may be in a starting/startFailed state (e.g. the server process
+    // died during boot); there is nothing left to stop.
+  }
 }
 
 export function notifyDocumentContextChanged(documentUri: string): void {
@@ -235,9 +266,20 @@ export function notifyDocumentContextChanged(documentUri: string): void {
   if (!client) {
     return;
   }
-  void client.sendNotification(NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION, {
+  sendNotificationSafely(client, NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION, {
     documentUri,
   } satisfies DocumentContextChangedParams);
+}
+
+/** Test hook: resolves the negative-cache fallback for table lookups. */
+export function __TEST_ONLY_resolveExistsFallback(
+  existsFromCache: boolean | undefined,
+  databaseKind: DatabaseKind | undefined,
+): boolean {
+  if (databaseKind === 'file' && existsFromCache === false) {
+    return true;
+  }
+  return existsFromCache ?? true;
 }
 
 export async function handleMetadataRequest(
@@ -346,6 +388,7 @@ export async function handleMetadataRequest(
           params.table,
           metadataProvider,
           metadataCache,
+          resolvedContext.databaseKind,
         );
       case "warmDatabaseColumns":
         if (!connectionName || !params.databases?.length) {
@@ -614,9 +657,8 @@ function findTableDescription(
           : objectInfo.item.OBJNAME || objectInfo.item.TABLENAME;
     if (!name || name.toUpperCase() !== normalizedTable) continue;
     if (normalizedSchema && objectInfo.schema.toUpperCase() !== normalizedSchema) continue;
-    if (objectInfo.description && objectInfo.description.trim()) {
-      return objectInfo.description.trim();
-    }
+    const description = normalizeName(objectInfo.description);
+    if (description) return description;
   }
   return undefined;
 }
@@ -628,6 +670,7 @@ async function getTableInfo(
   table: string,
   metadataProvider: MetadataProvider,
   metadataCache: MetadataCache,
+  databaseKind?: DatabaseKind,
 ): Promise<MetadataTableInfoResponse> {
   if (!connectionName || !database) {
     return {
@@ -683,8 +726,12 @@ async function getTableInfo(
     resolvedSchema,
     table,
   );
+  // File SQL connections create their objects (views + editable table) at
+  // connect time; a negative cache entry gathered before the first connect
+  // is not trustworthy, so treat it as unknown instead of flagging SQL006.
+  const exists = __TEST_ONLY_resolveExistsFallback(existsFromCache, databaseKind);
   return {
-    exists: existsFromCache ?? true,
+    exists,
     table,
     database,
     schema: resolvedSchema ?? schema,
@@ -754,8 +801,11 @@ async function getCachedTableInfo(
     resolvedSchema ?? schema,
     table,
   );
+  // File SQL connections create their objects at connect time; a negative
+  // cache entry gathered before the first connect is not trustworthy.
+  const exists = __TEST_ONLY_resolveExistsFallback(existsFromCache, databaseKind);
   return {
-    exists: existsFromCache ?? true,
+    exists,
     table,
     database,
     schema: resolvedSchema ?? schema,
@@ -887,8 +937,8 @@ function findTableInCache(
   return false;
 }
 
-function normalizeName(value: string | undefined): string | undefined {
-  if (!value) {
+function normalizeName(value: unknown): string | undefined {
+  if (typeof value !== "string") {
     return undefined;
   }
   const trimmed = value.trim();

@@ -1,5 +1,6 @@
 import {
   CompletionItem,
+  CompletionTriggerKind,
   Position,
 } from "vscode-languageserver/node";
 import { SqlLexer } from "../sqlParser";
@@ -17,7 +18,7 @@ import {
   buildExpressionClauseKeywordItems,
   buildExpressionFunctionItems,
   buildExpressionSpecialValueItems,
-  isExpressionClauseContext,
+  resolveExpressionClauseContext,
 } from "./completionExpressionAnalyzer";
 import { dedupeCompletionItems } from "./completionRanker";
 import {
@@ -66,6 +67,7 @@ export interface SemanticScopeCompletionRequest {
   statementPrefix: string;
   linePrefix: string;
   position: Position;
+  triggerKind?: CompletionTriggerKind;
   localDefs: LocalDefinition[];
   documentUri: string;
   documentVersion: number;
@@ -265,6 +267,7 @@ export class CompletionScopeResolver {
       statementPrefix,
       linePrefix,
       position,
+      triggerKind,
       localDefs,
       documentUri,
       documentVersion,
@@ -278,13 +281,41 @@ export class CompletionScopeResolver {
       specialBuiltinValues,
     } = request;
 
-    if (!isExpressionClauseContext(statementPrefix)) {
+    const clause = resolveExpressionClauseContext(statementPrefix);
+    if (!clause) {
       return undefined;
     }
 
     const typedPrefix = this.contextExtractor.extractCurrentIdentifierPrefix(
       linePrefix,
     );
+    // After a completed FROM/JOIN target (with or without alias) only clause
+    // keywords can follow; columns are used later via qualifier paths (A.) or
+    // in SELECT/WHERE/GROUP BY/HAVING. Do not show anything on a plain
+    // whitespace trigger; keywords become available once a letter is typed or
+    // the completion is invoked explicitly (Ctrl+Space).
+    if (
+      clause === "from" &&
+      triggerKind === CompletionTriggerKind.TriggerCharacter &&
+      typedPrefix === ""
+    ) {
+      return [];
+    }
+    if (clause === "from") {
+      return buildContextualKeywordItems(
+        statementPrefix,
+        typedPrefix,
+        position,
+        completionKeywords,
+      );
+    }
+    if (
+      clause === "limit" ||
+      clause === "offset" ||
+      (clause === "values" && typedPrefix === "")
+    ) {
+      return [];
+    }
     const statementSql = statement ? statement.sql : "";
     const parserFriendlyStatementPrepared = statement
       ? this.contextExtractor.prepareParserFriendlySql(
@@ -331,6 +362,7 @@ export class CompletionScopeResolver {
       position,
       sqlFunctionNames,
       sqlFunctionSignatures,
+      triggerKind === CompletionTriggerKind.Invoked,
     );
     const clauseKeywordItems = buildExpressionClauseKeywordItems(
       statementPrefix,
@@ -349,6 +381,7 @@ export class CompletionScopeResolver {
       typedPrefix,
       position,
       specialBuiltinValues,
+      triggerKind === CompletionTriggerKind.Invoked,
     );
     const items = dedupeCompletionItems([
       ...columnItems,
