@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import { createJustyBaseLiteApi } from '../api/publicApi';
 import {
     type DatabaseCommand,
@@ -9,6 +10,7 @@ import {
     createDatabaseDialectTraits
 } from '../contracts/database';
 import { getDatabaseCapabilities, getDatabaseDialect } from '../core/connectionFactory';
+import type { ConnectionManager } from '../core/connectionManager';
 import { resetDatabaseDialectTestingState } from './dialectTestUtils';
 import { sqliteMetadataProvider } from '../dialects/sqlite/metadata/provider';
 import { sqliteSqlAuthoring } from '../dialects/sqlite/sql/authoring';
@@ -112,5 +114,34 @@ describe('createJustyBaseLiteApi', () => {
         expect(api.registerDatabaseDialect(competingDialect)).toBe(postgresqlDialect);
         expect(getDatabaseDialect('postgresql')).toBe(postgresqlDialect);
         expect(getDatabaseCapabilities('postgresql')).toEqual(postgresqlDialect.capabilities);
+    });
+
+    it('does not reuse a non-file profile for a File SQL session with the same name', async () => {
+        const saveConnection = jest.fn();
+        const connectionManager = {
+            getConnections: jest.fn().mockResolvedValue([
+                {
+                    name: 'shared-name',
+                    host: 'localhost',
+                    database: 'warehouse',
+                    user: 'analyst',
+                    dbType: 'sqlite',
+                },
+            ]),
+            saveConnection,
+        } as unknown as ConnectionManager;
+        const api = createJustyBaseLiteApi({} as vscode.ExtensionContext, connectionManager);
+
+        await expect(api.openFileSqlSession(
+            {
+                name: 'shared-name',
+                host: 'local',
+                database: '/tmp/orders.csv',
+                user: 'file',
+                dbType: 'file',
+            },
+            { connectionName: 'shared-name' },
+        )).rejects.toThrow('not a File SQL profile');
+        expect(saveConnection).not.toHaveBeenCalled();
     });
 });

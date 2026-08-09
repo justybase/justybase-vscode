@@ -291,6 +291,8 @@ describe('ExportManager', () => {
                 [1, 'Alice'],
                 [2, 'Bob']
             ]);
+
+            stateManager.dispose();
         });
 
         it('should hydrate disk-backed SQLite results when host data array is empty', () => {

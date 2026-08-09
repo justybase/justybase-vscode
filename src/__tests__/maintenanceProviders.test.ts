@@ -18,6 +18,7 @@ import { db2Dialect } from '../../extensions/db2/src/db2Dialect';
 import { db2MaintenanceProvider } from '../../extensions/db2/src/db2MaintenanceProvider';
 import { postgresqlDialect } from '../../extensions/postgresql/src/postgresqlDialect';
 import { postgresqlMaintenanceProvider } from '../../extensions/postgresql/src/postgresqlMaintenanceProvider';
+import { sqliteMaintenanceProvider } from '../dialects/sqlite/maintenanceProvider';
 
 jest.mock('vscode', () => ({
     window: {
@@ -85,6 +86,24 @@ describe('partial dialect maintenance wiring', () => {
 
         expect(postgresqlDialect.capabilities.supportsTableMaintenance).toBe(true);
         expect(postgresqlDialect.advancedFeatures?.maintenance).toBe(postgresqlMaintenanceProvider);
+    });
+});
+
+describe('sqliteMaintenanceProvider', () => {
+    it('targets the temp catalog for temporary tables', async () => {
+        const services = createServices();
+        showInformationMessage.mockResolvedValue('Yes, analyze');
+        const target: DatabaseMaintenanceTarget = {
+            connectionName: 'sqlite-conn',
+            databaseName: 'main',
+            schemaName: 'temp',
+            tableName: 'scratch',
+            qualifiedName: 'temp.scratch'
+        };
+
+        await sqliteMaintenanceProvider.analyzeTable!(target, services);
+
+        expectExecutedSql(services, 'ANALYZE "temp".scratch;');
     });
 });
 

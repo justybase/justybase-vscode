@@ -2,8 +2,54 @@ import { mySqlImportWizardAdapter } from '../import/wizard/adapters/MySqlImportW
 import { netezzaImportWizardAdapter } from '../import/wizard/adapters/NetezzaImportWizardAdapter';
 import { snowflakeImportWizardAdapter } from '../import/wizard/adapters/SnowflakeImportWizardAdapter';
 import { verticaImportWizardAdapter } from '../import/wizard/adapters/VerticaImportWizardAdapter';
+import { accessImportWizardAdapter } from '../import/wizard/adapters/AccessImportWizardAdapter';
+import { accessBatchImportConfig } from '../import/accessImporter';
 
 describe('import wizard adapters', () => {
+    it('maps Access source types and builds direct INSERT previews', () => {
+        expect(accessImportWizardAdapter.mapInferredType('VARCHAR(80)')).toBe('TEXT(255)');
+        expect(accessImportWizardAdapter.mapInferredType('BIGINT')).toBe('INTEGER');
+        expect(accessImportWizardAdapter.mapInferredType('DATE')).toBe('DATETIME');
+
+        const plan = accessImportWizardAdapter.buildExecutionPlan({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'Orders',
+            connectionDetails: {
+                dbType: 'access',
+                host: '',
+                database: '/tmp/orders.accdb',
+                user: '',
+            } as never,
+            columns: [
+                { sourceIndex: 0, columnName: 'ID', dataType: 'INTEGER' },
+                { sourceIndex: 1, columnName: 'NAME', dataType: 'TEXT(255)' },
+            ],
+            previewRows: [['1', "O'Reilly"]],
+            detectedDelimiter: ',',
+            decimalDelimiter: '.',
+        });
+
+        expect(plan.mode).toBe('direct');
+        expect(plan.createTableSql).toContain('CREATE TABLE Orders');
+        expect(plan.loadSql).toContain("'O''Reilly'");
+    });
+
+    it('maps Access batch literals without corrupting nulls, booleans, or quotes', () => {
+        const column = (targetDataType: string) => ({
+            sourceIndex: 0,
+            columnName: 'VALUE',
+            dataType: targetDataType,
+            sourceDataType: targetDataType,
+            targetDataType,
+        });
+
+        expect(accessBatchImportConfig.toSqlLiteral(null, column('TEXT(255)'), '.')).toBe('NULL');
+        expect(accessBatchImportConfig.toSqlLiteral('yes', column('BOOLEAN'), '.')).toBe('TRUE');
+        expect(accessBatchImportConfig.toSqlLiteral('0', column('BOOLEAN'), '.')).toBe('FALSE');
+        expect(accessBatchImportConfig.toSqlLiteral("O'Reilly", column('TEXT(255)'), '.')).toBe("'O''Reilly'");
+        expect(accessBatchImportConfig.toSqlLiteral('12.50', column('DECIMAL(10,2)'), '.')).toBe('12.50');
+    });
+
     it('uses standalone CREATE and load SQL previews for Netezza advanced mode', () => {
         const plan = netezzaImportWizardAdapter.buildExecutionPlan({
             filePath: '/tmp/orders.csv',

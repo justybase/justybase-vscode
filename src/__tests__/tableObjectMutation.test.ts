@@ -126,6 +126,32 @@ describe('tableObjectMutation', () => {
         ]);
     });
 
+    it('replaces Access TABLE rows under default.., keeps views, and handles an empty catalog', () => {
+        const cache = createCache();
+        cache.setTables(
+            'CONN',
+            'default..',
+            [
+                { OBJNAME: 'OLD_T', SCHEMA: undefined, OBJID: 1, objType: 'TABLE', label: 'OLD_T' },
+                { OBJNAME: 'V1', SCHEMA: undefined, OBJID: 2, objType: 'VIEW', label: 'V1' },
+            ],
+            new Map([
+                ['default..OLD_T', 1],
+                ['default..V1', 2],
+            ]),
+        );
+
+        replaceTableObjectTypeForDatabase(cache, 'CONN', 'default', 'TABLE', [], {
+            flatCatalog: true,
+        });
+
+        expect(cache.getTables('CONN', 'default..')).toEqual([
+            expect.objectContaining({ OBJNAME: 'V1', objType: 'VIEW' }),
+        ]);
+        expect(cache.findTableId('CONN', 'DEFAULT..OLD_T')).toBeUndefined();
+        expect(cache.findObjectWithType('CONN', 'DEFAULT', undefined, 'OLD_T')).toBeUndefined();
+    });
+
     it('invalidates only one table column layer until live columns replace it', async () => {
         const cache = createCache();
         cache.setColumns('CONN', 'DB1.ADMIN.T1', [{ ATTNAME: 'OLD', FORMAT_TYPE: 'INTEGER' }]);

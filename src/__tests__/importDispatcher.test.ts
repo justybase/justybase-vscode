@@ -10,6 +10,7 @@ import { importClipboardDataToOracle, importDataToOracle } from '../import/oracl
 import { importClipboardDataToMySql, importDataToMySql } from '../import/mysqlImporter';
 import { importClipboardDataToDuckDb, importDataToDuckDb } from '../import/duckdbImporter';
 import { importClipboardDataToSqlite, importDataToSqlite } from '../import/sqliteImporter';
+import { importClipboardDataToAccess } from '../import/accessImporter';
 import {
     getImportDialectLabel,
     importClipboardDataForConnection,
@@ -73,6 +74,11 @@ jest.mock('../import/sqliteImporter', () => ({
     importDataToSqlite: jest.fn().mockResolvedValue({ success: true, message: 'sqlite-file' })
 }));
 
+jest.mock('../import/accessImporter', () => ({
+    importClipboardDataToAccess: jest.fn().mockResolvedValue({ success: true, message: 'access-clipboard' }),
+    importDataToAccess: jest.fn().mockResolvedValue({ success: true, message: 'access-file' })
+}));
+
 describe('importDispatcher', () => {
     let tempDir: string;
 
@@ -95,6 +101,10 @@ describe('importDispatcher', () => {
         expect(resolveImportDialect('sqlite3')).toBe('sqlite');
         expect(resolveImportDialect('duckdb')).toBe('duckdb');
         expect(resolveImportDialect('snowflake')).toBe('snowflake');
+        expect(resolveImportDialect('access')).toBe('access');
+        expect(resolveImportDialect('mdb')).toBe('access');
+        expect(resolveImportDialect('accdb')).toBe('access');
+        expect(resolveImportDialect('unknown')).toBe('unsupported');
         expect(getImportDialectLabel('db2')).toBe('Db2');
         expect(getImportDialectLabel('postgresql')).toBe('PostgreSQL');
         expect(getImportDialectLabel('vertica')).toBe('Vertica');
@@ -103,6 +113,31 @@ describe('importDispatcher', () => {
         expect(getImportDialectLabel('duckdb')).toBe('DuckDB');
         expect(getImportDialectLabel('sqlite')).toBe('SQLite');
         expect(getImportDialectLabel('snowflake')).toBe('Snowflake');
+        expect(getImportDialectLabel('access')).toBe('Microsoft Access');
+    });
+
+    it('accepts file-backed Access connections without a host', async () => {
+        await expect(importDataForConnection('C:\\data.csv', 'newTable', {
+            host: '',
+            database: 'C:\\data.accdb',
+            user: '',
+            dbType: 'access'
+        })).resolves.toEqual({ success: true, message: 'access-file' });
+
+        await expect(importClipboardDataForConnection('newTable', {
+            host: '',
+            database: 'C:\\data.accdb',
+            user: '',
+            dbType: 'access'
+        })).resolves.toEqual({ success: true, message: 'access-clipboard' });
+
+        expect(importClipboardDataToAccess).toHaveBeenCalledWith(
+            'newTable',
+            expect.objectContaining({ database: 'C:\\data.accdb', dbType: 'access' }),
+            undefined,
+            undefined,
+            undefined,
+        );
     });
 
     it('validates file-import requests before dispatching', async () => {
@@ -326,5 +361,23 @@ describe('importDispatcher', () => {
         expect(result.success).toBe(false);
         expect(result.message).toContain('clipboard import is not executed directly');
         expect(result.details?.snowflakeWorkflow?.workflowMarkdown).toContain('Snowflake clipboard import guidance');
+    });
+
+    it('allows hostless SQLite clipboard imports for local database files', async () => {
+        const result = await importClipboardDataForConnection('main.orders', {
+            host: '',
+            database: '/tmp/empty.sqlite',
+            user: '',
+            dbType: 'sqlite',
+        });
+
+        expect(result).toEqual({ success: true, message: 'sqlite-clipboard' });
+        expect(importClipboardDataToSqlite).toHaveBeenCalledWith(
+            'main.orders',
+            expect.objectContaining({ database: '/tmp/empty.sqlite', dbType: 'sqlite' }),
+            undefined,
+            undefined,
+            undefined,
+        );
     });
 });

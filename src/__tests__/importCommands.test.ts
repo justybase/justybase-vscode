@@ -1416,6 +1416,33 @@ describe('commands/importCommands', () => {
     });
 
     describe('registerPasteDetection', () => {
+        it('does not treat File SQL view completion as a pasted file path', async () => {
+            mockConnectionManager.getExecutionDatabaseKind = jest.fn().mockReturnValue('file');
+            const activeEditor = {
+                document: { languageId: 'sql' },
+                edit: jest.fn(),
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = activeEditor;
+
+            const deps: ImportCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            };
+            registerImportCommands(deps);
+            const onChange = (vscode.workspace.onDidChangeTextDocument as jest.Mock).mock.calls[0][0];
+
+            await onChange({
+                document: activeEditor.document,
+                contentChanges: [{ text: '"/home/dusko/source/sql_samples/hh.csv"', rangeLength: 0, range: {} }],
+            });
+
+            expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+            expect(require('fs').existsSync).not.toHaveBeenCalled();
+        });
+
         it('should ignore non-sql documents', () => {
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
