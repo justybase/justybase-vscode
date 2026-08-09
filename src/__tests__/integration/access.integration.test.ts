@@ -301,8 +301,9 @@ describeLive('Microsoft Access dialect (live)', () => {
     it('shares one bridge across concurrent connections and metadata access', async () => {
         const first = createConnection();
         const second = createConnection();
-        await Promise.all([first.connect(), second.connect()]);
         try {
+            await Promise.all([first.connect(), second.connect()]);
+
             expect(first.getBridge()).toBe(second.getBridge());
 
             const queryReader = await first.createCommand('SELECT COUNT(*) FROM Klienci').executeReader();
