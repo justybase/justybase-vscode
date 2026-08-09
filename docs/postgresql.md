@@ -8,16 +8,18 @@ This pack is published with `"preview": true` in `extensions/postgresql/package.
 
 **Netezza (core)** ships the full dialect tooling: dedicated Chevrotain grammar, NZPLSQL procedure diagnostics, semantic tokens, SQL/NZ/NZP linter depth, and Netezza-specific IDE workflows (GROOM, session monitor, ETL designer, and similar).
 
-**PostgreSQL (this pack)** reuses the shared shell (connect, schema browser, query execution, results/export) and adds PostgreSQL-oriented features below. SQL editor intelligence is **more limited** than Netezza and should be treated as preview-quality.
+**PostgreSQL (this pack)** reuses the shared shell (connect, schema browser, query execution, results/export) and adds PostgreSQL-oriented features below. It ships a dedicated PostgreSQL Chevrotain lexer/parser in core (`src/dialects/postgresql/sql`) with **strict** syntax validation on the shared LSP stack. Editor depth is below Netezza (no NZPLSQL-equivalent procedure scope analysis, no PostgreSQL-specific TOIDs beyond shared codes), but SQL validation is first-class rather than best-effort.
 
 ## What this pack provides
 
 - Shared connection UI with PostgreSQL-specific fields such as `searchPath`, `sslMode`, and statement timeout
 - Metadata-driven schema explorer for schemas, tables, views, functions, procedures, and sequences
-- Metadata-aware SQL completion through the shared LSP path (where implemented for PostgreSQL)
+- Metadata-aware SQL completion through the shared LSP path, backed by the dedicated PostgreSQL parser
+- Dedicated PostgreSQL lexer/parser in core (`src/dialects/postgresql/sql`) with strict syntax validation on the shared LSP stack
 - PostgreSQL import flow backed by `COPY ... FROM STDIN`
 - DDL generation for tables, views, routines, and sequences
 - `EXPLAIN (FORMAT JSON)` parsing for the explain view and tuning-advisor scaffolding
+- Table maintenance (VACUUM/ANALYZE/REINDEX and friends) and session monitor (`pg_terminate_backend`)
 
 ## Installation
 

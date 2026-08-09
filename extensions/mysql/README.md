@@ -13,15 +13,17 @@ This extension adds the `MySQL` dialect to JustyBase SQL Editor (Netezza) and in
 ## What This Extension Adds
 
 - MySQL connection type in the shared login panel
-- MySQL runtime integration via the `mysql` (or `mysql2`) package
+- MySQL runtime integration via the `mysql2` package with **streaming** result readers and cancel
 - Metadata queries for databases, schemas, tables, views, procedures, functions, and column lookup
-- MySQL SQL authoring profile and dialect registration
+- MySQL 8 Chevrotain parser runtime (strict validation: backtick identifiers, `DATABASE.TABLE` qualification, CTEs, MySQL `LIMIT` forms, `INSERT IGNORE`, `ON DUPLICATE KEY UPDATE`, MySQL-specific types) and dialect registration
+- MySQL authoring assets (builtins with signatures, functions), grammar injection, and snippets
 - DDL generation for tables and supporting object types where available
 
 ## Current Runtime Notes
 
 - MySQL authentication and connection options are provided through the shared connection form.
 - Schema browsing focuses on user databases and catalog objects that are safe to expose in the explorer.
+- Large query results stream row-by-row via `mysql2`; `cancel()` aborts the active query.
 - The optional package exposes DDL and authoring features, but other database-specific workflows remain intentionally conservative.
 
 ## Installation Order

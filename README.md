@@ -13,6 +13,16 @@
 A powerful, **Zero Config** VS Code extension for working with IBM Netezza / PureData System for Analytics databases.
 Distinct from other extensions, JustyBase includes a **custom Node.js-based Netezza driver** provided by `@justybase/netezza-driver`, eliminating the need to install or configure IBM ODBC drivers. Just install and connect!
 
+### Three powerful workflows to discover
+
+| | What you can do | Start here |
+|---|---|---|
+| **Explore results visually** | Turn a query result into column profiles, distributions, pivots, and time-based summaries without writing another query. | [Explore data](#explore-data) |
+| **Query local files** | Join and aggregate Excel, CSV/TSV, Parquet, or Avro files with SQL through DuckDB — or open and edit a local Access database. | [File SQL & Access](#local-files-as-sql-connections) |
+| **Give AI your schema safely** | Connect Copilot Chat, Cursor, Claude Desktop, or another MCP client to read-only Netezza schema tools. | [Netezza MCP Server](docs/MCP_SERVER.md) |
+
+These workflows share the same connection panel, SQL editor, results grid, export tools, and VS Code-native experience.
+
 > **Marketplace identity:** The active core extension is `krzysztof-d.justybaselite-netezza`. This established identity is retained so existing users receive updates automatically.
 
 ## Quick start
@@ -31,11 +41,13 @@ Published VSIX packages use readable JavaScript bundles with source maps that in
 | Target | Install | SQL tooling |
 | ------ | ------- | ----------- |
 | **IBM Netezza / PureData** | Core extension (this package) | **First-class** — full dialect stack: Chevrotain parser, NZPLSQL procedure diagnostics, semantic tokens, LSP completion/navigation/rename, SQL/NZ/NZP linter rules, Netezza-specific Copilot tools, GROOM/monitor/ETL workflows, and more |
+| **File SQL (Excel / CSV / Parquet / Avro)** | Core extension **+** [DuckDB + Files pack](extensions/duckdb) | **First-class file workflow** — query local files through in-memory DuckDB with dedicated parser/authoring, completion, snippets and read-only/editable-copy boundaries |
+| **Microsoft Access** | Core extension **+** [Access pack](extensions/access) | **Preview companion** — query and edit local `.mdb` / `.accdb` files through the bundled UCanAccess bridge; requires Java 11+ |
 | **Oracle** | Core extension **+** [Oracle support pack](extensions/oracle) | **Near-full companion** — dedicated Oracle Chevrotain parser and PL/SQL validation in core, grammar/snippets, advanced DDL/import/export, explain graph, tuning advisor, session monitor, and ORA quality rules; requires optional VSIX for `oracledb` connectivity. Not Netezza parity (no NZ/NZP depth, GROOM/ETL, or skew Copilot). See [docs/oracle.md](docs/oracle.md) |
-| **Db2 LUW** | Core extension **+** [Db2 support pack](extensions/db2) | **Near-full companion runtime** — advanced connect/metadata/DDL/import/explain/maintenance with dedicated live suite and DB2 quality rules; editor Shared until deeper Chevrotain/SQL PL work. Native `ibm_db` VSIX. See [docs/db2.md](docs/db2.md) |
-| **Other optional databases** | Core extension **+** separate optional extension per database | **Preview companions** — shared connect/query/schema/export UX and metadata-aware SQL tooling **where implemented**; typically less editor depth than Netezza or Oracle |
+| **Db2 LUW** | Core extension **+** [Db2 support pack](extensions/db2) | **Near-full companion runtime** — advanced connect/metadata/DDL/import/explain/maintenance with dedicated Db2 parser runtime, quality rules, and live suite. Native `ibm_db` VSIX. See [docs/db2.md](docs/db2.md) |
+| **PostgreSQL / MySQL / MS SQL Server / Vertica / Snowflake / DuckDB** | Core extension **+** separate optional extension per database | **Companion runtimes with varying editor depth** — see the detailed status table below. PostgreSQL, MySQL, MS SQL Server and DuckDB ship dedicated Chevrotain lexers/parsers; the remaining packs reuse the shared base grammar |
 
-JustyBase is built **first and foremost for Netezza**. Most optional database packs are preview companion runtimes with **reduced** SQL editor intelligence compared to Netezza. **Oracle is the exception**: install core + Oracle pack for advanced Oracle SQL/PL/SQL authoring on the shared LSP stack.
+JustyBase is built **first and foremost for Netezza**. Editor depth varies by dialect — **Oracle is the strongest optional SQL/PL/SQL editor**, while **PostgreSQL, MySQL, Db2, and MS SQL Server** also ship dedicated parser runtimes and quality rules on the shared LSP stack. DuckDB, Vertica, Snowflake, SQLite, Access, and File SQL provide companion runtimes with reduced editor intelligence.
 
 Netezza SQL files support SAS-like preprocessing macros, including `%let`, `%if/%do/%end`, `%export`, `%include`, and `%python` (which substitutes a Python script's standard output).
 
@@ -118,6 +130,25 @@ When disabled:
 - **SQL Formatter**: Auto-format SQL code (`Shift+Alt+F`).
 - 📖 **[Query Execution & Analysis Guide](docs/QUERY_EXECUTION.md)**
 
+### Local files as SQL connections
+
+The connection panel also includes two local-file workflows. They are separate from the regular server database connections:
+
+- **File SQL (DuckDB)** — install the [DuckDB + Files pack](extensions/duckdb), select **Excel / CSV / Parquet / Avro (DuckDB)** in **Connect to Database**, and choose a `.xlsx`, `.csv`, `.tsv`, `.parquet`, or `.avro` file. The file is exposed as a table or view for SQL queries; an `.xlsx` workbook also exposes its sheets. The Explorer context action **Query File with SQL (DuckDB)** opens the same workflow directly. Use **Query Multiple Files with SQL (DuckDB)** to select several local files and run joins, unions, CTEs, and aggregations in one read-only workspace. Sources are available as views named by their full path, sheet views are suggested by SQL completion, and **Add Files to Active File SQL Workspace (DuckDB)** extends the current workspace. **Open Saved File SQL Workspace** reopens a saved workspace.
+- **Microsoft Access** — install the [Access pack](extensions/access), select **Microsoft Access** in **Connect to Database**, and choose an `.mdb` or `.accdb` file. SQL can read and modify the Access file through the UCanAccess bridge. Java 11+ must be available on the machine; no ODBC driver is required.
+
+For File SQL, views are read-only by default. Enable **Editable copy** when creating the connection to edit a materialized table, then run **JustyBase: Save File Edits**. CSV/TSV, Parquet, and XLSX are written back to the selected file; Avro edits are saved as a new `_edited.parquet` file. XLSX and Avro support may download the corresponding DuckDB extension the first time they are used.
+
+📖 **[File SQL guide](docs/file-sql.md)** · **[Microsoft Access guide](extensions/access/README.md)**
+
+### Explore data
+
+The **Explore** view turns a result set into a quick data-profiling workspace. Open it from the Results panel to inspect column types and cardinality, distinct values, null counts, numeric summaries, distributions, and the most common values. Use **Pivot** for grouped summaries and **Composer** for time-based exploration; generated SQL can be previewed or opened in the editor when you want to keep the analysis.
+
+<img src="https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/explore_data.png" alt="Explore query results with column profiles, distributions, and summaries" width="100%">
+
+The analysis uses the result set locally where possible, while actions that need the complete dataset can run a focused database query. See [SQL results filtering and aggregation](docs/SQL_RESULTS_FILTERING.md) for the exact data boundaries.
+
 ### 📓 SQL Notebooks
 
 Use the VS Code Notebook API to create interactive SQL notebooks with inline results.
@@ -155,6 +186,17 @@ Search across `.sql` and `.py` files in your workspace by content and filename w
 - **Result grouping**: Results can be grouped by modification time (`Today`, `This Week`, `This Month`, `Older`) with collapsible group headers.
 - **Auto‑search**: Changing any toggle or option automatically re‑triggers the search.
 - **Access**: View → File Search in the Netezza panel.
+
+### 🔌 Netezza MCP Server
+
+JustyBase can expose a **read-only Netezza MCP server** so AI tools can understand your databases without receiving write capabilities or arbitrary SQL execution. Use it in VS Code Copilot Chat, or enable the local HTTP transport for Cursor, Claude Desktop, OpenCode, and other MCP clients.
+
+- Select a saved Netezza connection in **JustyBase Settings → MCP Server**.
+- Choose **Copilot Chat (VS Code)** or **Local HTTP Server** (or both).
+- Let the agent list databases, search schemas, inspect columns, read DDL, validate SQL, and explain a `SELECT` query.
+- Credentials stay in VS Code Secret Storage and are passed only to the local child process; the server never reads table data and never accepts arbitrary SQL.
+
+📖 **[MCP setup, tools, security model, and client configuration](docs/MCP_SERVER.md)**
 
 ### ⭐ Favorites & SQL Snippets
 
@@ -307,9 +349,19 @@ Optional database packs plug into the **shared core UX** (login UI, schema explo
 - Metadata-aware completion and diagnostics **where implemented** for that dialect
 - Import/export and DDL helpers **where implemented**
 
-**Oracle (exception)** — with core + [Oracle pack](extensions/oracle): dedicated Oracle parser/PL/SQL validation, grammar/snippets, advanced data and schema workflows, explain/tuning/session monitor, and ORA quality rules. Documented in [docs/oracle.md](docs/oracle.md); internal parity labels in [plans/DIALECT_PARITY_MATRIX.md](plans/DIALECT_PARITY_MATRIX.md).
+**Dialects with dedicated SQL editors** — these packs ship their own Chevrotain lexer/parser runtimes and strict (or best-effort) syntax validation on the shared LSP stack:
 
-**MySQL** — with core + [MySQL pack](extensions/mysql): a MySQL 8 preview companion with strict validation for common MySQL syntax, backtick identifiers, `DATABASE.TABLE` qualification, CTEs, MySQL `LIMIT` forms, `INSERT IGNORE`, `ON DUPLICATE KEY UPDATE`, and MySQL-specific types/functions. Query results use native `mysql2` streaming with typed columns and cancellation support. It remains a preview pack and does not provide Netezza-level SQL/NZPLSQL tooling.
+- **Oracle** — dedicated Oracle parser/PL/SQL validation, grammar/snippets, advanced data and schema workflows, explain/tuning/session monitor, and ORA quality rules. Documented in [docs/oracle.md](docs/oracle.md); internal parity labels in [plans/DIALECT_PARITY_MATRIX.md](plans/DIALECT_PARITY_MATRIX.md).
+- **PostgreSQL** — dedicated PostgreSQL parser runtime with strict validation, grammar/snippets, metadata-aware tooling, DDL, COPY, explain/tuning, maintenance, and session monitor.
+- **MS SQL Server** — dedicated T-SQL parser runtime (TOP/OUTPUT/APPLY/bracketed identifiers), streaming readers with cancellation, MSS001–MSS008 quality rules, grammar, and snippets.
+- **MySQL** — MySQL 8 parser with strict validation for common MySQL syntax, backtick identifiers, `DATABASE.TABLE` qualification, CTEs, MySQL `LIMIT` forms, `INSERT IGNORE`, `ON DUPLICATE KEY UPDATE`, and MySQL-specific types/functions; native `mysql2` streaming with typed columns and cancellation.
+- **Db2 LUW** — dedicated Db2 parser runtime (isolation, `OPTIMIZE FOR`, `FETCH FIRST`, DGTT, thin SQL PL), DB2001–DB2008 quality rules, grammar/snippets; documented in [docs/db2.md](docs/db2.md).
+
+Access, Vertica, Snowflake and SQLite remain companion runtimes with reduced editor intelligence. File SQL and DuckDB now use dedicated DuckDB parser/authoring runtimes.
+
+**File SQL** — with core + [DuckDB + Files pack](extensions/duckdb): local Excel, CSV/TSV, Parquet, and Avro files are queried through an in-memory DuckDB connection. Multiple files can be opened together as a saved, read-only workspace for SQL joins and transformations. This is a file-backed SQL workflow, not a general-purpose spreadsheet editor; editing a single source still requires the opt-in **Editable copy** flow described above.
+
+**Microsoft Access** — with core + [Access pack](extensions/access): local `.mdb` and `.accdb` databases can be queried and edited through the UCanAccess Java bridge. Access uses a flat catalog, so it does not expose the server-style database/schema hierarchy used by Netezza and most server databases. Java 11+ is required.
 
 **What remains Netezza-only (or Netezza-first)**
 
@@ -320,16 +372,18 @@ Optional database packs plug into the **shared core UX** (login UI, schema explo
 | Database          | Status        | Distribution                | Marketplace `preview` | Notes                                                                                  |
 | ----------------- | ------------- | --------------------------- | --------------------- | -------------------------------------------------------------------------------------- |
 | **SQLite**        | Experimental  | Built into core extension   | n/a (core)            | File-based, no separate installation; minimal SQL validation                           |
-| **IBM Db2**       | Near-full preview | Separate optional extension | yes                   | Advanced runtime + dedicated live suite; Shared editor (DB2xxx + first-slice parser) — [docs/db2.md](docs/db2.md) |
-| **DuckDB**        | Preview       | Separate optional extension | yes                   | Uses `@duckdb/node-api` with platform-specific native bindings                         |
-| **PostgreSQL**    | Preview       | Separate optional extension | yes                   | Pure JS `pg` runtime; connect, schema browser, query/export; limited SQL validation  |
+| **File SQL**      | Near-full preview | Separate DuckDB + Files extension | yes              | Dedicated DuckDB parser/authoring; read-only source views and `_edit` tables for opt-in writes |
+| **Microsoft Access** | Preview    | Separate optional extension | yes                 | `.mdb`/`.accdb` query/edit through UCanAccess; requires Java 11+                      |
+| **IBM Db2**       | Near-full preview | Separate optional extension | yes                   | Dedicated Db2 parser runtime (isol level, `OPTIMIZE FOR`, `FETCH FIRST`, DGTT, SQL P) + DB2001–DB2008 rules — [docs/db2.md](docs/db2.md) |
+| **DuckDB**        | Near-full preview | Separate optional extension | yes                   | Dedicated parser, strict authoring, DDK001–DDK003 rules, grammar and snippets; uses `@duckdb/node-api` |
+| **PostgreSQL**    | Near-full preview | Separate optional extension | yes                   | Pure JS `pg` runtime; dedicated PostgreSQL parser runtime, DDL/Copy/explain, maintenance, session monitor |
 | **Snowflake**     | Preview       | Separate optional extension | yes                   | Pure JS `snowflake-sdk`; connect, schema browser, stage helpers; limited SQL validation |
 | **Oracle**        | Near-full preview | Separate optional extension | yes               | Advanced SQL/PL/SQL editor in core + thin `oracledb` VSIX; dedicated live suite — [docs/oracle.md](docs/oracle.md) |
-| **Microsoft SQL** | Preview       | Separate optional extension | yes                   | Requires `mssql` npm package                                                           |
-| **MySQL**         | Preview       | Separate optional extension | yes                   | MySQL 8 parser/validation, metadata-aware tooling, and native `mysql2` streaming; requires `mysql2` |
+| **Microsoft SQL** | Preview       | Separate optional extension | yes                   | Dedicated MS SQL runtime; requires `mssql` npm package                                 |
+| **MySQL**         | Preview       | Separate optional extension | yes                   | MySQL 8 parser (strict) + native `mysql2` streaming; requires `mysql2` |
 | **Vertica**       | Preview       | Separate optional extension | yes                   | Requires `vertica` npm package                                                         |
 
-All optional database extensions are published with `"preview": true` in their `package.json` (PostgreSQL included). Treat them as **preview companion runtimes** — not peers of the full Netezza-first stack. SQL editor depth varies by dialect; **Oracle** is closest to Netezza on the shared parser/LSP path.
+All optional database extensions are published with `"preview": true` in their `package.json` (PostgreSQL included). Treat them as **preview companion runtimes** — not peers of the full Netezza-first stack. SQL editor depth varies by dialect; **Oracle** is closest to Netezza on the shared parser/LSP path, with **PostgreSQL, MySQL, Db2, and MS SQL Server** also shipping dedicated parser runtimes.
 
 Install the core extension first, then install the Oracle support package to enable:
 
@@ -380,7 +434,7 @@ If the Visual Studio Marketplace is temporarily unavailable (for example, it ret
 
 This section is for building, testing, packaging, and releasing the extension. Database users can skip it.
 
-Optional database support now lives in sibling packages under `extensions\`. Today that includes `extensions\db2`, `extensions\duckdb`, `extensions\oracle`, `extensions\postgresql`, `extensions\mssql`, `extensions\mysql`, and `extensions\snowflake` when those optional packages are present in the checkout. Db2 and DuckDB are distributed separately because their runtimes include platform-specific native components and should not be bundled into the core Netezza/SQLite VSIX.
+Optional database support now lives in sibling packages under `extensions\`. Today that includes `extensions\access`, `extensions\db2`, `extensions\duckdb`, `extensions\oracle`, `extensions\postgresql`, `extensions\mssql`, `extensions\mysql`, `extensions\snowflake`, and `extensions\vertica` when those optional packages are present in the checkout. Db2, DuckDB, and Access are distributed separately because their runtimes should not be bundled into the core Netezza/SQLite VSIX.
 
 ```bash
 # Install dependencies
@@ -389,6 +443,7 @@ npm install
 # Install optional package dependencies (when present in your checkout)
 npm run install:db2
 npm run install:duckdb
+npm run install:access
 npm run install:oracle
 npm run install:postgresql
 npm run install:snowflake
@@ -398,6 +453,7 @@ npm run install:mysql
 # Press F5 from the repository root and choose one of:
 # Run Core + Db2 Support
 # Run Core + DuckDB Support
+# Run Core + Access Extension
 # Run Core + Oracle Support
 # Run Core + PostgreSQL Support
 # Run Core + Snowflake Support
@@ -408,6 +464,8 @@ npm run install:mysql
 npm run build
 npm run build:db2
 npm run build:duckdb
+npm run build:access
+npm run build:access-jar
 npm run build:oracle
 npm run build:postgresql
 npm run build:snowflake
@@ -418,6 +476,7 @@ npm run build:mysql
 npm run test -- --testPathPatterns="sqlParser.test.ts"
 npm run test -- --testNamePattern="ConnectionManager"
 npm run test:duckdb:integration
+npm run test:access:integration
 npm run test:oracle:integration
 npm run test:live:local
 
@@ -429,6 +488,7 @@ npm run db2:runtime:electron
 npm run check-types
 npm run check-types:db2
 npm run check-types:duckdb
+npm run check-types:access
 npm run check-types:oracle
 npm run check-types:postgresql
 npm run check-types:snowflake
@@ -436,6 +496,7 @@ npm run check-types:mssql
 npm run check-types:mysql
 npm run lint
 npm run lint:duckdb
+npm run lint:access
 npm run lint:snowflake
 npm run lint:mysql
 npm run verify:duckdb
@@ -446,6 +507,7 @@ npm run verify:mysql
 npm run package:pre
 npm run package:db2
 npm run package:duckdb
+npm run package:access
 npm run package:oracle
 npm run package:postgresql
 npm run package:snowflake
