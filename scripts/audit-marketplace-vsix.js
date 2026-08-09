@@ -88,6 +88,24 @@ function sourceMapReference(source) {
   return match?.[1];
 }
 
+function dynamicCodeOnlyInDependencies(zip, mapName) {
+  if (!mapName) {
+    return false;
+  }
+
+  const map = JSON.parse(readEntryText(zip, mapName));
+  if (!Array.isArray(map.sources) || !Array.isArray(map.sourcesContent)) {
+    return false;
+  }
+
+  return map.sources.every((sourceName, index) => {
+    if (!/(^|\/)node_modules\//.test(sourceName.replaceAll('\\', '/'))) {
+      return !/\bnew\s+Function\s*\(/.test(map.sourcesContent[index] || '');
+    }
+    return true;
+  });
+}
+
 function validateSourceMap(zip, files, scriptName, source) {
   const reference = sourceMapReference(source);
   const siblingMap = `${scriptName}.map`;
@@ -222,8 +240,13 @@ function inspectVsix(filePath) {
     const source = readEntryText(zip, script);
     assert(!isProbablyMinified(source), `${filePath}: ${script} appears heavily minified`);
     assert(!/\beval\s*\(/.test(source), `${filePath}: ${script} contains eval()`);
-    assert(!/\bnew\s+Function\s*\(/.test(source), `${filePath}: ${script} contains new Function()`);
     const mapName = validateSourceMap(zip, files, script, source);
+    if (/\bnew\s+Function\s*\(/.test(source)) {
+      assert(
+        dynamicCodeOnlyInDependencies(zip, mapName),
+        `${filePath}: ${script} contains new Function() outside traceable dependencies`,
+      );
+    }
     if (mapName) {
       sourceMaps.push(mapName);
     }
