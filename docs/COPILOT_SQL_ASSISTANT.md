@@ -74,6 +74,13 @@ The extension provides **three ways** to interact with Copilot:
 | **Context Menu Commands** | Right-click → Copilot actions | Quick fixes, optimization |
 | **Chat Participant** | Type `@sql-copilot` in Copilot Chat | Interactive conversations |
 | **Language Model Tools** | Use `#toolName` in any chat | AI agent automation |
+| **MCP Server** | Configure in *JustyBase Settings → MCP Server* (or use `MCP: List Servers`) | Read-only schema tools for Copilot Chat and external MCP clients |
+
+> **MCP server note:** the bundled Netezza MCP server (see `docs/MCP_SERVER.md`) exposes the same
+> read-only catalog/EXPLAIN capabilities as the language model tools — list databases, schemas, tables,
+> columns, search, DDL, EXPLAIN and parser validation. Passwords are passed to the server process via
+> environment variables from the VS Code Secrets API and are **never written to a file**. The HTTP mode
+> is bound to `127.0.0.1` and only runs while VS Code is open.
 
 ---
 

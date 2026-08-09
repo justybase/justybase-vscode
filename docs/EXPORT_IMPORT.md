@@ -206,6 +206,18 @@ JustyBase can import data from:
 
 The primary file-based import surface is the **Advanced Import Wizard**.
 
+### Multi-file SQL workspace
+
+With the optional DuckDB + Files extension, use **Query Multiple Files with SQL (DuckDB)** to select several local `.csv`, `.tsv`, `.xlsx`, `.parquet`, or `.avro` files. The extension opens one read-only DuckDB workspace and registers each file as a view named by its full path, so sources can be joined directly:
+
+```sql
+SELECT c.id, c.name, o.total
+FROM "/data/customers.csv" AS c
+JOIN "/data/orders.csv" AS o ON o.customer_id = c.id;
+```
+
+For Excel workbooks, each discovered sheet is also exposed as `"<path>#sheet=<sheet>"` and is suggested by SQL completion after typing the workbook path. The selected file list is saved as a connection profile and can be reopened with **Open Saved File SQL Workspace**. To extend the current workspace, run **Add Files to Active File SQL Workspace (DuckDB)**; the command opens a new editor with the updated list. Multi-file workspaces are read-only; export the result to a new file when a combined dataset is needed.
+
 **How to use:**
 
 1. Right-click on a table in Schema Browser → **Import Data**
