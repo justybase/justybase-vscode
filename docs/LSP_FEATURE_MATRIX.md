@@ -58,7 +58,7 @@ LSP features that need a Chevrotain CST share a per-server `DocumentParseSession
 
 On a single document version, diagnostics plus completion should trigger at most one full-document parse; inlay hints reuse statement-scoped parse entries from the same session. Extension-host features (semantic tokens, quality linter) still parse independently until a later migration phase.
 
-Benchmark: `npm run benchmark:lsp` reports `parseCalls` for the multi-feature xlarge scenario; CI enforces `parseCalls ≤ 1` when `LSP_BENCHMARK_ENFORCE=1`.
+Benchmark: `npm run benchmark:lsp` reports `parseCalls` for the multi-feature xlarge scenario; the budget can be enforced locally with `LSP_BENCHMARK_ENFORCE=1`.
 
 ## Incremental validation
 
