@@ -124,6 +124,27 @@ describe("MetadataBridge list cache", () => {
     });
   });
 
+  it("maps tableInfo columns and drops non-text descriptions safely", async () => {
+    sendRequest.mockResolvedValue({
+      exists: true,
+      table: "Tabela1",
+      database: "default",
+      description: { invalid: true },
+      columns: [
+        { name: "ID", type: "INTEGER", description: 42 },
+        { name: "Opis", type: "TEXT", description: "  opis  " },
+        { name: 7 },
+      ],
+    } as never);
+
+    await expect(
+      bridge.getColumns(docUri, "default", "Tabela1"),
+    ).resolves.toEqual([
+      { name: "ID", type: "INTEGER", description: undefined, isPk: undefined, isFk: undefined },
+      { name: "Opis", type: "TEXT", description: "opis", isPk: undefined, isFk: undefined },
+    ]);
+  });
+
   // =========================================================================
   // Block B: Separacja kluczy
   // =========================================================================

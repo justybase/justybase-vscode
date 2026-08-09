@@ -98,6 +98,28 @@ describe('SchemaProvider pure functions', () => {
 
             expect(result).toBe('appdb.public.import_20260321_5750');
         });
+
+        it('should return a bare table name for flat file dialects (Access/SQLite)', () => {
+            const dbInfo = { CURRENT_CATALOG: 'default', CURRENT_SCHEMA: 'default' };
+            const fixedDate = new Date('2026-03-21T00:00:00Z');
+            const fixedRandom = 5750;
+
+            const accessResult = generateAutoTableNameFromDbInfo(
+                dbInfo,
+                'access',
+                () => fixedDate,
+                () => fixedRandom,
+            );
+            expect(accessResult).toBe('IMPORT_20260321_5750');
+
+            const sqliteResult = generateAutoTableNameFromDbInfo(
+                dbInfo,
+                'sqlite',
+                () => fixedDate,
+                () => fixedRandom,
+            );
+            expect(sqliteResult).toBe('IMPORT_20260321_5750');
+        });
     });
 
     describe('buildObjectTypeQuery', () => {

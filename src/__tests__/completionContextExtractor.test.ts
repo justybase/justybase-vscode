@@ -50,6 +50,46 @@ describe("CompletionContextExtractor", () => {
     });
   });
 
+  it("strips only top-level FROM-list commas", () => {
+    expect(
+      extractor.parseFromJoinContext(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A, ",
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A, ",
+        "",
+        "netezza",
+      ),
+    ).toEqual({ kind: "from_join_name", partial: "" });
+
+    expect(
+      extractor.parseFromJoinContext(
+        "SELECT * FROM (SELECT 1, ",
+        "SELECT * FROM (SELECT 1, ",
+        "",
+        "netezza",
+      ),
+    ).toBeUndefined();
+
+    expect(
+      extractor.parseFromJoinContext(
+        "SELECT * FROM TABLE(fn(1, ",
+        "SELECT * FROM TABLE(fn(1, ",
+        "",
+        "netezza",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("ignores commas inside quoted FROM identifiers", () => {
+    expect(
+      extractor.parseFromJoinContext(
+        'SELECT * FROM "A,B", ',
+        'SELECT * FROM "A,B", ',
+        "",
+        "netezza",
+      ),
+    ).toEqual({ kind: "from_join_name", partial: "" });
+  });
+
   it.each(["CALL", "EXECUTE", "EXEC"])(
     "parses %s procedure targets with quoted db.schema qualification",
     (keyword) => {

@@ -449,6 +449,35 @@ describe("LspCompletionEngine", () => {
   });
 
   describe("object path and target-context completions", () => {
+    it("suggests XLSX sheet views inside a full-path File SQL identifier", async () => {
+      metadataProvider.databaseKind = "file";
+      metadataProvider.effectiveDatabase = "memory";
+      metadataProvider.setViews("memory", [
+        "/home/dusko/source/sql_samples/data1.xlsx",
+        "/home/dusko/source/sql_samples/data1.xlsx#sheet=Sales",
+        "/home/dusko/source/sql_samples/data1.xlsx#sheet=Inventory",
+      ]);
+
+      const items = await complete(
+        'SELECT * FROM "/home/dusko/source/sql_samples/data1.xlsx#sheet=In|',
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(labels(items)).toEqual([
+        "/home/dusko/source/sql_samples/data1.xlsx#sheet=Inventory",
+      ]);
+      expect(items[0]?.insertText).toBe(
+        '"/home/dusko/source/sql_samples/data1.xlsx#sheet=Inventory"',
+      );
+      expect(items[0]?.textEdit).toMatchObject({
+        newText: '"/home/dusko/source/sql_samples/data1.xlsx#sheet=Inventory"',
+      });
+      expect(metadataProvider.getViews).toHaveBeenCalledWith(
+        expect.any(String),
+        "memory",
+      );
+    });
+
     it("returns tables for schema dot completion in FROM context", async () => {
       metadataProvider.setTables("BAZA", ["ORDERS_TBL"], "ADMIN");
       const items = await complete("SELECT * FROM ADMIN.|");
@@ -461,6 +490,68 @@ describe("LspCompletionEngine", () => {
       expect(metadataProvider.getSchemas).not.toHaveBeenCalledWith(
         expect.any(String),
         "ADMIN",
+      );
+    });
+
+    it("returns matching FROM objects when the first letter is typed automatically", async () => {
+      metadataProvider.effectiveDatabase = "JUST_DATA";
+      metadataProvider.setSchemas("JUST_DATA", ["DATA_SCHEMA"]);
+      metadataProvider.setTables("JUST_DATA", ["DATA_TABLE"]);
+      metadataProvider.setViews("JUST_DATA", ["DATA_VIEW"]);
+      metadataProvider.setTables("BAZA", ["DATA_OTHER_DB"]);
+      metadataProvider.setViews("BAZA", ["DATA_OTHER_VIEW"]);
+
+      const items = await complete(
+        "SELECT * FROM DATA|",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["DATA_SCHEMA", "DATA_TABLE", "DATA_VIEW"]),
+      );
+      expect(labels(items)).not.toEqual(
+        expect.arrayContaining(["DATA_OTHER_DB", "DATA_OTHER_VIEW"]),
+      );
+      expect(metadataProvider.getTables).not.toHaveBeenCalledWith(
+        expect.any(String),
+        "BAZA",
+      );
+      expect(metadataProvider.getViews).not.toHaveBeenCalledWith(
+        expect.any(String),
+        "BAZA",
+      );
+      expect(
+        items.every((item) => Array.isArray(item.commitCharacters)),
+      ).toBe(true);
+    });
+
+    it("returns matching database names for an unqualified FROM prefix", async () => {
+      metadataProvider.setTables("BAZA", ["JUST_TABLE"]);
+      const items = await complete(
+        "SELECT * FROM JUS|",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(labels(items)).toContain("JUST_DATA");
+      expect(items.find((item) => item.label === "JUST_DATA")?.kind).toBe(
+        CompletionItemKind.Module,
+      );
+      expect(labels(items)).toContain("JUST_TABLE");
+      expect(metadataProvider.getSchemas).toHaveBeenCalledWith(
+        expect.any(String),
+        "BAZA",
+      );
+      expect(metadataProvider.getTables).toHaveBeenCalledWith(
+        expect.any(String),
+        "BAZA",
+      );
+      expect(metadataProvider.getTables).not.toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
+      );
+      expect(metadataProvider.getViews).not.toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
       );
     });
 
@@ -1479,7 +1570,7 @@ FROM (
 
     it("returns SQL functions at start of next SELECT expression after comma", async () => {
       const items = await complete(
-        "SELECT A.ID AS COL, | FROM JUST_DATA..DEPARTMENT A",
+        "SELECT A.ID AS COL, C| FROM JUST_DATA..DEPARTMENT A",
       );
       expect(labels(items)).toContain("COALESCE");
     });
@@ -1505,8 +1596,25 @@ FROM (
       expect(functionItem!.sortText! < keywordItem!.sortText!).toBe(true);
     });
 
+    it("ranks scoped columns before session variables and SQL functions after a typed letter", async () => {
+      const items = await complete("SELECT C| FROM JUST_DATA..DIMACCOUNT");
+      const columnItem = items.find((item) => item.detail === "Column in scope");
+      const sessionItem = items.find(
+        (item) => item.detail === "Session variable",
+      );
+      const functionItem = items.find(
+        (item) => item.kind === CompletionItemKind.Function,
+      );
+
+      expect(columnItem).toBeDefined();
+      expect(sessionItem).toBeDefined();
+      expect(functionItem).toBeDefined();
+      expect(columnItem!.sortText! < sessionItem!.sortText!).toBe(true);
+      expect(sessionItem!.sortText! < functionItem!.sortText!).toBe(true);
+    });
+
     it("ranks scoped columns first when table alias is used in SELECT list", async () => {
-      const items = await complete("SELECT | FROM JUST_DATA..DIMACCOUNT X");
+      const items = await complete("SELECT C| FROM JUST_DATA..DIMACCOUNT X");
       const columnItem = items.find((item) => item.detail === "Column in scope");
       const sessionItem = items.find(
         (item) => item.detail === "Session variable",
@@ -2622,6 +2730,509 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
     });
   });
 
+  describe("whitespace-triggered completion restraint", () => {
+    const TRIGGER = CompletionTriggerKind.TriggerCharacter;
+
+    it("does not suggest keywords or columns after FROM alias + space on whitespace trigger", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A |",
+        TRIGGER,
+      );
+      const itemLabels = labels(items);
+      expect(itemLabels).not.toEqual(
+        expect.arrayContaining([
+          "LEFT",
+          "RIGHT",
+          "FULL",
+          "WHERE",
+          "GROUP",
+          "ORDER",
+          "JOIN",
+          "INNER",
+          "CROSS",
+        ]),
+      );
+      expect(
+        items.some((item) => item.detail === "Column in scope"),
+      ).toBe(false);
+      expect(itemLabels).not.toEqual(
+        expect.arrayContaining([
+          "_V_DATABASE",
+          "_V_SESSION",
+          "_V_VIEW",
+          "INSERT",
+          "DROP",
+          "GROOM",
+          "CREATE",
+        ]),
+      );
+    });
+
+    it("suggests join/where keywords after FROM alias + space when invoked with Ctrl+Space", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A |",
+      );
+      const itemLabels = labels(items);
+      expect(itemLabels).toEqual(
+        expect.arrayContaining([
+          "LEFT",
+          "RIGHT",
+          "FULL",
+          "WHERE",
+          "GROUP",
+          "ORDER",
+          "JOIN",
+          "INNER",
+          "CROSS",
+        ]),
+      );
+      expect(itemLabels).not.toContain("_V_DATABASE");
+      expect(itemLabels).not.toContain("INSERT");
+    });
+
+    it("does not offer scoped columns after FROM alias + space on whitespace trigger", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A |",
+        TRIGGER,
+      );
+      expect(
+        items.some((item) => item.detail === "Column in scope"),
+      ).toBe(false);
+    });
+
+    it("does not offer scoped columns after FROM table + space on whitespace trigger", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT |",
+        TRIGGER,
+      );
+      expect(
+        items.some((item) => item.detail === "Column in scope"),
+      ).toBe(false);
+    });
+
+    it("does not offer scoped columns after FROM alias + space when invoked with Ctrl+Space", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A |",
+      );
+      expect(
+        items.some((item) => item.detail === "Column in scope"),
+      ).toBe(false);
+    });
+
+    it("does not offer scoped columns after FROM alias + space even when a column-matching letter is typed", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A ACC|",
+        TRIGGER,
+      );
+      expect(
+        items.some((item) => item.detail === "Column in scope"),
+      ).toBe(false);
+      expect(
+        items.some((item) => item.kind === CompletionItemKind.Function),
+      ).toBe(false);
+    });
+
+    it("suggests join/where keywords after FROM alias + space once a letter is typed", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A W|",
+        TRIGGER,
+      );
+      expect(labels(items)).toContain("WHERE");
+    });
+
+    it("does not offer qualifier columns right after FROM alias (A.| is invalid there)", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A A.|",
+        TRIGGER,
+      );
+      expect(
+        items.some((item) => item.detail === "Column in scope"),
+      ).toBe(false);
+      expect(labels(items)).not.toContain("* (Expand Columns)");
+    });
+
+    it("does not offer wildcard expansion right after FROM alias (A.*| is invalid there)", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A A.*|",
+        TRIGGER,
+      );
+      expect(labels(items)).not.toContain("* (Expand Columns)");
+      expect(
+        items.some((item) => item.detail === "Column in scope"),
+      ).toBe(false);
+    });
+
+    it("offers qualifier columns in WHERE clause after FROM alias", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A WHERE A.|",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining([
+          "* (Expand Columns)",
+          "ACCOUNTKEY",
+          "ACCOUNTNAME",
+        ]),
+      );
+    });
+
+    it("offers qualifier columns in SELECT list after FROM alias", async () => {
+      const items = await complete(
+        "SELECT A.| FROM JUST_DATA..DIMACCOUNT A",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["* (Expand Columns)", "ACCOUNTKEY"]),
+      );
+    });
+
+    it("offers qualifier columns in JOIN ON clause after FROM alias", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A JOIN JUST_DATA..DIMEMPLOYEE B ON A.|",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["* (Expand Columns)", "ACCOUNTKEY"]),
+      );
+    });
+
+    it("offers qualifier columns in GROUP BY clause after FROM alias", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A GROUP BY A.|",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["* (Expand Columns)", "ACCOUNTKEY"]),
+      );
+    });
+
+    it("offers qualifier columns in ORDER BY clause after FROM alias", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A ORDER BY A.|",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["* (Expand Columns)", "ACCOUNTKEY"]),
+      );
+    });
+
+    it("offers qualifier columns in HAVING clause after FROM alias", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A HAVING A.|",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["* (Expand Columns)", "ACCOUNTKEY"]),
+      );
+    });
+
+    it("offers qualifier columns in UPDATE SET clause after FROM alias", async () => {
+      const items = await complete(
+        "UPDATE JUST_DATA..DIMACCOUNT A SET A.|",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["* (Expand Columns)", "ACCOUNTKEY"]),
+      );
+    });
+
+    it("includes LIMIT, OFFSET, and UNION among keywords after FROM alias + Ctrl+Space", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A |",
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["LIMIT", "OFFSET", "UNION", "HAVING"]),
+      );
+      expect(labels(items)).not.toEqual(
+        expect.arrayContaining(["OUTER", "FETCH"]),
+      );
+    });
+
+    it("does not suggest keywords after FROM table + space on whitespace trigger", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT |",
+        TRIGGER,
+      );
+      const itemLabels = labels(items);
+      expect(itemLabels).not.toEqual(
+        expect.arrayContaining(["LEFT", "RIGHT", "FULL", "WHERE", "GROUP", "ORDER"]),
+      );
+      expect(itemLabels).not.toContain("_V_DATABASE");
+      expect(itemLabels).not.toContain("INSERT");
+    });
+
+    it("suggests join/where keywords after FROM table + space when invoked", async () => {
+      const items = await complete("SELECT * FROM JUST_DATA..DIMACCOUNT |");
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["LEFT", "RIGHT", "FULL", "WHERE", "GROUP", "ORDER"]),
+      );
+    });
+
+    it("keeps keywords in GROUP BY context instead of dumping statement keywords", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT GROUP BY |",
+      );
+      const itemLabels = labels(items);
+      expect(itemLabels).toEqual(
+        expect.arrayContaining(["BY", "ORDER", "HAVING"]),
+      );
+      expect(itemLabels).not.toContain("INSERT");
+      expect(itemLabels).not.toContain("SELECT");
+    });
+
+    it("keeps keywords in ORDER BY context instead of dumping statement keywords", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT ORDER BY |",
+      );
+      const itemLabels = labels(items);
+      expect(itemLabels).toEqual(
+        expect.arrayContaining(["BY", "ASC", "DESC", "NULLS", "FIRST", "LAST"]),
+      );
+      expect(itemLabels).not.toContain("INSERT");
+      expect(itemLabels).not.toContain("SELECT");
+    });
+
+    it("does not expose _V_* system views as keywords at statement start", async () => {
+      const items = await complete("|", TRIGGER);
+      const itemLabels = labels(items);
+      expect(itemLabels).not.toEqual(
+        expect.arrayContaining([
+          "_V_DATABASE",
+          "_V_SESSION",
+          "_V_TABLE",
+          "_V_OBJECT_DATA",
+        ]),
+      );
+    });
+
+    it("does not suggest SQL functions right after whitespace in expression contexts", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY = 1 AND |",
+        TRIGGER,
+      );
+      expect(
+        items.some((item) => item.kind === CompletionItemKind.Function),
+      ).toBe(false);
+    });
+
+    it("suggests SQL functions once a letter is typed in expression contexts", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY = 1 AND C|",
+        TRIGGER,
+      );
+      expect(labels(items)).toContain("COALESCE");
+    });
+
+    it("suggests no keyword dump inside VALUES parentheses", async () => {
+      const items = await complete(
+        "INSERT INTO JUST_DATA..DIMACCOUNT VALUES (|",
+        TRIGGER,
+      );
+      expect(
+        items.some((item) => item.kind === CompletionItemKind.Keyword),
+      ).toBe(false);
+    });
+
+    it("suggests SQL functions once a letter is typed inside VALUES parentheses", async () => {
+      const items = await complete(
+        "INSERT INTO JUST_DATA..DIMACCOUNT VALUES (A|",
+        TRIGGER,
+      );
+      expect(labels(items)).toContain("ABS");
+    });
+
+    it("suggests the next table after a comma in the FROM list when invoked", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A, |",
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["USERS", "ORDERS", "DEPT"]),
+      );
+      expect(metadataProvider.getTables).toHaveBeenCalledWith(
+        expect.any(String),
+        "BAZA",
+      );
+    });
+
+    it("suggests SET after a completed UPDATE target when invoked", async () => {
+      const items = await complete("UPDATE JUST_DATA..DIMACCOUNT |");
+      expect(labels(items)).toContain("SET");
+      expect(labels(items)).not.toContain("DIMACCOUNT");
+    });
+
+    it("suggests TABLE and VIEWS after bare GROOM when invoked", async () => {
+      const items = await complete("GROOM |");
+      const itemLabels = labels(items);
+      expect(itemLabels).toEqual(
+        expect.arrayContaining(["TABLE", "VIEWS"]),
+      );
+      expect(itemLabels).not.toContain("INSERT");
+    });
+
+    it("keeps system views in table position but sorts them after user objects when invoked", async () => {
+      const items = await complete("SELECT * FROM |");
+      const systemView = items.find(
+        (item) => item.label === "_V_SESSION",
+      );
+      const userTable = items.find((item) => item.label === "USERS");
+      expect(systemView).toBeDefined();
+      expect(userTable).toBeDefined();
+      expect(String(systemView?.sortText)).toMatch(/^9_/);
+      expect(String(userTable?.sortText)).toMatch(/^3_/);
+      expect(String(systemView!.sortText!) > String(userTable!.sortText!)).toBe(
+        true,
+      );
+    });
+
+    it("never opens the list on a plain whitespace trigger in SELECT list position", async () => {
+      const items = await complete("SELECT * |", TRIGGER);
+      expect(items).toHaveLength(0);
+    });
+
+    it("opens the list on whitespace position when invoked with Ctrl+Space", async () => {
+      const items = await complete("SELECT * |");
+      expect(items.length).toBeGreaterThan(0);
+    });
+
+    it("opens the list once a letter is typed after whitespace", async () => {
+      const items = await complete("SELECT * F|", TRIGGER);
+      expect(labels(items)).toContain("FROM");
+      expect(items.find((item) => item.label === "FROM")?.commitCharacters).toEqual(
+        [],
+      );
+    });
+
+    it("does not keep FROM active after a non-matching continuation", async () => {
+      const items = await complete("SELECT * FX|", TRIGGER);
+      expect(labels(items)).not.toContain("FROM");
+      expect(items).toHaveLength(0);
+    });
+
+    it("does not keep SELECT active after a non-matching continuation", async () => {
+      const items = await complete("SELECT * SX|", TRIGGER);
+      expect(labels(items)).not.toContain("SELECT");
+      expect(items).toHaveLength(0);
+    });
+
+    it("never opens the list after a complete WHERE predicate + space", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY = 1 |",
+        TRIGGER,
+      );
+      expect(items).toHaveLength(0);
+    });
+
+    it("never opens the list on space right after a dot", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A WHERE A.|",
+        TRIGGER,
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["* (Expand Columns)", "ACCOUNTKEY"]),
+      );
+      const itemsAfterSpace = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A WHERE A. |",
+        TRIGGER,
+      );
+      expect(itemsAfterSpace).toHaveLength(0);
+    });
+
+    it("opens the list with SQL functions on Ctrl+Space in expression context", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT WHERE |",
+      );
+      expect(
+        items.some((item) => item.kind === CompletionItemKind.Function),
+      ).toBe(true);
+    });
+
+    it("does not offer session values after a complete WHERE predicate on Ctrl+Space", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY = 1 |",
+      );
+      expect(
+        items.some((item) => item.detail === "Session variable"),
+      ).toBe(false);
+    });
+
+    it("does not offer session values after AS on Ctrl+Space", async () => {
+      const items = await complete("SELECT 1 AS |");
+      expect(
+        items.some((item) => item.detail === "Session variable"),
+      ).toBe(false);
+    });
+
+    it("suggests SELECT continuation after UNION + Ctrl+Space", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A UNION |",
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["SELECT", "WITH", "INTERSECT", "EXCEPT", "ALL"]),
+      );
+      expect(labels(items)).not.toEqual(
+        expect.arrayContaining(["LEFT", "LIMIT"]),
+      );
+    });
+
+    it("keeps predicate operators available after a typed expression prefix", async () => {
+      const inItems = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY I|",
+        TRIGGER,
+      );
+      const betweenItems = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY B|",
+        TRIGGER,
+      );
+
+      expect(labels(inItems)).toContain("IN");
+      expect(labels(betweenItems)).toContain("BETWEEN");
+    });
+
+    it("offers AS after a FROM target alias prefix", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT A|",
+        TRIGGER,
+      );
+      expect(labels(items)).toContain("AS");
+    });
+
+    it("does not treat LIMIT or OFFSET values as FROM continuations", async () => {
+      const limitItems = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT LIMIT |",
+      );
+      const offsetItems = await complete(
+        "SELECT * FROM JUST_DATA..DIMACCOUNT LIMIT 10 OFFSET |",
+      );
+
+      expect(labels(limitItems)).not.toEqual(
+        expect.arrayContaining(["JOIN", "WHERE", "GROUP"]),
+      );
+      expect(labels(offsetItems)).not.toEqual(
+        expect.arrayContaining(["JOIN", "WHERE", "GROUP"]),
+      );
+    });
+
+    it("keeps nested SELECT expressions out of FROM table-path completion", async () => {
+      const items = await complete("SELECT * FROM (SELECT 1, |");
+
+      expect(labels(items)).not.toContain("USERS");
+      expect(items.some((item) => item.kind === CompletionItemKind.Function)).toBe(
+        true,
+      );
+    });
+
+    it("suggests SET for a single-letter UPDATE target", async () => {
+      const items = await complete("UPDATE X |");
+      expect(labels(items)).toContain("SET");
+    });
+
+    it("suggests SET for an UPDATE target with AS alias", async () => {
+      const items = await complete("UPDATE JUST_DATA..DIMACCOUNT AS X |");
+      expect(labels(items)).toContain("SET");
+      expect(labels(items)).not.toContain("DIMACCOUNT");
+    });
+  });
+
   describe("additional column resolution scenarios", () => {
     type QuotedAliasCompletionScenario = {
       name: string;
@@ -3576,6 +4187,32 @@ SELECT M.| FROM MIXED M`);
 
       expect(labelsWithoutExpand(items)).toEqual(
         expect.arrayContaining(["id", "amount"]),
+      );
+    });
+
+    it("resolves Access aliases through the flat default catalog", async () => {
+      metadataProvider.databaseKind = "access";
+      metadataProvider.effectiveDatabase = "default";
+      metadataProvider.effectiveSchema = "default";
+      metadataProvider.setColumns("default", "Tabela1", ["ID", "Opis"]);
+
+      const items = await complete(
+        "SELECT * FROM Tabela1 X WHERE X.|",
+      );
+
+      expect(labelsWithoutExpand(items)).toEqual(
+        expect.arrayContaining(["ID", "Opis"]),
+      );
+      expect(metadataProvider.getColumns).toHaveBeenCalledWith(
+        expect.any(String),
+        "default",
+        "Tabela1",
+      );
+      expect(metadataProvider.getColumns).not.toHaveBeenCalledWith(
+        expect.any(String),
+        "default",
+        "Tabela1",
+        expect.anything(),
       );
     });
   });

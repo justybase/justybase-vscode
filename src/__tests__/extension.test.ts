@@ -180,6 +180,7 @@ jest.mock('../core/connectionManager', () => ({
 jest.mock('../metadataCache', () => ({
     MetadataCache: jest.fn().mockImplementation(() => ({
         initialize: jest.fn().mockResolvedValue(undefined),
+        whenDiskReady: jest.fn().mockResolvedValue(undefined),
         getDatabases: jest.fn(),
         setDatabases: jest.fn(),
         hasConnectionPrefetchTriggered: jest.fn().mockReturnValue(false),

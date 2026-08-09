@@ -234,13 +234,14 @@ describe('commands/schema/utilityCommands', () => {
             expect(vscode.commands.registerCommand).toHaveBeenCalledWith('netezza.insertToEditor', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.favorites.includeNow', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.refreshSchemaSelection', expect.any(Function));
-            expect(disposables).toHaveLength(19);
+            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealAccessFile', expect.any(Function));
+            expect(disposables).toHaveLength(20);
         });
 
         it('should return disposables for cleanup', () => {
             const disposables = registerUtilityCommands(mockDeps);
 
-            expect(disposables).toHaveLength(19);
+            expect(disposables).toHaveLength(20);
             expect(disposables[0].dispose).toBeDefined();
             expect(disposables[1].dispose).toBeDefined();
             expect(disposables[2].dispose).toBeDefined();

@@ -14,6 +14,7 @@ import { oracleDialect } from '../../extensions/oracle/src/oracleDialect';
 import { postgresqlDialect } from '../../extensions/postgresql/src/postgresqlDialect';
 import { snowflakeDialect } from '../../extensions/snowflake/src/snowflakeDialect';
 import { verticaDialect } from '../../extensions/vertica/src/verticaDialect';
+import { accessDialect } from '../../extensions/access/src/accessDialect';
 
 const SOURCE_SEARCH_OPTIONS: DatabaseSourceSearchQueryOptions = {
     rawTerm: 'CUSTOMERS',
@@ -81,6 +82,11 @@ const OPTIONAL_DIALECT_CASES: readonly {
         expectedDefaultPort: 3306,
         expectedConnectionFields: ['host', 'port', 'database', 'user', 'password', 'connectTimeout'],
     },
+    {
+        dialect: accessDialect,
+        expectedDefaultPort: undefined,
+        expectedConnectionFields: ['filePath', 'password'],
+    },
 ];
 
 function expectSqlString(query: string): void {
@@ -115,9 +121,12 @@ describe.each(OPTIONAL_DIALECT_CASES)(
             expect(getDatabaseDialectByKind(dialect.kind)).toBe(dialect);
             expect(validateDialectTraits(dialect.traits)).toEqual([]);
             expect(dialect.defaultPort).toBe(expectedDefaultPort);
-            expect(dialect.connectionForm?.fields.map((field) => field.key)).toEqual(
-                expect.arrayContaining(expectedConnectionFields),
-            );
+            const fieldKeys = dialect.connectionForm?.fields.map((field) => field.key);
+            if (dialect.kind === 'access') {
+                expect(fieldKeys).toEqual(['filePath', 'password', 'readOnly']);
+            } else {
+                expect(fieldKeys).toEqual(expect.arrayContaining(expectedConnectionFields));
+            }
             expect(typeof dialect.getConnectionConstructor()).toBe('function');
         });
 

@@ -52,6 +52,14 @@ describe('ConnectionManager', () => {
             mode: 'file'
         }
     };
+    const accessConnection: ConnectionDetails = {
+        name: 'LocalAccess',
+        host: '',
+        database: '/data/klienci.accdb',
+        user: '',
+        password: 'secret',
+        dbType: 'access'
+    };
     const db2Connection: ConnectionDetails = {
         name: 'WarehouseDb2',
         host: 'db2.example.test',
@@ -165,6 +173,33 @@ describe('ConnectionManager', () => {
 
         it('should allow duckdb connections with blank host and user', async () => {
             await expect(manager.saveConnection(duckdbConnection)).resolves.toBeUndefined();
+        });
+
+        it('should allow file connections (Excel/CSV/Parquet/Avro) with blank host and user', async () => {
+            const fileConnection: ConnectionDetails = {
+                name: 'FileSQL: sales.xlsx',
+                host: '',
+                database: '/data/sales.xlsx',
+                user: '',
+                password: '',
+                dbType: 'file'
+            };
+            await expect(manager.saveConnection(fileConnection)).resolves.toBeUndefined();
+            manager.setDocumentConnection('file:///doc.sql', 'FileSQL: sales.xlsx');
+            expect(manager.getExecutionDatabaseKind('file:///doc.sql')).toBe('file');
+        });
+
+        it('should allow Access file connections with blank host and user', async () => {
+            const accessConnection: ConnectionDetails = {
+                name: 'Access: sales.accdb',
+                host: '',
+                database: '/data/sales.accdb',
+                user: '',
+                password: '',
+                dbType: 'access',
+            };
+            await expect(manager.saveConnection(accessConnection)).resolves.toBeUndefined();
+            expect(manager.getConnectionDatabaseKind('Access: sales.accdb')).toBe('access');
         });
 
         it('should update existing connection', async () => {
@@ -315,16 +350,16 @@ describe('ConnectionManager', () => {
             }
         );
 
-        it('should expose a safe default capability set for sqlite connections', async () => {
+        it('should expose native SQLite capability set for sqlite connections', async () => {
             await manager.saveConnection(sqliteConnection);
 
             expect(manager.getConnectionCapabilities('LocalSQLite')).toEqual({
-                supportsExplainPlan: false,
-                supportsExplainGraph: false,
-                supportsTuningAdvisor: false,
+                supportsExplainPlan: true,
+                supportsExplainGraph: true,
+                supportsTuningAdvisor: true,
                 supportsExternalTables: false,
                 supportsProcedures: false,
-                supportsTableMaintenance: false,
+                supportsTableMaintenance: true,
                 supportsSessionMonitor: false,
                 supportsDistributionMetrics: false
             });
@@ -394,11 +429,41 @@ describe('ConnectionManager', () => {
             expect(await manager.getCurrentDatabase('LocalDuckDB')).toBe('analytics');
         });
 
+        it('should resolve file connections to the in-memory duckdb catalog', async () => {
+            const fileConnection: ConnectionDetails = {
+                name: 'FileSQL: sales.xlsx',
+                host: '',
+                database: '/data/sales.xlsx',
+                user: '',
+                password: '',
+                dbType: 'file'
+            };
+            await manager.saveConnection(fileConnection);
+
+            expect(await manager.getCurrentDatabase('FileSQL: sales.xlsx')).toBe('memory');
+            manager.setDocumentConnection('file:///file.sql', 'FileSQL: sales.xlsx');
+            expect(await manager.getEffectiveDatabase('file:///file.sql')).toBe('memory');
+        });
+
         it('should resolve duckdb effective database to the inferred default catalog', async () => {
             await manager.saveConnection(duckdbConnection);
             manager.setDocumentConnection('file:///duckdb.sql', 'LocalDuckDB');
 
             expect(await manager.getEffectiveDatabase('file:///duckdb.sql')).toBe('analytics');
+        });
+
+        it.each([
+            ['LocalSQLite', sqliteConnection, 'file:///sqlite-import.sql'],
+            ['LocalDuckDB', duckdbConnection, 'file:///duckdb-import.sql'],
+            ['LocalAccess', accessConnection, 'file:///access-import.sql'],
+        ] as const)('preserves the physical path for %s import details', async (connectionName, connection, documentUri) => {
+            await manager.saveConnection(connection);
+            manager.setDocumentConnection(documentUri, connectionName);
+            await manager.setDocumentDatabase(documentUri, 'logical_override');
+
+            const details = await manager.getConnectionDetailsForImport(documentUri, connectionName, 'dropped_catalog');
+
+            expect(details?.database).toBe(connection.database);
         });
     });
 
@@ -451,6 +516,70 @@ describe('ConnectionManager', () => {
             manager.setDocumentConnection(docUri, 'DocSpecificConnection');
 
             expect(manager.getConnectionForExecution(docUri)).toBe('DocSpecificConnection');
+        });
+
+        it('should recreate the tab connection after switching from an old connection to Netezza', async () => {
+            const oldConnection: ConnectionDetails = {
+                name: 'LegacyConnection',
+                host: 'legacy.example.test',
+                database: 'legacydb',
+                user: 'legacy',
+                password: '',
+                dbType: 'netezza',
+            };
+            const netezzaConnection: ConnectionDetails = {
+                ...sampleConnection,
+                name: 'NetezzaWarehouse',
+                host: 'netezza.example.test',
+            };
+            await manager.saveConnection(oldConnection);
+            await manager.saveConnection(netezzaConnection);
+
+            const documentUri = 'file:///switch-connection.sql';
+            await manager.setDocumentConnection(documentUri, oldConnection.name);
+            const oldPersistentConnection = await manager.getDocumentPersistentConnection(documentUri);
+
+            await manager.setDocumentConnection(documentUri, netezzaConnection.name);
+            const currentPersistentConnection = await manager.getDocumentPersistentConnection(documentUri);
+
+            expect(manager.getConnectionForExecution(documentUri)).toBe(netezzaConnection.name);
+            expect(currentPersistentConnection).not.toBe(oldPersistentConnection);
+            expect((oldPersistentConnection as MockNzConnection)._connected).toBe(false);
+            expect((currentPersistentConnection as MockNzConnection)._connected).toBe(true);
+            expect(mockNzConnectionConstructor).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    host: netezzaConnection.host,
+                    database: netezzaConnection.database,
+                }),
+            );
+        });
+
+        it('should not reuse an old in-flight tab connection after changing its selection', async () => {
+            const oldConnection = new MockNzConnection();
+            let releaseOldConnection: (() => void) | undefined;
+            oldConnection.connect = () => new Promise<void>(resolve => {
+                releaseOldConnection = resolve;
+            });
+            const newConnection = new MockNzConnection();
+            mockNzConnectionConstructor
+                .mockImplementationOnce(() => oldConnection)
+                .mockImplementationOnce(() => newConnection);
+
+            await manager.saveConnection({ ...sampleConnection, name: 'OldConnection' });
+            await manager.saveConnection({ ...sampleConnection, name: 'NewConnection', host: 'new.example.test' });
+
+            const documentUri = 'file:///switch-in-flight.sql';
+            await manager.setDocumentConnection(documentUri, 'OldConnection');
+            const oldPersistentPromise = manager.getDocumentPersistentConnection(documentUri);
+            await new Promise<void>(resolve => setImmediate(resolve));
+
+            await manager.setDocumentConnection(documentUri, 'NewConnection');
+            const newPersistentPromise = manager.getDocumentPersistentConnection(documentUri);
+            releaseOldConnection?.();
+
+            await expect(oldPersistentPromise).rejects.toThrow('Connection selection changed');
+            await expect(newPersistentPromise).resolves.toBe(newConnection);
+            expect(manager.getConnectionForExecution(documentUri)).toBe('NewConnection');
         });
     });
 
@@ -667,6 +796,46 @@ describe('ConnectionManager', () => {
             expect(newManager.getConnectionMetadata('WarehouseDb2')?.dbType).toBe('db2');
             expect(newManager.getConnectionDatabaseKind('WarehouseDb2')).toBe('db2');
 
+             await newManager.dispose();
+        });
+
+        it('should infer file kind for legacy data-file entries without dbType', async () => {
+            globalState.set('justybase.connectionsCache', {
+                'File SQL: data1.xlsx': {
+                    name: 'File SQL: data1.xlsx',
+                    host: '',
+                    database: '/home/dusko/source/sql_samples/data1.xlsx',
+                    user: '',
+                    dbType: undefined
+                }
+            });
+            globalState.set('justybase.activeConnection', 'File SQL: data1.xlsx');
+
+            const newManager = new ConnectionManager(mockContext);
+
+            expect(newManager.isFastLoaded()).toBe(true);
+            expect(newManager.getConnectionMetadata('File SQL: data1.xlsx')?.dbType).toBe('file');
+            expect(newManager.getConnectionDatabaseKind('File SQL: data1.xlsx')).toBe('file');
+
+            await newManager.dispose();
+        });
+
+        it('should correct data-file profiles saved with an explicit sqlite dbType', async () => {
+            globalState.set('justybase.connectionsCache', {
+                'File SQL: data1.xlsx': {
+                    name: 'File SQL: data1.xlsx',
+                    host: '',
+                    database: '/home/dusko/source/sql_samples/data1.xlsx',
+                    user: '',
+                    dbType: 'sqlite'
+                }
+            });
+            globalState.set('justybase.activeConnection', 'File SQL: data1.xlsx');
+
+            const newManager = new ConnectionManager(mockContext);
+
+            expect(newManager.getConnectionDatabaseKind('File SQL: data1.xlsx')).toBe('file');
+
             await newManager.dispose();
         });
 
@@ -691,6 +860,27 @@ describe('ConnectionManager', () => {
             expect(newManager.isFastLoaded()).toBe(true);
             expect(newManager.getConnectionMetadata('WarehouseMsSql')?.dbType).toBe('mssql');
             expect(newManager.getConnectionDatabaseKind('WarehouseMsSql')).toBe('mssql');
+
+            await newManager.dispose();
+        });
+
+        it('should infer file kind for legacy data-file entries without dbType (xlsx/csv/parquet/avro)', async () => {
+            globalState.set('justybase.connectionsCache', {
+                'File SQL: data1.xlsx': {
+                    name: 'File SQL: data1.xlsx',
+                    host: '',
+                    database: '/home/dusko/source/sql_samples/data1.xlsx',
+                    user: '',
+                    dbType: undefined
+                }
+            });
+            globalState.set('justybase.activeConnection', 'File SQL: data1.xlsx');
+
+            const newManager = new ConnectionManager(mockContext);
+
+            expect(newManager.isFastLoaded()).toBe(true);
+            expect(newManager.getConnectionMetadata('File SQL: data1.xlsx')?.dbType).toBe('file');
+            expect(newManager.getConnectionDatabaseKind('File SQL: data1.xlsx')).toBe('file');
 
             await newManager.dispose();
         });

@@ -67,7 +67,8 @@ jest.mock('../metadata/systemQueries', () => ({
 
 jest.mock('../utils/sqlUtils', () => ({
     escapeSqlIdentifier: jest.fn((v: string) => `"${v}"`),
-    escapeSqlLiteral: jest.fn((v: string) => `'${v.replace(/'/g, "''")}'`)
+    escapeSqlLiteral: jest.fn((v: string) => `'${v.replace(/'/g, "''")}'`),
+    escapeSqlString: jest.requireActual<typeof import('../utils/sqlUtils')>('../utils/sqlUtils').escapeSqlString
 }));
 
 jest.mock('../ddlGenerator', () => ({

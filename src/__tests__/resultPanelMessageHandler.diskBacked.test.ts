@@ -55,12 +55,18 @@ function isNodeSqliteAvailable(): boolean {
 const describeIfSqlite = isNodeSqliteAvailable() ? describe : describe.skip;
 
 describeIfSqlite('ResultPanelMessageHandler requestRows', () => {
+    let stateManager: ResultStateManager;
+
+    beforeEach(() => {
+        stateManager = new ResultStateManager();
+    });
+
     afterEach(() => {
+        stateManager.dispose();
         diskBackedStoreRegistry.disposeAll();
     });
 
     it('returns rowWindow from SQLite store', () => {
-        const stateManager = new ResultStateManager();
         const exportManager = new ExportManager(stateManager.resultsMap);
         const postedMessages: unknown[] = [];
 
@@ -114,7 +120,6 @@ describeIfSqlite('ResultPanelMessageHandler requestRows', () => {
     });
 
     it('returns diskQueryResult window with filters and sort', async () => {
-        const stateManager = new ResultStateManager();
         const exportManager = new ExportManager(stateManager.resultsMap);
         const postedMessages: unknown[] = [];
 
@@ -186,7 +191,6 @@ describeIfSqlite('ResultPanelMessageHandler requestRows', () => {
     });
 
     it('returns diskQueryResult groups for SQLite-backed results', async () => {
-        const stateManager = new ResultStateManager();
         const exportManager = new ExportManager(stateManager.resultsMap);
         const postedMessages: unknown[] = [];
 

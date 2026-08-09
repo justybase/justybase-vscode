@@ -29,6 +29,12 @@ describe('SettingsView webview shell', () => {
         expect(panel.webview.html).toMatch(/script-src mock-csp-source 'nonce-[A-Za-z0-9]+'/);
         expect(panel.webview.html).not.toContain('<style>');
         expect(panel.webview.html).toContain('src="webview-uri:///extension/media/settingsView.js"');
+        expect(panel.webview.html).toContain('"id":"mcp-connection-name"');
+        expect(panel.webview.html).toContain('"type":"select"');
+
+        const settingsScript = fs.readFileSync(path.join(__dirname, '../../media/settingsView.js'), 'utf8');
+        expect(settingsScript).toContain("'mcp': '<svg");
+        expect(settingsScript).toContain('function renderMcpStatus()');
     });
 
     it('styles text settings with theme-aware input colors', () => {

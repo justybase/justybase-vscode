@@ -1626,6 +1626,37 @@ describe('SchemaItem', () => {
             expect(item.tooltip).toContain('PUBLIC');
         });
 
+        it.each([123, { source: 'access' }])(
+            'should ignore non-text object descriptions (%p)',
+            (description) => {
+                expect(() => new SchemaItem(
+                    'USERS',
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    'netezza:TABLE',
+                    'TESTDB',
+                    'TABLE',
+                    'PUBLIC',
+                    1,
+                    description,
+                    'TestConnection',
+                )).not.toThrow();
+
+                const item = new SchemaItem(
+                    'USERS',
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    'netezza:TABLE',
+                    'TESTDB',
+                    'TABLE',
+                    'PUBLIC',
+                    1,
+                    description,
+                    'TestConnection',
+                );
+                expect(item.objectDescription).toBeUndefined();
+                expect(item.description).toBe('(PUBLIC)');
+            },
+        );
+
         it('should set description as schema name', () => {
             const item = new SchemaItem(
                 'USERS',

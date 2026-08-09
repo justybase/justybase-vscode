@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { SqliteConnection } from '../../../dialects/sqlite';
 
 async function readAllRows(connection: SqliteConnection, sql: string): Promise<unknown[][]> {
@@ -69,5 +72,44 @@ describe('SqliteConnection runtime', () => {
         } finally {
             await connection.close();
         }
+    });
+
+    it('creates a missing database file (and its parent directory) on connect', async () => {
+        const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlite-conn-'));
+        const dbPath = path.join(workspace, 'nested', 'brand-new.db');
+        expect(fs.existsSync(dbPath)).toBe(false);
+
+        const connection = new SqliteConnection({
+            host: '',
+            database: dbPath,
+            user: '',
+            password: ''
+        });
+
+        try {
+            await connection.connect();
+            expect(fs.existsSync(dbPath)).toBe(true);
+
+            await connection.createCommand('CREATE TABLE items(id INTEGER PRIMARY KEY);').execute();
+            expect(await readAllRows(connection, 'SELECT name FROM pragma_database_list;')).toEqual([['main']]);
+        } finally {
+            await connection.close();
+        }
+
+        fs.rmSync(workspace, { recursive: true, force: true });
+    });
+
+    it('keeps :memory: mode independent of the database path field', async () => {
+        const connection = new SqliteConnection({
+            host: '',
+            database: '/does/not/exist/ignored.db',
+            user: '',
+            password: '',
+            options: { mode: 'memory' }
+        });
+
+        await connection.connect();
+        expect(await readAllRows(connection, 'SELECT sqlite_version() AS v;')).toHaveLength(1);
+        await connection.close();
     });
 });

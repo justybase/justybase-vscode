@@ -47,6 +47,12 @@ export const workspace = {
   onDidChangeConfiguration: jest.fn(() => ({ dispose: jest.fn() })),
 };
 
+export const env = {
+  clipboard: {
+    writeText: jest.fn().mockResolvedValue(undefined),
+  },
+};
+
 export const Uri = {
   file: (path: string) => ({
     scheme: "file",

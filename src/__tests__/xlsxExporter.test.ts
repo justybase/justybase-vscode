@@ -6,6 +6,7 @@
 import * as os from 'os';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
+import * as vscode from 'vscode';
 import {
   exportCsvToXlsx,
   exportStructuredToXlsx,
@@ -250,8 +251,16 @@ describe('xlsxExporter', () => {
   });
 
   describe('copyFileToClipboard', () => {
-    it('should return false on non-Windows platform', async () => {
+    it('should copy file path as text on non-Windows platform', async () => {
       (os.platform as jest.Mock).mockReturnValue('linux');
+      const result = await copyFileToClipboard('file.xlsx');
+      expect(result).toBe(true);
+      expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('file.xlsx'));
+    });
+
+    it('should return false when clipboard text write fails on non-Windows', async () => {
+      (os.platform as jest.Mock).mockReturnValue('linux');
+      (vscode.env.clipboard.writeText as jest.Mock).mockRejectedValueOnce(new Error('no clipboard'));
       const result = await copyFileToClipboard('file.xlsx');
       expect(result).toBe(false);
     });

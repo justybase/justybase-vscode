@@ -75,11 +75,28 @@ describe("CompletionScopeResolver", () => {
         (item) =>
           item.kind === CompletionItemKind.Function && item.label === "COUNT",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       result?.some(
         (item) =>
           item.kind === CompletionItemKind.Keyword && item.label === "FROM",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns SQL functions in SELECT clause once a letter is typed", async () => {
+    const result = await resolver.getSemanticScopeCompletions(
+      makeScopeRequest({
+        statementPrefix: "SELECT C",
+        linePrefix: "SELECT C",
+      }),
+    );
+
+    expect(result).toBeDefined();
+    expect(
+      result?.some(
+        (item) =>
+          item.kind === CompletionItemKind.Function && item.label === "COUNT",
       ),
     ).toBe(true);
   });

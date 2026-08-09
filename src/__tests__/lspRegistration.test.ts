@@ -6,7 +6,8 @@ import type { MetadataProvider } from '../providers/providers/metadataProvider'
 
 jest.mock('../utils/logger', () => ({
     getLogger: () => ({
-        error: jest.fn()
+        error: jest.fn(),
+        info: jest.fn()
     })
 }))
 
@@ -18,7 +19,7 @@ jest.mock('../dialects/netezza/metadata/netezzaSchemaContext', () => ({
 const mockExtensionContext = { subscriptions: [] } as unknown as import('vscode').ExtensionContext
 
 function createConnectionManager(
-    databaseKind: 'db2' | 'oracle' | 'postgresql' | 'netezza',
+    databaseKind: 'access' | 'db2' | 'oracle' | 'postgresql' | 'netezza',
     options: { effectiveDatabase?: string; effectiveSchema?: string } = {}
 ): ConnectionManager {
     return {
@@ -241,6 +242,65 @@ describe('handleMetadataRequest cachedTableInfo', () => {
             database: 'db1',
             schema: 'ADMIN',
             columns: [{ name: 'ACCOUNT_ID', type: 'INT4' }],
+        })
+    })
+})
+
+describe('handleMetadataRequest Access metadata mapping', () => {
+    it('keeps columns when a cached table description has an invalid type', async () => {
+        const metadataCache = {
+            getColumns: jest.fn().mockReturnValue(undefined),
+            getColumnsAnySchema: jest.fn().mockReturnValue(undefined),
+            ensureColumnsLoadedForTableKey: jest.fn().mockResolvedValue(undefined),
+            getObjectsWithSchema: jest.fn().mockReturnValue([
+                {
+                    item: { label: 'Tabela1' },
+                    schema: '',
+                    description: { invalid: true },
+                },
+            ]),
+            findObjectWithType: jest.fn().mockReturnValue(undefined),
+        } as unknown as MetadataCache
+        const metadataProvider = {
+            getTableColumnsMetadata: jest.fn().mockResolvedValue([
+                {
+                    ATTNAME: 'ID',
+                    FORMAT_TYPE: 'INTEGER',
+                    documentation: 42,
+                    isPk: false,
+                    isFk: false,
+                },
+            ]),
+        } as unknown as MetadataProvider
+
+        const response = await handleMetadataRequest(
+            {
+                documentUri: 'file:///access.sql',
+                kind: 'tableInfo',
+                database: 'default',
+                table: 'Tabela1',
+            },
+            mockExtensionContext,
+            metadataProvider,
+            metadataCache,
+            createConnectionManager('access', { effectiveDatabase: 'default' }),
+        )
+
+        expect(response).toEqual({
+            exists: true,
+            table: 'Tabela1',
+            database: 'default',
+            schema: undefined,
+            description: undefined,
+            columns: [
+                {
+                    name: 'ID',
+                    type: 'INTEGER',
+                    description: undefined,
+                    isPk: false,
+                    isFk: false,
+                },
+            ],
         })
     })
 })

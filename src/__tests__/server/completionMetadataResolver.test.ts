@@ -67,6 +67,63 @@ describe("CompletionMetadataResolver", () => {
     expect(items[0]?.kind).toBe(CompletionItemKind.Class);
   });
 
+  it("limits unqualified Netezza metadata lookups to the active database", async () => {
+    const metadataProvider = {
+      ...createMetadataProvider(),
+      getDatabases: jest.fn(async () =>
+        Array.from({ length: 25 }, (_, index) => ({ name: `DB_${index}` })),
+      ),
+      getSchemas: jest.fn(async (_documentUri: string, database: string) =>
+        database === "MYDB" ? [{ name: "ADMIN" }] : [{ name: "OTHER" }],
+      ),
+      getTables: jest.fn(async (_documentUri: string, database: string) =>
+        database === "MYDB"
+          ? [{ name: "TABLE_ACTIVE" }]
+          : [{ name: "TABLE_OTHER" }],
+      ),
+      getViews: jest.fn(async (_documentUri: string, database: string) =>
+        database === "MYDB"
+          ? [{ name: "VIEW_ACTIVE" }]
+          : [{ name: "VIEW_OTHER" }],
+      ),
+    };
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      new CompletionWildcardResolver(),
+    );
+
+    const items = await resolver.resolveTablePathCompletions(
+      { kind: "from_join_name", partial: "T" },
+      [],
+      "file:///test.sql",
+      "MYDB",
+      "netezza",
+      true,
+    );
+
+    expect(items.map((item) => item.label)).toEqual(
+      expect.arrayContaining(["TABLE_ACTIVE"]),
+    );
+    expect(items.map((item) => item.label)).not.toEqual(
+      expect.arrayContaining(["TABLE_OTHER", "VIEW_OTHER"]),
+    );
+    expect(metadataProvider.getSchemas).toHaveBeenCalledTimes(1);
+    expect(metadataProvider.getTables).toHaveBeenCalledTimes(1);
+    expect(metadataProvider.getViews).toHaveBeenCalledTimes(1);
+    expect(metadataProvider.getSchemas).toHaveBeenCalledWith(
+      "file:///test.sql",
+      "MYDB",
+    );
+    expect(metadataProvider.getTables).toHaveBeenCalledWith(
+      "file:///test.sql",
+      "MYDB",
+    );
+    expect(metadataProvider.getViews).toHaveBeenCalledWith(
+      "file:///test.sql",
+      "MYDB",
+    );
+  });
+
   it("resolves DB..TABLE without forcing effectiveSchema when schemas are disabled", async () => {
     const metadataProvider = createMetadataProvider();
     const resolver = new CompletionMetadataResolver(

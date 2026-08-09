@@ -180,7 +180,12 @@ const DIALECT_CASES: readonly DialectContractCase[] = [
       user: "",
       password: "",
     },
-    expectedCapabilities: createDatabaseCapabilities(),
+    expectedCapabilities: createDatabaseCapabilities({
+      supportsExplainPlan: true,
+      supportsExplainGraph: true,
+      supportsTuningAdvisor: true,
+      supportsTableMaintenance: true,
+    }),
     expectedConnectionFieldKeys: ["mode", "database"],
     validationTypeName: "INTEGER",
     expectedTypeCanonical: "INTEGER",
@@ -311,6 +316,7 @@ describe("database dialect rollout guards", () => {
     "db2",
     "mssql",
     "mysql",
+    "access",
   ] as const;
 
   beforeEach(() => {
