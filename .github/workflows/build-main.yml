@@ -1,6 +1,21 @@
 name: Build Main Extension
 
 on:
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - "src/**"
+      - "media/**"
+      - "dialects/**"
+      - "esbuild.js"
+      - "package.json"
+      - "package-lock.json"
+  push:
+    branches:
+      - master
+      - main
   workflow_dispatch:
 
 permissions:

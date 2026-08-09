@@ -81,6 +81,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_access:
+        description: "Publish Microsoft Access preview extension."
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: write
 
@@ -231,6 +236,7 @@ jobs:
           MSSQL: ${{ github.event.inputs.publish_mssql }}
           MYSQL: ${{ github.event.inputs.publish_mysql }}
           SNOWFLAKE: ${{ github.event.inputs.publish_snowflake }}
+          ACCESS: ${{ github.event.inputs.publish_access }}
         run: |
           targets=()
           [ "$CORE" = "true" ] && targets+=("core")
@@ -242,6 +248,7 @@ jobs:
           [ "$MSSQL" = "true" ] && targets+=("mssql")
           [ "$MYSQL" = "true" ] && targets+=("mysql")
           [ "$SNOWFLAKE" = "true" ] && targets+=("snowflake")
+          [ "$ACCESS" = "true" ] && targets+=("access")
           IFS=','; echo "targets=${targets[*]}" >> "$GITHUB_OUTPUT"
 
   build-attach-and-publish:

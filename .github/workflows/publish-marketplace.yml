@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       publish_targets:
-        description: "Comma-separated targets: core, all, db2, duckdb, oracle, postgresql, vertica, mssql, mysql, snowflake."
+        description: "Comma-separated targets: core, all, db2, duckdb, oracle, postgresql, vertica, mssql, mysql, snowflake, access."
         required: false
         default: core
         type: string
@@ -65,6 +65,11 @@ on:
         type: boolean
       publish_snowflake:
         description: "Publish Snowflake extension."
+        required: true
+        default: false
+        type: boolean
+      publish_access:
+        description: "Publish Microsoft Access preview extension."
         required: true
         default: false
         type: boolean
@@ -125,6 +130,7 @@ jobs:
           CHECKBOX_MSSQL: ${{ inputs.publish_mssql }}
           CHECKBOX_MYSQL: ${{ inputs.publish_mysql }}
           CHECKBOX_SNOWFLAKE: ${{ inputs.publish_snowflake }}
+          CHECKBOX_ACCESS: ${{ inputs.publish_access }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
@@ -150,6 +156,7 @@ jobs:
               ['mssql', process.env.CHECKBOX_MSSQL],
               ['mysql', process.env.CHECKBOX_MYSQL],
               ['snowflake', process.env.CHECKBOX_SNOWFLAKE],
+              ['access', process.env.CHECKBOX_ACCESS],
             ];
 
             for (const [target, enabled] of checkboxTargets) {
@@ -168,6 +175,7 @@ jobs:
             { id: 'mssql', display_name: 'MS SQL Server' },
             { id: 'mysql', display_name: 'MySQL' },
             { id: 'snowflake', display_name: 'Snowflake' },
+            { id: 'access', display_name: 'Microsoft Access' },
           ];
           const known = new Set(['all', 'core', 'db2', 'duckdb', ...optional.map((item) => item.id)]);
           const unknown = [...requested].filter((target) => !known.has(target));
@@ -219,6 +227,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify Access release snapshot parity
+        run: node scripts/verify-access-release-snapshot.js
 
       - name: Lint
         run: npm run lint
@@ -544,6 +555,13 @@ jobs:
       - name: Install extension dependencies
         working-directory: extensions/${{ matrix.id }}
         run: npm ci
+
+      - name: Setup Java 11 for Access bridge validation
+        if: ${{ matrix.id == 'access' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
 
       - name: Build extension
         run: npm run build:${{ matrix.id }}
