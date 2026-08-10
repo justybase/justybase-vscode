@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: "Release increment type. Choose exact to provide a specific version."
+        description: "Release increment type. Choose exact to provide a specific version, or specific to republish an already-existing tag."
         required: true
         default: patch
         type: choice
@@ -17,8 +17,13 @@ on:
           - premajor
           - prerelease
           - exact
+          - specific
       version:
         description: "Explicit version when release_type=exact, for example 1.2.3"
+        required: false
+        type: string
+      existing_release_tag:
+        description: "Existing tag to republish when release_type=specific, for example v3.16.24"
         required: false
         type: string
       draft:
@@ -107,7 +112,7 @@ jobs:
       - name: Checkout target branch
         uses: actions/checkout@v4
         with:
-          ref: refs/heads/${{ github.event.inputs.target_branch }}
+          ref: ${{ github.event.inputs.release_type == 'specific' && format('refs/tags/{0}', github.event.inputs.existing_release_tag) || format('refs/heads/{0}', github.event.inputs.target_branch) }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -119,14 +124,22 @@ jobs:
             package-lock.json
             extensions/*/package-lock.json
 
-      - name: Bump synchronized versions
+      - name: Resolve synchronized versions
         id: version
         shell: bash
         run: |
           release_type='${{ github.event.inputs.release_type }}'
           explicit_version='${{ github.event.inputs.version }}'
+          existing_release_tag='${{ github.event.inputs.existing_release_tag }}'
 
-          if [ "$release_type" = 'exact' ]; then
+          if [ "$release_type" = 'specific' ]; then
+            if [ -z "$existing_release_tag" ]; then
+              echo 'Input existing_release_tag is required when release_type=specific.' >&2
+              exit 1
+            fi
+
+            node scripts/version-sync.js check --release-tag "$existing_release_tag" --include-optionals
+          elif [ "$release_type" = 'exact' ]; then
             if [ -z "$explicit_version" ]; then
               echo 'Input version is required when release_type=exact.' >&2
               exit 1
@@ -145,6 +158,7 @@ jobs:
         run: node scripts/version-sync.js check --release-tag ${{ steps.version.outputs.tag }} --include-optionals
 
       - name: Ensure release tag does not already exist remotely
+        if: ${{ github.event.inputs.release_type != 'specific' }}
         shell: bash
         run: |
           if git ls-remote --exit-code --tags origin refs/tags/${{ steps.version.outputs.tag }} >/dev/null 2>&1; then
@@ -152,12 +166,23 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure release tag exists remotely
+        if: ${{ github.event.inputs.release_type == 'specific' }}
+        shell: bash
+        run: |
+          if ! git ls-remote --exit-code --tags origin refs/tags/${{ steps.version.outputs.tag }} >/dev/null 2>&1; then
+            echo 'Remote tag does not exist: ${{ steps.version.outputs.tag }}' >&2
+            exit 1
+          fi
+
       - name: Configure Git identity
+        if: ${{ github.event.inputs.release_type != 'specific' }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
       - name: Commit release version files
+        if: ${{ github.event.inputs.release_type != 'specific' }}
         shell: bash
         run: |
           git add package.json package-lock.json
@@ -172,14 +197,17 @@ jobs:
           git commit -m "chore: release ${{ steps.version.outputs.version }} [skip ci]"
 
       - name: Create annotated tag
+        if: ${{ github.event.inputs.release_type != 'specific' }}
         run: git tag -a ${{ steps.version.outputs.tag }} -m ${{ steps.version.outputs.tag }}
 
       - name: Push release commit and tag
+        if: ${{ github.event.inputs.release_type != 'specific' }}
         run: |
           git push origin HEAD:${{ github.event.inputs.target_branch }}
           git push origin ${{ steps.version.outputs.tag }}
 
       - name: Create GitHub Release
+        if: ${{ github.event.inputs.release_type != 'specific' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -204,14 +232,22 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## Release prepared'
-            echo ''
-            echo '- Version: `${{ steps.version.outputs.version }}`'
-            echo '- Tag: `${{ steps.version.outputs.tag }}`'
-            echo '- Branch: `${{ github.event.inputs.target_branch }}`'
-            echo '- Draft release: `${{ github.event.inputs.draft }}`'
-            echo '- Pre-release: `${{ github.event.inputs.prerelease }}`'
-            echo ''
+            if [ '${{ github.event.inputs.release_type }}' = 'specific' ]; then
+              echo '## Republishing existing tag'
+              echo ''
+              echo '- Tag: `${{ steps.version.outputs.tag }}` (already exists, no version bump)'
+              echo '- Rebuild and attach selected VSIX files; Marketplace publish only for newly selected targets.'
+              echo ''
+            else
+              echo '## Release prepared'
+              echo ''
+              echo '- Version: `${{ steps.version.outputs.version }}`'
+              echo '- Tag: `${{ steps.version.outputs.tag }}`'
+              echo '- Branch: `${{ github.event.inputs.target_branch }}`'
+              echo '- Draft release: `${{ github.event.inputs.draft }}`'
+              echo '- Pre-release: `${{ github.event.inputs.prerelease }}`'
+              echo ''
+            fi
             echo 'Selected VSIX files are built and attached to this GitHub Release in the next job.'
             echo 'If draft=false, they are then published to Marketplace.'
             echo 'If draft=true, Marketplace publishing is skipped.'
