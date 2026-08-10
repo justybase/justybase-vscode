@@ -765,10 +765,30 @@ jobs:
         shell: bash
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: >
-          vsce publish
-          --packagePath artifacts/justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
-          -p "$VSCE_PAT"
+        run: |
+          package_path="artifacts/justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix"
+
+          publish_with_retry() {
+            local label="$1"
+            local attempt=1
+            while true; do
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+                echo "Published ${label}."
+                return 0
+              fi
+
+              if [ "$attempt" -ge 2 ]; then
+                echo "Publishing ${label} failed after ${attempt} attempts." >&2
+                return 1
+              fi
+
+              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              attempt=$((attempt + 1))
+              sleep 15
+            done
+          }
+
+          publish_with_retry "main extension"
 
       - name: Publish DB2 extensions
         if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
@@ -776,10 +796,30 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
+          publish_with_retry() {
+            local label="$1"
+            local package_path="$2"
+            local attempt=1
+            while true; do
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+                echo "Published ${label}."
+                return 0
+              fi
+
+              if [ "$attempt" -ge 2 ]; then
+                echo "Publishing ${label} failed after ${attempt} attempts." >&2
+                return 1
+              fi
+
+              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              attempt=$((attempt + 1))
+              sleep 15
+            done
+          }
+
           for target in win32-x64 linux-x64 darwin-arm64; do
-            vsce publish \
-              --packagePath "artifacts/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
-              -p "$VSCE_PAT"
+            publish_with_retry "DB2 (${target})" \
+              "artifacts/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix"
           done
 
       - name: Publish DuckDB extensions
@@ -788,10 +828,30 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
+          publish_with_retry() {
+            local label="$1"
+            local package_path="$2"
+            local attempt=1
+            while true; do
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+                echo "Published ${label}."
+                return 0
+              fi
+
+              if [ "$attempt" -ge 2 ]; then
+                echo "Publishing ${label} failed after ${attempt} attempts." >&2
+                return 1
+              fi
+
+              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              attempt=$((attempt + 1))
+              sleep 15
+            done
+          }
+
           for target in win32-x64 linux-x64 darwin-arm64; do
-            vsce publish \
-              --packagePath "artifacts/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix" \
-              -p "$VSCE_PAT"
+            publish_with_retry "DuckDB (${target})" \
+              "artifacts/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix"
           done
 
       - name: Publish optional extensions
@@ -802,6 +862,27 @@ jobs:
           RELEASE_VERSION: ${{ needs.validate-release.outputs.release_version }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
+          publish_with_retry() {
+            local label="$1"
+            local package_path="$2"
+            local attempt=1
+            while true; do
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+                echo "Published ${label}."
+                return 0
+              fi
+
+              if [ "$attempt" -ge 2 ]; then
+                echo "Publishing ${label} failed after ${attempt} attempts." >&2
+                return 1
+              fi
+
+              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              attempt=$((attempt + 1))
+              sleep 15
+            done
+          }
+
           IFS=',' read -ra targets <<< "$OPTIONAL_TARGETS"
           for target in "${targets[@]}"; do
             package_path="artifacts/justybaselite-${target}-${RELEASE_VERSION}.vsix"
@@ -809,5 +890,5 @@ jobs:
               echo "Missing package for ${target}: $package_path" >&2
               exit 1
             fi
-            vsce publish --packagePath "$package_path" -p "$VSCE_PAT"
+            publish_with_retry "${target} extension" "$package_path"
           done
