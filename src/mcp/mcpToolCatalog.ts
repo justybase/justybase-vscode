@@ -32,9 +32,34 @@ export const MCP_TOOL_CATALOG: readonly McpToolCatalogEntry[] = [
         description: 'Returns DATABASE|SCHEMA|TABLE_NAME|COLUMN_NAME|DATA_TYPE|NOT_NULL for one or more tables.'
     },
     {
+        name: 'get_table_stats',
+        title: 'Get table statistics',
+        description: 'Returns catalog-only row, skew, distribution and organization statistics for a table.'
+    },
+    {
+        name: 'get_comments',
+        title: 'Get table comments',
+        description: 'Returns table and optional column comments from Netezza catalog metadata.'
+    },
+    {
+        name: 'get_dependencies',
+        title: 'Get object dependencies',
+        description: 'Returns foreign-key and view/procedure source references for a catalog object.'
+    },
+    {
+        name: 'get_external_tables',
+        title: 'List external tables',
+        description: 'Lists external tables and their data-object metadata without reading external data.'
+    },
+    {
+        name: 'get_table_constraints',
+        title: 'Get table constraints',
+        description: 'Returns PRIMARY KEY, FOREIGN KEY and UNIQUE metadata for a table.'
+    },
+    {
         name: 'get_procedures',
         title: 'List stored procedures',
-        description: 'Lists user stored procedures (non-builtin) of a database, optionally filtered by schema.'
+        description: 'Lists stored procedures visible in a database, optionally filtered by schema.'
     },
     {
         name: 'get_views',
@@ -55,6 +80,11 @@ export const MCP_TOOL_CATALOG: readonly McpToolCatalogEntry[] = [
         name: 'explain_sql',
         title: 'Explain SQL plan',
         description: 'Runs EXPLAIN for a single SELECT or WITH ... SELECT statement (read-only).'
+    },
+    {
+        name: 'analyze_query_plan',
+        title: 'Analyze query plan',
+        description: 'Runs a read-only EXPLAIN and returns structural nodes, hotspots, risk and recommendations.'
     },
     {
         name: 'validate_sql',
