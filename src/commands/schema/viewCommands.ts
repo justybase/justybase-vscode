@@ -12,7 +12,17 @@ import { requireConnection, executeWithProgress } from './helpers';
  * Register view/visualization commands
  */
 export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.Disposable[] {
-    const { context, connectionManager, metadataCache } = deps;
+    const { context, connectionManager, metadataCache, schemaTreeView } = deps;
+
+    const resolveSessionMonitorConnectionName = (): string | undefined => {
+        const selectedSchemaConnection = schemaTreeView.selection?.[0]?.connectionName;
+        if (selectedSchemaConnection) {
+            return selectedSchemaConnection;
+        }
+
+        const activeDocumentUri = vscode.window.activeTextEditor?.document.uri.toString();
+        return connectionManager.getConnectionForExecution(activeDocumentUri);
+    };
 
     return [
         // Show ERD
@@ -178,18 +188,26 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
         // Show Session Monitor
         vscode.commands.registerCommand('netezza.showSessionMonitor', async () => {
             try {
-                if (!await requireConnection(connectionManager)) {
+                const connectionName = resolveSessionMonitorConnectionName();
+                if (!await requireConnection(connectionManager, connectionName)) {
                     vscode.window.showErrorMessage('Please connect to a database first.');
                     return;
                 }
 
-                if (!connectionManager.supportsCapability('supportsSessionMonitor')) {
-                    vscode.window.showErrorMessage('Session monitor is not supported for the active database dialect.');
+                if (!connectionName || !connectionManager.supportsCapability('supportsSessionMonitor', undefined, connectionName)) {
+                    const activeConnectionName = connectionName || 'none';
+                    const activeDatabaseKind = connectionName
+                        ? connectionManager.getConnectionDatabaseKind(connectionName)
+                        : undefined;
+                    const activeDialect = activeDatabaseKind || 'unknown';
+                    vscode.window.showErrorMessage(
+                        `Session monitor is not supported for active connection '${activeConnectionName}' (${activeDialect}). Select a Netezza connection with "JustyBase: Select Active Connection" first.`,
+                    );
                     return;
                 }
 
                 const { SessionMonitorView } = await import('../../views/sessionMonitorView');
-                SessionMonitorView.createOrShow(context.extensionUri, context, connectionManager);
+                SessionMonitorView.createOrShow(context.extensionUri, context, connectionManager, connectionName);
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
                 vscode.window.showErrorMessage(`Error opening Session Monitor: ${message}`);
