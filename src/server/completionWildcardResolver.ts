@@ -712,6 +712,7 @@ export class CompletionWildcardResolver {
         lexResult.tokens,
         fullSql,
         definitionName,
+        databaseKind,
       )
     );
   }
@@ -743,6 +744,7 @@ export class CompletionWildcardResolver {
         lexResult.tokens,
         fullSql,
         definitionName,
+        databaseKind,
       )
     );
   }
@@ -829,6 +831,7 @@ export class CompletionWildcardResolver {
     tokens: IToken[],
     _fullSql: string,
     definitionName: string,
+    databaseKind?: DatabaseKind,
   ):
     | {
         hasExplicitColumnList: boolean;
@@ -859,7 +862,7 @@ export class CompletionWildcardResolver {
         continue;
       }
 
-      const tableRef = parseQualifiedTableNameFromTokens(tokens, scanIndex + 1);
+      const tableRef = parseQualifiedTableNameFromTokens(tokens, scanIndex + 1, databaseKind);
       if (!tableRef) {
         continue;
       }
@@ -941,6 +944,7 @@ export class CompletionWildcardResolver {
     tokens: IToken[],
     fullSql: string,
     definitionName: string,
+    databaseKind?: DatabaseKind,
   ): string | undefined {
     const targetName = definitionName.toUpperCase();
 
@@ -966,7 +970,7 @@ export class CompletionWildcardResolver {
         continue;
       }
 
-      const tableRef = parseQualifiedTableNameFromTokens(tokens, scanIndex + 1);
+      const tableRef = parseQualifiedTableNameFromTokens(tokens, scanIndex + 1, databaseKind);
       if (!tableRef) {
         continue;
       }

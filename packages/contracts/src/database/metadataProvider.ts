@@ -30,6 +30,8 @@ export interface DatabaseMetadataProvider {
   buildListSchemasQuery(database: string): string;
   buildListTablesQuery(database: string, schema?: string): string;
   buildListViewsQuery(database: string, schema?: string): string;
+  buildListSourceObjectsQuery?(database: string, schema?: string): string;
+  buildSynonymTargetQuery?(database: string, synonymName: string, schema?: string): string;
   buildListProceduresQuery(database: string, schema?: string): string;
   buildObjectTypeQuery(database: string, objectType: string): string;
   buildTypeGroupsQuery(database: string): string;

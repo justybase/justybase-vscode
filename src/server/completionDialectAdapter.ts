@@ -1,6 +1,10 @@
 import type { CstNode, IToken } from "chevrotain";
 import type { DatabaseKind } from "../contracts/database";
-import { supportsDoubleDotPath, usesDatabaseObjectTwoPartName } from "./completionPathUtils";
+import {
+  supportsDoubleDotPath,
+  supportsThreePartPath,
+  usesDatabaseObjectTwoPartName,
+} from "./completionPathUtils";
 import { getChildNodes, getFirstTokenFromCst, getTokens, isIdentifierToken } from "./completionCstUtils";
 import type { FromJoinContext, QualifiedTableName } from "./completionTypes";
 
@@ -115,6 +119,7 @@ export function parseTablePathFragment(
 export function parseQualifiedTableNameFromTokens(
   tokens: IToken[],
   startIndex: number,
+  databaseKind?: DatabaseKind,
 ): { tableRef: QualifiedTableName; nextIndex: number } | undefined {
   if (!isIdentifierToken(tokens[startIndex])) {
     return undefined;
@@ -156,6 +161,10 @@ export function parseQualifiedTableNameFromTokens(
       tableRef: { schema: names[0], table: names[1] },
       nextIndex: index,
     };
+  }
+
+  if (!supportsThreePartPath(databaseKind)) {
+    return undefined;
   }
 
   return {
@@ -201,6 +210,10 @@ export function parseQualifiedTableName(
       return { database: names[0], table: names[1] };
     }
     return { schema: names[0], table: names[1] };
+  }
+
+  if (!supportsThreePartPath(databaseKind)) {
+    return undefined;
   }
 
   return {

@@ -100,6 +100,17 @@ export class MetadataBridge {
     );
   }
 
+  async getSourceObjects(
+    documentUri: string,
+    database: string,
+    schema?: string,
+  ): Promise<MetadataObjectItem[]> {
+    const cacheKey = `SRC|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
+    return this.getCachedOrFetchList(cacheKey, () =>
+      this.request({ documentUri, kind: "sourceObjects", database, schema }),
+    );
+  }
+
   async getProcedures(
     documentUri: string,
     database: string,
@@ -116,7 +127,39 @@ export class MetadataBridge {
     database: string,
     table: string,
     schema?: string,
+    options?: { allowPublicSynonym?: boolean },
   ): Promise<MetadataColumnItem[]> {
+    if (options?.allowPublicSynonym) {
+      const connectionName = await this.resolveConnectionName(documentUri);
+      const cacheKey = connectionName
+        ? this.buildTableCacheKey(connectionName, database, schema, table)
+        : undefined;
+      const cached = cacheKey ? this.tableInfoCache.get(cacheKey) : undefined;
+      if (cached && cached.columns.length > 0) {
+        return cached.columns;
+      }
+
+      const response = await this.request({
+        documentUri,
+        kind: "columns",
+        database,
+        schema,
+        table,
+        allowPublicSynonym: true,
+      });
+      const columns = this.asColumnList(response);
+      if (cacheKey && columns.length > 0) {
+        this.cacheTableInfo(documentUri, cacheKey, {
+          exists: true,
+          table,
+          database,
+          schema,
+          columns,
+        });
+      }
+      return columns;
+    }
+
     const tableInfo = await this.getCachedTableInfo(
       documentUri,
       database,

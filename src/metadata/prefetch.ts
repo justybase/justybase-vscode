@@ -136,7 +136,7 @@ interface RawTypeGroupRow {
 }
 
 function mapPrefetchObjectRow(row: RawObjectRow): TableMetadata {
-    const normalizedObjectType = row.OBJTYPE?.toUpperCase() || 'TABLE';
+    const normalizedObjectType = row.OBJTYPE?.trim().toUpperCase() || 'TABLE';
     const isViewLike =
         normalizedObjectType === 'VIEW'
         || normalizedObjectType === 'MATERIALIZED VIEW'

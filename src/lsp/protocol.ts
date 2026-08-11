@@ -28,6 +28,7 @@ export type MetadataRequestKind =
   | "schemas"
   | "tables"
   | "views"
+  | "sourceObjects"
   | "procedures"
   | "columns"
   | "cachedTableInfo"
@@ -42,6 +43,7 @@ export interface MetadataRequestParams {
   database?: string;
   schema?: string;
   table?: string;
+  allowPublicSynonym?: boolean;
   /** Batch-warm column metadata for these databases (one query per DB). */
   databases?: string[];
 }
@@ -67,7 +69,12 @@ export interface MetadataObjectItem {
   name: string;
   database?: string;
   schema?: string;
-  objectType?: "table" | "view" | "procedure";
+  objectType?:
+    | "table"
+    | "view"
+    | "materialized-view"
+    | "synonym"
+    | "procedure";
   detail?: string;
   description?: string;
   /** Parsed from procedure signature when objectType is procedure. */

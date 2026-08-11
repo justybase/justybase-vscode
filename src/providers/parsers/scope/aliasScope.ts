@@ -1,5 +1,6 @@
 import { CstNode, type IToken } from "chevrotain";
 import type { DatabaseKind } from "../../../contracts/database";
+import { getDatabaseDialectTraits } from "../../../core/dialectTraits";
 import { resolveSqlParsingRuntime } from "../../../sqlParser/parsingRuntime";
 import { formatQualifiedObjectName } from "../../../utils/identifierUtils";
 import type { AliasInfo, LocalDefinition } from "../../types";
@@ -622,6 +623,10 @@ export class ParserSqlContextCollector {
       return { schema: names[0], table: names[1] };
     }
 
+    if (!getDatabaseDialectTraits(this._databaseKind).qualification.supportsThreePartName) {
+      return undefined;
+    }
+
     return { database: names[0], schema: names[1], table: names[2] };
   }
 
@@ -823,7 +828,7 @@ export function parseAliasBindingsFromTokens(
     }
 
     if (tokenName === "From" || tokenName === "Join") {
-      const parsed = parseTableReferenceAndAlias(tokens, index + 1);
+      const parsed = parseTableReferenceAndAlias(tokens, index + 1, databaseKind);
       if (parsed) {
         const resolvedRef = resolveRef(parsed.tableRef);
         registerAliasBinding(
@@ -836,7 +841,7 @@ export function parseAliasBindingsFromTokens(
         index = parsed.nextIndex - 1;
       }
     } else if (tokenName === "Update") {
-      const parsed = parseTableReferenceAndAlias(tokens, index + 1);
+      const parsed = parseTableReferenceAndAlias(tokens, index + 1, databaseKind);
       if (parsed) {
         registerAliasBinding(
           aliasCandidates,
@@ -852,7 +857,7 @@ export function parseAliasBindingsFromTokens(
       if (tokens[startIndex]?.tokenType.name === "From") {
         startIndex += 1;
       }
-      const parsed = parseTableReferenceAndAlias(tokens, startIndex);
+      const parsed = parseTableReferenceAndAlias(tokens, startIndex, databaseKind);
       if (parsed) {
         registerAliasBinding(
           aliasCandidates,
@@ -901,6 +906,7 @@ export function parseAliasBindingsFromTokens(
               tokens,
               scanIndex,
               cteBodyEnd.nextIndex,
+              databaseKind,
             );
             if (inferredTableRef) {
               cteBindings.set(cteName.toUpperCase(), inferredTableRef);
@@ -1023,6 +1029,7 @@ export function consumeBalancedParentheses(
 function parseTableReferenceAndAlias(
   tokens: IToken[],
   startIndex: number,
+  databaseKind?: DatabaseKind,
 ):
   | { tableRef: QualifiedTableName; alias?: string; nextIndex: number }
   | undefined {
@@ -1054,6 +1061,7 @@ function parseTableReferenceAndAlias(
       tokens,
       startIndex,
       subqueryEnd.nextIndex,
+      databaseKind,
     );
 
     return {
@@ -1064,8 +1072,8 @@ function parseTableReferenceAndAlias(
   }
 
   const tableRefResult =
-    parseTableWithFinalReferenceFromTokens(tokens, startIndex) ??
-    parseQualifiedTableNameFromTokens(tokens, startIndex);
+    parseTableWithFinalReferenceFromTokens(tokens, startIndex, databaseKind) ??
+    parseQualifiedTableNameFromTokens(tokens, startIndex, databaseKind);
   if (!tableRefResult) {
     return undefined;
   }
@@ -1091,6 +1099,7 @@ function parseTableReferenceAndAlias(
 function parseTableWithFinalReferenceFromTokens(
   tokens: IToken[],
   startIndex: number,
+  databaseKind?: DatabaseKind,
 ): { tableRef: QualifiedTableName; nextIndex: number } | undefined {
   if (
     tokens[startIndex]?.tokenType.name !== "Table" ||
@@ -1104,6 +1113,7 @@ function parseTableWithFinalReferenceFromTokens(
   const functionName = parseQualifiedTableNameFromTokens(
     tokens,
     startIndex + 4,
+    databaseKind,
   );
   if (
     !functionName ||
@@ -1133,6 +1143,7 @@ function inferSimpleStarSubqueryTableRef(
   tokens: IToken[],
   subqueryStartIndex: number,
   subqueryEndIndex: number,
+  databaseKind?: DatabaseKind,
 ): QualifiedTableName | undefined {
   let depth = 0;
   let selectIndex: number | undefined;
@@ -1192,6 +1203,7 @@ function inferSimpleStarSubqueryTableRef(
   const tableRefResult = parseQualifiedTableNameFromTokens(
     tokens,
     fromIndex + 1,
+    databaseKind,
   );
   if (!tableRefResult) {
     return undefined;
@@ -1292,6 +1304,7 @@ function hasSingleTableSource(
 function parseQualifiedTableNameFromTokens(
   tokens: IToken[],
   startIndex: number,
+  databaseKind?: DatabaseKind,
 ): { tableRef: QualifiedTableName; nextIndex: number } | undefined {
   if (!isIdentifierToken(tokens[startIndex])) {
     return undefined;
@@ -1333,6 +1346,10 @@ function parseQualifiedTableNameFromTokens(
       tableRef: { schema: names[0], table: names[1] },
       nextIndex: index,
     };
+  }
+
+  if (!getDatabaseDialectTraits(databaseKind).qualification.supportsThreePartName) {
+    return undefined;
   }
 
   return {

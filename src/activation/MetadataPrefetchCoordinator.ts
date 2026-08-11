@@ -193,7 +193,8 @@ export class MetadataPrefetchCoordinator {
         if (!connectionName) {
             return;
         }
-        if (this.services.connectionManager.getConnectionDatabaseKind(connectionName) !== 'netezza') {
+        const databaseKind = this.services.connectionManager.getConnectionDatabaseKind(connectionName);
+        if (databaseKind !== 'netezza' && databaseKind !== 'oracle') {
             return;
         }
 

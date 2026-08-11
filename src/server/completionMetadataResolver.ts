@@ -10,6 +10,7 @@ import {
   isNetezzaDoubleDotSource,
   shouldTreatSingleDotPathAsSchema,
   supportsDoubleDotPath,
+  supportsThreePartPath,
   usesDatabaseObjectTwoPartName,
   type MetadataLookupOptions,
 } from "./completionPathUtils";
@@ -25,11 +26,16 @@ import {
   procedureMatchesCallName,
 } from "../metadata/procedureSignatureUtils";
 import { dedupeCompletionItems, matchesPrefix } from "./completionRanker";
-import { filterMetadataItems } from "./completionRenderer";
+import {
+  filterMetadataItems,
+  filterOracleSchemaItems,
+  filterOracleSourceItems,
+} from "./completionRenderer";
 import type {
   CompletionMetadataProvider,
   FromJoinContext,
 } from "./completionTypes";
+import type { MetadataObjectItem } from "../lsp/protocol";
 import { CompletionWildcardResolver } from "./completionWildcardResolver";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 
@@ -50,7 +56,12 @@ export class CompletionMetadataResolver {
     effectiveDb: string | undefined,
     databaseKind?: DatabaseKind,
     includeViews = false,
+    effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
+    if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
+      return [];
+    }
+
     if (context.kind === "db_dot") {
       if (usesDatabaseObjectTwoPartName(databaseKind)) {
         return this.getTableLikeCompletions(
@@ -96,6 +107,27 @@ export class CompletionMetadataResolver {
           context.dbName,
           context.partial,
           includeViews,
+          databaseKind,
+        );
+      }
+      if (databaseKind === "oracle") {
+        if (!effectiveDb) {
+          return [];
+        }
+        if (includeViews) {
+          return this.getOracleSourceCompletions(
+            documentUri,
+            effectiveDb,
+            context.dbName,
+            context.partial,
+          );
+        }
+        return this.getTableLikeCompletions(
+          documentUri,
+          effectiveDb,
+          context.dbName,
+          context.partial,
+          false,
           databaseKind,
         );
       }
@@ -149,6 +181,21 @@ export class CompletionMetadataResolver {
     const result: CompletionItem[] = [
       ...localItems.filter((item) => matchesPrefix(item.label, partial)),
     ];
+
+    if (databaseKind === "oracle") {
+      if (!effectiveDb) {
+        return result;
+      }
+      return this.resolveOracleUnqualifiedCompletions(
+        result,
+        documentUri,
+        effectiveDb,
+        effectiveSchema,
+        partial,
+        includeViews,
+      );
+    }
+
     const databases = await this.metadataProvider.getDatabases(documentUri);
     const databaseItems = filterMetadataItems(
       databases,
@@ -236,6 +283,10 @@ export class CompletionMetadataResolver {
     effectiveDb: string | undefined,
     databaseKind?: DatabaseKind,
   ): Promise<CompletionItem[]> {
+    if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
+      return [];
+    }
+
     if (context.kind === "db_dot") {
       if (usesDatabaseObjectTwoPartName(databaseKind)) {
         const views = await this.metadataProvider.getViews(
@@ -328,6 +379,16 @@ export class CompletionMetadataResolver {
       );
     }
 
+    if (databaseKind === "oracle") {
+      const result = effectiveDb
+        ? filterOracleSchemaItems(
+            await this.metadataProvider.getSchemas(documentUri, effectiveDb),
+            context.partial,
+          )
+        : [];
+      return dedupeCompletionItems(result);
+    }
+
     const databases = await this.metadataProvider.getDatabases(documentUri);
     const result = filterMetadataItems(
       databases,
@@ -365,6 +426,10 @@ export class CompletionMetadataResolver {
     effectiveDb: string | undefined,
     databaseKind?: DatabaseKind,
   ): Promise<CompletionItem[]> {
+    if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
+      return [];
+    }
+
     if (context.kind === "db_dot") {
       if (usesDatabaseObjectTwoPartName(databaseKind)) {
         const procedures = await this.metadataProvider.getProcedures(
@@ -576,6 +641,40 @@ export class CompletionMetadataResolver {
     ];
   }
 
+  private async resolveOracleUnqualifiedCompletions(
+    result: CompletionItem[],
+    documentUri: string,
+    effectiveDb: string,
+    effectiveSchema: string | undefined,
+    partial: string,
+    includeViews: boolean,
+  ): Promise<CompletionItem[]> {
+    const schemas = await this.metadataProvider.getSchemas(documentUri, effectiveDb);
+    result.push(
+      ...filterOracleSchemaItems(schemas, partial, effectiveSchema),
+    );
+
+    // An unqualified Oracle relation resolves in CURRENT_SCHEMA (then through
+    // synonyms). If the session schema is unavailable, do not expose objects
+    // from every accessible owner as bare names.
+    if (effectiveSchema) {
+      result.push(
+        ...(await this.getOracleSourceCompletions(
+          documentUri,
+          effectiveDb,
+          effectiveSchema,
+          partial,
+          includeViews,
+          includeViews,
+        )),
+      );
+    }
+
+    return dedupeCompletionItems(result).sort((left, right) =>
+      (left.sortText ?? left.label).localeCompare(right.sortText ?? right.label),
+    );
+  }
+
   public async getMetadataColumnsForSource(
     documentUri: string,
     source: { db?: string; schema?: string; table: string },
@@ -625,6 +724,8 @@ export class CompletionMetadataResolver {
 
       const omitSchemaForFlatCatalog =
         databaseKind === "access" && lookupTarget.schema === undefined;
+      const allowPublicSynonym =
+        databaseKind === "oracle" && source.schema === undefined;
 
       const columns =
         omitSchemaArgument ||
@@ -636,6 +737,14 @@ export class CompletionMetadataResolver {
               lookupTarget.database,
               lookupTarget.table,
             )
+          : allowPublicSynonym
+            ? await this.metadataProvider.getColumns(
+                documentUri,
+                lookupTarget.database,
+                lookupTarget.table,
+                lookupTarget.schema,
+                { allowPublicSynonym: true },
+              )
           : await this.metadataProvider.getColumns(
               documentUri,
               lookupTarget.database,
@@ -836,6 +945,59 @@ export class CompletionMetadataResolver {
       ...result,
       ...viewItems,
     ]);
+  }
+
+  private async getOracleSourceCompletions(
+    documentUri: string,
+    database: string,
+    schema: string,
+    partial: string,
+    includeViews = true,
+    includePublicSynonyms = false,
+  ): Promise<CompletionItem[]> {
+    const sourceObjects = includeViews
+      ? this.metadataProvider.getSourceObjects
+        ? await this.metadataProvider.getSourceObjects(documentUri, database, schema)
+        : [
+            ...(await this.metadataProvider.getTables(documentUri, database, schema)),
+            ...(await this.metadataProvider.getViews(documentUri, database, schema)),
+          ]
+      : await this.metadataProvider.getTables(documentUri, database, schema);
+    if (includeViews && includePublicSynonyms && schema.toUpperCase() !== "PUBLIC") {
+      const publicObjects = this.metadataProvider.getSourceObjects
+        ? await this.metadataProvider.getSourceObjects(documentUri, database, "PUBLIC")
+        : [];
+      sourceObjects.push(
+        ...publicObjects.filter((item) =>
+          item.objectType === "synonym" && item.schema?.toUpperCase() === "PUBLIC",
+        ),
+      );
+    }
+
+    const byName = new Map<string, MetadataObjectItem>();
+    const priority = (item: MetadataObjectItem): number => {
+      switch (item.objectType) {
+        case "table":
+          return 0;
+        case "view":
+        case "materialized-view":
+          return 1;
+        case "synonym":
+          return item.schema?.toUpperCase() === "PUBLIC" ? 3 : 2;
+        default:
+          return 4;
+      }
+    };
+
+    for (const item of sourceObjects) {
+      const key = item.name.toUpperCase();
+      const existing = byName.get(key);
+      if (!existing || priority(item) < priority(existing)) {
+        byName.set(key, item);
+      }
+    }
+
+    return filterOracleSourceItems(Array.from(byName.values()), partial);
   }
 
   private async matchesKnownDatabase(

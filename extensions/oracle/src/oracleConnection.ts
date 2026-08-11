@@ -22,6 +22,7 @@ import {
 
 interface OracleDbTypeDescriptor {
     name?: string;
+    columnTypeName?: string;
 }
 
 interface OracleColumnMetadata {
@@ -29,6 +30,10 @@ interface OracleColumnMetadata {
     dbTypeName?: string;
     dbType?: OracleDbTypeDescriptor | string | number;
     fetchType?: OracleDbTypeDescriptor | string | number;
+    precision?: number;
+    scale?: number;
+    byteSize?: number;
+    charSize?: number;
 }
 
 interface OracleResultSet {
@@ -186,27 +191,91 @@ function normalizeExecutableSql(sql: string): string {
     return shouldPreserveTrailingSemicolon(trimmed) ? trimmed : trimmed.replace(/;+\s*$/, '');
 }
 
-function buildColumnTypeName(column: OracleColumnMetadata | undefined): string {
+function getOracleTypeCandidate(
+    value: OracleDbTypeDescriptor | string | number | undefined,
+): string | undefined {
+    if (typeof value === 'string' && value.trim().length > 0) {
+        return value;
+    }
+    if (value && typeof value === 'object') {
+        if (typeof value.columnTypeName === 'string' && value.columnTypeName.trim().length > 0) {
+            return value.columnTypeName;
+        }
+        if (typeof value.name === 'string' && value.name.trim().length > 0) {
+            return value.name;
+        }
+    }
+    return undefined;
+}
+
+function getPositiveMetadataNumber(...values: Array<number | undefined>): number | undefined {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+            return Math.floor(value);
+        }
+    }
+    return undefined;
+}
+
+function getOracleBaseTypeName(column: OracleColumnMetadata): string {
+    const candidate = getOracleTypeCandidate(column.dbTypeName)
+        ?? getOracleTypeCandidate(column.dbType)
+        ?? getOracleTypeCandidate(column.fetchType)
+        ?? '';
+    return candidate.replace(/^DB_TYPE_/i, '').trim().toUpperCase();
+}
+
+export function buildColumnTypeName(column: OracleColumnMetadata | undefined): string {
     if (!column) {
         return '';
     }
 
-    if (typeof column.dbTypeName === 'string' && column.dbTypeName.trim().length > 0) {
-        return column.dbTypeName;
+    const baseType = getOracleBaseTypeName(column);
+    if (!baseType) {
+        return '';
     }
 
-    const dbType = column.dbType;
-    if (dbType && typeof dbType === 'object' && 'name' in dbType && typeof dbType.name === 'string') {
-        return dbType.name.replace(/^DB_TYPE_/, '');
-    }
-    if (typeof dbType === 'string' && dbType.length > 0) {
-        return dbType.replace(/^DB_TYPE_/, '');
-    }
-    if (typeof column.fetchType === 'object' && column.fetchType && 'name' in column.fetchType && typeof column.fetchType.name === 'string') {
-        return column.fetchType.name.replace(/^DB_TYPE_/, '');
+    if (baseType === 'NUMBER' || baseType === 'NUMERIC' || baseType === 'DECIMAL') {
+        const precision = getPositiveMetadataNumber(column.precision);
+        const scale = typeof column.scale === 'number' && Number.isFinite(column.scale) && column.scale >= 0
+            ? Math.floor(column.scale)
+            : undefined;
+        if (precision !== undefined && scale !== undefined) {
+            return `${baseType}(${precision},${scale})`;
+        }
+        if (precision !== undefined) {
+            return `${baseType}(${precision})`;
+        }
+        return baseType;
     }
 
-    return '';
+    const characterOrBinaryType = new Set([
+        'CHAR',
+        'VARCHAR',
+        'VARCHAR2',
+        'NCHAR',
+        'NVARCHAR',
+        'NVARCHAR2',
+        'RAW',
+    ]);
+    if (characterOrBinaryType.has(baseType)) {
+        const length = getPositiveMetadataNumber(column.charSize, column.byteSize);
+        return length === undefined ? baseType : `${baseType}(${length})`;
+    }
+
+    if (baseType === 'TIMESTAMP' || baseType === 'TIMESTAMP WITH TIME ZONE' || baseType === 'TIMESTAMP WITH LOCAL TIME ZONE') {
+        const precision = getPositiveMetadataNumber(column.precision);
+        if (precision === undefined) {
+            return baseType;
+        }
+        if (baseType === 'TIMESTAMP') {
+            return `${baseType}(${precision})`;
+        }
+        const suffix = baseType.slice('TIMESTAMP'.length);
+        return `TIMESTAMP(${precision})${suffix}`;
+    }
+
+    return baseType;
 }
 
 function buildColumnDefinitions(metaData: readonly OracleColumnMetadata[] | undefined): OracleColumnDefinition[] {

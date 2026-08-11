@@ -12,6 +12,8 @@ import { SchemaCommandsDependencies } from './types';
 import type { DatabaseKind } from '../../contracts/database';
 import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
 import { stripIdentifierQuoting } from '../../utils/identifierUtils';
+import { isTableCacheObjectType } from '../../metadata/cache/schemaTreeDataSource';
+import { toTableMetadata, upsertTableObject } from '../../metadata/cache/tableObjectMutation';
 
 interface RevealData {
     name: string;
@@ -29,6 +31,211 @@ interface GenericRevealRow {
     DATABASE?: string;
     SCHEMA?: string;
     OBJID?: number;
+}
+
+interface NetezzaObjectRow extends Record<string, unknown> {
+    OBJNAME: string;
+    OBJTYPE: string;
+    SCHEMA: string;
+    OBJID: number | string;
+}
+
+function escapeSqlLiteral(value: string): string {
+    return value.replace(/'/g, "''").trim();
+}
+
+function normalizeObjectId(value: number | string | undefined): number | undefined {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : undefined;
+    }
+
+    const normalized = value?.trim();
+    if (!normalized) {
+        return undefined;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isTreeResolveFailure(error: unknown): boolean {
+    return error instanceof Error && error.message.includes('Cannot resolve tree item');
+}
+
+function refreshNetezzaRevealTree(
+    deps: SchemaCommandsDependencies,
+    logger: ReturnType<typeof resolveLogger>,
+): void {
+    try {
+        deps.schemaProvider.refresh();
+    } catch (error) {
+        logger?.warn('[CQ01-REVEAL-008] Failed to refresh schema tree before reveal', error);
+    }
+}
+
+function warmNetezzaRevealTarget(
+    deps: SchemaCommandsDependencies,
+    connectionName: string,
+    database: string,
+    object: NetezzaObjectRow,
+    logger: ReturnType<typeof resolveLogger>,
+): void {
+    if (!isTableCacheObjectType(object.OBJTYPE)) {
+        return;
+    }
+
+    const objectId = normalizeObjectId(object.OBJID);
+    if (objectId === undefined) {
+        logger?.warn(
+            `[CQ01-REVEAL-007] Skipping cache warm-up for ${database}.${object.SCHEMA}.${object.OBJNAME}: invalid OBJID`,
+        );
+        return;
+    }
+
+    try {
+        upsertTableObject(
+            deps.metadataCache,
+            connectionName,
+            database,
+            object.SCHEMA || undefined,
+            toTableMetadata({
+                OBJNAME: object.OBJNAME,
+                OBJID: objectId,
+                OBJTYPE: object.OBJTYPE,
+                SCHEMA: object.SCHEMA || undefined,
+            }),
+        );
+        // TreeView.reveal resolves against its currently loaded children. Force
+        // a data refresh after warming the cache so the target becomes resolvable.
+        refreshNetezzaRevealTree(deps, logger);
+    } catch (error) {
+        logger?.warn('[CQ01-REVEAL-007] Failed to warm reveal target into metadata cache', error);
+    }
+}
+
+/**
+ * Locate an object for reveal within a single Netezza database.
+ *
+ * Primary lookup is `_V_OBJECT_DATA` (case/whitespace-insensitive). External
+ * tables are not always listed in `_V_OBJECT_DATA` (verified on dev instances),
+ * so when the caller is looking for an external table (or any object) we fall
+ * back to `_V_EXTERNAL`/`_V_EXTOBJECT` — the same source the schema search uses.
+ */
+async function findNetezzaObjectForReveal(
+    deps: SchemaCommandsDependencies,
+    logger: ReturnType<typeof resolveLogger>,
+    connectionName: string,
+    database: string,
+    searchName: string,
+    searchType: string | undefined,
+    schemaName: string | undefined,
+): Promise<NetezzaObjectRow | undefined> {
+    const db = database.toUpperCase();
+    const escapedName = escapeSqlLiteral(searchName);
+    const escapedSchema = escapeSqlLiteral(schemaName || '');
+    const escapedType = escapeSqlLiteral(searchType || '');
+    const typeFilter = escapedType && escapedType !== 'COLUMN'
+        ? `AND UPPER(TRIM(OBJTYPE)) = UPPER('${escapedType}')`
+        : '';
+    const schemaFilter = escapedSchema
+        ? `AND UPPER(TRIM(SCHEMA)) = UPPER('${escapedSchema}')`
+        : '';
+
+    const objectDataQuery = `
+        SELECT OBJNAME, OBJTYPE, SCHEMA, OBJID
+        FROM ${db}.._V_OBJECT_DATA
+        WHERE UPPER(TRIM(OBJNAME)) = UPPER('${escapedName}')
+        AND UPPER(TRIM(DBNAME)) = '${db}'
+        ${typeFilter}
+        ${schemaFilter}
+        LIMIT 1
+    `;
+
+    try {
+        const objResult = await runQueryRaw(
+            deps.context,
+            objectDataQuery,
+            true,
+            deps.connectionManager,
+            connectionName,
+            undefined, undefined, undefined, 1000000, false
+        );
+        if (objResult?.data) {
+            const objects = queryResultToRows<NetezzaObjectRow>(objResult);
+            if (objects.length > 0) {
+                const obj = objects[0];
+                obj.OBJTYPE = (obj.OBJTYPE || '').trim().toUpperCase();
+                obj.OBJNAME = (obj.OBJNAME || searchName).trim();
+                obj.SCHEMA = (obj.SCHEMA || '').trim();
+
+                if (obj.OBJTYPE === 'PROCEDURE') {
+                    try {
+                        const sigQuery = `SELECT PROCEDURESIGNATURE FROM ${db}.._V_PROCEDURE WHERE OBJID = ${obj.OBJID}`;
+                        const sigResult = await runQueryRaw(
+                            deps.context,
+                            sigQuery,
+                            true,
+                            deps.connectionManager,
+                            connectionName,
+                            undefined, undefined, undefined, 1000000, false
+                        );
+                        if (sigResult?.data && sigResult.data.length > 0) {
+                            const sigObj = queryResultToRows<{ PROCEDURESIGNATURE: string }>(sigResult);
+                            if (sigObj.length > 0 && sigObj[0].PROCEDURESIGNATURE) {
+                                obj.OBJNAME = sigObj[0].PROCEDURESIGNATURE;
+                            }
+                        }
+                    } catch (sigErr) {
+                        logger?.warn('[CQ01-REVEAL-002] Failed to resolve procedure signature', sigErr);
+                    }
+                }
+
+                return obj;
+            }
+        }
+    } catch (e) {
+        logger?.warn(`[CQ01-REVEAL-003] Error searching object in ${database}`, e);
+    }
+
+    if (!escapedType || escapedType === 'EXTERNAL TABLE') {
+        const extSchemaFilter = escapedSchema
+            ? `AND UPPER(TRIM(E1.SCHEMA)) = UPPER('${escapedSchema}')`
+            : '';
+        const extQuery = `
+            SELECT E1.TABLENAME AS OBJNAME, 'EXTERNAL TABLE' AS OBJTYPE, E1.SCHEMA, E1.RELID AS OBJID
+            FROM ${db}.._V_EXTERNAL E1
+            JOIN ${db}.._V_EXTOBJECT E2 ON E1.RELID = E2.OBJID
+            WHERE UPPER(TRIM(E1.TABLENAME)) = UPPER('${escapedName}')
+            AND UPPER(TRIM(E1.DATABASE)) = '${db}'
+            ${extSchemaFilter}
+            LIMIT 1
+        `;
+
+        try {
+            const extResult = await runQueryRaw(
+                deps.context,
+                extQuery,
+                true,
+                deps.connectionManager,
+                connectionName,
+                undefined, undefined, undefined, 1000000, false
+            );
+            if (extResult?.data) {
+                const extObjects = queryResultToRows<NetezzaObjectRow>(extResult);
+                if (extObjects.length > 0) {
+                    const obj = extObjects[0];
+                    obj.OBJTYPE = 'EXTERNAL TABLE';
+                    obj.OBJNAME = (obj.OBJNAME || searchName).trim();
+                    obj.SCHEMA = (obj.SCHEMA || '').trim();
+                    return obj;
+                }
+            }
+        } catch (e) {
+            logger?.warn(`[CQ01-REVEAL-006] Error searching external table in ${database}`, e);
+        }
+    }
+
+    return undefined;
 }
 
 function resolveLogger() {
@@ -121,7 +328,18 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
     const logger = resolveLogger();
     const revealSchemaItem = async (targetItem: SchemaItem): Promise<void> => {
         await focusSchemaExplorer(logger);
-        await schemaTreeView.reveal(targetItem, { select: true, focus: true });
+        try {
+            await schemaTreeView.reveal(targetItem, { select: true, focus: true });
+        } catch (error) {
+            if (!isTreeResolveFailure(error)) {
+                throw error;
+            }
+
+            // A prior tree expansion may still hold an empty/stale child list.
+            // Refresh once, then let TreeView.reveal resolve the target again.
+            refreshNetezzaRevealTree(deps, logger);
+            await schemaTreeView.reveal(targetItem, { select: true, focus: true });
+        }
     };
 
     return [
@@ -212,6 +430,9 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                         searchName
                     );
                     if (cachedObj) {
+                        if (connectionKind === 'netezza' && isTableCacheObjectType(cachedObj.objType)) {
+                            refreshNetezzaRevealTree(deps, logger);
+                        }
                         const targetItem = new SchemaItem(
                             cachedObj.name,
                             vscode.TreeItemCollapsibleState.Collapsed,
@@ -350,91 +571,53 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                 }
 
                 if (targetDb) {
-                    const typeFilter =
-                        searchType && searchType !== 'COLUMN' ? `AND UPPER(OBJTYPE) = UPPER('${searchType}')` : '';
-                    const schemaFilter = normalizedSchema
-                        ? `AND UPPER(SCHEMA) = UPPER('${normalizedSchema.replace(/'/g, "''").trim()}')`
-                        : '';
+                    const obj = await findNetezzaObjectForReveal(
+                        deps,
+                        logger,
+                        targetConnectionName,
+                        targetDb,
+                        searchName,
+                        searchType,
+                        normalizedSchema,
+                    );
 
-                    const query = `
-                        SELECT OBJNAME, OBJTYPE, SCHEMA, OBJID 
-                        FROM ${targetDb}.._V_OBJECT_DATA 
-                        WHERE UPPER(OBJNAME) = UPPER('${searchName.replace(/'/g, "''").trim()}') 
-                        AND DBNAME = '${targetDb}'
-                        ${typeFilter}
-                        ${schemaFilter}
-                        LIMIT 1
-                    `;
-
-                    try {
-                        const objResult = await runQueryRaw(
-                            context,
-                            query,
-                            true,
-                            connectionManager,
+                    if (obj) {
+                        const objectId = normalizeObjectId(obj.OBJID);
+                        warmNetezzaRevealTarget(
+                            deps,
                             targetConnectionName,
-                            undefined, undefined, undefined, 1000000, false
+                            targetDb,
+                            obj,
+                            logger,
                         );
-                        if (objResult && objResult.data) {
-                            const objects = queryResultToRows<{ OBJNAME: string; OBJTYPE: string; SCHEMA: string; OBJID: number }>(objResult);
+                        const targetItem = new SchemaItem(
+                            obj.OBJNAME,
+                            vscode.TreeItemCollapsibleState.Collapsed,
+                            `netezza:${obj.OBJTYPE}`,
+                            targetDb,
+                            obj.OBJTYPE,
+                            obj.SCHEMA,
+                            objectId,
+                            undefined,
+                            targetConnectionName
+                        );
 
-                            if (objects.length > 0) {
-                                const obj = objects[0];
-
-                                if (obj.OBJTYPE === 'PROCEDURE') {
-                                    try {
-                                        const sigQuery = `SELECT PROCEDURESIGNATURE FROM ${targetDb}.._V_PROCEDURE WHERE OBJID = ${obj.OBJID}`;
-                                        const sigResult = await runQueryRaw(
-                                            context,
-                                            sigQuery,
-                                            true,
-                                            connectionManager,
-                                            targetConnectionName,
-                                            undefined, undefined, undefined, 1000000, false
-                                        );
-                                        if (sigResult && sigResult.data && sigResult.data.length > 0) {
-                                            const sigObj = queryResultToRows<{ PROCEDURESIGNATURE: string }>(sigResult);
-                                            if (sigObj.length > 0 && sigObj[0].PROCEDURESIGNATURE) {
-                                                obj.OBJNAME = sigObj[0].PROCEDURESIGNATURE;
-                                            }
-                                        }
-                                    } catch (sigErr) {
-                                        logger?.warn('[CQ01-REVEAL-002] Failed to resolve procedure signature', sigErr);
-                                    }
-                                }
-
-                                const targetItem = new SchemaItem(
-                                    obj.OBJNAME,
-                                    vscode.TreeItemCollapsibleState.Collapsed,
-                                    `netezza:${obj.OBJTYPE}`,
-                                    targetDb,
-                                    obj.OBJTYPE,
-                                    obj.SCHEMA,
-                                    obj.OBJID,
-                                    undefined,
-                                    targetConnectionName
-                                );
-
-                                await revealSchemaItem(targetItem);
-                                logger?.info(
-                                    `[perf] revealInSchema db-hit (${targetDb}.${obj.SCHEMA}.${searchName}) ${(performance.now() - revealStart).toFixed(1)}ms`
-                                );
-                                emitRevealTelemetry('ok', {
-                                    metadata: {
-                                        path: 'database',
-                                        object_type: obj.OBJTYPE
-                                    }
-                                });
-                                statusBarDisposable.dispose();
-                                vscode.window.setStatusBarMessage(
-                                    `$(check) Found ${searchName} in ${targetDb}.${obj.SCHEMA}`,
-                                    3000
-                                );
-                                return;
+                        await revealSchemaItem(targetItem);
+                        logger?.info(
+                            `[perf] revealInSchema db-hit (${targetDb}.${obj.SCHEMA}.${searchName}) ${(performance.now() - revealStart).toFixed(1)}ms`
+                        );
+                        emitRevealTelemetry('ok', {
+                            metadata: {
+                                path: 'database',
+                                object_type: obj.OBJTYPE
                             }
-                        }
-                    } catch (e) {
-                        logger?.warn(`[CQ01-REVEAL-003] Error searching object in ${targetDb}`, e);
+                        });
+                        statusBarDisposable.dispose();
+                        vscode.window.setStatusBarMessage(
+                            `$(check) Found ${searchName} in ${targetDb}.${obj.SCHEMA}`,
+                            3000
+                        );
+                        return;
                     }
                 }
 
@@ -453,87 +636,53 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                         for (const db of databases) {
                             const dbName = db.DATABASE;
                             try {
-                                const typeFilter =
-                                    searchType && searchType !== 'COLUMN' ? `AND UPPER(OBJTYPE) = UPPER('${searchType}')` : '';
-                                const schemaFilter = normalizedSchema
-                                    ? `AND UPPER(SCHEMA) = UPPER('${normalizedSchema.replace(/'/g, "''").trim()}')`
-                                    : '';
-
-                                const query = `
-                                    SELECT OBJNAME, OBJTYPE, SCHEMA, OBJID 
-                                    FROM ${dbName}.._V_OBJECT_DATA 
-                                    WHERE UPPER(OBJNAME) = UPPER('${searchName.replace(/'/g, "''").trim()}') 
-                                    AND DBNAME = '${dbName}'
-                                    ${typeFilter}
-                                    ${schemaFilter}
-                                    LIMIT 1
-                                `;
-
-                                const objResultRaw = await runQueryRaw(
-                                    context,
-                                    query,
-                                    true,
-                                    connectionManager,
+                                const obj = await findNetezzaObjectForReveal(
+                                    deps,
+                                    logger,
                                     targetConnectionName,
-                                    undefined, undefined, undefined, 1000000, false
+                                    dbName,
+                                    searchName,
+                                    searchType,
+                                    normalizedSchema,
                                 );
-                                if (objResultRaw && objResultRaw.data) {
-                                    const objects = queryResultToRows<{ OBJNAME: string; OBJTYPE: string; SCHEMA: string; OBJID: number }>(objResultRaw);
 
-                                    if (objects.length > 0) {
-                                        const obj = objects[0];
+                                if (obj) {
+                                    const objectId = normalizeObjectId(obj.OBJID);
+                                    warmNetezzaRevealTarget(
+                                        deps,
+                                        targetConnectionName,
+                                        dbName,
+                                        obj,
+                                        logger,
+                                    );
+                                    const targetItem = new SchemaItem(
+                                        obj.OBJNAME,
+                                        vscode.TreeItemCollapsibleState.Collapsed,
+                                        `netezza:${obj.OBJTYPE}`,
+                                        dbName,
+                                        obj.OBJTYPE,
+                                        obj.SCHEMA,
+                                        objectId,
+                                        undefined,
+                                        targetConnectionName
+                                    );
 
-                                        if (obj.OBJTYPE === 'PROCEDURE') {
-                                            try {
-                                                const sigQuery = `SELECT PROCEDURESIGNATURE FROM ${dbName}.._V_PROCEDURE WHERE OBJID = ${obj.OBJID}`;
-                                                const sigResult = await runQueryRaw(
-                                                    context,
-                                                    sigQuery,
-                                                    true,
-                                                    connectionManager,
-                                                    targetConnectionName,
-                                                    undefined, undefined, undefined, 1000000, false
-                                                );
-                                                if (sigResult && sigResult.data && sigResult.data.length > 0) {
-                                                    const sigObj = queryResultToRows<{ PROCEDURESIGNATURE: string }>(sigResult);
-                                                    if (sigObj.length > 0 && sigObj[0].PROCEDURESIGNATURE) {
-                                                        obj.OBJNAME = sigObj[0].PROCEDURESIGNATURE;
-                                                    }
-                                                }
-                                            } catch (sigErr) {
-                                                logger?.warn('[CQ01-REVEAL-002] Failed to resolve procedure signature', sigErr);
-                                            }
+                                    await revealSchemaItem(targetItem);
+                                    logger?.info(
+                                        `[perf] revealInSchema cross-db-hit (${dbName}.${obj.SCHEMA}.${searchName}) ${(performance.now() - revealStart).toFixed(1)}ms`
+                                    );
+                                    emitRevealTelemetry('ok', {
+                                        metadata: {
+                                            path: 'cross_database',
+                                            object_type: obj.OBJTYPE
                                         }
-
-                                        const targetItem = new SchemaItem(
-                                            obj.OBJNAME,
-                                            vscode.TreeItemCollapsibleState.Collapsed,
-                                            `netezza:${obj.OBJTYPE}`,
-                                            dbName,
-                                            obj.OBJTYPE,
-                                            obj.SCHEMA,
-                                            obj.OBJID,
-                                            undefined,
-                                            targetConnectionName
-                                        );
-
-                                        await revealSchemaItem(targetItem);
-                                        logger?.info(
-                                            `[perf] revealInSchema cross-db-hit (${dbName}.${obj.SCHEMA}.${searchName}) ${(performance.now() - revealStart).toFixed(1)}ms`
-                                        );
-                                        emitRevealTelemetry('ok', {
-                                            metadata: {
-                                                path: 'cross_database',
-                                                object_type: obj.OBJTYPE
-                                            }
-                                        });
-                                        statusBarDisposable.dispose();
-                                        vscode.window.setStatusBarMessage(
-                                            `$(check) Found ${searchName} in ${dbName}.${obj.SCHEMA}`,
-                                            3000
-                                        );
-                                        return;
-                                    }
+                                    });
+                                    statusBarDisposable.dispose();
+                                    vscode.window.setStatusBarMessage(
+                                        `$(check) Found ${searchName} in ${dbName}.${obj.SCHEMA}`,
+                                        3000
+                                    );
+                                    return;
                                 }
                             } catch (e) {
                                 logger?.warn(`[CQ01-REVEAL-004] Error searching object in ${dbName}`, e);

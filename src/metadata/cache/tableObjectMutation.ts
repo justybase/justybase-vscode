@@ -30,6 +30,10 @@ function sameName(left: string | undefined, right: string): boolean {
     return left?.toUpperCase() === right.toUpperCase();
 }
 
+function sameSchema(left: string | undefined, right: string | undefined): boolean {
+    return (left?.trim().toUpperCase() || '') === (right?.trim().toUpperCase() || '');
+}
+
 function compareTableObjectNames(left: TableMetadata, right: TableMetadata): number {
     return (getObjectName(left) || '').localeCompare(getObjectName(right) || '');
 }
@@ -57,6 +61,19 @@ function mergeUpsertedTableObject(
     return [...retained, ...sameType];
 }
 
+function mergeUpsertedTableObjectForSchema(
+    existing: readonly TableMetadata[],
+    table: TableMetadata,
+    schema: string | undefined,
+): TableMetadata[] {
+    const schemaRows = existing.filter(item => sameSchema(item.SCHEMA, schema));
+    const otherSchemaRows = existing.filter(item => !sameSchema(item.SCHEMA, schema));
+    return [
+        ...otherSchemaRows,
+        ...mergeUpsertedTableObject(schemaRows, table),
+    ];
+}
+
 export function toTableMetadata(row: {
     OBJNAME: string;
     SCHEMA?: string | null;
@@ -65,7 +82,7 @@ export function toTableMetadata(row: {
     OWNER?: string;
     DESCRIPTION?: string;
 }): TableMetadata {
-    const objectType = row.OBJTYPE?.toUpperCase() || 'TABLE';
+    const objectType = row.OBJTYPE?.trim().toUpperCase() || 'TABLE';
     return {
         OBJNAME: row.OBJNAME,
         OBJID: row.OBJID,
@@ -93,8 +110,30 @@ export function upsertTableObject(
     if (!tableName) {
         return;
     }
-    const existing = cache.getTables(connectionName, cacheKey) ?? [];
-    const merged = mergeUpsertedTableObject(existing, table);
+    const existing = cache.getTables(connectionName, cacheKey);
+    if (existing) {
+        const merged = mergeUpsertedTableObject(existing, table);
+        cache.setTables(connectionName, cacheKey, merged, buildIdMap(database, schema, merged));
+        return;
+    }
+
+    // A full DB.. aggregate may be the only materialized layer after disk
+    // hydration. Update it in place instead of replacing it with one schema
+    // and silently dropping every other cached object.
+    const aggregateKey = buildSchemaCacheKey(database);
+    const aggregate = cache.getTables(connectionName, aggregateKey);
+    if (aggregate && schema) {
+        const merged = mergeUpsertedTableObjectForSchema(aggregate, table, schema);
+        cache.setTables(
+            connectionName,
+            aggregateKey,
+            merged,
+            buildIdMap(database, undefined, merged),
+        );
+        return;
+    }
+
+    const merged = mergeUpsertedTableObject([], table);
     cache.setTables(connectionName, cacheKey, merged, buildIdMap(database, schema, merged));
 }
 
@@ -128,11 +167,22 @@ export function replaceTableObjectTypeForDatabase(
     rows: readonly TableMetadata[],
     options?: { flatCatalog?: boolean },
 ): void {
+    const aggregateKey = buildSchemaCacheKey(database);
+    const aggregate = cache.getTables(connectionName, aggregateKey);
+    const cachedTables = aggregate ?? cache.getTablesAllSchemas(connectionName, database) ?? [];
+    const cachedBySchema = new Map<string, TableMetadata[]>();
+    for (const cached of cachedTables) {
+        const schema = cached.SCHEMA?.trim().toUpperCase() || '';
+        const entries = cachedBySchema.get(schema) ?? [];
+        entries.push(cached);
+        cachedBySchema.set(schema, entries);
+    }
+
     const schemas = new Set<string>();
     if (options?.flatCatalog) {
         schemas.add('');
     }
-    for (const cached of cache.getTablesAllSchemas(connectionName, database) ?? []) {
+    for (const cached of cachedTables) {
         const schema = cached.SCHEMA?.trim().toUpperCase();
         if (schema || options?.flatCatalog) {
             schemas.add(schema || '');
@@ -148,7 +198,9 @@ export function replaceTableObjectTypeForDatabase(
     for (const schema of schemas) {
         const schemaName = schema || undefined;
         const cacheKey = buildSchemaCacheKey(database, schemaName);
-        const existing = cache.getTables(connectionName, cacheKey) ?? [];
+        const existing = cache.getTables(connectionName, cacheKey)
+            ?? cachedBySchema.get(schema)
+            ?? [];
         const retained = existing.filter(item => inferCachedTableLikeType(item).toUpperCase() !== objectType.toUpperCase());
         const replacements = rows.filter(row => (row.SCHEMA?.trim().toUpperCase() || '') === schema);
         const merged = [...retained, ...replacements];

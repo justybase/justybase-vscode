@@ -343,6 +343,17 @@ export async function handleMetadataRequest(
           metadataCache,
           "view",
         );
+      case "sourceObjects":
+        if (!connectionName || !effectiveDatabase) {
+          return [];
+        }
+        return await getSourceObjects(
+          connectionName,
+          effectiveDatabase,
+          params.schema,
+          metadataProvider,
+          metadataCache,
+        );
       case "procedures":
         if (!connectionName || !effectiveDatabase) {
           return [];
@@ -363,6 +374,7 @@ export async function handleMetadataRequest(
           effectiveDatabase,
           params.schema,
           params.table,
+          params.allowPublicSynonym,
           metadataProvider,
         );
       case "cachedTableInfo":
@@ -589,6 +601,26 @@ async function getTables(
   return matchingItems;
 }
 
+async function getSourceObjects(
+  connectionName: string,
+  database: string,
+  schema: string | undefined,
+  metadataProvider: MetadataProvider,
+  metadataCache: MetadataCache,
+): Promise<MetadataObjectItem[]> {
+  await metadataProvider.getSourceObjects(connectionName, database, schema);
+  const items = getTablesForScope(metadataCache, connectionName, database, schema);
+  return (items ?? [])
+    .map((item) => mapTableMetadata(item, database))
+    .filter((item): item is MetadataObjectItem =>
+      !!item &&
+      (item.objectType === "table" ||
+        item.objectType === "view" ||
+        item.objectType === "materialized-view" ||
+        item.objectType === "synonym"),
+    );
+}
+
 async function getProcedures(
   connectionName: string,
   database: string,
@@ -624,6 +656,7 @@ async function getColumns(
   database: string,
   schema: string | undefined,
   table: string,
+  allowPublicSynonym: boolean | undefined,
   metadataProvider: MetadataProvider,
 ): Promise<MetadataColumnItem[]> {
   const columns = await metadataProvider.getTableColumnsMetadata(
@@ -631,6 +664,7 @@ async function getColumns(
     database,
     schema,
     table,
+    allowPublicSynonym ? { allowPublicSynonym: true } : undefined,
   );
   return mapColumns(columns);
 }
@@ -824,8 +858,14 @@ function mapTableMetadata(
     return undefined;
   }
 
-  const objectType =
-    inferObjectType(item).toUpperCase() === "VIEW" ? "view" : "table";
+  const normalizedType = inferObjectType(item).toUpperCase();
+  const objectType = normalizedType === "SYNONYM"
+    ? "synonym"
+    : normalizedType === "MATERIALIZED VIEW"
+      ? "materialized-view"
+      : normalizedType === "VIEW"
+        ? "view"
+        : "table";
   return {
     name,
     database,

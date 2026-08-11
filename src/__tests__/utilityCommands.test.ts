@@ -31,6 +31,9 @@ jest.mock('vscode', () => ({
     },
     TreeItemCollapsibleState: {
         Collapsed: 1
+    },
+    CompletionItemKind: {
+        Class: 7
     }
 }));
 
@@ -134,6 +137,8 @@ describe('commands/schema/utilityCommands', () => {
             } as any,
             metadataCache: {
                 findObjectWithType: jest.fn(),
+                getTables: jest.fn(),
+                setTables: jest.fn(),
                 hasConnectionPrefetchTriggered: jest.fn(() => true),
                 isConnectionPrefetchFresh: jest.fn(() => true),
                 triggerConnectionPrefetch: jest.fn(() => Promise.resolve())
@@ -141,7 +146,9 @@ describe('commands/schema/utilityCommands', () => {
             schemaTreeView: {
                 reveal: jest.fn()
             } as any,
-            schemaProvider: {} as any
+            schemaProvider: {
+                refresh: jest.fn(),
+            } as any
         };
 
         (mockDeps.connectionManager.getConnection as jest.Mock).mockResolvedValue({
@@ -524,8 +531,92 @@ describe('commands/schema/utilityCommands', () => {
             await handler({ name: 'target_table', objType: 'TABLE' });
 
             expect(mockedRunQueryRaw).toHaveBeenCalledTimes(3);
-            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain('FROM db1.._V_OBJECT_DATA');
-            expect(mockedRunQueryRaw.mock.calls[2][1]).toContain('FROM db2.._V_OBJECT_DATA');
+            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain('FROM DB1.._V_OBJECT_DATA');
+            expect(mockedRunQueryRaw.mock.calls[2][1]).toContain('FROM DB2.._V_OBJECT_DATA');
+            expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalled();
+        });
+
+        it('should find EXTERNAL TABLE via _V_EXTERNAL/_V_EXTOBJECT fallback when missing from _V_OBJECT_DATA', async () => {
+            (mockDeps.metadataCache.findObjectWithType as jest.Mock).mockReturnValue(null);
+            (mockDeps.connectionManager.getCurrentDatabase as jest.Mock).mockResolvedValue('testdb');
+
+            mockedRunQueryRaw
+                .mockResolvedValueOnce({ data: [], columns: [] })
+                .mockResolvedValueOnce({
+                    data: [['ET_TEMP', 'EXTERNAL TABLE', 'ADMIN', 55]],
+                    columns: [{ name: 'OBJNAME' }, { name: 'OBJTYPE' }, { name: 'SCHEMA' }, { name: 'OBJID' }]
+                });
+
+            mockedQueryResultToRows
+                .mockReturnValueOnce([])
+                .mockReturnValueOnce([{ OBJNAME: 'ET_TEMP', OBJTYPE: 'EXTERNAL TABLE', SCHEMA: 'ADMIN', OBJID: 55 }]);
+
+            const handler = getCommandHandler('netezza.revealInSchema');
+
+            await handler({
+                name: 'ET_TEMP',
+                database: 'testdb',
+                schema: 'ADMIN',
+                objType: 'EXTERNAL TABLE'
+            });
+
+            expect(mockedRunQueryRaw).toHaveBeenCalledTimes(2);
+            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain('_V_EXTERNAL');
+            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain('_V_EXTOBJECT');
+            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain("E1.TABLENAME");
+            expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalled();
+            expect(mockDeps.schemaProvider.refresh).toHaveBeenCalled();
+            expect(mockedShowWarningMessage).not.toHaveBeenCalled();
+        });
+
+        it('should refresh and retry when TreeView has stale children', async () => {
+            (mockDeps.metadataCache.findObjectWithType as jest.Mock).mockReturnValue({
+                name: 'ET_TEMP',
+                objType: 'EXTERNAL TABLE',
+                schema: 'ADMIN',
+                objId: 55,
+            });
+            (mockDeps.schemaTreeView.reveal as jest.Mock)
+                .mockRejectedValueOnce(new Error('Cannot resolve tree item for element 1/NZ|...'))
+                .mockResolvedValueOnce(undefined);
+
+            const handler = getCommandHandler('netezza.revealInSchema');
+
+            await handler({
+                name: 'ET_TEMP',
+                database: 'testdb',
+                schema: 'ADMIN',
+                objType: 'EXTERNAL TABLE',
+            });
+
+            expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalledTimes(2);
+            expect(mockDeps.schemaProvider.refresh).toHaveBeenCalledTimes(2);
+            expect(mockedShowErrorMessage).not.toHaveBeenCalled();
+        });
+
+        it('should normalize case and whitespace in the Netezza reveal lookup query', async () => {
+            (mockDeps.metadataCache.findObjectWithType as jest.Mock).mockReturnValue(null);
+            (mockDeps.connectionManager.getCurrentDatabase as jest.Mock).mockResolvedValue('testdb');
+
+            mockedRunQueryRaw.mockResolvedValue({
+                data: [['et_temp', 'EXTERNAL TABLE ', ' ADMIN ', 55]],
+                columns: [{ name: 'OBJNAME' }, { name: 'OBJTYPE' }, { name: 'SCHEMA' }, { name: 'OBJID' }]
+            });
+            mockedQueryResultToRows.mockReturnValue([{ OBJNAME: 'et_temp', OBJTYPE: 'EXTERNAL TABLE ', SCHEMA: ' ADMIN ', OBJID: 55 }]);
+
+            const handler = getCommandHandler('netezza.revealInSchema');
+
+            await handler({
+                name: 'ET_TEMP',
+                database: 'testdb',
+                schema: 'ADMIN',
+                objType: 'EXTERNAL TABLE'
+            });
+
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(OBJNAME)) = UPPER');
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(DBNAME))');
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(OBJTYPE))');
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(SCHEMA))');
             expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalled();
         });
 

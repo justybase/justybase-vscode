@@ -71,6 +71,8 @@ describe('commands/schema/viewCommands', () => {
 
         mockConnectionManager = {
             getActiveConnectionName: jest.fn().mockReturnValue('test-conn'),
+            getConnectionForExecution: jest.fn().mockReturnValue('test-conn'),
+            getConnectionDatabaseKind: jest.fn().mockReturnValue('access'),
             getConnection: jest.fn().mockResolvedValue({ name: 'test-conn', host: 'localhost' }),
             supportsCapability: jest.fn().mockReturnValue(true)
         };
@@ -361,7 +363,24 @@ describe('commands/schema/viewCommands', () => {
             await showSessionMonitorCallback();
 
             expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-                'Session monitor is not supported for the active database dialect.'
+                "Session monitor is not supported for active connection 'test-conn' (access). Select a Netezza connection with \"JustyBase: Select Active Connection\" first."
+            );
+        });
+
+        it('should use the selected schema connection instead of the global active connection', async () => {
+            mockSchemaTreeView.selection = [{ connectionName: 'NetezzaWarehouse' }];
+            mockConnectionManager.supportsCapability.mockImplementation(
+                (_capability: string, _documentUri: string | undefined, connectionName: string) =>
+                    connectionName === 'NetezzaWarehouse',
+            );
+            (requireConnection as jest.Mock).mockResolvedValue(true);
+
+            await showSessionMonitorCallback();
+
+            expect(mockConnectionManager.supportsCapability).toHaveBeenCalledWith(
+                'supportsSessionMonitor',
+                undefined,
+                'NetezzaWarehouse',
             );
         });
     });

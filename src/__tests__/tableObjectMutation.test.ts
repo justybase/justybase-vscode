@@ -126,6 +126,69 @@ describe('tableObjectMutation', () => {
         ]);
     });
 
+    it('preserves aggregate objects when refreshing a type before per-schema layers exist', () => {
+        const cache = createCache();
+        cache.setTables(
+            'CONN',
+            'DB1..',
+            [
+                { OBJNAME: 'T1', SCHEMA: 'ADMIN', OBJID: 1, objType: 'TABLE', label: 'T1' },
+                { OBJNAME: 'V1', SCHEMA: 'ADMIN', OBJID: 2, objType: 'VIEW', label: 'V1' },
+            ],
+            new Map([
+                ['DB1.ADMIN.T1', 1],
+                ['DB1.ADMIN.V1', 2],
+            ]),
+        );
+
+        replaceTableObjectTypeForDatabase(
+            cache,
+            'CONN',
+            'DB1',
+            'EXTERNAL TABLE',
+            [toTableMetadata({ OBJNAME: 'ET_TEMP', SCHEMA: 'ADMIN', OBJID: 3, OBJTYPE: 'EXTERNAL TABLE' })],
+        );
+
+        expect(cache.getTables('CONN', 'DB1.ADMIN')?.map(row => row.OBJNAME)).toEqual([
+            'T1',
+            'V1',
+            'ET_TEMP',
+        ]);
+        expect(cache.findObjectWithType('CONN', 'DB1', 'ADMIN', 'ET_TEMP')).toEqual(
+            expect.objectContaining({ objId: 3, objType: 'EXTERNAL TABLE' }),
+        );
+    });
+
+    it('warms a new schema object into an aggregate without dropping other schemas', () => {
+        const cache = createCache();
+        cache.setTables(
+            'CONN',
+            'DB1..',
+            [
+                { OBJNAME: 'T1', SCHEMA: 'ADMIN', OBJID: 1, objType: 'TABLE', label: 'T1' },
+                { OBJNAME: 'T2', SCHEMA: 'STAGE', OBJID: 2, objType: 'TABLE', label: 'T2' },
+            ],
+            new Map([
+                ['DB1.ADMIN.T1', 1],
+                ['DB1.STAGE.T2', 2],
+            ]),
+        );
+
+        upsertTableObject(
+            cache,
+            'CONN',
+            'DB1',
+            'ADMIN',
+            toTableMetadata({ OBJNAME: 'ET_TEMP', SCHEMA: 'ADMIN', OBJID: 3, OBJTYPE: 'EXTERNAL TABLE' }),
+        );
+
+        expect(cache.getTables('CONN', 'DB1..')?.map(row => row.OBJNAME)).toEqual(
+            expect.arrayContaining(['T1', 'T2', 'ET_TEMP']),
+        );
+        expect(cache.findObjectWithType('CONN', 'DB1', 'ADMIN', 'T1')).toBeDefined();
+        expect(cache.findObjectWithType('CONN', 'DB1', 'STAGE', 'T2')).toBeDefined();
+    });
+
     it('replaces Access TABLE rows under default.., keeps views, and handles an empty catalog', () => {
         const cache = createCache();
         cache.setTables(

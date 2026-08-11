@@ -76,7 +76,7 @@ export function parseAlterTableContext(
     return undefined;
   }
 
-  const tableRef = parseQualifiedTableNameFromTokens(tokens, alterIndex + 2);
+  const tableRef = parseQualifiedTableNameFromTokens(tokens, alterIndex + 2, databaseKind);
   if (!tableRef) {
     if (pathParsed) {
       return { kind: "table_target", path: pathParsed };

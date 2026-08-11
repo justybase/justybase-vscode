@@ -59,6 +59,8 @@ export class CompletionPathResolver {
         documentUri,
         effectiveDb,
         databaseKind,
+        false,
+        effectiveSchema,
       );
     }
     if (alterTableContext?.kind === "action") {
@@ -86,6 +88,7 @@ export class CompletionPathResolver {
         effectiveDb,
         databaseKind,
         true,
+        effectiveSchema,
       );
       return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }
@@ -186,6 +189,7 @@ export class CompletionPathResolver {
         effectiveDb,
         databaseKind,
         true,
+        requestContext.effectiveSchema,
       );
       return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }

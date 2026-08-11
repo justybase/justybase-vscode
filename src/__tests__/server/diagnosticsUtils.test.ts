@@ -106,6 +106,17 @@ describe("diagnosticsUtils", () => {
         table: "departments",
       });
     });
+
+    it("does not treat Oracle database.schema.table as a valid object path", () => {
+      expect(parseQualifiedReference("ORCL.HR.EMPLOYEES", "oracle")).toBeUndefined();
+    });
+
+    it("keeps Oracle schema.table references valid", () => {
+      expect(parseQualifiedReference("HR.EMPLOYEES", "oracle")).toEqual({
+        schema: "HR",
+        table: "EMPLOYEES",
+      });
+    });
   });
 
   describe("extractTableReferences", () => {

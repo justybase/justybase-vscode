@@ -135,7 +135,7 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                 LEFT JOIN ${database}.._V_SYNONYM S ON S.OBJID = O.OBJID
                 WHERE UPPER(O.DBNAME) = UPPER('${escapeSqlLiteral(database)}')
                     AND UPPER(O.SCHEMA) = UPPER('${escapeSqlLiteral(schema)}')
-                    AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM')
+                    AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')
                 ORDER BY O.OBJNAME
             `.trim();
         }
@@ -150,7 +150,7 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
             FROM ${database}.._V_OBJECT_DATA O
             LEFT JOIN ${database}.._V_SYNONYM S ON S.OBJID = O.OBJID
             WHERE UPPER(O.DBNAME) = UPPER('${escapeSqlLiteral(database)}')
-                AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM')
+                AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')
             ORDER BY O.OBJNAME
         `.trim();
     },

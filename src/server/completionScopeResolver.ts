@@ -139,6 +139,7 @@ export class CompletionScopeResolver {
       this.extractAdditionalAliasBindings(
         preparedStatement.sql,
         preparedStatement.cursorOffset,
+        databaseKind,
       ),
     );
 
@@ -152,7 +153,7 @@ export class CompletionScopeResolver {
           undefined,
           databaseKind,
         ),
-        this.extractAdditionalAliasBindings(preparedStatement.sql, undefined),
+        this.extractAdditionalAliasBindings(preparedStatement.sql, undefined, databaseKind),
       );
       if (globalAlias.size > 0) {
         aliasBindingsToUse = globalAlias;
@@ -340,6 +341,7 @@ export class CompletionScopeResolver {
       this.extractAdditionalAliasBindings(
         parserFriendlyStatementPrepared.sql,
         parserFriendlyStatementPrepared.cursorOffset,
+        databaseKind,
       ),
     );
     const aliasBindings = this.resolveAliasBindingsFully(aliasBindingsRaw);
@@ -526,13 +528,15 @@ export class CompletionScopeResolver {
   private extractAdditionalAliasBindings(
     statementSql: string,
     cursorOffset?: number,
+    databaseKind?: DatabaseKind,
   ): Map<string, AliasInfo> {
-    return this.parseMergeAliasBindings(statementSql, cursorOffset);
+    return this.parseMergeAliasBindings(statementSql, cursorOffset, databaseKind);
   }
 
   private parseMergeAliasBindings(
     statementSql: string,
     cursorOffset?: number,
+    databaseKind?: DatabaseKind,
   ): Map<string, AliasInfo> {
     const collectBindings = (sql: string): Map<string, AliasInfo> => {
       const bindings = new Map<string, AliasInfo>();
@@ -554,7 +558,7 @@ export class CompletionScopeResolver {
         scanIndex += 1;
       }
 
-      const targetRef = parseQualifiedTableNameFromTokens(tokens, scanIndex);
+      const targetRef = parseQualifiedTableNameFromTokens(tokens, scanIndex, databaseKind);
       if (!targetRef) {
         return bindings;
       }
@@ -573,7 +577,7 @@ export class CompletionScopeResolver {
         return bindings;
       }
 
-      const sourceRef = parseQualifiedTableNameFromTokens(tokens, usingIndex + 1);
+      const sourceRef = parseQualifiedTableNameFromTokens(tokens, usingIndex + 1, databaseKind);
       if (!sourceRef) {
         return bindings;
       }

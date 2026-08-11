@@ -180,6 +180,7 @@ const oracleFormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE
 });
 
 const oracleValidationProfile: DatabaseSqlValidationProfile = {
+    databaseKind: 'oracle',
     builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, ORACLE_BUILTIN_FUNCTION_OVERLAYS),
     systemColumns: new Set(),
     specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, ORACLE_SPECIAL_BUILTIN_VALUE_OVERLAYS),
