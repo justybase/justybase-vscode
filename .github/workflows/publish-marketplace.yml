@@ -298,12 +298,58 @@ jobs:
           joined=$(IFS='|'; echo "${patterns[*]}")
           npx jest --runInBand --testPathPatterns="extensions/(${joined})|(${joined}).*(AdvancedFeatures|ExplainParser|ImportTypeMapper|ReferenceProvider|SystemQueries|TuningAdvisor|Connection|ImportExport|ImportPlanner|QueryProfile)\\.test\\.ts"
 
+  integration-gate:
+    name: Local Runtime Integration Gate (DuckDB / File SQL / Access)
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/duckdb/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install DuckDB extension dependencies
+        working-directory: extensions/duckdb
+        run: npm ci
+
+      - name: Setup Java 11 for the Access bridge
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Run DuckDB integration tests
+        run: npm run test:duckdb:integration
+
+      - name: Run File SQL integration tests
+        run: npm run test:file:integration
+
+      - name: Run Access integration tests
+        run: npm run test:access:integration
+
   build-main:
     name: Build main VSIX
     needs:
       - validate-release
       - quality-gate
       - test-gate
+      - integration-gate
     if: ${{ needs.validate-release.outputs.publish_core == 'true' }}
     runs-on: windows-latest
 
@@ -342,6 +388,7 @@ jobs:
       - validate-release
       - quality-gate
       - test-gate
+      - integration-gate
     if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -445,6 +492,7 @@ jobs:
       - validate-release
       - quality-gate
       - test-gate
+      - integration-gate
     if: ${{ needs.validate-release.outputs.publish_duckdb == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -528,6 +576,7 @@ jobs:
       - validate-release
       - quality-gate
       - test-gate
+      - integration-gate
     if: ${{ needs.validate-release.outputs.optional_targets != '' }}
     runs-on: windows-latest
     strategy:
@@ -584,6 +633,7 @@ jobs:
       - validate-release
       - quality-gate
       - test-gate
+      - integration-gate
       - build-main
       - build-db2
       - build-duckdb
@@ -593,6 +643,7 @@ jobs:
       && needs.validate-release.result == 'success'
       && needs.quality-gate.result == 'success'
       && needs.test-gate.result == 'success'
+      && needs.integration-gate.result == 'success'
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
@@ -638,6 +689,7 @@ jobs:
       - validate-release
       - quality-gate
       - test-gate
+      - integration-gate
       - build-main
       - build-db2
       - build-duckdb
@@ -648,6 +700,7 @@ jobs:
       && needs.validate-release.result == 'success'
       && needs.quality-gate.result == 'success'
       && needs.test-gate.result == 'success'
+      && needs.integration-gate.result == 'success'
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
@@ -710,6 +763,7 @@ jobs:
       - validate-release
       - quality-gate
       - test-gate
+      - integration-gate
       - build-main
       - build-db2
       - build-duckdb
@@ -722,6 +776,7 @@ jobs:
       && needs.validate-release.result == 'success'
       && needs.quality-gate.result == 'success'
       && needs.test-gate.result == 'success'
+      && needs.integration-gate.result == 'success'
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
