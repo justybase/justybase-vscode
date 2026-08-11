@@ -46,6 +46,7 @@ import { affectsExtensionConfiguration } from '../compatibility/configuration';
 import { getConnectionForDocument } from '../core/queryRunnerHelpers';
 import { ensurePersistentConnectionReadyForQuery } from '../core/connectionReadiness';
 import { runQueryRaw } from '../core/queryRunner';
+import { MigrationWizardView } from './migrationWizardView';
 import {
     ALL_ROWS_AGGREGATIONS_TIMEOUT_SECONDS,
     ALL_ROWS_APPLY_FILTER_TIMEOUT_SECONDS,
@@ -164,6 +165,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             onUpdateWebview: () => this._updateWebview(),
             onPostMessage: msg => this._postMessageToWebview(msg),
             onForceHydrate: () => this._forceHydrate(),
+            onMigrateResult: (sourceUri, resultSetIndex) => {
+                void this._openMigrationForResult(sourceUri, resultSetIndex);
+            },
             onLogRowsApplied: (sourceUri, executionTimestamp, totalRows) =>
                 this._handleLogRowsApplied(sourceUri, executionTimestamp, totalRows),
             onRequestLogSync: (sourceUri, executionTimestamp, currentRows) =>
@@ -233,6 +237,27 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 const copyFormat = vscode.workspace.getConfiguration('justybase.results').get<string>('copyFormat', 'markdown') as 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon';
                 this._postMessageToWebview({ command: 'updateCopyFormat', copyFormat });
             }
+        });
+    }
+
+    private async _openMigrationForResult(sourceUri: string, resultSetIndex: number): Promise<void> {
+        if (!this._context || !this._connectionManager) {
+            vscode.window.showErrorMessage('Migration Studio is not available in this result panel.');
+            return;
+        }
+        const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
+        const sql = (resultSet?.refreshSql || resultSet?.sql || '').trim();
+        const connectionName = this._connectionManager.getConnectionForExecution(sourceUri);
+        if (!sql || !connectionName) {
+            vscode.window.showErrorMessage('This result does not have a reusable SQL query or active connection.');
+            return;
+        }
+        const targetDetails = await this._connectionManager.getConnection(connectionName);
+        await MigrationWizardView.createOrShow(this._context, this._connectionManager, {
+            source: { mode: 'sql', connectionName, sql },
+            targetConnectionName: connectionName,
+            targetDatabase: targetDetails?.database,
+            targetSchema: targetDetails?.schema,
         });
     }
 

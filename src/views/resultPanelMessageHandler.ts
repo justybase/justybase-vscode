@@ -64,6 +64,7 @@ export interface MessageHandlerCallbacks {
     onUpdateWebview: () => void;
     onPostMessage: (message: ResultPanelOutboundMessage) => void;
     onForceHydrate: () => void;
+    onMigrateResult?: (sourceUri: string, resultSetIndex: number) => void;
     onLogRowsApplied?: (sourceUri: string, executionTimestamp: number, totalRows: number) => void;
     onRequestLogSync?: (sourceUri: string, executionTimestamp: number | undefined, currentRows: number) => void;
     onSelectionStatsChanged?: (stats: SelectionStatsUpdatePayload | null) => void;
@@ -233,6 +234,10 @@ export class ResultPanelMessageHandler {
         switch (message.command) {
             case 'ready':
                 this._callbacks.onForceHydrate();
+                return;
+
+            case 'migrateResult':
+                this._callbacks.onMigrateResult?.(message.sourceUri, message.resultSetIndex);
                 return;
 
             case 'logRowsApplied':

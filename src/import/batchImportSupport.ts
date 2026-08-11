@@ -54,12 +54,12 @@ export interface BatchImportDialectConfig {
     buildDropTableSql?(target: BatchImportTargetTable): string;
 }
 
-interface ImportExecutionInput {
+export interface ImportExecutionInput {
     targetTable: string;
     connectionDetails: ConnectionDetails;
     columns: ImportColumnDescriptor[];
     appendToExistingTable?: boolean;
-    rows: Iterable<string[]>;
+    rows: Iterable<string[]> | AsyncIterable<string[]>;
     totalRows: number;
     decimalDelimiter: string;
     progressCallback?: ProgressCallback;
@@ -413,6 +413,8 @@ function buildDefaultInsertSql(
     return `INSERT INTO ${target.qualifiedName} (${columnList}) VALUES\n${valueRows.join(',\n')}`;
 }
 
+export { buildDefaultInsertSql };
+
 export function buildBatchCreateTablePreview(
     config: BatchImportDialectConfig,
     targetTable: string,
@@ -457,7 +459,7 @@ async function insertRowsInBatches(
     config: BatchImportDialectConfig,
     target: BatchImportTargetTable,
     columns: PreparedImportColumnDescriptor[],
-    rows: Iterable<string[]>,
+    rows: Iterable<string[]> | AsyncIterable<string[]>,
     decimalDelimiter: string,
     totalRows: number,
     progressCallback?: ProgressCallback
@@ -465,7 +467,7 @@ async function insertRowsInBatches(
     let insertedRows = 0;
     let batch: string[][] = [];
 
-    for (const row of rows) {
+    for await (const row of rows) {
         batch.push(row);
         if (batch.length < config.insertBatchSize) {
             continue;
@@ -492,7 +494,7 @@ async function insertRowsInBatches(
     return insertedRows;
 }
 
-async function executeBatchImport(
+export async function executeBatchImport(
     config: BatchImportDialectConfig,
     input: ImportExecutionInput
 ): Promise<ImportResult> {
