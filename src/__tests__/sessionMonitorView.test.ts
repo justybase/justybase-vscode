@@ -144,6 +144,7 @@ describe('SessionMonitorView', () => {
     mockConnectionManager = {
       getConnections: jest.fn().mockResolvedValue([]),
       getActiveConnectionName: jest.fn().mockReturnValue('TestConnection'),
+      getConnectionDatabaseKind: jest.fn().mockReturnValue('netezza'),
       getConnection: jest.fn().mockResolvedValue({
         name: 'TestConnection',
         host: 'localhost',
@@ -372,7 +373,8 @@ describe('SessionMonitorView', () => {
         expect(mockSessionMonitorProvider.killSession).toHaveBeenCalledWith(
           expect.anything(),
           mockConnectionManager,
-          456
+          456,
+          undefined
         );
       });
 

@@ -412,25 +412,30 @@ export interface DatabaseSessionMonitorProvider {
   getSessions(
     context: unknown,
     connectionManager: unknown,
-    database?: string
+    database?: string,
+    connectionName?: string
   ): Promise<Record<string, unknown>[]>;
   getQueries(
     context: unknown,
     connectionManager: unknown,
-    database?: string
+    database?: string,
+    connectionName?: string
   ): Promise<Record<string, unknown>[]>;
   getStorage(
     context: unknown,
-    connectionManager: unknown
+    connectionManager: unknown,
+    connectionName?: string
   ): Promise<Record<string, unknown>[]>;
   getResources(
     context: unknown,
-    connectionManager: unknown
+    connectionManager: unknown,
+    connectionName?: string
   ): Promise<{ gra: unknown[]; systemUtil: unknown[]; sysUtilSummary: unknown }>;
   killSession(
     context: unknown,
     connectionManager: unknown,
-    sessionId: number
+    sessionId: number,
+    connectionName?: string
   ): Promise<void>;
 }
 

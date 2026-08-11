@@ -34,18 +34,21 @@ export class SessionMonitorView {
     private _disposables: vscode.Disposable[] = [];
     private _context: vscode.ExtensionContext;
     private _connectionManager: ConnectionManager;
+    private _connectionName: string | undefined;
     private _refreshInterval: NodeJS.Timeout | undefined;
 
     private constructor(
         panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
         context: vscode.ExtensionContext,
-        connectionManager: ConnectionManager
+        connectionManager: ConnectionManager,
+        connectionName?: string
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this._context = context;
         this._connectionManager = connectionManager;
+        this._connectionName = connectionName;
 
         this._update();
 
@@ -80,11 +83,13 @@ export class SessionMonitorView {
     public static createOrShow(
         extensionUri: vscode.Uri,
         context: vscode.ExtensionContext,
-        connectionManager: ConnectionManager
+        connectionManager: ConnectionManager,
+        connectionName?: string
     ) {
         const column = vscode.window.activeTextEditor ? vscode.ViewColumn.Beside : undefined;
 
         if (SessionMonitorView.currentPanel) {
+            SessionMonitorView.currentPanel._connectionName = connectionName;
             SessionMonitorView.currentPanel._panel.reveal(column);
             SessionMonitorView.currentPanel._fetchAndSendData();
             return;
@@ -104,7 +109,13 @@ export class SessionMonitorView {
             }
         );
 
-        SessionMonitorView.currentPanel = new SessionMonitorView(panel, extensionUri, context, connectionManager);
+        SessionMonitorView.currentPanel = new SessionMonitorView(
+            panel,
+            extensionUri,
+            context,
+            connectionManager,
+            connectionName,
+        );
     }
 
     public dispose() {
@@ -138,12 +149,13 @@ export class SessionMonitorView {
     }
 
     private async _getProvider(): Promise<DatabaseSessionMonitorProvider | undefined> {
-        const activeName = this._connectionManager.getActiveConnectionName();
-        if (!activeName) return undefined;
-        const details = await this._connectionManager.getConnection(activeName);
-        if (!details?.dbType) return undefined;
+        const connectionName = this._connectionName ?? this._connectionManager.getActiveConnectionName() ?? undefined;
+        if (!connectionName) return undefined;
+        const details = await this._connectionManager.getConnection(connectionName);
+        const databaseKind = this._connectionManager.getConnectionDatabaseKind(connectionName) ?? details?.dbType;
+        if (!databaseKind) return undefined;
         const { getDatabaseDialectByKind } = await import('../core/factories/databaseDialectRegistry');
-        const dialect = getDatabaseDialectByKind(details.dbType);
+        const dialect = getDatabaseDialectByKind(databaseKind);
         if (dialect?.capabilities.supportsSessionMonitor && dialect.advancedFeatures?.sessionMonitor) {
             return dialect.advancedFeatures.sessionMonitor;
         }
@@ -165,7 +177,7 @@ export class SessionMonitorView {
 
             const provider = await this._getProvider();
             if (provider) {
-                await provider.killSession(this._context, this._connectionManager, sessionId);
+                await provider.killSession(this._context, this._connectionManager, sessionId, this._connectionName);
                 vscode.window.showInformationMessage(`Session ${sessionId} terminated successfully.`);
                 // Refresh data
                 await this._fetchAndSendData();
@@ -355,18 +367,13 @@ export class SessionMonitorView {
     }
 
     private async _resolveScopedDatabase(): Promise<string | undefined> {
-        const manager = this._connectionManager as unknown as {
-            getActiveConnectionName?: () => string | undefined;
-            getCurrentDatabase?: (connectionName: string) => Promise<string | undefined>;
-        };
-
-        const activeConnectionName = manager.getActiveConnectionName?.();
-        if (!activeConnectionName || !manager.getCurrentDatabase) {
+        const connectionName = this._connectionName ?? this._connectionManager.getActiveConnectionName() ?? undefined;
+        if (!connectionName) {
             return undefined;
         }
 
         try {
-            const database = await manager.getCurrentDatabase(activeConnectionName);
+            const database = await this._connectionManager.getCurrentDatabase(connectionName);
             const normalized = database?.trim();
             return normalized && normalized.length > 0 ? normalized : undefined;
         } catch {
@@ -379,7 +386,12 @@ export class SessionMonitorView {
         if (!provider) return [];
         const scopedDatabase = await this._resolveScopedDatabase();
         try {
-            return await provider.getSessions(this._context, this._connectionManager, scopedDatabase) as SessionMonitorSession[];
+            return await provider.getSessions(
+                this._context,
+                this._connectionManager,
+                scopedDatabase,
+                this._connectionName,
+            ) as SessionMonitorSession[];
         } catch (e: unknown) {
             console.error('[SessionMonitorView] Error fetching sessions:', e);
             vscode.window.showErrorMessage(`Failed to fetch sessions: ${e instanceof Error ? e.message : String(e)}`);
@@ -392,7 +404,12 @@ export class SessionMonitorView {
         if (!provider) return [];
         const scopedDatabase = await this._resolveScopedDatabase();
         try {
-            return await provider.getQueries(this._context, this._connectionManager, scopedDatabase) as SessionMonitorQuery[];
+            return await provider.getQueries(
+                this._context,
+                this._connectionManager,
+                scopedDatabase,
+                this._connectionName,
+            ) as SessionMonitorQuery[];
         } catch (e: unknown) {
             console.error('[SessionMonitorView] Error fetching queries:', e);
             vscode.window.showErrorMessage(`Failed to fetch queries: ${e instanceof Error ? e.message : String(e)}`);
@@ -404,7 +421,11 @@ export class SessionMonitorView {
         const provider = await this._getProvider();
         if (!provider) return [];
         try {
-            return await provider.getStorage(this._context, this._connectionManager) as SessionMonitorStorageInfo[];
+            return await provider.getStorage(
+                this._context,
+                this._connectionManager,
+                this._connectionName,
+            ) as SessionMonitorStorageInfo[];
         } catch (e: unknown) {
             console.error('[SessionMonitorView] Error fetching storage:', e);
             vscode.window.showErrorMessage(`Failed to fetch storage info: ${e instanceof Error ? e.message : String(e)}`);
@@ -416,7 +437,11 @@ export class SessionMonitorView {
         const provider = await this._getProvider();
         if (!provider) return { gra: [], systemUtil: [], sysUtilSummary: null };
         try {
-            return await provider.getResources(this._context, this._connectionManager) as SessionMonitorResources;
+            return await provider.getResources(
+                this._context,
+                this._connectionManager,
+                this._connectionName,
+            ) as SessionMonitorResources;
         } catch (e: unknown) {
             console.warn('[SessionMonitorView] failed to fetch resources:', e);
             return { gra: [], systemUtil: [], sysUtilSummary: null };
