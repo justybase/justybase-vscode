@@ -1,7 +1,7 @@
 {
   "name": "justybaselite-netezza",
   "displayName": "JustyBase SQL Editor (Netezza)",
-  "description": "A powerful, zero-config VS Code extension for IBM Netezza / PureData System for Analytics databases",
+  "description": "Netezza-first SQL workspace for VS Code: connect without ODBC drivers, write and validate SQL, explore results, browse schemas, and manage warehouse workflows.",
   "version": "3.16.24",
   "workspaces": [
     "packages/*",
@@ -14,7 +14,7 @@
   "license": "Apache-2.0",
   "icon": "icon.png",
   "galleryBanner": {
-    "color": "#1a1a2e",
+    "color": "#0B2A5B",
     "theme": "dark"
   },
   "extensionKind": [
@@ -26,26 +26,37 @@
     "node": ">=22.12.0"
   },
   "keywords": [
-    "SQL",
-    "netezza",
-    "IBM PureData System for Analytics",
-    "nz",
-    "database",
+    "Netezza",
+    "IBM PureData",
+    "PureData System for Analytics",
+    "Netezza SQL",
+    "SQL editor",
+    "SQL IDE",
+    "database client",
     "data warehouse",
-    "dwh",
-    "sqlite",
-    "duckdb",
-    "db2",
-    "postgresql",
-    "snowflake",
-    "oracle",
-    "mssql",
-    "mysql"
+    "schema browser",
+    "SQL completion",
+    "SQL linter",
+    "SQL formatter",
+    "NZPLSQL",
+    "GROOM",
+    "ETL",
+    "query results",
+    "data exploration",
+    "AI SQL assistant",
+    "GitHub Copilot",
+    "MCP",
+    "DuckDB",
+    "Excel",
+    "Parquet",
+    "CSV",
+    "VS Code"
   ],
   "categories": [
     "Programming Languages",
     "Data Science",
-    "Other"
+    "Linters",
+    "Visualization"
   ],
   "homepage": "https://github.com/justybase/justybase-vscode",
   "bugs": {
@@ -219,6 +230,11 @@
         "icon": "$(plug)"
       },
       {
+        "command": "netezza.selectActiveConnection",
+        "title": "JustyBase: Select Active Connection",
+        "icon": "$(server-environment)"
+      },
+      {
         "command": "netezza.openSqlConsole",
         "title": "JustyBase: Open SQL Console",
         "icon": "$(terminal)"
@@ -359,6 +375,16 @@
         "command": "netezza.importDataAdvanced",
         "title": "Import Data to Table (Advanced Wizard)",
         "icon": "$(table)"
+      },
+      {
+        "command": "netezza.migrateData",
+        "title": "Open Migration Studio",
+        "icon": "$(repo-push)"
+      },
+      {
+        "command": "netezza.openFileConnectionPanel",
+        "title": "Open File Connection Manager",
+        "icon": "$(file-directory)"
       },
       {
         "command": "netezza.importWithPicker",
@@ -1657,6 +1683,11 @@
     "menus": {
       "editor/title": [
         {
+          "command": "netezza.migrateData",
+          "when": "resourceLangId == sql",
+          "group": "navigation@99"
+        },
+        {
           "command": "netezza.switchToNativeCsvPreview",
           "when": "activeWebviewPanelId == 'netezza.filePreview' && netezza.filePreviewExtname == .csv",
           "group": "navigation@0"
@@ -1744,6 +1775,10 @@
         {
           "command": "netezza.showSessionMonitor",
           "when": "justybase.active.capabilities.supportsSessionMonitor"
+        },
+        {
+          "command": "netezza.selectActiveConnection",
+          "when": "true"
         },
         {
           "command": "netezza.showResultPanelPerformanceStats",
@@ -2124,6 +2159,11 @@
       ],
       "view/item/context": [
         {
+          "command": "netezza.migrateData",
+          "when": "view == netezza.schema && (viewItem =~ /^netezza:(TABLE|VIEW|EXTERNAL TABLE)$/ || viewItem =~ /^favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)$/)",
+          "group": "1_data@1"
+        },
+        {
           "command": "netezza.refreshSchemaSelection",
           "when": "view == netezza.schema && (viewItem == serverInstance || viewItem == database || viewItem =~ /^typeGroup:/ || viewItem =~ /^netezza:/)",
           "group": "inline@0"
@@ -2152,6 +2192,11 @@
           "command": "netezza.revealAccessFile",
           "when": "view == netezza.schema && (viewItem == serverInstance || viewItem == database) && justybase.schemaDatabaseKind == access",
           "group": "0_file@1"
+        },
+        {
+          "command": "netezza.openFileConnectionPanel",
+          "when": "view == netezza.schema && viewItem == serverInstance && justybase.schemaDatabaseKind == file",
+          "group": "0_file@2"
         },
         {
           "command": "netezza.schema.copyTableMetadataComment",
@@ -4298,9 +4343,11 @@
     "test:watch": "cross-env NODE_ENV=test JEST_SILENT=1 jest --watch",
     "test:unit:debug": "cross-env NODE_ENV=test JEST_SILENT=0 JEST_VERBOSE=1 JEST_LOG_HEAP=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand",
     "test:coverage": "cross-env NODE_ENV=test JEST_SILENT=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --coverage --runInBand",
+    "test:mcp:live": "npm run build && cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/mcpLive.integration.test.ts",
     "provision:heavy-prefetch-schema": "npx tsx Benchmark/provisionHeavyPrefetchSchema.ts",
     "benchmark": "npm run benchmark:suggest && npm run benchmark:lsp && npm run benchmark:quality && npm run benchmark:result-panel",
     "benchmark:suggest": "jest --config Benchmark/jest.config.js --runInBand Benchmark/suggestBenchmark.test.ts",
+    "benchmark:migration": "jest --config Benchmark/jest.config.js --runInBand Benchmark/migrationPerfBenchmark.test.ts",
     "benchmark:result-panel": "jest --config Benchmark/jest.config.js --runInBand Benchmark/resultPanelHydrationBenchmark.test.ts",
     "benchmark:quality": "jest --config Benchmark/jest.config.js --runInBand Benchmark/qualityRulesBenchmark.test.ts",
     "benchmark:lsp": "jest --config Benchmark/jest.config.js --runInBand Benchmark/lspFeatureBenchmark.test.ts",
@@ -4308,6 +4355,7 @@
     "test:playwright:ui": "npx playwright test --ui --config=test-harness/playwright.config.ts",
     "test:playwright:install": "npx playwright install chromium",
     "test:duckdb:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/duckdb.integration.test.ts",
+    "test:file:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/fileSql.integration.test.ts",
     "test:access:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/access.integration.test.ts",
     "test:db2:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/jest/bin/jest.js --config jest.live.config.js --runInBand src/__tests__/integration/db2.integration.test.ts",
     "db2:connect-probe": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-connect-probe.ts",
@@ -4382,12 +4430,16 @@
     "@justybase/spreadsheet-tasks": "*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@msgpack/msgpack": "^3.1.3",
+    "@xyflow/react": "^12.11.2",
     "chevrotain": "^12.0.0",
     "echarts": "^6.1.0",
+    "elkjs": "^0.12.0",
     "hyparquet": "^1.26.1",
     "hyparquet-compressors": "^1.1.1",
     "hyparquet-writer": "^0.16.1",
     "mssql": "^12.5.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "vscode-languageclient": "^10.1.0",
     "vscode-languageserver": "^10.1.0",
     "vscode-languageserver-textdocument": "^1.0.13"
@@ -4402,6 +4454,8 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^25.5.0",
     "@types/pg": "^8.20.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@types/snowflake-sdk": "^1.6.24",
     "@types/vscode": "^1.103.2",
     "@typescript-eslint/eslint-plugin": "^8.57.1",
