@@ -22,14 +22,28 @@ function listZipEntries(buffer: Buffer): ZipEntry[] {
         if (buffer.readUInt32LE(offset) !== 0x04034b50) {
             break;
         }
+        const flags = buffer.readUInt16LE(offset + 6);
         const method = buffer.readUInt16LE(offset + 8);
         const compSize = buffer.readUInt32LE(offset + 18);
         const nameLength = buffer.readUInt16LE(offset + 26);
         const extraLength = buffer.readUInt16LE(offset + 28);
         const name = buffer.toString('utf8', offset + 30, offset + 30 + nameLength);
         const dataStart = offset + 30 + nameLength + extraLength;
-        entries.push({ name, method, compSize, dataStart });
+        const entry: ZipEntry = { name, method, compSize, dataStart };
+        entries.push(entry);
         offset = dataStart + compSize;
+
+        // Writers such as the DuckDB excel extension set flag bit 3: the
+        // compressed size is not known until the data descriptor that follows
+        // the payload. Locate the descriptor to advance to the next header.
+        if ((flags & 0x0008) !== 0) {
+            const descriptorStart = buffer.indexOf(Buffer.from([0x50, 0x4b, 0x07, 0x08]), dataStart);
+            if (descriptorStart < 0 || descriptorStart + 16 > buffer.length) {
+                break;
+            }
+            entry.compSize = buffer.readUInt32LE(descriptorStart + 8);
+            offset = descriptorStart + 16;
+        }
     }
     return entries;
 }
