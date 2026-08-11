@@ -1,0 +1,181 @@
+:root {
+    --diagram-border: var(--vscode-panel-border, #3b3b3b);
+    --diagram-panel: var(--vscode-sideBar-background, #252526);
+    --diagram-panel-alt: var(--vscode-editorWidget-background, #202020);
+    --diagram-foreground: var(--vscode-editor-foreground, #cccccc);
+    --diagram-muted: var(--vscode-descriptionForeground, #8f8f8f);
+    --diagram-accent: var(--vscode-textLink-foreground, #4daafc);
+    --diagram-edge-erd: #6aa9d8;
+    --diagram-edge-success: #64c68a;
+    --diagram-edge-failure: #e66b77;
+    --diagram-edge-muted: #7d8794;
+    --diagram-shadow: 0 14px 36px rgba(0, 0, 0, 0.2);
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    min-width: 720px;
+    height: 100vh;
+    overflow: hidden;
+    color: var(--diagram-foreground);
+    background: var(--vscode-editor-background, #1e1e1e);
+    font-family: var(--vscode-font-family, system-ui, sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+}
+
+button, input { font: inherit; }
+button { color: inherit; }
+
+.diagram-app {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+}
+
+.diagram-root { display: block; width: 100%; height: 100%; }
+
+.diagram-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 46px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--diagram-border);
+    background: color-mix(in srgb, var(--diagram-panel) 94%, transparent);
+    z-index: 5;
+}
+
+.diagram-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: min(320px, 30vw);
+    min-width: 160px;
+    padding: 0 9px;
+    border: 1px solid var(--diagram-border);
+    border-radius: 4px;
+    color: var(--diagram-muted);
+    background: var(--diagram-panel-alt);
+}
+
+.diagram-search input {
+    width: 100%;
+    min-width: 0;
+    padding: 6px 0;
+    border: 0;
+    outline: 0;
+    color: var(--diagram-foreground);
+    background: transparent;
+}
+
+.diagram-toolbar-divider { width: 1px; height: 22px; margin: 0 5px; background: var(--diagram-border); }
+.diagram-toolbar-spacer { flex: 1; }
+.diagram-title-block { min-width: 160px; padding-right: 6px; }
+.diagram-title-block strong { display: block; margin-top: 2px; font-size: 12px; }
+
+.diagram-button, .diagram-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 28px;
+    padding: 4px 9px;
+    border: 1px solid var(--diagram-border);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.diagram-icon-button { width: 28px; padding: 0; font-size: 16px; }
+.diagram-button:hover, .diagram-icon-button:hover { border-color: var(--diagram-accent); background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,.08)); }
+.diagram-button-primary { color: var(--vscode-button-foreground, #fff); border-color: var(--vscode-button-background, var(--diagram-accent)); background: var(--vscode-button-background, var(--diagram-accent)); }
+.diagram-button-primary:hover { background: var(--vscode-button-hoverBackground, var(--diagram-accent)); }
+.diagram-button[aria-pressed="true"] { color: var(--diagram-accent); }
+.diagram-button-symbol { color: var(--diagram-muted); }
+
+.diagram-main { display: flex; flex: 1; min-height: 0; }
+.diagram-side-panel { width: 210px; flex: 0 0 210px; padding: 12px; overflow: auto; border-right: 1px solid var(--diagram-border); background: var(--diagram-panel); }
+.diagram-side-panel.right { border-right: 0; border-left: 1px solid var(--diagram-border); }
+.diagram-side-panel h2, .diagram-side-panel h3 { margin: 0 0 10px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--diagram-muted); }
+.diagram-side-panel p { color: var(--diagram-muted); line-height: 1.45; }
+.diagram-muted { color: var(--diagram-muted); }
+
+.diagram-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--vscode-editor-background, #1e1e1e); }
+.diagram-canvas .react-flow { width: 100%; height: 100%; }
+.diagram-canvas .react-flow__controls { overflow: hidden; border: 1px solid var(--diagram-border); box-shadow: var(--diagram-shadow); }
+.diagram-canvas .react-flow__controls-button { width: 28px; height: 28px; border-bottom: 1px solid var(--diagram-border); color: var(--diagram-foreground); background: var(--diagram-panel); fill: currentColor; }
+.diagram-canvas .react-flow__minimap { overflow: hidden; border: 1px solid var(--diagram-border); background: color-mix(in srgb, var(--diagram-panel) 92%, transparent); }
+.diagram-canvas .react-flow__attribution { background: transparent; color: var(--diagram-muted); }
+.diagram-canvas .react-flow__background pattern path { stroke: color-mix(in srgb, var(--diagram-muted) 20%, transparent); }
+
+.diagram-edge-line { vector-effect: non-scaling-stroke; transition: opacity .12s ease, stroke-width .12s ease; }
+.diagram-edge-hit-area { pointer-events: stroke; cursor: pointer; }
+.diagram-edge-label { position: absolute; padding: 2px 5px; border: 1px solid var(--diagram-border); border-radius: 3px; font-size: 10px; background: var(--diagram-panel); pointer-events: all; white-space: nowrap; }
+
+.diagram-inspector { width: 286px; flex: 0 0 286px; border-left: 1px solid var(--diagram-border); background: var(--diagram-panel); overflow: auto; }
+.diagram-inspector-heading { display: flex; justify-content: space-between; gap: 8px; padding: 16px; border-bottom: 1px solid var(--diagram-border); }
+.diagram-inspector-heading h2 { margin: 3px 0 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.diagram-inspector-content { padding: 14px 16px; }
+.diagram-eyebrow { font-size: 10px; letter-spacing: .12em; color: var(--diagram-muted); }
+
+.erd-card, .etl-card { position: relative; width: 100%; border: 1px solid var(--diagram-border); border-radius: 7px; background: var(--diagram-panel); box-shadow: var(--diagram-shadow); overflow: visible; }
+.erd-card.is-search-match { border-color: var(--diagram-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--diagram-accent) 40%, transparent), var(--diagram-shadow); }
+.erd-card-header, .etl-card-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--diagram-border); background: color-mix(in srgb, var(--diagram-panel-alt) 70%, transparent); }
+.erd-card-header strong, .etl-card-header strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.erd-card-header small { display: block; margin-top: 2px; color: var(--diagram-muted); font-size: 10px; }
+.erd-card-icon, .etl-task-icon { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid color-mix(in srgb, var(--diagram-accent) 50%, var(--diagram-border)); border-radius: 5px; color: var(--diagram-accent); background: color-mix(in srgb, var(--diagram-accent) 12%, transparent); }
+.erd-card-count { margin-left: auto; color: var(--diagram-muted); font-size: 11px; }
+.erd-column-row { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 5px; min-height: 28px; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--diagram-border) 54%, transparent); }
+.erd-column-row:last-child { border-bottom: 0; }
+.erd-column-row.is-match { background: color-mix(in srgb, var(--diagram-accent) 12%, transparent); }
+.erd-column-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.erd-column-type { color: var(--diagram-muted); font-size: 10px; white-space: nowrap; }
+.erd-key-badges { display: flex; gap: 2px; }
+.erd-key-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 21px; padding: 1px 3px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+.erd-key-badge.pk { color: #e6c36a; background: color-mix(in srgb, #e6c36a 18%, transparent); }
+.erd-key-badge.fk { color: #79c4e8; background: color-mix(in srgb, #79c4e8 18%, transparent); }
+
+.etl-card { min-width: 220px; }
+.etl-card-header { border-left: 3px solid var(--etl-node-color, var(--diagram-accent)); }
+.etl-card-header .etl-task-icon { color: var(--etl-node-color, var(--diagram-accent)); border-color: color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 55%, var(--diagram-border)); background: color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 13%, transparent); }
+.etl-card-body { padding: 10px 12px; }
+.etl-card-description { display: -webkit-box; overflow: hidden; color: var(--diagram-muted); font-size: 11px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.etl-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--diagram-border); color: var(--diagram-muted); font-size: 10px; }
+.etl-status { display: inline-flex; align-items: center; gap: 4px; text-transform: uppercase; letter-spacing: .06em; }
+.etl-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--diagram-muted); }
+.etl-status-running .etl-status-dot { background: #d5b65b; box-shadow: 0 0 0 3px color-mix(in srgb, #d5b65b 18%, transparent); }
+.etl-status-success .etl-status-dot { background: var(--diagram-edge-success); }
+.etl-status-error .etl-status-dot { background: var(--diagram-edge-failure); }
+.etl-status-skipped .etl-status-dot { background: #9a8ac7; }
+.etl-handle { width: 10px; height: 10px; border: 2px solid var(--diagram-panel); background: var(--diagram-accent); }
+.etl-handle-success { background: var(--diagram-edge-success); }
+.etl-handle-failure { background: var(--diagram-edge-failure); }
+.etl-handle-label { position: absolute; right: 14px; color: var(--diagram-muted); font-size: 9px; pointer-events: none; }
+.etl-handle-label.success { top: calc(50% - 26px); }
+.etl-handle-label.failure { top: calc(50% + 14px); }
+
+.diagram-toolbox-item { display: flex; align-items: center; gap: 8px; width: 100%; margin: 0 0 7px; padding: 9px; border: 1px solid var(--diagram-border); border-radius: 5px; text-align: left; background: transparent; cursor: grab; }
+.diagram-toolbox-item:hover { border-color: var(--diagram-accent); background: var(--vscode-list-hoverBackground, rgba(255,255,255,.06)); }
+.diagram-toolbox-item svg { flex: 0 0 auto; }
+.diagram-toolbox-help { margin-top: 18px; font-size: 11px; }
+
+.diagram-status-bar { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 10px; border-top: 1px solid var(--diagram-border); color: var(--diagram-muted); font-size: 11px; }
+.erd-status-overlay { display: flex; gap: 14px; min-height: 28px; padding: 5px 12px; border-top: 1px solid var(--diagram-border); color: var(--diagram-muted); font-size: 11px; }
+.diagram-empty-state { position: absolute; top: 50%; left: 50%; display: flex; flex-direction: column; gap: 6px; transform: translate(-50%, -50%); padding: 18px 22px; border: 1px solid var(--diagram-border); border-radius: 7px; background: var(--diagram-panel); box-shadow: var(--diagram-shadow); text-align: center; }
+.diagram-detail-stack { display: flex; flex-direction: column; gap: 16px; overflow-wrap: anywhere; }
+.diagram-detail-stack dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; margin: 0; font-size: 11px; }
+.diagram-detail-stack dt { color: var(--diagram-muted); }
+.diagram-detail-stack dd { margin: 0; }
+.diagram-detail-list { display: flex; flex-direction: column; gap: 7px; padding-top: 4px; border-top: 1px solid var(--diagram-border); }
+.diagram-detail-list > div { display: flex; justify-content: space-between; gap: 8px; }
+.diagram-badge { padding: 2px 6px; border-radius: 10px; background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #fff); }
+.diagram-modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; z-index: 20; background: rgba(0,0,0,.45); }
+.diagram-modal { display: flex; flex-direction: column; width: min(1100px, 92vw); height: min(760px, 88vh); border: 1px solid var(--diagram-border); border-radius: 8px; background: var(--vscode-editor-background, #1e1e1e); box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+.diagram-modal-header, .diagram-modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--diagram-border); background: var(--diagram-panel); }
+.diagram-modal-footer { justify-content: flex-end; border-top: 1px solid var(--diagram-border); border-bottom: 0; }
+.diagram-modal-body { display: flex; flex: 1; min-height: 0; }
+.diagram-modal-body .diagram-canvas { min-width: 0; }
+.diagram-modal-title { font-weight: 600; }

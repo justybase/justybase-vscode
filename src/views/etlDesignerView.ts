@@ -172,12 +172,17 @@ export class EtlDesignerView {
             }
 
             case 'addConnection': {
-                const { from, to } = message.payload as { from: string; to: string };
+                const { from, to, connectionType } = message.payload as {
+                    from: string;
+                    to: string;
+                    connectionType?: 'success' | 'failure';
+                };
                 try {
                     this._projectManager.addConnection({
                         id: generateConnectionId(),
                         from,
-                        to
+                        to,
+                        ...(connectionType ? { connectionType } : {}),
                     });
                     this._sendProjectUpdate();
                 } catch (error) {
@@ -569,10 +574,24 @@ export class EtlDesignerView {
     }
 
     private _getHtml(project: EtlProject): string {
+        const styleUri = this._assetUri('etlDiagram.css');
+        const scriptUri = this._assetUri('etlDiagram.js');
         return generateEtlDesignerHtml({
             project,
-            nonce: this._getNonce()
+            nonce: this._getNonce(),
+            styleUri,
+            scriptUri,
+            cspSource: this._panel.webview.cspSource || "'self'",
         });
+    }
+
+    private _assetUri(fileName: string): string {
+        const uriApi = vscode.Uri as typeof vscode.Uri & { joinPath?: (base: vscode.Uri, ...pathSegments: string[]) => vscode.Uri };
+        const webview = this._panel.webview as vscode.Webview & { asWebviewUri?: (resource: vscode.Uri) => vscode.Uri };
+        if (!uriApi.joinPath || !webview.asWebviewUri) {
+            return `./dist/media/${fileName}`;
+        }
+        return webview.asWebviewUri(uriApi.joinPath(this._context.extensionUri, 'dist', 'media', fileName)).toString();
     }
 
     private _getNonce(): string {

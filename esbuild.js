@@ -6,6 +6,18 @@ const fs = require('fs');
 const minify = process.argv.includes('--minify');
 
 async function main() {
+  // The ERD entrypoint was renamed when the React Flow renderer replaced the
+  // DOM/SVG implementation. Remove only its generated leftovers so an
+  // incremental build cannot package an obsolete renderer.
+  for (const staleAsset of [
+    'dist/media/erdView.js',
+    'dist/media/erdView.js.map',
+    'dist/media/erdView.css',
+    'dist/media/erdView.css.map',
+  ]) {
+    fs.rmSync(staleAsset, { force: true });
+  }
+
   // These libraries are loaded as globals by several webviews. Build them from
   // their published ESM sources instead of shipping upstream production/minified
   // UMD files, so Marketplace artifacts stay readable and source-mapped.
@@ -63,9 +75,13 @@ async function main() {
     './media/sessionMonitor.ts',
     './media/securityPanel.ts',
     './media/importWizard.ts',
+    './media/migrationWizard.ts',
+    './media/fileConnectionPanel.ts',
     './media/visualQueryBuilder.ts',
     './media/tableDesigner.ts',
     './media/explainPlanGraph.ts',
+    './media/erdDiagram.tsx',
+    './media/etlDiagram.tsx',
     './media/testDataGenerator.ts'
   ].filter(f => fs.existsSync(f));
 
@@ -78,6 +94,8 @@ async function main() {
     sourcesContent: true,
     platform: 'browser',
     outdir: 'dist/media',
+    jsx: 'automatic',
+    lineLimit: 120,
     logLevel: 'info',
   });
 
