@@ -4,6 +4,9 @@
  */
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { ConnectionManager, ConnectionDetails } from '../core/connectionManager';
 import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
 import { MockNzConnection } from '../__mocks__/mockNzConnection';
@@ -423,6 +426,29 @@ describe('ConnectionManager', () => {
             expect(await manager.getEffectiveDatabase('file:///sqlite.sql')).toBe('main');
         });
 
+        it('should not apply a SQLite file path as a catalog override for a persistent document connection', async () => {
+            const databasePath = path.join(os.tmpdir(), `migration-catalog-${Date.now()}.db`);
+            const fileConnection = { ...sqliteConnection, database: databasePath };
+            const documentUri = 'file:///sqlite-file.sql';
+
+            try {
+                await manager.saveConnection(fileConnection);
+                manager.setDocumentConnection(documentUri, fileConnection.name);
+                await manager.setDocumentDatabase(documentUri, databasePath);
+
+                const connection = await manager.getDocumentPersistentConnection(documentUri);
+                const reader = await connection.createCommand('SELECT CURRENT_CATALOG').executeReader();
+                try {
+                    expect(await reader.read()).toBe(true);
+                    expect(reader.getValue(0)).toBe('main');
+                } finally {
+                    await reader.close();
+                }
+            } finally {
+                fs.rmSync(databasePath, { force: true });
+            }
+        });
+
         it('should resolve duckdb current database to the inferred default catalog', async () => {
             await manager.saveConnection(duckdbConnection);
 
@@ -637,6 +663,32 @@ describe('ConnectionManager', () => {
             manager.setDocumentConnection(docUri, 'TestConnection');
 
             expect(manager.getEffectiveSchemaSync(docUri, 'testdb')).toBe('ADMIN');
+        });
+
+        it('should resolve Oracle currentSchema before falling back to the login user', async () => {
+            await manager.saveConnection({
+                ...oracleConnection,
+                options: { currentSchema: 'APP_OWNER' },
+            });
+            manager.setDocumentConnection('file:///oracle-schema.sql', oracleConnection.name);
+
+            expect(manager.getEffectiveSchemaSync('file:///oracle-schema.sql', 'ORCL')).toBe('APP_OWNER');
+
+            await manager.saveConnection({
+                ...oracleConnection,
+                options: undefined,
+            });
+            expect(manager.getEffectiveSchemaSync('file:///oracle-schema.sql', 'ORCL')).toBe('system');
+        });
+
+        it('prefers the cached Oracle session schema after ALTER SESSION', async () => {
+            await manager.saveConnection(oracleConnection);
+            manager.setDocumentConnection('file:///oracle-session.sql', oracleConnection.name);
+            manager.setMetadataCache({
+                getCurrentSchema: jest.fn(() => 'SESSION_OWNER'),
+            } as never);
+
+            expect(manager.getEffectiveSchemaSync('file:///oracle-session.sql', 'ORCL')).toBe('SESSION_OWNER');
         });
 
         it('should prefer connection schema in effective schema sync', async () => {
@@ -1018,6 +1070,26 @@ describe('ConnectionManager', () => {
             await new Promise(resolve => setTimeout(resolve, 10));
 
             expect((await newManager.getConnection('WarehouseDb2'))?.dbType).toBe('db2');
+
+            await newManager.dispose();
+        });
+
+        it('should infer netezza from the legacy default port when dbType is missing', async () => {
+            globalState.set('justybase.connectionsCache', {
+                LegacyNetezza: {
+                    name: 'LegacyNetezza',
+                    host: 'netezza.example.test',
+                    port: 5480,
+                    database: 'warehouse',
+                    user: 'admin'
+                }
+            });
+            globalState.set('justybase.activeConnection', 'LegacyNetezza');
+
+            const newManager = new ConnectionManager(mockContext);
+
+            expect(newManager.getConnectionDatabaseKind('LegacyNetezza')).toBe('netezza');
+            expect(newManager.supportsCapability('supportsSessionMonitor')).toBe(true);
 
             await newManager.dispose();
         });

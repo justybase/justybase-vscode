@@ -29,6 +29,10 @@ import {
   QUERY_HISTORY_INBOUND_TYPES,
   QUERY_HISTORY_OUTBOUND_TYPES,
 } from "../contracts/webviews/queryHistoryContracts";
+import {
+  FILE_CONNECTION_PANEL_INBOUND_TYPES,
+  FILE_CONNECTION_PANEL_OUTBOUND_TYPES,
+} from "../contracts/webviews/fileConnectionPanelContracts";
 
 type MessagePropertyName = "command" | "type";
 
@@ -145,6 +149,14 @@ const FILE_SEARCH_PROVIDER_FILE = "src/providers/fileSearchProvider.ts";
 const FILE_SEARCH_GENERATOR_FILE = "src/views/fileSearchHtmlGenerator.ts";
 
 const LOGIN_PANEL_FILE = "src/views/loginPanel.ts";
+
+const FILE_CONNECTION_PANEL_FRONTEND_FILES = [
+  "media/fileConnectionPanel/panel.ts",
+];
+
+const FILE_CONNECTION_PANEL_HOST_CONTRACTS_FILE = "media/fileConnectionPanel/hostContracts.ts";
+
+const FILE_CONNECTION_PANEL_VIEW_FILE = "src/views/fileConnectionPanelView.ts";
 
 function readWorkspaceFile(relativePath: string): string {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
@@ -909,6 +921,63 @@ describe("Webview contract sync", () => {
     expect(providerSource).toContain("../contracts/webviews/fileSearchContracts");
   });
 
+  it("keeps File Connection Panel message types aligned across the host and webview", () => {
+    const hostHandledTypes = extractCaseLabels(
+      readWorkspaceFile(FILE_CONNECTION_PANEL_VIEW_FILE),
+    );
+    const hostSentTypes = extractObjectPropertyValues(
+      readWorkspaceFile(FILE_CONNECTION_PANEL_VIEW_FILE),
+      "type",
+    );
+    const frontendPostedTypes = extractFromFiles(
+      FILE_CONNECTION_PANEL_FRONTEND_FILES,
+      (source) => extractPostedPropertyValues(source, "type"),
+    );
+    const frontendHandledTypes = extractFromFiles(
+      FILE_CONNECTION_PANEL_FRONTEND_FILES,
+      extractCaseLabels,
+    );
+
+    expectSetEqual(hostHandledTypes, FILE_CONNECTION_PANEL_INBOUND_TYPES);
+    expectSubset(frontendPostedTypes, FILE_CONNECTION_PANEL_INBOUND_TYPES);
+    expectSetEqual(hostSentTypes, FILE_CONNECTION_PANEL_OUTBOUND_TYPES);
+    expectSetEqual(frontendHandledTypes, FILE_CONNECTION_PANEL_OUTBOUND_TYPES);
+  });
+
+  it("keeps File Connection Panel frontend and host bound to the shared contracts", () => {
+    const frontendSources = FILE_CONNECTION_PANEL_FRONTEND_FILES.map(readWorkspaceFile);
+
+    frontendSources.forEach((source) => {
+      expect(source).toContain("FileConnectionPanelHostToWebviewMessage");
+      expect(source).toContain("FileConnectionPanelWebviewToHostMessage");
+      expect(source).toContain("./hostContracts.js");
+    });
+    expect(readWorkspaceFile(FILE_CONNECTION_PANEL_VIEW_FILE)).toContain(
+      "../contracts/webviews/fileConnectionPanelContracts",
+    );
+  });
+
+  it("keeps File Connection Panel webview hostContracts aligned with shared contracts", () => {
+    const hostContractsSource = readWorkspaceFile(
+      FILE_CONNECTION_PANEL_HOST_CONTRACTS_FILE,
+    );
+
+    expectSetEqual(
+      extractUnionMessageTypeLiterals(
+        hostContractsSource,
+        "FileConnectionPanelWebviewToHostMessage",
+      ),
+      FILE_CONNECTION_PANEL_INBOUND_TYPES,
+    );
+    expectSetEqual(
+      extractUnionMessageTypeLiterals(
+        hostContractsSource,
+        "FileConnectionPanelHostToWebviewMessage",
+      ),
+      FILE_CONNECTION_PANEL_OUTBOUND_TYPES,
+    );
+  });
+
   it("avoids shadowing window.postMessage in top-level webview frontends", () => {
     const migratedProtocolFiles = [
       "media/editDataPanel/protocol.ts",
@@ -919,6 +988,7 @@ describe("Webview contract sync", () => {
       "media/tableDesigner/protocol.ts",
       "media/explainPlanGraph/protocol.ts",
       "media/testDataGenerator/protocol.ts",
+      "media/fileConnectionPanel/protocol.ts",
     ];
     const legacyFrontendFiles: string[] = [];
 

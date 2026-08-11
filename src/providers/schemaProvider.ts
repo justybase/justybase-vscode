@@ -3,7 +3,7 @@ import * as path from 'path';
 import { DatabaseKind } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
-import { normalizeDatabaseKind } from '../contracts/database';
+import { normalizeDatabaseKind, tryNormalizeDatabaseKind } from '../contracts/database';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
 import type { DocumentParseSession } from '../sqlParser/documentParseSession';
@@ -33,6 +33,7 @@ import {
     columnVisibleInSchemaFilter,
     tableMatchesSchemaFilter,
 } from './schemaFilterUtils';
+import { buildFileConnectionDetails, detectFileDataFormat, getFilePaths, normalizeFilePath, saveFileConnectionDetails } from '../services/fileConnectionProfileService';
 
 /**
  * Default timeout for schema queries (60 seconds)
@@ -1063,6 +1064,27 @@ export class SchemaProvider
                 }
             })
             .filter((u) => u !== null) as vscode.Uri[];
+
+        // Dropping files onto a File SQL connection attaches them to the profile.
+        if (target && target.contextValue === 'serverInstance' && target.connectionName) {
+            const targetDetails = this.connectionManager.getConnectionMetadata(target.connectionName);
+            if (tryNormalizeDatabaseKind(targetDetails?.dbType) === 'file') {
+                const droppedPaths = uris
+                    .filter((uri) => uri.scheme === 'file')
+                    .map((uri) => uri.fsPath);
+                const filePaths = droppedPaths.filter(
+                    (filePath) => detectFileDataFormat(filePath) !== undefined,
+                );
+                if (filePaths.length > 0) {
+                    await attachFilesToFileConnection(this.connectionManager, target.connectionName, filePaths);
+                } else if (droppedPaths.length > 0) {
+                    vscode.window.showWarningMessage(
+                        'No supported data files were dropped. Supported formats: xlsx, csv, tsv, parquet, avro.',
+                    );
+                }
+                return;
+            }
+        }
 
         for (const uri of uris) {
             if (token.isCancellationRequested) return;
@@ -2715,4 +2737,25 @@ export class SchemaItem extends vscode.TreeItem {
                 return new vscode.ThemeIcon('file');
         }
     }
+}
+
+async function attachFilesToFileConnection(
+    connectionManager: ConnectionManager,
+    connectionName: string,
+    filePaths: readonly string[],
+): Promise<void> {
+    const current = await connectionManager.getConnection(connectionName);
+    if (!current) {
+        return;
+    }
+    const merged = Array.from(
+        new Set([...getFilePaths(current), ...filePaths.map(normalizeFilePath)]),
+    );
+    const { details, editableCleared } = buildFileConnectionDetails(connectionName, merged, current);
+    await saveFileConnectionDetails(connectionManager, details);
+    const addedCount = merged.length - getFilePaths(current).length;
+    const message = editableCleared
+        ? `Added ${addedCount} file(s) to '${connectionName}'. The connection is now a read-only multi-file workspace; the editable copy was disabled.`
+        : `Added ${addedCount} file(s) to '${connectionName}'.`;
+    await vscode.window.showInformationMessage(message);
 }
