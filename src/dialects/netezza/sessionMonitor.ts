@@ -204,7 +204,7 @@ async function fetchStorageForDatabase(
 }
 
 export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-  async getSessions(context, mgr, database) {
+  async getSessions(context, mgr, database, connectionName) {
     const connectionManager = mgr as ConnectionManager;
     const scopedDatabase = normalizeDatabaseFilter(database);
     const whereClause = scopedDatabase
@@ -222,7 +222,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
       sql,
       true,
       connectionManager,
-      undefined,
+      connectionName,
       undefined,
       undefined,
       undefined,
@@ -235,7 +235,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
     return queryResultToRows<Record<string, unknown>>(result);
   },
 
-  async getQueries(context, mgr, database) {
+  async getQueries(context, mgr, database, connectionName) {
     const connectionManager = mgr as ConnectionManager;
     const scopedDatabase = normalizeDatabaseFilter(database);
     const whereClause = scopedDatabase
@@ -260,7 +260,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
       sql,
       true,
       connectionManager,
-      undefined,
+      connectionName,
       undefined,
       undefined,
       undefined,
@@ -273,18 +273,18 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
     return queryResultToRows<Record<string, unknown>>(result);
   },
 
-  async getStorage(context, mgr) {
+  async getStorage(context, mgr, connectionName) {
     const connectionManager = mgr as ConnectionManager;
-    const connectionName = connectionManager.getActiveConnectionName();
-    if (!connectionName) return [];
+    const targetConnectionName = connectionName ?? connectionManager.getActiveConnectionName();
+    if (!targetConnectionName) return [];
 
-    const details = await connectionManager.getConnection(connectionName);
+    const details = await connectionManager.getConnection(targetConnectionName);
     if (!details) return [];
 
     const databases = await fetchStorageDatabases(
       context,
       connectionManager,
-      connectionName,
+      targetConnectionName,
       details.database,
     );
     const tasks = databases.map((db) => async () => {
@@ -317,7 +317,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
     return storageRows;
   },
 
-  async getResources(context, mgr) {
+  async getResources(context, mgr, connectionName) {
     const connectionManager = mgr as ConnectionManager;
     let graData: unknown[] = [];
     let sysUtil: unknown[] = [];
@@ -329,7 +329,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         `SELECT * FROM _V_SCHED_GRA_EXT LIMIT 50`,
         true,
         connectionManager,
-        undefined,
+        connectionName,
         undefined,
         undefined,
         undefined,
@@ -349,7 +349,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         `SELECT * FROM _V_SYSTEM_UTIL ORDER BY 1 DESC LIMIT 50`,
         true,
         connectionManager,
-        undefined,
+        connectionName,
         undefined,
         undefined,
         undefined,
@@ -376,7 +376,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
                 FROM _V_SYSTEM_UTIL`,
         true,
         connectionManager,
-        undefined,
+        connectionName,
       );
       if (summaryResult && summaryResult.data) {
         const parsed =
@@ -390,10 +390,10 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
     return { gra: graData, systemUtil: sysUtil, sysUtilSummary };
   },
 
-  async killSession(context, mgr, sessionId) {
+  async killSession(context, mgr, sessionId, connectionName) {
     validateSessionId(sessionId);
     const connectionManager = mgr as ConnectionManager;
     const sql = `DROP SESSION ${sessionId}`;
-    await runQueryRaw(context, sql, true, connectionManager, undefined);
+    await runQueryRaw(context, sql, true, connectionManager, connectionName);
   },
 };

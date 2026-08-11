@@ -28,6 +28,7 @@ import { mysqlSessionMonitorProvider } from '../../extensions/mysql/src/mysqlSes
 import { mysqlDialect } from '../../extensions/mysql/src/mysqlDialect';
 import { oracleSessionMonitorProvider } from '../../extensions/oracle/src/oracleSessionMonitorProvider';
 import { oracleDialect } from '../../extensions/oracle/src/oracleDialect';
+import { netezzaSessionMonitorProvider } from '../dialects/netezza/sessionMonitor';
 
 const mockedRunQueryRaw = runQueryRaw as jest.MockedFunction<typeof runQueryRaw>;
 
@@ -83,6 +84,39 @@ describe('partial dialect session monitor wiring', () => {
 
         expect(mysqlDialect.capabilities.supportsSessionMonitor).toBe(true);
         expect(mysqlDialect.advancedFeatures?.sessionMonitor).toBe(mysqlSessionMonitorProvider);
+    });
+});
+
+describe('netezzaSessionMonitorProvider', () => {
+    const context = createMockContext();
+    const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('passes the explicitly selected connection to session queries', async () => {
+        mockRows([{ ID: 7, DBNAME: 'JUST_DATA' }]);
+
+        await netezzaSessionMonitorProvider.getSessions(
+            context,
+            connectionManager,
+            'JUST_DATA',
+            'NetezzaWarehouse',
+        );
+
+        expect(mockedRunQueryRaw).toHaveBeenCalledWith(
+            context,
+            expect.stringContaining('FROM _V_SESSION'),
+            true,
+            connectionManager,
+            'NetezzaWarehouse',
+            undefined,
+            undefined,
+            undefined,
+            1000,
+            false,
+        );
     });
 });
 

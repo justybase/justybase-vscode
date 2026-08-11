@@ -52,13 +52,14 @@ export async function runSessionMonitorQuery<T extends Record<string, unknown>>(
   connectionManager: ConnectionManager,
   sql: string,
   rowLimit = 1000,
+  connectionName?: string,
 ): Promise<T[]> {
   const result = await runQueryRaw(
     context as ExtensionContext,
     sql,
     true,
     connectionManager,
-    undefined,
+    connectionName,
     undefined,
     undefined,
     undefined,
@@ -75,13 +76,14 @@ export async function executeSessionMonitorStatement(
   context: unknown,
   connectionManager: ConnectionManager,
   sql: string,
+  connectionName?: string,
 ): Promise<void> {
   await runQueryRaw(
     context as ExtensionContext,
     sql,
     true,
     connectionManager,
-    undefined,
+    connectionName,
     undefined,
     undefined,
     undefined,
