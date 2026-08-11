@@ -2,7 +2,7 @@
     "name": "justybaselite-snowflake",
     "displayName": "JustyBase SQL Editor (Snowflake)",
     "description": "Optional Snowflake companion for JustyBase SQL Editor (Netezza)",
-    "version": "3.16.24",
+    "version": "3.16.25",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
