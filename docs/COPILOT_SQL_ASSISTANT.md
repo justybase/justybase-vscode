@@ -420,7 +420,7 @@ If output path is not provided, the tool suggests Desktop as a user-friendly des
 
 ### 1. **Fix SQL with Context** 
 
-![Fix SQL Button](screenshots/ai_fix_errors_button.png)
+![Fix SQL Button](screenshots/sql-validation-and-copilot.png)
 
 Right-click on SQL → `Copilot: Fix SQL with Context`
 
@@ -468,7 +468,7 @@ Ask any question about your SQL with full context. Examples:
 
 ### 5. **Generate SQL from Natural Language** ⭐ NEW
 
-![Natural Language Generation](screenshots/natural_language_sql_creator.png)
+![Copilot-assisted SQL generation and refinement](screenshots/copilot-chat.png)
 
 Right-click in SQL editor → `Copilot: Generate SQL from Description`
 

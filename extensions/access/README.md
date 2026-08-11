@@ -1,6 +1,8 @@
 # JustyBase SQL Editor (Microsoft Access)
 
-Optional Microsoft Access support for JustyBase SQL Editor (Netezza). It adds a shared connection-panel entry for local `.mdb` and `.accdb` files and lets you query and edit them with SQL.
+Microsoft Access support for JustyBase SQL Editor. It lets you connect to local `.mdb` and `.accdb` files and query or edit them with SQL. The base JustyBase SQL Editor extension is installed automatically as a technical dependency; Netezza is not required, and you do not need to install or use it.
+
+The icon’s red Access-inspired mark and database cylinder are a small visual cue for the bridge between familiar desktop database files and SQL work in VS Code.
 
 ## Why use Access support?
 
@@ -8,16 +10,16 @@ Open a legacy Access database directly in VS Code, browse its tables in the fami
 
 ## Requirements
 
-- Install the core extension first: `JustyBase SQL Editor (Netezza)`
+- The base extension is installed automatically as a technical dependency; no separate Netezza installation is required.
 - VS Code Desktop
 - Java 11 or newer available as `java` on `PATH`, through `JAVA_HOME`, or configured with `justybase.access.javaPath`
 
-No ODBC driver is required. The extension ships a prebuilt Java bridge based on [UCanAccess](https://ucanaccess.sourceforge.net/) and launches it locally when an Access connection is opened.
+No ODBC driver is required. The extension ships a prebuilt Java bridge based on [UCanAccess](https://github.com/spannm/ucanaccess) and launches it locally when an Access connection is opened.
 
 ## How to connect
 
 1. Install `JustyBase SQL Editor (Microsoft Access)`.
-2. Open **Connect to Database** from the JustyBase/Netezza view.
+2. Open **Connect to Database** from the JustyBase view.
 3. Choose **Microsoft Access**, select an `.mdb` or `.accdb` file, and optionally enter its database password.
 4. Leave **Open database as read-only** enabled unless the connection must write to the file. Existing profiles without this option are treated as read-only; only an explicit unchecked value enables `INSERT`, `UPDATE`, `DELETE`, or DDL.
 5. Save and connect, then open a SQL editor or use the schema browser.
