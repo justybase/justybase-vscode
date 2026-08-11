@@ -1,12 +1,12 @@
 # JustyBase SQL Editor (Db2)
 
-Optional Db2 LUW support for JustyBase SQL Editor (Netezza).
+Db2 LUW support for JustyBase SQL Editor. The base JustyBase SQL Editor extension is installed automatically as a technical dependency; Netezza is not required, and you do not need to install or use it.
 
 This extension adds the `Db2 LUW` dialect and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry. Core ships a dedicated Db2 SQL lexer/parser (strict), grammar, snippets, dialect-aware semantic tokens, and **DB2001–DB2008** quality rules; this VSIX supplies the native `ibm_db` driver and runtime providers.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase SQL Editor (Netezza)`
+- The base extension is installed automatically as a technical dependency; no separate Netezza installation is required.
 - VS Code Desktop
 - Network access to your Db2 LUW server
 
@@ -51,10 +51,9 @@ The extension **never** registers an ODBC driver or changes the Windows registry
 
 ## Installation Order
 
-1. Install `JustyBase SQL Editor (Netezza)`
-2. Install `JustyBase SQL Editor (Db2)`
+1. Install `JustyBase SQL Editor (Db2)`; VS Code installs the base extension automatically.
 
-`extensionDependencies` on the core extension allow Marketplace resolution.
+The extension dependency allows Marketplace resolution; no separate Netezza installation is required.
 
 ## Development
 
@@ -78,7 +77,7 @@ For Linux/macOS library path notes see `extensions/DB2_DEBUG_AND_INSTALL.md` whe
 npm run package:db2:full
 ```
 
-CI: `.github/workflows/db2-build.yml` (VSIX) and `.github/workflows/db2-live.yml` (opt-in live suite).
+CI: `.github/workflows/db2-build.yml` (VSIX).
 
 ## License
 

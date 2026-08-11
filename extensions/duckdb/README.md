@@ -1,12 +1,12 @@
 # JustyBase SQL Editor (DuckDB + Files)
 
-Optional DuckDB support for JustyBase SQL Editor (Netezza) — including **File SQL**: query Excel (`.xlsx`), CSV/TSV (`.csv`/`.tsv`), Parquet (`.parquet`) and Avro (`.avro`) files with SQL through an in-memory DuckDB.
+DuckDB support for JustyBase SQL Editor — including **File SQL**: query Excel (`.xlsx`), CSV/TSV (`.csv`/`.tsv`), Parquet (`.parquet`) and Avro (`.avro`) files with SQL through an in-memory DuckDB. The base JustyBase SQL Editor extension is installed automatically as a technical dependency; Netezza is not required, and you do not need to install or use it.
 
-This extension adds the `DuckDB` and `File` dialects to JustyBase SQL Editor (Netezza) and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+This extension adds the `DuckDB` and `File` dialects to JustyBase SQL Editor and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
 
 ## Requirements
 
-- Install the core extension first: `JustyBase SQL Editor (Netezza)`
+- The base extension is installed automatically as a technical dependency; no separate Netezza installation is required.
 - VS Code Desktop
 - DuckDB is an embedded database, so no separate server is required. The extension uses the `@duckdb/node-api` package to interact with DuckDB.
 
@@ -55,10 +55,9 @@ This extension adds the `DuckDB` and `File` dialects to JustyBase SQL Editor (Ne
 
 Marketplace or manual VSIX installation should end with both extensions installed:
 
-1. Install `JustyBase SQL Editor (Netezza)`
-2. Install `JustyBase SQL Editor (DuckDB)`
+1. Install `JustyBase SQL Editor (DuckDB)`; VS Code installs the base extension automatically.
 
-`JustyBase SQL Editor (DuckDB)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios.
+`JustyBase SQL Editor (DuckDB)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios. No separate Netezza installation is required.
 
 ## Development Notes
 

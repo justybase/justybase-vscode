@@ -117,13 +117,12 @@ The deep suite exercises:
 - live completion E2E (`LspCompletionEngine` + live Db2 metadata; keywords `FETCH FIRST` / `WITH UR`, no `GROOM`)
 - live SQL quality (`SqlQualityEngine` / DB2001–DB2008, strict GROOM/`LIMIT`/`DB..TABLE` rejection, SQL004 unknown column + SQL025 type mismatch against live column metadata)
 
-Local `npm run test:db2:integration` **requires** `DB2_LIVE_TEST_*` (fails if missing). GitHub Actions soft-skips when secrets are absent — do not set `DB2_LIVE_TEST_REQUIRED` on CI.
+Local `npm run test:db2:integration` **requires** `DB2_LIVE_TEST_*` (fails if missing). Live runs are not wired into GitHub Actions — run locally against a Db2 host.
 - explain JSON parse + tuning advisor (soft-skip if explain tables missing)
 - RUNSTATS maintenance (soft-skip on privilege errors)
 - session-monitor storage provider
 
 Db2 does not mirror Netezza distribution/skew UI. See [docs/db2.md](db2.md).
-CI opt-in: `.github/workflows/db2-live.yml`.
 
 ## Snowflake Checklist
 

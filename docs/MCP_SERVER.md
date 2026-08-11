@@ -5,8 +5,8 @@ introspection and SQL tooling to AI agents:
 
 - **Copilot Chat in VS Code** (stdio mode) — registered via
   `vscode.lm.registerMcpServerDefinitionProvider` (`contributes.mcpServerDefinitionProviders`).
-- **External MCP clients on the local machine** (HTTP mode, `127.0.0.1`) — Cursor, Claude Desktop and
-  other clients connect to `http://127.0.0.1:37210` while VS Code is open.
+- **External MCP clients on the local machine** (HTTP mode, `127.0.0.1`) — GitHub Copilot CLI, Claude Code,
+  Codex CLI, Cursor, Claude Desktop and other clients connect to `http://127.0.0.1:37210` while VS Code is open.
 
 All MCP configuration lives in the custom **JustyBase Settings → MCP Server** section: connection selection,
 on/off switches for both modes, the HTTP port, live status, tools and the OpenCode configuration snippet.
@@ -20,8 +20,8 @@ database object, inspect its columns and DDL, search the catalog, validate SQL l
 Choose the integration that matches your workflow:
 
 - **VS Code Copilot Chat** — use the tools directly in agent mode inside VS Code.
-- **External MCP clients** — enable the local HTTP server and connect tools such as Cursor, Claude Desktop,
-  or OpenCode while VS Code is running.
+- **External MCP clients** — enable the local HTTP server and connect tools such as GitHub Copilot CLI, Claude Code,
+  Codex CLI, Cursor, Claude Desktop, or OpenCode while VS Code is running.
 
 The selected MCP connection is explicit and independent of the active SQL editor tab. This prevents an agent
 from silently switching databases when you change tabs.
@@ -57,11 +57,17 @@ Every tool is registered with the `readOnlyHint` MCP annotation. The server:
 | `get_schemas` | Optional `database`; uses the active database, or `_V_USER` when none is available. |
 | `get_tables` | Optional `database` and `schema`; returns up to 200 tables from `_V_TABLE`. |
 | `get_columns` | Required `tables` array. Accepts `TABLE`, `SCHEMA.TABLE`, `DATABASE.SCHEMA.TABLE` and `DATABASE..TABLE`; returns type and nullability metadata from `_V_RELATION_COLUMN`. |
-| `get_procedures` | Optional `database` and `schema`; lists non-builtin procedures from `_V_PROCEDURE`. |
+| `get_table_stats` | Required `tableName`; returns catalog-only row/storage, skew, distribution and organization metadata. It never scans the table. |
+| `get_comments` | Required `tableName`; optional `database`, `schema` and `includeColumns`; returns `DESCRIPTION` values from catalog views. |
+| `get_dependencies` | Required `object`; optional `database` and `objectType` (`TABLE`, `VIEW`, `PROCEDURE`); reports FK and view/procedure source references. |
+| `get_external_tables` | Optional `database`, `schema` and `pattern`; lists external-table metadata including `DATAOBJECT`, without reading external data. |
+| `get_table_constraints` | Required `tableName`; optional `database` and `schema`; returns `PRIMARY KEY`, `FOREIGN KEY` and `UNIQUE` metadata. |
+| `get_procedures` | Optional `database` and `schema`; lists visible procedures from `_V_PROCEDURE`. |
 | `get_views` | Optional `database` and `schema`; lists up to 200 non-system views from `_V_VIEW`. |
 | `search_schema` | Required `pattern`; optional `database` and `objectType`. `ALL` searches tables, views and procedures; use `COLUMNS` to search column names. Results are limited to 100. |
 | `get_ddl` | Required `objectName`; optional `objectType`, `database` and `schema`. Generates DDL through the database DDL provider and supports qualified Netezza names including `DATABASE..OBJECT`. |
 | `explain_sql` | Required single `SELECT` or `WITH ... SELECT` in `sql`; optional `verbose` and `database`. Returns the plan captured from driver NOTICE messages. |
+| `analyze_query_plan` | Same safe SQL input as `explain_sql`; returns parsed plan nodes, edges, hotspots, risk summary and recommendations. |
 | `validate_sql` | Required `sql`. Runs parser and linter validation without a database connection. |
 
 ## Using it in VS Code (Copilot Chat)
@@ -78,18 +84,63 @@ or lost access stop the server and require choosing another connection.
 ## Using it from other applications (HTTP mode)
 
 1. In *JustyBase Settings → MCP Server*, choose a saved Netezza connection, then enable "Local HTTP Server" and choose a port (default `37210`).
-2. In OpenCode, use its `mcp` configuration section and the Streamable HTTP `remote` transport:
+2. Add the server to the client of your choice. All examples below assume the default port:
 
-```json
-{
-  "mcp": {
-    "netezza-schema": {
-      "type": "remote",
-      "url": "http://127.0.0.1:37210"
+   **GitHub Copilot CLI** — add it from the terminal:
+
+   ```bash
+   copilot mcp add --transport http netezza-schema http://127.0.0.1:37210
+   ```
+
+   Alternatively, add this entry to `~/.copilot/mcp-config.json`:
+
+   ```json
+   {
+     "mcpServers": {
+       "netezza-schema": {
+         "type": "http",
+         "url": "http://127.0.0.1:37210",
+         "tools": ["*"]
+       }
+     }
+   }
+   ```
+
+   **Claude Code** — add it from the terminal:
+
+   ```bash
+   claude mcp add --transport http netezza-schema http://127.0.0.1:37210
+   ```
+
+   **Codex CLI** — add it from the terminal:
+
+   ```bash
+   codex mcp add netezza-schema --url http://127.0.0.1:37210
+   ```
+
+   The same server can be configured in `~/.codex/config.toml`:
+
+   ```toml
+   [mcp_servers.netezza-schema]
+   url = "http://127.0.0.1:37210"
+   enabled = true
+   ```
+
+   **OpenCode** — use its `mcp` configuration section and the Streamable HTTP `remote` transport:
+
+   ```json
+   {
+     "mcp": {
+       "netezza-schema": {
+         "type": "remote",
+         "url": "http://127.0.0.1:37210"
+       }
     }
-  }
-}
-```
+   }
+   ```
+
+   In each client, start a new session after adding the server and check its MCP server list/status if
+   the tools do not appear immediately.
 
 Requirements and limits:
 
@@ -120,3 +171,12 @@ JustyBase Settings → MCP Server ──► registerMcpServerDefinitionProvider 
 Shared read-only logic lives in `src/core/catalogIntrospection.ts` (no `vscode` imports), so it is
 usable both from the extension host and from the standalone server process. The server entry point is
 `src/mcp/mcpServerEntry.ts` (built to `dist/mcp/mcpServer.js` by `esbuild.js`).
+
+## Live verification
+
+Run `npm run test:mcp:live` with `NZ_DEV_PASSWORD` and optional `NZ_DEV_HOST`, `NZ_DEV_PORT`,
+`NZ_DEV_DATABASE` and `NZ_DEV_USER`. The suite performs a preflight, calls every tool through stdio and
+Streamable HTTP, compares catalog responses with independent `_V_*` oracle queries, checks invalid
+arguments and process shutdown, and writes a redacted summary to `/tmp/justybase-mcp-live-report.json`.
+Fixture DDL is disabled by default; enable it explicitly with `MCP_LIVE_ALLOW_FIXTURE_DDL=1` and, if
+needed, set `MCP_LIVE_FIXTURE_SCHEMA` to a schema where the test user may create temporary objects.

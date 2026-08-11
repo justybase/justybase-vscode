@@ -13,7 +13,7 @@ There are several ways to open the ETL Designer:
 
 ## Interface Overview
 
-![ETL Designer Interface](screenshots/etl_01.png)
+![ETL Designer Interface](screenshots/etl-designer.png)
 
 The ETL Designer interface consists of four main areas:
 

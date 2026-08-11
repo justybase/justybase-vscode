@@ -96,9 +96,9 @@ The benchmark includes an XLarge incremental-edit scenario and reports `validate
 ## Baseline Notes
 
 - Parser/context regression harness: `Benchmark/suggestBenchmark.test.ts`.
-- End-to-end LSP engine latency (completion, hover, inlay, diagnostics validator): `Benchmark/lspFeatureBenchmark.test.ts` → `Benchmark/lspFeature.results.md`.
+- End-to-end LSP engine latency (completion, hover, inlay, diagnostics validator): `Benchmark/lspFeatureBenchmark.test.ts` (results written locally to `Benchmark/lspFeature.results.md`, gitignored).
 - CI enforces Medium/Large budgets when `LSP_BENCHMARK_ENFORCE=1`; full-document XLarge diagnostics keep a separate tier, while the incremental XLarge edit scenario uses the standard diagnostics budget.
-- Raw benchmark artifacts are kept under `Benchmark/` for engineering reference.
+- Benchmark harness sources live under `Benchmark/`; generated timing artifacts (`*.results.md`) are never committed.
 
 ## Recommended Next Slice
 
