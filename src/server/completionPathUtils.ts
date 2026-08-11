@@ -12,6 +12,9 @@ export interface MetadataLookupOptions {
   netezzaDefaultSchemaForDatabase?: string;
 }
 
+/** File SQL runs all workspace views in DuckDB's in-memory main schema. */
+export const FILE_SQL_DEFAULT_SCHEMA = "main";
+
 export function usesDatabaseObjectTwoPartName(
   databaseKind?: DatabaseKind,
 ): boolean {
@@ -23,6 +26,10 @@ export function usesDatabaseObjectTwoPartName(
 
 export function supportsDoubleDotPath(databaseKind?: DatabaseKind): boolean {
   return getDatabaseDialectTraits(databaseKind).completion.supportsDoubleDotPath;
+}
+
+export function supportsThreePartPath(databaseKind?: DatabaseKind): boolean {
+  return getDatabaseDialectTraits(databaseKind).qualification.supportsThreePartName;
 }
 
 export function shouldTreatSingleDotPathAsSchema(
@@ -98,6 +105,14 @@ function resolveMetadataLookupTarget(
     return {
       database: undefined,
       schema: source.schema || effectiveSchema,
+      table: source.table,
+    };
+  }
+
+  if (databaseKind === "file") {
+    return {
+      database: source.db || effectiveDb,
+      schema: source.schema || effectiveSchema || FILE_SQL_DEFAULT_SCHEMA,
       table: source.table,
     };
   }

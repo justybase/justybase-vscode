@@ -1,5 +1,6 @@
 import { CstNode, type IToken } from "chevrotain";
 import { getOrderedReferenceTokens } from "../../providers/parsers/scope";
+import { getDatabaseDialectTraits } from "../../core/dialectTraits";
 import {
   getCstNodeTokenSpan,
   getTokenSpanPositionFromEndpoints,
@@ -427,6 +428,11 @@ export function tableName(
       )
     : { name: "" };
 
+  const qualifiedNameNode = ctx.qualifiedName?.[0];
+  if (qualifiedNameNode) {
+    addUnsupportedThreePartNameError(host, qualifiedNameNode);
+  }
+
   return {
     name: qualifiedName.name || "",
     schema: qualifiedName.schema,
@@ -435,6 +441,42 @@ export function tableName(
     isTempTable: false,
     columns: [],
   };
+}
+
+function addUnsupportedThreePartNameError(
+  host: SqlVisitorHost,
+  qualifiedNameNode: CstNode,
+): void {
+  const databaseKind = host.getValidationProfile().databaseKind;
+  if (
+    !databaseKind ||
+    getDatabaseDialectTraits(databaseKind).qualification.supportsThreePartName
+  ) {
+    return;
+  }
+
+  const identifiers =
+    (qualifiedNameNode.children?.identifier as CstNode[] | undefined) ?? [];
+  if (identifiers.length < 3) {
+    return;
+  }
+
+  const span = getCstNodeTokenSpan(qualifiedNameNode);
+  if (!span) {
+    return;
+  }
+
+  const suggestedFix = identifiers
+    .slice(1)
+    .map((identifier) => host.getCstText(identifier))
+    .join(".");
+  host.addErrorAtPosition(
+    `${databaseKind === "oracle" ? "Oracle" : "This dialect"} does not support DATABASE.SCHEMA.OBJECT qualification; use SCHEMA.OBJECT`,
+    span,
+    "error",
+    "SQL050",
+    suggestedFix,
+  );
 }
 
 export function qualifiedName(

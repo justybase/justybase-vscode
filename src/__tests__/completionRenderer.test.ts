@@ -7,6 +7,8 @@ import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { ScopedColumnCandidate } from "../server/completionTypes";
 import {
   filterMetadataItems,
+  filterOracleSchemaItems,
+  filterOracleSourceItems,
   toFunctionItems,
   toMetadataColumnItem,
   toScopedColumnItems,
@@ -207,6 +209,30 @@ describe("completionRenderer — documentation regression guard", () => {
         .toBe("departments");
       expect(items.find((item) => item.label === "Sales Orders")?.insertText)
         .toBe('"Sales Orders"');
+    });
+
+    it("ranks Oracle schemas before relation sources and gives synonyms a distinct kind", () => {
+      const schemas = filterOracleSchemaItems(
+        [{ name: "APP" }, { name: "HR" }],
+        "",
+        "HR",
+      );
+      const sources = filterOracleSourceItems([
+        { name: "EMPLOYEES_SYNONYM", objectType: "synonym" },
+        { name: "EMPLOYEES_MV", objectType: "materialized-view" },
+        { name: "EMPLOYEES", objectType: "table" },
+      ], "EMP");
+
+      expect(schemas.map((item) => item.sortText)).toEqual([
+        "0_000_HR",
+        "0_100_APP",
+      ]);
+      expect(sources.map((item) => item.sortText)).toEqual([
+        "2_000_EMPLOYEES",
+        "3_000_EMPLOYEES_MV",
+        "4_000_EMPLOYEES_SYNONYM",
+      ]);
+      expect(sources[2].kind).toBe(CompletionItemKind.Reference);
     });
   });
 

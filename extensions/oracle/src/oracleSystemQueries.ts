@@ -3,6 +3,7 @@ import type { DatabaseSourceSearchQueryOptions } from '@justybase/contracts';
 type OracleCatalogObjectType =
     | 'TABLE'
     | 'VIEW'
+    | 'MATERIALIZED VIEW'
     | 'PROCEDURE'
     | 'FUNCTION'
     | 'PACKAGE'
@@ -328,6 +329,100 @@ export function buildListTablesQuery(schema?: string): string {
 
 export function buildListViewsQuery(schema?: string): string {
     return buildTableLikeObjectQuery('VIEW', undefined, schema);
+}
+
+/**
+ * Objects which Oracle can resolve as a relation in FROM/JOIN. Procedures,
+ * functions, sequences and other catalog objects intentionally stay out of
+ * this list because they need a different SQL form.
+ */
+export function buildListSourceObjectsQuery(schema?: string): string {
+    const objectTypes = ["'TABLE'", "'VIEW'", "'MATERIALIZED VIEW'"].join(', ');
+    const ownerFilter = schema
+        ? buildEqualityFilter('O.OWNER', schema)
+        : '';
+    const synonymOwnerFilter = schema
+        ? buildEqualityFilter('S.OWNER', schema)
+        : `
+            AND (
+                UPPER(S.OWNER) = UPPER(SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'))
+                OR UPPER(S.OWNER) = 'PUBLIC'
+            )`;
+
+    return `
+        SELECT
+            O.OBJECT_NAME AS OBJNAME,
+            O.OBJECT_ID AS OBJID,
+            O.OBJECT_TYPE AS OBJTYPE,
+            O.OWNER AS SCHEMA,
+            COALESCE(C.COMMENTS, '') AS DESCRIPTION,
+            O.OWNER AS OWNER,
+            ${buildCurrentDatabaseExpression()} AS "DATABASE",
+            CAST(NULL AS VARCHAR2(128)) AS TARGET_SCHEMA,
+            CAST(NULL AS VARCHAR2(128)) AS TARGET_NAME,
+            CAST(NULL AS VARCHAR2(128)) AS DB_LINK
+        FROM ALL_OBJECTS O
+        LEFT JOIN ALL_TAB_COMMENTS C
+            ON C.OWNER = O.OWNER
+           AND C.TABLE_NAME = O.OBJECT_NAME
+        WHERE O.OBJECT_TYPE IN (${objectTypes})
+        ${ownerFilter}
+
+        UNION ALL
+
+        SELECT
+            S.SYNONYM_NAME AS OBJNAME,
+            CAST(NULL AS NUMBER) AS OBJID,
+            'SYNONYM' AS OBJTYPE,
+            S.OWNER AS SCHEMA,
+            '' AS DESCRIPTION,
+            S.OWNER AS OWNER,
+            ${buildCurrentDatabaseExpression()} AS "DATABASE",
+            S.TABLE_OWNER AS TARGET_SCHEMA,
+            S.TABLE_NAME AS TARGET_NAME,
+            S.DB_LINK AS DB_LINK
+        FROM ALL_SYNONYMS S
+        WHERE 1 = 1
+        ${synonymOwnerFilter}
+          AND (
+              S.DB_LINK IS NOT NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM ALL_OBJECTS T
+                  WHERE UPPER(T.OWNER) = UPPER(S.TABLE_OWNER)
+                    AND UPPER(T.OBJECT_NAME) = UPPER(S.TABLE_NAME)
+                    AND T.OBJECT_TYPE IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW', 'SYNONYM')
+              )
+          )
+        ORDER BY SCHEMA, OBJTYPE, OBJNAME
+    `;
+}
+
+export function buildSynonymTargetQuery(
+    _database: string,
+    synonymName: string,
+    schema?: string,
+): string {
+    const ownerFilter = schema
+        ? buildEqualityFilter('S.OWNER', schema)
+        : `
+            AND (
+                UPPER(S.OWNER) = UPPER(SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'))
+                OR UPPER(S.OWNER) = 'PUBLIC'
+            )`;
+    return `
+        SELECT
+            S.TABLE_OWNER AS TARGET_SCHEMA,
+            S.TABLE_NAME AS TARGET_NAME,
+            S.DB_LINK AS DB_LINK
+        FROM ALL_SYNONYMS S
+        WHERE UPPER(S.SYNONYM_NAME) = UPPER(${quoteLiteral(synonymName)})
+        ${ownerFilter}
+        ORDER BY CASE
+            WHEN UPPER(S.OWNER) = UPPER(SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')) THEN 0
+            ELSE 1
+        END
+    `;
 }
 
 export function buildListProceduresQuery(database?: string, schema?: string): string {
@@ -689,7 +784,7 @@ export function buildBatchObjectListQuery(schema?: string, objectTypes?: readonl
     const normalizedObjectTypes = (objectTypes ?? ORACLE_DEFAULT_OBJECT_TYPES)
         .map(type => type.trim().toUpperCase())
         .filter((type): type is OracleCatalogObjectType =>
-            ORACLE_DEFAULT_OBJECT_TYPES.includes(type as Exclude<OracleCatalogObjectType, 'INDEX'>)
+            (ORACLE_DEFAULT_OBJECT_TYPES as readonly string[]).includes(type)
             || type === 'INDEX'
         );
     const objectTypeList = (normalizedObjectTypes.length > 0 ? normalizedObjectTypes : ORACLE_DEFAULT_OBJECT_TYPES)

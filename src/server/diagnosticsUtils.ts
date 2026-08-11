@@ -6,6 +6,7 @@ import {
 } from "vscode-languageserver/node";
 import type { ValidationError } from "../sqlParser";
 import type { DatabaseKind } from "../contracts/database";
+import { getDatabaseDialectTraits } from "../core/dialectTraits";
 
 export interface TableReference {
   database?: string;
@@ -74,6 +75,9 @@ export function parseQualifiedReference(
       return { database: parts[0], table: parts[1] };
     }
     return { schema: parts[0], table: parts[1] };
+  }
+  if (!getDatabaseDialectTraits(databaseKind).qualification.supportsThreePartName) {
+    return undefined;
   }
   return { database: parts[0], schema: parts[1], table: parts[2] };
 }

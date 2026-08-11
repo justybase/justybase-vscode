@@ -419,6 +419,117 @@ export class MetadataProvider {
     }
 
     /**
+     * Get relation-like objects that can be used directly after FROM/JOIN.
+     * Oracle uses this for materialized views and synonyms in addition to
+     * regular tables and views.
+     */
+    async getSourceObjects(
+        connectionName: string | undefined,
+        dbName: string,
+        schemaName?: string,
+    ): Promise<vscode.CompletionItem[]> {
+        if (!connectionName) return [];
+
+        await this.connectionManager.ensureFullyLoaded();
+        await this.waitForConnectionMetadataReady(connectionName);
+
+        const metadataProvider = this.getMetadataProvider(connectionName);
+        const queryBuilder = metadataProvider.buildListSourceObjectsQuery;
+        if (!queryBuilder) {
+            return [
+                ...(await this.getTables(connectionName, dbName, schemaName)),
+                ...(await this.getViews(connectionName, dbName, schemaName)),
+            ];
+        }
+
+        const cacheKey = buildSchemaCacheKey(dbName, schemaName);
+        const statusBarMessage = schemaName
+            ? `Fetching source objects for ${dbName}.${schemaName}...`
+            : `Fetching source objects for ${dbName}...`;
+        const statusBarDisposable = vscode.window.setStatusBarMessage(statusBarMessage);
+
+        try {
+            const result = await runQueryRaw(
+                this.context,
+                queryBuilder.call(metadataProvider, dbName, schemaName),
+                true,
+                this.connectionManager,
+                connectionName,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                false,
+            );
+            if (!result) return [];
+
+            const results = queryResultToRows<{
+                OBJNAME: string;
+                OBJID?: number;
+                OBJTYPE?: string;
+                SCHEMA?: string;
+                DESCRIPTION?: string;
+                OWNER?: string;
+                TARGET_SCHEMA?: string;
+                TARGET_NAME?: string;
+                DB_LINK?: string;
+            }>(result);
+            const items: TableMetadata[] = results
+                .filter((row) => !!row.OBJNAME)
+                .map((row) => {
+                    const normalizedObjectType = row.OBJTYPE?.trim().toUpperCase() || 'TABLE';
+                    const isView = normalizedObjectType.includes('VIEW');
+                    const typeLabel = normalizedObjectType === 'MATERIALIZED VIEW'
+                        ? 'Materialized view'
+                        : normalizedObjectType === 'SYNONYM'
+                            ? row.OWNER?.toUpperCase() === 'PUBLIC' ? 'Public synonym' : 'Synonym'
+                            : isView ? 'View' : 'Table';
+                    const targetDetail = normalizedObjectType === 'SYNONYM' && row.TARGET_NAME
+                        ? ` → ${row.TARGET_SCHEMA ? `${row.TARGET_SCHEMA}.` : ''}${row.TARGET_NAME}${row.DB_LINK ? `@${row.DB_LINK}` : ''}`
+                        : '';
+
+                    return {
+                        OBJNAME: row.OBJNAME,
+                        TABLENAME: row.OBJNAME,
+                        OBJID: row.OBJID,
+                        SCHEMA: row.SCHEMA || schemaName,
+                        OWNER: row.OWNER,
+                        label: row.OBJNAME,
+                        kind: normalizedObjectType === 'SYNONYM'
+                            ? vscode.CompletionItemKind.Reference
+                            : isView
+                                ? vscode.CompletionItemKind.Interface
+                                : vscode.CompletionItemKind.Class,
+                        objType: normalizedObjectType,
+                        detail: `${typeLabel}${schemaName ? '' : row.SCHEMA ? ` (${row.SCHEMA})` : ''}${targetDetail}`,
+                        sortText: row.OBJNAME,
+                        DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
+                        TARGET_SCHEMA: row.TARGET_SCHEMA,
+                        TARGET_NAME: row.TARGET_NAME,
+                        DB_LINK: row.DB_LINK,
+                    };
+                });
+
+            this.metadataCache.setTables(
+                connectionName,
+                cacheKey,
+                items,
+                this.buildTableIdMapForCacheKey(dbName, schemaName, items),
+            );
+
+            return this.createTableCompletionItems(
+                items,
+                this.connectionManager.getConnectionDatabaseKind(connectionName),
+            );
+        } catch (e: unknown) {
+            logWithFallback('error', '[MetadataProvider] Error in getSourceObjects:', e);
+            return [];
+        } finally {
+            statusBarDisposable.dispose();
+        }
+    }
+
+    /**
      * Get procedures for a database/schema
      */
     async getProcedures(
@@ -543,9 +654,16 @@ export class MetadataProvider {
         connectionName: string | undefined,
         dbName: string | undefined,
         schemaName: string | undefined,
-        tableName: string
+        tableName: string,
+        options?: { allowPublicSynonym?: boolean },
     ): Promise<vscode.CompletionItem[]> {
-        const items = await this.getTableColumnsMetadata(connectionName, dbName, schemaName, tableName);
+        const items = await this.getTableColumnsMetadata(
+            connectionName,
+            dbName,
+            schemaName,
+            tableName,
+            options,
+        );
         return items.map(item => this.createColumnCompletionItem(item));
     }
 
@@ -557,13 +675,16 @@ export class MetadataProvider {
         dbName: string | undefined,
         schemaName: string | undefined,
         tableName: string,
-        visited = new Set<string>()
+        options?: { allowPublicSynonym?: boolean },
+        visited = new Set<string>(),
     ): Promise<ColumnMetadata[]> {
         if (!connectionName) return [];
 
         const connectionKind = this.getConnectionDatabaseKind(connectionName);
         const normalizedDbName = dbName ? stripIdentifierQuoting(dbName, connectionKind) : dbName;
-        const normalizedSchemaName = schemaName ? stripIdentifierQuoting(schemaName, connectionKind) : schemaName;
+        const normalizedSchemaName = connectionKind === 'file'
+            ? stripIdentifierQuoting(schemaName || 'main', connectionKind)
+            : schemaName ? stripIdentifierQuoting(schemaName, connectionKind) : schemaName;
         const normalizedTableName = stripIdentifierQuoting(tableName, connectionKind);
         const recursionKey = `${(normalizedDbName || 'CURRENT').toUpperCase()}|${(normalizedSchemaName || '').toUpperCase()}|${normalizedTableName.toUpperCase()}`;
 
@@ -628,7 +749,7 @@ export class MetadataProvider {
                 || (diskCacheKey !== cacheKey
                     ? this.metadataCache.getColumns(connectionName, diskCacheKey)
                     : undefined);
-            if (cached) {
+            if (cached && (connectionKind !== 'file' || cached.length > 0)) {
                 if (diskCacheKey !== cacheKey) {
                     this.metadataCache.setColumns(connectionName, cacheKey, cached);
                 }
@@ -674,14 +795,48 @@ export class MetadataProvider {
                 if (synonymTarget) {
                     const synonymColumns = await this.getTableColumnsMetadata(
                         connectionName,
-                        synonymTarget.database,
-                        synonymTarget.schema,
-                        synonymTarget.table,
-                        visited
+                            synonymTarget.database,
+                            synonymTarget.schema,
+                            synonymTarget.table,
+                            undefined,
+                            visited
                     );
                     if (synonymColumns.length > 0) {
                         this.metadataCache.setColumns(connectionName, cacheKey, synonymColumns);
                         return synonymColumns;
+                    }
+                }
+            }
+
+            if (connectionKind === 'oracle' && normalizedDbName) {
+                const cachedObject = this.metadataCache.findObjectWithType(
+                    connectionName,
+                    normalizedDbName,
+                    normalizedSchemaName,
+                    normalizedTableName,
+                );
+                const cachedType = cachedObject?.objType?.toUpperCase();
+                if (!cachedType || cachedType === 'SYNONYM') {
+                    const synonymTarget = await this.resolveOracleSynonymReference(
+                        connectionName,
+                        normalizedDbName,
+                        normalizedSchemaName,
+                        normalizedTableName,
+                        options?.allowPublicSynonym === true,
+                    );
+                    if (synonymTarget) {
+                        const synonymColumns = await this.getTableColumnsMetadata(
+                            connectionName,
+                            synonymTarget.database,
+                            synonymTarget.schema,
+                            synonymTarget.table,
+                            undefined,
+                            visited,
+                        );
+                        if (synonymColumns.length > 0) {
+                            this.metadataCache.setColumns(connectionName, cacheKey, synonymColumns);
+                            return synonymColumns;
+                        }
                     }
                 }
             }
@@ -801,7 +956,12 @@ export class MetadataProvider {
                 }));
             }
 
-            this.metadataCache.setColumns(connectionName, cacheKey, items);
+            // File SQL views are created when the in-memory connection starts.
+            // Do not persist an empty result from a race with that setup: the
+            // next completion request must be able to retry the same view.
+            if (items.length > 0 || connectionKind !== 'file') {
+                this.metadataCache.setColumns(connectionName, cacheKey, items);
+            }
             if (shouldMirrorSystemCatalog && metadataDbName) {
                 this.metadataCache.setColumns(
                     connectionName,
@@ -925,13 +1085,18 @@ export class MetadataProvider {
         return items.map(item => {
             const label = typeof item.label === 'string' ? item.label : (item.label?.label || item.OBJNAME || item.TABLENAME || '?');
             const detailText = (item.detail || '').toUpperCase();
+            const objectType = (item.objType || '').toUpperCase();
             const isView =
-                (item.objType || '').toUpperCase() === 'VIEW'
+                objectType === 'VIEW'
+                || objectType === 'MATERIALIZED VIEW'
                 || detailText.startsWith('VIEW')
+                || detailText.startsWith('MATERIALIZED VIEW')
                 || (detailText.length === 0 && (item.kind === 18 || item.kind === vscode.CompletionItemKind.Interface));
             const ci = new vscode.CompletionItem(
                 label,
-                isView ? vscode.CompletionItemKind.Interface : vscode.CompletionItemKind.Class
+                objectType === 'SYNONYM'
+                    ? vscode.CompletionItemKind.Reference
+                    : isView ? vscode.CompletionItemKind.Interface : vscode.CompletionItemKind.Class
             );
             ci.insertText = formatIdentifierForSql(label, databaseKind);
             this.applySuggestDescription(ci, label, item.detail, item.DESCRIPTION);
@@ -1168,6 +1333,61 @@ export class MetadataProvider {
             cachedObject?.schema || schemaName,
             refObjName,
         );
+    }
+
+    private async resolveOracleSynonymReference(
+        connectionName: string,
+        dbName: string,
+        schemaName: string | undefined,
+        tableName: string,
+        allowPublicSynonym: boolean,
+    ): Promise<{ database: string; schema: string; table: string } | undefined> {
+        const provider = this.tryGetMetadataProvider(connectionName);
+        const queryBuilder = provider?.buildSynonymTargetQuery;
+        if (!queryBuilder) {
+            return undefined;
+        }
+
+        const query = queryBuilder(
+            dbName,
+            tableName,
+            allowPublicSynonym ? undefined : schemaName,
+        );
+        const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
+            runQueryRaw(
+                this.context,
+                query,
+                true,
+                this.connectionManager,
+                connectionName,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                false,
+            ),
+        );
+        if (!result) {
+            return undefined;
+        }
+
+        const rows = queryResultToRows<{
+            TARGET_SCHEMA?: string;
+            TARGET_NAME?: string;
+            DB_LINK?: string;
+        }>(result);
+        const target = rows.find(
+            (row) => row.TARGET_SCHEMA?.trim() && row.TARGET_NAME?.trim() && !row.DB_LINK?.trim(),
+        );
+        if (!target?.TARGET_SCHEMA || !target.TARGET_NAME) {
+            return undefined;
+        }
+
+        return {
+            database: dbName,
+            schema: target.TARGET_SCHEMA.trim(),
+            table: target.TARGET_NAME.trim(),
+        };
     }
 
     private buildTableIdMapForCacheKey(

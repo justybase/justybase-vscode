@@ -120,6 +120,12 @@ export interface CompletionMetadataProvider {
     database: string,
     schema?: string,
   ): Promise<MetadataObjectItem[]>;
+  /** Relation-like objects legal after FROM/JOIN (dialect-specific). */
+  getSourceObjects?(
+    documentUri: string,
+    database: string,
+    schema?: string,
+  ): Promise<MetadataObjectItem[]>;
   getProcedures(
     documentUri: string,
     database: string,
@@ -130,6 +136,7 @@ export interface CompletionMetadataProvider {
     database: string,
     table: string,
     schema?: string,
+    options?: { allowPublicSynonym?: boolean },
   ): Promise<MetadataColumnItem[]>;
   getNetezzaDefaultSchema?(
     documentUri: string,

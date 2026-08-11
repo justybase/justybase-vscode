@@ -13,6 +13,8 @@ export interface DelegatingMetadataProviderConfig {
     listSchemas: (database?: string) => string;
     listTables: (database: string, schema?: string) => string;
     listViews: (database: string, schema?: string) => string;
+    listSourceObjects?: (database: string, schema?: string) => string;
+    synonymTarget?: (database: string, synonymName: string, schema?: string) => string;
     listProcedures: (database: string, schema?: string) => string;
     objectType: (database: string, objectType: string) => string;
     typeGroups: (database: string) => string;
@@ -45,6 +47,20 @@ export function createDelegatingMetadataProvider(
         buildListViewsQuery(database: string, schema?: string): string {
             return config.listViews(database, schema);
         },
+        ...(config.listSourceObjects
+            ? {
+                buildListSourceObjectsQuery(database: string, schema?: string): string {
+                    return config.listSourceObjects!(database, schema);
+                },
+            }
+            : {}),
+        ...(config.synonymTarget
+            ? {
+                buildSynonymTargetQuery(database: string, synonymName: string, schema?: string): string {
+                    return config.synonymTarget!(database, synonymName, schema);
+                },
+            }
+            : {}),
         buildListProceduresQuery(database: string, schema?: string): string {
             return config.listProcedures(database, schema);
         },

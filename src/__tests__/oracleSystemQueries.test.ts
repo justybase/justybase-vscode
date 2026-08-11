@@ -11,6 +11,8 @@ import {
     buildListDatabasesQuery,
     buildListProceduresQuery,
     buildListSchemasQuery,
+    buildListSourceObjectsQuery,
+    buildSynonymTargetQuery,
     buildListTablesQuery,
     buildListViewsQuery,
     buildLookupColumnsQuery,
@@ -57,6 +59,28 @@ describe('oracleSystemQueries', () => {
         expect(viewsQuery).toContain("C.TABLE_TYPE = 'VIEW'");
         expect(viewsQuery).toContain("AND UPPER(O.OWNER) = UPPER('HR')");
         expect(viewsQuery).toContain("'VIEW' AS OBJTYPE");
+    });
+
+    it('builds FROM/JOIN source listings for tables, materialized views and legal synonyms', () => {
+        const currentSchemaQuery = compactSql(buildListSourceObjectsQuery());
+        const schemaQuery = compactSql(buildListSourceObjectsQuery('HR'));
+
+        expect(currentSchemaQuery).toContain("O.OBJECT_TYPE IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW')");
+        expect(currentSchemaQuery).toContain('FROM ALL_SYNONYMS S');
+        expect(currentSchemaQuery).toContain("UPPER(S.OWNER) = UPPER(SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'))");
+        expect(currentSchemaQuery).toContain("T.OBJECT_TYPE IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW', 'SYNONYM')");
+        expect(schemaQuery).toContain("AND UPPER(O.OWNER) = UPPER('HR')");
+        expect(schemaQuery).toContain("AND UPPER(S.OWNER) = UPPER('HR')");
+    });
+
+    it('builds synonym target lookup with current-schema precedence and database-link metadata', () => {
+        const query = compactSql(buildSynonymTargetQuery('ORCL', 'EMP_SYNONYM'));
+
+        expect(query).toContain('S.TABLE_OWNER AS TARGET_SCHEMA');
+        expect(query).toContain('S.TABLE_NAME AS TARGET_NAME');
+        expect(query).toContain('S.DB_LINK AS DB_LINK');
+        expect(query).toContain("UPPER(S.SYNONYM_NAME) = UPPER('EMP_SYNONYM')");
+        expect(query).toContain("UPPER(S.OWNER) = UPPER(SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'))");
     });
 
     it('builds Oracle routine queries with argument signatures and explicit database projection', () => {

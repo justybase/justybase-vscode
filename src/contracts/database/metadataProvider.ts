@@ -34,6 +34,13 @@ export interface DatabaseMetadataProvider {
     buildListSchemasQuery(database: string): string;
     buildListTablesQuery(database: string, schema?: string): string;
     buildListViewsQuery(database: string, schema?: string): string;
+    /**
+     * Builds the relation-like objects that are legal after FROM/JOIN.
+     * Dialects without a distinct source catalog can leave this undefined and
+     * use the regular table/view queries instead.
+     */
+    buildListSourceObjectsQuery?(database: string, schema?: string): string;
+    buildSynonymTargetQuery?(database: string, synonymName: string, schema?: string): string;
     buildListProceduresQuery(database: string, schema?: string): string;
     buildObjectTypeQuery(database: string, objectType: string): string;
     buildTypeGroupsQuery(database: string): string;

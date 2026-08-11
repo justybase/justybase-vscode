@@ -15,4 +15,15 @@ describe('netezzaMetadataProvider DDL synchronization', () => {
         expect(sql).toContain("UPPER(OBJNAME) = UPPER('T''1')");
         expect(sql).toContain("OBJTYPE IN ('TABLE', 'GLOBAL TEMP TABLE')");
     });
+
+    it('includes EXTERNAL TABLE in buildListTablesQuery so the lazy cache write keeps external tables', () => {
+        const scoped = netezzaMetadataProvider.buildListTablesQuery('JUST_DATA', 'ADMIN');
+        const unscoped = netezzaMetadataProvider.buildListTablesQuery('JUST_DATA');
+
+        for (const query of [scoped, unscoped]) {
+            expect(query).toContain("O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')");
+            expect(query).toContain('JUST_DATA.._V_OBJECT_DATA');
+        }
+        expect(scoped).toContain("UPPER(O.SCHEMA) = UPPER('ADMIN')");
+    });
 });

@@ -822,6 +822,32 @@ describeIfConfigured('oracle integration', () => {
 	});
 
 	describe('compatibility shims', () => {
+		it('exposes complete SELECT result metadata without consuming rows', async () => {
+			const reader = await connection.createCommand(`
+				SELECT
+					CAST(ID AS NUMBER(10,2)) AS N_DEC,
+					CAST(ID AS NUMBER) AS N_ANY,
+					CAST(CREATED_AT AS TIMESTAMP) AS TS,
+					CAST(${quoteIdentifier(searchColumnName)} AS VARCHAR2(20)) AS V20,
+					CAST(${quoteIdentifier(searchColumnName)} AS CHAR(8)) AS C8
+				FROM ${buildQualifiedName(schemaName, tableName)}
+				WHERE 1 = 0
+			`).executeReader();
+			try {
+				expect(reader.fieldCount).toBe(5);
+				expect(Array.from({ length: reader.fieldCount }, (_value, index) => reader.getTypeName(index))).toEqual([
+					'NUMBER(10,2)',
+					'NUMBER',
+					'TIMESTAMP(6)',
+					'VARCHAR2(20)',
+					'CHAR(8)',
+				]);
+				expect(await reader.read()).toBe(false);
+			} finally {
+				await reader.close();
+			}
+		});
+
 		it('emulates CURRENT_CATALOG and CURRENT_SCHEMA through OracleConnection', async () => {
 			const catalogRows = await readRows(connection, 'SELECT CURRENT_CATALOG FROM DUAL');
 			expect(catalogRows).toHaveLength(1);

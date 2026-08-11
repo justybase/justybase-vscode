@@ -281,6 +281,9 @@ export function filterMetadataItems(
   prefix: string,
   kindOverride?: CompletionItemKind,
   databaseKind?: DatabaseKind,
+  options?: {
+    sortPrefix?: (item: MetadataObjectItem) => string;
+  },
 ): CompletionItem[] {
   return items
     .filter((item) => matchesPrefix(item.name, prefix))
@@ -288,9 +291,10 @@ export function filterMetadataItems(
       const insertText = formatIdentifierForSql(item.name, databaseKind);
       // Netezza system views (_V_*) stay available but sort after user objects.
       const sortPrefix =
-        databaseKind === "netezza" && item.name.startsWith("_V_")
+        options?.sortPrefix?.(item) ??
+        (databaseKind === "netezza" && item.name.startsWith("_V_")
           ? "9_"
-          : "3_";
+          : "3_");
       return attachCompletionDescription(
         {
           label: item.name,
@@ -310,8 +314,55 @@ export function toCompletionKind(
   if (objectType === "view") {
     return CompletionItemKind.Interface;
   }
+  if (objectType === "materialized-view") {
+    return CompletionItemKind.Interface;
+  }
+  if (objectType === "synonym") {
+    return CompletionItemKind.Reference;
+  }
   if (objectType === "procedure") {
     return CompletionItemKind.Function;
   }
   return CompletionItemKind.Class;
+}
+
+export function filterOracleSchemaItems(
+  items: MetadataObjectItem[],
+  prefix: string,
+  currentSchema?: string,
+): CompletionItem[] {
+  const normalizedCurrentSchema = currentSchema?.toUpperCase();
+  return sortOracleCompletionItems(filterMetadataItems(items, prefix, CompletionItemKind.Module, "oracle", {
+    sortPrefix: (item) =>
+      item.name.toUpperCase() === normalizedCurrentSchema
+        ? "0_000_"
+        : "0_100_",
+  }));
+}
+
+export function filterOracleSourceItems(
+  items: MetadataObjectItem[],
+  prefix: string,
+): CompletionItem[] {
+  return sortOracleCompletionItems(filterMetadataItems(items, prefix, undefined, "oracle", {
+    sortPrefix: (item) => {
+      switch (item.objectType) {
+        case "table":
+          return "2_000_";
+        case "view":
+        case "materialized-view":
+          return "3_000_";
+        case "synonym":
+          return item.schema?.toUpperCase() === "PUBLIC" ? "4_100_" : "4_000_";
+        default:
+          return "2_900_";
+      }
+    },
+  }));
+}
+
+function sortOracleCompletionItems(items: CompletionItem[]): CompletionItem[] {
+  return items.sort((left, right) =>
+    (left.sortText ?? left.label).localeCompare(right.sortText ?? right.label),
+  );
 }

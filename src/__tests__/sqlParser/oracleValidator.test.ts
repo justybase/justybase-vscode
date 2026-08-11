@@ -108,10 +108,20 @@ describe('Oracle SQL validator', () => {
     ]);
     const result = new SqlValidator(schema, oracleSqlAuthoring.validation).validate(`
       BEGIN
-        SELECT missing_column INTO v_result FROM ORCL.HR.EMPLOYEES;
+        SELECT missing_column INTO v_result FROM HR.EMPLOYEES;
       END;
     `);
 
     expect(result.errors.map((error) => error.code)).toContain('SQL004');
+  });
+
+  it('reports unsupported database.schema.object qualification in Oracle', () => {
+    const result = new SqlValidator(undefined, oracleSqlAuthoring.validation).validate(
+      'SELECT * FROM ORCL.HR.EMPLOYEES;',
+    );
+
+    const diagnostic = result.errors.find((error) => error.code === 'SQL050');
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic?.suggestedFix).toBe('HR.EMPLOYEES');
   });
 });

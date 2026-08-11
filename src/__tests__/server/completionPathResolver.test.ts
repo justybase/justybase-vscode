@@ -65,6 +65,7 @@ describe("CompletionPathResolver", () => {
       "MYDB",
       "netezza",
       true,
+      "PUBLIC",
     );
   });
 

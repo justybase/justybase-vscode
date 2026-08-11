@@ -66,4 +66,23 @@ describe("completionPathUtils Netezza double-dot lookup", () => {
       table: "DIMACCOUNT_NS",
     });
   });
+
+  it("uses DuckDB main schema for File SQL view names, including full paths", () => {
+    const fullPath = "/home/dusko/source/sql_samples/data1.xlsx";
+
+    expect(
+      buildMetadataLookupTargets(
+        { table: fullPath },
+        "memory",
+        undefined,
+        "file",
+      ),
+    ).toEqual([
+      {
+        database: "memory",
+        schema: "main",
+        table: fullPath,
+      },
+    ]);
+  });
 });

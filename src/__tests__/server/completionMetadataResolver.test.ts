@@ -2,6 +2,7 @@ import { CompletionItemKind } from "vscode-languageserver/node";
 import { CompletionMetadataResolver } from "../../server/completionMetadataResolver";
 import { CompletionWildcardResolver } from "../../server/completionWildcardResolver";
 import type { CompletionMetadataProvider } from "../../server/completionTypes";
+import type { MetadataObjectItem } from "../../lsp/protocol";
 import { DocumentParseSession } from "../../sqlParser/documentParseSession";
 
 jest.unmock("chevrotain");
@@ -65,6 +66,183 @@ describe("CompletionMetadataResolver", () => {
 
     expect(items.some((item) => item.label === "USERS")).toBe(true);
     expect(items[0]?.kind).toBe(CompletionItemKind.Class);
+  });
+
+  it("orders Oracle schemas before current-schema relation sources", async () => {
+    const metadataProvider: CompletionMetadataProvider = {
+      ...createMetadataProvider(),
+      getContext: jest.fn(async () => ({
+        effectiveDatabase: "ORCL",
+        effectiveSchema: "HR",
+        databaseKind: "oracle" as const,
+      })),
+      getSchemas: jest.fn(async () => [
+        { name: "APP" },
+        { name: "HR" },
+      ]),
+      getSourceObjects: jest.fn(async (_uri: string, _database: string, schema?: string): Promise<MetadataObjectItem[]> =>
+        schema === "PUBLIC"
+          ? [{ name: "PUBLIC_EMPLOYEES", objectType: "synonym", schema: "PUBLIC" }]
+          : [
+              { name: "EMPLOYEES", objectType: "table", schema: "HR" },
+              { name: "EMPLOYEES_V", objectType: "view", schema: "HR" },
+              { name: "EMPLOYEES_SYNONYM", objectType: "synonym", schema: "HR" },
+            ],
+      ),
+    };
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      new CompletionWildcardResolver(),
+    );
+
+    const items = await resolver.resolveTablePathCompletions(
+      { kind: "from_join_name", partial: "" },
+      [],
+      "file:///oracle.sql",
+      "ORCL",
+      "oracle",
+      true,
+      "HR",
+    );
+
+    expect(items.map((item) => item.label)).toEqual([
+      "HR",
+      "APP",
+      "EMPLOYEES",
+      "EMPLOYEES_V",
+      "EMPLOYEES_SYNONYM",
+      "PUBLIC_EMPLOYEES",
+    ]);
+    expect(metadataProvider.getDatabases).not.toHaveBeenCalled();
+    expect(metadataProvider.getSourceObjects).toHaveBeenNthCalledWith(
+      1,
+      "file:///oracle.sql",
+      "ORCL",
+      "HR",
+    );
+    expect(metadataProvider.getSourceObjects).toHaveBeenNthCalledWith(
+      2,
+      "file:///oracle.sql",
+      "ORCL",
+      "PUBLIC",
+    );
+  });
+
+  it("completes Oracle source objects after an explicit schema and rejects a database prefix", async () => {
+    const metadataProvider: CompletionMetadataProvider = {
+      ...createMetadataProvider(),
+      getSourceObjects: jest.fn(async (): Promise<MetadataObjectItem[]> => [
+        { name: "EMPLOYEES", objectType: "table", schema: "HR" },
+        { name: "EMPLOYEES_MV", objectType: "materialized-view", schema: "HR" },
+        { name: "EMPLOYEES_SYNONYM", objectType: "synonym", schema: "HR" },
+      ]),
+    };
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      new CompletionWildcardResolver(),
+    );
+
+    const schemaItems = await resolver.resolveTablePathCompletions(
+      { kind: "db_dot", dbName: "HR", partial: "EMP" },
+      [],
+      "file:///oracle.sql",
+      "ORCL",
+      "oracle",
+      true,
+      "HR",
+    );
+    const invalidItems = await resolver.resolveTablePathCompletions(
+      {
+        kind: "db_schema_dot",
+        dbName: "ORCL",
+        schemaName: "HR",
+        partial: "EMP",
+      },
+      [],
+      "file:///oracle.sql",
+      "ORCL",
+      "oracle",
+      true,
+      "HR",
+    );
+
+    expect(schemaItems.map((item) => item.label)).toEqual([
+      "EMPLOYEES",
+      "EMPLOYEES_MV",
+      "EMPLOYEES_SYNONYM",
+    ]);
+    expect(invalidItems).toEqual([]);
+  });
+
+  it("omits Oracle views and synonyms for table-only completion", async () => {
+    const metadataProvider: CompletionMetadataProvider = {
+      ...createMetadataProvider(),
+      getContext: jest.fn(async () => ({
+        effectiveDatabase: "ORCL",
+        effectiveSchema: "HR",
+        databaseKind: "oracle" as const,
+      })),
+      getSchemas: jest.fn(async () => [{ name: "HR" }]),
+      getTables: jest.fn(async () => [{ name: "EMPLOYEES" }]),
+      getSourceObjects: jest.fn(async (): Promise<MetadataObjectItem[]> => [
+        { name: "EMPLOYEES", objectType: "table", schema: "HR" },
+        { name: "EMPLOYEES_V", objectType: "view", schema: "HR" },
+        { name: "EMPLOYEES_SYNONYM", objectType: "synonym", schema: "HR" },
+      ]),
+    };
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      new CompletionWildcardResolver(),
+    );
+
+    const items = await resolver.resolveTablePathCompletions(
+      { kind: "from_join_name", partial: "EMP" },
+      [],
+      "file:///oracle.sql",
+      "ORCL",
+      "oracle",
+      false,
+      "HR",
+    );
+
+    expect(items.map((item) => item.label)).toEqual(["EMPLOYEES"]);
+    expect(metadataProvider.getTables).toHaveBeenCalledWith(
+      "file:///oracle.sql",
+      "ORCL",
+      "HR",
+    );
+    expect(metadataProvider.getSourceObjects).not.toHaveBeenCalled();
+  });
+
+  it("allows Oracle column lookup to resolve a public synonym for an unqualified source", async () => {
+    const metadataProvider = createMetadataProvider();
+    const resolver = new CompletionMetadataResolver(
+      {
+        ...metadataProvider,
+        getContext: jest.fn(async () => ({
+          effectiveDatabase: "ORCL",
+          effectiveSchema: "HR",
+          databaseKind: "oracle" as const,
+        })),
+      },
+      new CompletionWildcardResolver(),
+    );
+
+    await resolver.getMetadataColumnsForSource(
+      "file:///oracle.sql",
+      { table: "EMP_PUBLIC" },
+      "ORCL",
+      "HR",
+      "oracle",
+    );
+
+    expect(metadataProvider.getColumns).toHaveBeenCalledWith(
+      "file:///oracle.sql",
+      "ORCL",
+      "EMP_PUBLIC",
+      "HR",
+      { allowPublicSynonym: true },
+    );
   });
 
   it("limits unqualified Netezza metadata lookups to the active database", async () => {

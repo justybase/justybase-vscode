@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { duckdbDialect } from '../../extensions/duckdb/src/duckdbDialect';
+import { fileDialect } from '../../extensions/duckdb/src/fileDialect';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import type { ConnectionManager } from '../core/connectionManager';
 import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
@@ -31,6 +32,7 @@ describe('MetadataProvider DuckDB column lookup', () => {
         jest.clearAllMocks();
         resetDatabaseDialectTestingState();
         registerDatabaseDialect(duckdbDialect);
+        registerDatabaseDialect(fileDialect);
 
         metadataCache = {
             getColumns: jest.fn(),
@@ -99,6 +101,30 @@ describe('MetadataProvider DuckDB column lookup', () => {
                 expect.objectContaining({ ATTNAME: 'id', FORMAT_TYPE: 'INTEGER' }),
                 expect.objectContaining({ ATTNAME: 'name', FORMAT_TYPE: 'VARCHAR' }),
             ]),
+        );
+    });
+
+    it('retries an empty cached File SQL path and uses memory.main as the cache scope', async () => {
+        connectionManager.getConnectionDatabaseKind.mockReturnValue('file');
+        metadataCache.getColumns.mockReturnValue([]);
+        const fullPath = '/home/dusko/source/sql_samples/data1.xlsx';
+
+        const columns = await provider.getTableColumnsMetadata(
+            'File SQL Workspace',
+            'memory',
+            undefined,
+            fullPath,
+        );
+
+        expect(columns.map(column => column.ATTNAME)).toEqual(['id', 'name']);
+        const executedQuery = compactSql(runQueryRawMock.mock.calls[0][1]);
+        expect(executedQuery).toContain("table_catalog = 'memory'");
+        expect(executedQuery).toContain("table_schema = 'main'");
+        expect(executedQuery).toContain(`table_name = '${fullPath}'`);
+        expect(metadataCache.setColumns).toHaveBeenCalledWith(
+            'File SQL Workspace',
+            `memory.main.${fullPath}`,
+            expect.any(Array),
         );
     });
 });

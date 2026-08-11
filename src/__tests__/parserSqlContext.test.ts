@@ -62,6 +62,13 @@ describe('parserSqlContext', () => {
         });
     });
 
+    it('does not create Oracle alias bindings for database.schema.object paths', () => {
+        const sql = 'SELECT e.employee_id FROM ORCL.HR.EMPLOYEES e';
+        const bindings = parseAliasBindingsWithParser(sql, sql.indexOf('employee_id'), 'oracle');
+
+        expect(bindings.has('E')).toBe(false);
+    });
+
     it('exposes Oracle parameters and local variables only inside their PL/SQL block', () => {
         const sql = `CREATE OR REPLACE FUNCTION HR.CALC_TOTAL(P_AMOUNT IN NUMBER)
 RETURN NUMBER IS
