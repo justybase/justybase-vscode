@@ -178,8 +178,11 @@ export class EtlProjectManager implements IProjectManager {
         }
 
         // Check if connection already exists
+        const incomingType = connection.connectionType || 'success';
         const exists = this.currentProject.connections.some(
-            c => c.from === connection.from && c.to === connection.to
+            c => c.from === connection.from
+                && c.to === connection.to
+                && (c.connectionType || 'success') === incomingType
         );
         if (exists) {
             throw new Error('Connection already exists');

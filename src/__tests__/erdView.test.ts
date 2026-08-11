@@ -166,7 +166,7 @@ describe('ERDView', () => {
         });
     });
 
-    describe('HTML content', () => {
+    describe('webview shell', () => {
         beforeEach(() => {
             ERDView.createOrShow(mockExtensionUri, sampleErdData);
         });
@@ -176,77 +176,58 @@ describe('ERDView', () => {
             expect(html).toContain('Entity Relationship Diagram');
         });
 
-        it('should display database and schema in badge', () => {
+        it('should display database and schema in the title', () => {
             const html = mockWebviewPanel.webview.html;
             expect(html).toContain('TESTDB.PUBLIC');
         });
 
         it('should display table count', () => {
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('3 tables');
+            expect(html).toContain('id="tableCount">3');
+            expect(html).toContain('>tables</span>');
         });
 
         it('should display relationship count', () => {
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('1 relationships');
+            expect(html).toContain('id="relationshipCount">1');
+            expect(html).toContain('>relationships</span>');
         });
 
-        it('should include legend with PK and FK indicators', () => {
+        it('should include the interactive toolbar and inspector', () => {
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('Primary Key');
-            expect(html).toContain('Foreign Key');
-            expect(html).toContain('🔑');
-            expect(html).toContain('🔗');
+            expect(html).toContain('id="erdSearch"');
+            expect(html).toContain('id="autoArrangeButton"');
+            expect(html).toContain('id="fitViewButton"');
+            expect(html).toContain('id="exportButton"');
+            expect(html).toContain('id="erdInspector"');
         });
 
-        it('should render table boxes for each table', () => {
+        it('should include the canvas and relationship SVG layers', () => {
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('id="table-USERS"');
-            expect(html).toContain('id="table-ORDERS"');
-            expect(html).toContain('id="table-PRODUCTS"');
-        });
-
-        it('should render columns with data types', () => {
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('ID');
-            expect(html).toContain('INTEGER');
-            expect(html).toContain('VARCHAR(100)');
-        });
-
-        it('should mark primary key columns', () => {
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('class="table-column pk"');
-        });
-
-        it('should mark foreign key columns', () => {
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('class="table-column fk"');
-        });
-
-        it('should include relationships table', () => {
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('Foreign Key Relationships');
-            expect(html).toContain('FK_ORDERS_USER');
-            expect(html).toContain('ORDERS');
-            expect(html).toContain('USERS');
-            expect(html).toContain('CASCADE');
-        });
-
-        it('should include SVG container for relationship lines', () => {
-            const html = mockWebviewPanel.webview.html;
+            expect(html).toContain('id="erdViewport"');
+            expect(html).toContain('id="tableLayer"');
             expect(html).toContain('id="relationshipsSvg"');
         });
 
-        it('should include draggable JavaScript', () => {
+        it('should pass the complete ERD payload to the webview renderer', () => {
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('mousedown');
-            expect(html).toContain('mousemove');
-            expect(html).toContain('mouseup');
+            expect(html).toContain('window.__NETEZZA_ERD_DATA__');
+            expect(html).toContain('PUBLIC.USERS');
+            expect(html).toContain('VARCHAR(100)');
+            expect(html).toContain('FK_ORDERS_USER');
+        });
+
+        it('should load external renderer and styles with a CSP', () => {
+            const html = mockWebviewPanel.webview.html;
+            expect(html).toContain('erdView.css');
+            expect(html).toContain('erdView.js');
+            expect(html).toContain('Content-Security-Policy');
+            expect(html).toContain('nonce=');
         });
     });
 
-    describe('no relationships warning', () => {
-        it('should show warning when no relationships exist', () => {
+    describe('empty states', () => {
+        it('should pass a schema without relationships to the renderer', () => {
             const noRelationshipsData = {
                 database: 'TESTDB',
                 schema: 'PUBLIC',
@@ -268,11 +249,12 @@ describe('ERDView', () => {
             ERDView.createOrShow(mockExtensionUri, noRelationshipsData);
 
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('No foreign key relationships found');
-            expect(html).toContain('no-relationships');
+            expect(html).toContain('"relationships":[]');
+            expect(html).toContain('id="canvasEmpty"');
+            expect(html).toContain('id="inspectorContent"');
         });
 
-        it('should show message in relationships table when no relationships', () => {
+        it('should render the empty schema shell without table markup', () => {
             const noRelationshipsData: ERDData = {
                 database: 'TESTDB',
                 schema: 'PUBLIC',
@@ -283,39 +265,22 @@ describe('ERDView', () => {
             ERDView.createOrShow(mockExtensionUri, noRelationshipsData);
 
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('No foreign key relationships defined');
+            expect(html).toContain('"tables":[]');
+            expect(html).toContain('No tables were found for this schema');
         });
     });
 
-    describe('table layout algorithm', () => {
-        it('should position fact tables in center column', () => {
-            // ORDERS has outgoing FK so it's a fact table
+    describe('layout and column visibility contract', () => {
+        it('should include all tables in the graph payload', () => {
             ERDView.createOrShow(mockExtensionUri, sampleErdData);
 
             const html = mockWebviewPanel.webview.html;
-
-            // ORDERS (fact table) should exist and be positioned
-            expect(html).toContain('id="table-ORDERS"');
-            // The exact position depends on layout algorithm
+            expect(html).toContain('PUBLIC.USERS');
+            expect(html).toContain('PUBLIC.ORDERS');
+            expect(html).toContain('PUBLIC.PRODUCTS');
         });
 
-        it('should position dimension tables in side columns', () => {
-            // USERS has incoming FK so it's a dimension table
-            ERDView.createOrShow(mockExtensionUri, sampleErdData);
-
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('id="table-USERS"');
-        });
-
-        it('should handle orphan tables (no relationships)', () => {
-            // PRODUCTS has no relationships
-            ERDView.createOrShow(mockExtensionUri, sampleErdData);
-
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('id="table-PRODUCTS"');
-        });
-
-        it('should limit displayed columns to first 10', () => {
+        it('should pass all columns for scrollable table cards', () => {
             const manyColumnsData = {
                 database: 'TESTDB',
                 schema: 'PUBLIC',
@@ -342,47 +307,29 @@ describe('ERDView', () => {
             const html = mockWebviewPanel.webview.html;
             expect(html).toContain('COL_1');
             expect(html).toContain('COL_10');
-            expect(html).toContain('... and 5 more');
-            expect(html).not.toContain('data-col="COL_11"');
+            expect(html).toContain('COL_11');
+            expect(html).toContain('COL_15');
+            expect(html).not.toContain('... and 5 more');
         });
     });
 
-    describe('relationship data in script', () => {
-        it('should serialize relationships to JavaScript', () => {
+    describe('relationship data payload', () => {
+        it('should serialize relationships for the browser renderer', () => {
             ERDView.createOrShow(mockExtensionUri, sampleErdData);
 
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('const relationships = [');
+            expect(html).toContain('"relationships":[{');
             expect(html).toContain('FK_ORDERS_USER');
         });
     });
 
-    describe('CSS styles', () => {
-        it('should include table-box styles', () => {
+    describe('webview resources', () => {
+        it('should reference the ERD renderer resources', () => {
             ERDView.createOrShow(mockExtensionUri, sampleErdData);
 
             const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('.table-box');
-            expect(html).toContain('.table-header');
-            expect(html).toContain('.table-column');
-        });
-
-        it('should include PK and FK highlighting styles', () => {
-            ERDView.createOrShow(mockExtensionUri, sampleErdData);
-
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('.table-column.pk');
-            expect(html).toContain('.table-column.fk');
-            expect(html).toContain('--pk-color');
-            expect(html).toContain('--fk-color');
-        });
-
-        it('should include VS Code theme variables', () => {
-            ERDView.createOrShow(mockExtensionUri, sampleErdData);
-
-            const html = mockWebviewPanel.webview.html;
-            expect(html).toContain('--vscode-editor-background');
-            expect(html).toContain('--vscode-editor-foreground');
+            expect(html).toContain('webview-uri:///test/media/erdView.css');
+            expect(html).toContain('webview-uri:///test/dist/media/erdView.js');
         });
     });
 
@@ -463,7 +410,7 @@ describe('ERDView', () => {
             const html = mockWebviewPanel.webview.html;
             expect(html).toContain('FK_ORDERS_SHIPPING');
             expect(html).toContain('FK_ORDERS_BILLING');
-            expect(html).toContain('2 relationships');
+            expect(html).toContain('id="relationshipCount">2');
         });
 
         it('should handle composite foreign keys', () => {

@@ -48,6 +48,10 @@ media/testDataGenerator.ts
 media/resultPanel/
 media/src/
 media/**/*.ts
+media/**/*.tsx
+media/diagram/
+media/erdView/
+media/erdView.css
 media/README-icons.txt
 
 # Build and config files
