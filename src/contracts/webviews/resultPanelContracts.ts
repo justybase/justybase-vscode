@@ -103,6 +103,7 @@ export interface ResultPanelViewData {
 
 export type ResultPanelWebviewToHostMessage =
   | { command: 'ready' }
+  | { command: 'migrateResult'; sourceUri: string; resultSetIndex: number }
   | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
   | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
   | { command: 'selectAll' }
@@ -495,6 +496,7 @@ export type ResultPanelOutboundMessage = ResultPanelHostToWebviewMessage;
 
 export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'ready',
+  'migrateResult',
   'logRowsApplied',
   'requestLogSync',
   'selectAll',

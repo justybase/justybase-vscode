@@ -142,7 +142,7 @@ export function getBaseDataType(typeName: string): string {
 export function getNumericScale(typeName: string): number | null {
   const normalized = normalizeDataType(typeName);
   const match = normalized.match(
-    /^(NUMERIC|DECIMAL)\(\s*\d+\s*,\s*(\d+)\s*\)$/,
+    /^(NUMERIC|DECIMAL|NUMBER)\(\s*\d+\s*,\s*(\d+)\s*\)$/,
   );
   if (!match) {
     return null;

@@ -248,6 +248,18 @@ function showContextMenu(e: MouseEvent, index: number): void {
         menu.appendChild(refreshItem);
     }
 
+    const canMigrate = Boolean(rs && !rs.isLog && !rs.isError && !rs.isTextContent && (rs.refreshSql || rs.sql));
+    if (canMigrate) {
+        const migrateItem = createMenuItem('Migrate this result...', () => {
+            vscode.postMessage({
+                command: 'migrateResult',
+                sourceUri: requireActiveSourceUri(),
+                resultSetIndex: index,
+            });
+        });
+        menu.appendChild(migrateItem);
+    }
+
     // Copilot AI Describe option
     const copilotItem = createMenuItem('✨ Describe data with Copilot AI', () => {
         if (rs) {

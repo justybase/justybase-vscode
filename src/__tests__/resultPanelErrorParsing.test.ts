@@ -1,5 +1,5 @@
 // Unit tests for extractKeyNetezzaErrorInfo in grid/alternateViews.ts
-// Validated against 26 real Netezza error messages collected from live DB (192.168.0.144:5480/JUST_DATA).
+// Validated against 26 real Netezza error messages collected from a live dev instance.
 //
 // Pattern follows resultPanelUtils.test.ts — require() inside it() blocks.
 

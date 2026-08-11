@@ -14,6 +14,7 @@ export type ResultPanelExportRowScope = 'loaded' | 'all';
 
 export type ResultPanelInboundMessage =
     | { command: 'ready' }
+    | { command: 'migrateResult'; sourceUri: string; resultSetIndex: number }
     | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
     | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
     | { command: 'reportHydrationMetrics'; metrics: ResultPanelHydrationMetricsPayload }
@@ -314,6 +315,7 @@ export type LoginPanelOutboundMessage =
 
 export const RESULT_PANEL_INBOUND_COMMANDS = [
     'ready',
+    'migrateResult',
     'logRowsApplied',
     'requestLogSync',
     'reportHydrationMetrics',
