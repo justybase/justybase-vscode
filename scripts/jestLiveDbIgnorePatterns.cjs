@@ -12,4 +12,5 @@ module.exports = [
   "vertica.integration.test.ts",
   "access.integration.test.ts",
   "allRowsTimeoutSession.live.integration.test.ts",
+  "mcpLive.integration.test.ts",
 ];
