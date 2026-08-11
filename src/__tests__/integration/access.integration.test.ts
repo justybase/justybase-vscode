@@ -9,6 +9,8 @@ import { AccessConnection } from '../../../extensions/access/src/accessConnectio
 import { accessDialect } from '../../../extensions/access/src/accessDialect';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import { importDataToAccess } from '../../import/accessImporter';
+import { exportResultSetToFile } from '../../export/resultExporter';
+import type { ResultSet } from '../../types';
 
 /**
  * Live integration test for the Microsoft Access dialect. Requires a Java 11+
@@ -524,6 +526,49 @@ describeLive('Microsoft Access dialect (live)', () => {
 
             const after = await readRows(conn, 'SELECT COUNT(*) FROM Klienci');
             expect(Number(after[0][0])).toBe(2);
+        } finally {
+            await conn.close();
+        }
+    });
+
+    it('blocks INSERT/UPDATE/DELETE when the database is opened read-only', async () => {
+        const conn = createConnection(fixturePath, true);
+        await conn.connect();
+        try {
+            await expect(conn.createCommand("INSERT INTO Klienci (Imie) VALUES ('Blocked')").execute())
+                .rejects.toThrow(/read-only/i);
+            await expect(conn.createCommand("UPDATE Klienci SET Miasto = 'X' WHERE ID = 1").execute())
+                .rejects.toThrow(/read-only/i);
+            await expect(conn.createCommand('DELETE FROM Klienci WHERE ID = 1').execute())
+                .rejects.toThrow(/read-only/i);
+
+            const after = await readRows(conn, 'SELECT COUNT(*) FROM Klienci');
+            expect(Number(after[0][0])).toBe(2);
+        } finally {
+            await conn.close();
+        }
+    });
+
+    it('exports a live result set to CSV through the shared exporter', async () => {
+        const conn = createConnection();
+        await conn.connect();
+        const csvOut = path.join(tempDir, 'access-export.csv');
+        try {
+            const rows = await readRows(conn, 'SELECT ID, Imie FROM Klienci ORDER BY ID');
+            const resultSet = {
+                columns: [
+                    { name: 'ID', type: 'INTEGER' },
+                    { name: 'Imie', type: 'VARCHAR' },
+                ],
+                data: rows.map(row => [row[0], row[1]]),
+                rowCount: rows.length,
+            } as unknown as ResultSet;
+
+            await exportResultSetToFile(resultSet, csvOut, { format: 'csv' });
+
+            const exported = fs.readFileSync(csvOut, 'utf8');
+            expect(exported).toContain('Anna');
+            expect(exported).toContain('Jan');
         } finally {
             await conn.close();
         }
