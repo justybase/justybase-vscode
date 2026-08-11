@@ -11,11 +11,17 @@ function createFakeIntrospection(): CatalogIntrospection {
         getSchemas: jest.fn().mockResolvedValue('[]'),
         getTables: jest.fn().mockResolvedValue('[]'),
         getColumns: jest.fn().mockResolvedValue('DATABASE|SCHEMA|TABLE_NAME|COLUMN_NAME|DATA_TYPE|NOT_NULL'),
+        getTableStats: jest.fn().mockResolvedValue('{"tableName":"ORDERS"}'),
+        getComments: jest.fn().mockResolvedValue('{"columns":[]}'),
+        getDependencies: jest.fn().mockResolvedValue('{"dependencies":[]}'),
+        getExternalTables: jest.fn().mockResolvedValue('[]'),
+        getTableConstraints: jest.fn().mockResolvedValue('{"constraints":[]}'),
         getProcedures: jest.fn().mockResolvedValue('[]'),
         getViews: jest.fn().mockResolvedValue('[]'),
         searchSchema: jest.fn().mockResolvedValue('[]'),
         getDDL: jest.fn().mockResolvedValue('## DDL'),
-        explain: jest.fn().mockResolvedValue('Plan')
+        explain: jest.fn().mockResolvedValue('Plan'),
+        analyzeQueryPlan: jest.fn().mockResolvedValue('{"summary":{"overallRisk":"low"}}')
     } as unknown as CatalogIntrospection;
 }
 
@@ -56,6 +62,37 @@ describe('MCP tool registry', () => {
         const tool = tools.find(t => t.name === 'get_tables')!;
         await tool.handler({ database: 'DWH', schema: 'ADMIN' });
         expect(introspection.getTables).toHaveBeenCalledWith('DWH', 'ADMIN');
+    });
+
+    it('forwards the new catalog tools without accepting table data SQL', async () => {
+        await tools.find(t => t.name === 'get_table_stats')!.handler({ tableName: 'ADMIN.ORDERS' });
+        expect(introspection.getTableStats).toHaveBeenCalledWith('ADMIN.ORDERS', undefined);
+
+        await tools.find(t => t.name === 'get_comments')!.handler({ tableName: 'ORDERS', includeColumns: false });
+        expect(introspection.getComments).toHaveBeenCalledWith('ORDERS', undefined, undefined, false);
+
+        await tools.find(t => t.name === 'get_dependencies')!.handler({ object: 'ORDERS', objectType: 'TABLE' });
+        expect(introspection.getDependencies).toHaveBeenCalledWith('ORDERS', undefined, 'TABLE');
+
+        await tools.find(t => t.name === 'get_external_tables')!.handler({ database: 'DWH' });
+        expect(introspection.getExternalTables).toHaveBeenCalledWith('DWH', undefined, undefined);
+
+        await tools.find(t => t.name === 'get_table_constraints')!.handler({ tableName: 'ORDERS' });
+        expect(introspection.getTableConstraints).toHaveBeenCalledWith('ORDERS', undefined, undefined);
+
+        await tools.find(t => t.name === 'analyze_query_plan')!.handler({ sql: 'SELECT 1' });
+        expect(introspection.analyzeQueryPlan).toHaveBeenCalledWith('EXPLAIN SELECT 1', undefined);
+    });
+
+    it.each([
+        ['get_table_stats', {}],
+        ['get_comments', {}],
+        ['get_dependencies', {}],
+        ['get_table_constraints', {}],
+        ['analyze_query_plan', {}]
+    ])('rejects missing required arguments for %s', async (name, args) => {
+        const result = await tools.find(t => t.name === name)!.handler(args);
+        expect(result.isError).toBe(true);
     });
 
     it('rejects DML through explain_sql', async () => {

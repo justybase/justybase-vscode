@@ -119,6 +119,145 @@ export function createMcpToolDefinitions(introspection: CatalogIntrospection): M
     ));
 
     definitions.push(build(
+        'get_table_stats',
+        {
+            type: 'object',
+            properties: {
+                tableName: { type: 'string', description: 'Table name (TABLE, SCHEMA.TABLE, DATABASE..TABLE or DATABASE.SCHEMA.TABLE)' },
+                database: { ...OPTIONAL_STRING, description: 'Database name (defaults to connected database)' }
+            },
+            required: ['tableName'],
+            additionalProperties: false
+        },
+        async (args) => {
+            const tableName = stringArg(args, 'tableName');
+            if (!tableName) {
+                return { text: 'No table name provided.', isError: true };
+            }
+            try {
+                return { text: await introspection.getTableStats(tableName, stringArg(args, 'database')) };
+            } catch (error: unknown) {
+                return { text: errorText(error), isError: true };
+            }
+        }
+    ));
+
+    definitions.push(build(
+        'get_comments',
+        {
+            type: 'object',
+            properties: {
+                tableName: { type: 'string', description: 'Table name' },
+                database: { ...OPTIONAL_STRING, description: 'Database name (defaults to connected database)' },
+                schema: { ...OPTIONAL_STRING, description: 'Schema name' },
+                includeColumns: { type: 'boolean', description: 'Include column comments (default true)' }
+            },
+            required: ['tableName'],
+            additionalProperties: false
+        },
+        async (args) => {
+            const tableName = stringArg(args, 'tableName');
+            if (!tableName) {
+                return { text: 'No table name provided.', isError: true };
+            }
+            try {
+                return {
+                    text: await introspection.getComments(
+                        tableName,
+                        stringArg(args, 'database'),
+                        stringArg(args, 'schema'),
+                        booleanArg(args, 'includeColumns') ?? true
+                    )
+                };
+            } catch (error: unknown) {
+                return { text: errorText(error), isError: true };
+            }
+        }
+    ));
+
+    definitions.push(build(
+        'get_dependencies',
+        {
+            type: 'object',
+            properties: {
+                object: { type: 'string', description: 'Object name' },
+                database: { ...OPTIONAL_STRING, description: 'Database name (defaults to connected database)' },
+                objectType: { ...OPTIONAL_STRING, description: 'TABLE, VIEW or PROCEDURE' }
+            },
+            required: ['object'],
+            additionalProperties: false
+        },
+        async (args) => {
+            const object = stringArg(args, 'object');
+            if (!object) {
+                return { text: 'No object name provided.', isError: true };
+            }
+            try {
+                return {
+                    text: await introspection.getDependencies(
+                        object,
+                        stringArg(args, 'database'),
+                        stringArg(args, 'objectType')
+                    )
+                };
+            } catch (error: unknown) {
+                return { text: errorText(error), isError: true };
+            }
+        }
+    ));
+
+    definitions.push(build(
+        'get_external_tables',
+        {
+            type: 'object',
+            properties: {
+                database: { ...OPTIONAL_STRING, description: 'Database name (defaults to connected database)' },
+                schema: { ...OPTIONAL_STRING, description: 'Schema name filter' },
+                pattern: { ...OPTIONAL_STRING, description: 'TABLENAME LIKE pattern' }
+            },
+            additionalProperties: false
+        },
+        async (args) => ({
+            text: await introspection.getExternalTables(
+                stringArg(args, 'database'),
+                stringArg(args, 'schema'),
+                stringArg(args, 'pattern')
+            )
+        })
+    ));
+
+    definitions.push(build(
+        'get_table_constraints',
+        {
+            type: 'object',
+            properties: {
+                tableName: { type: 'string', description: 'Table name' },
+                database: { ...OPTIONAL_STRING, description: 'Database name (defaults to connected database)' },
+                schema: { ...OPTIONAL_STRING, description: 'Schema name' }
+            },
+            required: ['tableName'],
+            additionalProperties: false
+        },
+        async (args) => {
+            const tableName = stringArg(args, 'tableName');
+            if (!tableName) {
+                return { text: 'No table name provided.', isError: true };
+            }
+            try {
+                return {
+                    text: await introspection.getTableConstraints(
+                        tableName,
+                        stringArg(args, 'database'),
+                        stringArg(args, 'schema')
+                    )
+                };
+            } catch (error: unknown) {
+                return { text: errorText(error), isError: true };
+            }
+        }
+    ));
+
+    definitions.push(build(
         'get_procedures',
         {
             type: 'object',
@@ -235,6 +374,32 @@ export function createMcpToolDefinitions(introspection: CatalogIntrospection): M
                 const explainSql = buildSafeExplainForMcp(sql, booleanArg(args, 'verbose'));
                 return { text: await introspection.explain(explainSql, stringArg(args, 'database')) };
             } catch (error) {
+                return { text: errorText(error), isError: true };
+            }
+        }
+    ));
+
+    definitions.push(build(
+        'analyze_query_plan',
+        {
+            type: 'object',
+            properties: {
+                sql: { type: 'string', description: 'SELECT or WITH ... SELECT statement (no EXPLAIN prefix)' },
+                verbose: { type: 'boolean', description: 'Verbose plan (default false)' },
+                database: { ...OPTIONAL_STRING, description: 'Database name (defaults to connected database)' }
+            },
+            required: ['sql'],
+            additionalProperties: false
+        },
+        async (args) => {
+            const sql = stringArg(args, 'sql');
+            if (!sql) {
+                return { text: 'No SQL statement provided.', isError: true };
+            }
+            try {
+                const explainSql = buildSafeExplainForMcp(sql, booleanArg(args, 'verbose'));
+                return { text: await introspection.analyzeQueryPlan(explainSql, stringArg(args, 'database')) };
+            } catch (error: unknown) {
                 return { text: errorText(error), isError: true };
             }
         }
