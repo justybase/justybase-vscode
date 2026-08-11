@@ -447,138 +447,185 @@ export class SecurityPanelView {
 <body>
     <div class="container">
         <div class="header">
-            <h2>🔐 Security Panel</h2>
-            <button id="refreshBtn" class="btn btn-secondary">↻ Refresh users/groups</button>
-        </div>
-
-        <p class="hint">Netezza SQL-first panel for permission management (GRANT / REVOKE).</p>
-
-        <div class="form-grid">
-            <label>Action
-                <select id="action">
-                    <option value="GRANT">GRANT</option>
-                    <option value="REVOKE">REVOKE</option>
-                </select>
-            </label>
-
-            <label>Variant
-                <select id="grantVariant">
-                    <option value="object">Object privileges (ON ...)</option>
-                    <option value="admin">Administration privileges (IN ...)</option>
-                    <option value="raw">Raw SQL (full IBM syntax)</option>
-                </select>
-            </label>
-
-            <label>Principal Type
-                <select id="principalType">
-                    <option value="USER">USER</option>
-                    <option value="GROUP">GROUP</option>
-                    <option value="PUBLIC">PUBLIC</option>
-                </select>
-            </label>
-
-            <label id="principalLabel">Principal
-                <input id="principal" type="text" placeholder="e.g. ANALYST_ROLE">
-            </label>
-
-            <label id="principalPickerLabel">Pick from detected users/groups
-                <select id="principalPicker">
-                    <option value="">Select user/group...</option>
-                </select>
-            </label>
-
-            <label class="variant-section object-variant">Object privileges (comma separated)
-                <input
-                    id="objectPrivileges"
-                    type="text"
-                    value="SELECT"
-                    placeholder="e.g. SELECT, INSERT, EXECUTE AS, LABEL ACCESS"
-                >
-            </label>
-
-            <label class="variant-section object-variant">ON target
-                <input
-                    id="objectTarget"
-                    type="text"
-                    placeholder="e.g. TABLE SALES, ALL TABLES IN SCHEMA REPORTING, PROCEDURE PROC1(INT)"
-                >
-            </label>
-
-            <label class="variant-section object-variant">Optional TYPE clause
-                <select id="objectTypeClause">
-                    <option value="">(none)</option>
-                    <option value="AGGREGATE">AGGREGATE</option>
-                    <option value="DATABASE">DATABASE</option>
-                    <option value="EXTERNAL TABLE">EXTERNAL TABLE</option>
-                    <option value="FUNCTION">FUNCTION</option>
-                    <option value="GROUP">GROUP</option>
-                    <option value="MANAGEMENT TABLE">MANAGEMENT TABLE</option>
-                    <option value="MANAGEMENT VIEW">MANAGEMENT VIEW</option>
-                    <option value="PROCEDURE">PROCEDURE</option>
-                    <option value="SCHEMA">SCHEMA</option>
-                    <option value="SEQUENCE">SEQUENCE</option>
-                    <option value="SYNONYM">SYNONYM</option>
-                    <option value="SYSTEM TABLE">SYSTEM TABLE</option>
-                    <option value="SYSTEM VIEW">SYSTEM VIEW</option>
-                    <option value="TABLE">TABLE</option>
-                    <option value="USER">USER</option>
-                    <option value="VIEW">VIEW</option>
-                </select>
-            </label>
-
-            <label class="variant-section admin-variant hidden">Administration privileges (comma separated)
-                <input
-                    id="adminPrivileges"
-                    type="text"
-                    value="CREATE TABLE"
-                    placeholder="e.g. CREATE TABLE, MANAGE SECURITY, ALL ADMIN"
-                >
-            </label>
-
-            <label class="variant-section admin-variant hidden">Optional IN scope
-                <input id="adminScope" type="text" placeholder="e.g. MYDB.ALL or ALL.ALL">
-            </label>
-
-            <label class="variant-section raw-variant full-width hidden">Raw SQL (full IBM GRANT/REVOKE syntax)
-                <textarea id="customSql" rows="4" placeholder="GRANT CREATE TABLE IN MYDB.MYSCHEMA TO GROUP ANALYSTS;"></textarea>
-            </label>
-
-            <label class="checkbox-label" id="grantOptionRow">
-                <span class="checkbox-label-text">Grant Option</span>
-                <span class="checkbox-wrapper">
-                    <input id="withGrantOption" type="checkbox">
-                    <span>WITH GRANT OPTION</span>
-                </span>
-            </label>
-        </div>
-
-        <div class="actions">
-            <button id="previewBtn" class="btn btn-primary">Preview SQL</button>
-            <button id="executeBtn" class="btn btn-danger">Execute</button>
-        </div>
-
-        <div class="section">
-            <h3>SQL Preview</h3>
-            <textarea id="sqlPreview" readonly></textarea>
-            <div id="statusMessage" class="status-message"></div>
-        </div>
-
-        <div class="section">
-            <h3>Detected Users / Groups</h3>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Type</th>
-                        </tr>
-                    </thead>
-                    <tbody id="principalTableBody">
-                        <tr><td colspan="2" class="empty">No data loaded</td></tr>
-                    </tbody>
-                </table>
+            <div class="header-title">
+                <h2>Security Panel</h2>
+                <span class="header-subtitle">GRANT / REVOKE</span>
+            </div>
+            <div class="header-actions">
+                <div class="refresh-indicator" id="refreshIndicator" aria-hidden="true" title="Refreshing…">
+                    <svg class="refresh-spinner" viewBox="0 0 50 50" aria-hidden="true">
+                        <circle class="refresh-spinner-circle" cx="25" cy="25" r="20" fill="none" stroke-width="5"/>
+                        <path class="refresh-spinner-path" d="M25 5 A20 20 0 0 1 45 25" fill="none" stroke-width="5"/>
+                    </svg>
+                </div>
+                <button id="refreshBtn" class="btn">↻ Refresh</button>
             </div>
         </div>
+
+        <div class="overview-strip">
+            <div class="overview-card">
+                <span class="overview-label">Users</span>
+                <span class="overview-value" id="overviewUsers">0</span>
+            </div>
+            <div class="overview-card">
+                <span class="overview-label">Groups</span>
+                <span class="overview-value" id="overviewGroups">0</span>
+            </div>
+            <div class="overview-card">
+                <span class="overview-label">Principals</span>
+                <span class="overview-value" id="overviewPrincipals">0</span>
+            </div>
+            <div class="overview-card">
+                <span class="overview-label">Command</span>
+                <span class="overview-value small" id="overviewCommand">GRANT · OBJECT</span>
+            </div>
+        </div>
+
+        <main class="security-content">
+            <section class="panel-card command-panel">
+                <div class="section-header">
+                    <h3>Permission command</h3>
+                    <span class="spacer"></span>
+                    <span class="count" id="commandMode">GRANT · OBJECT</span>
+                </div>
+
+                <p class="hint">Build a Netezza permission statement and review it before execution.</p>
+
+                <div class="form-grid">
+                    <label><span class="field-label">Action</span>
+                        <select id="action">
+                            <option value="GRANT">GRANT</option>
+                            <option value="REVOKE">REVOKE</option>
+                        </select>
+                    </label>
+
+                    <label><span class="field-label">Variant</span>
+                        <select id="grantVariant">
+                            <option value="object">Object privileges (ON ...)</option>
+                            <option value="admin">Administration privileges (IN ...)</option>
+                            <option value="raw">Raw SQL (full IBM syntax)</option>
+                        </select>
+                    </label>
+
+                    <label><span class="field-label">Principal type</span>
+                        <select id="principalType">
+                            <option value="USER">USER</option>
+                            <option value="GROUP">GROUP</option>
+                            <option value="PUBLIC">PUBLIC</option>
+                        </select>
+                    </label>
+
+                    <label id="principalLabel"><span class="field-label">Principal</span>
+                        <input id="principal" type="text" placeholder="e.g. ANALYST_ROLE">
+                    </label>
+
+                    <label id="principalPickerLabel"><span class="field-label">Detected principal</span>
+                        <select id="principalPicker">
+                            <option value="">Select user/group...</option>
+                        </select>
+                    </label>
+
+                    <label class="variant-section object-variant"><span class="field-label">Object privileges</span>
+                        <input
+                            id="objectPrivileges"
+                            type="text"
+                            value="SELECT"
+                            placeholder="e.g. SELECT, INSERT, EXECUTE AS, LABEL ACCESS"
+                        >
+                    </label>
+
+                    <label class="variant-section object-variant"><span class="field-label">ON target</span>
+                        <input
+                            id="objectTarget"
+                            type="text"
+                            placeholder="e.g. TABLE SALES, ALL TABLES IN SCHEMA REPORTING, PROCEDURE PROC1(INT)"
+                        >
+                    </label>
+
+                    <label class="variant-section object-variant"><span class="field-label">Optional TYPE clause</span>
+                        <select id="objectTypeClause">
+                            <option value="">(none)</option>
+                            <option value="AGGREGATE">AGGREGATE</option>
+                            <option value="DATABASE">DATABASE</option>
+                            <option value="EXTERNAL TABLE">EXTERNAL TABLE</option>
+                            <option value="FUNCTION">FUNCTION</option>
+                            <option value="GROUP">GROUP</option>
+                            <option value="MANAGEMENT TABLE">MANAGEMENT TABLE</option>
+                            <option value="MANAGEMENT VIEW">MANAGEMENT VIEW</option>
+                            <option value="PROCEDURE">PROCEDURE</option>
+                            <option value="SCHEMA">SCHEMA</option>
+                            <option value="SEQUENCE">SEQUENCE</option>
+                            <option value="SYNONYM">SYNONYM</option>
+                            <option value="SYSTEM TABLE">SYSTEM TABLE</option>
+                            <option value="SYSTEM VIEW">SYSTEM VIEW</option>
+                            <option value="TABLE">TABLE</option>
+                            <option value="USER">USER</option>
+                            <option value="VIEW">VIEW</option>
+                        </select>
+                    </label>
+
+                    <label class="variant-section admin-variant hidden"><span class="field-label">Administration privileges</span>
+                        <input
+                            id="adminPrivileges"
+                            type="text"
+                            value="CREATE TABLE"
+                            placeholder="e.g. CREATE TABLE, MANAGE SECURITY, ALL ADMIN"
+                        >
+                    </label>
+
+                    <label class="variant-section admin-variant hidden"><span class="field-label">Optional IN scope</span>
+                        <input id="adminScope" type="text" placeholder="e.g. MYDB.ALL or ALL.ALL">
+                    </label>
+
+                    <label class="variant-section raw-variant full-width hidden"><span class="field-label">Raw SQL (full IBM GRANT/REVOKE syntax)</span>
+                        <textarea id="customSql" rows="4" placeholder="GRANT CREATE TABLE IN MYDB.MYSCHEMA TO GROUP ANALYSTS;"></textarea>
+                    </label>
+
+                    <label class="checkbox-label" id="grantOptionRow">
+                        <span class="field-label">Grant option</span>
+                        <span class="checkbox-wrapper">
+                            <input id="withGrantOption" type="checkbox">
+                            <span>WITH GRANT OPTION</span>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="actions">
+                    <button id="previewBtn" class="btn btn-primary">Preview SQL</button>
+                    <button id="executeBtn" class="btn btn-danger">Execute</button>
+                </div>
+
+                <div class="preview-section">
+                    <div class="preview-heading">
+                        <h3>SQL Preview</h3>
+                        <span class="preview-hint">Generated statement</span>
+                    </div>
+                    <textarea id="sqlPreview" readonly placeholder="Preview will appear here…"></textarea>
+                    <div id="statusMessage" class="status-message" aria-live="polite"></div>
+                </div>
+            </section>
+
+            <section class="panel-card principals-panel">
+                <div class="section-header">
+                    <h3>Detected users / groups</h3>
+                    <span class="spacer"></span>
+                    <span class="count" id="principalCount">0</span>
+                </div>
+                <div class="table-container">
+                    <table id="principalTable">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                            </tr>
+                        </thead>
+                        <tbody id="principalTableBody">
+                            <tr><td colspan="2" class="empty-state">No principal data loaded</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
     </div>
 
     <script nonce="${nonce}" src="${scriptUri}"></script>

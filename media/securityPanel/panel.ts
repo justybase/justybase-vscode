@@ -9,6 +9,7 @@ import { postToHost, asHostMessage } from './protocol.js';
 import { escapeHtml } from './utils.js';
 
 const refreshBtn = getElementById<HTMLButtonElement>('refreshBtn');
+const refreshIndicator = getElementById('refreshIndicator');
 const action = getElementById<HTMLSelectElement>('action');
 const grantVariant = getElementById<HTMLSelectElement>('grantVariant');
 const principalType = getElementById<HTMLSelectElement>('principalType');
@@ -31,6 +32,12 @@ const previewBtn = getElementById<HTMLButtonElement>('previewBtn');
 const executeBtn = getElementById<HTMLButtonElement>('executeBtn');
 const sqlPreview = getElementById<HTMLTextAreaElement>('sqlPreview');
 const principalTableBody = getElementById('principalTableBody');
+const principalCount = getElementById('principalCount');
+const overviewUsers = getElementById('overviewUsers');
+const overviewGroups = getElementById('overviewGroups');
+const overviewPrincipals = getElementById('overviewPrincipals');
+const overviewCommand = getElementById('overviewCommand');
+const commandMode = getElementById('commandMode');
 const statusMessage = getElementById('statusMessage');
 
 let principals: SecurityPrincipal[] = [];
@@ -120,7 +127,18 @@ function updateFormVisibility(): void {
     toggleSections(rawSections, selectedVariant === 'raw');
     grantOptionRow?.classList.toggle('hidden', !isGrant);
 
+    updateCommandMode();
     updatePrincipalControls();
+}
+
+function updateCommandMode(): void {
+    const actionName = action?.value || 'GRANT';
+    const variantName = grantVariant?.value || 'object';
+    const variantLabel = variantName.toUpperCase();
+    const mode = `${actionName} · ${variantLabel}`;
+
+    if (overviewCommand) overviewCommand.textContent = mode;
+    if (commandMode) commandMode.textContent = mode;
 }
 
 function updatePrincipalControls(): void {
@@ -161,6 +179,14 @@ function buildPayload(): PermissionPayload {
 function renderPrincipals(): void {
     if (!principalPicker || !principalTableBody) return;
 
+    const users = principals.filter(item => (item.TYPE || '').toUpperCase() === 'USER').length;
+    const groups = principals.filter(item => (item.TYPE || '').toUpperCase() === 'GROUP').length;
+
+    if (overviewUsers) overviewUsers.textContent = String(users);
+    if (overviewGroups) overviewGroups.textContent = String(groups);
+    if (overviewPrincipals) overviewPrincipals.textContent = String(principals.length);
+    if (principalCount) principalCount.textContent = String(principals.length);
+
     if (!principals.length) {
         principalPicker.innerHTML = '<option value="">No principal data found</option>';
         principalTableBody.innerHTML =
@@ -179,12 +205,17 @@ function renderPrincipals(): void {
     principalTableBody.innerHTML = principals
         .slice(0, 400)
         .map(
-            item => `
+            item => {
+                const type = (item.TYPE || '').toUpperCase();
+                const typeClass = type === 'GROUP' ? 'status-group' : 'status-user';
+
+                return `
                 <tr>
                     <td>${escapeHtml(item.NAME || '')}</td>
-                    <td>${escapeHtml(item.TYPE || '')}</td>
+                    <td><span class="status-badge ${typeClass}">${escapeHtml(type)}</span></td>
                 </tr>
-            `,
+            `;
+            },
         )
         .join('');
 }
@@ -193,6 +224,8 @@ function setLoading(loading: boolean): void {
     if (refreshBtn) refreshBtn.disabled = loading;
     if (previewBtn) previewBtn.disabled = loading;
     if (executeBtn) executeBtn.disabled = loading;
+    refreshIndicator?.classList.toggle('visible', loading);
+    refreshIndicator?.setAttribute('aria-hidden', loading ? 'false' : 'true');
 }
 
 function setStatus(text: string, isError: boolean): void {
