@@ -41,7 +41,7 @@ const describeIfDb = skipTests ? describe.skip : describe;
 const itIfDb = skipTests ? it.skip : it;
 
 const DB_CONFIG = {
-  host: process.env.NZ_DEV_HOST || "192.168.0.144",
+  host: process.env.NZ_DEV_HOST || "localhost",
   port: process.env.NZ_DEV_PORT ? Number(process.env.NZ_DEV_PORT) : 5480,
   database: process.env.NZ_DEV_DATABASE || "JUST_DATA",
   user: process.env.NZ_DEV_USER || "admin",

@@ -8,6 +8,8 @@ export const window = {
   showWarningMessage: jest.fn(),
   showErrorMessage: jest.fn(),
   showQuickPick: jest.fn(),
+  showOpenDialog: jest.fn(),
+  showSaveDialog: jest.fn(),
   createOutputChannel: jest.fn(() => ({
     appendLine: jest.fn(),
     show: jest.fn(),
@@ -25,6 +27,7 @@ export const window = {
   })),
   setStatusBarMessage: jest.fn(() => ({ dispose: jest.fn() })),
   activeTextEditor: undefined,
+  showTextDocument: jest.fn(),
   createTextEditorDecorationType: jest.fn(() => ({
     dispose: jest.fn(),
   })),
@@ -40,6 +43,8 @@ export const workspace = {
     get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
   })),
   textDocuments: [],
+  findFiles: jest.fn(),
+  openTextDocument: jest.fn(),
   onDidCloseTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
   onDidSaveTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
   onDidOpenTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
