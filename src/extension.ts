@@ -21,6 +21,8 @@ import { registerSchemaCommands } from './commands/schemaCommands';
 import { registerExportCommands } from './commands/exportCommands';
 import { registerExportToMdCommand } from './commands/exportToMdCommand';
 import { registerImportCommands } from './commands/importCommands';
+import { registerMigrationCommands } from './commands/migrationCommands';
+import { registerFileConnectionCommands } from './commands/fileConnectionCommands';
 import { registerQueryCommands } from './commands/queryCommands';
 import { registerCopilotFeatures } from './activation/copilotRegistration';
 import { showSensitiveCopilotToolNotice } from './activation/sensitiveCopilotToolNotice';
@@ -263,6 +265,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     context.subscriptions.push(...registerExportCommands({ context, connectionManager, outputChannel }));
     context.subscriptions.push(registerExportToMdCommand({ connectionManager, resultPanelProvider }));
     context.subscriptions.push(...registerImportCommands({ context, connectionManager, metadataCache, outputChannel }));
+    context.subscriptions.push(...registerMigrationCommands({ context, connectionManager }));
+    context.subscriptions.push(...registerFileConnectionCommands({ context, connectionManager }));
     context.subscriptions.push(...registerQueryCommands({
         context,
         connectionManager,
