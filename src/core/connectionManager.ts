@@ -66,6 +66,7 @@ const LEGACY_POSTGRESQL_OPTION_KEYS = new Set([
 ]);
 
 const LEGACY_PORT_KIND_MAP = new Map<number, DatabaseKind>([
+    [5480, 'netezza'],
     [50000, 'db2'],
     [1433, 'mssql'],
     [1521, 'oracle'],
@@ -345,6 +346,10 @@ export class ConnectionManager {
 
     setMetadataCache(metadataCache: MetadataCache): void {
         this._metadataCache = metadataCache;
+    }
+
+    getMetadataCache(): MetadataCache | undefined {
+        return this._metadataCache;
     }
 
     getSchemaForConnection(connectionName: string): string | null {
@@ -649,6 +654,7 @@ export class ConnectionManager {
             isLocalFileDialect(resolvedKind)
             && typeof databaseOverride === 'string'
             && databaseOverride.length > 0
+            && !isLikelySqliteDatabaseName(databaseOverride)
             && databaseOverride !== defaultLogicalDatabase;
 
         const existing = this._documentPersistentConnections.get(normalizedUri);
@@ -814,6 +820,25 @@ export class ConnectionManager {
         }
     }
 
+    /**
+     * Recreate File SQL sessions after the profile's physical file list changes.
+     * File SQL registers its configured files when the DuckDB connection opens.
+     */
+    async refreshFileConnection(connectionName: string): Promise<void> {
+        const documentUris = Array.from(this._documentConnections.entries())
+            .filter(([, selectedConnectionName]) => selectedConnectionName === connectionName)
+            .map(([documentUri]) => documentUri);
+
+        await Promise.all(documentUris.map(async (documentUri) => {
+            const normalizedUri = normalizeUriKey(documentUri);
+            this._documentConnectionPromises.delete(normalizedUri);
+            this.bumpDocumentConnectionGeneration(normalizedUri);
+            await this.closeDocumentPersistentConnection(normalizedUri);
+        }));
+
+        this._metadataCache?.clearConnectionMetadata(connectionName);
+    }
+
     async dispose(): Promise<void> {
         await this.closeAllDocumentPersistentConnections();
         this._onDidChangeConnections.dispose();
@@ -924,6 +949,42 @@ export class ConnectionManager {
       if (!details) {
         return null;
       }
+
+      const databaseKind = this.getConnectionDatabaseKind(connectionName);
+      if (databaseKind === "oracle") {
+        // The session value is authoritative after connection/ALTER SESSION;
+        // configured currentSchema and the login user are fallbacks used
+        // before the first refresh has completed.
+        if (effectiveDb) {
+          const cachedSchema = this._metadataCache?.getCurrentSchema(
+            connectionName,
+            effectiveDb,
+          );
+          if (cachedSchema) {
+            return cachedSchema;
+          }
+        }
+
+        const configuredCurrentSchema = details.options?.currentSchema;
+        if (
+          typeof configuredCurrentSchema === "string" &&
+          configuredCurrentSchema.trim().length > 0
+        ) {
+          return configuredCurrentSchema.trim();
+        }
+        if (
+          "schema" in details &&
+          typeof details.schema === "string" &&
+          details.schema.trim().length > 0
+        ) {
+          return details.schema.trim();
+        }
+        if (details.user.trim().length > 0) {
+          return details.user.trim();
+        }
+        return null;
+      }
+
       if (
         "schema" in details &&
         typeof details.schema === "string" &&
@@ -951,7 +1012,7 @@ export class ConnectionManager {
           return cachedSchema;
         }
       }
-      if (this.getConnectionDatabaseKind(connectionName) === "netezza") {
+      if (databaseKind === "netezza") {
         return "ADMIN";
       }
       return null;

@@ -12,6 +12,19 @@ export {
     IMPORT_WIZARD_WEBVIEW_TO_HOST_TYPES
 } from './importWizardContracts';
 
+export type {
+    MigrationWizardAnalysisState,
+    MigrationWizardColumnState,
+    MigrationWizardConnection,
+    MigrationWizardHostToWebviewMessage,
+    MigrationWizardProgressState,
+    MigrationWizardSourceMode,
+    MigrationWizardSourceState,
+    MigrationWizardState,
+    MigrationWizardTargetState,
+    MigrationWizardWebviewToHostMessage,
+} from './migrationWizardContracts';
+
 export {
     RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS,
     RESULT_PANEL_INBOUND_COMMANDS,
@@ -79,6 +92,21 @@ export {
     FILE_SEARCH_OUTBOUND_TYPES,
     FILE_SEARCH_WEBVIEW_TO_HOST_TYPES
 } from './fileSearchContracts';
+
+export {
+    FILE_CONNECTION_PANEL_HOST_TO_WEBVIEW_TYPES,
+    FILE_CONNECTION_PANEL_INBOUND_TYPES,
+    FILE_CONNECTION_PANEL_OUTBOUND_TYPES,
+    FILE_CONNECTION_PANEL_WEBVIEW_TO_HOST_TYPES
+} from './fileConnectionPanelContracts';
+
+export type {
+    FileConnectionPanelFile,
+    FileConnectionPanelHostToWebviewMessage,
+    FileConnectionPanelMode,
+    FileConnectionPanelState,
+    FileConnectionPanelWebviewToHostMessage
+} from './fileConnectionPanelContracts';
 
 export type {
     EditDataChanges,

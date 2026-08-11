@@ -92,8 +92,55 @@ describe('file dialect LSP completion (server flow)', () => {
             expect.anything(),
             'memory',
             'data1',
-            undefined,
+            'main',
         );
         expect(labels(items)).toEqual(expect.arrayContaining(['DATEKEY', 'AMOUNT']));
+    });
+
+    it('resolves alias columns for a full File SQL workspace path and a shorthand view', async () => {
+        const provider = new MockProvider();
+        const fullPath = '/home/dusko/source/sql_samples/data1.xlsx';
+        provider.setColumns('memory', fullPath, ['DATEKEY', 'AMOUNT']);
+        provider.setColumns('memory', 'data1', ['DATEKEY', 'AMOUNT']);
+        const fullPathEngine = new LspCompletionEngine(provider as never, new DocumentParseSession());
+        const shorthandEngine = new LspCompletionEngine(provider as never, new DocumentParseSession());
+        const fullPathRequest = createDoc(`SELECT * FROM "${fullPath}" x WHERE x.|`);
+
+        const fullPathResult = await fullPathEngine.provideCompletionItems(
+            fullPathRequest.document,
+            fullPathRequest.position,
+            CompletionTriggerKind.TriggerCharacter,
+        );
+        const shorthand = createDoc('SELECT * FROM data1 x WHERE x.|');
+        const shorthandResult = await shorthandEngine.provideCompletionItems(
+            shorthand.document,
+            shorthand.position,
+            CompletionTriggerKind.TriggerCharacter,
+        );
+
+        expect(labels(fullPathResult)).toEqual(expect.arrayContaining(['DATEKEY', 'AMOUNT']));
+        expect(labels(shorthandResult)).toEqual(expect.arrayContaining(['DATEKEY', 'AMOUNT']));
+        expect(provider.getColumns).toHaveBeenCalledWith(
+            expect.anything(),
+            'memory',
+            fullPath,
+            'main',
+        );
+    });
+
+    it('filters columns by prefix for a full File SQL workspace path', async () => {
+        const provider = new MockProvider();
+        const fullPath = '/home/dusko/source/sql_samples/data1.xlsx';
+        provider.setColumns('memory', fullPath, ['DATEKEY', 'AMOUNT']);
+        const engine = new LspCompletionEngine(provider as never, new DocumentParseSession());
+        const request = createDoc(`SELECT * FROM "${fullPath}" x WHERE x.DAT|`);
+
+        const items = await engine.provideCompletionItems(
+            request.document,
+            request.position,
+            CompletionTriggerKind.TriggerCharacter,
+        );
+
+        expect(labels(items)).toEqual(['DATEKEY']);
     });
 });
