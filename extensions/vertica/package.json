@@ -2,7 +2,7 @@
     "name": "justybaselite-vertica",
     "displayName": "JustyBase SQL Editor (Vertica)",
     "description": "Optional Vertica companion for JustyBase SQL Editor",
-    "version": "3.16.25",
+    "version": "3.16.26",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
