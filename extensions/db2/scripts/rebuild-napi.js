@@ -126,6 +126,22 @@ function getIbmDbVersion() {
     return String(packageJson.version);
 }
 
+function patchDarwinLibraryReference() {
+    if (process.platform !== 'darwin') {
+        return;
+    }
+
+    // ibm_db's macOS build links against the bare `libdb2.dylib` name. The
+    // loader does not reliably honor DYLD_LIBRARY_PATH after the host starts
+    // (notably in VS Code and CI), so make the packaged binding self-contained.
+    execFileSync('install_name_tool', [
+        '-change',
+        'libdb2.dylib',
+        '@loader_path/../../installer/clidriver/lib/libdb2.dylib',
+        BINDING_BINARY_PATH,
+    ], { stdio: 'inherit' });
+}
+
 function writeRuntimeMarker() {
     fs.mkdirSync(path.dirname(RUNTIME_MARKER_PATH), { recursive: true });
     fs.writeFileSync(
@@ -178,6 +194,7 @@ function main() {
             fail(`N-API build completed but did not create ${BINDING_BINARY_PATH}`);
         }
 
+        patchDarwinLibraryReference();
         writeRuntimeMarker();
         const size = fs.statSync(BINDING_BINARY_PATH).size;
         console.log(`Built ibm_db Node-API ${NAPI_VERSION}: ${BINDING_BINARY_PATH} (${size} bytes)`);

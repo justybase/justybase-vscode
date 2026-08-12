@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             platform: win32
             arch: x64
             expected_driver: node_modules/ibm_db/installer/clidriver/bin/db2cli64.dll
