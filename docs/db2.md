@@ -56,11 +56,12 @@ Maintainer labels: [plans/DIALECT_PARITY_MATRIX.md](../plans/DIALECT_PARITY_MATR
 
 ```bash
 npm run install:db2
-npm run db2:runtime:node          # Jest / live (Node ABI)
+npm run db2:runtime:napi          # shared Node-API runtime
 npm run db2:connect-probe
 npm run test:db2:integration      # dedicated live suite (auto-for-live-tests)
 npm run verify:db2
-npm run db2:runtime:electron      # restore F5 / Extension Host ABI
+DB2_VSCODE_TEST_VERSION=stable npm run test:db2:vscode-runtime
+# Add DB2_VSCODE_RUNTIME_LIVE=true to run SELECT 1 against DB2_LIVE_TEST_*.
 ```
 
 ### Persistent live fixture
@@ -79,8 +80,17 @@ See [`scripts-private/db2-live-fixture/manifest.json`](../scripts-private/db2-li
 |-------|----------|
 | Unit | explain parser, tuning advisor, quality rules DB2001–8, streaming cancel mocks, Db2 parser LUW + authoring |
 | Live | `test:db2:integration` — metadata, DDL, completion E2E, DB2xxx + SQL004/SQL025 quality, explain/tuning soft-skip, maintenance, fixture |
-| Manual | F5 Extension Host with Db2 VSIX + `db2:runtime:electron` |
+| Manual | F5 Extension Host with Db2 VSIX + `db2:runtime:napi` |
 
 ## Packaging note
 
 Root extension ships editor assets; the Db2 VSIX ships `ibm_db` + providers. Install order: core then Db2 pack (see [INTEGRATION_STEPS.md](./INTEGRATION_STEPS.md)).
+
+## VS Code/Electron compatibility
+
+The packaged `ibm_db` binding targets **Node-API 8**, so the VSIX is not tied
+to a particular Electron ABI. Release CI loads the native driver from an
+Extension Host on the minimum supported VS Code (`1.103.2`), current Stable,
+and Insiders. Add `DB2_VSCODE_RUNTIME_LIVE=true` to make the same test perform
+`SELECT 1 FROM SYSIBM.SYSDUMMY1` using `DB2_LIVE_TEST_*`; the compatibility
+gate intentionally validates only native loading.

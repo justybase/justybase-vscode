@@ -29,6 +29,11 @@ type IbmDbModule = typeof import('ibm_db');
 let _ibmDbModulePromise: Promise<IbmDbModule> | undefined;
 const _extensionRequire = createRequire(__filename);
 const _bundledClidriverHome = path.resolve(__dirname, '../node_modules/ibm_db/installer/clidriver');
+const _bundledRuntimeMarkerPath = path.resolve(
+    __dirname,
+    '../node_modules/ibm_db/build/Release/.justybase-napi-runtime.json'
+);
+const REQUIRED_NAPI_VERSION = 8;
 
 
 
@@ -131,7 +136,27 @@ function getRuntimeVersionSummary(): string {
     const nodeVersion = process.version;
     const electronVersion = process.versions.electron ?? 'n/a';
     const abiVersion = process.versions.modules ?? 'n/a';
-    return `Current runtime: Node ${nodeVersion}, Electron ${electronVersion}, ABI ${abiVersion}.`;
+    const napiVersion = process.versions.napi ?? 'n/a';
+    return `Current runtime: Node ${nodeVersion}, Electron ${electronVersion}, ABI ${abiVersion}, N-API ${napiVersion}.`;
+}
+
+function getBundledRuntimeSummary(): string {
+    try {
+        const marker = JSON.parse(fs.readFileSync(_bundledRuntimeMarkerPath, 'utf8')) as {
+            runtime?: unknown;
+            napiVersion?: unknown;
+            platform?: unknown;
+            arch?: unknown;
+            ibmDbVersion?: unknown;
+        };
+        if (marker.runtime === 'napi') {
+            return `Bundled driver: N-API ${String(marker.napiVersion)}, ${String(marker.platform)}-${String(marker.arch)}, ibm_db ${String(marker.ibmDbVersion)}.`;
+        }
+    } catch {
+        // The marker is diagnostic-only; older development installs may not have it.
+    }
+
+    return 'Bundled driver: N-API runtime marker unavailable.';
 }
 
 function isMissingIbmDbDependencyError(error: unknown): boolean {
@@ -148,6 +173,14 @@ function isMissingIbmDbDependencyError(error: unknown): boolean {
 function isAbiMismatchError(error: unknown): boolean {
     const message = getErrorMessage(error);
     return message.includes('NODE_MODULE_VERSION') || message.includes('was compiled against a different Node.js version');
+}
+
+function isNapiMismatchError(error: unknown): boolean {
+    const message = getErrorMessage(error).toLowerCase();
+    return message.includes('n-api version')
+        || message.includes('node-api version')
+        || message.includes('napi version')
+        || message.includes('module did not self-register');
 }
 
 function isOdbcDriverManagerError(error: unknown): boolean {
@@ -169,18 +202,14 @@ function buildIbmDbLoadError(error: unknown, clidriverHome: string | undefined):
         );
     }
 
-    if (isAbiMismatchError(error)) {
+    if (isAbiMismatchError(error) || isNapiMismatchError(error)) {
         return new Error(
-            'Db2 native module "ibm_db" was compiled for a different Node.js ABI version.\n' +
+            'Db2 native module "ibm_db" is incompatible with the current VS Code runtime.\n' +
             `${runtimeSummary}\n` +
-            'Fix: use the matching DB2 runtime helper from the repository root:\n' +
-            '  - local Jest/live tests: npm run db2:runtime:node\n' +
-            '  - F5 / VS Code Electron: npm run db2:runtime:electron\n' +
-            'If auto-detect picked the wrong VS Code install, rerun with:\n' +
-            '  npm run db2:runtime:electron -- --vscode-dir "C:\\Path\\To\\Microsoft VS Code"\n' +
-            'or pass the Electron runtime explicitly:\n' +
-            '  npm run db2:runtime:electron -- --electron <ElectronVersion>\n' +
-            'Then close all VS Code and Extension Development Host windows before pressing F5 again.',
+            `${getBundledRuntimeSummary()}\n` +
+            `The packaged driver requires N-API ${REQUIRED_NAPI_VERSION} or newer.\n` +
+            'Install the latest platform-specific Db2 extension and restart VS Code.\n' +
+            'For source development, rebuild the shared runtime with: npm run db2:runtime:napi',
             { cause: error }
         );
     }
@@ -192,13 +221,12 @@ function buildIbmDbLoadError(error: unknown, clidriverHome: string | undefined):
     return new Error(
         `Db2 native module "ibm_db" failed to load: ${getErrorMessage(error)}\n` +
         `${runtimeSummary}\n` +
+        `${getBundledRuntimeSummary()}\n` +
         'Possible fixes:\n' +
-        '  1. Ensure ibm_db is installed: npm run install:db2\n' +
-        '  2. For local Jest/live tests, switch DB2 to Node: npm run db2:runtime:node\n' +
-        '  3. For F5 debugging, switch DB2 to Electron: npm run db2:runtime:electron\n' +
-        '  4. If auto-detect chooses the wrong VS Code runtime, rerun db2:runtime:electron with --vscode-dir or --electron.\n' +
-        '  5. Close all VS Code / Extension Development Host windows before retrying.\n' +
-        '  6. Check that IBM CLI driver (clidriver) is accessible and IBM_DB_HOME is set correctly.' +
+        '  1. Reinstall the latest platform-specific Db2 extension and restart VS Code.\n' +
+        '  2. Check that the bundled IBM CLI driver (clidriver) is accessible.\n' +
+        '  3. For source development, run: npm run db2:runtime:napi\n' +
+        '  4. Close all VS Code / Extension Development Host windows before retrying.' +
         clidriverHint,
         { cause: error }
     );
@@ -625,8 +653,7 @@ export class Db2Connection extends EventEmitter implements DatabaseConnection {
             const db2cliExe = path.join(_bundledClidriverHome, 'bin', 'db2cli.exe');
             const odbcHint = isOdbcDriverManagerError(error)
                 ? '\nThe native addon routes through the Windows ODBC Driver Manager.\n' +
-                  'Fix: run "npm run db2:runtime:electron" (or the legacy alias "npm run rebuild:db2")\n' +
-                  'to recompile with direct IBM CLI linking.\n' +
+                  'Reinstall the latest platform-specific Db2 extension to restore the bundled native driver.\n' +
                   'This extension never registers an ODBC driver automatically.\n' +
                   'If your administrator approves it, register the bundled ODBC driver manually from an elevated command prompt:\n' +
                   `  "${db2cliExe}" install -setup`

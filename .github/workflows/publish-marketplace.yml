@@ -85,7 +85,7 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   NODE_VERSION: "22"
-  ELECTRON_VERSION: "42.2.0"
+  DB2_NAPI_VERSION: "8"
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 
 jobs:
@@ -382,6 +382,53 @@ jobs:
           path: justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
           retention-days: 1
 
+  verify-db2-vscode-runtime:
+    name: Verify DB2 runtime in VS Code ${{ matrix.vscode }}
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+      - integration-gate
+    if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode: ["1.103.2", stable, insiders]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/db2/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install DB2 extension dependencies
+        working-directory: extensions/db2
+        run: npm ci
+
+      - name: Build and verify shared N-API runtime
+        working-directory: extensions/db2
+        run: node scripts/rebuild-napi.js && node scripts/verify-napi-runtime.js
+        env:
+          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+
+      - name: Run Extension Host native-runtime smoke test
+        run: npm run test:db2:vscode-runtime
+        env:
+          DB2_VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+
   build-db2:
     name: Build DB2 VSIX (${{ matrix.target }})
     needs:
@@ -389,6 +436,7 @@ jobs:
       - quality-gate
       - test-gate
       - integration-gate
+      - verify-db2-vscode-runtime
     if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -427,24 +475,28 @@ jobs:
         working-directory: extensions/db2
         run: npm ci
 
-      - name: Cache ibm_db Electron rebuild
+      - name: Cache ibm_db N-API build
         id: cache-ibm-db
         uses: actions/cache@v4
         with:
           path: |
             extensions/db2/node_modules/ibm_db/build
             extensions/db2/node_modules/ibm_db/installer/clidriver
-          key: ibm-db-electron-${{ env.ELECTRON_VERSION }}-${{ matrix.target }}-${{ hashFiles('extensions/db2/package-lock.json') }}
+          key: ibm-db-napi-${{ env.DB2_NAPI_VERSION }}-${{ matrix.target }}-${{ hashFiles('extensions/db2/package-lock.json') }}
           restore-keys: |
-            ibm-db-electron-${{ env.ELECTRON_VERSION }}-${{ matrix.target }}-
-            ibm-db-electron-${{ env.ELECTRON_VERSION }}-
+            ibm-db-napi-${{ env.DB2_NAPI_VERSION }}-${{ matrix.target }}-
+            ibm-db-napi-${{ env.DB2_NAPI_VERSION }}-
 
-      - name: Rebuild ibm_db for Electron runtime
+      - name: Build ibm_db as a stable Node-API runtime
         if: steps.cache-ibm-db.outputs.cache-hit != 'true'
         working-directory: extensions/db2
-        run: node scripts/rebuild-electron.js --electron ${{ env.ELECTRON_VERSION }}
+        run: node scripts/rebuild-napi.js
         env:
           IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+
+      - name: Verify ibm_db native runtime
+        working-directory: extensions/db2
+        run: node scripts/verify-napi-runtime.js
 
       - name: Build DB2 extension
         run: npm run build:db2
@@ -460,6 +512,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import json
           import zipfile
 
           vsix_path = 'extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
@@ -469,12 +522,24 @@ jobs:
               names = archive.namelist()
               has_binding = any('node_modules/ibm_db/build/Release/odbc_bindings.node' in name for name in names)
               has_driver = any(expected_driver in name for name in names)
+              marker_name = next((name for name in names if name.endswith('node_modules/ibm_db/build/Release/.justybase-napi-runtime.json')), None)
+              marker_json = archive.read(marker_name) if marker_name else None
 
           if not has_binding:
               raise SystemExit('Missing odbc_bindings.node in packaged VSIX')
 
           if not has_driver:
               raise SystemExit(f'Missing expected platform driver file in VSIX: {expected_driver}')
+
+          if not marker_name:
+              raise SystemExit('Missing N-API runtime marker in packaged VSIX')
+
+          marker = json.loads(marker_json)
+          target_platform, target_arch = '${{ matrix.target }}'.split('-', 1)
+          if marker.get('runtime') != 'napi' or marker.get('napiVersion') != 8:
+              raise SystemExit(f'Unexpected N-API runtime marker: {marker}')
+          if marker.get('platform') != target_platform or marker.get('arch') != target_arch:
+              raise SystemExit(f'Packaged runtime marker targets the wrong platform: {marker}')
 
           print('VSIX runtime asset verification passed')
           PY
@@ -634,6 +699,7 @@ jobs:
       - quality-gate
       - test-gate
       - integration-gate
+      - verify-db2-vscode-runtime
       - build-main
       - build-db2
       - build-duckdb
@@ -644,6 +710,7 @@ jobs:
       && needs.quality-gate.result == 'success'
       && needs.test-gate.result == 'success'
       && needs.integration-gate.result == 'success'
+      && (needs.verify-db2-vscode-runtime.result == 'success' || needs.verify-db2-vscode-runtime.result == 'skipped')
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
@@ -690,6 +757,7 @@ jobs:
       - quality-gate
       - test-gate
       - integration-gate
+      - verify-db2-vscode-runtime
       - build-main
       - build-db2
       - build-duckdb
@@ -701,6 +769,7 @@ jobs:
       && needs.quality-gate.result == 'success'
       && needs.test-gate.result == 'success'
       && needs.integration-gate.result == 'success'
+      && (needs.verify-db2-vscode-runtime.result == 'success' || needs.verify-db2-vscode-runtime.result == 'skipped')
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
@@ -764,6 +833,7 @@ jobs:
       - quality-gate
       - test-gate
       - integration-gate
+      - verify-db2-vscode-runtime
       - build-main
       - build-db2
       - build-duckdb
@@ -777,6 +847,7 @@ jobs:
       && needs.quality-gate.result == 'success'
       && needs.test-gate.result == 'success'
       && needs.integration-gate.result == 'success'
+      && (needs.verify-db2-vscode-runtime.result == 'success' || needs.verify-db2-vscode-runtime.result == 'skipped')
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')

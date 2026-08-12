@@ -43,7 +43,7 @@ Editor depth is **Advanced (LUW SQL + CST linter/semantic)**; deep SQL PL visito
 
 ## Windows ODBC registration
 
-The extension **never** registers an ODBC driver or changes the Windows registry automatically. If the driver reports **Data source name not found**, rebuild with `npm run db2:runtime:electron`. Only when approved by an administrator, register the bundled driver manually:
+The extension **never** registers an ODBC driver or changes the Windows registry automatically. If the driver reports **Data source name not found**, reinstall the current platform-specific Db2 VSIX. For source development, rebuild the shared Node-API driver with `npm run db2:runtime:napi`. Only when approved by an administrator, register the bundled driver manually:
 
 ```powershell
 <path-to-clidriver>\bin\db2cli.exe install -setup
@@ -59,12 +59,14 @@ The extension dependency allows Marketplace resolution; no separate Netezza inst
 
 ```powershell
 npm run install:db2
-npm run rebuild:db2          # Electron ABI for F5
+npm run db2:runtime:napi     # shared Node-API runtime for F5 and Jest
 # F5 -> Run Core + Db2 Support
 
-npm run db2:runtime:node     # before Jest / live tests
 npm run test:db2:integration
 npm run verify:db2
+DB2_VSCODE_TEST_VERSION=stable npm run test:db2:vscode-runtime
+# Optional real query in the Extension Host (requires DB2_LIVE_TEST_*):
+DB2_VSCODE_RUNTIME_LIVE=true DB2_VSCODE_TEST_VERSION=stable npm run test:db2:vscode-runtime
 ```
 
 Live env: `DB2_LIVE_TEST_*` — see [docs/db2.md](../../docs/db2.md). Persistent fixture: `npm run db2:seed-live-fixture`.
@@ -78,6 +80,13 @@ npm run package:db2:full
 ```
 
 CI: `.github/workflows/db2-build.yml` (VSIX).
+
+## VS Code runtime compatibility
+
+`ibm_db` is packaged as a Node-API 8 module, rather than a binary tied to one
+Electron version. Release CI verifies it inside the Extension Host for VS Code
+`1.103.2`, current Stable, and Insiders. A platform-specific VSIX is still
+required for Windows x64, Linux x64, or macOS Apple Silicon.
 
 ## License
 

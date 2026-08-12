@@ -1,7 +1,7 @@
 {
     "name": "justybaselite-vertica",
     "displayName": "JustyBase SQL Editor (Vertica)",
-    "description": "Optional Vertica companion for JustyBase SQL Editor (Netezza)",
+    "description": "Optional Vertica companion for JustyBase SQL Editor",
     "version": "3.16.25",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
