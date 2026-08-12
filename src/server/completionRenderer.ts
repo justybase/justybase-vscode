@@ -283,6 +283,7 @@ export function filterMetadataItems(
   databaseKind?: DatabaseKind,
   options?: {
     sortPrefix?: (item: MetadataObjectItem) => string;
+    ranking?: MetadataCompletionRanking;
   },
 ): CompletionItem[] {
   return items
@@ -292,20 +293,122 @@ export function filterMetadataItems(
       // Netezza system views (_V_*) stay available but sort after user objects.
       const sortPrefix =
         options?.sortPrefix?.(item) ??
+        getMetadataSortPrefix(item, databaseKind, options?.ranking) ??
         (databaseKind === "netezza" && item.name.startsWith("_V_")
           ? "9_"
           : "3_");
+      const detail =
+        options?.ranking?.role === "location" && databaseKind === "db2"
+          ? "Db2 location (CURRENT SERVER)"
+          : item.detail;
       return attachCompletionDescription(
         {
           label: item.name,
           kind: kindOverride || toCompletionKind(item.objectType),
-          detail: item.detail,
+          detail,
           sortText: `${sortPrefix}${item.name}`,
           insertText,
         },
         item.description,
       );
-    });
+  });
+}
+
+export type MetadataCompletionRole =
+  | "database"
+  | "location"
+  | "schema"
+  | "source";
+
+export interface MetadataCompletionRanking {
+  role: MetadataCompletionRole;
+  effectiveDatabase?: string;
+  effectiveSchema?: string;
+  defaultObjectType?: NonNullable<MetadataObjectItem["objectType"]>;
+}
+
+function getMetadataSortPrefix(
+  item: MetadataObjectItem,
+  databaseKind: DatabaseKind | undefined,
+  ranking: MetadataCompletionRanking | undefined,
+): string | undefined {
+  if (!ranking) {
+    return undefined;
+  }
+
+  switch (ranking.role) {
+    case "database":
+    case "location":
+      return namesEqual(item.name, ranking.effectiveDatabase, databaseKind)
+        ? "0_000_"
+        : "0_100_";
+    case "schema":
+      return namesEqual(item.name, ranking.effectiveSchema, databaseKind)
+        ? "0_200_"
+        : "0_300_";
+    case "source":
+      return getSourceSortPrefix(
+        item,
+        databaseKind,
+        ranking.effectiveSchema,
+        ranking.defaultObjectType,
+      );
+  }
+}
+
+function getSourceSortPrefix(
+  item: MetadataObjectItem,
+  databaseKind: DatabaseKind | undefined,
+  effectiveSchema: string | undefined,
+  defaultObjectType: NonNullable<MetadataObjectItem["objectType"]> | undefined,
+): string {
+  // Netezza system views remain available but always follow user objects.
+  if (databaseKind === "netezza" && item.name.startsWith("_V_")) {
+    return "9_";
+  }
+
+  const isActiveSchema =
+    !effectiveSchema ||
+    !item.schema ||
+    namesEqual(item.schema, effectiveSchema, databaseKind);
+  const scopePrefix = isActiveSchema ? "3_0" : "3_1";
+
+  switch (item.objectType ?? defaultObjectType) {
+    case "table":
+      return `${scopePrefix}00_`;
+    case "view":
+    case "materialized-view":
+      return `${scopePrefix}10_`;
+    case "synonym":
+      return item.schema?.toUpperCase() === "PUBLIC"
+        ? `${scopePrefix}30_`
+        : `${scopePrefix}20_`;
+    case "procedure":
+      return `${scopePrefix}40_`;
+    default:
+      return `${scopePrefix}90_`;
+  }
+}
+
+function namesEqual(
+  left: string | undefined,
+  right: string | undefined,
+  databaseKind: DatabaseKind | undefined,
+): boolean {
+  if (!left || !right) {
+    return false;
+  }
+
+  if (
+    databaseKind === "postgresql" ||
+    databaseKind === "vertica" ||
+    databaseKind === "duckdb" ||
+    databaseKind === "file"
+  ) {
+    return left.toLowerCase() === right.toLowerCase();
+  }
+
+  return left.toUpperCase() === right.toUpperCase();
 }
 
 export function toCompletionKind(
@@ -331,32 +434,23 @@ export function filterOracleSchemaItems(
   prefix: string,
   currentSchema?: string,
 ): CompletionItem[] {
-  const normalizedCurrentSchema = currentSchema?.toUpperCase();
   return sortOracleCompletionItems(filterMetadataItems(items, prefix, CompletionItemKind.Module, "oracle", {
-    sortPrefix: (item) =>
-      item.name.toUpperCase() === normalizedCurrentSchema
-        ? "0_000_"
-        : "0_100_",
+    ranking: {
+      role: "schema",
+      effectiveSchema: currentSchema,
+    },
   }));
 }
 
 export function filterOracleSourceItems(
   items: MetadataObjectItem[],
   prefix: string,
+  currentSchema?: string,
 ): CompletionItem[] {
   return sortOracleCompletionItems(filterMetadataItems(items, prefix, undefined, "oracle", {
-    sortPrefix: (item) => {
-      switch (item.objectType) {
-        case "table":
-          return "2_000_";
-        case "view":
-        case "materialized-view":
-          return "3_000_";
-        case "synonym":
-          return item.schema?.toUpperCase() === "PUBLIC" ? "4_100_" : "4_000_";
-        default:
-          return "2_900_";
-      }
+    ranking: {
+      role: "source",
+      effectiveSchema: currentSchema,
     },
   }));
 }

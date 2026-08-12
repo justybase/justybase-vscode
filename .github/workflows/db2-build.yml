@@ -133,6 +133,6 @@ jobs:
           IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
 
       - name: Run Extension Host native-runtime smoke test
-        run: npm run test:db2:vscode-runtime
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:db2:vscode-runtime
         env:
           DB2_VSCODE_TEST_VERSION: ${{ matrix.vscode }}

@@ -50,8 +50,14 @@ export function validateDialectTraits(traits: DatabaseDialectTraits): string[] {
         errors.push('qualification.twoPartNameStyle="database-object" requires supportsThreePartName=false.');
     }
 
-    if (qualification.twoPartNameStyle === 'database-object' && completion.singleDotPathNamespace !== 'database') {
-        errors.push('Database-object dialects require completion.singleDotPathNamespace="database".');
+    if (qualification.supportsThreePartName !== (qualification.threePartNamePrefix !== 'none')) {
+        errors.push('qualification.supportsThreePartName must agree with qualification.threePartNamePrefix.');
+    }
+
+    if (qualification.twoPartNameStyle === 'database-object'
+        && completion.singleDotPathNamespace !== 'database'
+        && completion.singleDotPathNamespace !== 'none') {
+        errors.push('Database-object dialects require completion.singleDotPathNamespace="database" or "none".');
     }
 
     if (completion.singleDotPathNamespace === 'schema-or-database' && !completion.supportsDoubleDotPath) {
@@ -60,6 +66,10 @@ export function validateDialectTraits(traits: DatabaseDialectTraits): string[] {
 
     if (completion.singleDotPathNamespace === 'schema-or-database' && qualification.twoPartNameStyle !== 'schema-object') {
         errors.push('completion.singleDotPathNamespace="schema-or-database" is only valid for schema-object dialects.');
+    }
+
+    if (qualification.threePartNamePrefix === 'location' && completion.singleDotPathNamespace !== 'schema') {
+        errors.push('Location-qualified dialects require completion.singleDotPathNamespace="schema".');
     }
 
     return errors;

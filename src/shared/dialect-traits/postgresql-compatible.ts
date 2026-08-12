@@ -9,6 +9,7 @@ export const postgresqlCompatibleDialectTraits = createDatabaseDialectTraits({
   },
   qualification: {
     supportsThreePartName: false,
+    threePartNamePrefix: "none",
     twoPartNameStyle: "schema-object",
     twoPartContainerPreference: "schema-over-database",
   },

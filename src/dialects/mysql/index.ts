@@ -15,6 +15,8 @@ export const mysqlDialect = createStubDialect('mysql', 'MySQL', 3306, {
             twoPartNameStyle: 'database-object',
             twoPartContainerPreference: 'database-over-schema',
             supportsThreePartName: false,
+            threePartNamePrefix: 'none',
+            databaseOnlyReferenceStyle: 'single-dot',
         },
     },
 });

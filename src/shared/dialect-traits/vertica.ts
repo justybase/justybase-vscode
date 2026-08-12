@@ -6,7 +6,6 @@ export const verticaDialectTraits = createDatabaseDialectTraits({
     generatedNameCase: "lower",
   },
   qualification: {
-    supportsThreePartName: false,
     twoPartNameStyle: "schema-object",
     twoPartContainerPreference: "schema-over-database",
     databaseOnlyReferenceStyle: "omit",

@@ -4,7 +4,7 @@ export type { DatabaseConnection, DatabaseCommand, DatabaseDataReader } from './
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor } from './database';
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue } from './database';
 export type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions } from './database';
-export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides } from './database';
+export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides, DatabaseThreePartNamePrefix } from './database';
 
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic } from './database';
 

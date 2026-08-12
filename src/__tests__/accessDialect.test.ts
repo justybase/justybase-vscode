@@ -6,7 +6,7 @@ describe('Access dialect authoring contract', () => {
     it('models Access as a flat, file-backed catalog without three-part names or indexes', () => {
         expect(accessDialectTraits.qualification.supportsThreePartName).toBe(false);
         expect(accessDialectTraits.qualification.twoPartNameStyle).toBe('database-object');
-        expect(accessDialectTraits.completion.singleDotPathNamespace).toBe('database');
+        expect(accessDialectTraits.completion.singleDotPathNamespace).toBe('none');
         expect(accessDialectTraits.objects.supportsIndexes).toBe(false);
     });
 

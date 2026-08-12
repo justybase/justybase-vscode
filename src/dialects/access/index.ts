@@ -14,6 +14,16 @@ const accessDialectBase = createStubDialect(
             identifiers: {
                 generatedNameCase: 'preserve',
             },
+            qualification: {
+                twoPartNameStyle: 'database-object',
+                twoPartContainerPreference: 'schema-over-database',
+                supportsThreePartName: false,
+                threePartNamePrefix: 'none',
+                databaseOnlyReferenceStyle: 'single-dot',
+            },
+            completion: {
+                singleDotPathNamespace: 'none',
+            },
         },
         extensionDisplayName: 'JustyBase SQL Editor (Microsoft Access)',
     },

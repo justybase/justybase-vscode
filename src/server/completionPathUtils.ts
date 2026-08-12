@@ -32,13 +32,37 @@ export function supportsThreePartPath(databaseKind?: DatabaseKind): boolean {
   return getDatabaseDialectTraits(databaseKind).qualification.supportsThreePartName;
 }
 
+export function supportsDatabaseContainerCompletions(
+  databaseKind?: DatabaseKind,
+): boolean {
+  const traits = getDatabaseDialectTraits(databaseKind);
+  return (
+    traits.completion.singleDotPathNamespace === "database" ||
+    traits.completion.singleDotPathNamespace === "schema-or-database" ||
+    traits.qualification.threePartNamePrefix !== "none"
+  );
+}
+
+export function supportsSingleDotPath(databaseKind?: DatabaseKind): boolean {
+  return (
+    getDatabaseDialectTraits(databaseKind).completion.singleDotPathNamespace !==
+    "none"
+  );
+}
+
+export function hasLocationThreePartPrefix(databaseKind?: DatabaseKind): boolean {
+  return (
+    getDatabaseDialectTraits(databaseKind).qualification.threePartNamePrefix ===
+    "location"
+  );
+}
+
 export function shouldTreatSingleDotPathAsSchema(
   databaseKind?: DatabaseKind,
 ): boolean {
-  return (
-    getDatabaseDialectTraits(databaseKind).completion.singleDotPathNamespace !==
-    "database"
-  );
+  const namespace =
+    getDatabaseDialectTraits(databaseKind).completion.singleDotPathNamespace;
+  return namespace === "schema" || namespace === "schema-or-database";
 }
 
 export function isNetezzaDoubleDotSource(

@@ -954,8 +954,8 @@ describe("MetadataBridge list cache", () => {
 
       expect(sendRequest).toHaveBeenCalledTimes(2);
       expect(result1).toEqual([
-        { label: "ORDERS", kind: CompletionItemKind.Class, detail: undefined, sortText: "3_ORDERS", insertText: "ORDERS" },
-        { label: "CUSTOMERS", kind: CompletionItemKind.Class, detail: undefined, sortText: "3_CUSTOMERS", insertText: "CUSTOMERS" },
+        { label: "ORDERS", kind: CompletionItemKind.Class, detail: undefined, sortText: "3_000_ORDERS", insertText: "ORDERS" },
+        { label: "CUSTOMERS", kind: CompletionItemKind.Class, detail: undefined, sortText: "3_000_CUSTOMERS", insertText: "CUSTOMERS" },
       ]);
 
       // Second call: cached
@@ -992,8 +992,8 @@ describe("MetadataBridge list cache", () => {
 
       expect(sendRequest).toHaveBeenCalledTimes(2);
       expect(result1).toEqual([
-        { label: "PUBLIC", kind: CompletionItemKind.Module, detail: undefined, sortText: "3_PUBLIC", insertText: "PUBLIC" },
-        { label: "ADMIN", kind: CompletionItemKind.Module, detail: undefined, sortText: "3_ADMIN", insertText: "ADMIN" },
+        { label: "PUBLIC", kind: CompletionItemKind.Module, detail: undefined, sortText: "0_300_PUBLIC", insertText: "PUBLIC" },
+        { label: "ADMIN", kind: CompletionItemKind.Module, detail: undefined, sortText: "0_300_ADMIN", insertText: "ADMIN" },
       ]);
     });
   });
