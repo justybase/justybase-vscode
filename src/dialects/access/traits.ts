@@ -9,10 +9,11 @@ export const accessDialectTraits = createDatabaseDialectTraits({
         twoPartNameStyle: 'database-object',
         twoPartContainerPreference: 'schema-over-database',
         supportsThreePartName: false,
+        threePartNamePrefix: 'none',
         databaseOnlyReferenceStyle: 'single-dot'
     },
     completion: {
-        singleDotPathNamespace: 'database'
+        singleDotPathNamespace: 'none'
     },
     objects: {
         supportsIndexes: false

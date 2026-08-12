@@ -8,5 +8,15 @@ export const oracleDialect = createStubDialect('oracle', 'Oracle', 1521, {
         identifiers: {
             generatedNameCase: 'upper',
         },
+        qualification: {
+            supportsThreePartName: false,
+            threePartNamePrefix: 'none',
+            twoPartContainerPreference: 'schema-over-database',
+            databaseOnlyReferenceStyle: 'omit',
+        },
+        completion: {
+            singleDotPathNamespace: 'schema',
+            supportsDoubleDotPath: false,
+        },
     },
 });

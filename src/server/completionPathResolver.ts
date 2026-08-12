@@ -149,6 +149,7 @@ export class CompletionPathResolver {
       documentUri,
       localDefs,
       effectiveDb,
+      effectiveSchema,
       databaseKind,
     );
   }
@@ -208,6 +209,7 @@ export class CompletionPathResolver {
       documentUri,
       localDefs,
       effectiveDb,
+      requestContext.effectiveSchema,
       databaseKind,
     );
   }
@@ -262,6 +264,7 @@ export class CompletionPathResolver {
     documentUri: string,
     localDefs: LocalDefinition[],
     effectiveDb: string | undefined,
+    effectiveSchema: string | undefined,
     databaseKind?: DatabaseKind,
   ): Promise<CompletionItem[]> {
     if (targetContext.targetType === "procedure") {
@@ -270,6 +273,7 @@ export class CompletionPathResolver {
         documentUri,
         effectiveDb,
         databaseKind,
+        effectiveSchema,
       );
     }
 
@@ -279,6 +283,7 @@ export class CompletionPathResolver {
         documentUri,
         effectiveDb,
         databaseKind,
+        effectiveSchema,
       );
     }
 
@@ -288,6 +293,8 @@ export class CompletionPathResolver {
       documentUri,
       effectiveDb,
       databaseKind,
+      false,
+      effectiveSchema,
     );
   }
 }

@@ -41,6 +41,7 @@ export type {
   DatabaseDialectTraits,
   DatabaseIdentifierTraits,
   DatabaseQualificationTraits,
+  DatabaseThreePartNamePrefix,
   DatabaseCompletionTraits,
   DatabaseObjectSupportTraits,
   DatabaseDialectTraitsOverrides,

@@ -8,8 +8,11 @@ import type { LocalDefinition } from "../providers/types";
 import {
   buildMetadataLookupTargets,
   isNetezzaDoubleDotSource,
+  hasLocationThreePartPrefix,
+  supportsDatabaseContainerCompletions,
   shouldTreatSingleDotPathAsSchema,
   supportsDoubleDotPath,
+  supportsSingleDotPath,
   supportsThreePartPath,
   usesDatabaseObjectTwoPartName,
   type MetadataLookupOptions,
@@ -63,6 +66,9 @@ export class CompletionMetadataResolver {
     }
 
     if (context.kind === "db_dot") {
+      if (!supportsSingleDotPath(databaseKind)) {
+        return [];
+      }
       if (usesDatabaseObjectTwoPartName(databaseKind)) {
         return this.getTableLikeCompletions(
           documentUri,
@@ -71,43 +77,21 @@ export class CompletionMetadataResolver {
           context.partial,
           includeViews,
           databaseKind,
+          effectiveSchema,
         );
       }
-      if (databaseKind === "db2") {
-        return this.resolveDb2DbDotTablePathCompletions(
-          documentUri,
-          effectiveDb,
-          context.dbName,
-          context.partial,
-          includeViews,
-        );
-      }
-      if (databaseKind === "mssql") {
-        const result = await this.resolveDb2DbDotTablePathCompletions(
-          documentUri,
-          effectiveDb,
-          context.dbName,
-          context.partial,
-          includeViews,
-        );
-        if (result.length > 0) {
-          return result;
-        }
+      if (await this.shouldResolveSingleDotAsContainer(
+        documentUri,
+        context.dbName,
+        effectiveDb,
+        databaseKind,
+      )) {
         return this.getSchemaPathCompletions(
           documentUri,
           context.dbName,
           context.partial,
           databaseKind,
-        );
-      }
-      if (databaseKind === "netezza") {
-        return this.resolveNetezzaDbDotTablePathCompletions(
-          documentUri,
-          effectiveDb,
-          context.dbName,
-          context.partial,
-          includeViews,
-          databaseKind,
+          effectiveSchema,
         );
       }
       if (databaseKind === "oracle") {
@@ -129,6 +113,7 @@ export class CompletionMetadataResolver {
           context.partial,
           false,
           databaseKind,
+          effectiveSchema,
         );
       }
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
@@ -142,14 +127,10 @@ export class CompletionMetadataResolver {
           context.partial,
           includeViews,
           databaseKind,
+          effectiveSchema,
         );
       }
-      return this.getSchemaPathCompletions(
-        documentUri,
-        context.dbName,
-        context.partial,
-        databaseKind,
-      );
+      return [];
     }
 
     if (context.kind === "db_schema_dot") {
@@ -160,6 +141,7 @@ export class CompletionMetadataResolver {
         context.partial,
         includeViews,
         databaseKind,
+        effectiveSchema,
       );
     }
 
@@ -174,6 +156,7 @@ export class CompletionMetadataResolver {
         context.partial,
         includeViews,
         databaseKind,
+        effectiveSchema,
       );
     }
 
@@ -196,82 +179,49 @@ export class CompletionMetadataResolver {
       );
     }
 
-    const databases = await this.metadataProvider.getDatabases(documentUri);
-    const databaseItems = filterMetadataItems(
-      databases,
-      partial,
-      CompletionItemKind.Module,
-      databaseKind,
-    );
-    result.push(...databaseItems);
+    if (supportsDatabaseContainerCompletions(databaseKind)) {
+      const databases = await this.metadataProvider.getDatabases(documentUri);
+      result.push(
+        ...filterMetadataItems(
+          databases,
+          partial,
+          CompletionItemKind.Module,
+          databaseKind,
+          {
+            ranking: {
+              role: hasLocationThreePartPrefix(databaseKind) ? "location" : "database",
+              effectiveDatabase: effectiveDb,
+            },
+          },
+        ),
+      );
+    }
 
-    if (databaseKind === "netezza") {
-      // Unqualified Netezza names resolve in the active database. Objects in
-      // another database must be completed through an explicit DB..TABLE or
-      // DB.SCHEMA.TABLE path; returning them as plain table names would
-      // produce SQL that resolves in the wrong database.
-      if (effectiveDb) {
+    if (effectiveDb) {
+      // Bare names resolve only in the active database. Other databases are
+      // reachable through an explicitly completed container path.
+      if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
         result.push(
           ...(await this.getSchemaPathCompletions(
             documentUri,
             effectiveDb,
             partial,
             databaseKind,
-          )),
-        );
-        result.push(
-          ...(await this.getTableLikeCompletions(
-            documentUri,
-            effectiveDb,
-            undefined,
-            partial,
-            includeViews,
-            databaseKind,
+            effectiveSchema,
           )),
         );
       }
-    } else if (effectiveDb) {
-      if (databaseKind === "db2" || databaseKind === "mssql") {
-        result.push(
-          ...(await this.getSchemaPathCompletions(
-            documentUri,
-            effectiveDb,
-            partial,
-            databaseKind,
-          )),
-        );
-        result.push(
-          ...(await this.getTableLikeCompletions(
-            documentUri,
-            effectiveDb,
-            undefined,
-            partial,
-            includeViews,
-            databaseKind,
-          )),
-        );
-      } else {
-        if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
-          result.push(
-            ...(await this.getSchemaPathCompletions(
-              documentUri,
-              effectiveDb,
-              partial,
-              databaseKind,
-            )),
-          );
-        }
-        result.push(
-          ...(await this.getTableLikeCompletions(
-            documentUri,
-            effectiveDb,
-            undefined,
-            partial,
-            includeViews,
-            databaseKind,
-          )),
-        );
-      }
+      result.push(
+        ...(await this.getTableLikeCompletions(
+          documentUri,
+          effectiveDb,
+          undefined,
+          partial,
+          includeViews,
+          databaseKind,
+          effectiveSchema,
+        )),
+      );
     }
 
     return dedupeCompletionItems(result);
@@ -282,12 +232,16 @@ export class CompletionMetadataResolver {
     documentUri: string,
     effectiveDb: string | undefined,
     databaseKind?: DatabaseKind,
+    effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
     if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
       return [];
     }
 
     if (context.kind === "db_dot") {
+      if (!supportsSingleDotPath(databaseKind)) {
+        return [];
+      }
       if (usesDatabaseObjectTwoPartName(databaseKind)) {
         const views = await this.metadataProvider.getViews(
           documentUri,
@@ -298,31 +252,21 @@ export class CompletionMetadataResolver {
           context.partial,
           CompletionItemKind.Interface,
           databaseKind,
+          { ranking: { role: "source", effectiveSchema, defaultObjectType: "view" } },
         );
       }
-      if (databaseKind === "db2") {
-        if (!effectiveDb) {
-          return [];
-        }
-        const views = await this.metadataProvider.getViews(
+      if (await this.shouldResolveSingleDotAsContainer(
+        documentUri,
+        context.dbName,
+        effectiveDb,
+        databaseKind,
+      )) {
+        return this.getSchemaPathCompletions(
           documentUri,
-          effectiveDb,
-          context.dbName,
-        );
-        return filterMetadataItems(
-          views,
-          context.partial,
-          CompletionItemKind.Interface,
-          databaseKind,
-        );
-      }
-      if (databaseKind === "netezza") {
-        return this.resolveNetezzaDbDotViewPathCompletions(
-          documentUri,
-          effectiveDb,
           context.dbName,
           context.partial,
           databaseKind,
+          effectiveSchema,
         );
       }
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
@@ -339,14 +283,10 @@ export class CompletionMetadataResolver {
           context.partial,
           CompletionItemKind.Interface,
           databaseKind,
+          { ranking: { role: "source", effectiveSchema, defaultObjectType: "view" } },
         );
       }
-      return this.getSchemaPathCompletions(
-        documentUri,
-        context.dbName,
-        context.partial,
-        databaseKind,
-      );
+      return [];
     }
 
     if (context.kind === "db_schema_dot") {
@@ -360,6 +300,7 @@ export class CompletionMetadataResolver {
         context.partial,
         CompletionItemKind.Interface,
         databaseKind,
+        { ranking: { role: "source", effectiveSchema, defaultObjectType: "view" } },
       );
     }
 
@@ -376,26 +317,38 @@ export class CompletionMetadataResolver {
         context.partial,
         CompletionItemKind.Interface,
         databaseKind,
+        { ranking: { role: "source", effectiveSchema, defaultObjectType: "view" } },
       );
     }
 
     if (databaseKind === "oracle") {
       const result = effectiveDb
-        ? filterOracleSchemaItems(
+          ? filterOracleSchemaItems(
             await this.metadataProvider.getSchemas(documentUri, effectiveDb),
             context.partial,
+            effectiveSchema,
           )
         : [];
       return dedupeCompletionItems(result);
     }
 
-    const databases = await this.metadataProvider.getDatabases(documentUri);
-    const result = filterMetadataItems(
-      databases,
-      context.partial,
-      CompletionItemKind.Module,
-      databaseKind,
-    );
+    const result: CompletionItem[] = [];
+    if (supportsDatabaseContainerCompletions(databaseKind)) {
+      result.push(
+        ...filterMetadataItems(
+          await this.metadataProvider.getDatabases(documentUri),
+          context.partial,
+          CompletionItemKind.Module,
+          databaseKind,
+          {
+            ranking: {
+              role: hasLocationThreePartPrefix(databaseKind) ? "location" : "database",
+              effectiveDatabase: effectiveDb,
+            },
+          },
+        ),
+      );
+    }
     if (effectiveDb) {
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
         result.push(
@@ -404,6 +357,7 @@ export class CompletionMetadataResolver {
             effectiveDb,
             context.partial,
             databaseKind,
+            effectiveSchema,
           )),
         );
       }
@@ -414,6 +368,7 @@ export class CompletionMetadataResolver {
           context.partial,
           CompletionItemKind.Interface,
           databaseKind,
+          { ranking: { role: "source", effectiveSchema, defaultObjectType: "view" } },
         ),
       );
     }
@@ -425,12 +380,16 @@ export class CompletionMetadataResolver {
     documentUri: string,
     effectiveDb: string | undefined,
     databaseKind?: DatabaseKind,
+    effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
     if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
       return [];
     }
 
     if (context.kind === "db_dot") {
+      if (!supportsSingleDotPath(databaseKind)) {
+        return [];
+      }
       if (usesDatabaseObjectTwoPartName(databaseKind)) {
         const procedures = await this.metadataProvider.getProcedures(
           documentUri,
@@ -441,31 +400,21 @@ export class CompletionMetadataResolver {
           context.partial,
           CompletionItemKind.Function,
           databaseKind,
+          { ranking: { role: "source", effectiveSchema, defaultObjectType: "procedure" } },
         );
       }
-      if (databaseKind === "db2") {
-        if (!effectiveDb) {
-          return [];
-        }
-        const procedures = await this.metadataProvider.getProcedures(
+      if (await this.shouldResolveSingleDotAsContainer(
+        documentUri,
+        context.dbName,
+        effectiveDb,
+        databaseKind,
+      )) {
+        return this.getSchemaPathCompletions(
           documentUri,
-          effectiveDb,
-          context.dbName,
-        );
-        return filterMetadataItems(
-          procedures,
-          context.partial,
-          CompletionItemKind.Function,
-          databaseKind,
-        );
-      }
-      if (databaseKind === "netezza") {
-        return this.resolveNetezzaDbDotProcedurePathCompletions(
-          documentUri,
-          effectiveDb,
           context.dbName,
           context.partial,
           databaseKind,
+          effectiveSchema,
         );
       }
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
@@ -482,14 +431,10 @@ export class CompletionMetadataResolver {
           context.partial,
           CompletionItemKind.Function,
           databaseKind,
+          { ranking: { role: "source", effectiveSchema, defaultObjectType: "procedure" } },
         );
       }
-      return this.getSchemaPathCompletions(
-        documentUri,
-        context.dbName,
-        context.partial,
-        databaseKind,
-      );
+      return [];
     }
 
     if (context.kind === "db_schema_dot") {
@@ -503,6 +448,7 @@ export class CompletionMetadataResolver {
         context.partial,
         CompletionItemKind.Function,
         databaseKind,
+        { ranking: { role: "source", effectiveSchema, defaultObjectType: "procedure" } },
       );
     }
 
@@ -519,16 +465,27 @@ export class CompletionMetadataResolver {
         context.partial,
         CompletionItemKind.Function,
         databaseKind,
+        { ranking: { role: "source", effectiveSchema, defaultObjectType: "procedure" } },
       );
     }
 
-    const databases = await this.metadataProvider.getDatabases(documentUri);
-    const result = filterMetadataItems(
-      databases,
-      context.partial,
-      CompletionItemKind.Module,
-      databaseKind,
-    );
+    const result: CompletionItem[] = [];
+    if (supportsDatabaseContainerCompletions(databaseKind)) {
+      result.push(
+        ...filterMetadataItems(
+          await this.metadataProvider.getDatabases(documentUri),
+          context.partial,
+          CompletionItemKind.Module,
+          databaseKind,
+          {
+            ranking: {
+              role: hasLocationThreePartPrefix(databaseKind) ? "location" : "database",
+              effectiveDatabase: effectiveDb,
+            },
+          },
+        ),
+      );
+    }
     if (effectiveDb) {
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
         result.push(
@@ -537,6 +494,7 @@ export class CompletionMetadataResolver {
             effectiveDb,
             context.partial,
             databaseKind,
+            effectiveSchema,
           )),
         );
       }
@@ -550,6 +508,7 @@ export class CompletionMetadataResolver {
           context.partial,
           CompletionItemKind.Function,
           databaseKind,
+          { ranking: { role: "source", effectiveSchema, defaultObjectType: "procedure" } },
         ),
       );
     }
@@ -616,6 +575,7 @@ export class CompletionMetadataResolver {
     database: string,
     partial: string,
     databaseKind?: DatabaseKind,
+    effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
     const schemas = await this.metadataProvider.getSchemas(documentUri, database);
     const schemaItems = filterMetadataItems(
@@ -623,6 +583,12 @@ export class CompletionMetadataResolver {
       partial,
       CompletionItemKind.Module,
       databaseKind,
+      {
+        ranking: {
+          role: "schema",
+          effectiveSchema,
+        },
+      },
     );
     if (
       schemaItems.length > 0 ||
@@ -637,6 +603,10 @@ export class CompletionMetadataResolver {
         label: "dbo",
         kind: CompletionItemKind.Module,
         detail: `Default schema in ${database}`,
+        sortText:
+          effectiveSchema?.toLowerCase() === "dbo"
+            ? "0_200_dbo"
+            : "0_300_dbo",
       },
     ];
   }
@@ -908,12 +878,21 @@ export class CompletionMetadataResolver {
     partial: string,
     includeViews: boolean,
     databaseKind?: DatabaseKind,
+    effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
     const tables =
       schema === undefined
         ? await this.metadataProvider.getTables(documentUri, database)
         : await this.metadataProvider.getTables(documentUri, database, schema);
-    const result = filterMetadataItems(tables, partial, undefined, databaseKind);
+    const result = filterMetadataItems(
+      tables.map((item) => ({ ...item, objectType: item.objectType ?? "table" })),
+      partial,
+      undefined,
+      databaseKind,
+      {
+      ranking: { role: "source", effectiveSchema, defaultObjectType: "table" },
+      },
+    );
 
     let viewItems: CompletionItem[] = [];
     if (includeViews) {
@@ -921,7 +900,15 @@ export class CompletionMetadataResolver {
         schema === undefined
           ? await this.metadataProvider.getViews(documentUri, database)
           : await this.metadataProvider.getViews(documentUri, database, schema);
-      viewItems = filterMetadataItems(views, partial, CompletionItemKind.Interface, databaseKind);
+      viewItems = filterMetadataItems(
+        views.map((item) => ({ ...item, objectType: item.objectType ?? "view" })),
+        partial,
+        CompletionItemKind.Interface,
+        databaseKind,
+        {
+          ranking: { role: "source", effectiveSchema, defaultObjectType: "view" },
+        },
+      );
 
       // Inject Netezza system views as synthetic completions for FROM/JOIN context.
       // These system views are not returned by the standard metadata provider because
@@ -997,150 +984,38 @@ export class CompletionMetadataResolver {
       }
     }
 
-    return filterOracleSourceItems(Array.from(byName.values()), partial);
+    return filterOracleSourceItems(Array.from(byName.values()), partial, schema);
   }
 
   private async matchesKnownDatabase(
     documentUri: string,
     name: string,
+    effectiveDatabase?: string,
   ): Promise<boolean> {
     const databases = await this.metadataProvider.getDatabases(documentUri);
     const normalized = name.toUpperCase();
-    return databases.some((item) => item.name.toUpperCase() === normalized);
-  }
-
-  private async resolveNetezzaDbDotTablePathCompletions(
-    documentUri: string,
-    effectiveDb: string | undefined,
-    qualifier: string,
-    partial: string,
-    includeViews: boolean,
-    databaseKind?: DatabaseKind,
-  ): Promise<CompletionItem[]> {
-    if (await this.matchesKnownDatabase(documentUri, qualifier)) {
-      return this.getSchemaPathCompletions(
-        documentUri,
-        qualifier,
-        partial,
-        databaseKind,
-      );
-    }
-    if (!effectiveDb) {
-      return [];
-    }
-    return this.getTableLikeCompletions(
-      documentUri,
-      effectiveDb,
-      qualifier,
-      partial,
-      includeViews,
-      databaseKind,
+    return (
+      effectiveDatabase?.toUpperCase() === normalized ||
+      databases.some((item) => item.name.toUpperCase() === normalized)
     );
   }
 
-  private async resolveNetezzaDbDotViewPathCompletions(
+  private async shouldResolveSingleDotAsContainer(
     documentUri: string,
-    effectiveDb: string | undefined,
-    qualifier: string,
-    partial: string,
-    databaseKind?: DatabaseKind,
-  ): Promise<CompletionItem[]> {
-    if (await this.matchesKnownDatabase(documentUri, qualifier)) {
-      return this.getSchemaPathCompletions(
-        documentUri,
-        qualifier,
-        partial,
-        databaseKind,
-      );
-    }
-    if (!effectiveDb) {
-      return [];
-    }
-    const views = await this.metadataProvider.getViews(
-      documentUri,
-      effectiveDb,
-      qualifier,
-    );
-    return filterMetadataItems(
-      views,
-      partial,
-      CompletionItemKind.Interface,
-    );
-  }
-
-  private async resolveNetezzaDbDotProcedurePathCompletions(
-    documentUri: string,
-    effectiveDb: string | undefined,
-    qualifier: string,
-    partial: string,
-    databaseKind?: DatabaseKind,
-  ): Promise<CompletionItem[]> {
-    if (await this.matchesKnownDatabase(documentUri, qualifier)) {
-      return this.getSchemaPathCompletions(
-        documentUri,
-        qualifier,
-        partial,
-        databaseKind,
-      );
-    }
-    if (!effectiveDb) {
-      return [];
-    }
-    const procedures = await this.metadataProvider.getProcedures(
-      documentUri,
-      effectiveDb,
-      qualifier,
-    );
-    return filterMetadataItems(
-      procedures,
-      partial,
-      CompletionItemKind.Function,
-    );
-  }
-
-  private async resolveDb2DbDotTablePathCompletions(
-    documentUri: string,
-    effectiveDb: string | undefined,
-    qualifier: string,
-    partial: string,
-    includeViews: boolean,
-  ): Promise<CompletionItem[]> {
-    const result: CompletionItem[] = [];
-    const normalizedQualifier = qualifier.toUpperCase();
-    const normalizedEffectiveDb = effectiveDb?.toUpperCase();
-
-    if (effectiveDb) {
-      result.push(
-        ...(await this.getTableLikeCompletions(
-          documentUri,
-          effectiveDb,
-          qualifier,
-          partial,
-          includeViews,
-          "mssql",
-        )),
-      );
+    name: string,
+    effectiveDatabase: string | undefined,
+    databaseKind: DatabaseKind | undefined,
+  ): Promise<boolean> {
+    if (!supportsThreePartPath(databaseKind)) {
+      return false;
     }
 
-    let shouldLoadSchemas = normalizedQualifier === normalizedEffectiveDb;
-    if (!shouldLoadSchemas && result.length === 0) {
-      const databases = await this.metadataProvider.getDatabases(documentUri);
-      shouldLoadSchemas = databases.some(
-        (item) => item.name.toUpperCase() === normalizedQualifier,
-      );
+    // Without session context SQL Server cannot distinguish SCHEMA.OBJECT
+    // from DATABASE.SCHEMA; preserve the existing database-first fallback.
+    if (databaseKind === "mssql" && !effectiveDatabase) {
+      return true;
     }
 
-    if (shouldLoadSchemas) {
-      result.unshift(
-        ...(await this.getSchemaPathCompletions(
-          documentUri,
-          qualifier,
-          partial,
-          "mssql",
-        )),
-      );
-    }
-
-    return dedupeCompletionItems(result);
+    return this.matchesKnownDatabase(documentUri, name, effectiveDatabase);
   }
 }

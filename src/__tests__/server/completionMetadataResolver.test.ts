@@ -128,6 +128,131 @@ describe("CompletionMetadataResolver", () => {
     );
   });
 
+  it("prioritizes the active database, schema, and source scope", async () => {
+    const metadataProvider: CompletionMetadataProvider = {
+      ...createMetadataProvider(),
+      getDatabases: jest.fn(async () => [
+        { name: "ARCHIVE" },
+        { name: "SALES" },
+      ]),
+      getSchemas: jest.fn(async () => [
+        { name: "ARCHIVE_SCHEMA" },
+        { name: "PUBLIC" },
+      ]),
+      getTables: jest.fn(async (): Promise<MetadataObjectItem[]> => [
+        { name: "ARCHIVE_ORDERS", objectType: "table", schema: "ARCHIVE_SCHEMA" },
+        { name: "ORDERS", objectType: "table", schema: "PUBLIC" },
+      ]),
+      getViews: jest.fn(async (): Promise<MetadataObjectItem[]> => [
+        { name: "V_ORDERS", objectType: "view", schema: "PUBLIC" },
+      ]),
+    };
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      new CompletionWildcardResolver(),
+    );
+
+    const items = await resolver.resolveTablePathCompletions(
+      { kind: "from_join_name", partial: "" },
+      [],
+      "file:///ranking.sql",
+      "SALES",
+      "netezza",
+      true,
+      "PUBLIC",
+    );
+    const sortText = (label: string): string =>
+      String(items.find((item) => item.label === label)?.sortText);
+
+    expect(sortText("SALES").localeCompare(sortText("ARCHIVE"))).toBeLessThan(0);
+    expect(sortText("ARCHIVE").localeCompare(sortText("PUBLIC"))).toBeLessThan(0);
+    expect(sortText("PUBLIC").localeCompare(sortText("ARCHIVE_SCHEMA"))).toBeLessThan(0);
+    expect(sortText("PUBLIC").localeCompare(sortText("ARCHIVE_ORDERS"))).toBeLessThan(0);
+    expect(sortText("ORDERS").localeCompare(sortText("V_ORDERS"))).toBeLessThan(0);
+    expect(sortText("V_ORDERS").localeCompare(sortText("ARCHIVE_ORDERS"))).toBeLessThan(0);
+  });
+
+  it("uses a known three-part container before treating it as a schema", async () => {
+    const metadataProvider: CompletionMetadataProvider = {
+      ...createMetadataProvider(),
+      getDatabases: jest.fn(async () => [{ name: "VMART" }]),
+      getSchemas: jest.fn(async () => [{ name: "PUBLIC" }]),
+      getTables: jest.fn(async (): Promise<MetadataObjectItem[]> => [{ name: "ORDERS", objectType: "table" }]),
+    };
+    const resolver = new CompletionMetadataResolver(
+      metadataProvider,
+      new CompletionWildcardResolver(),
+    );
+
+    const items = await resolver.resolveTablePathCompletions(
+      { kind: "db_dot", dbName: "VMART", partial: "" },
+      [],
+      "file:///vertica.sql",
+      "VMART",
+      "vertica",
+      true,
+      "PUBLIC",
+    );
+
+    expect(items.map((item) => item.label)).toContain("PUBLIC");
+    expect(metadataProvider.getSchemas).toHaveBeenCalledWith(
+      "file:///vertica.sql",
+      "VMART",
+    );
+    expect(metadataProvider.getTables).not.toHaveBeenCalled();
+  });
+
+  it("does not suggest a database container for schema-only or flat dialects", async () => {
+    const postgresqlProvider: CompletionMetadataProvider = {
+      ...createMetadataProvider(),
+      getDatabases: jest.fn(async () => [{ name: "APPDB" }]),
+      getSchemas: jest.fn(async () => [{ name: "public" }]),
+      getTables: jest.fn(async (): Promise<MetadataObjectItem[]> => [{ name: "orders", objectType: "table", schema: "public" }]),
+    };
+    const postgresqlResolver = new CompletionMetadataResolver(
+      postgresqlProvider,
+      new CompletionWildcardResolver(),
+    );
+    const postgresqlItems = await postgresqlResolver.resolveTablePathCompletions(
+      { kind: "from_join_name", partial: "" },
+      [],
+      "file:///postgres.sql",
+      "APPDB",
+      "postgresql",
+      true,
+      "public",
+    );
+
+    expect(postgresqlItems.map((item) => item.label)).toEqual(
+      expect.arrayContaining(["public", "orders"]),
+    );
+    expect(postgresqlItems.map((item) => item.label)).not.toContain("APPDB");
+    expect(postgresqlProvider.getDatabases).not.toHaveBeenCalled();
+
+    const accessProvider: CompletionMetadataProvider = {
+      ...createMetadataProvider(),
+      getDatabases: jest.fn(async () => [{ name: "DEFAULT" }]),
+      getSchemas: jest.fn(async () => [{ name: "IGNORED" }]),
+      getTables: jest.fn(async (): Promise<MetadataObjectItem[]> => [{ name: "Customers", objectType: "table" }]),
+    };
+    const accessResolver = new CompletionMetadataResolver(
+      accessProvider,
+      new CompletionWildcardResolver(),
+    );
+    const accessItems = await accessResolver.resolveTablePathCompletions(
+      { kind: "from_join_name", partial: "" },
+      [],
+      "file:///access.sql",
+      "DEFAULT",
+      "access",
+      true,
+    );
+
+    expect(accessItems.map((item) => item.label)).toContain("Customers");
+    expect(accessProvider.getDatabases).not.toHaveBeenCalled();
+    expect(accessProvider.getSchemas).not.toHaveBeenCalled();
+  });
+
   it("completes Oracle source objects after an explicit schema and rejects a database prefix", async () => {
     const metadataProvider: CompletionMetadataProvider = {
       ...createMetadataProvider(),

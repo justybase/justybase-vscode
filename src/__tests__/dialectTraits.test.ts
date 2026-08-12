@@ -107,9 +107,33 @@ describe('dialectTraits', () => {
                 expect(qualification.twoPartNameStyle).toBe('schema-object');
             }
             if (qualification.twoPartNameStyle === 'database-object') {
-                expect(completion.singleDotPathNamespace).toBe('database');
+                expect(['database', 'none']).toContain(completion.singleDotPathNamespace);
             }
         });
+    });
+
+    it('models completion qualification according to each dialect syntax', () => {
+        const expected = {
+            netezza: { supportsThreePartName: true, threePartNamePrefix: 'database', singleDotPathNamespace: 'schema' },
+            oracle: { supportsThreePartName: false, threePartNamePrefix: 'none', singleDotPathNamespace: 'schema' },
+            postgresql: { supportsThreePartName: false, threePartNamePrefix: 'none', singleDotPathNamespace: 'schema' },
+            vertica: { supportsThreePartName: true, threePartNamePrefix: 'database', singleDotPathNamespace: 'schema' },
+            snowflake: { supportsThreePartName: true, threePartNamePrefix: 'database', singleDotPathNamespace: 'schema' },
+            sqlite: { supportsThreePartName: false, threePartNamePrefix: 'none', singleDotPathNamespace: 'database' },
+            duckdb: { supportsThreePartName: true, threePartNamePrefix: 'database', singleDotPathNamespace: 'schema' },
+            file: { supportsThreePartName: true, threePartNamePrefix: 'database', singleDotPathNamespace: 'schema' },
+            db2: { supportsThreePartName: true, threePartNamePrefix: 'location', singleDotPathNamespace: 'schema' },
+            mssql: { supportsThreePartName: true, threePartNamePrefix: 'database', singleDotPathNamespace: 'schema-or-database' },
+            mysql: { supportsThreePartName: false, threePartNamePrefix: 'none', singleDotPathNamespace: 'database' },
+            access: { supportsThreePartName: false, threePartNamePrefix: 'none', singleDotPathNamespace: 'none' },
+        } as const;
+
+        for (const [kind, expectedTraits] of Object.entries(expected)) {
+            const traits = getDatabaseDialectTraits(kind);
+            expect(traits.qualification.supportsThreePartName).toBe(expectedTraits.supportsThreePartName);
+            expect(traits.qualification.threePartNamePrefix).toBe(expectedTraits.threePartNamePrefix);
+            expect(traits.completion.singleDotPathNamespace).toBe(expectedTraits.singleDotPathNamespace);
+        }
     });
 
     it('rejects invalid trait combinations during dialect registration', () => {

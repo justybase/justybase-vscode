@@ -3,7 +3,8 @@ export type DatabaseGeneratedIdentifierCase = 'upper' | 'lower' | 'preserve';
 export type DatabaseTwoPartNameStyle = 'schema-object' | 'database-object';
 export type DatabaseTwoPartContainerPreference = 'database-over-schema' | 'schema-over-database';
 export type DatabaseDatabaseOnlyReferenceStyle = 'double-dot' | 'single-dot' | 'omit';
-export type DatabaseSingleDotPathNamespace = 'database' | 'schema' | 'schema-or-database';
+export type DatabaseThreePartNamePrefix = 'database' | 'location' | 'none';
+export type DatabaseSingleDotPathNamespace = 'database' | 'schema' | 'schema-or-database' | 'none';
 
 export interface DatabaseIdentifierTraits {
     quoteStyle: DatabaseIdentifierQuoteStyle;
@@ -15,6 +16,8 @@ export interface DatabaseQualificationTraits {
     twoPartNameStyle: DatabaseTwoPartNameStyle;
     twoPartContainerPreference: DatabaseTwoPartContainerPreference;
     supportsThreePartName: boolean;
+    /** Meaning of the first segment in a three-part object name. */
+    threePartNamePrefix: DatabaseThreePartNamePrefix;
     databaseOnlyReferenceStyle: DatabaseDatabaseOnlyReferenceStyle;
 }
 
@@ -53,6 +56,7 @@ export function createDatabaseDialectTraits(overrides: DatabaseDialectTraitsOver
             twoPartNameStyle: 'schema-object',
             twoPartContainerPreference: 'database-over-schema',
             supportsThreePartName: true,
+            threePartNamePrefix: 'database',
             databaseOnlyReferenceStyle: 'double-dot',
             ...overrides.qualification,
         },

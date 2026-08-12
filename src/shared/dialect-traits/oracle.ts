@@ -12,6 +12,7 @@ export const oracleDialectTraits = createDatabaseDialectTraits({
     twoPartContainerPreference: 'schema-over-database',
     // Oracle doesn't support CATALOG.SCHEMA.TABLE without database links
     supportsThreePartName: false,
+    threePartNamePrefix: 'none',
     // Oracle doesn't use DB..TABLE notation
     databaseOnlyReferenceStyle: 'omit',
   },

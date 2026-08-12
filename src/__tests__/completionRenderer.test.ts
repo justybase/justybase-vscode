@@ -224,13 +224,13 @@ describe("completionRenderer — documentation regression guard", () => {
       ], "EMP");
 
       expect(schemas.map((item) => item.sortText)).toEqual([
-        "0_000_HR",
-        "0_100_APP",
+        "0_200_HR",
+        "0_300_APP",
       ]);
       expect(sources.map((item) => item.sortText)).toEqual([
-        "2_000_EMPLOYEES",
-        "3_000_EMPLOYEES_MV",
-        "4_000_EMPLOYEES_SYNONYM",
+        "3_000_EMPLOYEES",
+        "3_010_EMPLOYEES_MV",
+        "3_020_EMPLOYEES_SYNONYM",
       ]);
       expect(sources[2].kind).toBe(CompletionItemKind.Reference);
     });
