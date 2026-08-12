@@ -42,11 +42,12 @@
     "build:minified": "node esbuild.db2.js --minify",
     "build:dev": "node esbuild.db2.js",
     "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
-    "install:vscode": "node scripts/switch-runtime.js electron",
-    "rebuild:electron": "node scripts/switch-runtime.js electron",
-    "rebuild:node": "node scripts/switch-runtime.js node",
+    "install:vscode": "node scripts/switch-runtime.js napi",
+    "rebuild:napi": "node scripts/switch-runtime.js napi",
+    "rebuild:electron": "node scripts/switch-runtime.js napi",
+    "rebuild:node": "node scripts/switch-runtime.js napi",
     "switch:runtime": "node scripts/switch-runtime.js",
-    "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/ibm_db')) { console.error('Missing ibm_db. Run npm install in extensions\\\\db2 or npm run install:db2 from the repository root before packaging.'); process.exit(1); }\"",
+    "verify:runtime-deps": "node scripts/verify-napi-runtime.js",
     "prepackage": "npm run verify:runtime-deps",
     "package": "node scripts/package-vsix.js package"
   },
@@ -137,7 +138,7 @@
     "ibm_db": "^4.0.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.3"
+    "node-gyp": "^11.5.0"
   },
   "preview": true
 }

@@ -17,17 +17,14 @@ jobs:
           - os: windows-latest
             platform: win32
             arch: x64
-            electron: "42.2.0"
             expected_driver: node_modules/ibm_db/installer/clidriver/bin/db2cli64.dll
           - os: ubuntu-latest
             platform: linux
             arch: x64
-            electron: "42.2.0"
             expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.so
           - os: macos-14
             platform: darwin
             arch: arm64
-            electron: "42.2.0"
             expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.dylib
 
     steps:
@@ -47,11 +44,15 @@ jobs:
         working-directory: extensions/db2
         run: npm ci
 
-      - name: Rebuild ibm_db for Electron runtime
+      - name: Build ibm_db as a stable Node-API runtime
         working-directory: extensions/db2
-        run: node scripts/rebuild-electron.js --electron ${{ matrix.electron }}
+        run: node scripts/rebuild-napi.js
         env:
           IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+
+      - name: Verify ibm_db native runtime
+        working-directory: extensions/db2
+        run: node scripts/verify-napi-runtime.js
 
       - name: Type check DB2 extension
         run: npm run check-types:db2
@@ -67,6 +68,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import json
           import zipfile
           vsix_path = 'extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix'
           expected_driver = '${{ matrix.expected_driver }}'
@@ -74,10 +76,18 @@ jobs:
               names = z.namelist()
               has_binding = any('node_modules/ibm_db/build/Release/odbc_bindings.node' in name for name in names)
               has_driver = any(expected_driver in name for name in names)
+              marker_name = next((name for name in names if name.endswith('node_modules/ibm_db/build/Release/.justybase-napi-runtime.json')), None)
               if not has_binding:
                   raise SystemExit('Missing odbc_bindings.node in packaged VSIX')
               if not has_driver:
                   raise SystemExit(f'Missing expected platform driver file in VSIX: {expected_driver}')
+              if not marker_name:
+                  raise SystemExit('Missing N-API runtime marker in packaged VSIX')
+              marker = json.loads(z.read(marker_name))
+              if marker.get('runtime') != 'napi' or marker.get('napiVersion') != 8:
+                  raise SystemExit(f'Unexpected N-API runtime marker: {marker}')
+              if marker.get('platform') != '${{ matrix.platform }}' or marker.get('arch') != '${{ matrix.arch }}':
+                  raise SystemExit(f'Packaged runtime marker targets the wrong platform: {marker}')
           print('VSIX runtime asset verification passed')
           PY
 
@@ -87,3 +97,42 @@ jobs:
           name: justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}
           path: extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
           retention-days: 1
+
+  verify-vscode-runtime:
+    name: Verify Db2 in VS Code ${{ matrix.vscode }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode: ["1.103.2", stable, insiders]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/db2/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install DB2 extension dependencies
+        working-directory: extensions/db2
+        run: npm ci
+
+      - name: Build and verify N-API runtime
+        working-directory: extensions/db2
+        run: node scripts/rebuild-napi.js && node scripts/verify-napi-runtime.js
+        env:
+          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+
+      - name: Run Extension Host native-runtime smoke test
+        run: npm run test:db2:vscode-runtime
+        env:
+          DB2_VSCODE_TEST_VERSION: ${{ matrix.vscode }}

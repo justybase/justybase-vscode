@@ -1,5 +1,6 @@
 src/
 scripts/
+test/
 tsconfig.json
 esbuild.db2.js
 *.vsix
