@@ -9,8 +9,6 @@ The Db2 pack is published with `"preview": true`. Treat it as a **near-full comp
 - **Runtime:** Advanced — connect, SYSCAT metadata (including aliases/nicknames/federated groups), DDL fallback, import/export, explain/tuning, RUNSTATS/REORG, session monitor, dedicated live suite + optional `JBL_LIVE` fixture.
 - **Editor:** Advanced (LUW SQL + CST linter/semantic) — **DB2001–DB2008** quality rules, strict Chevrotain runtime (`FETCH FIRST`, `OPTIMIZE FOR`, isolation, `FOR READ ONLY`, `FINAL TABLE`, DGTT, thin SQL PL units), dialect-aware semantic tokens. Deep SQL PL (SQL037–039 visitor depth) remains a follow-on.
 
-Maintainer labels: [plans/DIALECT_PARITY_MATRIX.md](../plans/DIALECT_PARITY_MATRIX.md).
-
 **Netezza (core)** remains the reference full experience. Db2 does **not** expose Netezza distribution/skew/GROOM UI actions.
 
 ## What this pack provides
@@ -72,7 +70,6 @@ npm run db2:verify-live-fixture
 npm run db2:drop-live-fixture
 ```
 
-See [`scripts-private/db2-live-fixture/manifest.json`](../scripts-private/db2-live-fixture/manifest.json). Optional IBM SAMPLE on the **Db2 host**: `db2sampl -name TESTDB -sql -force` (does not replace `JBL_LIVE`).
 
 ### Unit vs live vs manual
 

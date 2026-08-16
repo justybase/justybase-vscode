@@ -8,7 +8,7 @@ The Oracle pack is published with `"preview": true` in `extensions/oracle/packag
 
 **Netezza (core)** remains the reference **full** experience: NZ/NZP rule depth, GROOM and ETL designer workflows, Netezza distribution/skew Copilot context, and Netezza-tuned language-model tools.
 
-**Oracle (core + optional pack)** provides **advanced** editor and runtime parity on the shared stack — the strongest optional dialect for SQL/PL/SQL authoring. It does **not** replace Netezza-only product surfaces. Maintainer-facing capability labels live in [plans/DIALECT_PARITY_MATRIX.md](../plans/DIALECT_PARITY_MATRIX.md).
+**Oracle (core + optional pack)** provides **advanced** editor and runtime parity on the shared stack — the strongest optional dialect for SQL/PL/SQL authoring. It does **not** replace Netezza-only product surfaces.
 
 ## What this pack provides
 
@@ -119,5 +119,3 @@ Quality bar for editor paths matches Netezza live E2E style (real catalog + `Lsp
 | Explain / tuning | `EXPLAIN PLAN` → parse + `ORTA-001` | Explain parser unit |
 | Import / export | Typed import, failed-import cleanup, SQL/CSV/JSON round-trip, cancel fetch | — |
 | Maintenance / session | Stats, ANALYZE, MOVE; storage + `V$SESSION`/`V$SQL` shapes | — |
-
-Maintainer capability labels: [plans/DIALECT_PARITY_MATRIX.md](../plans/DIALECT_PARITY_MATRIX.md).

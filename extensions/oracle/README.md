@@ -59,7 +59,7 @@ See [docs/oracle.md](../../docs/oracle.md) for parity boundaries versus Netezza 
 - Netezza-only SQL (for example `GROOM`) is rejected in strict Oracle validation mode
 - Netezza-specific Copilot tools, GROOM/ETL designer workflows, and SQL/NZ/NZP rule depth remain on the Netezza-first path
 - Cross-service catalog switching is not supported through `SET CATALOG`
-- External-table workflows and advanced PL/SQL object-type / cursor / record semantics are outside the supported core (see [plans/DIALECT_PARITY_MATRIX.md](../../plans/DIALECT_PARITY_MATRIX.md))
+- External-table workflows and advanced PL/SQL object-type / cursor / record semantics are outside the supported core
 
 ## Installation order
 
