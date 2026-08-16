@@ -825,6 +825,20 @@ export class ConnectionManager {
      * File SQL registers its configured files when the DuckDB connection opens.
      */
     async refreshFileConnection(connectionName: string): Promise<void> {
+        await this.refreshConnectionSessions(connectionName);
+    }
+
+    /**
+     * Recreate document sessions after a local persistent DuckDB workspace is
+     * changed outside the active SQL editor.  Kept separate from File SQL so
+     * callers do not accidentally imply that durable workspaces are read-only
+     * file views.
+     */
+    async refreshDataWorkspaceConnection(connectionName: string): Promise<void> {
+        await this.refreshConnectionSessions(connectionName);
+    }
+
+    private async refreshConnectionSessions(connectionName: string): Promise<void> {
         const documentUris = Array.from(this._documentConnections.entries())
             .filter(([, selectedConnectionName]) => selectedConnectionName === connectionName)
             .map(([documentUri]) => documentUri);

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from '../core/connectionManager';
 import type { SchemaItem } from '../providers/schemaProvider';
+import { isDataWorkspaceProfile } from './dataWorkspaceService';
 
 type CapabilityContextKey =
     | 'supportsExplainPlan'
@@ -77,6 +78,9 @@ export async function updateSchemaUiContexts(
     selectedSchemaItem?: Pick<SchemaItem, 'connectionName'>
 ): Promise<void> {
     const schemaConnectionName = selectedSchemaItem?.connectionName || connectionManager.getActiveConnectionName() || undefined;
+    const schemaDetails = schemaConnectionName
+        ? await connectionManager.getConnection(schemaConnectionName)
+        : undefined;
     await updateCapabilityContextSet(
         connectionManager,
         `${DATABASE_UI_CONTEXT_PREFIX}.schema`,
@@ -87,7 +91,11 @@ export async function updateSchemaUiContexts(
         setContext(
             `${DATABASE_UI_CONTEXT_PREFIX}.schemaDatabaseKind`,
             connectionManager.getConnectionDatabaseKind(schemaConnectionName) ?? ''
-        )
+        ),
+        setContext(
+            `${DATABASE_UI_CONTEXT_PREFIX}.schemaIsDataWorkspace`,
+            Boolean(schemaDetails && isDataWorkspaceProfile(schemaDetails))
+        ),
     ]);
 }
 
