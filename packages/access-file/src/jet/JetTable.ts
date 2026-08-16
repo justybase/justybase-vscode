@@ -743,12 +743,13 @@ export class JetTable {
      */
     public updateRowWithIndexes(location: JetRowLocation, oldValues: readonly AccessValue[], newValues: readonly AccessValue[]): void {
         const rowId = new JetRowId(location.pageNumber, location.rowNumber);
-        // constraints first: removing the old entry and inserting the new one
-        // may fail (unique/required); verify before touching the data page
+        // Prepare every new entry before removing the old entries.  A failed
+        // uniqueness/required check must not leave this in-memory table with
+        // its old index entries deleted.
+        const changes = this.indexDatas.map(index => index.prepareAddRow(newValues, rowId));
         for (const index of this.indexDatas) {
             index.deleteRow(oldValues, rowId);
         }
-        const changes = this.indexDatas.map(index => index.prepareAddRow(newValues, rowId));
         this.commitIndexChanges(changes);
         this.updateRow(location, oldValues, newValues);
     }

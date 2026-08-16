@@ -19,7 +19,6 @@ import type {
     AccessTableSnapshot,
     AccessValue,
 } from '../types';
-import { JET_PAGE_TYPES } from './JetLayout';
 import { jetLayoutFor } from './JetLayout';
 import { JetPageChannel } from './JetPageChannel';
 import { JetTable } from './JetTable';
@@ -35,26 +34,10 @@ function discoverTables(buffer: Buffer, format: AccessFileFormat): DiscoveredTab
     const channel = new JetPageChannel(buffer, layout);
 
     const catalog = new JetTable(channel, 'MSysObjects', 2);
-    const catalogPages = Array.from({ length: channel.pageCount }, (_, pageNumber) => pageNumber)
-        .filter(pageNumber => {
-            if (pageNumber < 3) return false;
-            const page = channel.pageAt(pageNumber);
-            return page[0] === JET_PAGE_TYPES.DATA
-                && page.readUInt32LE(4) === 2
-                && page.readUInt32LE(4) !== 0x4c41564c;
-        });
-
-    const catalogRows: AccessValue[][] = [];
-    for (const pageNumber of catalogPages) {
-        const page = channel.pageAt(pageNumber);
-        const rowCount = page.readUInt16LE(layout.offsetNumRowsOnDataPage);
-        for (let rowNumber = 0; rowNumber < rowCount; rowNumber++) {
-            const location = catalog.rowLocationAt(pageNumber, rowNumber, page);
-            if (location) {
-                catalogRows.push(catalog.readRowValues(location));
-            }
-        }
-    }
+    // Use the catalog's owned-pages map instead of scanning every data page.
+    // Long-value pages can carry the same table-definition number as the
+    // catalog and must never be interpreted as MSysObjects rows.
+    const catalogRows = catalog.rowLocations().map(location => catalog.readRowValues(location));
 
     const nameIndex = catalog.columns.findIndex(column => /^name$/i.test(column.name));
     const idIndex = catalog.columns.findIndex(column => /^id$/i.test(column.name));
@@ -94,6 +77,94 @@ function valuesEqual(left: AccessValue, right: AccessValue): boolean {
         return left.getTime() === right.getTime();
     }
     return left === right;
+}
+
+function stableValueKey(value: AccessValue): string | undefined {
+    if (value === null || Array.isArray(value)) {
+        return undefined;
+    }
+    if (value instanceof Date) {
+        return `date:${value.getTime()}`;
+    }
+    if (value instanceof Uint8Array) {
+        return `bytes:${Buffer.from(value).toString('hex')}`;
+    }
+    return `${typeof value}:${String(value)}`;
+}
+
+function rowKey(
+    row: readonly AccessValue[],
+    columns: readonly number[],
+): string | undefined {
+    const values = columns.map(column => stableValueKey(row[column] ?? null));
+    return values.every((value): value is string => value !== undefined)
+        ? JSON.stringify(values)
+        : undefined;
+}
+
+function stableRowKeyColumns(table: JetTable, before: AccessTableSnapshot): number[] {
+    const uniqueIndex = table.indexDatas.find(index => index.backingPrimaryKey || index.isUnique);
+    if (uniqueIndex && uniqueIndex.columns.length > 0) {
+        return uniqueIndex.columns.map(column => column.columnNumber);
+    }
+
+    const primaryKey = before.definition.columns
+        .map((column, index) => column.isPrimaryKey ? index : -1)
+        .filter(index => index >= 0);
+    if (primaryKey.length > 0) {
+        return primaryKey;
+    }
+
+    const autoNumber = before.definition.columns.findIndex(column => column.autoLong || column.autoUuid);
+    if (autoNumber >= 0) {
+        return [autoNumber];
+    }
+    const physicalAutoNumber = table.columns.findIndex(column => column.autoLong || column.autoUuid);
+    return physicalAutoNumber >= 0 ? [physicalAutoNumber] : [];
+}
+
+/**
+ * Aligns an UPDATE result with physical rows when the mirror changes the
+ * result order.  Access tables with a unique index or AutoNumber have a
+ * stable key; tables without one retain the existing positional behavior,
+ * because their rows have no identity available in a snapshot.
+ */
+function alignUpdatedRows(
+    table: JetTable,
+    before: AccessTableSnapshot,
+    after: AccessTableSnapshot,
+): readonly (readonly AccessValue[])[] {
+    const keyColumns = stableRowKeyColumns(table, before);
+    if (keyColumns.length === 0) {
+        return after.rows;
+    }
+
+    const beforeKeys = before.rows.map(row => rowKey(row, keyColumns));
+    const afterKeys = after.rows.map(row => rowKey(row, keyColumns));
+    if (beforeKeys.some(key => key === undefined) || afterKeys.some(key => key === undefined)) {
+        return after.rows;
+    }
+
+    const afterByKey = new Map<string, readonly AccessValue[]>();
+    for (let index = 0; index < after.rows.length; index++) {
+        const key = afterKeys[index]!;
+        if (afterByKey.has(key)) {
+            return after.rows;
+        }
+        afterByKey.set(key, after.rows[index]!);
+    }
+
+    const aligned: (readonly AccessValue[])[] = [];
+    for (const key of beforeKeys) {
+        const row = afterByKey.get(key!);
+        if (!row) {
+            // A changed key is a valid UPDATE.  Without a stable match, keep
+            // the mirror's physical order rather than guessing a mapping.
+            return after.rows;
+        }
+        aligned.push(row);
+    }
+    return aligned;
 }
 
 function snapshotsEqual(left: AccessTableSnapshot, right: AccessTableSnapshot): boolean {
@@ -137,14 +208,15 @@ function applyTableChange(
     }
 
     if (newRows.length === oldRows.length) {
+        const alignedRows = alignUpdatedRows(table, before, after);
         for (let index = 0; index < oldRows.length; index++) {
-            if (!rowsEqual(oldRows[index] ?? [], newRows[index] ?? [])) {
+            if (!rowsEqual(oldRows[index] ?? [], alignedRows[index] ?? [])) {
                 // A growing row can rewrite every slot on its page.  Resolve
                 // the physical location again for each update instead of
                 // writing through offsets captured before that rewrite.
                 const location = table.rowLocations()[index];
                 if (!location) throw new AccessFileError(`Missing physical row ${index} in '${table.name}'.`);
-                table.updateRowWithIndexes(location, oldRows[index] ?? [], newRows[index] ?? []);
+                table.updateRowWithIndexes(location, oldRows[index] ?? [], alignedRows[index] ?? []);
             }
         }
         return;
@@ -181,6 +253,7 @@ export async function writeAccessSnapshotChanges(
     format: AccessFileFormat,
     beforeSnapshots: readonly AccessTableSnapshot[],
     afterSnapshots: readonly AccessTableSnapshot[],
+    targetTableName?: string,
 ): Promise<void> {
     const buffer = await fs.readFile(stagedPath);
     const layout = jetLayoutFor(format);
@@ -189,7 +262,15 @@ export async function writeAccessSnapshotChanges(
     const afterByName = new Map(afterSnapshots.map(snapshot => [snapshot.definition.name.toLowerCase(), snapshot]));
     const beforeByName = new Map(beforeSnapshots.map(snapshot => [snapshot.definition.name.toLowerCase(), snapshot]));
 
-    for (const table of discoverTables(buffer, format)) {
+    const discoveredTables = discoverTables(buffer, format);
+    const tablesToWrite = targetTableName
+        ? discoveredTables.filter(table => table.name.localeCompare(targetTableName, undefined, { sensitivity: 'accent' }) === 0)
+        : discoveredTables;
+    if (targetTableName && tablesToWrite.length === 0) {
+        throw new AccessFileError(`Access table '${targetTableName}' cannot be found in the staged file.`);
+    }
+
+    for (const table of tablesToWrite) {
         if (/^MSys/i.test(table.name)) {
             continue;
         }

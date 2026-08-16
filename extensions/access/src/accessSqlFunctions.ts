@@ -72,7 +72,7 @@ function intervalFor(interval: string): string {
         case 'd':
             return 'day';
         case 'w':
-            return 'week';
+            return 'day';
         case 'ww':
             return 'week';
         case 'h':
@@ -140,7 +140,7 @@ const ACCESS_FUNCTIONS: ReadonlyMap<string, AccessFunctionRewrite> = new Map<str
                 if (parts.length < 2) {
                     return `instr(${args})`;
                 }
-                return `length(${parts[0]}) - instr(reverse(${parts[0]}), ${parts[1]}) + 1`;
+                return `length(${parts[0]}) - instr(reverse(${parts[0]}), reverse(${parts[1]})) - length(${parts[1]}) + 2`;
             },
         },
     ],
@@ -157,7 +157,9 @@ const ACCESS_FUNCTIONS: ReadonlyMap<string, AccessFunctionRewrite> = new Map<str
                 if (parts.length < 2) {
                     return `repeat(${parts[0] ?? "' '"}, 1)`;
                 }
-                return `repeat(chr(${parts[0]}), ${parts[1]})`;
+                const character = parts[1]!;
+                const numericTypes = "'TINYINT', 'SMALLINT', 'INTEGER', 'BIGINT', 'HUGEINT', 'UTINYINT', 'USMALLINT', 'UINTEGER', 'UBIGINT', 'UHUGEINT', 'DECIMAL', 'FLOAT', 'DOUBLE'";
+                return `repeat(CASE WHEN typeof(${character}) IN (${numericTypes}) THEN chr(CAST(${character} AS INTEGER)) ELSE left(CAST(${character} AS VARCHAR), 1) END, ${parts[0]})`;
             },
         },
     ],
@@ -188,7 +190,20 @@ const ACCESS_FUNCTIONS: ReadonlyMap<string, AccessFunctionRewrite> = new Map<str
     ['hour', { name: 'hour', expand: args => `hour(${args})` }],
     ['minute', { name: 'minute', expand: args => `minute(${args})` }],
     ['second', { name: 'second', expand: args => `second(${args})` }],
-    ['weekday', { name: 'weekday', expand: args => `((dayofweek(${args}) + 6) % 7) + 1` }],
+    [
+        'weekday',
+        {
+            name: 'weekday',
+            expand: args => {
+                const parts = splitArgs(args);
+                if (parts.length < 2) {
+                    return `(dayofweek(${parts[0] ?? args}) + 1)`;
+                }
+                const firstDay = `CASE WHEN CAST(${parts[1]} AS INTEGER) = 0 THEN 1 ELSE CAST(${parts[1]} AS INTEGER) END`;
+                return `((dayofweek(${parts[0]}) - ((${firstDay}) - 1) + 7) % 7) + 1`;
+            },
+        },
+    ],
     [
         'datepart',
         {
@@ -197,6 +212,13 @@ const ACCESS_FUNCTIONS: ReadonlyMap<string, AccessFunctionRewrite> = new Map<str
                 const parts = splitArgs(args);
                 if (parts.length < 2) {
                     return `date_part(${args})`;
+                }
+                const interval = unquote(parts[0]!).trim().toLowerCase();
+                if (interval === 'w') {
+                    return `(date_part('dayofweek', ${parts[1]}) + 1)`;
+                }
+                if (interval === 'y') {
+                    return `date_part('dayofyear', ${parts[1]})`;
                 }
                 return `date_part('${intervalFor(parts[0]!)}', ${parts[1]})`;
             },
@@ -324,9 +346,36 @@ export function translateAccessFunctions(code: string): string {
     let index = 0;
     while (index < code.length) {
         const c = code[index]!;
+        if (c === '-' && code[index + 1] === '-') {
+            const end = code.indexOf('\n', index + 2);
+            const stop = end < 0 ? code.length : end;
+            result += code.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (c === '/' && code[index + 1] === '*') {
+            const end = code.indexOf('*/', index + 2);
+            const stop = end < 0 ? code.length : end + 2;
+            result += code.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (c === '#') {
+            const end = code.indexOf('#', index + 1);
+            const stop = end < 0 ? code.length : end + 1;
+            result += code.slice(index, stop);
+            index = stop;
+            continue;
+        }
         if (c === '\'' || c === '"') {
             result += copyQuoted(code, index);
             index += copyQuotedLength(code, index);
+            continue;
+        }
+        if (c === '[') {
+            const length = copyBracketLength(code, index);
+            result += code.slice(index, index + length);
+            index += length;
             continue;
         }
         if (/[A-Za-z_]/.test(c)) {
@@ -337,7 +386,7 @@ export function translateAccessFunctions(code: string): string {
                 next++;
             }
             if (next < code.length && code[next] === '(' && ACCESS_FUNCTIONS.has(id.toLowerCase())) {
-                result += `${id}__JB__`;
+                result += `\uE002${id}\uE003`;
             } else {
                 result += id;
             }
@@ -371,13 +420,29 @@ function copyQuotedLength(code: string, index: number): number {
     return stop - index;
 }
 
+function copyBracketLength(code: string, index: number): number {
+    let stop = index + 1;
+    while (stop < code.length) {
+        if (code[stop] !== ']') {
+            stop++;
+            continue;
+        }
+        if (code[stop + 1] === ']') {
+            stop += 2;
+            continue;
+        }
+        return stop + 1 - index;
+    }
+    return code.length - index;
+}
+
 function expandMarkedCalls(code: string): string {
     let result = code;
     // repeatedly find a marked call, extract balanced args, replace
     let guard = 0;
     while (guard < 1000) {
         guard++;
-        const match = result.match(/\b([a-z0-9_]+)__JB__\s*\(/i);
+        const match = result.match(/\uE002([a-z0-9_]+)\uE003\s*\(/i);
         if (!match) {
             break;
         }

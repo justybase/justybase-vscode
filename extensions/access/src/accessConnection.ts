@@ -173,7 +173,7 @@ export function splitAccessStatements(sql: string): string[] {
 }
 
 interface HeldFileLock {
-    readonly lockPath: string;
+    readonly lockKey: string;
     refCount: number;
     readonly releasePromise: Promise<() => Promise<void>>;
 }
@@ -199,7 +199,7 @@ function makeRefCountedRelease(
         released = true;
         holder.refCount -= 1;
         if (holder.refCount <= 0) {
-            heldFileLocks.delete(holder.lockPath);
+            heldFileLocks.delete(holder.lockKey);
             await release();
         }
     };
@@ -222,8 +222,9 @@ async function acquireAccessFileLock(
         || format === 'accdb2019';
     const lockExt = isAccdb ? '.laccdb' : '.ldb';
     const lockPath = databasePath.replace(/\.(?:mdb|accdb)$/i, '') + lockExt;
+    const lockKey = accessFileLockKey(lockPath);
 
-    const existing = heldFileLocks.get(lockPath);
+    const existing = heldFileLocks.get(lockKey);
     if (existing) {
         existing.refCount += 1;
         const release = await existing.releasePromise;
@@ -231,16 +232,16 @@ async function acquireAccessFileLock(
     }
 
     const holder: HeldFileLock = {
-        lockPath,
+        lockKey,
         refCount: 1,
         releasePromise: createLockFileHandle(lockPath, databasePath),
     };
-    heldFileLocks.set(lockPath, holder);
+    heldFileLocks.set(lockKey, holder);
     try {
         const release = await holder.releasePromise;
         return makeRefCountedRelease(holder, release);
     } catch (error) {
-        heldFileLocks.delete(lockPath);
+        heldFileLocks.delete(lockKey);
         throw error;
     }
 }
@@ -333,16 +334,10 @@ export function writeTargetTableName(sql: string): string | undefined {
     return prefix ? readAccessIdentifierAt(statement, prefix[0].length)?.name : undefined;
 }
 
-function rowValueEquals(left: unknown, right: unknown): boolean {
-    if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime();
-    if (left instanceof Uint8Array && right instanceof Uint8Array) {
-        return left.length === right.length && left.every((value, index) => value === right[index]);
-    }
-    return left === right;
-}
-
-function rowEquals(left: readonly unknown[], right: readonly unknown[]): boolean {
-    return left.length === right.length && left.every((value, index) => rowValueEquals(value, right[index]));
+function identityValueKey(value: unknown): string | undefined {
+    if (typeof value === 'bigint') return `bigint:${value.toString()}`;
+    if (typeof value === 'number' && Number.isFinite(value)) return `number:${value}`;
+    return undefined;
 }
 
 function insertedIdentityFromSnapshots(
@@ -359,8 +354,20 @@ function insertedIdentityFromSnapshots(
     const identityColumn = afterTable.definition.columns.find(column => column.autoLong);
     if (!identityColumn) return undefined;
     const identityIndex = afterTable.definition.columns.indexOf(identityColumn);
-    const newRows = afterTable.rows.filter(row => !beforeTable?.rows.some(previous => rowEquals(row, previous)));
-    const candidate = newRows[newRows.length - 1]?.[identityIndex];
+    // AutoNumber values are unique, so comparing only the identity column is
+    // both linear and correct when an INSERT duplicates an existing row.
+    const previousIdentities = new Set(
+        (beforeTable?.rows ?? [])
+            .map(row => identityValueKey(row[identityIndex]))
+            .filter((value): value is string => value !== undefined),
+    );
+    const candidate = afterTable.rows
+        .map(row => row[identityIndex])
+        .reverse()
+        .find(value => {
+            const key = identityValueKey(value);
+            return key !== undefined && !previousIdentities.has(key);
+        });
     if (typeof candidate === 'bigint') return candidate;
     if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
     return undefined;
@@ -443,10 +450,22 @@ function tableDefinitions(session: AccessFileSession): AccessTableDefinition[] {
 
 type AccessWriteTask<T> = () => Promise<T>;
 const accessFileWriteTails = new Map<string, Promise<void>>();
+const accessFileVersions = new Map<string, number>();
 
 function accessFileLockKey(filePath: string): string {
     const resolved = path.resolve(filePath);
     return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function currentAccessFileVersion(filePath: string): number {
+    return accessFileVersions.get(accessFileLockKey(filePath)) ?? 0;
+}
+
+function markAccessFileChanged(filePath: string): number {
+    const key = accessFileLockKey(filePath);
+    const version = currentAccessFileVersion(filePath) + 1;
+    accessFileVersions.set(key, version);
+    return version;
 }
 
 async function withAccessFileWriteLock<T>(filePath: string, task: AccessWriteTask<T>): Promise<T> {
@@ -780,9 +799,12 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
     private _lastInsertedIdentity?: number | bigint;
     private _nextQueryId = 1;
     private _queryTail: Promise<void> = Promise.resolve();
+    private _activeExecution?: Promise<ExecutionResult>;
     private _activeQueryId?: number;
     private _activeQueryRelease?: () => void;
     private readonly _cancelledQueryIds = new Set<number>();
+    private _observedFileVersion = 0;
+    private _closing = false;
 
     public constructor(public readonly config: DatabaseConnectionConfig) {
         super();
@@ -830,6 +852,7 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
             await this._mirror.open(session);
             this._session = session;
             this._snapshots = await this._mirror.snapshotTables(session.listTables());
+            this._observedFileVersion = currentAccessFileVersion(this._databasePath);
             this._connected = true;
         } catch (error) {
             await this.releaseLock();
@@ -840,20 +863,29 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
     }
 
     public async close(): Promise<void> {
-        const pendingConnection = this._connectPromise;
-        if (pendingConnection) {
-            await pendingConnection.catch(() => undefined);
+        this._closing = true;
+        try {
+            const pendingConnection = this._connectPromise;
+            if (pendingConnection) {
+                await pendingConnection.catch(() => undefined);
+            }
+            this._mirror.interrupt();
+            this._activeQueryRelease?.();
+            await this._activeExecution?.catch(() => undefined);
+            await this._queryTail.catch(() => undefined);
+            this._queryTail = Promise.resolve();
+            await this._mirror.close();
+            const session = this._session;
+            this._session = undefined;
+            this._snapshots = [];
+            this._lastInsertedIdentity = undefined;
+            this._connected = false;
+            await session?.close();
+            await this.releaseLock();
+            this.emit('close');
+        } finally {
+            this._closing = false;
         }
-        this._activeQueryRelease?.();
-        await this._mirror.close();
-        const session = this._session;
-        this._session = undefined;
-        this._snapshots = [];
-        this._lastInsertedIdentity = undefined;
-        this._connected = false;
-        await session?.close();
-        await this.releaseLock();
-        this.emit('close');
     }
 
     private async releaseLock(): Promise<void> {
@@ -867,6 +899,9 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
     }
 
     public async executeRaw(sql: string, queryId?: number): Promise<ExecutionResult> {
+        if (this._closing) {
+            throw new Error('Microsoft Access connection is closing.');
+        }
         const ownerId = queryId ?? this._nextQueryId++;
         const previous = this._queryTail;
         let releaseQueue!: () => void;
@@ -879,6 +914,10 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
             releaseQueue();
             throw new Error('Query cancelled.');
         }
+        if (this._closing) {
+            releaseQueue();
+            throw new Error('Microsoft Access connection is closing.');
+        }
         this._activeQueryId = ownerId;
         const release = (): void => {
             if (this._activeQueryId === ownerId) {
@@ -889,8 +928,10 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
             releaseQueue();
         };
         this._activeQueryRelease = release;
+        const executionPromise = this.executeRawUnlocked(sql, ownerId);
+        this._activeExecution = executionPromise;
         try {
-            const execution = await this.executeRawUnlocked(sql, ownerId);
+            const execution = await executionPromise;
             if (execution.rowChunks) {
                 return { ...execution, release };
             }
@@ -899,6 +940,10 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
         } catch (error) {
             release();
             throw error;
+        } finally {
+            if (this._activeExecution === executionPromise) {
+                this._activeExecution = undefined;
+            }
         }
     }
 
@@ -922,7 +967,10 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
 
         const metadataMarker = parseMetadataMarker(trimmedSql);
         if (metadataMarker) {
-            return metadataResult(this.requireSession(), metadataMarker, this._mirror);
+            return withAccessFileWriteLock(this._databasePath, async () => {
+                await this.refreshSessionIfStale();
+                return metadataResult(this.requireSession(), metadataMarker, this._mirror);
+            });
         }
 
         if (startsWithAccessWriteStatement(trimmedSql)) {
@@ -938,7 +986,10 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
             return this.executeWrite(trimmedSql);
         }
 
-        return this._mirror.execute(trimmedSql);
+        return withAccessFileWriteLock(this._databasePath, async () => {
+            await this.refreshSessionIfStale();
+            return this._mirror.execute(trimmedSql);
+        });
     }
 
     /**
@@ -949,7 +1000,7 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
     private async executeDdl(sql: string): Promise<ExecutionResult> {
         this.requireSession();
         return withAccessFileWriteLock(this._databasePath, async () => {
-            await this.reloadSessionFromDisk();
+            await this.refreshSessionIfStale();
             const session = this.requireSession();
             await session.writeAtomically(async context => {
                 const buffer = await fs.readFile(context.stagedPath);
@@ -959,6 +1010,7 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
                 await fs.writeFile(context.stagedPath, channel.buffer);
             });
             await this.reloadSessionFromDisk();
+            this._observedFileVersion = markAccessFileChanged(this._databasePath);
             return { columns: [], rows: [], recordsAffected: 0 };
         });
     }
@@ -976,32 +1028,45 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
     private async executeWrite(sql: string): Promise<ExecutionResult> {
         this.requireSession();
         return withAccessFileWriteLock(this._databasePath, async () => {
-            await this.reloadSessionFromDisk();
+            await this.refreshSessionIfStale();
             const session = this.requireSession();
             const targetTable = writeTargetTableName(sql);
-            if (targetTable) {
-                const definition = session.getTableDefinition(targetTable);
-                if (definition.columns.some(column => column.accessType === 'complex')) {
-                    throw new Error(
-                        `Writes to Access complex columns in table '${definition.name}' are not supported yet; use its flat child table.`,
-                    );
-                }
+            if (!targetTable) {
+                throw new Error('Access writes require an explicit target table.');
             }
-            const before = this._snapshots;
+            const definition = session.getTableDefinition(targetTable);
+            if (definition.columns.some(column => column.accessType === 'complex')) {
+                throw new Error(
+                    `Writes to Access complex columns in table '${definition.name}' are not supported yet; use its flat child table.`,
+                );
+            }
+            const beforeSnapshots = this._snapshots;
+            const beforeTable = beforeSnapshots.find(snapshot => snapshot.definition.name.localeCompare(definition.name, undefined, { sensitivity: 'accent' }) === 0);
+            if (!beforeTable) {
+                throw new Error(`Access snapshot for table '${definition.name}' is not available.`);
+            }
             const execution = await this._mirror.executeAndReadAll(sql);
-            const after = await this._mirror.snapshotTables(session.listTables());
+            const afterTable = await this._mirror.snapshotTables([definition]).then(snapshots => snapshots[0]);
+            if (!afterTable) {
+                throw new Error(`Access snapshot for table '${definition.name}' could not be refreshed.`);
+            }
             try {
                 await session.writeAtomically(context => writeAccessSnapshotChanges(
                     context.stagedPath,
                     context.format,
-                    before,
-                    after,
+                    [beforeTable],
+                    [afterTable],
+                    definition.name,
                 ));
-                this._snapshots = after;
-                const identity = insertedIdentityFromSnapshots(sql, before, after);
+                const afterSnapshots = this._snapshots.map(snapshot => snapshot.definition.name.localeCompare(definition.name, undefined, { sensitivity: 'accent' }) === 0
+                    ? afterTable
+                    : snapshot);
+                this._snapshots = afterSnapshots;
+                const identity = insertedIdentityFromSnapshots(sql, beforeSnapshots, afterSnapshots);
                 if (identity !== undefined) {
                     this._lastInsertedIdentity = identity;
                 }
+                this._observedFileVersion = markAccessFileChanged(this._databasePath);
                 return execution;
             } catch (error) {
                 await this.reloadSessionFromDisk();
@@ -1017,6 +1082,13 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
         this._snapshots = [];
         await previousSession?.close();
         await this.openSession();
+    }
+
+    private async refreshSessionIfStale(): Promise<void> {
+        if (this._observedFileVersion === currentAccessFileVersion(this._databasePath)) {
+            return;
+        }
+        await this.reloadSessionFromDisk();
     }
 
     private requireSession(): AccessFileSession {

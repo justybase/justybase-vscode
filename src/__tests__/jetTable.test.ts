@@ -182,6 +182,41 @@ describe('JetTable writes on real Access fixtures', () => {
         expect(reopened.rows[2]![2]).toBe(99);
     });
 
+    it('maps reordered UPDATE snapshots by the table AutoNumber key', async () => {
+        const file = copyFixture('sample2007.accdb');
+        try {
+            const session = await AccessFileSession.open({ filePath: file });
+            const before = await session.readTable('t_people');
+            await session.close();
+
+            const reordered = [
+                [...before.rows[2]!].map((value, index) => index === 1 ? 'updated third' : value),
+                [...before.rows[0]!],
+                [...before.rows[1]!],
+            ];
+            await writeAccessSnapshotChanges(
+                file,
+                'accdb2007',
+                [before],
+                [{ definition: before.definition, rows: reordered }],
+            );
+
+            const reopened = await AccessFileSession.open({ filePath: file });
+            try {
+                const rows = (await reopened.readTable('t_people')).rows;
+                expect(rows.map(row => row[1])).toEqual([
+                    before.rows[0]![1],
+                    before.rows[1]![1],
+                    'updated third',
+                ]);
+            } finally {
+                await reopened.close();
+            }
+        } finally {
+            fs.rmSync(file, { force: true });
+        }
+    });
+
     it('deletes a middle row and keeps the remaining order', async () => {
         const file = copyFixture('sample2007.accdb');
         const { rows } = open(file);
@@ -460,6 +495,25 @@ describe('AccessConnection DDL', () => {
             expect(await readAllRows(connection, 'SELECT @@IDENTITY AS id')).toEqual([[null]]);
         } finally {
             await connection.close();
+            fs.rmSync(file, { force: true });
+        }
+    });
+
+    it('refreshes another in-process mirror after a write', async () => {
+        const file = copyFixture('sample2007.accdb');
+        const first = new AccessConnection(createAccessConfig(file, false));
+        const second = new AccessConnection(createAccessConfig(file, false));
+        try {
+            await first.connect();
+            await second.connect();
+            await first.createCommand("INSERT INTO t_people (name) VALUES ('from first connection')").execute();
+
+            const rows = await readAllRows(second, 'SELECT id, name FROM t_people ORDER BY id');
+            expect(rows).toHaveLength(4);
+            expect(rows[3]).toEqual([4, 'from first connection']);
+        } finally {
+            await second.close();
+            await first.close();
             fs.rmSync(file, { force: true });
         }
     });

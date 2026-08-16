@@ -31,6 +31,25 @@ describe('accessSqlFunctions', () => {
         expect(translateAccessFunctions('DatePart("q", d)')).toBe("date_part('quarter', d)");
     });
 
+    it('uses Access weekday numbering and interval semantics', () => {
+        expect(translateAccessFunctions('Weekday(d)')).toBe('(dayofweek(d) + 1)');
+        expect(translateAccessFunctions('Weekday(d, 2)')).toContain('dayofweek(d) - ((CASE WHEN CAST(2 AS INTEGER) = 0');
+        expect(translateAccessFunctions('DatePart("w", d)')).toBe("(date_part('dayofweek', d) + 1)");
+        expect(translateAccessFunctions('DateAdd("w", 1, d)')).toBe('(d) + INTERVAL (1) day');
+    });
+
+    it('repeats the Access String character argument', () => {
+        const translated = translateAccessFunctions('String(5, "A")');
+        expect(translated).toContain('repeat(CASE WHEN typeof("A")');
+        expect(translated).toContain('END, 5)');
+        expect(translated).not.toContain('repeat(chr(5)');
+    });
+
+    it('reverses the search text for InStrRev', () => {
+        expect(translateAccessFunctions('InStrRev("abcabc", "bc")'))
+            .toBe('length("abcabc") - instr(reverse("abcabc"), reverse("bc")) - length("bc") + 2');
+    });
+
     it('rewrites conditional and null functions', () => {
         expect(translateAccessFunctions('IIF(a > 1, 10, 20)')).toBe('if(a > 1, 10, 20)');
         expect(translateAccessFunctions('IIf(a, 1)')).toBe('if(a, 1, NULL)');
@@ -58,5 +77,9 @@ describe('accessSqlFunctions', () => {
         // literals are protected before this stage in the real pipeline;
         // here we verify the expansion does not break on quotes
         expect(translateAccessFunctions('Left(name, InStr(name, "(") - 1)')).toBe('left(name, instr(name, "(") - 1)');
+    });
+
+    it('does not use a marker that can collide with an identifier', () => {
+        expect(translateAccessFunctions('left__JB__(name)')).toBe('left__JB__(name)');
     });
 });

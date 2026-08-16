@@ -55,8 +55,20 @@ describe('translateAccessSql (Faza 3)', () => {
         expect(translateAccessSql("SELECT 'len(x)' FROM t")).toBe("SELECT 'len(x)' FROM t");
     });
 
+    it('does not mistake ILIKE for a LIKE operator', () => {
+        expect(translateAccessSql("SELECT * FROM t WHERE name ILIKE 'A*'"))
+            .toBe("SELECT * FROM t WHERE name ILIKE 'A*'");
+    });
+
+    it('does not rewrite LIKE or date markers inside literals and comments', () => {
+        expect(translateAccessSql("SELECT 'name LIKE A* #1#' FROM t")).toBe("SELECT 'name LIKE A* #1#' FROM t");
+        expect(translateAccessSql("-- name LIKE 'A*' #1#\nSELECT * FROM t WHERE name LIKE 'A*'"))
+            .toBe("-- name LIKE 'A*' #1#\nSELECT * FROM t WHERE name SIMILAR TO '(?i)A.*'");
+    });
+
     it('handles TOP', () => {
         expect(translateAccessSql('SELECT TOP 10 * FROM t')).toBe('SELECT * FROM t LIMIT 10');
+        expect(translateAccessSql('-- comment\nSELECT TOP 10 * FROM t')).toBe('-- comment\nSELECT * FROM t LIMIT 10');
     });
 
     it('translates date literals', () => {

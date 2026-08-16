@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
+import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 
 /**
@@ -93,9 +94,9 @@ export function validateExportPath(outputPath: string): void {
     }
 
     // Check write permission by attempting to create and remove a temp file
-    const testFile = path.join(dir, `.export_write_test_${Date.now()}`);
+    const testFile = path.join(dir, `.export_write_test_${process.pid}_${randomBytes(8).toString('hex')}`);
     try {
-        fs.writeFileSync(testFile, '');
+        fs.writeFileSync(testFile, '', { flag: 'wx' });
         fs.unlinkSync(testFile);
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);

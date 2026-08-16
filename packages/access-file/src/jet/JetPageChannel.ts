@@ -66,7 +66,7 @@ export class JetPageChannel {
 
     public pageAt(pageNumber: number): Buffer {
         const page = this._pages[pageNumber];
-        if (!pageNumber || pageNumber < 0 || !page) {
+        if (!Number.isInteger(pageNumber) || pageNumber < 0 || !page) {
             throw new AccessFileError(`Access page ${pageNumber} is outside the file.`);
         }
         return page;
