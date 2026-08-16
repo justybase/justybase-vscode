@@ -79,7 +79,7 @@ function CancelIcon(): ReactElement {
 
 // ── Run mode types ────────────────────────────────────
 
-export type RunMode = 'run' | 'smart' | 'batch' | 'export-csv' | 'export-xlsx' | 'export-xlsb';
+export type RunMode = 'run' | 'smart' | 'batch' | 'explain' | 'export-csv' | 'export-xlsx' | 'export-xlsb';
 
 // ── Props ──────────────────────────────────────────────
 
@@ -126,14 +126,19 @@ export function EditorToolbar({
         setRunMenuOpen(false);
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setRunMenuOpen(false);
+    }
     window.addEventListener('mousedown', handler);
-    return () => window.removeEventListener('mousedown', handler);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => { window.removeEventListener('mousedown', handler); window.removeEventListener('keydown', handleKeyDown); };
   }, [runMenuOpen]);
 
   const runModes: { key: RunMode; label: string; icon: ReactElement }[] = [
     { key: 'run', label: 'Run', icon: <PlayIcon /> },
     { key: 'smart', label: 'Smart run (split by ;)', icon: <SplitIcon /> },
-    { key: 'batch', label: 'Run as single batch', icon: <PlayIcon /> },
+    { key: 'batch', label: 'Run whole document (sequential)', icon: <PlayIcon /> },
+    { key: 'explain', label: 'Explain current statement', icon: <FileIcon /> },
     { key: 'export-csv', label: 'Run → Export CSV', icon: <FileIcon /> },
     { key: 'export-xlsx', label: 'Run → Export XLSX', icon: <FileIcon /> },
     { key: 'export-xlsb', label: 'Run → Export XLSB (preferred, faster)', icon: <FileIcon /> },
@@ -163,7 +168,7 @@ export function EditorToolbar({
           <button
             className="tb-btn tb-run-arrow"
             title="More run options"
-            disabled={!connectionId}
+            disabled={isRunning || !connectionId}
             onClick={() => setRunMenuOpen(prev => !prev)}
           >
             <ChevronDownIcon />

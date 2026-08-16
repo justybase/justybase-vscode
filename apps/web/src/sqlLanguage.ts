@@ -1,5 +1,5 @@
 import type * as Monaco from 'monaco-editor';
-import type { SqlLanguageContext } from '@justybase/contracts';
+import type { EditorPreferences, SqlLanguageContext } from '@justybase/contracts';
 import { api } from './api';
 
 interface RpcMessage { id?: number; method?: string; result?: unknown; error?: { message?: string }; params?: Record<string, unknown>; }
@@ -107,7 +107,7 @@ class WebLspClient {
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/inlayHint', { textDocument: { uri: this.uri } }));
   }
-  public formatting(options: { tabSize: number; insertSpaces: boolean }): Promise<unknown> {
+  public formatting(options: { tabSize: number; insertSpaces: boolean; keywordCase?: EditorPreferences['keywordCase'] }): Promise<unknown> {
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/formatting', { textDocument: { uri: this.uri }, options }));
   }
@@ -176,22 +176,47 @@ function monacoSignatureHelp(_monaco: typeof Monaco, help: CoreSignatureHelpLike
   };
 }
 
-export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco, getContext: () => SqlLanguageContext): void {
+export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco, getContext: () => SqlLanguageContext, getPreferences: () => EditorPreferences | null = () => null): void {
   const model = editor.getModel();
   if (!model) return;
   const client = new WebLspClient(model.uri.toString(), getContext);
+  const suggestedFixes = new Map<string, string>();
+  const markerKey = (code: string, line: number, character: number): string => `${code}:${line}:${character}`;
   const setMarkers = (params: Record<string, unknown>): void => {
+    const preferences = getPreferences();
     const diagnostics = Array.isArray(params.diagnostics) ? params.diagnostics as Array<Record<string, unknown>> : [];
-    monaco.editor.setModelMarkers(model, 'justybase-netezza-lsp', diagnostics.map(item => {
+    suggestedFixes.clear();
+    if (preferences?.linterEnabled === false) {
+      monaco.editor.setModelMarkers(model, 'justybase-netezza-lsp', []);
+      return;
+    }
+    monaco.editor.setModelMarkers(model, 'justybase-netezza-lsp', diagnostics.filter(item => {
+      const code = typeof item.code === 'string' || typeof item.code === 'number' ? String(item.code) : '';
+      const range = item.range as { start?: { line?: number; character?: number } } | undefined;
+      const suggestedFix = (item.data as { suggestedFix?: unknown } | undefined)?.suggestedFix;
+      if (typeof suggestedFix === 'string' && suggestedFix.trim()) suggestedFixes.set(markerKey(code, Number(range?.start?.line ?? 0), Number(range?.start?.character ?? 0)), suggestedFix);
+      return preferences?.linterRules[code] !== 'off';
+    }).map(item => {
       const range = item.range as { start?: { line?: number; character?: number }; end?: { line?: number; character?: number } } | undefined;
       const start = range?.start ?? {};
       const end = range?.end ?? start;
-      return { message: String(item.message ?? ''), severity: Number(item.severity) === 1 ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning, startLineNumber: Number(start.line ?? 0) + 1, startColumn: Number(start.character ?? 0) + 1, endLineNumber: Number(end.line ?? start.line ?? 0) + 1, endColumn: Math.max(Number(start.character ?? 0) + 2, Number(end.character ?? 0) + 1), data: item.data as { suggestedFix?: string } | undefined };
+      const code = typeof item.code === 'string' || typeof item.code === 'number' ? String(item.code) : '';
+      const configuredSeverity = preferences?.linterRules[code];
+      const wireSeverity = Number(item.severity);
+      const severity = configuredSeverity === 'error' ? monaco.MarkerSeverity.Error
+        : configuredSeverity === 'warning' ? monaco.MarkerSeverity.Warning
+          : configuredSeverity === 'information' ? monaco.MarkerSeverity.Info
+            : configuredSeverity === 'hint' ? monaco.MarkerSeverity.Hint
+              : wireSeverity === 1 ? monaco.MarkerSeverity.Error
+                : wireSeverity === 3 ? monaco.MarkerSeverity.Info
+                  : wireSeverity === 4 ? monaco.MarkerSeverity.Hint
+                    : monaco.MarkerSeverity.Warning;
+      return { message: String(item.message ?? ''), severity, code, startLineNumber: Number(start.line ?? 0) + 1, startColumn: Number(start.character ?? 0) + 1, endLineNumber: Number(end.line ?? start.line ?? 0) + 1, endColumn: Math.max(Number(start.character ?? 0) + 2, Number(end.character ?? 0) + 1), data: item.data as { suggestedFix?: string } | undefined };
     }));
   };
   client.setDiagnosticsHandler(setMarkers);
   void client.initialize(model).catch(async () => {
-    try { const response = await api.diagnostics({ ...getContext(), sql: model.getValue() }); setMarkers({ diagnostics: response.diagnostics.map(item => ({ message: item.message, severity: item.severity === 'error' ? 1 : 2, range: { start: item.start, end: item.end } })) }); } catch { /* editor remains usable without diagnostics */ }
+    try { const response = await api.diagnostics({ ...getContext(), sql: model.getValue() }); setMarkers({ diagnostics: response.diagnostics.map(item => ({ message: item.message, code: item.code, severity: item.severity === 'error' ? 1 : 2, range: { start: item.start, end: item.end } })) }); } catch { /* editor remains usable without diagnostics */ }
   });
   const changeDisposable = model.onDidChangeContent(() => client.didChange(model));
   const completionDisposable = monaco.languages.registerCompletionItemProvider('sql', { triggerCharacters: ['.', ' ', '\n'], provideCompletionItems: async (completionModel, position) => {
@@ -290,6 +315,7 @@ export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCod
   const inlayHintsDisposable = monaco.languages.registerInlayHintsProvider('sql', {
     provideInlayHints: async (_inlayModel, _range, token) => {
       try {
+        if (getPreferences()?.inlineTypeHints === false) return { hints: [], dispose: () => undefined };
         const response = await client.inlayHints() as Array<{ position?: { line?: number; character?: number }; label?: string; kind?: 'type' | 'parameter' | null }> | null;
         if (token.isCancellationRequested) return { hints: [], dispose: () => undefined };
         return {
@@ -304,16 +330,40 @@ export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCod
     },
   });
   const formatDisposable = monaco.languages.registerDocumentFormattingEditProvider('sql', {
-    provideDocumentFormattingEdits: async (_formatModel, options) => {
+    provideDocumentFormattingEdits: async (formatModel, options) => {
+      const tabSize = options.tabSize;
+      const insertSpaces = options.insertSpaces;
       try {
-        const tabSize = options.tabSize;
-        const insertSpaces = options.insertSpaces;
-        const changes = await client.formatting({ tabSize, insertSpaces }) as Array<{ range?: CoreRangeLike; newText?: string }> | null;
+        const changes = await client.formatting({ tabSize, insertSpaces, keywordCase: getPreferences()?.keywordCase }) as Array<{ range?: CoreRangeLike; newText?: string }> | null;
         if (!Array.isArray(changes)) return [];
         return changes.map(change => ({ range: monacoRange(monaco, change.range), text: change.newText ?? '' }));
-      } catch { return []; }
+      } catch {
+        try {
+          const response = await api.formatSql({ ...getContext(), sql: formatModel.getValue(), tabSize, insertSpaces, keywordCase: getPreferences()?.keywordCase });
+          return [{ range: new monaco.Range(1, 1, formatModel.getLineCount(), formatModel.getLineMaxColumn(formatModel.getLineCount())), text: response.sql }];
+        } catch { return []; }
+      }
     },
   });
+  const codeActionDisposable = monaco.languages.registerCodeActionProvider('sql', {
+    provideCodeActions: (actionModel, _range, context) => {
+      const actions = context.markers.flatMap(marker => {
+        const code = typeof marker.code === 'string' ? marker.code : typeof marker.code === 'object' ? marker.code.value : '';
+        const suggestedFix = suggestedFixes.get(markerKey(code, marker.startLineNumber - 1, marker.startColumn - 1));
+        if (!suggestedFix) return [];
+        return [{
+          title: `Apply ${code || 'SQL'} quick-fix`,
+          kind: 'quickfix',
+          isPreferred: true,
+          diagnostics: [marker],
+          edit: {
+            edits: [{ resource: actionModel.uri, versionId: actionModel.getVersionId(), textEdit: { range: { startLineNumber: marker.startLineNumber, startColumn: marker.startColumn, endLineNumber: marker.endLineNumber, endColumn: marker.endColumn }, text: suggestedFix } }],
+          },
+        } satisfies Monaco.languages.CodeAction];
+      });
+      return { actions, dispose: () => undefined };
+    },
+  }, { providedCodeActionKinds: ['quickfix'] });
 
   // Semantic tokens (no TextMate grammar on the web — lexer/CST-based provider)
   const semanticTokenLegend: Monaco.languages.SemanticTokensLegend = {
@@ -379,6 +429,7 @@ export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCod
     documentSymbolDisposable.dispose();
     inlayHintsDisposable.dispose();
     formatDisposable.dispose();
+    codeActionDisposable.dispose();
     semanticTokenDisposable.dispose();
     client.dispose();
   });

@@ -1,26 +1,40 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement, DragEvent } from 'react';
-import type { SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
+import type { DatabaseKind, SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
 import { api } from './api';
 
 const ROOT = '__root__';
 
 // ── Qualified name helpers ─────────────────────────────
 
-/** Build a dot-separated qualified name for any tree node. */
-function qualifiedName(node: SchemaTreeNode): string {
-  switch (node.kind) {
-    case 'database':
-      return node.database || node.label;
-    case 'schema':
-      return [node.database, node.schema || node.label].filter(Boolean).join('.');
-    case 'object':
-      return [node.database, node.schema, node.objectName || node.label].filter(Boolean).join('.');
-    case 'column':
-      return `${node.objectName || ''}.${node.label}`;
-    default:
-      return node.label;
+function quoteIdentifier(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+/** One dialect-aware qualification rule used by copy, insert and drag/drop. */
+export function qualifySchemaNode(node: SchemaTreeNode, databaseKind: DatabaseKind = 'netezza'): string {
+  if (node.kind === 'database') return quoteIdentifier(node.database || node.label);
+  if (node.kind === 'schema') {
+    return databaseKind === 'sqlite'
+      ? quoteIdentifier(node.database || node.schema || node.label)
+      : [node.database, node.schema || node.label].filter((part): part is string => Boolean(part)).map(quoteIdentifier).join('.');
   }
+  if (node.kind === 'object' || node.kind === 'column') {
+    const objectParts = databaseKind === 'sqlite'
+      ? [node.database, node.objectName || node.label]
+      : [node.database, node.schema, node.objectName || node.label];
+    const parts = node.kind === 'column' ? [...objectParts, node.label] : objectParts;
+    return parts.filter((part): part is string => Boolean(part)).map(quoteIdentifier).join('.');
+  }
+  return quoteIdentifier(node.label);
+}
+
+export function buildExplainSql(sql: string, databaseKind: DatabaseKind = 'netezza'): string {
+  const trimmed = sql.trim();
+  if (databaseKind === 'duckdb') return `EXPLAIN ${trimmed}`;
+  if (databaseKind === 'sqlite' && /^(?:SELECT|WITH)\b/i.test(trimmed)) return `EXPLAIN QUERY PLAN ${trimmed}`;
+  if (databaseKind === 'sqlite') return `EXPLAIN ${trimmed}`;
+  return `EXPLAIN VERBOSE ${trimmed}`;
 }
 
 // ── SVG Icons ──────────────────────────────────────────
@@ -204,12 +218,15 @@ const OBJECT_TYPES = [
 
 // ── Main SchemaTree component ───────────────────────────
 
-export function SchemaTree({ connectionId, database, onInsert, onContextChange, onObjectSelect }: {
+export function SchemaTree({ connectionId, database, databaseKind = 'netezza', onInsert, onContextChange, onObjectSelect, onOpenQuery, onImport }: {
   connectionId: string;
   database?: string;
+  databaseKind?: DatabaseKind;
   onInsert(value: string): void;
   onContextChange(database?: string, schema?: string): void;
   onObjectSelect?(node: SchemaTreeNode): void;
+  onOpenQuery?(sql: string, title: string, node: SchemaTreeNode): void;
+  onImport?(node: SchemaTreeNode): void;
 }): ReactElement {
   const [children, setChildren] = useState<Record<string, SchemaTreeNode[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -220,8 +237,38 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
   const [activeDatabase, setActiveDatabase] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(OBJECT_TYPES.map(t => t.key)));
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [objectMenu, setObjectMenu] = useState<{ x: number; y: number; node: SchemaTreeNode } | null>(null);
+  const [favorites, setFavorites] = useState<SchemaTreeNode[]>([]);
+  const [recentObjects, setRecentObjects] = useState<SchemaTreeNode[]>([]);
+  const [storageReadyKey, setStorageReadyKey] = useState<string | null>(null);
   // Separate store for column metadata not present on SchemaTreeNode
   const [columnMeta, setColumnMeta] = useState<Record<string, ColumnMeta>>({});
+
+  useEffect(() => {
+    const closeMenu = (): void => setObjectMenu(null);
+    const handleKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') setObjectMenu(null); };
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => { document.removeEventListener('click', closeMenu); document.removeEventListener('keydown', handleKeyDown); };
+  }, []);
+
+  const storageKey = `jwb_schema_${connectionId}`;
+  useEffect(() => {
+    setStorageReadyKey(null);
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as { favorites?: SchemaTreeNode[]; recent?: SchemaTreeNode[] };
+      setFavorites(Array.isArray(stored.favorites) ? stored.favorites.filter(node => node?.kind === 'object') : []);
+      setRecentObjects(Array.isArray(stored.recent) ? stored.recent.filter(node => node?.kind === 'object') : []);
+    } catch {
+      setFavorites([]);
+      setRecentObjects([]);
+    }
+    setStorageReadyKey(storageKey);
+  }, [storageKey]);
+  useEffect(() => {
+    if (storageReadyKey !== storageKey) return;
+    try { localStorage.setItem(storageKey, JSON.stringify({ favorites, recent: recentObjects })); } catch { /* ignore storage quota errors */ }
+  }, [favorites, recentObjects, storageKey, storageReadyKey]);
 
   const loadFn = useCallback(async (parentId: string): Promise<SchemaTreeNode[]> => {
     setLoading(prev => ({ ...prev, [parentId]: true }));
@@ -322,8 +369,8 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
     setError('');
     try {
       const cols = await api.columns(connectionId, node.database, node.schema, node.objectName);
-      const colNodes: SchemaTreeNode[] = cols.map(col => ({
-        id: `col:${node.database}.${node.schema}.${node.objectName}.${col.name}`,
+      const colNodes: SchemaTreeNode[] = cols.map((col, columnIndex) => ({
+        id: `col:${node.database}.${node.schema}.${node.objectName}.${columnIndex}`,
         parentId: node.id,
         kind: 'column' as const,
         label: col.name,
@@ -336,8 +383,8 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
       }));
       // Store PK/FK metadata separately
       const metaEntries: Record<string, ColumnMeta> = {};
-      for (const col of cols) {
-        const colId = `col:${node.database}.${node.schema}.${node.objectName}.${col.name}`;
+      for (const [columnIndex, col] of cols.entries()) {
+        const colId = `col:${node.database}.${node.schema}.${node.objectName}.${columnIndex}`;
         if (col.isPk || col.isFk) {
           metaEntries[colId] = { isPrimaryKey: col.isPk, isForeignKey: col.isFk };
         }
@@ -378,8 +425,9 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
   function insertNode(node: SchemaTreeNode): void {
     if (node.database || node.schema) onContextChange(node.database, node.schema);
     if (node.kind === 'object' && node.objectName) {
+      setRecentObjects(previous => [node, ...previous.filter(item => item.id !== node.id)].slice(0, 8));
       onObjectSelect?.(node);
-      onInsert([node.database, node.schema, node.objectName].filter(Boolean).join('.'));
+      onInsert(qualifySchemaNode(node, databaseKind));
     }
     if (node.kind === 'column') {
       onInsert(node.label);
@@ -387,7 +435,48 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
   }
 
   function insertSearchResult(item: SchemaSearchResult): void {
-    onInsert([item.database, item.schema, item.name].filter(Boolean).join('.'));
+    onInsert(qualifySchemaNode({ id: `search:${item.database}.${item.schema}.${item.name}`, kind: 'object', label: item.name, database: item.database, schema: item.schema, objectName: item.name, hasChildren: false }, databaseKind));
+  }
+
+  function objectSqlName(node: SchemaTreeNode): string { return qualifySchemaNode(node, databaseKind); }
+
+  function toggleFavorite(node: SchemaTreeNode): void {
+    setFavorites(previous => previous.some(item => item.id === node.id) ? previous.filter(item => item.id !== node.id) : [...previous, node].slice(-20));
+    setObjectMenu(null);
+  }
+
+  function openObjectMenu(event: React.MouseEvent<HTMLElement>, node: SchemaTreeNode): void {
+    if (node.kind !== 'object') return;
+    event.preventDefault();
+    event.stopPropagation();
+    onObjectSelect?.(node);
+    setObjectMenu({ x: event.clientX, y: event.clientY, node });
+  }
+
+  function openObjectData(node: SchemaTreeNode): void {
+    onOpenQuery?.(`SELECT *\nFROM ${objectSqlName(node)}\nLIMIT 1000`, `Top 1000 · ${node.label}`, node);
+    setObjectMenu(null);
+  }
+
+  function explainObject(node: SchemaTreeNode): void {
+    onOpenQuery?.(buildExplainSql(`SELECT *\nFROM ${objectSqlName(node)}\nLIMIT 1000`, databaseKind), `Explain · ${node.label}`, node);
+    setObjectMenu(null);
+  }
+
+  async function copyObjectDdl(node: SchemaTreeNode): Promise<void> {
+    try {
+      const columns = await api.columns(connectionId, node.database ?? database ?? '', node.schema ?? '', node.objectName ?? node.label);
+      const type = node.objectType?.toUpperCase() === 'VIEW' ? 'VIEW' : 'TABLE';
+      const ddl = type === 'VIEW'
+        ? `-- View definition is not exposed by the lightweight metadata endpoint.\n-- Columns visible in ${objectSqlName(node)}: ${columns.map(column => quoteIdentifier(column.name)).join(', ') || '(none)'}\n-- Retrieve the source definition from the database catalog before executing this DDL.`
+        : `CREATE TABLE ${objectSqlName(node)} (\n${columns.map(column => `  ${quoteIdentifier(column.name)} ${column.type || 'VARCHAR(1)'}`).join(',\n')}\n);`;
+      await navigator.clipboard.writeText(ddl);
+      setError('DDL copied to clipboard.');
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Could not generate DDL.');
+    } finally {
+      setObjectMenu(null);
+    }
   }
 
   // Drag & Drop handlers
@@ -395,7 +484,7 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
     // Columns drag just their own name; objects drag the qualified name
     const name = node.kind === 'column'
       ? node.label
-      : [node.database, node.schema, node.objectName || node.label].filter(Boolean).join('.');
+      : qualifySchemaNode(node, databaseKind);
     event.dataTransfer.setData('text/plain', name);
     event.dataTransfer.effectAllowed = 'copy';
   }
@@ -460,6 +549,11 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
         ))}
       </div>
 
+      {(favorites.length > 0 || recentObjects.length > 0) && <div className="schema-shortcuts">
+        {favorites.length > 0 && <div><div className="schema-shortcuts-title">Favorites</div>{favorites.map(node => <button key={node.id} className="schema-shortcut" onClick={() => insertNode(node)} onContextMenu={event => openObjectMenu(event, node)}><span>★</span>{node.label}<small>{node.schema}</small></button>)}</div>}
+        {recentObjects.length > 0 && <div><div className="schema-shortcuts-title">Recent</div>{recentObjects.slice(0, 5).map(node => <button key={node.id} className="schema-shortcut" onClick={() => insertNode(node)} onContextMenu={event => openObjectMenu(event, node)}><span>↻</span>{node.label}<small>{node.schema}</small></button>)}</div>}
+      </div>}
+
       {error && <div className="error schema-error">{error}</div>}
 
       {/* Search results or tree */}
@@ -508,18 +602,21 @@ export function SchemaTree({ connectionId, database, onInsert, onContextChange, 
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
+                onContextMenu={openObjectMenu}
+                databaseKind={databaseKind}
               />
             ))
           )}
         </div>
       )}
+      {objectMenu && <div className="schema-context-menu" style={{ left: objectMenu.x, top: objectMenu.y }} onClick={event => event.stopPropagation()}><strong>{objectMenu.node.label}</strong><button type="button" onClick={() => openObjectData(objectMenu.node)}>View top 1000</button><button type="button" onClick={() => explainObject(objectMenu.node)}>Explain plan</button><button type="button" onClick={() => void copyObjectDdl(objectMenu.node)}>Copy DDL</button><button type="button" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>Import CSV/XLSX</button><button type="button" onClick={() => { onInsert(objectSqlName(objectMenu.node)); setObjectMenu(null); }}>Insert qualified name</button><button type="button" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? 'Remove from favorites' : 'Add to favorites'}</button></div>}
     </div>
   );
 }
 
 // ── TreeNode recursive component ───────────────────────
 
-function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, columnMeta, onToggle, onInsert, onDragStart, onDragOver, onDragLeave, onDrop }: {
+function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, columnMeta, onToggle, onInsert, onDragStart, onDragOver, onDragLeave, onDrop, onContextMenu, databaseKind }: {
   node: SchemaTreeNode;
   depth: number;
   childrenMap: Record<string, SchemaTreeNode[]>;
@@ -533,6 +630,8 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
   onDragOver(event: DragEvent<HTMLDivElement>, nodeId: string): void;
   onDragLeave(): void;
   onDrop(event: DragEvent<HTMLDivElement>, node: SchemaTreeNode): void;
+  onContextMenu(event: React.MouseEvent<HTMLElement>, node: SchemaTreeNode): void;
+  databaseKind: DatabaseKind;
 }): ReactElement {
   const [showCopied, setShowCopied] = useState(false);
   const open = expanded[node.id] === true;
@@ -544,7 +643,7 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
   async function handleCopy(event: React.MouseEvent<HTMLButtonElement>): Promise<void> {
     event.stopPropagation();
     try {
-      await navigator.clipboard.writeText(qualifiedName(node));
+      await navigator.clipboard.writeText(qualifySchemaNode(node, databaseKind));
       setShowCopied(true);
       window.setTimeout(() => setShowCopied(false), 1200);
     } catch {
@@ -568,6 +667,7 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
         onDragOver={e => onDragOver(e, node.id)}
         onDragLeave={onDragLeave}
         onDrop={e => onDrop(e, node)}
+        onContextMenu={e => onContextMenu(e, node)}
       >
         {/* Expander */}
         <button
@@ -652,8 +752,10 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
-            onDrop={onDrop}
-          />
+                onDrop={onDrop}
+            onContextMenu={onContextMenu}
+            databaseKind={databaseKind}
+              />
         ))}
       </div>
     </div>
