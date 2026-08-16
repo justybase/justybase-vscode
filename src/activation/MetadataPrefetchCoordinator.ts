@@ -140,7 +140,7 @@ export class MetadataPrefetchCoordinator {
      * Access metadata and authoring requests can arrive before the first SQL
      * execution. Establish the persistent lease while the SQL document enters
      * focus so autocomplete/reveal do not become the first operation that has
-     * to start Java/UCanAccess.
+     * to initialize the native file reader and SQL mirror.
      */
     private primeAccessConnection(connectionName: string | undefined, documentUri: string): void {
         if (!connectionName
