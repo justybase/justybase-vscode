@@ -39,7 +39,7 @@ Built and packaged per target platform (native `ibm_db` / clidriver):
 | Session monitor | Yes |
 | External tables / distribution metrics | No (Netezza-only surfaces stay hidden) |
 
-Editor depth is **Advanced (LUW SQL + CST linter/semantic)**; deep SQL PL visitor (SQL037–039) remains a follow-on. See [docs/db2.md](../../docs/db2.md) and [plans/DIALECT_PARITY_MATRIX.md](../../plans/DIALECT_PARITY_MATRIX.md).
+Editor depth is **Advanced (LUW SQL + CST linter/semantic)**; deep SQL PL visitor (SQL037–039) remains a follow-on. See [docs/db2.md](../../docs/db2.md).
 
 ## Windows ODBC registration
 
