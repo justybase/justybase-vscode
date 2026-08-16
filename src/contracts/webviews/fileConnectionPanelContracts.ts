@@ -1,56 +1,56 @@
-export type FileConnectionPanelMode = 'single' | 'workspace';
+/** The manager intentionally exposes one user-facing workspace variant. */
+export type FileConnectionPanelMode = 'dataWorkspace';
 
-export interface FileConnectionPanelFile {
-    path: string;
-    name: string;
-    format: 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | undefined;
-    sizeLabel: string;
-    exists: boolean;
+export interface FileConnectionPanelWorkspaceSource {
+    id: string;
+    kind: 'file' | 'external';
+    label: string;
+    tableName: string;
+    rowCount?: number;
+    lastRefresh?: string;
+    refreshStatus: 'success' | 'error' | 'cancelled' | 'never';
+    message?: string;
 }
 
 export interface FileConnectionPanelState {
-    /** All saved file connection profiles (for the switcher dropdown). */
+    /** All saved persistent Data Workspace profiles (for the switcher dropdown). */
     connections: string[];
     /** Connection currently selected in the panel. */
     selectedConnectionName: string;
     mode: FileConnectionPanelMode | undefined;
-    editable: boolean;
-    files: FileConnectionPanelFile[];
+    workspaceSources?: FileConnectionPanelWorkspaceSource[];
     notice?: string;
 }
 
 export type FileConnectionPanelWebviewToHostMessage =
     | { type: 'ready' }
     | { type: 'selectConnection'; connectionName: string }
-    | { type: 'addFiles'; paths: string[] }
-    | { type: 'removeFile'; path: string }
-    | { type: 'setEditable'; enabled: boolean }
+    | { type: 'createDataWorkspace' }
+    | { type: 'addWorkspaceFile' }
+    | { type: 'addNetezzaSource' }
+    | { type: 'refreshWorkspaceSource'; sourceId: string }
+    | { type: 'removeWorkspaceSource'; sourceId: string }
+    | { type: 'queryWorkspace' }
     | { type: 'deleteConnection' }
-    | { type: 'previewFile'; path: string }
-    | { type: 'requestSheets'; path: string }
-    | { type: 'queryFile'; path: string }
-    | { type: 'resolveDroppedNames'; names: string[] }
     | { type: 'exportConnections' }
     | { type: 'importConnections' }
     | { type: 'refresh' };
 
 export type FileConnectionPanelHostToWebviewMessage =
     | { type: 'state'; state: FileConnectionPanelState }
-    | { type: 'sheets'; path: string; sheetNames: string[] }
     | { type: 'error'; message: string }
     | { type: 'notice'; message: string };
 
 export const FILE_CONNECTION_PANEL_WEBVIEW_TO_HOST_TYPES = [
     'ready',
     'selectConnection',
-    'addFiles',
-    'removeFile',
-    'setEditable',
+    'createDataWorkspace',
+    'addWorkspaceFile',
+    'addNetezzaSource',
+    'refreshWorkspaceSource',
+    'removeWorkspaceSource',
+    'queryWorkspace',
     'deleteConnection',
-    'previewFile',
-    'requestSheets',
-    'queryFile',
-    'resolveDroppedNames',
     'exportConnections',
     'importConnections',
     'refresh',
@@ -58,7 +58,6 @@ export const FILE_CONNECTION_PANEL_WEBVIEW_TO_HOST_TYPES = [
 
 export const FILE_CONNECTION_PANEL_HOST_TO_WEBVIEW_TYPES = [
     'state',
-    'sheets',
     'error',
     'notice',
 ] as const satisfies readonly FileConnectionPanelHostToWebviewMessage['type'][];

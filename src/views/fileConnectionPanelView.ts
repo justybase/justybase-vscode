@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type {
-    FileConnectionPanelFile,
     FileConnectionPanelHostToWebviewMessage,
     FileConnectionPanelState,
     FileConnectionPanelWebviewToHostMessage,
@@ -11,23 +10,14 @@ import { tryNormalizeDatabaseKind } from '../contracts/database';
 import type { ConnectionManager } from '../core/connectionManager';
 import type { ConnectionDetails } from '../types';
 import {
-    applyFilePathsToConnection,
-    buildFileConnectionDetails,
-    detectFileDataFormat,
-    formatFileSize,
-    getFilePaths,
-    importFileConnections,
-    isFileWorkspaceProfile,
-    listXlsxSheetNames,
-    normalizeFilePath,
-    parseFileConnectionsExport,
-    serializeFileConnectionExport,
-    serializeFileConnectionsExport,
-    saveFileConnectionDetails,
-    toFileInfo,
-} from '../services/fileConnectionProfileService';
+    DataWorkspaceService,
+    defaultDataWorkspaceTableName,
+    isDataWorkspaceProfile,
+    parseDataWorkspace,
+    parseDataWorkspaceProfileExport,
+    serializeDataWorkspaceProfileExport,
+} from '../services/dataWorkspaceService';
 
-const FILE_QUERY_COMMAND = 'netezza.openInFilePreview';
 const DATA_FILE_FILTERS = { 'Data files': ['xlsx', 'csv', 'tsv', 'parquet', 'avro'] };
 
 function getNonce(): string {
@@ -35,57 +25,12 @@ function getNonce(): string {
     return Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
-function sanitizeViewName(filePath: string): string {
-    const base = path.basename(filePath).replace(/\.[^.]+$/, '');
-    const sanitized = base.replace(/[^\w]/g, '_').replace(/_+/g, '_');
-    return sanitized || 'file';
-}
-
 function quoteIdentifier(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
 }
 
-function buildQueryContent(
-    connectionName: string,
-    files: readonly string[],
-    workspaceMode: boolean,
-    sheetsByFile: ReadonlyMap<string, readonly string[]>,
-    selectedFilePath?: string,
-): string {
-    const lines = workspaceMode
-        ? [
-            `-- ${connectionName} — File SQL Workspace (read-only)`,
-            '-- Each source is a view named by its full path.',
-            '-- For XLSX files, every discovered sheet is available as "<path>#sheet=<sheet>".',
-            '',
-            '-- Available sources:',
-        ]
-        : [
-            `-- ${connectionName} — File SQL`,
-            '-- Query the file like a table.',
-        ];
-    if (files.length === 0) {
-        lines.push('-- No data files configured.');
-    }
-    for (const filePath of files) {
-        lines.push(`-- ${quoteIdentifier(filePath)}`);
-        if (workspaceMode && detectFileDataFormat(filePath) === 'xlsx') {
-            for (const sheet of sheetsByFile.get(filePath) ?? []) {
-                lines.push(`-- ${quoteIdentifier(`${filePath}#sheet=${sheet}`)}`);
-            }
-        }
-    }
-    if (files.length > 0) {
-        const selectedFile = selectedFilePath
-            ? files.find(filePath => normalizeFilePath(filePath) === normalizeFilePath(selectedFilePath))
-            : undefined;
-        const initialFile = selectedFile ?? files[0];
-        const view = workspaceMode
-            ? quoteIdentifier(initialFile)
-            : quoteIdentifier(sanitizeViewName(initialFile));
-        lines.push('', `SELECT * FROM ${view} LIMIT 100;`, '');
-    }
-    return lines.join('\n');
+function quoteNetezzaObjectPart(value: string): string {
+    return `"${value.replace(/"/g, '""')}"`;
 }
 
 export class FileConnectionPanelView {
@@ -138,7 +83,7 @@ export class FileConnectionPanelView {
         const column = vscode.window.activeTextEditor ? vscode.ViewColumn.Beside : vscode.ViewColumn.One;
         const panel = vscode.window.createWebviewPanel(
             FileConnectionPanelView.viewType,
-            'File Connection Manager',
+            'Data Workspace Manager',
             column,
             { enableScripts: true, retainContextWhenHidden: true },
         );
@@ -158,7 +103,7 @@ export class FileConnectionPanelView {
     }
 
     public async refreshConnections(): Promise<void> {
-        const connections = await this.listFileConnections();
+        const connections = await this.listDataWorkspaces();
         if (
             this.selectedConnectionName
             && !connections.includes(this.selectedConnectionName)
@@ -172,7 +117,7 @@ export class FileConnectionPanelView {
     }
 
     public async loadSession(connectionName?: string): Promise<void> {
-        const connections = await this.listFileConnections();
+        const connections = await this.listDataWorkspaces();
         if (connectionName && connections.includes(connectionName)) {
             this.selectedConnectionName = connectionName;
         } else if (!this.selectedConnectionName || !connections.includes(this.selectedConnectionName)) {
@@ -190,10 +135,10 @@ export class FileConnectionPanelView {
         }
     }
 
-    private async listFileConnections(): Promise<string[]> {
+    private async listDataWorkspaces(): Promise<string[]> {
         const connections = await this.connectionManager.getConnections();
         return connections
-            .filter(connection => tryNormalizeDatabaseKind(connection.dbType) === 'file')
+            .filter(connection => isDataWorkspaceProfile(connection))
             .map(connection => connection.name)
             .sort((a, b) => a.localeCompare(b));
     }
@@ -206,7 +151,7 @@ export class FileConnectionPanelView {
     }
 
     private async buildState(): Promise<FileConnectionPanelState> {
-        const connections = await this.listFileConnections();
+        const connections = await this.listDataWorkspaces();
         if (
             !this.selectedConnectionName
             || !connections.includes(this.selectedConnectionName)
@@ -214,31 +159,42 @@ export class FileConnectionPanelView {
             this.selectedConnectionName = connections[0];
         }
         if (!this.selectedConnectionName) {
-            return { connections, selectedConnectionName: '', mode: undefined, editable: false, files: [] };
+            return { connections, selectedConnectionName: '', mode: undefined, workspaceSources: [] };
         }
 
         const details = await this.getSelectedDetails();
         if (!details) {
-            return { connections, selectedConnectionName: this.selectedConnectionName, mode: undefined, editable: false, files: [] };
+            return { connections, selectedConnectionName: this.selectedConnectionName, mode: undefined, workspaceSources: [] };
         }
 
-        const filePaths = getFilePaths(details);
-        const files: FileConnectionPanelFile[] = filePaths.map(filePath => {
-            const info = toFileInfo(filePath);
+        const dataWorkspace = parseDataWorkspace(details.options?.dataWorkspace);
+        if (dataWorkspace && isDataWorkspaceProfile(details)) {
             return {
-                path: info.path,
-                name: info.name,
-                format: info.format,
-                sizeLabel: info.sizeBytes === undefined ? '' : formatFileSize(info.sizeBytes),
-                exists: info.exists,
+                connections,
+                selectedConnectionName: this.selectedConnectionName,
+                mode: 'dataWorkspace',
+                workspaceSources: dataWorkspace.sources.map(source => ({
+                    id: source.id,
+                    kind: source.kind,
+                    label: source.kind === 'file'
+                        ? source.path
+                        : source.sourceKind === 'query'
+                            ? `${source.connectionName}: ${source.queryTemplate ?? ''}`
+                            : `${source.connectionName}: ${source.objectName ?? ''}`,
+                    tableName: source.tableName,
+                    rowCount: source.lastRefresh?.rowCount,
+                    lastRefresh: source.lastRefresh?.completedAt,
+                    refreshStatus: source.lastRefresh?.status ?? 'never',
+                    message: source.lastRefresh?.message,
+                })),
             };
-        });
+        }
         return {
             connections,
             selectedConnectionName: this.selectedConnectionName,
-            mode: isFileWorkspaceProfile(details) ? 'workspace' : 'single',
-            editable: details.options?.editable === true,
-            files,
+            mode: undefined,
+            workspaceSources: [],
+            notice: 'The selected profile is not a Data Workspace.',
         };
     }
 
@@ -266,29 +222,26 @@ export class FileConnectionPanelView {
                 this.selectedConnectionName = message.connectionName;
                 this.postState();
                 return;
-            case 'addFiles':
-                await this.addFiles(message.paths);
+            case 'createDataWorkspace':
+                await this.createDataWorkspace();
                 return;
-            case 'removeFile':
-                await this.removeFile(message.path);
+            case 'addWorkspaceFile':
+                await this.addWorkspaceFile();
                 return;
-            case 'setEditable':
-                await this.setEditable(message.enabled);
+            case 'addNetezzaSource':
+                await this.addNetezzaSource();
+                return;
+            case 'refreshWorkspaceSource':
+                await this.refreshWorkspaceSource(message.sourceId);
+                return;
+            case 'removeWorkspaceSource':
+                await this.removeWorkspaceSource(message.sourceId);
+                return;
+            case 'queryWorkspace':
+                await this.queryWorkspace();
                 return;
             case 'deleteConnection':
                 await this.deleteConnection();
-                return;
-            case 'previewFile':
-                await this.previewFile(message.path);
-                return;
-            case 'requestSheets':
-                await this.sendSheets(message.path);
-                return;
-            case 'queryFile':
-                await this.queryFile(message.path);
-                return;
-            case 'resolveDroppedNames':
-                await this.resolveDroppedNames(message.names);
                 return;
             case 'exportConnections':
                 await this.exportConnections();
@@ -304,78 +257,193 @@ export class FileConnectionPanelView {
         }
     }
 
-    private async addFiles(providedPaths: readonly string[]): Promise<void> {
-        if (!this.selectedConnectionName) {
-            return;
-        }
-
-        let paths = providedPaths.map(normalizeFilePath).filter(filePath => filePath.length > 0);
-        if (paths.length === 0) {
-            const result = await vscode.window.showOpenDialog({
-                canSelectMany: true,
-                canSelectFolders: false,
-                openLabel: 'Add data files',
-                filters: DATA_FILE_FILTERS,
-            });
-            paths = (result ?? []).map(uri => normalizeFilePath(uri.fsPath));
-        }
-
-        if (paths.length === 0) {
-            return;
-        }
-
-        const supported = paths.filter(filePath => detectFileDataFormat(filePath) !== undefined);
-        const unsupportedCount = paths.length - supported.length;
-
-        const current = await this.connectionManager.getConnection(this.selectedConnectionName);
-        if (!current) {
-            this.post({ type: 'error', message: `Connection '${this.selectedConnectionName}' is no longer available.` });
-            return;
-        }
-        const merged = Array.from(new Set([...getFilePaths(current), ...supported]));
-        const { details, editableCleared } = buildFileConnectionDetails(this.selectedConnectionName, merged, current);
-        await saveFileConnectionDetails(this.connectionManager, details);
-        if (editableCleared) {
-            this.postNotice('The connection is now a multi-file workspace (read-only); the editable copy was disabled.');
-        }
-        if (unsupportedCount > 0) {
-            this.postNotice(`${unsupportedCount} unsupported file(s) were ignored. Supported formats: xlsx, csv, tsv, parquet, avro.`);
-        }
-        this.postState();
+    private dataWorkspaceService(): DataWorkspaceService {
+        return new DataWorkspaceService(this.context, this.connectionManager);
     }
 
-    private async removeFile(filePath: string): Promise<void> {
-        if (!this.selectedConnectionName) {
-            return;
-        }
-        const current = await this.connectionManager.getConnection(this.selectedConnectionName);
-        if (!current) {
-            return;
-        }
-        const remaining = getFilePaths(current).filter(existing => normalizeFilePath(existing) !== normalizeFilePath(filePath));
-        if (remaining.length === 0) {
-            this.postNotice('A File SQL connection must contain at least one data file. Delete the profile instead if it is no longer needed.');
-            return;
-        }
-        await applyFilePathsToConnection(this.connectionManager, this.selectedConnectionName, remaining);
-        this.postState();
-    }
-
-    private async setEditable(enabled: boolean): Promise<void> {
-        if (!this.selectedConnectionName) {
-            return;
-        }
-        const current = await this.connectionManager.getConnection(this.selectedConnectionName);
-        if (!current) {
-            return;
-        }
-        const paths = getFilePaths(current);
-        const { details } = buildFileConnectionDetails(this.selectedConnectionName, paths, {
-            ...current,
-            options: { ...(current.options ?? {}), editable: enabled },
+    private async createDataWorkspace(): Promise<void> {
+        const name = await vscode.window.showInputBox({
+            prompt: 'Name for the persistent local DuckDB Data Workspace',
+            value: 'Data Workspace',
+            ignoreFocusOut: true,
         });
-        await saveFileConnectionDetails(this.connectionManager, details);
+        if (!name?.trim()) return;
+        try {
+            const details = await this.dataWorkspaceService().createWorkspace(name);
+            this.selectedConnectionName = details.name;
+            this.postNotice(`Created Data Workspace '${details.name}'.`);
+            this.postState();
+        } catch (error) {
+            this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async addWorkspaceFile(): Promise<void> {
+        if (!this.selectedConnectionName) return;
+        const details = await this.getSelectedDetails();
+        if (!isDataWorkspaceProfile(details)) return;
+        const files = await vscode.window.showOpenDialog({
+            canSelectMany: true,
+            canSelectFolders: false,
+            openLabel: 'Add file source',
+            filters: DATA_FILE_FILTERS,
+        });
+        if (!files?.length) return;
+        try {
+            const service = this.dataWorkspaceService();
+            for (const file of files) {
+                const suggestedName = defaultDataWorkspaceTableName(file.fsPath);
+                const tableName = await vscode.window.showInputBox({
+                    prompt: `Local DuckDB table name for ${path.basename(file.fsPath)}`,
+                    value: suggestedName,
+                    ignoreFocusOut: true,
+                });
+                if (!tableName?.trim()) continue;
+                const source = await service.addFileSource(this.selectedConnectionName, file.fsPath, tableName);
+                await service.refreshSource(this.selectedConnectionName, source.id);
+            }
+            this.postNotice(`Added and materialized ${files.length} file source(s).`);
+            this.postState();
+        } catch (error) {
+            this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+            this.postState();
+        }
+    }
+
+    private async addNetezzaSource(): Promise<void> {
+        if (!this.selectedConnectionName) return;
+        const workspace = await this.getSelectedDetails();
+        if (!isDataWorkspaceProfile(workspace)) return;
+        const connections = (await this.connectionManager.getConnections())
+            .filter(connection => tryNormalizeDatabaseKind(connection.dbType) === 'netezza');
+        if (connections.length === 0) {
+            this.post({ type: 'error', message: 'Add a saved Netezza connection before adding an external source.' });
+            return;
+        }
+        const connectionName = await vscode.window.showQuickPick(connections.map(connection => ({
+            label: connection.name,
+            description: `${connection.user}@${connection.host}/${connection.database}`,
+        })), { placeHolder: 'Select saved Netezza connection' });
+        if (!connectionName) return;
+        const kind = await vscode.window.showQuickPick([
+            { label: 'Table', value: 'table' as const, description: 'Materialize a table from cached metadata or enter its name.' },
+            { label: 'View', value: 'view' as const, description: 'Materialize a view from cached metadata or enter its name.' },
+            { label: 'Manual SELECT / WITH query', value: 'query' as const, description: 'Read-only SQL; $var parameters are requested on each refresh.' },
+        ], { placeHolder: 'Choose source type' });
+        if (!kind) return;
+
+        let objectName: string | undefined;
+        let queryTemplate: string | undefined;
+        if (kind.value === 'query') {
+            queryTemplate = await vscode.window.showInputBox({
+                prompt: 'Single read-only SELECT or WITH query',
+                placeHolder: 'SELECT * FROM schema.table WHERE date_col >= \'$from\'',
+                ignoreFocusOut: true,
+            });
+            if (!queryTemplate?.trim()) return;
+        } else {
+            objectName = await this.pickNetezzaObject(connectionName.label, kind.value);
+            if (!objectName) return;
+        }
+        const defaultName = defaultDataWorkspaceTableName(`${connectionName.label}_${objectName ?? 'query'}`);
+        const tableName = await vscode.window.showInputBox({
+            prompt: 'Local DuckDB table name',
+            value: defaultName,
+            ignoreFocusOut: true,
+        });
+        if (!tableName?.trim()) return;
+        try {
+            const service = this.dataWorkspaceService();
+            const source = await service.addExternalSource(this.selectedConnectionName, {
+                kind: 'external',
+                connectionName: connectionName.label,
+                sourceKind: kind.value,
+                objectName,
+                queryTemplate,
+                tableName,
+            });
+            await service.refreshSource(this.selectedConnectionName, source.id);
+            this.postNotice(`Materialized '${source.tableName}' from ${connectionName.label}.`);
+            this.postState();
+        } catch (error) {
+            this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+            this.postState();
+        }
+    }
+
+    private async pickNetezzaObject(connectionName: string, sourceKind: 'table' | 'view'): Promise<string | undefined> {
+        const details = await this.connectionManager.getConnection(connectionName);
+        const metadataCache = this.connectionManager.getMetadataCache();
+        const cached = details && metadataCache
+            ? metadataCache.getObjectsWithSchema(connectionName, details.database)
+            : [];
+        const choices: vscode.QuickPickItem[] = [];
+        for (const entry of cached) {
+            if ((entry.item.objType ?? entry.item.TYPE ?? '').toLowerCase() !== sourceKind) continue;
+            const name = entry.item.OBJNAME ?? entry.item.TABLENAME;
+            if (name) {
+                choices.push({
+                    label: `${quoteNetezzaObjectPart(entry.schema)}.${quoteNetezzaObjectPart(name)}`,
+                    description: sourceKind,
+                });
+            }
+            if (choices.length >= 500) break;
+        }
+        if (choices.length > 0) {
+            const selected = await vscode.window.showQuickPick(choices, { placeHolder: `Select cached Netezza ${sourceKind}` });
+            if (selected) return selected.label;
+        }
+        return vscode.window.showInputBox({
+            prompt: `Netezza ${sourceKind} name`,
+            placeHolder: 'schema.object (or DB..object)',
+            ignoreFocusOut: true,
+        });
+    }
+
+    private async refreshWorkspaceSource(sourceId: string): Promise<void> {
+        if (!this.selectedConnectionName) return;
+        const confirmation = await vscode.window.showWarningMessage(
+            'Refreshing replaces this source table. Manual changes to that table are lost; other local tables and views are kept.',
+            { modal: true },
+            'Refresh',
+        );
+        if (confirmation !== 'Refresh') return;
+        try {
+            const result = await this.dataWorkspaceService().refreshSource(this.selectedConnectionName, sourceId);
+            this.postNotice(`Source refreshed (${result.rowCount?.toLocaleString() ?? 0} rows).`);
+        } catch (error) {
+            this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+        }
         this.postState();
+    }
+
+    private async removeWorkspaceSource(sourceId: string): Promise<void> {
+        if (!this.selectedConnectionName) return;
+        const confirmation = await vscode.window.showWarningMessage(
+            'Remove this source and its materialized DuckDB table?', { modal: true }, 'Remove',
+        );
+        if (confirmation !== 'Remove') return;
+        try {
+            await this.dataWorkspaceService().removeSource(this.selectedConnectionName, sourceId);
+            this.postNotice('Source and its materialized table were removed.');
+        } catch (error) {
+            this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+        }
+        this.postState();
+    }
+
+    private async queryWorkspace(): Promise<void> {
+        if (!this.selectedConnectionName) return;
+        const details = await this.getSelectedDetails();
+        const config = parseDataWorkspace(details?.options?.dataWorkspace);
+        if (!config) return;
+        const table = config.sources[0]?.tableName;
+        const document = await vscode.workspace.openTextDocument({
+            language: 'sql',
+            content: table ? `SELECT * FROM ${quoteIdentifier(table)} LIMIT 100;\n` : '-- Persistent Data Workspace (DuckDB)\n',
+        });
+        const editor = await vscode.window.showTextDocument(document, { preview: false });
+        await this.connectionManager.setDocumentConnection(editor.document.uri.toString(), this.selectedConnectionName);
     }
 
     private async deleteConnection(): Promise<void> {
@@ -397,97 +465,6 @@ export class FileConnectionPanelView {
         this.postNotice(`Connection '${name}' was deleted.`);
     }
 
-    private async previewFile(filePath: string): Promise<void> {
-        const uri = vscode.Uri.file(normalizeFilePath(filePath));
-        await vscode.commands.executeCommand(FILE_QUERY_COMMAND, uri);
-    }
-
-    private async sendSheets(filePath: string): Promise<void> {
-        const normalized = normalizeFilePath(filePath);
-        try {
-            const sheetNames = await listXlsxSheetNames(normalized);
-            this.post({ type: 'sheets', path: normalized, sheetNames });
-        } catch (error) {
-            this.post({ type: 'error', message: `Could not read Excel sheets: ${error instanceof Error ? error.message : String(error)}` });
-        }
-    }
-
-    private async queryFile(filePath: string): Promise<void> {
-        if (!this.selectedConnectionName) {
-            return;
-        }
-        const details = await this.connectionManager.getConnection(this.selectedConnectionName);
-        if (!details) {
-            this.post({ type: 'error', message: `Connection '${this.selectedConnectionName}' is no longer available.` });
-            return;
-        }
-        const workspaceMode = isFileWorkspaceProfile(details);
-        const sheetsByFile = new Map<string, readonly string[]>();
-        if (workspaceMode) {
-            for (const sourcePath of getFilePaths(details)) {
-                if (detectFileDataFormat(sourcePath) === 'xlsx') {
-                    try {
-                        sheetsByFile.set(sourcePath, await listXlsxSheetNames(sourcePath));
-                    } catch {
-                        sheetsByFile.set(sourcePath, []);
-                    }
-                }
-            }
-        }
-        const content = buildQueryContent(
-            this.selectedConnectionName,
-            getFilePaths(details),
-            workspaceMode,
-            sheetsByFile,
-            filePath,
-        );
-        const document = await vscode.workspace.openTextDocument({ language: 'sql', content });
-        const editor = await vscode.window.showTextDocument(document, { preview: false });
-        await this.connectionManager.setDocumentConnection(editor.document.uri.toString(), this.selectedConnectionName);
-    }
-
-    private async resolveDroppedNames(names: readonly string[]): Promise<void> {
-        if (!this.selectedConnectionName || names.length === 0) {
-            return;
-        }
-        const resolved: string[] = [];
-        const unresolved: string[] = [];
-        for (const name of names) {
-            if (/^file:/i.test(name)) {
-                const parsedUri = vscode.Uri.parse(name);
-                const filePath = normalizeFilePath(parsedUri.fsPath);
-                if (filePath && fs.existsSync(filePath)) {
-                    resolved.push(filePath);
-                } else {
-                    unresolved.push(name);
-                }
-                continue;
-            }
-
-            if (path.isAbsolute(name) && fs.existsSync(name)) {
-                resolved.push(normalizeFilePath(name));
-                continue;
-            }
-
-            const escaped = name.replace(/[\\[\]{}()*+?.^$|]/g, '\\$&');
-            const matches = await vscode.workspace.findFiles(`**/${escaped}`, undefined, 2);
-            const match = matches.length === 1 ? matches[0] : undefined;
-            if (match?.scheme === 'file') {
-                resolved.push(match.fsPath);
-            } else {
-                unresolved.push(name);
-            }
-        }
-        if (resolved.length > 0) {
-            await this.addFiles(resolved);
-        }
-        if (unresolved.length > 0) {
-            const list = unresolved.slice(0, 5).join(', ');
-            const more = unresolved.length > 5 ? ` (and ${unresolved.length - 5} more)` : '';
-            this.postNotice(`Could not locate dropped file(s) in the current workspace: ${list}${more}. Use "Add files" to pick them manually.`);
-        }
-    }
-
     private async exportConnections(): Promise<void> {
         if (!this.selectedConnectionName) {
             return;
@@ -496,7 +473,11 @@ export class FileConnectionPanelView {
         if (!details) {
             return;
         }
-        const defaultName = `${this.selectedConnectionName.replace(/[^\w-]+/g, '_')}.file-connections.json`;
+        if (!isDataWorkspaceProfile(details)) {
+            this.post({ type: 'error', message: 'Only Data Workspace profiles can be exported from this manager.' });
+            return;
+        }
+        const defaultName = `${this.selectedConnectionName.replace(/[^\w-]+/g, '_')}.data-workspace.json`;
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
         const defaultUri = workspaceRoot
             ? vscode.Uri.joinPath(workspaceRoot, defaultName)
@@ -509,8 +490,8 @@ export class FileConnectionPanelView {
         if (!target) {
             return;
         }
-        const json = serializeFileConnectionsExport([
-            serializeFileConnectionExport(this.selectedConnectionName, details),
+        const json = serializeDataWorkspaceProfileExport([
+            await this.dataWorkspaceService().exportProfile(this.selectedConnectionName),
         ]);
         await fs.promises.writeFile(target.fsPath, json, 'utf8');
         this.postNotice(`Connection '${this.selectedConnectionName}' exported to ${target.fsPath}.`);
@@ -529,16 +510,17 @@ export class FileConnectionPanelView {
         }
         try {
             const json = await fs.promises.readFile(file.fsPath, 'utf8');
-            const entries = parseFileConnectionsExport(json);
-            if (entries.length === 0) {
-                this.post({ type: 'error', message: 'The export does not contain any connections.' });
+            const workspaces = parseDataWorkspaceProfileExport(json);
+            if (workspaces.length === 0) {
+                this.post({ type: 'error', message: 'The export does not contain any Data Workspaces.' });
                 return;
             }
-            const result = await importFileConnections(this.connectionManager, entries);
-            const createdText = result.created.length > 0 ? `Created: ${result.created.join(', ')}.` : 'No new connections were created.';
-            const skippedText = result.skipped.length > 0 ? ` Skipped: ${result.skipped.join(', ')}.` : '';
-            const warnings = result.warnings.length > 0 ? ` ${result.warnings.join(' ')}` : '';
-            this.postNotice(`${createdText}${skippedText}${warnings}`);
+            const service = this.dataWorkspaceService();
+            const created: string[] = [];
+            for (const workspace of workspaces) {
+                created.push((await service.importProfile(workspace)).name ?? workspace.name);
+            }
+            this.postNotice(`Created Data Workspace: ${created.join(', ')}. Source data is not exported; refresh each source to materialize it locally.`);
             await this.refreshConnections();
         } catch (error) {
             this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
