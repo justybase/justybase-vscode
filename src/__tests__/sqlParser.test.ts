@@ -65,6 +65,18 @@ describe('SqlParser', () => {
             expect(result.length).toBeGreaterThan(0);
         });
 
+        it('should keep Netezza BEGIN_PROC bodies together when splitting a script', () => {
+            const sql = `CREATE PROCEDURE myproc() RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC
+                SELECT 'inside;body';
+                RETURN 1;
+            END_PROC;
+            SELECT 3;`;
+            expect(SqlParser.splitStatements(sql)).toEqual([
+                expect.stringContaining('RETURN 1;'),
+                'SELECT 3',
+            ]);
+        });
+
         it('should handle escaped single quotes in strings', () => {
             const sql = "SELECT 'it''s a test'; SELECT 2;";
             const result = SqlParser.splitStatements(sql);
