@@ -144,6 +144,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Access DuckDB runtime
+        working-directory: extensions/access
+        run: npm ci
+
       - name: Run fast unit test suite
         run: npm run test:fast
 
