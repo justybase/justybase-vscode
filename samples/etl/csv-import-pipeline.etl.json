@@ -1,0 +1,87 @@
+{
+    "name": "CSV Import Pipeline",
+    "version": "1.0.0",
+    "description": "Import CSV file into Netezza table with validation",
+    "variables": {
+        "schema": "STAGING",
+        "inputDir": "${workspaceFolder}/imports"
+    },
+    "nodes": [
+        {
+            "id": "node-1",
+            "type": "sql",
+            "name": "Truncate Staging Table",
+            "position": {
+                "x": 100,
+                "y": 100
+            },
+            "config": {
+                "query": "TRUNCATE TABLE ${schema}.PRODUCT_STAGING;",
+                "connection": "default"
+            }
+        },
+        {
+            "id": "node-2",
+            "type": "import",
+            "name": "Import Products CSV",
+            "position": {
+                "x": 350,
+                "y": 100
+            },
+            "config": {
+                "format": "csv",
+                "inputPath": "${inputDir}/products.csv",
+                "targetTable": "PRODUCT_STAGING",
+                "targetSchema": "${schema}",
+                "delimiter": ",",
+                "skipRows": 1,
+                "createTable": false,
+                "timeout": 1800
+            }
+        },
+        {
+            "id": "node-3",
+            "type": "sql",
+            "name": "Validate Import",
+            "position": {
+                "x": 600,
+                "y": 100
+            },
+            "config": {
+                "query": "SELECT COUNT(*) AS IMPORTED_ROWS FROM ${schema}.PRODUCT_STAGING;",
+                "connection": "default"
+            }
+        },
+        {
+            "id": "node-4",
+            "type": "sql",
+            "name": "Merge to Production",
+            "position": {
+                "x": 850,
+                "y": 100
+            },
+            "config": {
+                "query": "MERGE INTO ADMIN.PRODUCTS AS target\nUSING ${schema}.PRODUCT_STAGING AS source\nON target.PRODUCT_ID = source.PRODUCT_ID\nWHEN MATCHED THEN UPDATE SET\n  PRODUCT_NAME = source.PRODUCT_NAME,\n  PRICE = source.PRICE,\n  UPDATED_AT = CURRENT_TIMESTAMP\nWHEN NOT MATCHED THEN INSERT\n  (PRODUCT_ID, PRODUCT_NAME, PRICE, CREATED_AT)\n  VALUES (source.PRODUCT_ID, source.PRODUCT_NAME, source.PRICE, CURRENT_TIMESTAMP);",
+                "connection": "default",
+                "timeout": 600
+            }
+        }
+    ],
+    "connections": [
+        {
+            "id": "conn-1",
+            "from": "node-1",
+            "to": "node-2"
+        },
+        {
+            "id": "conn-2",
+            "from": "node-2",
+            "to": "node-3"
+        },
+        {
+            "id": "conn-3",
+            "from": "node-3",
+            "to": "node-4"
+        }
+    ]
+}

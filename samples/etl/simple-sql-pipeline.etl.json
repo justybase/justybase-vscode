@@ -1,0 +1,63 @@
+{
+    "name": "Simple SQL Pipeline",
+    "version": "1.0.0",
+    "description": "Basic example: Execute two SQL queries in sequence",
+    "variables": {
+        "sourceSchema": "ADMIN",
+        "targetSchema": "STAGING"
+    },
+    "nodes": [
+        {
+            "id": "node-1",
+            "type": "sql",
+            "name": "Create Staging Table",
+            "position": {
+                "x": 100,
+                "y": 100
+            },
+            "config": {
+                "query": "CREATE TABLE IF NOT EXISTS ${targetSchema}.CUSTOMER_STAGING (\n  CUSTOMER_ID INTEGER,\n  CUSTOMER_NAME VARCHAR(100),\n  EMAIL VARCHAR(200),\n  CREATED_AT TIMESTAMP\n);",
+                "connection": "default"
+            }
+        },
+        {
+            "id": "node-2",
+            "type": "sql",
+            "name": "Load Customer Data",
+            "position": {
+                "x": 350,
+                "y": 100
+            },
+            "config": {
+                "query": "INSERT INTO ${targetSchema}.CUSTOMER_STAGING\nSELECT \n  CUSTOMER_ID,\n  CUSTOMER_NAME,\n  EMAIL,\n  CURRENT_TIMESTAMP\nFROM ${sourceSchema}.CUSTOMERS\nWHERE ACTIVE = 1;",
+                "connection": "default",
+                "timeout": 300
+            }
+        },
+        {
+            "id": "node-3",
+            "type": "sql",
+            "name": "Update Statistics",
+            "position": {
+                "x": 600,
+                "y": 100
+            },
+            "config": {
+                "query": "GENERATE STATISTICS ON ${targetSchema}.CUSTOMER_STAGING;",
+                "connection": "default"
+            }
+        }
+    ],
+    "connections": [
+        {
+            "id": "conn-1",
+            "from": "node-1",
+            "to": "node-2"
+        },
+        {
+            "id": "conn-2",
+            "from": "node-2",
+            "to": "node-3"
+        }
+    ]
+}

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Query Builder Harness</title>
+</head>
+<body>
+    <div id="visual-query-builder-root" class="diagram-root" aria-label="Visual query builder">
+        <script id="visual-query-builder-payload" type="application/json">
+            {
+                "connectionName": "test-connection",
+                "availableSchemas": ["ADMIN", "PUBLIC"],
+                "data": {
+                    "database": "JUST_DATA",
+                    "schema": "ADMIN",
+                    "tables": [
+                        {
+                            "database": "JUST_DATA",
+                            "schema": "ADMIN",
+                            "tableName": "DIM_ACCOUNT",
+                            "fullName": "JUST_DATA.ADMIN.DIM_ACCOUNT",
+                            "columns": [
+                                { "name": "ACCOUNT_ID", "dataType": "INTEGER", "isPrimaryKey": true, "isForeignKey": false },
+                                { "name": "ACCOUNT_NAME", "dataType": "VARCHAR", "isPrimaryKey": false, "isForeignKey": false },
+                                { "name": "ACCOUNT_STATUS", "dataType": "VARCHAR", "isPrimaryKey": false, "isForeignKey": false },
+                                { "name": "OPEN_DATE", "dataType": "DATE", "isPrimaryKey": false, "isForeignKey": false },
+                                { "name": "BALANCE", "dataType": "NUMERIC(18,2)", "isPrimaryKey": false, "isForeignKey": false }
+                            ],
+                            "primaryKeyColumns": ["ACCOUNT_ID"],
+                            "objectType": "TABLE"
+                        },
+                        {
+                            "database": "JUST_DATA",
+                            "schema": "ADMIN",
+                            "tableName": "DIM_CUSTOMER",
+                            "fullName": "JUST_DATA.ADMIN.DIM_CUSTOMER",
+                            "columns": [
+                                { "name": "CUSTOMER_ID", "dataType": "INTEGER", "isPrimaryKey": true, "isForeignKey": false },
+                                { "name": "CUSTOMER_NAME", "dataType": "VARCHAR", "isPrimaryKey": false, "isForeignKey": false },
+                                { "name": "REGION", "dataType": "VARCHAR", "isPrimaryKey": false, "isForeignKey": false }
+                            ],
+                            "primaryKeyColumns": ["CUSTOMER_ID"],
+                            "objectType": "TABLE"
+                        }
+                    ],
+                    "relationships": [],
+                    "allSchemas": ["ADMIN", "PUBLIC"]
+                }
+            }
+        </script>
+    </div>
+    <link rel="stylesheet" href="/dist/media/visualQueryBuilder.css">
+    <script src="/dist/media/visualQueryBuilder.js"></script>
+</body>
+</html>

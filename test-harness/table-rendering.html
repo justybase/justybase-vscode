@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Table Rendering Test</title>
+    <link rel="stylesheet" href="/media/resultPanel.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #1e1e1e;
+            color: #cccccc;
+            overflow: hidden;
+            height: 100vh;
+        }
+        /* Minimal VS Code variable stubs so the grid renders */
+        :root {
+            --vscode-editor-background: #1e1e1e;
+            --vscode-editor-foreground: #cccccc;
+            --vscode-editor-font-family: 'Consolas', 'Courier New', monospace;
+            --vscode-editor-font-size: 13px;
+            --vscode-panel-border: #3c3c3c;
+            --vscode-breadcrumb-background: #2d2d2d;
+            --vscode-input-background: #3c3c3c;
+            --vscode-input-foreground: #cccccc;
+            --vscode-focusBorder: #007fd4;
+            --vscode-errorForeground: #f48771;
+            --vscode-button-background: #0e639c;
+            --vscode-button-foreground: #ffffff;
+            --vscode-button-hoverBackground: #1177bb;
+            --vscode-list-hoverBackground: #2a2d2e;
+            --vscode-list-activeSelectionBackground: #094771;
+            --vscode-list-inactiveSelectionBackground: #37373d;
+            --justybase-results-grid-font-family: 'Consolas', monospace;
+        }
+        .test-info {
+            padding: 8px 16px;
+            background: #2d2d2d;
+            border-bottom: 1px solid #3c3c3c;
+            font-size: 12px;
+            color: #888;
+            display: flex;
+            gap: 16px;
+        }
+        .test-info span { display: flex; align-items: center; gap: 4px; }
+    </style>
+</head>
+<body>
+    <div class="test-info" id="testInfo">
+        <span>Rows: <strong id="rowCount">1,000</strong></span>
+        <span>Columns: <strong id="colCount">8</strong></span>
+        <span id="renderStatus">⏳ Rendering...</span>
+    </div>
+
+    <!-- Copy of the real webview DOM structure that grid.js expects -->
+    <div class="result-set-header" id="resultSetHeader">
+        <div id="resultSetTabs" class="result-set-tabs" style="display: none;"></div>
+        <span id="docIndicator" class="doc-indicator"></span>
+    </div>
+    <div id="executionStatusBanner" class="execution-status-banner" style="display: none;"></div>
+
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="executing-text">Executing SQL...</div>
+        <button id="cancelQueryBtn" class="secondary">Cancel</button>
+    </div>
+    <div class="controls">
+        <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter...">
+        <div class="column-search-wrapper">
+            <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column...">
+            <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
+        </div>
+        <div class="toolbar-separator"></div>
+        <div class="split-btn view-split-btn" id="viewSplitBtn">
+            <button class="btn split-btn__primary view-split-btn__label" id="viewModeLabel">Table</button>
+            <button class="btn split-btn__arrow" id="viewModeArrow">▾</button>
+            <div class="split-btn__menu" id="viewSplitMenu" style="display:none">
+                <div class="split-btn__menu-item" data-mode="table">Table</div>
+                <div class="split-btn__menu-item" data-mode="pivot">Pivot</div>
+                <div class="split-btn__menu-item" data-mode="chart">Charts</div>
+                <div class="split-btn__menu-item" data-mode="diff">Diff</div>
+            </div>
+            <select id="viewModeSelect" class="view-mode-select-hidden">
+                <option value="table">Table</option>
+                <option value="pivot">Pivot</option>
+                <option value="chart">Charts</option>
+                <option value="diff">Diff</option>
+            </select>
+            <select id="diffBaselineSelect" class="view-mode-select-hidden" style="display: none;"></select>
+        </div>
+        <div class="toolbar-separator"></div>
+        <button class="btn" id="columnVisibilityBtn">Columns</button>
+        <button class="btn" id="formattingBtn">Formatting</button>
+        <div class="toolbar-separator"></div>
+        <button id="editToggleBtn" style="display: none;">Edit</button>
+        <button id="saveEditsBtn" style="display: none;">Save Changes</button>
+        <button id="discardEditsBtn" style="display: none;">Discard</button>
+        <div class="toolbar-separator"></div>
+        <div class="split-btn" id="exportSplitBtn">
+            <button class="btn split-btn__primary" id="exportBtn">Export</button>
+            <button class="btn split-btn__arrow" id="exportArrow">▾</button>
+            <div class="split-btn__menu" id="exportSplitMenu" style="display:none">
+                <div class="split-btn__menu-item" data-action="current-view">Export current view</div>
+                <div class="split-btn__menu-item" data-action="all-rows">Export all rows</div>
+                <div class="split-btn__menu-separator"></div>
+                <div class="split-btn__menu-item" data-action="excel">Excel (.xlsb)</div>
+                <div class="split-btn__menu-item" data-action="markdown">Markdown (.md)</div>
+                <div class="split-btn__menu-item" data-action="json">JSON</div>
+                <div class="split-btn__menu-item" data-action="csv">CSV</div>
+                <div class="split-btn__menu-separator"></div>
+                <div class="split-btn__menu-item" data-action="copy-html">Copy as HTML to clipboard</div>
+                <div class="split-btn__menu-item" data-action="copy-md">Copy as Markdown to clipboard</div>
+            </div>
+        </div>
+        <div class="toolbar-separator"></div>
+        <button class="btn btn-destructive" id="clearFiltersBtn">Clear Filters</button>
+        <button id="clearLogsBtn" style="display: none;">Clear Logs</button>
+        <span id="rowCountInfo" class="row-count-info"></span>
+    </div>
+
+    <div id="groupingPanel" class="grouping-panel">
+        <span class="drag-hint">Drag headers here to group</span>
+    </div>
+
+    <div id="mainSplitView" class="main-split-view">
+        <div id="gridContainer"></div>
+        <div id="analysisContainer" class="analysis-container" style="display: none;"></div>
+        <div id="rowViewPanel" class="row-view-panel">
+            <div class="row-view-header">
+                <span>Row Details &amp; Comparison</span>
+                <span class="row-view-close" id="rowViewClose">✕</span>
+            </div>
+            <div id="rowViewContent" class="row-view-content">
+                <div class="row-view-placeholder">Select 1 to 10 rows to view details or compare</div>
+            </div>
+        </div>
+    </div>
+    <div id="valueViewerOverlay" class="value-viewer-overlay">
+        <div class="value-viewer-modal">
+            <div class="value-viewer-header">
+                <div>
+                    <div id="valueViewerTitle" class="value-viewer-title">Cell Value</div>
+                    <div id="valueViewerMeta" class="value-viewer-meta"></div>
+                </div>
+                <button id="valueViewerCloseBtn" class="value-viewer-close">×</button>
+            </div>
+            <div id="valueViewerBody" class="value-viewer-body"></div>
+            <div class="value-viewer-actions">
+                <button id="valueViewerCopyBtn" class="primary">Copy Value</button>
+                <button id="valueViewerDismissBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load TanStack libraries (UMD → global TableCore / VirtualCore) -->
+    <script src="/media/tanstack-table-core.js"></script>
+    <script src="/media/tanstack-virtual-core.js"></script>
+
+    <script>
+        // --- MOCK VS Code API ---
+        window.acquireVsCodeApi = function() {
+            return {
+                postMessage: function(msg) { console.log('postMessage:', msg); },
+                setState: function(state) { window.__mockState = state; },
+                getState: function() { return window.__mockState || null; },
+            };
+        };
+
+        // --- SET UP WINDOW STATE ---
+        window.sources = [];
+        window.pinnedSources = new Set();
+        window.pinnedResults = [];
+        window.activeSource = 'test-source-1';
+        window.resultSets = [];
+        window.executingSources = new Set();
+        window.justybaseHostCopyShortcut = true;
+        window.defaultCopyFormat = 'markdown';
+        window.columnSearchMap = {};
+        // Don't set workerUri → search worker initialisation is skipped
+
+        // --- GENERATE TEST DATA ---
+        function generateTestData(rowCount, colCount) {
+            const columns = [];
+            const types = ['integer', 'varchar', 'decimal', 'date', 'boolean', 'varchar', 'integer', 'decimal'];
+            const names = ['id', 'name', 'salary', 'hire_date', 'active', 'department', 'projects', 'rating'];
+
+            for (let i = 0; i < colCount; i++) {
+                columns.push({
+                    name: names[i] || 'col_' + i,
+                    type: types[i] || 'varchar',
+                    index: i,
+                });
+            }
+
+            const firstNames = ['Anna', 'Jan', 'Maria', 'Piotr', 'Kasia', 'Tomasz', 'Agnieszka', 'Michał'];
+            const lastNames = ['Kowalski', 'Nowak', 'Wiśniewski', 'Wójcik', 'Krawczyk', 'Zieliński', 'Kamiński', 'Lewandowski'];
+            const departments = ['Engineering', 'Marketing', 'Sales', 'HR', 'Finance', 'Operations'];
+            const data = [];
+
+            // Generate data with IDs in RANDOM order so sorting actually changes the view
+            const indices = Array.from({ length: rowCount }, (_, i) => i);
+            // Fisher-Yates shuffle
+            for (let s = indices.length - 1; s > 0; s--) {
+                const r = Math.floor(Math.random() * (s + 1));
+                [indices[s], indices[r]] = [indices[r], indices[s]];
+            }
+
+            for (let n = 0; n < rowCount; n++) {
+                const i = indices[n];
+                const firstName = firstNames[i % firstNames.length];
+                const lastName = lastNames[i % lastNames.length];
+                data.push([
+                    i + 1,                                    // id (NOT sequential in data order)
+                    firstName + ' ' + lastName,                // name
+                    (Math.random() * 200000 + 30000).toFixed(2), // salary
+                    '202' + (i % 10) + '-' +
+                        String((i % 12) + 1).padStart(2, '0') + '-' +
+                        String((i % 28) + 1).padStart(2, '0'),  // hire_date
+                    i % 3 !== 0,                               // active
+                    departments[i % departments.length],       // department
+                    Math.floor(Math.random() * 10),             // projects
+                    (Math.random() * 10).toFixed(1),            // rating
+                ]);
+            }
+
+            return { columns, data };
+        }
+
+        var testData = generateTestData(1000, 8);
+        window.resultSets = [{
+            data: testData.data,
+            columns: testData.columns,
+            executionTimestamp: Date.now(),
+            isLog: false,
+            isError: false,
+            isTextContent: false,
+            sourceUri: 'test-source-1',
+        }];
+
+        // --- LOAD AND INIT ---
+        var script = document.createElement('script');
+        script.src = '/dist/media/resultPanel.js';
+        script.onload = function() {
+            try {
+                // Call init() from the loaded bundle
+                window.init();
+                // Expose renderGrids for tests to call directly (without re-running init)
+                // The bundle has window.grids set by initializeWindowState(), but resetGrids()
+                // reassigns the module-level grids array, so window.grids becomes stale.
+                // We use the gridWrapper querySelector as the primary verification mechanism.
+                document.getElementById('renderStatus').textContent = '✅ Rendered';
+                document.getElementById('renderStatus').style.color = '#4ec9b0';
+            } catch (e) {
+                document.getElementById('renderStatus').textContent = '❌ Error: ' + e.message;
+                document.getElementById('renderStatus').style.color = '#f48771';
+                console.error('Init error:', e);
+            }
+        };
+        script.onerror = function() {
+            document.getElementById('renderStatus').textContent = '❌ Failed to load resultPanel.js';
+            document.getElementById('renderStatus').style.color = '#f48771';
+        };
+        document.body.appendChild(script);
+    </script>
+</body>
+</html>

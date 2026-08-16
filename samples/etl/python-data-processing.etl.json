@@ -1,0 +1,85 @@
+{
+    "name": "Python Data Processing",
+    "version": "1.0.0",
+    "description": "Use Python script to transform data between SQL operations",
+    "variables": {
+        "schema": "ADMIN",
+        "tempDir": "${workspaceFolder}/temp"
+    },
+    "nodes": [
+        {
+            "id": "node-1",
+            "type": "export",
+            "name": "Export Raw Data",
+            "position": {
+                "x": 100,
+                "y": 100
+            },
+            "config": {
+                "format": "csv",
+                "query": "SELECT * FROM ${schema}.RAW_SALES WHERE PROCESSED = 0",
+                "outputPath": "${tempDir}/raw_sales.csv"
+            }
+        },
+        {
+            "id": "node-2",
+            "type": "python",
+            "name": "Transform Data",
+            "position": {
+                "x": 350,
+                "y": 100
+            },
+            "config": {
+                "script": "import pandas as pd\nimport os\n\n# Read raw data\ndf = pd.read_csv(os.environ['TEMP_DIR'] + '/raw_sales.csv')\n\n# Transform: clean and aggregate\ndf['SALE_DATE'] = pd.to_datetime(df['SALE_DATE'])\ndf['AMOUNT'] = df['AMOUNT'].fillna(0)\n\n# Aggregate by date\ndaily = df.groupby(df['SALE_DATE'].dt.date).agg({\n    'AMOUNT': 'sum',\n    'CUSTOMER_ID': 'nunique'\n}).reset_index()\n\ndaily.columns = ['SALE_DATE', 'TOTAL_AMOUNT', 'UNIQUE_CUSTOMERS']\n\n# Save transformed data\ndaily.to_csv(os.environ['TEMP_DIR'] + '/daily_sales.csv', index=False)\nprint(f'Processed {len(daily)} daily records')",
+                "pythonPath": "python",
+                "timeout": 300
+            }
+        },
+        {
+            "id": "node-3",
+            "type": "import",
+            "name": "Load Aggregated Data",
+            "position": {
+                "x": 600,
+                "y": 100
+            },
+            "config": {
+                "format": "csv",
+                "inputPath": "${tempDir}/daily_sales.csv",
+                "targetTable": "DAILY_SALES_SUMMARY",
+                "targetSchema": "${schema}",
+                "createTable": true
+            }
+        },
+        {
+            "id": "node-4",
+            "type": "sql",
+            "name": "Mark as Processed",
+            "position": {
+                "x": 850,
+                "y": 100
+            },
+            "config": {
+                "query": "UPDATE ${schema}.RAW_SALES SET PROCESSED = 1 WHERE PROCESSED = 0;",
+                "connection": "default"
+            }
+        }
+    ],
+    "connections": [
+        {
+            "id": "conn-1",
+            "from": "node-1",
+            "to": "node-2"
+        },
+        {
+            "id": "conn-2",
+            "from": "node-2",
+            "to": "node-3"
+        },
+        {
+            "id": "conn-3",
+            "from": "node-3",
+            "to": "node-4"
+        }
+    ]
+}

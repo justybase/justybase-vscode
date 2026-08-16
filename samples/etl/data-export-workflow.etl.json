@@ -1,0 +1,90 @@
+{
+    "name": "Data Export Workflow",
+    "version": "1.0.0",
+    "description": "Export customer data to CSV and XLSB formats in parallel",
+    "variables": {
+        "schema": "ADMIN",
+        "outputDir": "${workspaceFolder}/exports"
+    },
+    "nodes": [
+        {
+            "id": "node-1",
+            "type": "sql",
+            "name": "Prepare Export View",
+            "position": {
+                "x": 100,
+                "y": 150
+            },
+            "config": {
+                "query": "CREATE OR REPLACE VIEW ${schema}.V_CUSTOMER_EXPORT AS\nSELECT \n  CUSTOMER_ID,\n  CUSTOMER_NAME,\n  EMAIL,\n  PHONE,\n  ADDRESS,\n  CITY,\n  COUNTRY,\n  CREATED_AT\nFROM ${schema}.CUSTOMERS\nWHERE ACTIVE = 1;",
+                "connection": "default"
+            }
+        },
+        {
+            "id": "node-2",
+            "type": "export",
+            "name": "Export to CSV",
+            "position": {
+                "x": 400,
+                "y": 50
+            },
+            "config": {
+                "format": "csv",
+                "query": "SELECT * FROM ${schema}.V_CUSTOMER_EXPORT",
+                "outputPath": "${outputDir}/customers.csv",
+                "delimiter": ",",
+                "timeout": 600
+            }
+        },
+        {
+            "id": "node-3",
+            "type": "export",
+            "name": "Export to Excel",
+            "position": {
+                "x": 400,
+                "y": 250
+            },
+            "config": {
+                "format": "xlsb",
+                "query": "SELECT * FROM ${schema}.V_CUSTOMER_EXPORT",
+                "outputPath": "${outputDir}/customers.xlsb",
+                "timeout": 600
+            }
+        },
+        {
+            "id": "node-4",
+            "type": "sql",
+            "name": "Log Export Completion",
+            "position": {
+                "x": 700,
+                "y": 150
+            },
+            "config": {
+                "query": "INSERT INTO ${schema}.EXPORT_LOG (EXPORT_TYPE, EXPORT_DATE, STATUS)\nVALUES ('CUSTOMERS', CURRENT_TIMESTAMP, 'COMPLETED');",
+                "connection": "default"
+            }
+        }
+    ],
+    "connections": [
+        {
+            "id": "conn-1",
+            "from": "node-1",
+            "to": "node-2"
+        },
+        {
+            "id": "conn-2",
+            "from": "node-1",
+            "to": "node-3"
+        },
+        {
+            "id": "conn-3",
+            "from": "node-2",
+            "to": "node-4"
+        },
+        {
+            "id": "conn-4",
+            "from": "node-3",
+            "to": "node-4"
+        }
+    ]
+}
