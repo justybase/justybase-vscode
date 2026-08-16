@@ -113,7 +113,7 @@ const SCHEMA_SEARCH_GENERATOR_FILE = "src/views/schemaSearchHtmlGenerator.ts";
 const SCHEMA_SEARCH_PROVIDER_FILE = "src/providers/schemaSearchProvider.ts";
 
 const VISUAL_QUERY_BUILDER_FRONTEND_FILES = [
-  "media/visualQueryBuilder/panel.ts",
+  "media/visualQueryBuilder/VisualQueryBuilderApp.tsx",
 ];
 
 const VISUAL_QUERY_BUILDER_HOST_CONTRACTS_FILE = "media/visualQueryBuilder/hostContracts.ts";

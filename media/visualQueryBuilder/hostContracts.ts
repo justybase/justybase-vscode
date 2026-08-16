@@ -16,6 +16,7 @@ export interface VisualQueryBuilderTable {
     fullName: string;
     columns: VisualQueryBuilderColumn[];
     primaryKeyColumns: string[];
+    objectType?: 'TABLE' | 'VIEW';
 }
 
 export interface VisualQueryBuilderRelationship {
@@ -40,12 +41,15 @@ export interface VisualQueryBuilderBootstrapState {
     connectionName: string;
     availableSchemas: string[];
     data: VisualQueryBuilderData;
+    /** Persisted design state restored for this connection/schema, if any. */
+    state?: VisualQueryBuilderState;
 }
 
 export type VisualQueryBuilderWebviewToHostMessage =
     | { command: 'openSql'; sql: string }
     | { command: 'runSql'; sql: string }
-    | { command: 'loadSchema'; schema: string };
+    | { command: 'loadSchema'; schema: string }
+    | { command: 'saveState'; state: VisualQueryBuilderState };
 
 export type VisualQueryBuilderHostToWebviewMessage =
     | { command: 'schemaData'; payload: VisualQueryBuilderBootstrapState }
@@ -78,6 +82,53 @@ export interface VisualQueryBuilderJoin {
     constraintName: string;
 }
 
+export type VisualQueryBuilderGridSort = 'ASC' | 'DESC' | 'NONE';
+
+export type VisualQueryBuilderGridAggregate =
+    | 'NONE'
+    | 'GROUP BY'
+    | 'WHERE'
+    | 'SUM'
+    | 'AVG'
+    | 'MIN'
+    | 'MAX'
+    | 'COUNT'
+    | 'COUNT DISTINCT'
+    | 'STDDEV'
+    | 'VARIANCE'
+    | 'EXPRESSION';
+
+export interface VisualQueryBuilderGridColumn {
+    id: string;
+    tableInstanceId: string;
+    columnName: string;
+    show: boolean;
+    aggregate: VisualQueryBuilderGridAggregate;
+    sort: VisualQueryBuilderGridSort;
+    criteriaRows: string[];
+}
+
+export interface VisualQueryBuilderQueryClauses {
+    distinct: boolean;
+    whereClause: string;
+    groupByClause: string;
+    havingClause: string;
+    orderByClause: string;
+    limitValue: string;
+}
+
+/**
+ * Persisted design state of the builder: what is on the canvas, how it is
+ * joined, and what the Filter & Sort grid and clause inputs contain.
+ */
+export interface VisualQueryBuilderState {
+    placedTables: PlacedTable[];
+    joins: VisualQueryBuilderJoin[];
+    filterColumns: VisualQueryBuilderGridColumn[];
+    clauses: VisualQueryBuilderQueryClauses;
+    searchTerm: string;
+}
+
 export interface CanvasPoint {
     x: number;
     y: number;
@@ -96,19 +147,4 @@ export interface ColumnJoinDragState {
     fromColumn: string;
     startPoint: CanvasPoint;
     currentPoint: CanvasPoint;
-}
-
-export interface VisualQueryBuilderState {
-    connectionName: string;
-    availableSchemas: string[];
-    data: VisualQueryBuilderData;
-    placedTables: PlacedTable[];
-    joins: VisualQueryBuilderJoin[];
-    searchTerm: string;
-    distinct: boolean;
-    whereClause: string;
-    groupByClause: string;
-    havingClause: string;
-    orderByClause: string;
-    limitValue: string;
 }
