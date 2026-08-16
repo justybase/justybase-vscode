@@ -77,7 +77,7 @@ async function main() {
     './media/importWizard.ts',
     './media/migrationWizard.ts',
     './media/fileConnectionPanel.ts',
-    './media/visualQueryBuilder.ts',
+    './media/visualQueryBuilder.tsx',
     './media/tableDesigner.ts',
     './media/explainPlanGraph.ts',
     './media/erdDiagram.tsx',

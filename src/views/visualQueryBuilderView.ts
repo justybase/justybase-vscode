@@ -4,7 +4,9 @@ import type {
     VisualQueryBuilderBootstrapState,
     VisualQueryBuilderData,
     VisualQueryBuilderInboundMessage,
-    VisualQueryBuilderOutboundMessage
+    VisualQueryBuilderRelationship,
+    VisualQueryBuilderOutboundMessage,
+    VisualQueryBuilderState
 } from '../contracts/webviews';
 import {
     buildVisualQueryBuilderDataForAllSchemas
@@ -17,6 +19,48 @@ function getNonce(): string {
         text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
     return text;
+}
+
+function normalizeSourcePart(value: string): string {
+    const trimmed = value.trim();
+    const unquoted = trimmed.startsWith('"') && trimmed.endsWith('"')
+        ? trimmed.slice(1, -1).replace(/""/g, '"')
+        : trimmed;
+    return unquoted.toLocaleUpperCase();
+}
+
+function sourceKey(value: string): string {
+    const parts = value.split('.');
+    return parts.slice(-2).map(normalizeSourcePart).join('\u0000');
+}
+
+function filterDataToSchema(data: VisualQueryBuilderData, selectedSchema: string): VisualQueryBuilderData {
+    const normalizedSelectedSchema = selectedSchema.trim().toLocaleUpperCase();
+    if (!normalizedSelectedSchema || !data.allSchemas?.length) {
+        return data;
+    }
+
+    const actualSchema = data.allSchemas.find(schema =>
+        schema.trim().toLocaleUpperCase() === normalizedSelectedSchema
+    );
+    if (!actualSchema) {
+        return data;
+    }
+
+    const tables = data.tables.filter(table =>
+        table.schema.trim().toLocaleUpperCase() === actualSchema.trim().toLocaleUpperCase()
+    );
+    const tableKeys = new Set(tables.map(table => sourceKey(`${table.schema}.${table.tableName}`)));
+    const relationships = data.relationships.filter((relationship: VisualQueryBuilderRelationship) =>
+        tableKeys.has(sourceKey(relationship.fromTable)) && tableKeys.has(sourceKey(relationship.toTable))
+    );
+
+    return {
+        ...data,
+        schema: actualSchema,
+        tables,
+        relationships,
+    };
 }
 
 export class VisualQueryBuilderView {
@@ -135,7 +179,18 @@ export class VisualQueryBuilderView {
             case 'loadSchema':
                 await this._loadAllSchemas(message.schema);
                 return;
+            case 'saveState':
+                await this._context.workspaceState.update(this._stateKey(), message.state);
+                return;
         }
+    }
+
+    private _stateKey(): string {
+        return `vqb.state.${this._connectionName}.${this._data.schema}`;
+    }
+
+    private _loadSavedState(): VisualQueryBuilderState | undefined {
+        return this._context.workspaceState.get<VisualQueryBuilderState>(this._stateKey());
     }
 
     private _postMessage(message: VisualQueryBuilderOutboundMessage): Thenable<boolean> {
@@ -152,10 +207,7 @@ export class VisualQueryBuilderView {
                 this._connectionName,
                 this._data.database
             );
-            const normalizedSelectedSchema = selectedSchema.trim().toUpperCase();
-            this._data = normalizedSelectedSchema && data.allSchemas?.includes(normalizedSelectedSchema)
-                ? { ...data, schema: normalizedSelectedSchema }
-                : data;
+            this._data = filterDataToSchema(data, selectedSchema);
             this._availableSchemas = data.allSchemas || this._availableSchemas;
             this._panel.title = `Visual Query Builder: ${this._data.database}.${this._data.schema}`;
 
@@ -164,7 +216,8 @@ export class VisualQueryBuilderView {
                 payload: {
                     connectionName: this._connectionName,
                     availableSchemas: this._availableSchemas,
-                    data: this._data
+                    data: this._data,
+                    state: this._loadSavedState()
                 } as VisualQueryBuilderBootstrapState
             });
         } catch (error: unknown) {
@@ -188,6 +241,12 @@ export class VisualQueryBuilderView {
                 language: 'sql',
                 content: normalizedSql
             });
+            // File SQL sources are DuckDB views local to the selected
+            // connection, so the generated document must keep that binding.
+            await this._connectionManager.setDocumentConnection(
+                document.uri.toString(),
+                this._connectionName
+            );
             await vscode.window.showTextDocument(document, { preview: false });
 
             if (runAfterOpen) {
@@ -203,129 +262,31 @@ export class VisualQueryBuilderView {
         const webview = this._panel.webview;
         const nonce = getNonce();
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'visualQueryBuilder.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'visualQueryBuilder.css'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'visualQueryBuilder.css'));
 
         const bootstrapState: VisualQueryBuilderBootstrapState = {
             connectionName: this._connectionName,
             availableSchemas: this._availableSchemas,
-            data: this._data
+            data: this._data,
+            state: this._loadSavedState()
         };
         const bootstrapStateJson = JSON.stringify(bootstrapState).replace(/</g, '\\u003c');
 
         return `<!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-                <title>Visual Query Builder</title>
-                <link href="${styleUri}" rel="stylesheet">
-                <script nonce="${nonce}">
-                    window.visualQueryBuilderInitialState = ${bootstrapStateJson};
-                </script>
-            </head>
-            <body>
-                <div class="builder-shell">
-                    <header class="builder-header">
-                        <div class="header-main">
-                            <h2>Visual Query Builder</h2>
-                            <span id="dbSchemaBadge" class="badge"></span>
-                            <span id="builderStats" class="stats"></span>
-                        </div>
-                        <div class="header-actions">
-                            <label for="schemaSelect">Schema</label>
-                            <select id="schemaSelect"></select>
-                            <button id="reloadSchemaBtn" class="vscode-button secondary">Reload</button>
-                            <button id="autoLayoutBtn" class="vscode-button secondary">Auto Layout</button>
-                            <button id="clearCanvasBtn" class="vscode-button secondary">Clear Canvas</button>
-                        </div>
-                    </header>
-
-                    <main class="builder-content">
-                        <aside class="panel panel-left">
-                            <div class="panel-title">Tables</div>
-                            <input id="tableSearch" type="text" placeholder="Filter tables..." />
-                            <div id="tablePalette" class="table-palette"></div>
-                            <div class="panel-footnote">Drag tables to canvas; drag column dots between tables to create joins.</div>
-                        </aside>
-
-                        <section class="canvas-wrapper">
-                            <div id="canvasViewport" class="canvas-viewport">
-                                <svg id="joinLines" class="join-lines"></svg>
-                                <div id="canvas" class="canvas"></div>
-                            </div>
-                        </section>
-
-                        <aside class="panel panel-right">
-                            <div class="panel-title">Query Controls</div>
-                            <label class="checkbox-label">
-                                <input id="distinctToggle" type="checkbox" />
-                                <span>SELECT DISTINCT</span>
-                            </label>
-
-                            <div class="section">
-                                <h3>Manual Join</h3>
-                                <select id="joinLeftTable"></select>
-                                <select id="joinLeftColumn"></select>
-                                <select id="joinType">
-                                    <option value="INNER">INNER JOIN</option>
-                                    <option value="LEFT">LEFT JOIN</option>
-                                    <option value="RIGHT">RIGHT JOIN</option>
-                                    <option value="FULL">FULL JOIN</option>
-                                </select>
-                                <select id="joinRightTable"></select>
-                                <select id="joinRightColumn"></select>
-                                <button id="addJoinBtn" class="vscode-button secondary">Add Join</button>
-                                <div id="joinList" class="join-list"></div>
-                            </div>
-
-                            <div class="section">
-                                <h3>Selected Columns</h3>
-                                <div id="selectedColumnsList" class="selected-columns-list"></div>
-                            </div>
-
-                            <div class="section">
-                                <h3>WHERE</h3>
-                                <textarea id="whereClause" rows="3" placeholder="e.g. t1.STATUS = 'ACTIVE'"></textarea>
-                            </div>
-
-                            <div class="section">
-                                <h3>GROUP BY (optional)</h3>
-                                <textarea id="groupByClause" rows="2" placeholder="e.g. t1.REGION, t2.CATEGORY"></textarea>
-                            </div>
-
-                            <div class="section">
-                                <h3>HAVING (optional)</h3>
-                                <textarea id="havingClause" rows="2" placeholder="e.g. COUNT(*) > 10"></textarea>
-                            </div>
-
-                            <div class="section">
-                                <h3>ORDER BY (optional)</h3>
-                                <textarea id="orderByClause" rows="2" placeholder="e.g. t1.CREATED_AT DESC"></textarea>
-                            </div>
-
-                            <div class="section">
-                                <h3>LIMIT</h3>
-                                <input id="limitValue" type="number" min="1" placeholder="1000" />
-                            </div>
-                        </aside>
-                    </main>
-
-                    <footer class="sql-footer">
-                        <div class="footer-header">
-                            <h3>Generated SQL</h3>
-                            <div class="footer-actions">
-                                <button id="copySqlBtn" class="vscode-button secondary">Copy SQL</button>
-                                <button id="openSqlBtn" class="vscode-button secondary">Open in Editor</button>
-                                <button id="runSqlBtn" class="vscode-button primary">Run Query</button>
-                            </div>
-                        </div>
-                        <textarea id="sqlPreview" readonly></textarea>
-                    </footer>
-                </div>
-
-                <script nonce="${nonce}" src="${scriptUri}"></script>
-            </body>
-            </html>`;
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; style-src-attr 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}';">
+    <link href="${styleUri}" rel="stylesheet">
+    <title>Visual Query Builder</title>
+</head>
+<body>
+    <div id="visual-query-builder-root" class="diagram-root" aria-label="Visual query builder">
+        <script id="visual-query-builder-payload" type="application/json" nonce="${nonce}">${bootstrapStateJson}</script>
+    </div>
+    <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
     }
 }
