@@ -69,6 +69,40 @@ export interface CoreDocumentSymbol { name: string; detail: string; kind: number
 export type CoreKeywordCase = 'upper' | 'lower' | 'preserve';
 export interface CoreFormatOptions { tabWidth?: number; keywordCase?: CoreKeywordCase; linesBetweenQueries?: number; }
 
+export interface CoreStatementBoundary {
+  index: number;
+  startOffset: number;
+  endOffset: number;
+  sql: string;
+}
+
+export interface CoreStatementAtPosition {
+  sql: string;
+  start: number;
+  end: number;
+}
+
+/** Parser-backed script splitting shared by the web API and other clients. */
+export function splitSqlStatements(sql: string): CoreStatementBoundary[] {
+  return SqlParser.splitStatementsWithPositions(sql).map((statement, index) => ({
+    index,
+    startOffset: statement.startOffset,
+    endOffset: statement.endOffset,
+    sql: statement.sql,
+  }));
+}
+
+/** Returns the statement containing the cursor, respecting comments, quotes and NZPLSQL bodies. */
+export function getSqlStatementAtPosition(sql: string, offset: number): CoreStatementAtPosition | null {
+  const statement = SqlParser.getStatementAtPosition(sql, Math.max(0, Math.min(offset, sql.length)));
+  if (!statement) return null;
+  const raw = sql.slice(statement.start, statement.end);
+  const leadingWhitespace = raw.search(/\S/);
+  const content = raw.trim();
+  const start = leadingWhitespace < 0 ? statement.start : statement.start + leadingWhitespace;
+  return { sql: content, start, end: start + content.length };
+}
+
 export interface WebLspContext {
   connectionName?: string;
   effectiveDatabase?: string;

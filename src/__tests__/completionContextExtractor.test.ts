@@ -33,6 +33,28 @@ describe("CompletionContextExtractor", () => {
     expect(second?.sql.trim()).toBe("SELECT 3");
   });
 
+  it("recomputes statement boundaries when text changes within the same document version", () => {
+    const sqlV1 = "SELECT * FROM Tabela1 T WHERE T.";
+    const sqlV2 = "SELECT * FROM Orders O WHERE O.";
+    const uri = "file:///stmt-same-version.sql";
+
+    const first = extractor.getStatementAtPosition(
+      sqlV1,
+      sqlV1.length,
+      uri,
+      1,
+    );
+    const second = extractor.getStatementAtPosition(
+      sqlV2,
+      sqlV2.length,
+      uri,
+      1,
+    );
+
+    expect(first?.sql.trim()).toBe(sqlV1);
+    expect(second?.sql.trim()).toBe(sqlV2);
+  });
+
   it("parses quoted DB..TABLE fragments from multiline CTE FROM clauses", () => {
     const context = extractor.parseFromJoinContext(
       `WITH CTE1 AS (

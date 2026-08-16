@@ -27,6 +27,10 @@ export interface CoreSignatureHelp { signatures: CoreSignatureInformation[]; act
 export interface CoreDocumentSymbol { name: string; detail: string; kind: number; range: CoreRange; selectionRange: CoreRange; children?: CoreDocumentSymbol[]; }
 export type CoreKeywordCase = 'upper' | 'lower' | 'preserve';
 export interface CoreFormatOptions { tabWidth?: number; keywordCase?: CoreKeywordCase; linesBetweenQueries?: number; }
+export interface CoreStatementBoundary { index: number; startOffset: number; endOffset: number; sql: string; }
+export interface CoreStatementAtPosition { sql: string; start: number; end: number; }
+export declare function splitSqlStatements(sql: string): CoreStatementBoundary[];
+export declare function getSqlStatementAtPosition(sql: string, offset: number): CoreStatementAtPosition | null;
 export type CoreSemanticTokenType = 'enumMember' | 'function' | 'keyword' | 'macro' | 'modifier' | 'variable' | 'type' | 'column' | 'table' | 'alias' | 'schema' | 'database' | 'localVariable';
 export type CoreSemanticTokenModifier = 'readonly' | 'defaultLibrary' | 'italic';
 export interface CoreSemanticToken { line: number; character: number; length: number; type: CoreSemanticTokenType; modifiers: CoreSemanticTokenModifier[]; }

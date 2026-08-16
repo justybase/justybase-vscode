@@ -33,7 +33,7 @@ import type { Position } from "vscode-languageserver/node";
  */
 export class CompletionContextExtractor {
   private readonly parsedCache = new Map<string, ParsedContext>();
-  /** Statement boundaries per document version (no full-text SHA-1). */
+  /** Statement boundaries per document version + content hash. */
   private readonly statementCache = new Map<string, StatementBoundary[]>();
   private readonly MAX_CACHE_SIZE = 50;
   private readonly MAX_STATEMENT_CACHE_SIZE = 100;
@@ -221,7 +221,7 @@ export class CompletionContextExtractor {
     documentVersion?: number,
   ): StatementBoundary | null {
     if (documentUri !== undefined && documentVersion !== undefined) {
-      const cacheKey = `${documentUri}:${documentVersion}`;
+      const cacheKey = `${documentUri}:${documentVersion}:${simpleHash(text)}`;
       let cached = this.statementCache.get(cacheKey);
       if (!cached) {
         cached = SqlParser.splitStatementsWithPositions(text).map(
