@@ -143,25 +143,6 @@ const dependencyDirectories = isCore ? coreDependencyDirectories() : optionalDep
 const components = [];
 const seen = new Set();
 
-function addJavaBridgeComponents() {
-  if (isCore) {
-    return;
-  }
-  const lockPath = path.join(packageDir, 'java-bridge', 'dependency-lock.json');
-  if (!existsSync(lockPath)) {
-    return;
-  }
-  for (const dependency of readJson(lockPath).dependencies || []) {
-    components.push({
-      name: dependency.name,
-      version: dependency.version,
-      license: dependency.license,
-      repository: dependency.repository || '',
-      licenseText: dependency.licenseText,
-    });
-  }
-}
-
 for (const dependencyDir of dependencyDirectories) {
   const dependencyManifestPath = path.join(dependencyDir, 'package.json');
   assert(existsSync(dependencyManifestPath), `Missing installed dependency metadata: ${dependencyManifestPath}`);
@@ -183,8 +164,6 @@ for (const dependencyDir of dependencyDirectories) {
     licenseText,
   });
 }
-
-addJavaBridgeComponents();
 
 components.sort((left, right) =>
   left.name.localeCompare(right.name) || left.version.localeCompare(right.version));

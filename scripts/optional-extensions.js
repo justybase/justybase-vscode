@@ -83,8 +83,7 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
         packageJson: path.join(repoRoot, 'extensions', 'access', 'package.json'),
         packageLock: path.join(repoRoot, 'extensions', 'access', 'package-lock.json'),
         tsconfig: path.join(repoRoot, 'extensions', 'access', 'tsconfig.json'),
-        srcDir: path.join(repoRoot, 'extensions', 'access', 'src'),
-        javaBridgeDir: path.join(repoRoot, 'extensions', 'access', 'java-bridge')
+        srcDir: path.join(repoRoot, 'extensions', 'access', 'src')
     }
 ]);
 
