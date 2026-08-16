@@ -21,6 +21,7 @@ describe('databaseUiContextService', () => {
     let mockConnectionManager: {
         resolveConnectionName: jest.Mock;
         getConnectionDatabaseKind: jest.Mock;
+        getConnection: jest.Mock;
         supportsCapability: jest.Mock;
         onDidChangeConnections: jest.Mock;
         onDidChangeActiveConnection: jest.Mock;
@@ -34,6 +35,7 @@ describe('databaseUiContextService', () => {
         mockConnectionManager = {
             resolveConnectionName: jest.fn().mockReturnValue('conn-a'),
             getConnectionDatabaseKind: jest.fn().mockReturnValue('netezza'),
+            getConnection: jest.fn().mockResolvedValue(undefined),
             supportsCapability: jest.fn((capability: string) =>
                 capability === 'supportsExplainPlan' || capability === 'supportsTableMaintenance'
             ),
@@ -106,6 +108,11 @@ describe('databaseUiContextService', () => {
         );
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'setContext',
+            `${DATABASE_UI_CONTEXT_PREFIX}.schemaIsDataWorkspace`,
+            false
+        );
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'setContext',
             `${DATABASE_UI_CONTEXT_PREFIX}.schema.capabilities.supportsExternalTables`,
             true
         );
@@ -113,6 +120,29 @@ describe('databaseUiContextService', () => {
             'setContext',
             `${DATABASE_UI_CONTEXT_PREFIX}.schema.capabilities.supportsExplainPlan`,
             false
+        );
+    });
+
+    it('marks only a Data Workspace connection for the workspace manager menu', async () => {
+        mockConnectionManager.getConnection.mockResolvedValue({
+            name: 'Reporting',
+            host: 'local',
+            database: '/tmp/reporting.duckdb',
+            user: 'duckdb',
+            dbType: 'duckdb',
+            options: {
+                dataWorkspace: JSON.stringify({ version: 2, workspaceId: 'reporting-12345678', sources: [] }),
+            },
+        });
+        await updateSchemaUiContexts(
+            mockConnectionManager as unknown as ConnectionManager,
+            { connectionName: 'Reporting' },
+        );
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'setContext',
+            `${DATABASE_UI_CONTEXT_PREFIX}.schemaIsDataWorkspace`,
+            true,
         );
     });
 

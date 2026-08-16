@@ -550,7 +550,7 @@ export class StreamingManager {
         chunkSize: number,
         timeoutSeconds: number | undefined,
         documentUri: string | undefined,
-        onChunk: (chunk: StreamingChunk) => void,
+        onChunk: (chunk: StreamingChunk) => void | Promise<void>,
         sessionId?: string,
         connectionManager?: { closeDocumentPersistentConnection(uri: string): Promise<void> },
         maxRows?: number,
@@ -653,7 +653,7 @@ export class StreamingManager {
 
                     // Send chunk when it reaches chunk size
                     if (chunk.length >= chunkSize) {
-                        onChunk({
+                        await onChunk({
                             columns: isFirstChunk ? columns : [],
                             rows: chunk,
                             isFirstChunk,
@@ -689,7 +689,7 @@ export class StreamingManager {
                 // If user cancelled, return early with an error
                 if (userCancelled) {
                     if (chunk.length > 0) {
-                        onChunk({
+                        await onChunk({
                             columns: isFirstChunk ? columns : [],
                             rows: chunk,
                             isFirstChunk,
@@ -707,7 +707,7 @@ export class StreamingManager {
                 if (signal?.aborted) {
                     operationStatus = 'cancelled';
                     if (chunk.length > 0) {
-                        onChunk({
+                        await onChunk({
                             columns: isFirstChunk ? columns : [],
                             rows: chunk,
                             isFirstChunk,
@@ -720,7 +720,7 @@ export class StreamingManager {
                     return { totalRows, limitReached, error: caughtError || new Error('Query cancelled'), recordsAffected: cmd._recordsAffected, status: 'cancelled' };
                 }
 
-                onChunk({
+                await onChunk({
                     columns: isFirstChunk ? columns : [],
                     rows: chunk,
                     isFirstChunk,

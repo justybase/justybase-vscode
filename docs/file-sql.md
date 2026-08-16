@@ -1,6 +1,6 @@
 # File SQL
 
-File SQL queries local Excel, CSV/TSV, Parquet and Avro files through an in-memory DuckDB connection.
+Data Workspace is the primary way to query local files. It stores a persistent DuckDB database in extension storage and materializes each local file as a real table. The older File SQL dialect remains available to existing integrations, but it is not shown in the Data Workspace Manager.
 
 ## Why use it?
 
@@ -9,11 +9,11 @@ Treat local files like database tables while staying inside VS Code: join severa
 ## Quick start
 
 1. Install the [DuckDB + Files pack](../extensions/duckdb/README.md).
-2. Open **Connect to Database** and choose **Excel / CSV / Parquet / Avro (DuckDB)**.
-3. Select one file, or use **Query Multiple Files with SQL (DuckDB)** for a read-only workspace containing several files.
-4. Write SQL against the generated views and run it like any other query.
+2. Open **Data Workspace Manager** and choose **New Data Workspace**.
+3. Use **Add local file**. A workspace containing one file is enough for a single-file SQL query; add more files when you need joins or unions.
+4. Use **Open SQL** and query the generated DuckDB table.
 
-For an `.xlsx` workbook, sheets are exposed as separate views and suggested by completion. A saved multi-file workspace can be reopened with **Open Saved File SQL Workspace**.
+For quick inspection, right-click a CSV or Excel file and choose **Open in Data File Preview**. The preview's **Add to Data Workspace** button lets you choose a new or existing workspace without leaving the preview.
 
 ## Editor Support
 
@@ -24,6 +24,6 @@ For an `.xlsx` workbook, sheets are exposed as separate views and suggested by c
 
 ## Runtime Boundary
 
-Source views are read-only. Enable **Editable copy** for a single-file connection to create an `_edit` table and save changes back through the File SQL commands. Multi-file workspaces are read-only.
+Materialized Data Workspace source tables are replaced on refresh; local tables and views created separately in DuckDB remain intact. Legacy File SQL source views are still read-only, and existing legacy profiles are not migrated or deleted by the new manager.
 
 See also: [Export & Import Reference](EXPORT_IMPORT.md) and the [File SQL section in the README](../README.md#local-files-as-sql-connections).
