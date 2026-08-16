@@ -19,6 +19,11 @@ function makeChannel(name: string, format: 'jet4' | 'accdb2007'): JetPageChannel
 }
 
 describe('JetPageChannel', () => {
+    it('allows access to the reserved header page zero', () => {
+        const channel = makeChannel('sample2007.accdb', 'accdb2007');
+        expect(channel.pageAt(0)).toHaveLength(channel.layout.pageSize);
+    });
+
     it('allocates pages without invalidating earlier page views', () => {
         const channel = makeChannel('sample2007.accdb', 'accdb2007');
         const initialPages = channel.pageCount;

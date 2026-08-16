@@ -108,8 +108,19 @@ function tokenize(sql: string): Token[] {
             continue;
         }
         if (c === '[') {
-            const end = sql.indexOf(']', index + 1);
-            const stop = end < 0 ? sql.length : end + 1;
+            let stop = index + 1;
+            while (stop < sql.length) {
+                if (sql[stop] !== ']') {
+                    stop++;
+                    continue;
+                }
+                if (sql[stop + 1] === ']') {
+                    stop += 2;
+                    continue;
+                }
+                stop++;
+                break;
+            }
             tokens.push({ text: sql.slice(index, stop), lower: sql.slice(index, stop).toLowerCase() });
             index = stop;
             continue;
@@ -140,10 +151,14 @@ function expect(tokens: Token[], index: { value: number }, keyword: string): voi
 
 function stripDelims(name: string): string {
     const trimmed = name.trim();
-    if (trimmed.length >= 2 && ((trimmed[0] === '[' && trimmed[trimmed.length - 1] === ']')
-        || (trimmed[0] === '"' && trimmed[trimmed.length - 1] === '"')
-        || (trimmed[0] === '\'' && trimmed[trimmed.length - 1] === '\''))) {
-        return trimmed.slice(1, -1);
+    if (trimmed.length >= 2 && trimmed[0] === '[' && trimmed[trimmed.length - 1] === ']') {
+        return trimmed.slice(1, -1).replace(/\]\]/g, ']');
+    }
+    if (trimmed.length >= 2 && trimmed[0] === '"' && trimmed[trimmed.length - 1] === '"') {
+        return trimmed.slice(1, -1).replace(/""/g, '"');
+    }
+    if (trimmed.length >= 2 && trimmed[0] === '\'' && trimmed[trimmed.length - 1] === '\'') {
+        return trimmed.slice(1, -1).replace(/''/g, '\'');
     }
     return trimmed;
 }
@@ -262,6 +277,9 @@ function parseCreateTable(channel: JetPageChannel, tokens: Token[], index: { val
     if (tokens[index.value]?.lower === 'as') {
         asSelect = true;
     }
+    if (asSelect) {
+        throw new AccessFileError('CREATE TABLE AS SELECT is not supported yet; create the table first and INSERT the rows.');
+    }
     expect(tokens, index, '(');
 
     const columns: JetDdlColumn[] = [];
@@ -336,9 +354,6 @@ function parseCreateTable(channel: JetPageChannel, tokens: Token[], index: { val
         }
     }
     expect(tokens, index, ')');
-    if (asSelect) {
-        throw new AccessFileError('CREATE TABLE AS SELECT is not supported yet; create the table first and INSERT the rows.');
-    }
     createTable(channel, tableName, columns, indexes, relationships);
 }
 

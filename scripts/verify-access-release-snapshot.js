@@ -12,7 +12,7 @@ const requiredFiles = [
   'extensions/access/THIRD_PARTY_NOTICES.md',
   'extensions/access/src/accessConnection.ts',
   'extensions/access/src/accessDuckDbMirror.ts',
-  'extensions/access/src/accessFileWriter.ts',
+  'packages/access-file/src/jet/JetWriter.ts',
   'packages/access-file/package.json',
   'packages/access-file/NOTICE',
   'packages/access-file/src/accessFileSession.ts',

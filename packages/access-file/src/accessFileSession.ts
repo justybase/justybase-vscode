@@ -782,10 +782,53 @@ function queryParameterType(flag: number, extra: number): string {
 }
 
 function quoteQueryIdentifier(value: string): string {
-    if (value.startsWith('[') && value.endsWith(']')) {
-        return value;
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        return `[${trimmed.slice(1, -1).replace(/\]\]/g, ']').replace(/]/g, ']]')}]`;
     }
-    return `[${value.replace(/]/g, ']]')}]`;
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        return `[${trimmed.slice(1, -1).replace(/""/g, '"').replace(/]/g, ']]')}]`;
+    }
+    return `[${trimmed.replace(/]/g, ']]')}]`;
+}
+
+function splitQueryIdentifierPath(value: string): string[] {
+    const parts: string[] = [];
+    let start = 0;
+    let index = 0;
+    while (index < value.length) {
+        const character = value[index]!;
+        if (character === '[' || character === '"') {
+            const quote = character;
+            index++;
+            while (index < value.length) {
+                if (value[index] !== quote) {
+                    index++;
+                    continue;
+                }
+                if (value[index + 1] === quote) {
+                    index += 2;
+                    continue;
+                }
+                index++;
+                break;
+            }
+            continue;
+        }
+        if (character === '.') {
+            parts.push(value.slice(start, index).trim());
+            start = index + 1;
+        }
+        index++;
+    }
+    parts.push(value.slice(start).trim());
+    return parts;
+}
+
+function quoteQueryIdentifierPath(value: string): string {
+    return splitQueryIdentifierPath(value)
+        .map(part => part.length === 0 ? '' : quoteQueryIdentifier(part))
+        .join('.');
 }
 
 interface QueryTableSource {
@@ -799,7 +842,7 @@ function queryTableSource(row: QueryRow): QueryTableSource | undefined {
         return undefined;
     }
     const database = row.expression?.trim();
-    const qualified = `${database ? `${quoteQueryIdentifier(database)}.` : ''}${table.split('.').map(quoteQueryIdentifier).join('.')}`;
+    const qualified = `${database ? `${quoteQueryIdentifierPath(database)}.` : ''}${quoteQueryIdentifierPath(table)}`;
     const alias = row.name2?.trim();
     return {
         keys: alias ? [table, alias] : [table],

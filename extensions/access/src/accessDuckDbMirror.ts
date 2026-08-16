@@ -124,19 +124,93 @@ function accessPatternToSimilar(pattern: string): string {
 }
 
 function translateAccessLikeExpressions(sql: string): string {
-    return sql.replace(
-        /\bLIKE\s+((?:'(?:(?:'')|[^'])*')|(?:"(?:""|[^"])*"))/gi,
-        (_match, literal: string) => {
-            const pattern = decodeAccessQuotedText(literal);
-            if (!/[#*?[]/.test(pattern)) {
-                return `LIKE '${pattern.replace(/'/g, "''")}'`;
+    let result = '';
+    let index = 0;
+    while (index < sql.length) {
+        const current = sql[index];
+        const next = sql[index + 1];
+        if (current === '-' && next === '-') {
+            const end = sql.indexOf('\n', index + 2);
+            const stop = end < 0 ? sql.length : end;
+            result += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (current === '/' && next === '*') {
+            const end = sql.indexOf('*/', index + 2);
+            const stop = end < 0 ? sql.length : end + 2;
+            result += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (current === '#') {
+            const end = sql.indexOf('#', index + 1);
+            const stop = end < 0 ? sql.length : end + 1;
+            result += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (current === '\'' || current === '"') {
+            const quote = current;
+            let stop = index + 1;
+            while (stop < sql.length) {
+                if (sql[stop] !== quote) {
+                    stop++;
+                    continue;
+                }
+                if (sql[stop + 1] === quote) {
+                    stop += 2;
+                    continue;
+                }
+                stop++;
+                break;
             }
-            // Access text comparisons use the database's default case-insensitive
-            // collation. DuckDB's SIMILAR TO does not inherit that collation, so
-            // make the translated regular expression explicitly insensitive.
-            return `SIMILAR TO '(?i)${accessPatternToSimilar(pattern).replace(/'/g, "''")}'`;
-        },
-    );
+            result += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (current === '[') {
+            let stop = index + 1;
+            while (stop < sql.length) {
+                if (sql[stop] !== ']') {
+                    stop++;
+                    continue;
+                }
+                if (sql[stop + 1] === ']') {
+                    stop += 2;
+                    continue;
+                }
+                stop++;
+                break;
+            }
+            result += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+
+        const match = /[A-Za-z0-9_]/.test(sql[index - 1] ?? '')
+            ? undefined
+            : sql.slice(index).match(
+                /^LIKE\s+((?:'(?:(?:'')|[^'])*')|(?:"(?:""|[^"])*"))/i,
+            );
+        if (!match) {
+            result += current ?? '';
+            index++;
+            continue;
+        }
+        const literal = match[1]!;
+        const pattern = decodeAccessQuotedText(literal);
+        if (!/[#*?[]/.test(pattern)) {
+            result += `LIKE '${pattern.replace(/'/g, "''")}'`;
+        } else {
+            // Access text comparisons use the database's default
+            // case-insensitive collation. DuckDB's SIMILAR TO does not
+            // inherit that collation, so make the expression insensitive.
+            result += `SIMILAR TO '(?i)${accessPatternToSimilar(pattern).replace(/'/g, "''")}'`;
+        }
+        index += match[0].length;
+    }
+    return result;
 }
 
 interface ProtectedSql {
@@ -230,7 +304,22 @@ function protectAccessSqlRegions(sql: string): ProtectedSql {
 }
 
 function translateTop(sql: string): string {
-    const match = sql.match(/^(\s*SELECT\s+(?:(?:DISTINCT|ALL)\s+)?)(TOP\s+(\d+)(?:\s+PERCENT)?\s+)/i);
+    let start = 0;
+    while (start < sql.length) {
+        while (start < sql.length && /\s/.test(sql[start]!)) start++;
+        if (sql.startsWith('--', start)) {
+            const newline = sql.indexOf('\n', start + 2);
+            start = newline < 0 ? sql.length : newline + 1;
+            continue;
+        }
+        if (sql.startsWith('/*', start)) {
+            const end = sql.indexOf('*/', start + 2);
+            start = end < 0 ? sql.length : end + 2;
+            continue;
+        }
+        break;
+    }
+    const match = sql.slice(start).match(/^(SELECT\s+(?:(?:DISTINCT|ALL)\s+)?)(TOP\s+(\d+)(?:\s+PERCENT)?\s+)/i);
     if (!match) {
         return sql;
     }
@@ -241,7 +330,7 @@ function translateTop(sql: string): string {
     if (!Number.isInteger(limit) || limit < 0) {
         return sql;
     }
-    const withoutTop = `${match[1]}${sql.slice(match[0].length)}`;
+    const withoutTop = `${sql.slice(0, start)}${match[1]}${sql.slice(start + match[0].length)}`;
     return `${withoutTop} LIMIT ${limit}`;
 }
 
@@ -263,8 +352,8 @@ export function translateAccessSql(sql: string): string {
     const withConcat = translateAmpersandConcat(code);
     const withNulls = translateNullOrdering(withConcat);
     const withPlus = translateAccessPlusSemantics(withNulls);
-    const restored = protectedSql.restore(withPlus);
-    return translateTop(translateAccessDateLiterals(restored));
+    const withDates = translateAccessDateLiterals(withPlus);
+    return translateTop(protectedSql.restore(withDates));
 }
 
 /**
@@ -750,9 +839,15 @@ export class AccessDuckDbMirror {
             return;
         }
         const placeholders = snapshot.definition.columns.map(() => '?').join(', ');
-        const sql = `INSERT INTO ${quoteIdentifier(definition.name)} VALUES (${placeholders})`;
-        for (const row of snapshot.rows) {
-            await connection.run(sql, row.map(value => normalizeValue(value, duckdb)));
+        const maxRowsPerBatch = Math.max(1, Math.floor(1000 / snapshot.definition.columns.length));
+        for (let start = 0; start < snapshot.rows.length; start += maxRowsPerBatch) {
+            const batch = snapshot.rows.slice(start, start + maxRowsPerBatch);
+            const values = batch.flatMap(row => row.map(value => normalizeValue(value, duckdb)));
+            const rowPlaceholders = batch.map(() => `(${placeholders})`).join(', ');
+            await connection.run(
+                `INSERT INTO ${quoteIdentifier(definition.name)} VALUES ${rowPlaceholders}`,
+                values,
+            );
         }
     }
 

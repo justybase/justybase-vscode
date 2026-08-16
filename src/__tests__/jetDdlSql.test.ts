@@ -25,6 +25,12 @@ function applyDdl(filePath: string, statements: readonly string[]): void {
 }
 
 describe('JetDdlSql foreign keys (Phase 4)', () => {
+    it('reports CREATE TABLE AS SELECT as unsupported before parsing columns', () => {
+        const channel = new JetPageChannel(fs.readFileSync(SAMPLE), jetLayoutFor('accdb2007'));
+        expect(() => applyDdlSql(channel, 'CREATE TABLE copy_t AS SELECT * FROM t_people'))
+            .toThrow(/CREATE TABLE AS SELECT is not supported/i);
+    });
+
     it('adds and lists a foreign key through ALTER TABLE', async () => {
         const { directory, filePath } = makeWorkingFile();
         try {
