@@ -77,7 +77,7 @@ netezza_reference
 
 # Dev/test scripts and utilities
 scripts/
-scripts-private/
+tools/
 packages/contracts/
 test-harness/
 test-infer.ts
