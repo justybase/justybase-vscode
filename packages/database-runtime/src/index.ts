@@ -19,6 +19,8 @@ export interface QueryOptions {
   maxRows: number;
   timeoutSeconds: number;
   readOnly?: boolean;
+  /** Optional execution database; metadata/profile database remains unchanged. */
+  database?: string;
 }
 
 function normalizeValue(value: unknown): unknown {
@@ -35,7 +37,7 @@ function toColumns(reader: { fieldCount: number; getName(index: number): string;
 }
 
 export async function executeNetezzaQuery(profile: NetezzaConnectionDetails, sql: string, options: QueryOptions, callbacks: QueryCallbacks): Promise<{ totalRows: number; limitReached: boolean; rowsAffected?: number }> {
-  const connection = new NzConnection(profile);
+  const connection = new NzConnection(options.database ? { ...profile, database: options.database } : profile);
   await connection.connect();
   let readOnlyTransaction = false;
   try {
