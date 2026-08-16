@@ -12,7 +12,7 @@ export const ACCESS_SORT_ORDER_INSTRUCTIONS = [
 ].join('\n');
 
 export const ACCESS_UNSUPPORTED_SORT_ORDER_MESSAGE =
-    'Microsoft Access uses a database sort order that UCanAccess cannot read.\n\n' +
+    'Microsoft Access uses a database sort order that the native TypeScript reader cannot read.\n\n' +
     ACCESS_SORT_ORDER_INSTRUCTIONS;
 
 export const ACCESS_OBJECT_NOT_FOUND_MESSAGE =
@@ -55,8 +55,8 @@ export function getAccessErrorText(error: unknown): string {
 }
 
 /**
- * Detects the Jackcess/UCanAccess collation failure without treating unrelated
- * UCA exceptions as sort-order failures.
+ * Detects a native Access collation failure without treating unrelated parser
+ * errors as sort-order failures.
  */
 export function isAccessUnsupportedSortOrderError(error: unknown): boolean {
     const text = getAccessErrorText(error);
@@ -70,8 +70,8 @@ export function isAccessUnsupportedSortOrderError(error: unknown): boolean {
         return true;
     }
 
-    return normalized.includes('ucaexc')
-        && (normalized.includes('collat') || normalized.includes('1045') || normalized.includes('sortorder'));
+    return normalized.includes('unsupported collating')
+        || normalized.includes('unsupported sort order');
 }
 
 export function isAccessObjectNotFoundError(error: unknown): boolean {

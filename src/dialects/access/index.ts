@@ -1,7 +1,8 @@
 import { createStubDialect } from '../stubDialectFactory';
 
 /**
- * Stub for the 'access' dialect (Microsoft Access .mdb/.accdb via UCanAccess).
+ * Stub for the 'access' dialect (Microsoft Access .mdb/.accdb via the native
+ * TypeScript companion extension).
  * Registered so the login panel shows the option with an install hint;
  * the real dialect is registered by the Access companion extension.
  */
@@ -45,7 +46,7 @@ export const accessDialectStub = {
                 storage: 'topLevel' as const,
                 required: true,
                 placeholder: 'Select a .mdb or .accdb file',
-                description: 'Microsoft Access database queried through the optional Java/UCanAccess bridge.',
+                description: 'Microsoft Access database queried through the optional native TypeScript extension.',
                 layout: 'full' as const,
             },
             {

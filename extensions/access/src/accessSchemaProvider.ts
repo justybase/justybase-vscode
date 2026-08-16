@@ -9,9 +9,9 @@ import type {
  * Metadata provider for Microsoft Access databases.
  *
  * Access has a single flat catalog: tables and saved queries. The metadata
- * engine executes these "marker" queries through the connection, which routes
- * them to the UCanAccess bridge (JDBC DatabaseMetaData) instead of running
- * them as SQL. The bridge returns rows in the same DATABASE/SCHEMA/TABLENAME
+ * engine executes these "marker" queries through the connection, which
+ * resolves them from the native file reader instead of running them against
+ * DuckDB. The connection returns rows in the same DATABASE/SCHEMA/TABLENAME
  * shape used by the SQLite provider so the shared metadata cache needs no
  * Access-specific logic.
  */

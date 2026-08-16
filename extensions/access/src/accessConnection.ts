@@ -1,7 +1,6 @@
-import { EventEmitter } from 'events';
-import { createHash } from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
+import { EventEmitter } from 'node:events';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type {
     DatabaseCommand,
@@ -10,37 +9,46 @@ import type {
     DatabaseDataReader,
 } from '@justybase/contracts';
 import {
-    JavaBridgeClient,
-    type BridgeColumnDefinition,
-    type BridgeFetchResponse,
-    type PendingQuery,
-} from './javaBridgeClient';
-import { accessBridgePool, type AccessBridgeLease } from './accessBridgePool';
+    AccessFileError,
+    AccessFileSession,
+    type AccessColumnDefinition,
+    type AccessQueryDefinition,
+    type AccessTableDefinition,
+    type AccessTableSnapshot,
+    type AccessValue,
+    type AccessFileFormat,
+} from '../../../packages/access-file/src';
+import {
+    AccessDuckDbMirror,
+    type AccessMirrorColumn,
+} from './accessDuckDbMirror';
+import { writeAccessSnapshotChanges, applyDdlSql } from '../../../packages/access-file/src';
+import { JetPageChannel } from '../../../packages/access-file/src/jet/JetPageChannel';
+import { jetLayoutFor } from '../../../packages/access-file/src/jet/JetLayout';
 
 const CURRENT_CATALOG_QUERY = /^SELECT\s+CURRENT_CATALOG\s*;?$/i;
 const CURRENT_SCHEMA_QUERY = /^SELECT\s+CURRENT_SCHEMA\s*;?$/i;
 const CURRENT_CATALOG_AND_SCHEMA_QUERY = /^SELECT\s+CURRENT_CATALOG\s*,\s*CURRENT_SCHEMA\s*;?$/i;
 const CURRENT_SID_QUERY = /^SELECT\s+CURRENT_SID\s*;?$/i;
+const LAST_IDENTITY_QUERY = /^SELECT\s+@@IDENTITY(?:\s+AS\s+(\[(?:[^\]]|\]\])+\]|"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*))?\s*;?$/i;
 const SET_CATALOG_QUERY = /^SET\s+CATALOG\s+(.+?)\s*;?$/i;
 const SET_SCHEMA_QUERY = /^SET\s+SCHEMA\s+(.+?)\s*;?$/i;
-
 const METADATA_MARKER_QUERY = /_access_metadata\.([a-z_]+)/i;
 const ACCESS_WRITE_STATEMENT = /^(?:INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b/i;
 
-interface ExecutionResult {
-    columns: BridgeColumnDefinition[];
-    rows: unknown[][];
-    recordsAffected: number;
-    cancelled: boolean;
-    cursorId?: number;
-    hasMore?: boolean;
+interface MetadataMarker {
+    readonly kind: string;
+    readonly table?: string;
+    readonly pattern?: string;
+    readonly serverSide: boolean;
 }
 
-interface MetadataMarker {
-    kind: string;
-    table?: string;
-    pattern?: string;
-    serverSide: boolean;
+interface ExecutionResult {
+    readonly columns: readonly AccessMirrorColumn[];
+    readonly rows?: readonly (readonly unknown[])[];
+    readonly rowChunks?: AsyncIterable<readonly (readonly unknown[])[]>;
+    readonly recordsAffected: number;
+    readonly release?: () => void;
 }
 
 function resolveDatabaseLocation(config: DatabaseConnectionConfig): string {
@@ -51,94 +59,14 @@ function resolveDatabaseLocation(config: DatabaseConnectionConfig): string {
     return path.isAbsolute(requestedDatabase) ? requestedDatabase : path.resolve(requestedDatabase);
 }
 
-function resolveJavaExecutable(config: DatabaseConnectionConfig): string {
-    const configured = config.options?.javaPath;
-    if (typeof configured === 'string' && configured.trim().length > 0) {
-        return configured.trim();
+function configuredReadOnly(config: DatabaseConnectionConfig): boolean {
+    if (typeof config.options?.readOnly === 'boolean') {
+        return config.options.readOnly;
     }
-
-    const setting = vscode.workspace.getConfiguration('justybase.access').get<string>('javaPath', '').trim();
-    if (setting.length > 0) {
-        return setting;
-    }
-
-    const javaHome = process.env.JAVA_HOME;
-    if (javaHome && javaHome.trim().length > 0) {
-        const executable = process.platform === 'win32' ? 'java.exe' : 'java';
-        return path.join(javaHome.trim(), 'bin', executable);
-    }
-
-    return 'java';
+    return vscode.workspace.getConfiguration('justybase.access').get<boolean>('readOnly', true);
 }
 
-/** Validate an explicitly configured Java launcher before it reaches spawn(). */
-export function validateJavaExecutablePath(value: string): string {
-    const candidate = value.trim();
-    if (!candidate) {
-        throw new Error('The Access Java path cannot be empty when explicitly configured.');
-    }
-    if (candidate.includes('"') || candidate.includes("'")) {
-        throw new Error('The Access Java path must contain only the executable path, without arguments.');
-    }
-    if (!path.isAbsolute(candidate)) {
-        throw new Error('The Access Java path must be an absolute path to java or java.exe.');
-    }
-    const executableName = path.basename(candidate).toLowerCase();
-    if (executableName !== 'java' && executableName !== 'java.exe') {
-        throw new Error('The Access Java path must point to an executable named java or java.exe.');
-    }
-    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) {
-        throw new Error(`The configured Access Java executable does not exist: ${candidate}`);
-    }
-    if (process.platform !== 'win32' && (fs.statSync(candidate).mode & 0o111) === 0) {
-        throw new Error(`The configured Access Java executable is not executable: ${candidate}`);
-    }
-    return candidate;
-}
-
-function resolveBridgeJarPath(): string {
-    return path.join(__dirname, '..', 'resources', 'access-bridge.jar');
-}
-
-export function verifyAccessBridgeJar(jarPath: string): void {
-    const checksumPath = `${jarPath}.sha256`;
-    if (!fs.existsSync(jarPath)) {
-        throw new Error(`Missing Access bridge JAR: ${jarPath}`);
-    }
-    if (!fs.existsSync(checksumPath)) {
-        throw new Error(`Missing Access bridge JAR checksum: ${checksumPath}`);
-    }
-    const expected = fs.readFileSync(checksumPath, 'utf8').trim().split(/\s+/)[0]?.toLowerCase();
-    const actual = createHash('sha256').update(fs.readFileSync(jarPath)).digest('hex');
-    if (!/^[0-9a-f]{64}$/.test(expected ?? '') || expected !== actual) {
-        throw new Error(`Access bridge JAR checksum mismatch: expected ${expected || '<missing>'}, got ${actual}`);
-    }
-}
-
-function parseMetadataMarker(sql: string): MetadataMarker | undefined {
-    const match = sql.match(METADATA_MARKER_QUERY);
-    if (!match) {
-        return undefined;
-    }
-
-    const kind = match[1].toLowerCase();
-    const table = readWhereString(sql, 'TABLE')
-        ?? (kind === 'object_type' ? readWhereString(sql, 'TYPE') : undefined);
-    const pattern = readWhereString(sql, 'PATTERN');
-    const serverSide = /SERVER_SIDE\s*=\s*1/i.test(sql);
-    return { kind, table, pattern, serverSide };
-}
-
-function readWhereString(sql: string, key: string): string | undefined {
-    const pattern = new RegExp(`${key}\\s*=\\s*'((?:[^']|'')*)'`, 'i');
-    const match = sql.match(pattern);
-    if (!match) {
-        return undefined;
-    }
-    return match[1].replace(/''/g, "'");
-}
-
-function startsWithAccessWriteStatement(sql: string): boolean {
+function stripLeadingComments(sql: string): string {
     let remaining = sql.trim();
     while (remaining.length > 0) {
         if (remaining.startsWith('--')) {
@@ -153,75 +81,656 @@ function startsWithAccessWriteStatement(sql: string): boolean {
         }
         break;
     }
-    return ACCESS_WRITE_STATEMENT.test(remaining);
+    return remaining;
 }
 
-type FetchMoreFn = (cursorId: number) => Promise<BridgeFetchResponse>;
-type CloseCursorFn = (cursorId: number) => Promise<void>;
+/**
+ * Splits a script into individual statements on top-level semicolons,
+ * respecting SQL strings, quoted identifiers, Access date literals (#...#),
+ * bracket identifiers and line/block comments.
+ */
+export function splitAccessStatements(sql: string): string[] {
+    const statements: string[] = [];
+    let current = '';
+    let index = 0;
+    while (index < sql.length) {
+        const character = sql[index]!;
+        const next = sql[index + 1];
+        if (character === '-' && next === '-') {
+            const end = sql.indexOf('\n', index + 2);
+            const stop = end < 0 ? sql.length : end;
+            current += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (character === '/' && next === '*') {
+            const end = sql.indexOf('*/', index + 2);
+            const stop = end < 0 ? sql.length : end + 2;
+            current += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (character === '\'' || character === '"') {
+            const quote = character;
+            let stop = index + 1;
+            while (stop < sql.length) {
+                if (sql[stop] !== quote) {
+                    stop++;
+                    continue;
+                }
+                if (sql[stop + 1] === quote) {
+                    stop += 2;
+                    continue;
+                }
+                stop++;
+                break;
+            }
+            current += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (character === '#') {
+            const end = sql.indexOf('#', index + 1);
+            const stop = end < 0 ? sql.length : end + 1;
+            current += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (character === '[') {
+            let stop = index + 1;
+            while (stop < sql.length) {
+                if (sql[stop] !== ']') {
+                    stop++;
+                    continue;
+                }
+                // Access escapes a closing bracket in an identifier as ]].
+                if (sql[stop + 1] === ']') {
+                    stop += 2;
+                    continue;
+                }
+                stop++;
+                break;
+            }
+            current += sql.slice(index, stop);
+            index = stop;
+            continue;
+        }
+        if (character === ';') {
+            if (current.trim().length > 0) {
+                statements.push(current.trim());
+            }
+            current = '';
+            index++;
+            continue;
+        }
+        current += character;
+        index++;
+    }
+    if (current.trim().length > 0) {
+        statements.push(current.trim());
+    }
+    return statements.filter(statement => stripLeadingComments(statement).length > 0);
+}
+
+interface HeldFileLock {
+    readonly lockPath: string;
+    refCount: number;
+    readonly releasePromise: Promise<() => Promise<void>>;
+}
+
+/**
+ * In-process lock holders keyed by lock file path. Multiple connections in
+ * the same extension process (the user's persistent connection plus the
+ * short-lived connection used by metadata refresh / schema search) share one
+ * lock file; the file is closed and removed only when the last holder
+ * releases it. Cross-process conflicts still fail with EEXIST.
+ */
+const heldFileLocks = new Map<string, HeldFileLock>();
+
+function makeRefCountedRelease(
+    holder: HeldFileLock,
+    release: () => Promise<void>,
+): () => Promise<void> {
+    let released = false;
+    return async () => {
+        if (released) {
+            return;
+        }
+        released = true;
+        holder.refCount -= 1;
+        if (holder.refCount <= 0) {
+            heldFileLocks.delete(holder.lockPath);
+            await release();
+        }
+    };
+}
+
+/**
+ * Creates the database lock file (".ldb" for MDB, ".laccdb" for ACCDB) and
+ * holds it open while the connection is writable, preventing another process
+ * from writing to the same file concurrently (as MS Access / UCanAccess do).
+ * Returns the release function, or null when the file is already locked.
+ */
+async function acquireAccessFileLock(
+    databasePath: string,
+    format: AccessFileFormat,
+): Promise<() => Promise<void>> {
+    const isAccdb = format === 'accdb2007'
+        || format === 'accdb2010'
+        || format === 'accdb2013'
+        || format === 'accdb2016'
+        || format === 'accdb2019';
+    const lockExt = isAccdb ? '.laccdb' : '.ldb';
+    const lockPath = databasePath.replace(/\.(?:mdb|accdb)$/i, '') + lockExt;
+
+    const existing = heldFileLocks.get(lockPath);
+    if (existing) {
+        existing.refCount += 1;
+        const release = await existing.releasePromise;
+        return makeRefCountedRelease(existing, release);
+    }
+
+    const holder: HeldFileLock = {
+        lockPath,
+        refCount: 1,
+        releasePromise: createLockFileHandle(lockPath, databasePath),
+    };
+    heldFileLocks.set(lockPath, holder);
+    try {
+        const release = await holder.releasePromise;
+        return makeRefCountedRelease(holder, release);
+    } catch (error) {
+        heldFileLocks.delete(lockPath);
+        throw error;
+    }
+}
+
+async function createLockFileHandle(
+    lockPath: string,
+    databasePath: string,
+): Promise<() => Promise<void>> {
+    let handle: Awaited<ReturnType<typeof fs.open>>;
+    try {
+        handle = await fs.open(lockPath, 'wx');
+    } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error
+            ? (error as { code?: string }).code
+            : undefined;
+        if (code === 'EEXIST') {
+            throw new Error(
+                `The database '${databasePath}' is already open by another process (lock file '${lockPath}' exists).`,
+                { cause: error },
+            );
+        }
+        throw new Error(
+            `Cannot create the Access database lock file '${lockPath}'. Writable access is refused.`,
+            { cause: error },
+        );
+    }
+    let released = false;
+    return async () => {
+        if (released) {
+            return;
+        }
+        released = true;
+        try {
+            await handle.close();
+        } catch {
+            // best effort
+        }
+        try {
+            await fs.rm(lockPath, { force: true });
+        } catch {
+            // best effort (another process may have taken over)
+        }
+    };
+}
+
+function startsWithAccessWriteStatement(sql: string): boolean {
+    return ACCESS_WRITE_STATEMENT.test(stripLeadingComments(sql));
+}
+
+interface AccessIdentifierAt {
+    readonly name: string;
+    readonly end: number;
+}
+
+function readAccessIdentifierAt(sql: string, start: number): AccessIdentifierAt | undefined {
+    const opening = sql[start];
+    if (opening === '[' || opening === '"') {
+        const closing = opening === '[' ? ']' : '"';
+        let name = '';
+        let index = start + 1;
+        while (index < sql.length) {
+            const character = sql[index]!;
+            if (character !== closing) {
+                name += character;
+                index++;
+                continue;
+            }
+            if (sql[index + 1] === closing) {
+                name += closing;
+                index += 2;
+                continue;
+            }
+            return { name, end: index + 1 };
+        }
+        return undefined;
+    }
+    const unquoted = sql.slice(start).match(/^[A-Za-z_][A-Za-z0-9_$]*/);
+    return unquoted ? { name: unquoted[0], end: start + unquoted[0].length } : undefined;
+}
+
+function unquoteAccessIdentifier(value: string): string {
+    const parsed = readAccessIdentifierAt(value, 0);
+    if (!parsed || parsed.end !== value.length) return value;
+    return parsed.name;
+}
+
+export function writeTargetTableName(sql: string): string | undefined {
+    const statement = stripLeadingComments(sql);
+    const prefix = statement.match(/^(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+/i);
+    return prefix ? readAccessIdentifierAt(statement, prefix[0].length)?.name : undefined;
+}
+
+function rowValueEquals(left: unknown, right: unknown): boolean {
+    if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime();
+    if (left instanceof Uint8Array && right instanceof Uint8Array) {
+        return left.length === right.length && left.every((value, index) => value === right[index]);
+    }
+    return left === right;
+}
+
+function rowEquals(left: readonly unknown[], right: readonly unknown[]): boolean {
+    return left.length === right.length && left.every((value, index) => rowValueEquals(value, right[index]));
+}
+
+function insertedIdentityFromSnapshots(
+    sql: string,
+    before: readonly AccessTableSnapshot[],
+    after: readonly AccessTableSnapshot[],
+): number | bigint | undefined {
+    if (!/^INSERT\b/i.test(stripLeadingComments(sql))) return undefined;
+    const tableName = writeTargetTableName(sql);
+    if (!tableName) return undefined;
+    const beforeTable = before.find(table => table.definition.name.toLowerCase() === tableName.toLowerCase());
+    const afterTable = after.find(table => table.definition.name.toLowerCase() === tableName.toLowerCase());
+    if (!afterTable) return undefined;
+    const identityColumn = afterTable.definition.columns.find(column => column.autoLong);
+    if (!identityColumn) return undefined;
+    const identityIndex = afterTable.definition.columns.indexOf(identityColumn);
+    const newRows = afterTable.rows.filter(row => !beforeTable?.rows.some(previous => rowEquals(row, previous)));
+    const candidate = newRows[newRows.length - 1]?.[identityIndex];
+    if (typeof candidate === 'bigint') return candidate;
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+    return undefined;
+}
+
+function readWhereString(sql: string, key: string): string | undefined {
+    const pattern = new RegExp(`${key}\\s*=\\s*'((?:[^']|'')*)'`, 'i');
+    const match = sql.match(pattern);
+    return match?.[1]?.replace(/''/g, "'");
+}
+
+function parseMetadataMarker(sql: string): MetadataMarker | undefined {
+    const match = sql.match(METADATA_MARKER_QUERY);
+    if (!match) {
+        return undefined;
+    }
+    const kind = match[1].toLowerCase();
+    return {
+        kind,
+        table: readWhereString(sql, 'TABLE') ?? (kind === 'object_type' ? readWhereString(sql, 'TYPE') : undefined),
+        pattern: readWhereString(sql, 'PATTERN'),
+        serverSide: /SERVER_SIDE\s*=\s*1/i.test(sql),
+    };
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesLike(value: string, pattern: string | undefined): boolean {
+    if (!pattern) {
+        return true;
+    }
+    const regex = `^${pattern.split('').map(character => {
+        if (character === '%') {
+            return '[\\s\\S]*';
+        }
+        if (character === '_') {
+            return '.';
+        }
+        return escapeRegExp(character);
+    }).join('')}$`;
+    return new RegExp(regex, 'i').test(value);
+}
+
+function typeName(column: AccessColumnDefinition): string {
+    switch (column.accessType) {
+        case 'boolean': return 'BOOLEAN';
+        case 'byte': return 'BYTE';
+        case 'integer': return 'SHORT';
+        case 'long': return 'LONG';
+        case 'bigint': return 'BIGINT';
+        case 'currency': return 'CURRENCY';
+        case 'float': return 'SINGLE';
+        case 'double': return 'DOUBLE';
+        case 'datetime':
+        case 'datetimextended': return 'DATETIME';
+        case 'binary': return 'BINARY';
+        case 'ole': return 'OLE';
+        case 'memo': return 'MEMO';
+        case 'numeric': return `DECIMAL(${column.precision ?? 18},${column.scale ?? 0})`;
+        case 'repid': return 'GUID';
+        case 'complex': return 'COMPLEX';
+        case 'text': return `VARCHAR(${Math.max(1, Math.floor(column.size / 2))})`;
+        default: return 'UNKNOWN';
+    }
+}
+
+function metadataColumns(columns: readonly string[]): AccessMirrorColumn[] {
+    return columns.map(name => ({ name, type: 'VARCHAR' }));
+}
+
+function result(columns: readonly string[], rows: readonly (readonly unknown[])[]): ExecutionResult {
+    return { columns: metadataColumns(columns), rows, recordsAffected: -1 };
+}
+
+function tableDefinitions(session: AccessFileSession): AccessTableDefinition[] {
+    return session.listTables(false);
+}
+
+type AccessWriteTask<T> = () => Promise<T>;
+const accessFileWriteTails = new Map<string, Promise<void>>();
+
+function accessFileLockKey(filePath: string): string {
+    const resolved = path.resolve(filePath);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+async function withAccessFileWriteLock<T>(filePath: string, task: AccessWriteTask<T>): Promise<T> {
+    const key = accessFileLockKey(filePath);
+    const previous = accessFileWriteTails.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>(resolve => {
+        release = resolve;
+    });
+    accessFileWriteTails.set(key, current);
+    await previous.catch(() => undefined);
+    try {
+        return await task();
+    } finally {
+        release();
+        if (accessFileWriteTails.get(key) === current) {
+            accessFileWriteTails.delete(key);
+        }
+    }
+}
+
+async function metadataResult(
+    session: AccessFileSession,
+    marker: MetadataMarker,
+    mirror: AccessDuckDbMirror,
+): Promise<ExecutionResult> {
+    const tables = tableDefinitions(session);
+    const queries = session.listQueryDefinitions();
+    switch (marker.kind) {
+        case 'databases':
+            return result(['DATABASE'], [['default']]);
+        case 'schemas':
+            return result(['SCHEMA'], []);
+        case 'tables':
+        case 'views':
+        case 'object_type': {
+            const requestedType = marker.kind === 'views' ? 'VIEW' : marker.kind === 'object_type'
+                ? marker.table?.toUpperCase() : 'TABLE';
+            const rows = requestedType === 'VIEW'
+                ? queries.filter(query => query.type === 'select')
+                    .map(query => [query.name, query.objectId, 'VIEW', null, null])
+                : requestedType === 'TABLE'
+                    ? tables.map(table => [table.name, table.name, 'TABLE', null, null])
+                    : [];
+            return result(['OBJNAME', 'OBJID', 'OBJTYPE', 'SCHEMA', 'DESCRIPTION'], rows);
+        }
+        case 'type_groups':
+            return result(['OBJTYPE'], [['TABLE'], ['VIEW']]);
+        case 'procedures':
+            return result(['OBJNAME'], []);
+        case 'columns':
+            return columnsMetadata(tables, queries, marker.table, mirror);
+        case 'table_columns':
+            return detailedColumnsMetadata(tables, queries, marker.table, false, mirror);
+        case 'column_metadata':
+            return detailedColumnsMetadata(tables, queries, marker.table, true, mirror);
+        case 'table_comment':
+            return result(['DESCRIPTION'], [['']]);
+        case 'object_search':
+            return objectSearchMetadata(tables, queries, marker.pattern);
+        case 'view_source_search':
+            return viewSourceMetadata(queries, marker.pattern, marker.serverSide);
+        case 'procedure_source_search':
+            return result(['NAME', 'SCHEMA', 'DATABASE', 'SOURCE'], []);
+        case 'relationships': {
+            const relationships = session.listRelationships();
+            const rows = relationships
+                .filter(relationship => !marker.table || relationship.table.localeCompare(marker.table, undefined, { sensitivity: 'accent' }) === 0)
+                .map(relationship => [
+                    relationship.name,
+                    relationship.table,
+                    relationship.columns.join(','),
+                    relationship.foreignTable,
+                    relationship.foreignColumns.join(','),
+                    relationship.enforced ? 1 : 0,
+                    relationship.updateCascade ? 1 : 0,
+                    relationship.deleteCascade ? 1 : 0,
+                ]);
+            return result(['RELATIONSHIP', 'TABLE', 'COLUMN', 'FOREIGN_TABLE', 'FOREIGN_COLUMN', 'ENFORCED', 'UPDATE_CASCADE', 'DELETE_CASCADE'], rows);
+        }
+        case 'linked_tables': {
+            const linkedTables = session.listLinkedTables();
+            const rows = linkedTables
+                .filter(linked => !marker.table || linked.name.localeCompare(marker.table, undefined, { sensitivity: 'accent' }) === 0)
+                .map(linked => [linked.name, linked.target, linked.foreignName]);
+            return result(['OBJNAME', 'TARGET', 'FOREIGN_NAME'], rows);
+        }
+        default:
+            throw new AccessFileError(`Unknown Access metadata marker '${marker.kind}'.`);
+    }
+}
+
+interface MetadataColumn {
+    readonly name: string;
+    readonly type: string;
+    readonly nullable: boolean;
+    readonly isPrimaryKey: boolean;
+    readonly isAuto: boolean;
+    readonly isCalculated: boolean;
+}
+
+/**
+ * ACCDB calculated fields are variable-length LONG columns stored with a fixed
+ * column size of 39 (their serialized evaluation-result cap). Plain LONG
+ * columns are fixed-length 4-byte columns, so the two flags together
+ * positively identify calculated fields. Calculated fields only exist in
+ * ACCDB (2010+); Jet3/Jet4 .mdb files never carry them.
+ */
+function isCalculatedColumn(column: AccessColumnDefinition): boolean {
+    return column.accessType === 'long' && !column.fixedLength && column.size === 39;
+}
+
+function findAccessTable(tables: readonly AccessTableDefinition[], requestedTable?: string): AccessTableDefinition | undefined {
+    return tables.find(candidate => candidate.name.localeCompare(requestedTable ?? '', undefined, { sensitivity: 'accent' }) === 0);
+}
+
+async function metadataColumnsFor(
+    tables: readonly AccessTableDefinition[],
+    queries: readonly AccessQueryDefinition[],
+    requestedTable: string | undefined,
+    mirror: AccessDuckDbMirror,
+): Promise<{ readonly name: string; readonly columns: readonly MetadataColumn[] } | undefined> {
+    const table = findAccessTable(tables, requestedTable);
+    if (table) {
+        return {
+            name: table.name,
+            columns: table.columns.map(column => ({
+                name: column.name,
+                type: typeName(column),
+                nullable: column.nullable,
+                isPrimaryKey: column.isPrimaryKey,
+                isAuto: column.autoLong || column.autoUuid,
+                isCalculated: isCalculatedColumn(column),
+            })),
+        };
+    }
+    const view = queries.find(query => query.type === 'select'
+        && query.name.toLowerCase() === (requestedTable ?? '').toLowerCase());
+    if (!view) {
+        return undefined;
+    }
+    let columns: AccessMirrorColumn[] = [];
+    try {
+        columns = await mirror.readObjectColumns(view.name);
+    } catch {
+        // Unsupported saved queries remain listed as views but expose no
+        // columns until the mirror can describe them.
+    }
+    return {
+        name: view.name,
+        columns: columns.map(column => ({
+            name: column.name,
+            type: column.type,
+            nullable: true,
+            isPrimaryKey: false,
+            isAuto: false,
+            isCalculated: false,
+        })),
+    };
+}
+
+async function columnsMetadata(
+    tables: readonly AccessTableDefinition[],
+    queries: readonly AccessQueryDefinition[],
+    requestedTable: string | undefined,
+    mirror: AccessDuckDbMirror,
+): Promise<ExecutionResult> {
+    const object = await metadataColumnsFor(tables, queries, requestedTable, mirror);
+    const rows = (object?.columns ?? []).map((column, index) => [
+        'default',
+        null,
+        object?.name ?? requestedTable ?? '',
+        column.name,
+        column.type,
+        null,
+        column.isPrimaryKey ? 1 : 0,
+        0,
+        index + 1,
+    ]);
+    return result(['DATABASE', 'SCHEMA', 'TABLENAME', 'ATTNAME', 'FORMAT_TYPE', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM'], rows);
+}
+
+async function detailedColumnsMetadata(
+    tables: readonly AccessTableDefinition[],
+    queries: readonly AccessQueryDefinition[],
+    requestedTable: string | undefined,
+    includeMetadataFlag: boolean,
+    mirror: AccessDuckDbMirror,
+): Promise<ExecutionResult> {
+    const object = await metadataColumnsFor(tables, queries, requestedTable, mirror);
+    const rows = (object?.columns ?? []).map((column, index) => {
+        const isAuto = column.isAuto ? 1 : 0;
+        const isCalculated = column.isCalculated ? 1 : 0;
+        const base = [column.name, column.type, column.type, column.nullable ? 0 : 1, null, null, column.isPrimaryKey ? 1 : 0, 0, index + 1];
+        return includeMetadataFlag
+            ? [base[0], base[1], base[2], base[3], base[3], base[4], base[5], base[6], base[7], base[8], isAuto, isCalculated]
+            : [...base, isAuto, isCalculated];
+    });
+    return includeMetadataFlag
+        ? result(['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'ATTNOTNULL', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC'], rows)
+        : result(['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC'], rows);
+}
+
+function objectSearchMetadata(
+    tables: readonly AccessTableDefinition[],
+    queries: readonly AccessQueryDefinition[],
+    pattern: string | undefined,
+): ExecutionResult {
+    const tableRows = tables
+        .filter(table => matchesLike(table.name, pattern))
+        .map(table => [1, table.name, null, 'default', 'TABLE', null, null, 'NAME']);
+    const queryRows = queries
+        .filter(query => query.type === 'select' && matchesLike(query.name, pattern))
+        .map(query => [1, query.name, null, 'default', 'VIEW', null, null, 'NAME']);
+    return result(
+        ['PRIORITY', 'NAME', 'SCHEMA', 'DATABASE', 'TYPE', 'PARENT', 'DESCRIPTION', 'MATCH_TYPE'],
+        [...tableRows, ...queryRows],
+    );
+}
+
+function viewSourceMetadata(
+    queries: readonly AccessQueryDefinition[],
+    pattern: string | undefined,
+    serverSide: boolean,
+): ExecutionResult {
+    const views = queries.filter(query => query.type === 'select');
+    if (serverSide) {
+        const matching = views.filter(query => matchesLike(query.sql ?? '', pattern));
+        return result(
+            ['NAME', 'SCHEMA', 'DATABASE'],
+            matching.map(query => [query.name, 'default', 'default']),
+        );
+    }
+    return result(
+        ['NAME', 'SCHEMA', 'DATABASE', 'SOURCE'],
+        views.map(query => [query.name, 'default', 'default', query.sql ?? '']),
+    );
+}
 
 class AccessDataReader implements DatabaseDataReader {
     public readonly fieldCount: number;
-    private _buffer: unknown[][];
+    private readonly _buffer: unknown[][];
     private _readIndex = -1;
     private _closed = false;
+    private _done = false;
+    private readonly _iterator?: AsyncIterator<readonly (readonly unknown[])[]>;
     private readonly _schemaRows: { NumericScale?: number }[];
+    private readonly _release?: () => void;
+    private _released = false;
 
-    public constructor(
-        private readonly _columns: readonly BridgeColumnDefinition[],
-        initialRows: readonly unknown[][],
-        private _cursorId?: number,
-        private _hasMore: boolean = false,
-        private readonly _fetchMore?: FetchMoreFn,
-        private readonly _closeCursor?: CloseCursorFn,
-    ) {
-        this.fieldCount = _columns.length;
-        this._buffer = [...initialRows];
-        this._schemaRows = _columns.map(column => ({
-            NumericScale: typeof column.scale === 'number' && column.scale > 0 ? column.scale : undefined,
-        }));
+    public constructor(columns: readonly AccessMirrorColumn[], execution: ExecutionResult) {
+        this.fieldCount = columns.length;
+        this._buffer = execution.rows?.map(row => [...row]) ?? [];
+        this._iterator = execution.rowChunks?.[Symbol.asyncIterator]();
+        this._done = !this._iterator;
+        this._schemaRows = columns.map(column => {
+            const match = column.type.match(/DECIMAL\([^,]+,(\d+)\)/i);
+            return match ? { NumericScale: Number(match[1]) } : {};
+        });
+        this._columns = columns;
+        this._release = execution.release;
     }
+
+    private readonly _columns: readonly AccessMirrorColumn[];
 
     public async read(): Promise<boolean> {
         if (this._closed) {
             return false;
         }
-
-        if (this._readIndex + 1 < this._buffer.length) {
-            this._readIndex++;
-            return true;
+        while (this._readIndex + 1 >= this._buffer.length && !this._done && this._iterator) {
+            const next = await this._iterator.next();
+            if (next.done) {
+                this._done = true;
+                this.releaseQuery();
+                break;
+            }
+            this._buffer.push(...next.value.map(row => [...row]));
         }
-
-        if (this._hasMore && this._cursorId !== undefined && this._fetchMore) {
-            await this._fillMore();
+        if (this._readIndex + 1 >= this._buffer.length) {
+            this.releaseQuery();
+            return false;
         }
-
-        if (this._readIndex + 1 < this._buffer.length) {
-            this._readIndex++;
-            return true;
-        }
-
-        return false;
-    }
-
-    private async _fillMore(): Promise<void> {
-        const cursorId = this._cursorId;
-        if (cursorId === undefined || !this._fetchMore) {
-            this._hasMore = false;
-            return;
-        }
-        const more = await this._fetchMore(cursorId);
-        if (more.cancelled) {
-            this._hasMore = false;
-            this._cursorId = undefined;
-            return;
-        }
-        if (more.rows.length > 0) {
-            this._buffer.push(...more.rows);
-        }
-        this._hasMore = more.hasMore;
-        if (!more.hasMore) {
-            this._cursorId = undefined;
-        }
+        this._readIndex++;
+        return true;
     }
 
     public async nextResult(): Promise<boolean> {
@@ -229,16 +738,10 @@ class AccessDataReader implements DatabaseDataReader {
     }
 
     public async close(): Promise<void> {
-        if (this._closed) {
-            return;
-        }
         this._closed = true;
-        const cursorId = this._cursorId;
-        this._cursorId = undefined;
-        this._hasMore = false;
-        if (cursorId !== undefined && this._closeCursor) {
-            await this._closeCursor(cursorId).catch(() => undefined);
-        }
+        this._done = true;
+        await this._iterator?.return?.();
+        this.releaseQuery();
     }
 
     public getName(index: number): string {
@@ -250,46 +753,41 @@ class AccessDataReader implements DatabaseDataReader {
     }
 
     public getValue(index: number): unknown {
-        if (this._readIndex < 0 || this._readIndex >= this._buffer.length) {
-            return undefined;
-        }
-        return this._buffer[this._readIndex]?.[index];
+        return this._readIndex >= 0 ? this._buffer[this._readIndex]?.[index] : undefined;
     }
 
     public getSchemaTable(): { NumericScale?: number }[] {
         return this._schemaRows;
     }
+
+    private releaseQuery(): void {
+        if (this._released) return;
+        this._released = true;
+        this._release?.();
+    }
 }
 
 export class AccessConnection extends EventEmitter implements DatabaseConnection {
     public _connected = false;
-    private _lease?: AccessBridgeLease;
-    // Kept as an internal compatibility seam for existing tests and callers
-    // that inject a bridge while exercising marker handling without Java.
-    private _bridge?: JavaBridgeClient;
-    private _connectPromise?: Promise<void>;
-    private readonly _sessionId = `access-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     private readonly _databasePath: string;
-    private readonly _javaExecutable: string;
-    private readonly _javaPathIsExplicit: boolean;
     private readonly _readOnly: boolean;
-    private readonly _chunkSize?: number;
+    private readonly _sessionId = `access-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    private readonly _mirror = new AccessDuckDbMirror();
+    private _session?: AccessFileSession;
+    private _lockRelease?: (() => Promise<void>) | null;
+    private _connectPromise?: Promise<void>;
+    private _snapshots: AccessTableSnapshot[] = [];
+    private _lastInsertedIdentity?: number | bigint;
+    private _nextQueryId = 1;
+    private _queryTail: Promise<void> = Promise.resolve();
+    private _activeQueryId?: number;
+    private _activeQueryRelease?: () => void;
+    private readonly _cancelledQueryIds = new Set<number>();
 
     public constructor(public readonly config: DatabaseConnectionConfig) {
         super();
         this._databasePath = resolveDatabaseLocation(config);
-        // Keep construction side-effect free. The executable is validated at
-        // connect time immediately before the sidecar can be spawned.
-        this._javaExecutable = resolveJavaExecutable(config);
-        const configuredOption = config.options?.javaPath;
-        const configuredSetting = vscode.workspace.getConfiguration('justybase.access').get<string>('javaPath', '').trim();
-        this._javaPathIsExplicit = (typeof configuredOption === 'string' && configuredOption.trim().length > 0)
-            || configuredSetting.length > 0;
-        this._readOnly = config.options?.readOnly !== false;
-        const chunkSize = config.options?.chunkSize;
-        this._chunkSize = typeof chunkSize === 'number' && Number.isInteger(chunkSize) && chunkSize > 0
-            ? chunkSize
-            : undefined;
+        this._readOnly = configuredReadOnly(config);
     }
 
     public getSessionId(): string {
@@ -297,7 +795,7 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
     }
 
     public getCurrentCatalog(): string {
-        return 'default';
+        return path.basename(this._databasePath, path.extname(this._databasePath)) || 'default';
     }
 
     public getCurrentSchema(): string {
@@ -308,8 +806,9 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
         if (this._connected) {
             return;
         }
+        this._lastInsertedIdentity = undefined;
         if (!this._connectPromise) {
-            this._connectPromise = this._connect();
+            this._connectPromise = this.openSession();
         }
         try {
             await this._connectPromise;
@@ -318,171 +817,238 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
         }
     }
 
-    private async _connect(): Promise<void> {
-        if (this._javaPathIsExplicit || path.isAbsolute(this._javaExecutable)) {
-            validateJavaExecutablePath(this._javaExecutable);
-        }
-        verifyAccessBridgeJar(resolveBridgeJarPath());
-        const lease = await accessBridgePool.acquire({
-            databasePath: this._databasePath,
-            javaExecutable: this._javaExecutable,
-            bridgeJarPath: resolveBridgeJarPath(),
-            user: this.config.user,
+    private async openSession(): Promise<void> {
+        const session = await AccessFileSession.open({
+            filePath: this._databasePath,
             password: this.config.password,
             readOnly: this._readOnly,
         });
-        this._lease = lease;
-        this._bridge = lease.bridge;
-        this._connected = true;
+        try {
+            if (!this._readOnly && !this._lockRelease) {
+                this._lockRelease = await acquireAccessFileLock(this._databasePath, session.format);
+            }
+            await this._mirror.open(session);
+            this._session = session;
+            this._snapshots = await this._mirror.snapshotTables(session.listTables());
+            this._connected = true;
+        } catch (error) {
+            await this.releaseLock();
+            await this._mirror.close();
+            await session.close();
+            throw error;
+        }
     }
 
     public async close(): Promise<void> {
-        if (this._connectPromise) {
-            await this._connectPromise.catch(() => undefined);
+        const pendingConnection = this._connectPromise;
+        if (pendingConnection) {
+            await pendingConnection.catch(() => undefined);
         }
-        const lease = this._lease;
-        this._lease = undefined;
-        this._bridge = undefined;
+        this._activeQueryRelease?.();
+        await this._mirror.close();
+        const session = this._session;
+        this._session = undefined;
+        this._snapshots = [];
+        this._lastInsertedIdentity = undefined;
         this._connected = false;
-        if (lease) {
-            await lease.release();
-        }
+        await session?.close();
+        await this.releaseLock();
+        this.emit('close');
+    }
+
+    private async releaseLock(): Promise<void> {
+        const release = this._lockRelease;
+        this._lockRelease = undefined;
+        await release?.();
     }
 
     public createCommand(sql: string): DatabaseCommand {
-        return new AccessCommand(this, sql);
+        return new AccessCommand(this, sql, this._nextQueryId++);
     }
 
-    public getBridge(): JavaBridgeClient {
-        if (!this._bridge && !this._lease) {
-            throw new Error('Microsoft Access connection is not open.');
+    public async executeRaw(sql: string, queryId?: number): Promise<ExecutionResult> {
+        const ownerId = queryId ?? this._nextQueryId++;
+        const previous = this._queryTail;
+        let releaseQueue!: () => void;
+        const current = new Promise<void>(resolve => {
+            releaseQueue = resolve;
+        });
+        this._queryTail = current;
+        await previous;
+        if (this._cancelledQueryIds.delete(ownerId)) {
+            releaseQueue();
+            throw new Error('Query cancelled.');
         }
-        return this._bridge ?? (this._lease as AccessBridgeLease).bridge;
+        this._activeQueryId = ownerId;
+        const release = (): void => {
+            if (this._activeQueryId === ownerId) {
+                this._activeQueryId = undefined;
+                this._activeQueryRelease = undefined;
+            }
+            this._cancelledQueryIds.delete(ownerId);
+            releaseQueue();
+        };
+        this._activeQueryRelease = release;
+        try {
+            const execution = await this.executeRawUnlocked(sql, ownerId);
+            if (execution.rowChunks) {
+                return { ...execution, release };
+            }
+            release();
+            return execution;
+        } catch (error) {
+            release();
+            throw error;
+        }
     }
 
-    public executeRaw(sql: string): Promise<ExecutionResult> | PendingQuery {
-        const trimmedSql = sql.trim();
-        if (!trimmedSql) {
-            return Promise.resolve({ columns: [], rows: [], recordsAffected: -1, cancelled: false });
+    private async executeRawUnlocked(sql: string, _queryId: number): Promise<ExecutionResult> {
+        const statements = splitAccessStatements(sql);
+        if (statements.length === 0) {
+            return { columns: [], rows: [], recordsAffected: -1 };
         }
+        let lastResult: ExecutionResult | undefined;
+        for (const statement of statements) {
+            lastResult = await this.executeSingleStatement(statement);
+        }
+        return lastResult ?? { columns: [], rows: [], recordsAffected: -1 };
+    }
 
-        const pseudoResult = this.tryExecuteCompatibilityCommand(trimmedSql);
-        if (pseudoResult) {
-            return Promise.resolve(pseudoResult);
+    private async executeSingleStatement(trimmedSql: string): Promise<ExecutionResult> {
+        const compatibility = this.tryExecuteCompatibilityCommand(trimmedSql);
+        if (compatibility) {
+            return compatibility;
         }
 
         const metadataMarker = parseMetadataMarker(trimmedSql);
         if (metadataMarker) {
-            return this.executeMetadataMarker(metadataMarker);
+            return metadataResult(this.requireSession(), metadataMarker, this._mirror);
         }
 
-        if (this._readOnly && startsWithAccessWriteStatement(trimmedSql)) {
-            return Promise.reject(new Error(
-                'Microsoft Access connection is read-only. Disable "Open database as read-only" to execute INSERT, UPDATE, DELETE, or DDL.',
-            ));
+        if (startsWithAccessWriteStatement(trimmedSql)) {
+            if (this._readOnly) {
+                throw new Error('Microsoft Access connection is read-only. Disable "Open database as read-only" to execute writes.');
+            }
+            if (/^(?:CREATE|DROP|ALTER)\b/i.test(stripLeadingComments(trimmedSql))) {
+                return this.executeDdl(trimmedSql);
+            }
+            if (!/^(?:INSERT|UPDATE|DELETE)\b/i.test(stripLeadingComments(trimmedSql))) {
+                throw new Error('Unsupported statement. INSERT, UPDATE, DELETE and CREATE/DROP/ALTER are supported by the staged writer.');
+            }
+            return this.executeWrite(trimmedSql);
         }
 
-        return this.getBridge().query(trimmedSql, undefined, this._chunkSize);
+        return this._mirror.execute(trimmedSql);
     }
 
-    public async fetchMore(cursorId: number): Promise<BridgeFetchResponse> {
-        const bridge = this._bridge ?? this._lease?.bridge;
-        if (!bridge) {
-            return { kind: 'fetch', rows: [], hasMore: false, cancelled: true };
-        }
-        return bridge.fetchMore(cursorId, this._chunkSize);
-    }
-
-    public async closeCursor(cursorId: number): Promise<void> {
-        const bridge = this._bridge ?? this._lease?.bridge;
-        if (!bridge) {
-            return;
-        }
-        await bridge.closeCursor(cursorId).catch(() => undefined);
-    }
-
-    public async cancelQuery(queryId: number): Promise<void> {
-        const bridge = this._bridge ?? this._lease?.bridge;
-        if (!bridge) {
-            return;
-        }
-        await bridge.cancel(queryId).catch(() => undefined);
-    }
-
-    private async executeMetadataMarker(marker: MetadataMarker): Promise<ExecutionResult> {
-        const response = await this.getBridge().metadata(marker.kind, {
-            table: marker.kind === 'object_search' || marker.kind === 'view_source_search'
-                ? marker.pattern
-                : marker.table,
-            serverSide: marker.serverSide,
+    /**
+     * Executes a DDL statement (CREATE/DROP TABLE/INDEX/VIEW) against the
+     * staged file copy through the direct-mutation engine, then reloads the
+     * mirror so the new schema is immediately queryable.
+     */
+    private async executeDdl(sql: string): Promise<ExecutionResult> {
+        this.requireSession();
+        return withAccessFileWriteLock(this._databasePath, async () => {
+            await this.reloadSessionFromDisk();
+            const session = this.requireSession();
+            await session.writeAtomically(async context => {
+                const buffer = await fs.readFile(context.stagedPath);
+                const layout = jetLayoutFor(context.format);
+                const channel = new JetPageChannel(buffer, layout);
+                applyDdlSql(channel, sql);
+                await fs.writeFile(context.stagedPath, channel.buffer);
+            });
+            await this.reloadSessionFromDisk();
+            return { columns: [], rows: [], recordsAffected: 0 };
         });
-        return {
-            columns: response.columns,
-            rows: response.rows,
-            recordsAffected: -1,
-            cancelled: false,
-        };
+    }
+
+    public async cancelQuery(queryId?: number): Promise<void> {
+        if (queryId === undefined) {
+            return;
+        }
+        this._cancelledQueryIds.add(queryId);
+        if (this._activeQueryId === queryId) {
+            this._mirror.interrupt();
+        }
+    }
+
+    private async executeWrite(sql: string): Promise<ExecutionResult> {
+        this.requireSession();
+        return withAccessFileWriteLock(this._databasePath, async () => {
+            await this.reloadSessionFromDisk();
+            const session = this.requireSession();
+            const targetTable = writeTargetTableName(sql);
+            if (targetTable) {
+                const definition = session.getTableDefinition(targetTable);
+                if (definition.columns.some(column => column.accessType === 'complex')) {
+                    throw new Error(
+                        `Writes to Access complex columns in table '${definition.name}' are not supported yet; use its flat child table.`,
+                    );
+                }
+            }
+            const before = this._snapshots;
+            const execution = await this._mirror.executeAndReadAll(sql);
+            const after = await this._mirror.snapshotTables(session.listTables());
+            try {
+                await session.writeAtomically(context => writeAccessSnapshotChanges(
+                    context.stagedPath,
+                    context.format,
+                    before,
+                    after,
+                ));
+                this._snapshots = after;
+                const identity = insertedIdentityFromSnapshots(sql, before, after);
+                if (identity !== undefined) {
+                    this._lastInsertedIdentity = identity;
+                }
+                return execution;
+            } catch (error) {
+                await this.reloadSessionFromDisk();
+                throw error;
+            }
+        });
+    }
+
+    private async reloadSessionFromDisk(): Promise<void> {
+        const previousSession = this._session;
+        await this._mirror.close();
+        this._session = undefined;
+        this._snapshots = [];
+        await previousSession?.close();
+        await this.openSession();
+    }
+
+    private requireSession(): AccessFileSession {
+        if (!this._session) {
+            throw new Error('Microsoft Access connection is not open.');
+        }
+        return this._session;
     }
 
     private tryExecuteCompatibilityCommand(sql: string): ExecutionResult | undefined {
+        const identityMatch = sql.match(LAST_IDENTITY_QUERY);
+        if (identityMatch) {
+            const alias = identityMatch[1]
+                ? unquoteAccessIdentifier(identityMatch[1])
+                : '@@IDENTITY';
+            return result([alias], [[this._lastInsertedIdentity ?? null]]);
+        }
         if (CURRENT_CATALOG_AND_SCHEMA_QUERY.test(sql)) {
-            return {
-                columns: [
-                    { name: 'CURRENT_CATALOG', type: 'TEXT' },
-                    { name: 'CURRENT_SCHEMA', type: 'TEXT' },
-                ],
-                rows: [[this.getCurrentCatalog(), this.getCurrentSchema()]],
-                recordsAffected: -1,
-                cancelled: false,
-            };
+            return result(['CURRENT_CATALOG', 'CURRENT_SCHEMA'], [[this.getCurrentCatalog(), this.getCurrentSchema()]]);
         }
-
         if (CURRENT_CATALOG_QUERY.test(sql)) {
-            return {
-                columns: [{ name: 'CURRENT_CATALOG', type: 'TEXT' }],
-                rows: [[this.getCurrentCatalog()]],
-                recordsAffected: -1,
-                cancelled: false,
-            };
+            return result(['CURRENT_CATALOG'], [[this.getCurrentCatalog()]]);
         }
-
         if (CURRENT_SCHEMA_QUERY.test(sql)) {
-            return {
-                columns: [{ name: 'CURRENT_SCHEMA', type: 'TEXT' }],
-                rows: [[this.getCurrentSchema()]],
-                recordsAffected: -1,
-                cancelled: false,
-            };
+            return result(['CURRENT_SCHEMA'], [[this.getCurrentSchema()]]);
         }
-
         if (CURRENT_SID_QUERY.test(sql)) {
-            return {
-                columns: [{ name: 'CURRENT_SID', type: 'TEXT' }],
-                rows: [[this.getSessionId()]],
-                recordsAffected: -1,
-                cancelled: false,
-            };
+            return result(['CURRENT_SID'], [[this.getSessionId()]]);
         }
-
-        const setCatalogMatch = sql.match(SET_CATALOG_QUERY);
-        if (setCatalogMatch) {
-            return {
-                columns: [],
-                rows: [],
-                recordsAffected: 0,
-                cancelled: false,
-            };
+        if (SET_CATALOG_QUERY.test(sql) || SET_SCHEMA_QUERY.test(sql)) {
+            return { columns: [], rows: [], recordsAffected: 0 };
         }
-
-        if (SET_SCHEMA_QUERY.test(sql)) {
-            return {
-                columns: [],
-                rows: [],
-                recordsAffected: 0,
-                cancelled: false,
-            };
-        }
-
         return undefined;
     }
 }
@@ -491,53 +1057,25 @@ class AccessCommand implements DatabaseCommand {
     public commandTimeout = 0;
     public _recordsAffected = -1;
     private _cancelled = false;
-    private _pendingQuery?: PendingQuery;
 
     public constructor(
         private readonly _connection: AccessConnection,
         private readonly _sql: string,
+        private readonly _queryId: number,
     ) {}
 
     public async executeReader(): Promise<DatabaseDataReader> {
         if (this._cancelled) {
             throw new Error('Query cancelled.');
         }
-
-        const execution = this._connection.executeRaw(this._sql);
-        let result: ExecutionResult;
-        if ('requestId' in execution) {
-            this._pendingQuery = execution;
-            try {
-                result = await execution.result;
-            } finally {
-                this._pendingQuery = undefined;
-            }
-        } else {
-            result = await execution;
-        }
-
-        this._recordsAffected = result.recordsAffected;
-
-        if (result.cancelled) {
-            return new AccessDataReader([], []);
-        }
-
-        return new AccessDataReader(
-            result.columns,
-            result.rows,
-            result.cursorId,
-            result.hasMore === true,
-            cursorId => this._connection.fetchMore(cursorId),
-            cursorId => this._connection.closeCursor(cursorId),
-        );
+        const execution = await this._connection.executeRaw(this._sql, this._queryId);
+        this._recordsAffected = execution.recordsAffected;
+        return new AccessDataReader(execution.columns, execution);
     }
 
     public async cancel(): Promise<void> {
         this._cancelled = true;
-        const pending = this._pendingQuery;
-        if (pending) {
-            await this._connection.cancelQuery(pending.requestId);
-        }
+        await this._connection.cancelQuery(this._queryId);
     }
 
     public async execute(): Promise<void> {
@@ -545,3 +1083,5 @@ class AccessCommand implements DatabaseCommand {
         await reader.close();
     }
 }
+
+export type { AccessValue };

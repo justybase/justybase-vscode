@@ -1,8 +1,7 @@
 /**
  * 'access' dialect: query Microsoft Access (.mdb/.accdb) files with SQL
- * through a Java sidecar running the UCanAccess JDBC driver. The traits and
- * SQL authoring live in the core extension; this package contributes the
- * connection class and the Java bridge process.
+ * through the pure TypeScript file reader and the embedded DuckDB mirror.
+ * The traits and SQL authoring live in the core extension.
  */
 
 import type {
@@ -16,6 +15,8 @@ import { accessDialectTraits } from '../../../src/dialects/access/traits';
 import { AccessConnection } from './accessConnection';
 import { accessMetadataProvider } from './accessSchemaProvider';
 import { accessSqlAuthoring } from './accessSqlAuthoring';
+import { accessDdlProvider } from './accessDdlProvider';
+import { accessImportTypeMapper } from './accessImportTypeMapper';
 
 const accessConnectionConstructor = AccessConnection as unknown as DatabaseConnectionStaticConstructor;
 
@@ -32,7 +33,7 @@ export const accessDialect: DatabaseDialect = {
                 storage: 'topLevel',
                 required: true,
                 placeholder: 'Select a .mdb or .accdb file',
-                description: 'Microsoft Access database queried and edited with SQL. Requires a Java 11+ runtime (JRE) on the system.',
+                description: 'Microsoft Access database queried with SQL. The file is read locally and mirrored into embedded DuckDB.',
                 layout: 'full'
             },
             {
@@ -57,6 +58,10 @@ export const accessDialect: DatabaseDialect = {
     traits: accessDialectTraits,
     metadataProvider: accessMetadataProvider,
     sqlAuthoring: accessSqlAuthoring,
+    advancedFeatures: {
+        ddl: accessDdlProvider,
+        importTypeMapper: accessImportTypeMapper,
+    },
     getConnectionConstructor(): DatabaseConnectionStaticConstructor {
         return accessConnectionConstructor;
     },
