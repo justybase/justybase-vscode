@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AccessDdlCompare</RootNamespace>
+    <AssemblyName>access-ddl-compare</AssemblyName>
+    <!-- Override with -p:UCanAccessRepo=/path/to/JustyBase.UCanAccessCs when
+         the checkout is not in the default .clone directory. -->
+    <UCanAccessRepo Condition="'$(UCanAccessRepo)' == ''">$(MSBuildProjectDirectory)/.clone</UCanAccessRepo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The JustyBase.UCanAccessCs port is cloned by tools/access-ddl-compare/bootstrap.sh
+         into .clone/ (see README.md). Its UCanAccess.csproj pulls in UCanAccess.File. -->
+    <ProjectReference Include="$(UCanAccessRepo)/src/UCanAccess/UCanAccess.csproj">
+      <SetTargetFramework>TargetFramework=net10.0</SetTargetFramework>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>
