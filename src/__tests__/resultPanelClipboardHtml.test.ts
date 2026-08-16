@@ -72,4 +72,33 @@ describe('result panel clipboard HTML', () => {
         expect(payload.html).toContain('x:num="2.5000"');
         expect(payload.html).toContain('>2,5000<');
     });
+
+    it('builds a complete virtualized column payload from all resolved rows', async () => {
+        const { __testHooks } = require('../../media/resultPanel/selection.js');
+        const fetchAllRowValues = jest.fn(() => Promise.resolve([
+            ['first', 'ignored-1'],
+            ['second', 'ignored-2'],
+            ['third', 'ignored-3'],
+        ]));
+
+        const payload = await __testHooks.buildSelectedColumnClipboardPayloadAsync({
+            getVisibleLeafColumns: () => [
+                {
+                    id: '0',
+                    columnDef: { header: 'value', dataType: 'text' },
+                },
+                {
+                    id: '1',
+                    columnDef: { header: 'other', dataType: 'text' },
+                },
+            ],
+            getFilteredRowModel: () => ({ rows: [] }),
+        }, 0, true, { fetchAllRowValues });
+
+        expect(fetchAllRowValues).toHaveBeenCalledTimes(1);
+        expect(payload?.headers).toEqual(['value']);
+        expect(payload?.text).toBe('value\nfirst\nsecond\nthird');
+        expect(payload?.matrix).toHaveLength(3);
+        expect(payload?.matrix.every((row: unknown[]) => row.length === 1)).toBe(true);
+    });
 });

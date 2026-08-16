@@ -347,6 +347,38 @@ async function resolveRowValuesForClipboard(
     return undefined;
 }
 
+async function resolveAllRowValuesForClipboard(
+    table: TanStackTable,
+    resolver?: ClipboardRowResolver,
+): Promise<unknown[][]> {
+    if (resolver?.fetchAllRowValues) {
+        return resolver.fetchAllRowValues();
+    }
+
+    return table.getFilteredRowModel().rows.map((row) => row.original as unknown[]);
+}
+
+function buildClipboardPayloadFromRowValues(
+    columns: TanStackColumn[],
+    rowValues: unknown[][],
+    withHeaders: boolean,
+): SelectedClipboardPayload {
+    const headers = withHeaders ? columns.map(col => String(col.columnDef.header ?? '')) : [];
+    const alignments = columns.map(col => getClipboardColumnAlignment(col.columnDef));
+    const matrix = rowValues.map((values) =>
+        columns.map((col) => getClipboardCellPayloadFromValues(values, col)),
+    );
+
+    return {
+        headers,
+        matrix,
+        alignments,
+        text: createPlainTextTable(headers, matrix),
+        html: createHtmlTable(headers, matrix, alignments),
+        md: createMarkdownTable(headers, matrix, alignments),
+    };
+}
+
 export async function buildSelectedClipboardPayloadAsync(
     table: TanStackTable,
     selectedCells: Set<string>,
@@ -391,6 +423,22 @@ export async function buildSelectedClipboardPayloadAsync(
     };
 }
 
+export async function buildSelectedColumnClipboardPayloadAsync(
+    table: TanStackTable,
+    columnIndex: number,
+    withHeaders = false,
+    resolver?: ClipboardRowResolver,
+) {
+    const columns = getVisibleDataColumns(table);
+    const selectedColumn = columns[columnIndex];
+    if (!selectedColumn) {
+        return null;
+    }
+
+    const allRows = await resolveAllRowValuesForClipboard(table, resolver);
+    return buildClipboardPayloadFromRowValues([selectedColumn], allRows, withHeaders);
+}
+
 export async function copyAllRowsAsync(
     table: TanStackTable,
     withHeaders: boolean,
@@ -398,22 +446,8 @@ export async function copyAllRowsAsync(
     resolver?: ClipboardRowResolver,
 ): Promise<void> {
     const columns = getVisibleDataColumns(table);
-    const headers = withHeaders ? columns.map(col => String(col.columnDef.header ?? '')) : [];
-    const alignments = columns.map(col => getClipboardColumnAlignment(col.columnDef));
-    const allRows = resolver?.fetchAllRowValues
-        ? await resolver.fetchAllRowValues()
-        : table.getFilteredRowModel().rows.map((row) => row.original as unknown[]);
-    const matrix = allRows.map((rowValues) =>
-        columns.map((col) => getClipboardCellPayloadFromValues(rowValues, col)),
-    );
-    const payload = {
-        headers,
-        matrix,
-        alignments,
-        text: createPlainTextTable(headers, matrix),
-        html: createHtmlTable(headers, matrix, alignments),
-        md: createMarkdownTable(headers, matrix, alignments),
-    };
+    const allRows = await resolveAllRowValuesForClipboard(table, resolver);
+    const payload = buildClipboardPayloadFromRowValues(columns, allRows, withHeaders);
     const plainText = resolvePlainText(payload, plainTextFormat);
     writeMultiFormatToClipboard(payload.html, plainText, payload.md, `${allRows.length} rows`);
 }
@@ -423,18 +457,9 @@ export async function copyAllRowsAsHtmlAsync(
     resolver?: ClipboardRowResolver,
 ): Promise<void> {
     const columns = getVisibleDataColumns(table);
-    const headers = columns.map(col => String(col.columnDef.header ?? ''));
-    const alignments = columns.map(col => getClipboardColumnAlignment(col.columnDef));
-    const allRows = resolver?.fetchAllRowValues
-        ? await resolver.fetchAllRowValues()
-        : table.getFilteredRowModel().rows.map((row) => row.original as unknown[]);
-    const matrix = allRows.map((rowValues) =>
-        columns.map((col) => getClipboardCellPayloadFromValues(rowValues, col)),
-    );
-    const html = createHtmlTable(headers, matrix, alignments);
-    const text = createPlainTextTable(headers, matrix);
-    const md = createMarkdownTable(headers, matrix, alignments);
-    writeMultiFormatToClipboard(html, text, md, `${allRows.length} rows`);
+    const allRows = await resolveAllRowValuesForClipboard(table, resolver);
+    const payload = buildClipboardPayloadFromRowValues(columns, allRows, true);
+    writeMultiFormatToClipboard(payload.html, payload.text, payload.md, `${allRows.length} rows`);
 }
 
 export async function copyAllRowsAsMdAsync(
@@ -443,22 +468,14 @@ export async function copyAllRowsAsMdAsync(
     resolver?: ClipboardRowResolver,
 ): Promise<void> {
     const columns = getVisibleDataColumns(table);
-    const headers = withHeaders ? columns.map(col => String(col.columnDef.header ?? '')) : [];
-    const alignments = columns.map(col => getClipboardColumnAlignment(col.columnDef));
-    const allRows = resolver?.fetchAllRowValues
-        ? await resolver.fetchAllRowValues()
-        : table.getFilteredRowModel().rows.map((row) => row.original as unknown[]);
-    const matrix = allRows.map((rowValues) =>
-        columns.map((col) => getClipboardCellPayloadFromValues(rowValues, col)),
-    );
-    const html = createHtmlTable(headers, matrix, alignments);
-    const md = createMarkdownTable(headers, matrix, alignments);
+    const allRows = await resolveAllRowValuesForClipboard(table, resolver);
+    const payload = buildClipboardPayloadFromRowValues(columns, allRows, withHeaders);
     vscode.postMessage({
         command: 'setContext',
         key: 'netezza.resultsCopyPrimed',
         value: false,
     });
-    writeMultiFormatToClipboard(html, md, md, `${allRows.length} rows`);
+    writeMultiFormatToClipboard(payload.html, payload.md, payload.md, `${allRows.length} rows`);
 }
 
 export function buildSelectedClipboardPayload(
@@ -655,5 +672,6 @@ export const __testHooks = {
     localizeNumericDisplayText,
     getClipboardCellPayload,
     createHtmlTable,
-    buildSelectedClipboardPayload
+    buildSelectedClipboardPayload,
+    buildSelectedColumnClipboardPayloadAsync,
 };
