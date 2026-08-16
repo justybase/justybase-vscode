@@ -106,8 +106,8 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
         // Open Visual Query Builder
         vscode.commands.registerCommand('netezza.openVisualQueryBuilder', async (item: SchemaItemData) => {
             try {
-                if (!item || item.contextValue !== 'typeGroup:TABLE') {
-                    vscode.window.showErrorMessage('Please right-click on a TABLE type group to open Visual Query Builder');
+                if (!item || (item.contextValue !== 'typeGroup:TABLE' && item.contextValue !== 'typeGroup:VIEW')) {
+                    vscode.window.showErrorMessage('Please right-click on a TABLE or VIEW type group to open Visual Query Builder');
                     return;
                 }
 
@@ -124,11 +124,20 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
                     return;
                 }
 
+                const databaseKind = connectionManager.getConnectionDatabaseKind(connectionName);
+                if (databaseKind !== 'netezza' && databaseKind !== 'duckdb' && databaseKind !== 'file') {
+                    vscode.window.showErrorMessage(
+                        'Visual Query Builder is available for Netezza, DuckDB, and File SQL connections.'
+                    );
+                    return;
+                }
+
                 const { buildVisualQueryBuilderDataForAllSchemas } = await import('../../schema/queryBuilderProvider');
                 
                 let tableCount = 0;
                 let relCount = 0;
                 let availableSchemas: string[] = [];
+                let hasSources = false;
                 
                 await executeWithProgress(
                     `Loading Visual Query Builder for ${database}...`,
@@ -137,16 +146,18 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
                             context,
                             connectionManager,
                             connectionName,
-                            database.toUpperCase()
+                            databaseKind === 'netezza' ? database.toUpperCase() : database
                         );
                         tableCount = data.tables.length;
                         relCount = data.relationships.length;
                         availableSchemas = data.allSchemas || [];
 
-                        if (availableSchemas.length === 0) {
-                            vscode.window.showWarningMessage('No tables found in this database');
+                        if (availableSchemas.length === 0 || data.tables.length === 0) {
+                            vscode.window.showWarningMessage('No tables or views found in this database');
                             return;
                         }
+
+                        hasSources = true;
 
                         const { VisualQueryBuilderView } = await import('../../views/visualQueryBuilderView');
                         VisualQueryBuilderView.createOrShow(
@@ -160,8 +171,12 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
                     }
                 );
 
+                if (!hasSources) {
+                    return;
+                }
+
                 vscode.window.showInformationMessage(
-                    `Visual Query Builder ready: ${tableCount} tables, ${relCount} relationships from ${availableSchemas.length} schema(s)`
+                    `Visual Query Builder ready: ${tableCount} sources, ${relCount} relationships from ${availableSchemas.length} schema(s)`
                 );
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
