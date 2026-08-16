@@ -1,0 +1,19 @@
+{
+  "name": "@justybase/access-file",
+  "version": "3.16.28",
+  "description": "Pure Node.js/TypeScript Access file session and format boundary for MDB/ACCDB.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "mdb-reader": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.0"
+  }
+}
