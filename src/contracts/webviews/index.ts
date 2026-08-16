@@ -101,7 +101,6 @@ export {
 } from './fileConnectionPanelContracts';
 
 export type {
-    FileConnectionPanelFile,
     FileConnectionPanelHostToWebviewMessage,
     FileConnectionPanelMode,
     FileConnectionPanelState,
@@ -205,12 +204,21 @@ export type {
     VisualQueryBuilderBootstrapState,
     VisualQueryBuilderColumn,
     VisualQueryBuilderData,
+    VisualQueryBuilderGridAggregate,
+    VisualQueryBuilderGridColumn,
+    VisualQueryBuilderGridSort,
     VisualQueryBuilderHostToWebviewMessage,
     VisualQueryBuilderInboundMessage,
+    VisualQueryBuilderJoin,
+    VisualQueryBuilderJoinSource,
+    VisualQueryBuilderJoinType,
     VisualQueryBuilderOutboundMessage,
+    VisualQueryBuilderQueryClauses,
     VisualQueryBuilderRelationship,
+    VisualQueryBuilderState,
     VisualQueryBuilderTable,
-    VisualQueryBuilderWebviewToHostMessage
+    VisualQueryBuilderWebviewToHostMessage,
+    PlacedTable
 } from './visualQueryBuilderContracts';
 
 export type {
