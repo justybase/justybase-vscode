@@ -249,6 +249,20 @@ export function setupExecutionStatusBanner(): void {
   });
 }
 
+/** FilePreviewEditor reuses this result grid and exposes a file-specific action. */
+function setupFileWorkspaceAction(): void {
+  const button = getElementById('add-file-to-data-workspace');
+  if (!button || button.dataset.wired === '1') {
+    return;
+  }
+  button.dataset.wired = '1';
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    vscode.postMessage({ command: 'addFileToDataWorkspace' });
+  });
+}
+
 // Setup global keyboard shortcuts
 function isInputLikeElement(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -924,6 +938,7 @@ export function init(): void {
     setupCancelButton();
     setupHideLoadingOverlayButton();
     setupExecutionStatusBanner();
+    setupFileWorkspaceAction();
 
     // Switch to correct grid if not default
     if (getActiveGridIndex() !== 0) {
