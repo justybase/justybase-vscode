@@ -205,6 +205,41 @@ describe('ETL advanced task executors', () => {
             expect(exportQueryToXlsbMock).toHaveBeenCalled();
         });
 
+        it('uses the connection selected on the task', async () => {
+            const selectedConnection: ConnectionDetails = {
+                ...baseConnectionDetails,
+                name: 'warehouse-read',
+                database: 'WAREHOUSE_READ'
+            };
+            const strategy: IExportStrategy = {
+                format: 'csv',
+                export: jest.fn().mockResolvedValue({ success: true, rowsExported: 4 })
+            };
+            const executor = new ExportTaskExecutor(createResolver(), new Map([['csv', strategy]]));
+            const context = createContext({
+                resolveConnection: jest.fn().mockResolvedValue(selectedConnection)
+            });
+
+            const result = await executor.execute(createNode({
+                type: 'export',
+                format: 'csv',
+                connection: 'warehouse-read',
+                outputPath: 'C:\\out.csv',
+                query: 'SELECT 1'
+            }), context);
+
+            expect(context.resolveConnection).toHaveBeenCalledWith('warehouse-read');
+            expect(strategy.export).toHaveBeenCalledWith(
+                context.extensionContext,
+                selectedConnection,
+                'SELECT 1',
+                'C:\\out.csv',
+                expect.any(Function),
+                undefined
+            );
+            expect(result.status).toBe('success');
+        });
+
         it('returns error when XLSB strategy reports failure', async () => {
             exportQueryToXlsbMock.mockResolvedValue({
                 success: false,
@@ -364,6 +399,37 @@ describe('ETL advanced task executors', () => {
                     rowsInserted: 95
                 })
             );
+        });
+
+        it('uses the connection selected on the task', async () => {
+            const selectedConnection: ConnectionDetails = {
+                ...baseConnectionDetails,
+                name: 'warehouse-write',
+                database: 'WAREHOUSE_WRITE'
+            };
+            const importer = { importData: jest.fn().mockResolvedValue({ success: true, details: { rowsInserted: 1 } } as ImportResult) };
+            const executor = new ImportTaskExecutor(createResolver(), importer);
+            const context = createContext({
+                resolveConnection: jest.fn().mockResolvedValue(selectedConnection)
+            });
+
+            const result = await executor.execute(createNode({
+                type: 'import',
+                format: 'csv',
+                connection: 'warehouse-write',
+                inputPath: 'C:\\input.csv',
+                targetTable: 'orders'
+            }), context);
+
+            expect(context.resolveConnection).toHaveBeenCalledWith('warehouse-write');
+            expect(importer.importData).toHaveBeenCalledWith(
+                'C:\\input.csv',
+                'orders',
+                selectedConnection,
+                expect.any(Function),
+                undefined
+            );
+            expect(result.status).toBe('success');
         });
 
         it('returns error when importer reports failure', async () => {

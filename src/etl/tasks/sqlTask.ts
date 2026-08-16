@@ -8,6 +8,7 @@ import { ExecutionContext, IConnectionFactory, IVariableResolver } from '../inte
 import { BaseTaskExecutor } from './baseTaskExecutor';
 import { NzConnection, NzDataReader, ConnectionDetails } from '../../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../../core/connectionFactory';
+import { resolveTaskConnection } from '../utils/connectionResolver';
 
 /**
  * Default connection factory using the driver
@@ -60,15 +61,21 @@ export class SqlTaskExecutor extends BaseTaskExecutor<SqlNodeConfig> {
 
             this.reportProgress(context, `Executing SQL: ${query.substring(0, 100)}${query.length > 100 ? '...' : ''}`);
 
-            // Validate connection details
-            if (!context.connectionDetails) {
-                return this.createError(node.id, startTime, 'No connection details available in context');
+            const connectionDetails = await resolveTaskConnection(context, config.connection);
+            if (!connectionDetails) {
+                return this.createError(
+                    node.id,
+                    startTime,
+                    config.connection
+                        ? `Connection not found: ${config.connection}`
+                        : 'No connection details available in context',
+                );
             }
 
             let connection: NzConnection | null = null;
             try {
                 // Create connection using factory
-                connection = await this.connectionFactory.createConnection(context.connectionDetails);
+                connection = await this.connectionFactory.createConnection(connectionDetails);
 
                 // Execute the query
                 const result = await this.executeQuery(connection, query, config.timeout);

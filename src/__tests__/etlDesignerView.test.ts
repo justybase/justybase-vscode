@@ -83,6 +83,8 @@ describe('views/etlDesignerView', () => {
             updateNode: jest.fn(),
             addConnection: jest.fn(),
             removeConnection: jest.fn(),
+            moveNodesToContainer: jest.fn(),
+            removeNodesFromContainer: jest.fn(),
             getNode: jest.fn(),
             saveProject: jest.fn().mockResolvedValue(undefined),
             loadProject: jest.fn().mockResolvedValue(project),
@@ -142,6 +144,69 @@ describe('views/etlDesignerView', () => {
         expect(projectManager.createProject).toHaveBeenCalledWith('New P');
     });
 
+    it('moves tasks through the container grouping messages', async () => {
+        EtlDesignerView.createOrShow({ extensionUri: {} as vscode.Uri } as vscode.ExtensionContext, project);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const instance = (EtlDesignerView as any).currentPanel as any;
+
+        await instance._handleMessage({ type: 'moveNodesToContainer', payload: { containerId: 'group', nodes: [{ id: 'task', position: { x: 80, y: 90 } }] } });
+        await instance._handleMessage({ type: 'removeNodesFromContainer', payload: { nodes: [{ id: 'task', position: { x: 700, y: 180 } }] } });
+
+        expect(projectManager.moveNodesToContainer).toHaveBeenCalledWith('group', [{ id: 'task', position: { x: 80, y: 90 } }]);
+        expect(projectManager.removeNodesFromContainer).toHaveBeenCalledWith([{ id: 'task', position: { x: 700, y: 180 } }]);
+    });
+
+    it('updates task details and publishes safe connection options', async () => {
+        const node = {
+            id: 'sql-task',
+            type: 'sql',
+            name: 'SQL task',
+            position: { x: 0, y: 0 },
+            config: { type: 'sql', query: 'SELECT 1' }
+        };
+        projectManager.getNode.mockReturnValue(node);
+        const connManager = {
+            getActiveConnectionName: jest.fn(() => 'active'),
+            getConnections: jest.fn().mockResolvedValue([
+                { name: 'active', database: 'MAIN', password: 'secret' },
+                { name: 'archive', database: 'ARCHIVE', password: 'secret-2' }
+            ]),
+            getConnection: jest.fn().mockResolvedValue({ name: 'active' })
+        };
+        EtlDesignerView.setConnectionManager(connManager as never);
+
+        EtlDesignerView.createOrShow({ extensionUri: {} as vscode.Uri } as vscode.ExtensionContext, project);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const instance = (EtlDesignerView as any).currentPanel as any;
+
+        await instance._handleMessage({
+            type: 'updateNodeDetails',
+            payload: {
+                nodeId: 'sql-task',
+                name: 'Read archive',
+                description: 'Reads the archive database',
+                config: { type: 'sql', query: 'SELECT * FROM archive', connection: 'archive' }
+            }
+        });
+        await instance._handleMessage({ type: 'getProject' });
+
+        expect(projectManager.updateNode).toHaveBeenCalledWith('sql-task', expect.objectContaining({
+            name: 'Read archive',
+            description: 'Reads the archive database',
+            config: { type: 'sql', query: 'SELECT * FROM archive', connection: 'archive' }
+        }));
+        expect(panel.webview.postMessage).toHaveBeenCalledWith({
+            type: 'connectionOptions',
+            payload: {
+                activeConnectionName: 'active',
+                connections: [
+                    { name: 'active', database: 'MAIN', dbType: undefined },
+                    { name: 'archive', database: 'ARCHIVE', dbType: undefined }
+                ]
+            }
+        });
+    });
+
     it('should execute runProject flow and stop execution', async () => {
         const engine = new EtlExecutionEngine() as unknown as { execute: jest.Mock };
         engine.execute.mockResolvedValue({
@@ -172,4 +237,3 @@ describe('views/etlDesignerView', () => {
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('ETL execution cancellation requested...');
     });
 });
-

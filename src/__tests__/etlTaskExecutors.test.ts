@@ -426,6 +426,35 @@ describe("SqlTaskExecutor", () => {
       expect(mockConnection.close).toHaveBeenCalled();
     });
 
+    it("should use the connection selected on the SQL task", async () => {
+      const mockReader = createMockReader({ columns: ["ID"], rows: [[1]] });
+      const mockCommand = {
+        executeReader: jest.fn().mockResolvedValue(mockReader),
+        commandTimeout: undefined,
+      };
+      mockConnection.createCommand.mockReturnValue(mockCommand as any);
+
+      const selectedConnection = {
+        ...mockContext.connectionDetails,
+        name: "reporting",
+        database: "reporting_db",
+      };
+      mockContext.resolveConnection = jest.fn().mockResolvedValue(selectedConnection);
+      const node: EtlNode = {
+        id: "sql-node",
+        type: "sql",
+        name: "SQL Node",
+        position: { x: 0, y: 0 },
+        config: { type: "sql", query: "SELECT 1", connection: "reporting" } as SqlNodeConfig,
+      };
+
+      const result = await executor.execute(node, mockContext);
+
+      expect(mockContext.resolveConnection).toHaveBeenCalledWith("reporting");
+      expect(mockConnectionFactory.createConnection).toHaveBeenCalledWith(selectedConnection);
+      expect(result.status).toBe("success");
+    });
+
     it("should handle query with timeout", async () => {
       const mockReader = createMockReader({
         columns: ["ID"],
@@ -755,6 +784,45 @@ describe("ContainerTaskExecutor", () => {
           name: "Container: Test Container",
           nodes: [nestedNode],
         }),
+        mockContext,
+      );
+    });
+
+    it("should resolve v2 flat members from the execution context", async () => {
+      const nestedNode: EtlNode = {
+        id: "flat-nested-node",
+        type: "sql",
+        name: "Flat Nested SQL",
+        position: { x: 60, y: 90 },
+        containerId: "container-node",
+        config: { type: "sql", query: "SELECT 1" },
+      };
+      const node: EtlNode = {
+        id: "container-node",
+        type: "container",
+        name: "Flat Container",
+        position: { x: 0, y: 0 },
+        config: { type: "container" },
+      };
+      mockContext.project = {
+        name: "Flat",
+        version: "2.0.0",
+        nodes: [node, nestedNode],
+        connections: [],
+      };
+      (mockEngine.execute as jest.Mock).mockResolvedValue({
+        projectName: "Container: Flat Container",
+        startTime: new Date(),
+        endTime: new Date(),
+        status: "completed",
+        nodeResults: new Map([[nestedNode.id, { nodeId: nestedNode.id, status: "success", startTime: new Date() }]]),
+      } as EtlExecutionResult);
+
+      const result = await executor.execute(node, mockContext);
+
+      expect(result.status).toBe("success");
+      expect(mockEngine.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ nodes: [expect.objectContaining({ id: "flat-nested-node", containerId: undefined })] }),
         mockContext,
       );
     });

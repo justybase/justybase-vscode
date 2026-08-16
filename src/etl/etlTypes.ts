@@ -22,6 +22,11 @@ export interface EtlNode {
     name: string;
     description?: string;
     position: Position;
+    /**
+     * Owning sequence container. Positions of grouped nodes are relative to
+     * the container; root nodes use canvas coordinates.
+     */
+    containerId?: string;
     config: EtlNodeConfig;
 }
 
@@ -45,13 +50,23 @@ export interface PythonNodeConfig {
 
 export interface ContainerNodeConfig {
     type: 'container';
-    nodes: EtlNode[];
-    connections: EtlConnection[];
+    /** Persisted size of the sequence-container boundary on the canvas. */
+    width?: number;
+    height?: number;
+    /**
+     * Legacy v1 payload. It is accepted during project loading and flattened
+     * into EtlNode.containerId before a project becomes editable.
+     */
+    nodes?: EtlNode[];
+    /** Legacy v1 payload paired with nodes. */
+    connections?: EtlConnection[];
 }
 
 export interface ExportNodeConfig {
     type: 'export';
     format: 'csv' | 'xlsb' | 'parquet';
+    /** Named connection used by this task; omitted means the run fallback. */
+    connection?: string;
     outputPath: string;
     query?: string;       // If SQL is embedded
     sourceNodeId?: string; // Or use result from previous node
@@ -63,6 +78,8 @@ export interface ExportNodeConfig {
 export interface ImportNodeConfig {
     type: 'import';
     format: 'csv' | 'xlsb' | 'parquet';
+    /** Named connection used by this task; omitted means the run fallback. */
+    connection?: string;
     inputPath: string;
     targetTable: string;
     targetSchema?: string;
@@ -106,6 +123,15 @@ export interface EtlConnection {
     connectionType?: ConnectionType;  // 'success' (default) or 'failure' for error handling
     label?: string;
     condition?: string;  // Optional condition expression
+    /**
+     * Original task endpoints for a connection that crosses a container
+     * boundary. The visible/executed edge uses the container endpoint, while
+     * these values make moving tasks in and out of a group reversible.
+     */
+    boundary?: {
+        originalFrom: string;
+        originalTo: string;
+    };
 }
 
 // ETL Project
@@ -117,6 +143,10 @@ export interface EtlProject {
     nodes: EtlNode[];
     connections: EtlConnection[];
 }
+
+export const ETL_PROJECT_FORMAT_VERSION = '2.0.0';
+export const DEFAULT_CONTAINER_WIDTH = 620;
+export const DEFAULT_CONTAINER_HEIGHT = 390;
 
 // Execution Status
 export type EtlNodeStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
@@ -147,7 +177,11 @@ export function getDefaultConfig(type: EtlNodeType): EtlNodeConfig {
         case 'python':
             return { type: 'python', script: '' };
         case 'container':
-            return { type: 'container', nodes: [], connections: [] };
+            return {
+                type: 'container',
+                width: DEFAULT_CONTAINER_WIDTH,
+                height: DEFAULT_CONTAINER_HEIGHT,
+            };
         case 'export':
             return { type: 'export', format: 'csv', outputPath: '' };
         case 'import':

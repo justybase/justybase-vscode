@@ -6,6 +6,7 @@
 import { EtlNode, EtlNodeExecutionResult, ContainerNodeConfig, EtlProject } from '../etlTypes';
 import { ExecutionContext, IExecutionEngine, IVariableResolver } from '../interfaces';
 import { BaseTaskExecutor } from './baseTaskExecutor';
+import { getContainerExecutionProject } from '../projectStructure';
 
 /**
  * Container execution output
@@ -39,22 +40,18 @@ export class ContainerTaskExecutor extends BaseTaskExecutor<ContainerNodeConfig>
         const startTime = new Date();
 
         // Empty container is a no-op success
-        if (!config.nodes || config.nodes.length === 0) {
+        const containerProject = context.project
+            ? getContainerExecutionProject(context.project, node.id)
+            : this.getLegacyContainerProject(node.name, config);
+
+        if (containerProject.nodes.length === 0) {
             return this.createSuccess(node.id, startTime, {
                 output: 'Empty container - nothing to execute'
             });
         }
 
         return this.safeExecute(node.id, startTime, async () => {
-            this.reportProgress(context, `Entering container: ${node.name} (${config.nodes.length} tasks)`);
-
-            // Create a mini-project from the container's nodes
-            const containerProject: EtlProject = {
-                name: `Container: ${node.name}`,
-                version: '1.0.0',
-                nodes: config.nodes,
-                connections: config.connections || []
-            };
+            this.reportProgress(context, `Entering container: ${node.name} (${containerProject.nodes.length} tasks)`);
 
             // Execute the container's tasks using the engine
             const result = await this.engine.execute(containerProject, context);
@@ -62,8 +59,17 @@ export class ContainerTaskExecutor extends BaseTaskExecutor<ContainerNodeConfig>
             this.reportProgress(context, `Exiting container: ${node.name}`);
 
             // Process results based on execution status
-            return this.processExecutionResult(node.id, startTime, config, result);
+            return this.processExecutionResult(node.id, startTime, containerProject.nodes.length, result);
         });
+    }
+
+    private getLegacyContainerProject(name: string, config: ContainerNodeConfig): EtlProject {
+        return {
+            name: `Container: ${name}`,
+            version: '1.0.0',
+            nodes: config.nodes || [],
+            connections: config.connections || [],
+        };
     }
 
     /**
@@ -72,14 +78,14 @@ export class ContainerTaskExecutor extends BaseTaskExecutor<ContainerNodeConfig>
     private processExecutionResult(
         nodeId: string,
         startTime: Date,
-        config: ContainerNodeConfig,
+        taskCount: number,
         result: import('../etlTypes').EtlExecutionResult
     ): EtlNodeExecutionResult {
         if (result.status === 'completed') {
             const { successCount, totalRows } = this.countSuccesses(result);
 
             const output: ContainerOutput = {
-                tasksExecuted: config.nodes.length,
+                tasksExecuted: taskCount,
                 tasksSucceeded: successCount,
                 nestedResults: Array.from(result.nodeResults.entries())
             };

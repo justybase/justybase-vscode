@@ -4,6 +4,12 @@
  */
 
 import { EtlProject, EtlNode, EtlConnection } from '../etlTypes';
+import {
+    getContainerExecutionProject,
+    getLogicalConnectionEndpoints,
+    getRootExecutionProject,
+    isContainerNode,
+} from '../projectStructure';
 
 /**
  * Validation result containing errors and warnings
@@ -50,6 +56,7 @@ export class ProjectValidator {
         const nodeErrors = this.validateNodes(nodesArray);
         errors.push(...nodeErrors.errors);
         warnings.push(...nodeErrors.warnings);
+        errors.push(...this.validateContainerMembership(nodesArray));
 
         // Validate connections
         const nodeIds = new Set(nodesArray.map(n => n.id));
@@ -112,6 +119,22 @@ export class ProjectValidator {
         return { errors, warnings };
     }
 
+    private validateContainerMembership(nodes: EtlNode[]): string[] {
+        const errors: string[] = [];
+        const nodeById = new Map(nodes.map(node => [node.id, node]));
+        for (const node of nodes) {
+            if (!node.containerId) continue;
+            const container = nodeById.get(node.containerId);
+            if (!isContainerNode(container)) {
+                errors.push(`Node ${node.id} has invalid container: ${node.containerId}`);
+            }
+            if (node.type === 'container') {
+                errors.push(`Container ${node.id} cannot be nested`);
+            }
+        }
+        return errors;
+    }
+
     /**
      * Validate connections array
      */
@@ -139,13 +162,21 @@ export class ProjectValidator {
                 errors.push(`Connection ${conn.id} has invalid 'to' node: ${conn.to}`);
             }
 
+            const logical = getLogicalConnectionEndpoints(conn);
+            if (!validNodeIds.has(logical.from)) {
+                errors.push(`Connection ${conn.id} has invalid original 'from' node: ${logical.from}`);
+            }
+            if (!validNodeIds.has(logical.to)) {
+                errors.push(`Connection ${conn.id} has invalid original 'to' node: ${logical.to}`);
+            }
+
             // Check self-connection
             if (conn.from === conn.to) {
                 errors.push(`Connection ${conn.id} cannot connect node to itself`);
             }
 
             // Check duplicate connection
-            const pairKey = `${conn.from}->${conn.to}`;
+            const pairKey = `${logical.from}->${logical.to}:${conn.connectionType || 'success'}`;
             if (connectionPairs.has(pairKey)) {
                 warnings.push(`Duplicate connection from ${conn.from} to ${conn.to}`);
             } else {
@@ -162,7 +193,25 @@ export class ProjectValidator {
      * @returns Array of error messages if cycles found
      */
     detectCycles(project: EtlProject): string[] {
-        const errors: string[] = [];
+        if (!Array.isArray(project.nodes) || !Array.isArray(project.connections)) {
+            return [];
+        }
+        const scopes = [getRootExecutionProject(project)];
+        for (const node of project.nodes || []) {
+            if (isContainerNode(node)) {
+                scopes.push(getContainerExecutionProject(project, node.id));
+            }
+        }
+
+        for (const scope of scopes) {
+            if (this.hasCycle(scope)) {
+                return ['Project contains circular dependencies'];
+            }
+        }
+        return [];
+    }
+
+    private hasCycle(project: EtlProject): boolean {
         const visited = new Set<string>();
         const recStack = new Set<string>();
 
@@ -196,13 +245,11 @@ export class ProjectValidator {
         for (const node of project.nodes || []) {
             if (!visited.has(node.id)) {
                 if (dfs(node.id)) {
-                    errors.push('Project contains circular dependencies');
-                    break;
+                    return true;
                 }
             }
         }
-
-        return errors;
+        return false;
     }
 
     /**
@@ -211,17 +258,18 @@ export class ProjectValidator {
      * @returns Array of node IDs in execution order, or null if cycle detected
      */
     getTopologicalOrder(project: EtlProject): string[] | null {
+        const rootProject = getRootExecutionProject(project);
         const inDegree = new Map<string, number>();
         const adj = new Map<string, string[]>();
 
         // Initialize
-        for (const node of project.nodes) {
+        for (const node of rootProject.nodes) {
             inDegree.set(node.id, 0);
             adj.set(node.id, []);
         }
 
         // Build graph
-        for (const conn of project.connections) {
+        for (const conn of rootProject.connections) {
             adj.get(conn.from)?.push(conn.to);
             inDegree.set(conn.to, (inDegree.get(conn.to) || 0) + 1);
         }
@@ -249,7 +297,7 @@ export class ProjectValidator {
         }
 
         // Check if all nodes are included (no cycle)
-        if (result.length !== project.nodes.length) {
+        if (result.length !== rootProject.nodes.length) {
             return null; // Cycle detected
         }
 

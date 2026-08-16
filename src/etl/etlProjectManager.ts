@@ -5,6 +5,7 @@
 
 import * as fs from 'fs';
 import {
+    ETL_PROJECT_FORMAT_VERSION,
     EtlProject,
     EtlNode,
     EtlConnection,
@@ -13,6 +14,13 @@ import {
 } from './etlTypes';
 import { IProjectManager } from './interfaces';
 import { ProjectValidator, ValidationResult } from './utils/projectValidator';
+import {
+    PositionedNode,
+    getLogicalConnectionEndpoints,
+    moveNodesToContainer as moveNodesToContainerInProject,
+    normalizeEtlProject,
+    removeNodesFromContainer as removeNodesFromContainerInProject,
+} from './projectStructure';
 
 /**
  * ETL Project Manager
@@ -56,7 +64,7 @@ export class EtlProjectManager implements IProjectManager {
     createProject(name: string): EtlProject {
         this.currentProject = {
             name,
-            version: '1.0.0',
+            version: ETL_PROJECT_FORMAT_VERSION,
             description: '',
             variables: {},
             nodes: [],
@@ -72,7 +80,7 @@ export class EtlProjectManager implements IProjectManager {
      */
     async loadProject(filePath: string): Promise<EtlProject> {
         const content = await fs.promises.readFile(filePath, 'utf-8');
-        const project = JSON.parse(content) as EtlProject;
+        const project = normalizeEtlProject(JSON.parse(content) as EtlProject);
 
         // Validate basic structure
         const errors = this.validateProject(project);
@@ -130,6 +138,15 @@ export class EtlProjectManager implements IProjectManager {
         if (!node.id) {
             node.id = generateNodeId();
         }
+        if (node.containerId) {
+            const container = this.currentProject.nodes.find(candidate => candidate.id === node.containerId);
+            if (!container || container.type !== 'container') {
+                throw new Error(`Target container was not found: ${node.containerId}`);
+            }
+            if (node.type === 'container') {
+                throw new Error('Containers cannot be nested');
+            }
+        }
         this.currentProject.nodes.push(node);
         this.isDirty = true;
     }
@@ -159,9 +176,25 @@ export class EtlProjectManager implements IProjectManager {
         if (!this.currentProject) {
             throw new Error('No project loaded');
         }
-        this.currentProject.nodes = this.currentProject.nodes.filter(n => n.id !== nodeId);
+        const node = this.currentProject.nodes.find(candidate => candidate.id === nodeId);
+        const nodeIdsToRemove = new Set<string>([nodeId]);
+        if (node?.type === 'container') {
+            for (const child of this.currentProject.nodes) {
+                if (child.containerId === nodeId) {
+                    nodeIdsToRemove.add(child.id);
+                }
+            }
+        }
+
+        this.currentProject.nodes = this.currentProject.nodes.filter(n => !nodeIdsToRemove.has(n.id));
         this.currentProject.connections = this.currentProject.connections.filter(
-            c => c.from !== nodeId && c.to !== nodeId
+            c => {
+                const logical = getLogicalConnectionEndpoints(c);
+                return !nodeIdsToRemove.has(c.from)
+                    && !nodeIdsToRemove.has(c.to)
+                    && !nodeIdsToRemove.has(logical.from)
+                    && !nodeIdsToRemove.has(logical.to);
+            }
         );
         this.isDirty = true;
     }
@@ -177,25 +210,30 @@ export class EtlProjectManager implements IProjectManager {
             connection.id = generateConnectionId();
         }
 
-        // Check if connection already exists
+        // Check if the logical task connection already exists. Container
+        // boundaries are derived from membership and must not collapse two
+        // different task paths into one edge.
         const incomingType = connection.connectionType || 'success';
         const exists = this.currentProject.connections.some(
-            c => c.from === connection.from
-                && c.to === connection.to
+            c => {
+                const currentLogical = getLogicalConnectionEndpoints(c);
+                return currentLogical.from === connection.from
+                    && currentLogical.to === connection.to
                 && (c.connectionType || 'success') === incomingType
-        );
+            });
         if (exists) {
             throw new Error('Connection already exists');
         }
 
         // Temporarily add connection to check for cycles
         this.currentProject.connections.push(connection);
+        this.currentProject = normalizeEtlProject(this.currentProject);
 
         // Validate no cycles
         const cycleErrors = this.validator.detectCycles(this.currentProject);
         if (cycleErrors.length > 0) {
             // Rollback
-            this.currentProject.connections.pop();
+            this.currentProject.connections = this.currentProject.connections.filter(c => c.id !== connection.id);
             throw new Error('Connection would create a cycle');
         }
 
@@ -261,7 +299,7 @@ export class EtlProjectManager implements IProjectManager {
      * Set project directly (for external updates)
      */
     setProject(project: EtlProject): void {
-        this.currentProject = project;
+        this.currentProject = normalizeEtlProject(project);
         this.isDirty = true;
     }
 
@@ -280,5 +318,33 @@ export class EtlProjectManager implements IProjectManager {
             return null;
         }
         return this.validator.getTopologicalOrder(this.currentProject);
+    }
+
+    /** Moves existing tasks into a sequence container as one atomic edit. */
+    moveNodesToContainer(containerId: string, positions: readonly PositionedNode[]): void {
+        if (!this.currentProject) {
+            throw new Error('No project loaded');
+        }
+        const nextProject = moveNodesToContainerInProject(this.currentProject, containerId, positions);
+        const errors = this.validator.validateProject(nextProject).errors;
+        if (errors.length > 0) {
+            throw new Error(`Invalid container move: ${errors.join(', ')}`);
+        }
+        this.currentProject = nextProject;
+        this.isDirty = true;
+    }
+
+    /** Returns selected tasks from a container to the root canvas. */
+    removeNodesFromContainer(positions: readonly PositionedNode[]): void {
+        if (!this.currentProject) {
+            throw new Error('No project loaded');
+        }
+        const nextProject = removeNodesFromContainerInProject(this.currentProject, positions);
+        const errors = this.validator.validateProject(nextProject).errors;
+        if (errors.length > 0) {
+            throw new Error(`Invalid container move: ${errors.join(', ')}`);
+        }
+        this.currentProject = nextProject;
+        this.isDirty = true;
     }
 }
