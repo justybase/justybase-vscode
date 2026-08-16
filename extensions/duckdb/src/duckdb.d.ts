@@ -3,6 +3,16 @@ declare module '@duckdb/node-api' {
         toString(): string;
     }
 
+    export type DuckDBValue =
+        | null
+        | boolean
+        | number
+        | bigint
+        | string
+        | Uint8Array
+        | Date
+        | object;
+
     export interface DuckDBMaterializedResult {
         readonly rowsChanged: number;
     }
