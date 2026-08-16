@@ -166,6 +166,44 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         }
     });
 
+    it('discovers workspace views with the Visual Query Builder metadata filters', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const firstPath = path.join(tempDir, 'vqb-first.csv');
+        const secondPath = path.join(tempDir, 'vqb-second.csv');
+        fs.writeFileSync(firstPath, 'id,name\n1,Alice\n');
+        fs.writeFileSync(secondPath, 'id,total\n1,100\n');
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: firstPath,
+            user: 'file',
+            options: { fileWorkspace: serializeFileWorkspace([firstPath, secondPath]) },
+        });
+
+        try {
+            await connection.connect();
+            const schemas = await readRows(
+                await connection.createCommand(duckdbMetadataProvider.buildListSchemasQuery('')).executeReader(),
+            );
+            const views = await readRows(
+                await connection.createCommand(duckdbMetadataProvider.buildListViewsQuery('', 'main')).executeReader(),
+            );
+            const columns = await readRows(
+                await connection.createCommand(
+                    duckdbMetadataProvider.buildColumnsWithKeysQuery('', { schema: 'main', objTypes: ['TABLE', 'VIEW'] }),
+                ).executeReader(),
+            );
+
+            expect(schemas).toEqual([['main']]);
+            expect(views.map(row => String(row[0]))).toEqual(expect.arrayContaining([firstPath, secondPath]));
+            expect(columns.map(row => String(row[2]))).toEqual(
+                expect.arrayContaining([firstPath, secondPath]),
+            );
+        } finally {
+            await connection.close();
+        }
+    });
+
     it('lists the file as a view in metadata', async () => {
         const csvPath = path.join(tempDir, 'customers.csv');
         fs.writeFileSync(csvPath, 'id,name\n1,Alice\n2,Bob\n');

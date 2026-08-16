@@ -2,42 +2,42 @@
  * Media-side copy of src/contracts/webviews/fileConnectionPanelContracts.ts.
  * Keep in sync with the host contract file (see webviewContractSync.test.ts).
  */
-export type FileConnectionPanelMode = 'single' | 'workspace';
+export type FileConnectionPanelMode = 'dataWorkspace';
 
-export interface FileConnectionPanelFile {
-    path: string;
-    name: string;
-    format: 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | undefined;
-    sizeLabel: string;
-    exists: boolean;
+export interface FileConnectionPanelWorkspaceSource {
+    id: string;
+    kind: 'file' | 'external';
+    label: string;
+    tableName: string;
+    rowCount?: number;
+    lastRefresh?: string;
+    refreshStatus: 'success' | 'error' | 'cancelled' | 'never';
+    message?: string;
 }
 
 export interface FileConnectionPanelState {
     connections: string[];
     selectedConnectionName: string;
     mode: FileConnectionPanelMode | undefined;
-    editable: boolean;
-    files: FileConnectionPanelFile[];
+    workspaceSources?: FileConnectionPanelWorkspaceSource[];
     notice?: string;
 }
 
 export type FileConnectionPanelWebviewToHostMessage =
     | { type: 'ready' }
     | { type: 'selectConnection'; connectionName: string }
-    | { type: 'addFiles'; paths: string[] }
-    | { type: 'removeFile'; path: string }
-    | { type: 'setEditable'; enabled: boolean }
+    | { type: 'createDataWorkspace' }
+    | { type: 'addWorkspaceFile' }
+    | { type: 'addNetezzaSource' }
+    | { type: 'refreshWorkspaceSource'; sourceId: string }
+    | { type: 'removeWorkspaceSource'; sourceId: string }
+    | { type: 'queryWorkspace' }
     | { type: 'deleteConnection' }
-    | { type: 'previewFile'; path: string }
-    | { type: 'requestSheets'; path: string }
-    | { type: 'queryFile'; path: string }
-    | { type: 'resolveDroppedNames'; names: string[] }
     | { type: 'exportConnections' }
     | { type: 'importConnections' }
     | { type: 'refresh' };
 
 export type FileConnectionPanelHostToWebviewMessage =
     | { type: 'state'; state: FileConnectionPanelState }
-    | { type: 'sheets'; path: string; sheetNames: string[] }
     | { type: 'error'; message: string }
     | { type: 'notice'; message: string };

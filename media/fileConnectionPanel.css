@@ -311,6 +311,35 @@ body {
     flex-shrink: 0;
 }
 
+.workspace-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.workspace-actions-title {
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    font-weight: 600;
+    margin-right: 2px;
+}
+
+.workspace-help {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--vscode-focusBorder);
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+
+.workspace-help strong {
+    color: var(--vscode-foreground);
+}
+
 .sheet-chips {
     display: flex;
     flex-wrap: wrap;
