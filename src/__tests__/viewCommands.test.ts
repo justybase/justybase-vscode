@@ -223,7 +223,7 @@ describe('commands/schema/viewCommands', () => {
             await openVisualQueryBuilderCallback();
 
             expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-                'Please right-click on a TABLE type group to open Visual Query Builder'
+                'Please right-click on a TABLE or VIEW type group to open Visual Query Builder'
             );
         });
 
@@ -239,6 +239,7 @@ describe('commands/schema/viewCommands', () => {
         });
 
         it('should show warning when no schemas are available', async () => {
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('netezza');
             const item: SchemaItemData = {
                 contextValue: 'typeGroup:TABLE',
                 dbName: 'TESTDB',
@@ -255,10 +256,12 @@ describe('commands/schema/viewCommands', () => {
 
             await openVisualQueryBuilderCallback(item);
 
-            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No tables found in this database');
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No tables or views found in this database');
+            expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
         });
 
         it('should load and open visual query builder', async () => {
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('netezza');
             const item: SchemaItemData = {
                 contextValue: 'typeGroup:TABLE',
                 dbName: 'TESTDB',
@@ -268,7 +271,10 @@ describe('commands/schema/viewCommands', () => {
             buildVisualQueryBuilderDataForAllSchemasMock.mockResolvedValue({
                 database: 'TESTDB',
                 schema: 'ADMIN',
-                tables: [],
+                tables: [{
+                    database: 'TESTDB', schema: 'ADMIN', tableName: 'ORDERS', fullName: 'TESTDB.ADMIN.ORDERS',
+                    primaryKeyColumns: [], columns: []
+                }],
                 relationships: [],
                 allSchemas: ['ADMIN', 'SALES']
             });
@@ -290,10 +296,53 @@ describe('commands/schema/viewCommands', () => {
                 {
                     database: 'TESTDB',
                     schema: 'ADMIN',
-                    tables: [],
+                    tables: [{
+                        database: 'TESTDB', schema: 'ADMIN', tableName: 'ORDERS', fullName: 'TESTDB.ADMIN.ORDERS',
+                        primaryKeyColumns: [], columns: []
+                    }],
                     relationships: [],
                     allSchemas: ['ADMIN', 'SALES']
                 }
+            );
+        });
+        it('opens the builder from a VIEW group for a File SQL connection', async () => {
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('file');
+            buildVisualQueryBuilderDataForAllSchemasMock.mockResolvedValue({
+                database: 'MEMORY',
+                schema: 'MAIN',
+                tables: [{
+                    database: 'memory', schema: 'MAIN', tableName: 'Sales', fullName: 'memory.MAIN.Sales',
+                    objectType: 'VIEW', primaryKeyColumns: [], columns: []
+                }],
+                relationships: [],
+                allSchemas: ['MAIN']
+            });
+
+            await openVisualQueryBuilderCallback({
+                contextValue: 'typeGroup:VIEW', dbName: 'memory', connectionName: 'test-conn'
+            });
+
+            expect(buildVisualQueryBuilderDataForAllSchemasMock).toHaveBeenCalledWith(
+                mockContext,
+                mockConnectionManager,
+                'test-conn',
+                'memory'
+            );
+            expect(createOrShowMock).toHaveBeenCalled();
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+                'Visual Query Builder ready: 1 sources, 0 relationships from 1 schema(s)'
+            );
+        });
+
+        it('rejects a database kind without Visual Query Builder support', async () => {
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('postgresql');
+
+            await openVisualQueryBuilderCallback({
+                contextValue: 'typeGroup:TABLE', dbName: 'TESTDB', connectionName: 'test-conn'
+            });
+
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+                'Visual Query Builder is available for Netezza, DuckDB, and File SQL connections.'
             );
         });
     });
