@@ -1,27 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-    <defs>
-        <linearGradient id="layerBg" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" style="stop-color:#002d9c;stop-opacity:1" />
-            <stop offset="100%" style="stop-color:#001d6c;stop-opacity:1" />
-        </linearGradient>
-    </defs>
-    <rect width="128" height="128" rx="24" fill="url(#layerBg)"/>
-    <g transform="translate(28, 28)">
-        <rect x="0" y="0" width="16" height="14" rx="3" fill="#a6c8ff"/>
-        <rect x="0" y="15" width="16" height="14" rx="3" fill="#78a9ff"/>
-        <rect x="0" y="30" width="16" height="14" rx="3" fill="#a6c8ff"/>
-        <rect x="0" y="45" width="16" height="13" rx="3" fill="#78a9ff"/>
-        <rect x="0" y="59" width="16" height="13" rx="3" fill="#a6c8ff"/>
-        
-        <rect x="56" y="0" width="16" height="14" rx="3" fill="#a6c8ff"/>
-        <rect x="56" y="15" width="16" height="14" rx="3" fill="#78a9ff"/>
-        <rect x="56" y="30" width="16" height="14" rx="3" fill="#a6c8ff"/>
-        <rect x="56" y="45" width="16" height="13" rx="3" fill="#78a9ff"/>
-        <rect x="56" y="59" width="16" height="13" rx="3" fill="#a6c8ff"/>
-        
-        <path d="M 16 0 L 56 72 L 72 72 L 32 0 Z" fill="#ffffff" opacity="0.9"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+    <title id="title">JustyBase Netezza</title>
+    <desc id="desc">Blue rounded square with the Netezza N logo</desc>
+    <rect width="256" height="256" rx="32" fill="#012d8f" />
+    <circle cx="128" cy="128" r="100" fill="#fbfaf3" stroke="#b6b604" stroke-width="4" />
+
+    <g fill="#02525a">
+        <path d="M74.5 67h35l36.5 53.7V67H181v125h-21.5l-85-125Z" />
+        <path d="M74.5 84l35 51.7V192h-35Z" />
     </g>
-    <rect x="8" y="112" width="24" height="8" rx="2" fill="#17636C"/>
-    <rect x="34" y="112" width="24" height="8" rx="2" fill="#17636C" opacity="0.7"/>
-    <rect x="60" y="112" width="24" height="8" rx="2" fill="#17636C" opacity="0.5"/>
 </svg>
