@@ -25,39 +25,45 @@ The ETL Designer interface consists of four main areas:
 - **⏹️ Stop**: Cancel a running execution (appears during execution)
 
 ### 2. Toolbox (Left Panel)
-Drag task types onto the canvas:
+The panel is labeled **Tasks** and uses letter badges rather than emoji icons. Click a task to add it to the canvas, or drag it onto the canvas or an existing container:
 
-| Task | Description |
-|------|-------------|
-| 📜 **SQL Task** | Execute SQL queries against Netezza |
-| 🐍 **Python Script** | Run Python scripts (inline or from file) |
-| 📦 **Container** | Group multiple tasks together |
-| 📤 **Export** | Export query results to CSV or XLSB |
-| 📥 **Import** | Import data from CSV/XLSB into tables |
+| Toolbox badge | Task | Description |
+|---------------|------|-------------|
+| `V` | **Variable** | Set a workflow variable from a user prompt, a static value, or a scalar SQL query |
+| `S` | **SQL task** | Execute a SQL query against the selected or run-fallback database connection |
+| `P` | **Python script** | Run an inline Python script or a selected `.py` file |
+| `C` | **Container** | Group tasks in a sequence container on the main canvas |
+| `E` | **Export** | Export query results to CSV, XLSB or Parquet |
+| `I` | **Import** | Import CSV, XLSB or Parquet data into a selected database |
+
+The toolbox also displays these hints below the task list:
+
+- Drop a task onto the canvas or a container.
+- Drag existing tasks into a container to group them.
 
 ### 3. Canvas (Center)
 The main workspace where you build your workflow:
 - **Drag tasks** from the toolbox to add them
-- **Click a task** to select it and view properties
-- **Double-click** or use "Edit Configuration" to configure a task
+- **Click** a task to select and edit it in the details inspector on the right
 - **Drag from output (right connector) to input (left connector)** to create connections
 - **Click a connection line** to delete it
 - **Press Delete** or click the × button to remove a selected task
 
 ### 4. Properties Panel (Right)
-Displays details of the selected task:
-- Task ID, Name, Type, Position
-- Configuration details specific to each task type
-- **Edit Configuration** button for quick access
+Displays editable details of the selected task:
+
+- Task name and description
+- Task-specific settings, including the database connection for SQL/SELECT, Import and Export tasks
+- Save/Revert actions
 
 ## Task Types
 
 ### SQL Task
-Execute SQL queries against your connected Netezza database.
+Execute SQL queries against the selected database connection.
 
 **Configuration:**
 - **Query**: The SQL statement to execute
-- **Connection**: Uses the active connection
+- **Connection**: Select a named saved connection, or use the run fallback connection
 
 **Features:**
 - Supports variable substitution: `${variableName}`
@@ -80,24 +86,29 @@ Run Python scripts for data transformation or custom logic.
 Export query results to files.
 
 **Configuration:**
-- **Format**: CSV or XLSB (Excel Binary)
+- **Format**: CSV, XLSB (Excel Binary) or Parquet
 - **Output Path**: Destination file path
+- **Connection**: Select a named saved connection, or use the run fallback connection
 - **Query**: SQL to generate export data
 
 ### Import Task
 Import data from files into Netezza tables.
 
 **Configuration:**
-- **Input Path**: Source file (CSV, TSV, or XLSB)
+- **Input Path**: Source file (CSV, TSV, XLSB or Parquet)
 - **Target Table**: Destination table name
+- **Connection**: Select a named saved connection, or use the run fallback connection
 - **Create Table**: Auto-create table if it doesn't exist
 - **Format**: Auto-detected or specified
 
 ### Container Task
-Group multiple tasks that should be treated as a unit.
+Group multiple tasks that should be treated as a unit, like an SSDT Sequence Container.
 
 **Configuration:**
-- **Child Tasks**: Nested tasks within the container
+- **Child Tasks**: Drag new or existing tasks into the visible container area on the main canvas
+- **Boundary paths**: Connections that cross the group are automatically represented by the container's success/failure ports
+- **Move to canvas**: Select a child task and use the Properties panel to remove it from the group
+- **Delete**: Deleting a container deletes its contained tasks after confirmation
 
 ## Connections and Execution Order
 
@@ -137,7 +148,7 @@ ETL projects are saved as `.etl.json` files containing:
 
 ## Running a Project
 
-1. Ensure you have an **active Netezza connection**
+1. Ensure the task connections are configured, or have an active/run fallback connection
 2. Click **▶️ Run** in the toolbar
 3. Monitor progress in the **ETL Execution** output channel
 4. Task nodes change color to indicate status:

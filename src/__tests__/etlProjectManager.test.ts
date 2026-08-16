@@ -3,6 +3,7 @@
  */
 
 import {
+    ETL_PROJECT_FORMAT_VERSION,
     EtlProject,
     EtlNode,
     getDefaultConfig
@@ -47,7 +48,7 @@ describe('EtlProjectManager', () => {
             const project = manager.createProject('Test Project');
 
             expect(project.name).toBe('Test Project');
-            expect(project.version).toBe('1.0.0');
+            expect(project.version).toBe(ETL_PROJECT_FORMAT_VERSION);
             expect(project.nodes).toEqual([]);
             expect(project.connections).toEqual([]);
             expect(manager.hasUnsavedChanges()).toBe(true);

@@ -10,6 +10,7 @@ import { BaseTaskExecutor } from './baseTaskExecutor';
 import { ImportResult } from '../../import/dataImporter';
 import { importDataForConnection } from '../../import/importDispatcher';
 import { ConnectionDetails } from '../../types';
+import { resolveTaskConnection } from '../utils/connectionResolver';
 
 /**
  * Default data importer implementation
@@ -74,6 +75,17 @@ export class ImportTaskExecutor extends BaseTaskExecutor<ImportNodeConfig> {
                 return this.createError(node.id, startTime, `Input file not found: ${inputPath}`);
             }
 
+            const connectionDetails = await resolveTaskConnection(context, config.connection);
+            if (!connectionDetails) {
+                return this.createError(
+                    node.id,
+                    startTime,
+                    config.connection
+                        ? `Connection not found: ${config.connection}`
+                        : 'No connection details available in context',
+                );
+            }
+
             this.reportProgress(context, `Importing from ${config.format.toUpperCase()}: ${inputPath}`);
             this.reportProgress(context, `Target table: ${targetSchema ? targetSchema + '.' : ''}${targetTable}`);
 
@@ -81,7 +93,7 @@ export class ImportTaskExecutor extends BaseTaskExecutor<ImportNodeConfig> {
             const result = await this.importer.importData(
                 inputPath,
                 targetTable,
-                context.connectionDetails,
+                connectionDetails,
                 (message) => {
                     this.reportProgress(context, `[Import] ${message}`);
                 },

@@ -1,11 +1,22 @@
 import { MarkerType, type Edge, type Node } from '@xyflow/react';
-import type { EtlConnection, EtlNode, EtlNodeStatus, EtlProject, ConnectionType } from '../../src/etl/etlTypes';
+import {
+    DEFAULT_CONTAINER_HEIGHT,
+    DEFAULT_CONTAINER_WIDTH,
+    type ConnectionType,
+    type EtlConnection,
+    type EtlNode,
+    type EtlNodeStatus,
+    type EtlProject,
+} from '../../src/etl/etlTypes';
+import { getContainerChildCount, isContainerNode } from '../../src/etl/projectStructure';
 
 export interface EtlFlowNodeData extends Record<string, unknown> {
     etlNode: EtlNode;
     status: EtlNodeStatus;
     miniMapColor: string;
     portOrder: string[];
+    childCount?: number;
+    onContainerResize?: (width: number, height: number) => void;
 }
 
 export interface EtlFlowEdgeData extends Record<string, unknown> {
@@ -16,7 +27,7 @@ export interface EtlFlowEdgeData extends Record<string, unknown> {
     muted: boolean;
 }
 
-export type EtlFlowNode = Node<EtlFlowNodeData, 'etlTask'>;
+export type EtlFlowNode = Node<EtlFlowNodeData, 'etlTask' | 'etlContainer'>;
 export type EtlFlowEdge = Edge<EtlFlowEdgeData, 'orthogonal'>;
 
 const STATUS_COLORS: Record<EtlNodeStatus, string> = {
@@ -48,27 +59,63 @@ export function etlConnectionFromFlowEdge(edge: Pick<Edge, 'id' | 'source' | 'ta
     };
 }
 
+function flowNodeData(
+    project: EtlProject,
+    etlNode: EtlNode,
+    statuses: ReadonlyMap<string, EtlNodeStatus>,
+    onContainerResize?: (containerId: string, width: number, height: number) => void,
+): EtlFlowNodeData {
+    const status = statuses.get(etlNode.id) || 'pending';
+    return {
+        etlNode,
+        status,
+        miniMapColor: STATUS_COLORS[status],
+        portOrder: ['target:input', 'source:success', 'source:failure'],
+        ...(isContainerNode(etlNode)
+            ? {
+                childCount: getContainerChildCount(project, etlNode.id),
+                ...(onContainerResize ? { onContainerResize: (width: number, height: number) => onContainerResize(etlNode.id, width, height) } : {}),
+            }
+            : {}),
+    };
+}
+
 export function etlFlowModel(
     project: EtlProject,
     statuses: ReadonlyMap<string, EtlNodeStatus> = new Map(),
     highlightedNodeId?: string,
+    onContainerResize?: (containerId: string, width: number, height: number) => void,
 ): { nodes: EtlFlowNode[]; edges: EtlFlowEdge[] } {
-    const nodes = project.nodes.map((etlNode, index): EtlFlowNode => {
-        const status = statuses.get(etlNode.id) || 'pending';
+    const containers = project.nodes.filter(isContainerNode).map((etlNode, index): EtlFlowNode => {
+        const config = etlNode.config;
         const position = Number.isFinite(etlNode.position?.x) && Number.isFinite(etlNode.position?.y)
             ? etlNode.position
-            : { x: 80 + (index % 4) * 360, y: 80 + Math.floor(index / 4) * 230 };
+            : { x: 80 + (index % 3) * 680, y: 60 + Math.floor(index / 3) * 480 };
         return {
             id: etlNode.id,
-            type: 'etlTask' as const,
+            type: 'etlContainer',
             position,
-            width: 250,
-            data: {
-                etlNode,
-                status,
-                miniMapColor: STATUS_COLORS[status],
-                portOrder: ['target:input', 'source:success', 'source:failure'],
+            selected: highlightedNodeId === etlNode.id,
+            style: {
+                width: config.width || DEFAULT_CONTAINER_WIDTH,
+                height: config.height || DEFAULT_CONTAINER_HEIGHT,
             },
+            data: flowNodeData(project, etlNode, statuses, onContainerResize),
+        };
+    });
+
+    const tasks = project.nodes.filter(node => !isContainerNode(node)).map((etlNode, index): EtlFlowNode => {
+        const position = Number.isFinite(etlNode.position?.x) && Number.isFinite(etlNode.position?.y)
+            ? etlNode.position
+            : { x: 80 + (index % 4) * 330, y: 90 + Math.floor(index / 4) * 210 };
+        return {
+            id: etlNode.id,
+            type: 'etlTask',
+            position,
+            selected: highlightedNodeId === etlNode.id,
+            ...(etlNode.containerId ? { parentId: etlNode.containerId, extent: 'parent' as const, zIndex: 2 } : {}),
+            width: 250,
+            data: flowNodeData(project, etlNode, statuses),
         };
     });
 
@@ -93,7 +140,7 @@ export function etlFlowModel(
         };
     });
 
-    return { nodes, edges };
+    return { nodes: [...containers, ...tasks], edges };
 }
 
 export function applyEtlFlowPositions(project: EtlProject, nodes: Pick<Node, 'id' | 'position'>[]): EtlProject {

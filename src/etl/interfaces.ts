@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import { EtlNode, EtlNodeExecutionResult, EtlProject, EtlConnection } from './etlTypes';
 import { ConnectionDetails } from '../types';
+import type { PositionedNode } from './projectStructure';
 
 /**
  * Execution context passed to task executors
@@ -20,12 +21,16 @@ export interface ExecutionContext {
     nodeOutputs: Map<string, unknown>;
     /** Database connection details */
     connectionDetails: ConnectionDetails;
+    /** Resolve a task-specific named connection, falling back to the run connection when omitted. */
+    resolveConnection?: (connectionName?: string) => Promise<ConnectionDetails | undefined>;
     /** Optional cancellation token for stopping execution */
     cancellationToken?: vscode.CancellationToken;
     /** Progress reporting callback */
     onProgress?: (message: string) => void;
     /** Variable manager for mutable variable storage (optional for backward compat) */
     variableManager?: import('./utils/variableManager').IVariableManager;
+    /** Canonical project used by container executors to resolve child tasks. */
+    project?: EtlProject;
 }
 
 /**
@@ -95,6 +100,12 @@ export interface IProjectManager {
 
     /** Get node by ID */
     getNode(nodeId: string): EtlNode | undefined;
+
+    /** Move tasks into a sequence container. */
+    moveNodesToContainer(containerId: string, positions: readonly PositionedNode[]): void;
+
+    /** Return tasks from a sequence container to the root canvas. */
+    removeNodesFromContainer(positions: readonly PositionedNode[]): void;
 }
 
 /**

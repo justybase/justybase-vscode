@@ -8,8 +8,6 @@ import {
     EtlProject,
     EtlNode,
     EtlNodeType,
-    EtlConnection,
-    ContainerNodeConfig,
     generateNodeId,
     generateConnectionId,
     getDefaultConfig
@@ -24,10 +22,28 @@ import { ContainerTaskExecutor } from '../etl/tasks/containerTask';
 import { VariableTaskExecutor } from '../etl/tasks/variableTask';
 import { VariableManager } from '../etl/utils/variableManager';
 import { ConnectionManager } from '../core/connectionManager';
+import { getRootExecutionProject } from '../etl/projectStructure';
 
 // Import refactored modules
 import { generateEtlDesignerHtml } from './etl/etlDesignerTemplate';
 import { NodeConfigurator } from './etl/nodeConfigurator';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function getConfiguredConnectionName(node: EtlNode): string | undefined {
+    switch (node.config.type) {
+        case 'sql':
+        case 'import':
+        case 'export':
+            return node.config.connection && node.config.connection !== 'default'
+                ? node.config.connection
+                : undefined;
+        default:
+            return undefined;
+    }
+}
 
 export class EtlDesignerView {
     public static currentPanel: EtlDesignerView | undefined;
@@ -117,6 +133,19 @@ export class EtlDesignerView {
             null,
             this._disposables
         );
+
+        void this._sendConnectionOptions();
+        const connectionManager = EtlDesignerView._connectionManager;
+        if (connectionManager && typeof connectionManager.onDidChangeConnections === 'function') {
+            this._disposables.push(connectionManager.onDidChangeConnections(() => {
+                void this._sendConnectionOptions();
+            }));
+        }
+        if (connectionManager && typeof connectionManager.onDidChangeActiveConnection === 'function') {
+            this._disposables.push(connectionManager.onDidChangeActiveConnection(() => {
+                void this._sendConnectionOptions();
+            }));
+        }
     }
 
     private async _handleMessage(message: { type: string; payload?: unknown }) {
@@ -124,12 +153,17 @@ export class EtlDesignerView {
 
         switch (message.type) {
             case 'addNode': {
-                const payload = message.payload as { type: EtlNodeType; position: { x: number; y: number } };
+                const payload = message.payload as {
+                    type: EtlNodeType;
+                    position: { x: number; y: number };
+                    containerId?: string;
+                };
                 const node: EtlNode = {
                     id: generateNodeId(),
                     type: payload.type,
                     name: this._nodeConfigurator.getDefaultNodeName(payload.type),
                     position: payload.position,
+                    ...(payload.containerId ? { containerId: payload.containerId } : {}),
                     config: getDefaultConfig(payload.type)
                 };
                 this._projectManager.addNode(node);
@@ -139,8 +173,11 @@ export class EtlDesignerView {
 
             case 'confirmRemoveNode': {
                 const nodeId = message.payload as string;
+                const node = this._projectManager.getNode(nodeId);
                 const confirm = await vscode.window.showWarningMessage(
-                    'Delete this task?',
+                    node?.type === 'container'
+                        ? 'Delete this container and all of its tasks?'
+                        : 'Delete this task?',
                     { modal: true },
                     'Delete'
                 );
@@ -168,6 +205,60 @@ export class EtlDesignerView {
                 const { nodeId, name } = message.payload as { nodeId: string; name: string };
                 this._projectManager.updateNode(nodeId, { name });
                 this._sendProjectUpdate();
+                break;
+            }
+
+            case 'updateNodeDetails': {
+                const payload = message.payload as {
+                    nodeId?: unknown;
+                    name?: unknown;
+                    description?: unknown;
+                    config?: unknown;
+                };
+                if (typeof payload?.nodeId !== 'string') {
+                    break;
+                }
+                const node = this._projectManager.getNode(payload.nodeId);
+                if (!node) {
+                    vscode.window.showErrorMessage(`Node not found: ${payload.nodeId}`);
+                    break;
+                }
+
+                try {
+                    const updates: Partial<EtlNode> = {};
+                    if (typeof payload.name === 'string') {
+                        const name = payload.name.trim();
+                        if (!name) {
+                            throw new Error('Task name cannot be empty');
+                        }
+                        updates.name = name;
+                    }
+                    if (typeof payload.description === 'string') {
+                        updates.description = payload.description.trim() || undefined;
+                    }
+                    if (payload.config !== undefined) {
+                        if (!isRecord(payload.config) || payload.config.type !== node.config.type) {
+                            throw new Error('Task configuration type does not match the selected task');
+                        }
+                        updates.config = payload.config as unknown as EtlNode['config'];
+                    }
+                    this._projectManager.updateNode(payload.nodeId, updates);
+                    this._sendProjectUpdate();
+                } catch (error) {
+                    vscode.window.showErrorMessage(String(error));
+                }
+                break;
+            }
+
+            case 'updateContainerSize': {
+                const { containerId, width, height } = message.payload as { containerId: string; width: number; height: number };
+                const container = this._projectManager.getNode(containerId);
+                if (container?.config.type === 'container') {
+                    this._projectManager.updateNode(containerId, {
+                        config: { ...container.config, width, height },
+                    });
+                    this._sendProjectUpdate();
+                }
                 break;
             }
 
@@ -217,6 +308,7 @@ export class EtlDesignerView {
                 const connection = project?.connections.find(c => c.id === connectionId);
                 if (connection) {
                     connection.connectionType = newType;
+                    this._projectManager.markDirty();
                     this._sendProjectUpdate();
                 }
                 break;
@@ -228,35 +320,27 @@ export class EtlDesignerView {
                 break;
             }
 
-            case 'updateContainerNodes': {
-                const { containerId, nodes, connections } = message.payload as {
+            case 'moveNodesToContainer': {
+                const payload = message.payload as {
                     containerId: string;
-                    nodes: EtlNode[];
-                    connections: EtlConnection[];
+                    nodes: Array<{ id: string; position: { x: number; y: number } }>;
                 };
-                const containerNode = this._projectManager.getNode(containerId);
-                if (containerNode && containerNode.type === 'container') {
-                    this._projectManager.updateNode(containerId, {
-                        config: {
-                            type: 'container',
-                            nodes: nodes,
-                            connections: connections
-                        } as ContainerNodeConfig
-                    });
+                try {
+                    this._projectManager.moveNodesToContainer(payload.containerId, payload.nodes);
                     this._sendProjectUpdate();
+                } catch (error) {
+                    vscode.window.showErrorMessage(String(error));
                 }
                 break;
             }
 
-            case 'configureContainerChildNode': {
-                const { containerId: cId, nodeId: childNodeId } = message.payload as { containerId: string; nodeId: string };
-                const container = this._projectManager.getNode(cId);
-                if (container && container.type === 'container') {
-                    const config = container.config as ContainerNodeConfig;
-                    const childNode = config.nodes.find(n => n.id === childNodeId);
-                    if (childNode) {
-                        await this._configureContainerChildNode(cId, childNode);
-                    }
+            case 'removeNodesFromContainer': {
+                const payload = message.payload as { nodes: Array<{ id: string; position: { x: number; y: number } }> };
+                try {
+                    this._projectManager.removeNodesFromContainer(payload.nodes);
+                    this._sendProjectUpdate();
+                } catch (error) {
+                    vscode.window.showErrorMessage(String(error));
                 }
                 break;
             }
@@ -297,8 +381,36 @@ export class EtlDesignerView {
 
             case 'getProject': {
                 this._sendProjectUpdate();
+                void this._sendConnectionOptions();
                 break;
             }
+        }
+    }
+
+    private async _sendConnectionOptions(): Promise<void> {
+        const connectionManager = EtlDesignerView._connectionManager;
+        if (!connectionManager || typeof connectionManager.getConnections !== 'function') {
+            return;
+        }
+
+        try {
+            const connections = await connectionManager.getConnections();
+            this._panel.webview.postMessage({
+                type: 'connectionOptions',
+                payload: {
+                    activeConnectionName: connectionManager.getActiveConnectionName() || undefined,
+                    connections: connections
+                        .filter(connection => !!connection.name)
+                        .map(connection => ({
+                            name: connection.name,
+                            database: connection.database,
+                            dbType: connection.dbType,
+                        })),
+                },
+            });
+        } catch {
+            // A missing/temporarily unavailable connection list must not make
+            // the designer unusable; the panel will keep the active fallback.
         }
     }
 
@@ -357,18 +469,35 @@ export class EtlDesignerView {
             return;
         }
 
-        const activeConnName = connManager.getActiveConnectionName();
+        const activeConnName = connManager.getActiveConnectionName() || undefined;
+        const configuredConnectionName = project.nodes
+            .map(getConfiguredConnectionName)
+            .find((name): name is string => !!name);
+        let runConnectionName = activeConnName || configuredConnectionName;
 
-        if (!activeConnName) {
-            vscode.window.showErrorMessage('No active connection. Please connect to a database first.');
+        if (!runConnectionName && typeof connManager.getConnections === 'function') {
+            const availableConnections = await connManager.getConnections();
+            runConnectionName = availableConnections.find(connection => !!connection.name)?.name;
+        }
+
+        if (!runConnectionName) {
+            vscode.window.showErrorMessage('No database connection is configured for this ETL project.');
             return;
         }
 
-        const connDetails = await connManager.getConnection(activeConnName);
+        const connDetails = await connManager.getConnection(runConnectionName);
         if (!connDetails) {
-            vscode.window.showErrorMessage(`Connection not found: ${activeConnName}`);
+            vscode.window.showErrorMessage(`Connection not found: ${runConnectionName}`);
             return;
         }
+
+        const resolveConnection = async (connectionName?: string) => {
+            const normalizedName = connectionName?.trim();
+            const targetName = !normalizedName || normalizedName === 'default'
+                ? runConnectionName
+                : normalizedName;
+            return connManager.getConnection(targetName);
+        };
 
         // Create output channel for logging
         const outputChannel = vscode.window.createOutputChannel('ETL Execution');
@@ -387,10 +516,12 @@ export class EtlDesignerView {
             nodeOutputs: new Map(),
             connectionDetails: connDetails,
             cancellationToken: this._cancellationTokenSource.token,
+            resolveConnection,
             onProgress: (message) => {
                 outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
             },
-            variableManager: variableManager
+            variableManager: variableManager,
+            project,
         };
 
         // Update UI when node status changes
@@ -406,10 +537,10 @@ export class EtlDesignerView {
 
         try {
             outputChannel.appendLine(`Starting ETL Project: ${project.name}`);
-            outputChannel.appendLine(`Connection: ${activeConnName}`);
+            outputChannel.appendLine(`Fallback connection: ${runConnectionName}`);
             outputChannel.appendLine('---');
 
-            const result = await this._executionEngine.execute(project, context);
+            const result = await this._executionEngine.execute(getRootExecutionProject(project), context);
 
             outputChannel.appendLine('---');
             outputChannel.appendLine(`Execution ${result.status}`);
@@ -453,19 +584,8 @@ export class EtlDesignerView {
     }
 
     private _updateProject(project: EtlProject) {
-        // Update the project manager with the new project
-        this._projectManager.createProject(project.name);
-        for (const node of project.nodes) {
-            this._projectManager.addNode(node);
-        }
-        for (const conn of project.connections) {
-            try {
-                this._projectManager.addConnection(conn);
-            } catch {
-                // Ignore connection errors during load
-            }
-        }
-        this._updateWebview(project);
+        this._projectManager.setProject(project);
+        this._updateWebview(this._projectManager.getCurrentProject() || project);
     }
 
     private _updateWebview(project: EtlProject) {
@@ -479,97 +599,6 @@ export class EtlDesignerView {
                 type: 'projectUpdate',
                 payload: project
             });
-        }
-    }
-
-    /**
-     * Configure a child node inside a container
-     */
-    private async _configureContainerChildNode(containerId: string, childNode: EtlNode): Promise<void> {
-        // For child nodes, we use a simplified configuration approach
-        // The node configurator works on project-level nodes, so we need a custom handler
-
-        const config = childNode.config;
-        let updated = false;
-
-        switch (childNode.type) {
-            case 'sql': {
-                const name = await vscode.window.showInputBox({
-                    prompt: 'Enter task name',
-                    value: childNode.name
-                });
-                if (name === undefined) return;
-
-                const query = await vscode.window.showInputBox({
-                    prompt: 'Enter SQL query',
-                    value: (config as { query?: string }).query || ''
-                });
-                if (query !== undefined) {
-                    childNode.name = name;
-                    (config as { query: string }).query = query;
-                    updated = true;
-                }
-                break;
-            }
-            case 'python': {
-                const name = await vscode.window.showInputBox({
-                    prompt: 'Enter task name',
-                    value: childNode.name
-                });
-                if (name === undefined) return;
-
-                const script = await vscode.window.showInputBox({
-                    prompt: 'Enter Python script',
-                    value: (config as { script?: string }).script || ''
-                });
-                if (script !== undefined) {
-                    childNode.name = name;
-                    (config as { script: string }).script = script;
-                    updated = true;
-                }
-                break;
-            }
-            case 'variable': {
-                const name = await vscode.window.showInputBox({
-                    prompt: 'Enter task name',
-                    value: childNode.name
-                });
-                if (name === undefined) return;
-
-                const variableName = await vscode.window.showInputBox({
-                    prompt: 'Enter variable name',
-                    value: (config as { variableName?: string }).variableName || ''
-                });
-                if (variableName) {
-                    childNode.name = name;
-                    (config as { variableName: string }).variableName = variableName;
-                    updated = true;
-                }
-                break;
-            }
-            default:
-                vscode.window.showInformationMessage(`Configure ${childNode.type} nodes by double-clicking in the main designer.`);
-                return;
-        }
-
-        if (updated) {
-            // Update the container with the modified child node
-            const container = this._projectManager.getNode(containerId);
-            if (container && container.type === 'container') {
-                const containerConfig = container.config as ContainerNodeConfig;
-                const nodeIndex = containerConfig.nodes.findIndex(n => n.id === childNode.id);
-                if (nodeIndex >= 0) {
-                    containerConfig.nodes[nodeIndex] = childNode;
-                    this._projectManager.updateNode(containerId, { config: containerConfig });
-                    this._sendProjectUpdate();
-
-                    // Also send update to webview to refresh the modal
-                    this._panel.webview.postMessage({
-                        type: 'containerChildUpdated',
-                        payload: { containerId, childNode }
-                    });
-                }
-            }
         }
     }
 

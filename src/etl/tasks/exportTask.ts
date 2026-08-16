@@ -11,6 +11,7 @@ import { exportToCsv } from '../../export/csvExporter';
 import { exportQueryToXlsb } from '../../export/xlsbExporter';
 import { exportQueryToParquet } from '../../export/parquetExporter';
 import { ConnectionDetails } from '../../types';
+import { resolveTaskConnection } from '../utils/connectionResolver';
 
 /**
  * CSV export strategy implementation
@@ -174,6 +175,17 @@ export class ExportTaskExecutor extends BaseTaskExecutor<ExportNodeConfig> {
                 );
             }
 
+            const connectionDetails = await resolveTaskConnection(context, config.connection);
+            if (!connectionDetails) {
+                return this.createError(
+                    node.id,
+                    startTime,
+                    config.connection
+                        ? `Connection not found: ${config.connection}`
+                        : 'No connection details available in context',
+                );
+            }
+
             // Get export strategy
             const strategy = this.strategies.get(config.format);
             if (!strategy) {
@@ -189,7 +201,7 @@ export class ExportTaskExecutor extends BaseTaskExecutor<ExportNodeConfig> {
             // Execute export
             const result = await strategy.export(
                 context.extensionContext,
-                context.connectionDetails,
+                connectionDetails,
                 query,
                 outputPath,
                 (message) => this.reportProgress(context, `[Export] ${message}`),

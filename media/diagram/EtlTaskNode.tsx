@@ -21,11 +21,14 @@ function statusLabel(status: EtlFlowNode['data']['status']): string {
 
 function descriptionForNode(node: EtlFlowNode['data']['etlNode']): string {
     switch (node.config.type) {
-        case 'sql': return node.config.query ? 'SQL statement configured' : 'SQL statement not configured';
+        case 'sql': return `${node.config.query ? 'SQL statement configured' : 'SQL statement not configured'}${node.config.connection && node.config.connection !== 'default' ? ` · ${node.config.connection}` : ''}`;
         case 'python': return node.config.script || node.config.scriptPath ? 'Python script configured' : 'Python script not configured';
-        case 'container': return `${node.config.nodes.length} child task${node.config.nodes.length === 1 ? '' : 's'}`;
-        case 'export': return `${node.config.format.toUpperCase()} · ${node.config.outputPath || 'output not configured'}`;
-        case 'import': return `${node.config.format.toUpperCase()} · ${node.config.targetTable || 'target not configured'}`;
+        case 'container': {
+            const childCount = node.config.nodes?.length || 0;
+            return `${childCount} child task${childCount === 1 ? '' : 's'}`;
+        }
+        case 'export': return `${node.config.format.toUpperCase()} · ${node.config.outputPath || 'output not configured'}${node.config.connection && node.config.connection !== 'default' ? ` · ${node.config.connection}` : ''}`;
+        case 'import': return `${node.config.format.toUpperCase()} · ${node.config.targetTable || 'target not configured'}${node.config.connection && node.config.connection !== 'default' ? ` · ${node.config.connection}` : ''}`;
         case 'variable': return node.config.variableName ? `\${node.config.variableName}` : 'Variable not configured';
     }
 }

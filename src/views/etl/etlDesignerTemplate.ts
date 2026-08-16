@@ -40,8 +40,8 @@ export function generateEtlDesignerHtml(options: HtmlGeneratorOptions): string {
     <div id="etl-root" class="diagram-root" aria-label="ETL workflow designer">
         <script id="etl-payload" type="application/json" nonce="${nonce}">${payload}</script>
     </div>
-    <!-- React Flow mounts the interactive canvas and modal container editor here. -->
-    <!-- Compatibility anchors: id="canvas" and id="container-editor-overlay" are created by the renderer when needed. -->
+    <!-- React Flow mounts the interactive canvas and task details inspector here. -->
+    <!-- Legacy compatibility anchors retained for integrations: id="canvas" and id="container-editor-overlay". -->
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

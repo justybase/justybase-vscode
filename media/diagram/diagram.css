@@ -157,6 +157,20 @@ button { color: inherit; }
 .etl-handle-label.success { top: calc(50% - 26px); }
 .etl-handle-label.failure { top: calc(50% + 14px); }
 
+.etl-container { position: relative; width: 100%; height: 100%; min-width: 360px; min-height: 240px; border: 2px solid color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 60%, var(--diagram-border)); border-radius: 8px; background: color-mix(in srgb, var(--diagram-panel-alt) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 15%, transparent); }
+.etl-container.is-selected { box-shadow: inset 0 0 0 1px var(--diagram-accent), 0 0 0 2px color-mix(in srgb, var(--diagram-accent) 25%, transparent); }
+.etl-container-header { display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 35%, var(--diagram-border)); background: color-mix(in srgb, var(--diagram-panel) 88%, var(--etl-node-color, var(--diagram-accent)) 12%); }
+.etl-container-header strong { display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.etl-container-header span { color: var(--diagram-muted); font-size: 10px; }
+.etl-container-icon { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 60%, var(--diagram-border)); border-radius: 5px; color: var(--etl-node-color, var(--diagram-accent)); font-size: 18px !important; }
+.etl-container-status { margin-left: auto; text-transform: uppercase; letter-spacing: .06em; }
+.etl-container-drop-hint { position: absolute; inset: 62px 12px 12px; display: grid; place-items: center; border: 1px dashed color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 38%, var(--diagram-border)); border-radius: 5px; color: color-mix(in srgb, var(--diagram-muted) 82%, transparent); font-size: 11px; pointer-events: none; }
+.etl-container.has-children .etl-container-drop-hint { display: none; }
+.etl-container-handle { z-index: 4; }
+.etl-container-handle-label { right: 16px; }
+.etl-container-resize-handle { width: 8px !important; height: 8px !important; border: 1px solid var(--diagram-panel) !important; border-radius: 2px; background: var(--etl-node-color, var(--diagram-accent)) !important; }
+.etl-container-resize-line { border-color: color-mix(in srgb, var(--etl-node-color, var(--diagram-accent)) 58%, transparent) !important; }
+
 .diagram-toolbox-item { display: flex; align-items: center; gap: 8px; width: 100%; margin: 0 0 7px; padding: 9px; border: 1px solid var(--diagram-border); border-radius: 5px; text-align: left; background: transparent; cursor: grab; }
 .diagram-toolbox-item:hover { border-color: var(--diagram-accent); background: var(--vscode-list-hoverBackground, rgba(255,255,255,.06)); }
 .diagram-toolbox-item svg { flex: 0 0 auto; }
@@ -172,6 +186,28 @@ button { color: inherit; }
 .diagram-detail-list { display: flex; flex-direction: column; gap: 7px; padding-top: 4px; border-top: 1px solid var(--diagram-border); }
 .diagram-detail-list > div { display: flex; justify-content: space-between; gap: 8px; }
 .diagram-badge { padding: 2px 6px; border-radius: 10px; background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #fff); }
+.etl-details-form { display: flex; flex-direction: column; gap: 14px; }
+.etl-detail-section { display: flex; flex-direction: column; gap: 10px; padding-bottom: 3px; }
+.etl-detail-section + .etl-detail-section { padding-top: 12px; border-top: 1px solid var(--diagram-border); }
+.etl-detail-section-title { color: var(--diagram-muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+.etl-detail-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.etl-detail-label { color: var(--diagram-muted); font-size: 11px; }
+.etl-detail-control { width: 100%; min-width: 0; padding: 6px 7px; border: 1px solid var(--diagram-border); border-radius: 4px; outline: none; color: var(--diagram-foreground); background: var(--diagram-panel-alt); }
+.etl-detail-control:focus { border-color: var(--diagram-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--diagram-accent) 35%, transparent); }
+.etl-detail-control::placeholder { color: var(--diagram-muted); }
+.etl-detail-textarea { resize: vertical; line-height: 1.35; }
+.etl-detail-code { font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 11px; }
+.etl-detail-hint { color: var(--diagram-muted); font-size: 10px; line-height: 1.35; }
+.etl-detail-checkbox { display: flex; align-items: center; gap: 7px; color: var(--diagram-foreground); font-size: 11px; }
+.etl-detail-checkbox input { margin: 0; }
+.etl-detail-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--diagram-muted); font-size: 11px; }
+.etl-detail-summary strong { color: var(--diagram-foreground); text-align: right; overflow-wrap: anywhere; }
+.etl-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px solid var(--diagram-border); }
+.etl-detail-actions .diagram-button:disabled { cursor: default; opacity: .5; }
+.etl-detail-saved { color: var(--diagram-edge-success); font-size: 11px; }
+.etl-detail-wide-button { width: 100%; }
+.etl-detail-danger-button { width: 100%; color: var(--diagram-edge-failure); border-color: color-mix(in srgb, var(--diagram-edge-failure) 50%, var(--diagram-border)); }
+.etl-detail-danger-button:hover { border-color: var(--diagram-edge-failure); background: color-mix(in srgb, var(--diagram-edge-failure) 12%, transparent); }
 .diagram-modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; z-index: 20; background: rgba(0,0,0,.45); }
 .diagram-modal { display: flex; flex-direction: column; width: min(1100px, 92vw); height: min(760px, 88vh); border: 1px solid var(--diagram-border); border-radius: 8px; background: var(--vscode-editor-background, #1e1e1e); box-shadow: 0 24px 70px rgba(0,0,0,.45); }
 .diagram-modal-header, .diagram-modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--diagram-border); background: var(--diagram-panel); }

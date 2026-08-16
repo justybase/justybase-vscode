@@ -75,6 +75,25 @@ describe('diagram domain adapters', () => {
         expect(applyEtlFlowPositions(etlProject, [{ id: 'target', position: { x: 900, y: 600 } }]).nodes[1].position).toEqual({ x: 900, y: 600 });
     });
 
+    it('renders flat container members as React Flow children', () => {
+        const grouped: EtlProject = {
+            name: 'Grouped',
+            version: '2.0.0',
+            nodes: [
+                { id: 'container', type: 'container', name: 'Sequence', position: { x: 100, y: 60 }, config: { type: 'container', width: 700, height: 420 } },
+                { id: 'child', type: 'sql', name: 'Inside', position: { x: 80, y: 90 }, containerId: 'container', config: { type: 'sql', query: 'select 1' } },
+            ],
+            connections: [],
+        };
+
+        const flow = etlFlowModel(grouped);
+        const container = flow.nodes.find(node => node.id === 'container');
+        const child = flow.nodes.find(node => node.id === 'child');
+
+        expect(container).toMatchObject({ type: 'etlContainer', style: { width: 700, height: 420 }, data: { childCount: 1 } });
+        expect(child).toMatchObject({ type: 'etlTask', parentId: 'container', extent: 'parent', position: { x: 80, y: 90 } });
+    });
+
     it('falls back to saved node positions when ELK fails', async () => {
         const nodes = etlFlowModel(etlProject).nodes;
         const result = await layoutWithElk(nodes, [], {}, { layout: async () => { throw new Error('layout unavailable'); } });
