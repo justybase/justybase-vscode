@@ -431,6 +431,12 @@ export class ResultPanelMessageHandler {
                 this._runExportWithScope(message.data, data => this._exportManager.openInFilePreview(data, message.sql));
                 return;
 
+            case 'addFileToDataWorkspace':
+                // This action is handled by FilePreviewEditor. The same
+                // result-panel bundle is reused there, so the regular result
+                // panel host simply ignores it.
+                return;
+
             case 'copyAsExcel':
                 this._runExportWithScope(message.data, data => this._exportManager.copyAsExcel(data, message.sql));
                 return;

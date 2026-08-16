@@ -2,6 +2,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { readParquetFile } from '../export/parquetHyparquet';
+import type { ConnectionManager } from '../core/connectionManager';
+import {
+    DataWorkspaceService,
+    defaultDataWorkspaceTableName,
+    isDataWorkspaceProfile,
+    parseDataWorkspace,
+} from '../services/dataWorkspaceService';
 
 interface ExcelReaderWithInit {
     open(path: string): Promise<void>;
@@ -40,7 +47,11 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
         void vscode.commands.executeCommand('setContext', 'netezza.filePreviewExtname', ext);
     }
 
-    constructor(private readonly _extensionUri: vscode.Uri) { }
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _context: vscode.ExtensionContext,
+        private readonly _connectionManager: ConnectionManager,
+    ) { }
 
     openCustomDocument(
         uri: vscode.Uri,
@@ -110,12 +121,71 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
                     void this._handleExcelExport(allData, 'xlsb', webviewPanel, true);
                 } else if (msg.command === 'exportAllResultSetsToExcel') {
                     void this._handleExcelExport(allData, 'xlsx', webviewPanel);
+                } else if (msg.command === 'addFileToDataWorkspace') {
+                    void this._addFileToDataWorkspace(document.uri.fsPath);
                 }
             });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             webviewPanel.title = `Error: ${path.basename(document.uri.fsPath)}`;
             webviewPanel.webview.html = this._buildErrorHtml(msg, document.uri.fsPath);
+        }
+    }
+
+    private async _addFileToDataWorkspace(filePath: string): Promise<void> {
+        try {
+            const service = new DataWorkspaceService(this._context, this._connectionManager);
+            const workspaces = (await this._connectionManager.getConnections())
+                .filter(connection => isDataWorkspaceProfile(connection));
+            const choices = [
+                {
+                    label: '$(add) New Data Workspace',
+                    description: 'Create a persistent local DuckDB workspace',
+                    target: 'new' as const,
+                },
+                ...workspaces.map(connection => ({
+                    label: connection.name,
+                    description: 'Existing Data Workspace',
+                    target: 'existing' as const,
+                    connectionName: connection.name,
+                })),
+            ];
+            const selected = await vscode.window.showQuickPick(choices, {
+                placeHolder: 'Add this file to a new or existing Data Workspace',
+            });
+            if (!selected) return;
+
+            let workspaceName: string;
+            if (selected.target === 'new') {
+                const requestedName = await vscode.window.showInputBox({
+                    prompt: 'Name for the new Data Workspace',
+                    value: 'Data Workspace',
+                    ignoreFocusOut: true,
+                });
+                if (!requestedName?.trim()) return;
+                const created = await service.createWorkspace(requestedName);
+                workspaceName = created.name ?? requestedName.trim();
+            } else {
+                workspaceName = selected.connectionName ?? selected.label;
+            }
+
+            const workspace = await this._connectionManager.getConnection(workspaceName);
+            const config = parseDataWorkspace(workspace?.options?.dataWorkspace);
+            if (!workspace || !config || !isDataWorkspaceProfile(workspace)) {
+                throw new Error(`'${workspaceName}' is not a valid Data Workspace.`);
+            }
+            const tableName = await vscode.window.showInputBox({
+                prompt: `Local DuckDB table name for ${path.basename(filePath)}`,
+                value: defaultDataWorkspaceTableName(filePath, config.sources.map(source => source.tableName)),
+                ignoreFocusOut: true,
+            });
+            if (!tableName?.trim()) return;
+
+            const source = await service.addFileSource(workspaceName, filePath, tableName);
+            await service.refreshSource(workspaceName, source.id);
+            vscode.window.showInformationMessage(`Added ${path.basename(filePath)} to Data Workspace '${workspaceName}'.`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not add file to Data Workspace: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
@@ -357,6 +427,9 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
         const fileSizeStr = stats.size < 1024 * 1024
             ? `${(stats.size / 1024).toFixed(1)} KB`
             : `${(stats.size / (1024 * 1024)).toFixed(2)} MB`;
+        const workspaceAction = ['.csv', '.xlsx'].includes(ext)
+            ? '<button id="add-file-to-data-workspace" class="primary" title="Add this file to a new or existing Data Workspace">Add to Data Workspace</button>'
+            : '';
 
         const resultSetsJson = JSON.stringify(allData.map(d => ({
             columns: d.columns,
@@ -407,6 +480,7 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
             </select>
         </div>
         <button onclick="handleClickExport()" title="Export results"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3h8v10H6V3zm-1 0H3v10h2V3zm-2-1h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M6 6h8v1H6V6zm0 2h8v1H6V8zm0 2h8v1H6v-1z"/></svg> Export</button>
+        ${workspaceAction}
         <button onclick="copySelection(false)" title="Copy selected cells to clipboard"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h7v2H4V4zm0 4h7v2H4V8zm0 4h7v2H4v-2zM2 1h12v14H2V1zm1 1v12h10V2H3z"/></svg> Copy</button>
         <button onclick="copySelection(true)" title="Copy selected cells with headers"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h7v2H4V4zm0 4h7v2H4V8zm0 4h7v2H4v-2zM2 1h12v14H2V1zm1 1v12h10V2H3z"/></svg> Copy w/ Headers</button>
         <div class="toolbar-separator"></div>

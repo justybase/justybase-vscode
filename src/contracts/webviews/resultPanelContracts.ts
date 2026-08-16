@@ -123,6 +123,7 @@ export type ResultPanelWebviewToHostMessage =
     | { command: 'exportCsv'; data: string | ExportMetadata }
     | { command: 'openInExcel'; data: unknown; sql?: string }
     | { command: 'openInFilePreview'; data: unknown; sql?: string }
+    | { command: 'addFileToDataWorkspace' }
     | { command: 'copyAsExcel'; data: unknown; sql?: string }
     | { command: 'openInExcelXlsx'; data: unknown; sql?: string }
     | { command: 'exportAllResultSetsToExcel'; data: ExcelExportMetadata }
@@ -510,6 +511,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'exportCsv',
   'openInExcel',
   'openInFilePreview',
+  'addFileToDataWorkspace',
   'copyAsExcel',
   'openInExcelXlsx',
   'exportAllResultSetsToExcel',

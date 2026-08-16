@@ -46,7 +46,7 @@ export function activateExplorerViews(
         }),
         vscode.window.registerCustomEditorProvider(
             FilePreviewEditor.viewType,
-            new FilePreviewEditor(context.extensionUri),
+            new FilePreviewEditor(context.extensionUri, context, connectionManager),
         ),
         vscode.commands.registerCommand('netezza.openInFilePreview', (resource?: vscode.Uri) => {
             const uri = resource ?? vscode.window.activeTextEditor?.document.uri;
