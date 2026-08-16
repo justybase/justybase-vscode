@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Import Wizard Harness</title>
+    <link rel="stylesheet" href="/media/importWizard.css">
+    <style>
+        :root {
+            --vscode-editor-background: #1e1e1e;
+            --vscode-editor-foreground: #cccccc;
+            --vscode-button-background: #0e639c;
+            --vscode-button-foreground: #ffffff;
+            --vscode-input-background: #3c3c3c;
+            --vscode-input-foreground: #cccccc;
+            --vscode-panel-border: #3c3c3c;
+        }
+        body { margin: 0; background: #1e1e1e; color: #ccc; font-family: sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="app" class="import-wizard-root"></div>
+    <script>
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'sessionInitialized') {
+                document.body.dataset.sessionReady = 'true';
+            }
+        });
+    </script>
+    <script src="/media/importWizard.js"></script>
+    <script>
+        setTimeout(() => {
+            window.postMessage({
+                type: 'sessionInitialized',
+                state: {
+                    targetTable: 'TEST_TABLE',
+                    targetDatabase: 'JUST_DATA',
+                    targetSchema: 'ADMIN',
+                    columns: [],
+                    previewRows: [],
+                    issues: [],
+                    warnings: [],
+                    hasValidationErrors: false
+                }
+            }, '*');
+        }, 100);
+    </script>
+</body>
+</html>

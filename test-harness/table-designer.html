@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Table Designer Harness</title>
+    <link rel="stylesheet" href="/media/tableDesigner.css">
+    <script>
+        window.initialContext = {
+            dbName: 'JUST_DATA',
+            schemaName: 'ADMIN',
+            databaseKind: 'netezza',
+            targetDisplay: 'JUST_DATA.ADMIN',
+            sqliteKeywords: []
+        };
+    </script>
+</head>
+<body>
+    <div class="designer-container">
+        <div class="header">
+            <h2>Visual Table Designer</h2>
+            <div class="table-info">
+                <div class="input-group">
+                    <label for="tableName">Table Name *</label>
+                    <input type="text" id="tableName" placeholder="Enter table name..." value="TEST_TABLE">
+                </div>
+                <div class="input-group">
+                    <label>Target</label>
+                    <span id="targetDisplay" class="read-only-field">JUST_DATA.ADMIN</span>
+                </div>
+            </div>
+        </div>
+        <div class="main-content">
+            <div class="columns-panel">
+                <div class="panel-header">
+                    <h3>Columns</h3>
+                    <button id="addColumnBtn" class="vscode-button primary">Add Column</button>
+                </div>
+                <div class="table-container">
+                    <table id="columnsTable">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Name</th>
+                                <th>Data Type</th>
+                                <th>Length/Prec.</th>
+                                <th>Not Null</th>
+                                <th>PK</th>
+                                <th class="distribution-column">Distribute</th>
+                                <th>Default</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="columnsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="ddl-panel">
+                <div class="panel-header"><h3>Generated DDL Preview</h3></div>
+                <div class="ddl-options">
+                    <div class="option-grid">
+                        <div class="input-group">
+                            <label for="tableType">Table Type</label>
+                            <select id="tableType">
+                                <option value="PERMANENT">PERMANENT</option>
+                            </select>
+                        </div>
+                        <div class="input-group checkbox-group">
+                            <label><input type="checkbox" id="ifNotExists"> IF NOT EXISTS</label>
+                            <label id="organizeNoneLabel"><input type="checkbox" id="organizeNone"> ORGANIZE ON NONE</label>
+                        </div>
+                    </div>
+                    <div class="input-group" id="organizeSection">
+                        <label for="organizeColumns">Organize Columns</label>
+                        <input type="text" id="organizeColumns">
+                    </div>
+                    <div class="input-group">
+                        <label for="tableConstraints">Additional Table Constraints</label>
+                        <textarea id="tableConstraints"></textarea>
+                    </div>
+                </div>
+                <textarea id="ddlPreview" readonly></textarea>
+                <div class="actions">
+                    <button id="saveAsSqlBtn" class="vscode-button secondary">Open in Editor</button>
+                    <button id="executeDdlBtn" class="vscode-button primary">Execute Table Creation</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/media/tableDesigner.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+-- ============================================================================
+-- Bracket / tokenization experiment fixtures
+-- ============================================================================
+-- Open these files as SQL (or netezza-sql) in VS Code / Cursor with JustyBase.
+--
+-- Suggested editor settings to compare during experiments:
+--   "editor.bracketPairColorization.enabled": true
+--   "editor.guides.bracketPairs": "active"
+--   "editor.matchBrackets": "always"
+--   "editor.wordWrap": "off"   (test again with "on")
+--   "editor.maxTokenizationLineLength": 20000  (default)
+--
+-- Useful command: "Developer: Inspect Editor Tokens and Scopes"
+--
+-- Files in this folder:
+--   01-short-baseline-nested-parens.sql     — control (should work)
+--   02-long-line-nested-parens.sql          — long line, many nested calls
+--   02.5_SIMPLE_REPOR.SQL                   — MINIMAL repro: 1 COALESCE + ~3k string literal
+--   03-long-string-with-parens-inside.sql   — parens inside a long literal
+--   04-long-string-escaped-quotes.sql       — '' escapes inside long literal
+--   05-mixed-strings-and-parens.sql         — alternating strings and functions
+--   06-deep-nesting-30-levels.sql           — moderate nesting depth
+--   07-deep-nesting-80-levels.sql           — deep nesting (color cycling)
+--   08-near-tokenization-limit.sql          — ~19 800 chars on one line
+--   09-over-tokenization-limit.sql          — ~25 000 chars on one line
+--   10-user-scenario-long-select-list.sql   — realistic wide SELECT
+--
+-- After TextMate injection optimizations (line-guard + P0d lookbehind removal),
+-- 02.5 should keep correct bracket pair colors on ", 1, 10)" even with long
+-- trailing literals (thousands of characters).
+--
+-- What to record per file:
+--   1) Does hover on a visible ')' highlight the correct '(' ?
+--   2) Do bracket pair COLORS match between opening and closing ?
+--   3) Inspect Tokens: is text inside '...' scoped as string.quoted ?
+--   4) Does behavior change with JustyBase disabled ?
+-- ============================================================================
+
+SELECT 'Open the numbered files above' AS hint;
