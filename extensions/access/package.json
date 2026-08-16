@@ -1,7 +1,7 @@
 {
     "name": "justybaselite-access",
     "displayName": "JustyBase SQL Editor (Microsoft Access)",
-    "description": "Optional Microsoft Access (.mdb/.accdb) companion for JustyBase SQL Editor. Query and edit Access databases with real SQL through a Java/UCanAccess bridge.",
+    "description": "Optional Microsoft Access (.mdb/.accdb) companion for JustyBase SQL Editor. Pure Node.js/TypeScript file access with a DuckDB SQL mirror.",
     "version": "3.16.28",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
@@ -42,11 +42,11 @@
     "configuration": {
         "title": "Microsoft Access",
         "properties": {
-            "justybase.access.javaPath": {
-                "type": "string",
-                "default": "",
+            "justybase.access.readOnly": {
+                "type": "boolean",
+                "default": true,
                 "scope": "machine",
-                "description": "Absolute path to the java/java.exe executable used to launch the Access bridge (leave empty to use JAVA_HOME or java on PATH)."
+                "description": "Open Microsoft Access databases without write intent."
             }
         }
     },
@@ -55,11 +55,14 @@
         "build": "node esbuild.access.js",
         "build:minified": "node esbuild.access.js --minify",
         "build:dev": "node esbuild.access.js",
-        "build:jar": "node scripts/build-jar.js",
         "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
-        "verify:runtime-deps": "node ../../scripts/verify-access-release-snapshot.js",
+        "verify:runtime-deps": "node -e \"const fs = require('fs'); for (const p of ['node_modules/@duckdb/node-api', 'node_modules/mdb-reader']) { if (!fs.existsSync(p)) { console.error('Missing Access runtime dependency: ' + p); process.exit(1); } }\"",
         "prepackage": "npm run verify:runtime-deps && node ../../scripts/generate-third-party-notices.js .",
         "package": "node ../../scripts/package-optional-vsix.js package"
+    },
+    "dependencies": {
+        "@duckdb/node-api": "^1.5.0-r.1",
+        "mdb-reader": "^3.2.0"
     },
     "preview": true
 }

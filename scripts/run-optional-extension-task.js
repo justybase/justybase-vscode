@@ -52,6 +52,13 @@ function resolveNpmInvocation() {
             .map(line => line.trim())
             .find(Boolean);
         if (resolvedPath) {
+            const npmCliPath = path.join(path.dirname(resolvedPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+            if (fs.existsSync(npmCliPath)) {
+                return {
+                    command: process.execPath,
+                    prefixArgs: [npmCliPath]
+                };
+            }
             return {
                 command: resolvedPath,
                 prefixArgs: []
