@@ -15,10 +15,11 @@ interface DocumentState { text: string; version: number; context: SqlLanguageCon
 
 export interface LspSession {
   invalidateConnection(connectionId: string): void;
+  invalidateAll(): void;
 }
 
 function contextFor(context: SqlLanguageContext | undefined): WebLspContext {
-  return { connectionName: context?.connectionId, effectiveDatabase: context?.database, effectiveSchema: context?.schema, databaseKind: 'netezza', netezzaSchemasEnabled: true };
+  return { connectionName: context?.connectionId, effectiveDatabase: context?.database, effectiveSchema: context?.schema, databaseKind: context?.databaseKind ?? 'netezza', netezzaSchemasEnabled: true };
 }
 
 function objectKind(value: string | undefined): 'table' | 'view' | 'procedure' {
@@ -95,6 +96,7 @@ function workspaceEditResponse(edit: { changes: Record<string, Array<{ range: { 
 
 export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: ApiConfig, userId: string, onClose?: (session: LspSession) => void): LspSession {
   const documents = new Map<string, DocumentState>();
+  const knownConnectionIds = new Set<string>();
   const core = new NetezzaWebLspCore({
     requestMetadata: params => requestMetadata(params, documents, store, config, userId),
     logger: { error: message => console.error(message) },
@@ -114,7 +116,10 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
     send({ method: 'textDocument/publishDiagnostics', params: { uri, version, diagnostics: diagnosticResponse(items) } });
   }
 
-  const session: LspSession = { invalidateConnection: connectionId => core.clearConnection(connectionId) };
+  const session: LspSession = {
+    invalidateConnection: connectionId => core.clearConnection(connectionId),
+    invalidateAll: () => { for (const connectionId of knownConnectionIds) core.clearConnection(connectionId); },
+  };
 
   socket.on('message', raw => {
     let request: RpcRequest;
@@ -130,7 +135,11 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
         if (request.method === 'justybase/documentContext') {
           const uri = typeof params.uri === 'string' ? params.uri : '';
           const document = documents.get(uri);
-          if (document) { document.context = (params.context ?? {}) as SqlLanguageContext; core.setContext(uri, contextFor(document.context)); }
+          if (document) {
+            document.context = (params.context ?? {}) as SqlLanguageContext;
+            if (document.context.connectionId) knownConnectionIds.add(document.context.connectionId);
+            core.setContext(uri, contextFor(document.context));
+          }
           return;
         }
         if (request.method === 'textDocument/didOpen') {
@@ -250,8 +259,8 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
           const textDocument = params.textDocument as { uri?: string } | undefined;
           const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
           if (!document) { response(request.id, []); return; }
-          const options = params.options as { tabSize?: number; insertSpaces?: boolean } | undefined;
-          const formatted = await core.format(document.text, 'netezza', { tabWidth: options?.insertSpaces === false ? 4 : Math.max(1, options?.tabSize ?? 4) });
+          const options = params.options as { tabSize?: number; insertSpaces?: boolean; keywordCase?: 'upper' | 'lower' | 'preserve' } | undefined;
+          const formatted = await core.format(document.text, document.context.databaseKind ?? 'netezza', { tabWidth: options?.insertSpaces === false ? 4 : Math.max(1, options?.tabSize ?? 4), keywordCase: options?.keywordCase });
           const lineCount = document.text.split('\n').length;
           response(request.id, [{ range: { start: { line: 0, character: 0 }, end: { line: Math.max(0, lineCount - 1), character: Number.MAX_SAFE_INTEGER } }, newText: formatted }]);
           return;

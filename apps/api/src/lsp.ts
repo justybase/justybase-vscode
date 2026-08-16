@@ -1,5 +1,6 @@
-import type { SqlCompletionItem, SqlCompletionRequest, SqlCompletionResponse, SqlDiagnostic, SqlDiagnosticsRequest, SqlDiagnosticsResponse } from '@justybase/contracts';
-import { isReadOnlySql, listColumns, listObjects } from './netezza';
+import type { SqlCompletionItem, SqlCompletionRequest, SqlCompletionResponse, SqlDiagnostic, SqlDiagnosticsRequest, SqlDiagnosticsResponse, SqlFormatRequest, SqlFormatResponse } from '@justybase/contracts';
+import { NetezzaWebLspCore } from '@justybase/sql-core';
+import { isProfileReadOnlySql, listColumns, listObjects } from './netezza';
 import type { ApiConfig } from './config';
 import type { AppStore, StoredConnection } from './store';
 
@@ -19,7 +20,8 @@ interface TableReference { table: string; alias?: string; }
 const objectCache = new Map<string, CacheEntry<Awaited<ReturnType<typeof listObjects>>>>();
 const columnCache = new Map<string, CacheEntry<Awaited<ReturnType<typeof listColumns>>>>();
 
-export function invalidateSqlMetadataCache(connectionId: string): void {
+export function invalidateSqlMetadataCache(connectionId?: string): void {
+  if (!connectionId) { objectCache.clear(); columnCache.clear(); return; }
   const prefix = `${connectionId}|`;
   for (const key of objectCache.keys()) if (key.startsWith(prefix)) objectCache.delete(key);
   for (const key of columnCache.keys()) if (key.startsWith(prefix)) columnCache.delete(key);
@@ -125,6 +127,12 @@ export async function provideSqlDiagnostics(store: AppStore, _config: ApiConfig,
   if (quoteOpen) diagnostics.push(diagnostic(sql, 'Unterminated string literal.', 'error', Math.max(0, sql.lastIndexOf("'")), 'WEB002'));
   if (parentheses > 0) diagnostics.push(diagnostic(sql, 'Unclosed parenthesis.', 'error', sql.length, 'WEB003'));
   const profile = getProfile(store, userId, request.connectionId);
-  if (profile?.readOnly && sql.trim() && !isReadOnlySql(sql)) diagnostics.push(diagnostic(sql, 'This connection is read-only; the statement may be rejected.', 'warning', 0, 'WEB004'));
+  if (profile?.readOnly && sql.trim() && !isProfileReadOnlySql(profile, sql)) diagnostics.push(diagnostic(sql, 'This connection is read-only; the statement may be rejected.', 'warning', 0, 'WEB004'));
   return { diagnostics };
+}
+
+/** Direct HTTP formatter for clients that do not keep the LSP WebSocket open. */
+export async function formatSqlDocument(_store: AppStore, _config: ApiConfig, _userId: string, request: SqlFormatRequest): Promise<SqlFormatResponse> {
+  const core = new NetezzaWebLspCore({ requestMetadata: async params => params.kind === 'context' ? { databaseKind: 'netezza' } : [] });
+  return { sql: await core.format(request.sql, request.databaseKind ?? 'netezza', { tabWidth: Math.max(1, request.tabSize ?? 4), keywordCase: request.keywordCase }) };
 }
