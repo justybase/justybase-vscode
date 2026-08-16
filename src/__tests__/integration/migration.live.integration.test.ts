@@ -142,7 +142,40 @@ describeIfNetezza('Live migration between databases', () => {
     let service: MigrationService;
     let manager: FakeConnectionManager;
 
-    const createdTables: Array<{ kind: DatabaseKind; name: string }> = [];
+    interface CreatedTable {
+        kind: DatabaseKind;
+        name: string;
+        details: ConnectionDetails;
+    }
+
+    const createdTables: CreatedTable[] = [];
+
+    function registerCreatedTable(
+        kind: DatabaseKind,
+        details: ConnectionDetails,
+        name: string,
+    ): void {
+        createdTables.push({ kind, details, name });
+    }
+
+    async function cleanupCreatedTable(table: CreatedTable): Promise<void> {
+        let connection: DatabaseConnection | undefined;
+        try {
+            connection = buildTargetConnection(table.kind, table.details);
+            await connection.connect();
+            await connection.createCommand(`DROP TABLE ${table.name}`).execute();
+        } catch {
+            // Best-effort cleanup: the table may not have been created or the target may be unavailable.
+        } finally {
+            if (connection) {
+                try {
+                    await connection.close();
+                } catch {
+                    // Ignore cleanup connection failures.
+                }
+            }
+        }
+    }
 
     beforeAll(async () => {
         nzConnection = new NzConnection({
@@ -168,7 +201,7 @@ describeIfNetezza('Live migration between databases', () => {
                 PRIMARY KEY (ID)
             )`,
         ).execute();
-        createdTables.push({ kind: 'netezza', name: sourceTable });
+        registerCreatedTable('netezza', buildNetezzaDetails(), `${sourceSchema}.${sourceTable}`);
 
         const values = [
             "1, 12.34, 'Alice', '1990-05-12', '2024-02-01 10:20:30', TRUE",
@@ -187,19 +220,15 @@ describeIfNetezza('Live migration between databases', () => {
     }, 60000);
 
     afterAll(async () => {
-        for (const table of createdTables) {
-            try {
-                await nzConnection.createCommand(
-                    `DROP TABLE IF EXISTS ${table.name.includes('.') ? table.name : `${sourceSchema}.${table.name}`}`,
-                ).execute();
-            } catch {
-                // Best-effort cleanup.
-            }
+        for (const table of [...createdTables].reverse()) {
+            await cleanupCreatedTable(table);
         }
-        try {
-            await nzConnection.close();
-        } catch {
-            // Ignore.
+        if (nzConnection) {
+            try {
+                await nzConnection.close();
+            } catch {
+                // Ignore.
+            }
         }
     });
 
@@ -331,12 +360,12 @@ describeIfNetezza('Live migration between databases', () => {
         }
 
         const targetTable = `JBL_MIG_TGT_${Date.now()}`.toLowerCase();
+        registerCreatedTable('postgresql', details, targetTable);
         const { phases, maxPercent, result } = await migrateNetezzaTableTo(
             details,
             'postgresql',
             targetTable,
         );
-        createdTables.push({ kind: 'postgresql', name: targetTable });
 
         expect(result.success).toBe(true);
         expect(result.rowsInserted).toBe(3);
@@ -363,13 +392,14 @@ describeIfNetezza('Live migration between databases', () => {
     it('migrates Netezza table to Netezza (external table stream)', async () => {
         const details = buildNetezzaDetails();
         const targetTable = `JBL_MIG_TGT_${Date.now()}`.toUpperCase();
+        const targetDetails = { ...details, name: 'nz-target', schema: sourceSchema };
+        registerCreatedTable('netezza', targetDetails, `${sourceSchema}.${targetTable}`);
 
         const { phases, maxPercent, result } = await migrateNetezzaTableTo(
-            { ...details, name: 'nz-target', schema: sourceSchema },
+            targetDetails,
             'netezza',
             targetTable,
         );
-        createdTables.push({ kind: 'netezza', name: `${sourceSchema}.${targetTable}` });
 
         expect(result.success).toBe(true);
         expect(result.rowsInserted).toBe(3);
@@ -399,12 +429,12 @@ describeIfNetezza('Live migration between databases', () => {
         }
 
         const targetTable = `JBL_MIG_TGT_${Date.now()}`.toLowerCase();
+        registerCreatedTable('mysql', details, targetTable);
         const { phases, result } = await migrateNetezzaTableTo(
             details,
             'mysql',
             targetTable,
         );
-        createdTables.push({ kind: 'mysql', name: targetTable });
 
         expect(result.success).toBe(true);
         expect(result.rowsInserted).toBe(3);
@@ -452,23 +482,26 @@ describeIfNetezza('Live migration between databases', () => {
             },
         };
 
-        const { phases, result } = await runMigration(request);
-
-        expect(result.success).toBe(true);
-        expect(result.rowsInserted).toBe(3);
-        expect(phases).toContain('done');
-
-        const connection = buildTargetConnection('sqlite', details);
         try {
-            await connection.connect();
-            await verifyTargetTable(connection, targetTable, 3, {
-                spotCheck: [
-                    [1, 'NAME', 'Alice'],
-                    [3, 'AMOUNT', -1.5],
-                ] as [number, string, unknown][],
-            });
+            const { phases, result } = await runMigration(request);
+
+            expect(result.success).toBe(true);
+            expect(result.rowsInserted).toBe(3);
+            expect(phases).toContain('done');
+
+            const connection = buildTargetConnection('sqlite', details);
+            try {
+                await connection.connect();
+                await verifyTargetTable(connection, targetTable, 3, {
+                    spotCheck: [
+                        [1, 'NAME', 'Alice'],
+                        [3, 'AMOUNT', -1.5],
+                    ] as [number, string, unknown][],
+                });
+            } finally {
+                await connection.close();
+            }
         } finally {
-            await connection.close();
             if (fs.existsSync(dbPath)) {
                 fs.unlinkSync(dbPath);
             }
@@ -489,6 +522,7 @@ describeIfNetezza('Live migration between databases', () => {
             await connection.createCommand(
                 `CREATE TABLE ${sourceTableName} (id INTEGER, amount NUMERIC(10,2), name VARCHAR(50), created_at TIMESTAMP)`,
             ).execute();
+            registerCreatedTable('postgresql', pgDetails, sourceTableName);
             await connection.createCommand(
                 `INSERT INTO ${sourceTableName} VALUES (1, 7.25, 'Zeus', '2024-06-01 12:00:00'), (2, 8.5, 'Hera', NULL)`,
             ).execute();
@@ -498,7 +532,9 @@ describeIfNetezza('Live migration between databases', () => {
 
         const targetTable = `JBL_MIG_SQLTGT_${Date.now()}`.toUpperCase();
         manager.register('pg-src', pgDetails);
-        manager.register('nz-target', { ...buildNetezzaDetails(), name: 'nz-target', schema: sourceSchema });
+        const targetDetails = { ...buildNetezzaDetails(), name: 'nz-target', schema: sourceSchema };
+        manager.register('nz-target', targetDetails);
+        registerCreatedTable('netezza', targetDetails, `${sourceSchema}.${targetTable}`);
 
         const request: MigrationRequest = {
             source: {
@@ -516,7 +552,6 @@ describeIfNetezza('Live migration between databases', () => {
         };
 
         const { phases, maxPercent, result } = await runMigration(request);
-        createdTables.push({ kind: 'netezza', name: `${sourceSchema}.${targetTable}` });
 
         expect(result.success).toBe(true);
         expect(result.rowsInserted).toBe(2);
@@ -542,14 +577,6 @@ describeIfNetezza('Live migration between databases', () => {
             await nz.close();
         }
 
-        // Cleanup PG source table.
-        const pgCleanup = buildTargetConnection('postgresql', pgDetails);
-        try {
-            await pgCleanup.connect();
-            await pgCleanup.createCommand(`DROP TABLE IF EXISTS ${sourceTableName}`).execute();
-        } finally {
-            await pgCleanup.close();
-        }
     }, 180000);
 
     it('uses Oracle SELECT metadata without sampling or counting a live result', async () => {
@@ -620,7 +647,9 @@ describeIfNetezza('Live migration between databases', () => {
 
         const targetTable = `JBL_MIG_ORA_NZ_${Date.now()}`.toUpperCase();
         manager.register('oracle-e2e-src', oracleDetails);
-        manager.register('nz-e2e-target', { ...buildNetezzaDetails(), name: 'nz-e2e-target', schema: sourceSchema });
+        const targetDetails = { ...buildNetezzaDetails(), name: 'nz-e2e-target', schema: sourceSchema };
+        manager.register('nz-e2e-target', targetDetails);
+        registerCreatedTable('netezza', targetDetails, `${sourceSchema}.${targetTable}`);
         const request: MigrationRequest = {
             source: {
                 mode: 'sql',
@@ -641,7 +670,6 @@ describeIfNetezza('Live migration between databases', () => {
         };
 
         const { phases, result } = await runMigration(request);
-        createdTables.push({ kind: 'netezza', name: `${sourceSchema}.${targetTable}` });
 
         expect(result.success).toBe(true);
         expect(result.rowsInserted).toBe(2);
@@ -696,13 +724,13 @@ describeIfNetezza('Live migration between databases', () => {
 
             const targetTable = `JBL_MIG_TGT_${Date.now()}`;
             const finalTableName = target.nameCase === 'upper' ? targetTable.toUpperCase() : targetTable.toLowerCase();
+            registerCreatedTable(target.kind, details, finalTableName);
 
             const { phases, result } = await migrateNetezzaTableTo(
                 details,
                 target.kind,
                 finalTableName,
             );
-            createdTables.push({ kind: target.kind, name: finalTableName });
 
             if (target.kind === 'oracle' || target.kind === 'vertica') {
                 const diag = buildTargetConnection(target.kind, details);
@@ -745,8 +773,8 @@ describeIfNetezza('Live migration between databases', () => {
         }
 
         const targetTable = `jbl_mig_append_${Date.now()}`.toLowerCase();
+        registerCreatedTable('postgresql', details, targetTable);
         await executeOnTarget('postgresql', details, `CREATE TABLE ${targetTable} (id INTEGER NOT NULL, amount NUMERIC(10,2), name VARCHAR(50), birth DATE, created_at TIMESTAMP, active BOOLEAN)`);
-        createdTables.push({ kind: 'postgresql', name: targetTable });
 
         manager.register('pg-append-target', details);
         const request: MigrationRequest = {

@@ -1,4 +1,4 @@
-/** Live-database integration suites excluded from default/validate unit test runs. */
+/** External-database suites excluded from default/fast/validate test runs. */
 module.exports = [
   "realDatabase.integration.test.ts",
   "optionalDialects.live.integration.test.ts",
@@ -12,5 +12,13 @@ module.exports = [
   "vertica.integration.test.ts",
   "access.integration.test.ts",
   "allRowsTimeoutSession.live.integration.test.ts",
+  "cteToTempTable.live.integration.test.ts",
+  "macroPreprocessor.live.integration.test.ts",
+  "migration.live.integration.test.ts",
+  "netezzaCompletionKeywordLegality.live.integration.test.ts",
+  "netezzaDoubleDotCompletion.live.integration.test.ts",
+  "netezzaTimestampFilterFormats.live.integration.test.ts",
   "mcpLive.integration.test.ts",
+  "sasLikeMacros.e2e.test.ts",
+  "linterLiveValidation.test.ts",
 ];

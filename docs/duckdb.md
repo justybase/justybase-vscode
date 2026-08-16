@@ -21,6 +21,8 @@ The extension provides DuckDB connectivity, metadata, DDL, import mapping, expla
 
 File SQL uses DuckDB SQL over read-only views for CSV, TSV, Parquet, Avro and XLSX sources. An editable single-file connection materializes a generated `<file>_edit` table. `FSL001` warns when DML targets a source other than an `_edit` table.
 
+The current user-facing file workflow is **Data Workspace Manager**: local files are materialized as persistent DuckDB tables, and the manager also accepts materialized Netezza sources. Existing `file` profiles and APIs remain available to integrations but are not listed by the manager.
+
 The read-only diagnostic is advisory because lint rules do not receive connection options. The execution layer remains the authority for whether a workspace is editable.
 
 ## Deliberate Boundaries

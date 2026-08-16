@@ -12,7 +12,7 @@
  * - Set NZ_DEV_PASSWORD environment variable with the database password
  * - Optionally override host/port/database/user via NZ_DEV_HOST/NZ_DEV_PORT/NZ_DEV_DATABASE/NZ_DEV_USER
  *
- * Run with: NZ_DEV_PASSWORD=password npx jest src/__tests__/sqlLinter/linterLiveValidation.test.ts
+ * Run with: NZ_DEV_PASSWORD=password npx jest --config jest.live.config.js --runInBand src/__tests__/sqlLinter/linterLiveValidation.test.ts
  */
 
 import { afterAll, beforeAll, describe, expect, it, jest } from "@jest/globals";
