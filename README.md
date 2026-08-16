@@ -7,7 +7,9 @@
 Connect without installing an ODBC driver, write and validate Netezza SQL, explore query results, browse schemas, and manage warehouse workflows from one familiar editor.
 
 [![Release](https://github.com/justybase/justybase-vscode/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/justybase/justybase-vscode/actions/workflows/release.yml)
-[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/krzysztof-d.justybaselite-netezza?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza)
+[![Marketplace](https://vsmarketplacebadges.dev/version/krzysztof-d.justybaselite-netezza.svg?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza)
+
+[Marketplace](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza) · [Publisher](https://marketplace.visualstudio.com/publishers/krzysztof-d)
 
 ## Why JustyBase?
 
@@ -50,6 +52,14 @@ Inspect types, cardinality, distinct values, null counts, summaries, distributio
 ![Interactive query result chart in JustyBase](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-chart.png)
 
 Turn result sets into interactive charts and compare patterns without leaving the SQL workspace.
+
+### Build queries visually
+
+![Visual Query Builder with joined sources, selected columns, filter and sort controls, and SQL preview](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/visual_query_builder.png)
+
+Compose multi-table `SELECT` queries by dragging tables or views onto a canvas, connecting columns to create joins, selecting fields, and adding filters, sorting, aggregates, `GROUP BY`, `HAVING`, and `LIMIT` clauses. Open the generated SQL in the editor, copy it, or run it immediately.
+
+Read the [Visual Query Builder guide](docs/VISUAL_QUERY_BUILDER.md) for the complete workflow.
 
 ### Use AI with explicit control
 
@@ -101,9 +111,11 @@ See the [SQL Results Filtering guide](docs/SQL_RESULTS_FILTERING.md) and [Export
 
 ### Work with files through SQL
 
-Install the optional [DuckDB + Files pack](extensions/duckdb) to query Excel, CSV/TSV, Parquet, and Avro files through SQL. Multiple local files can be opened as a saved workspace for joins, unions, CTEs, and aggregations.
+Install the optional [DuckDB + Files pack](extensions/duckdb), open **Data Workspace Manager**, and create a persistent DuckDB workspace. Add one local Excel/CSV/TSV/Parquet file or several files as sources, then query the materialized tables with SQL. The same workspace can also materialize saved Netezza tables, views, and read-only `SELECT`/`WITH` queries.
 
-Install the optional [Microsoft Access pack](extensions/access) to query and edit `.mdb` and `.accdb` files through the bundled UCanAccess bridge. Java 11+ is required.
+For quick inspection, the existing **Open in Data File Preview** action remains available from the Explorer for CSV and Excel files. The preview includes **Add to Data Workspace**, which lets you choose a new or existing workspace.
+
+Install the optional [Microsoft Access pack](extensions/access) to query and edit `.mdb` and `.accdb` files through the native TypeScript reader and embedded DuckDB mirror. No Java runtime or JAR is required.
 
 Read the [File SQL guide](docs/file-sql.md) and [Access guide](extensions/access/README.md).
 
@@ -146,7 +158,7 @@ See the [Editor Capability Matrix](docs/EDITOR_CAPABILITY_MATRIX.md) for current
 
 - VS Code `1.103.2` or newer.
 - No external Netezza driver for the core extension.
-- Java 11+ only when using the Microsoft Access pack.
+- The Microsoft Access pack uses the Node.js runtime supplied by VS Code; no Java runtime is required.
 - Optional database packs may require their own native or JavaScript driver package.
 
 ## Support

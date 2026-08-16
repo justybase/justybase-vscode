@@ -8,9 +8,11 @@
  *
  * Prerequisites:
  *   NZ_DEV_PASSWORD environment variable (falls back to 'password')
+ *   Optional: NZ_DEV_SCHEMA (defaults to ADMIN)
  *
  * Run:
- *   NZ_DEV_PASSWORD=password npm run test -- --testPathPatterns="netezzaTimestampFilterFormats"
+ *   NZ_DEV_PASSWORD=password npx jest --config jest.live.config.js --runInBand \
+ *     src/__tests__/integration/netezzaTimestampFilterFormats.live.integration.test.ts
  */
 
 const skipTests = !process.env.NZ_DEV_PASSWORD;
@@ -30,7 +32,9 @@ const DB_CONFIG = {
     password: process.env.NZ_DEV_PASSWORD || 'password',
 };
 
-const TABLE = 'ADMIN.FILTER_FORMAT_TEST';
+const TEST_SCHEMA = process.env.NZ_DEV_SCHEMA || 'ADMIN';
+const TEST_TABLE = `JBL_FILTER_FORMAT_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const TABLE = `${TEST_SCHEMA}.${TEST_TABLE}`;
 
 interface FormatTestCase {
     label: string;
@@ -94,9 +98,12 @@ describeIfDb('Netezza Temporal Filter Format Discovery', () => {
     }, 30_000);
 
     afterAll(async () => {
-        if (connection) {
+        if (!connection) return;
+
+        try {
             await tryExecute(connection, `DROP TABLE ${TABLE} IF EXISTS`);
-            connection.close();
+        } finally {
+            await connection.close();
         }
     });
 

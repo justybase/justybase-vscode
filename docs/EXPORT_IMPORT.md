@@ -206,9 +206,9 @@ JustyBase can import data from:
 
 The primary file-based import surface is the **Advanced Import Wizard**.
 
-### Multi-file SQL workspace
+### Data Workspace SQL
 
-With the optional DuckDB + Files extension, use **Query Multiple Files with SQL (DuckDB)** to select several local `.csv`, `.tsv`, `.xlsx`, `.parquet`, or `.avro` files. The extension opens one read-only DuckDB workspace and registers each file as a view named by its full path, so sources can be joined directly:
+With the optional DuckDB + Files extension, open **Data Workspace Manager** and create a persistent DuckDB workspace. Add one or more local `.csv`, `.tsv`, `.xlsx`, or `.parquet` sources; a workspace with one source is the single-file SQL workflow. Sources are materialized as real local tables, so they can be joined directly:
 
 ```sql
 SELECT c.id, c.name, o.total
@@ -216,7 +216,7 @@ FROM "/data/customers.csv" AS c
 JOIN "/data/orders.csv" AS o ON o.customer_id = c.id;
 ```
 
-For Excel workbooks, each discovered sheet is also exposed as `"<path>#sheet=<sheet>"` and is suggested by SQL completion after typing the workbook path. The selected file list is saved as a connection profile and can be reopened with **Open Saved File SQL Workspace**. To extend the current workspace, run **Add Files to Active File SQL Workspace (DuckDB)**; the command opens a new editor with the updated list. Multi-file workspaces are read-only; export the result to a new file when a combined dataset is needed.
+Use **Open SQL** in the manager to query the local tables. Right-clicking a CSV or Excel file and choosing **Open in Data File Preview** still provides a preview; its **Add to Data Workspace** button can add the file to a new or existing workspace. Refresh replaces only that source table; other local tables and views remain intact.
 
 **How to use:**
 

@@ -6,7 +6,8 @@
  * - Optional: NZ_DEV_HOST, NZ_DEV_PORT, NZ_DEV_DATABASE, NZ_DEV_USER
  *
  * Run:
- *   npm run test -- --testPathPatterns=netezzaDoubleDotCompletion.live --runInBand
+ *   npx jest --config jest.live.config.js --runInBand \
+ *     src/__tests__/integration/netezzaDoubleDotCompletion.live.integration.test.ts
  */
 
 jest.unmock("chevrotain");

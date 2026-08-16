@@ -270,7 +270,7 @@ Before considering a dialect addition complete, verify:
 npm run check-types
 npm run lint
 npm run build
-npm run test -- --testPathIgnorePatterns="realDatabase.integration.test.ts"
+npm run test:validate
 ```
 
 Use targeted test runs while iterating, but finish with the full gate above.

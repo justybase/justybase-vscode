@@ -13,7 +13,8 @@
  *   NZ_DEV_PASSWORD environment variable (falls back to 'password')
  *
  * Run:
- *   NZ_DEV_PASSWORD=password npm run test -- --testPathPatterns="netezzaCompletionKeywordLegality"
+ *   NZ_DEV_PASSWORD=password npx jest --config jest.live.config.js --runInBand \
+ *     src/__tests__/integration/netezzaCompletionKeywordLegality.live.integration.test.ts
  */
 
 const skipTests = !process.env.NZ_DEV_PASSWORD;

@@ -26,31 +26,19 @@
     "node": ">=22.12.0"
   },
   "keywords": [
+    "SQL Editor",
+    "SQL IDE",
     "Netezza",
+    "Netezza SQL",
     "IBM PureData",
     "PureData System for Analytics",
-    "Netezza SQL",
-    "SQL editor",
-    "SQL IDE",
     "database client",
     "data warehouse",
-    "schema browser",
     "SQL completion",
     "SQL linter",
     "SQL formatter",
     "NZPLSQL",
-    "GROOM",
-    "ETL",
-    "query results",
-    "data exploration",
-    "AI SQL assistant",
-    "GitHub Copilot",
-    "MCP",
-    "DuckDB",
-    "Excel",
-    "Parquet",
-    "CSV",
-    "VS Code"
+    "AI SQL assistant"
   ],
   "categories": [
     "Programming Languages",
@@ -383,7 +371,7 @@
       },
       {
         "command": "netezza.openFileConnectionPanel",
-        "title": "Open File Connection Manager",
+        "title": "Open Data Workspace Manager",
         "icon": "$(file-directory)"
       },
       {
@@ -2195,7 +2183,7 @@
         },
         {
           "command": "netezza.openFileConnectionPanel",
-          "when": "view == netezza.schema && viewItem == serverInstance && justybase.schemaDatabaseKind == file",
+          "when": "view == netezza.schema && viewItem == serverInstance && (justybase.schemaIsDataWorkspace || justybase.schemaDatabaseKind == file)",
           "group": "0_file@2"
         },
         {
@@ -2515,7 +2503,7 @@
         },
         {
           "command": "netezza.openVisualQueryBuilder",
-          "when": "view == netezza.schema && viewItem == typeGroup:TABLE",
+          "when": "view == netezza.schema && viewItem =~ /typeGroup:(TABLE|VIEW)/ && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == file)",
           "group": "8_visualization@1"
         },
         {
@@ -4301,7 +4289,6 @@
     "build:mssql": "node scripts/run-optional-extension-task.js mssql build",
     "build:mysql": "node scripts/run-optional-extension-task.js mysql build",
     "build:access": "node scripts/run-optional-extension-task.js access build",
-    "build:access-jar": "node extensions/access/scripts/build-jar.js",
     "build:dev": "node esbuild.js",
     "build:watch": "node esbuild.js --watch",
     "clean:db2": "rimraf extensions/db2/dist",
@@ -4339,14 +4326,18 @@
     "verify:access": "node scripts/run-optional-extension-task.js access verify",
     "test": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest",
     "test:validate": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.validate.config.js",
-    "test:fast": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --testPathIgnorePatterns=\"completionEngine.test.ts|metadataCache.test.ts|sqlLinter.test.ts|sqlValidator.test.ts|validator.advanced.test.ts|extension.test.ts\"",
+    "test:fast": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.fast.config.js",
     "test:parser": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"sqlParser|validator|completionEngine|identifierRoleCollector|semanticTokens|parserSqlContext|procedure\"",
     "test:serial": "cross-env NODE_ENV=test JEST_SILENT=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest",
     "test:watch": "cross-env NODE_ENV=test JEST_SILENT=1 jest --watch",
     "test:unit:debug": "cross-env NODE_ENV=test JEST_SILENT=0 JEST_VERBOSE=1 JEST_LOG_HEAP=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand",
     "test:coverage": "cross-env NODE_ENV=test JEST_SILENT=1 JEST_MAX_WORKERS=1 NODE_OPTIONS=--max-old-space-size=4096 jest --coverage --runInBand",
+    "test:live:local": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node scripts-private/live-test-matrix.js --smoke-only",
     "test:mcp:live": "npm run build && cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/mcpLive.integration.test.ts",
+    "test:live:prefetch-heavy": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config Benchmark/jest.config.js --runInBand --verbose Benchmark/metadataPrefetchHeavyLive.test.ts",
     "provision:heavy-prefetch-schema": "npx tsx Benchmark/provisionHeavyPrefetchSchema.ts",
+    "test:live:list": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node scripts-private/live-test-matrix.js --list",
+    "test:live:matrix": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node scripts-private/live-test-matrix.js",
     "benchmark": "npm run benchmark:suggest && npm run benchmark:lsp && npm run benchmark:quality && npm run benchmark:result-panel",
     "benchmark:suggest": "jest --config Benchmark/jest.config.js --runInBand Benchmark/suggestBenchmark.test.ts",
     "benchmark:migration": "jest --config Benchmark/jest.config.js --runInBand Benchmark/migrationPerfBenchmark.test.ts",
@@ -4355,10 +4346,14 @@
     "benchmark:lsp": "jest --config Benchmark/jest.config.js --runInBand Benchmark/lspFeatureBenchmark.test.ts",
     "test:playwright": "npx playwright test --config=test-harness/playwright.config.ts",
     "test:playwright:ui": "npx playwright test --ui --config=test-harness/playwright.config.ts",
+    "test:playwright:web-sql": "npx playwright test --config=test-harness/web-sql-playwright.config.ts",
     "test:playwright:install": "npx playwright install chromium",
     "test:duckdb:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/duckdb.integration.test.ts",
     "test:file:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/fileSql.integration.test.ts",
     "test:access:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/access.integration.test.ts",
+    "test:access:com": "node scripts/access-com-crosscheck.cjs",
+    "test:access:jet3": "node scripts/access-jet3-crosscheck.cjs",
+    "test:access:sql": "node scripts/access-sql-crosscheck.cjs",
     "test:db2:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/jest/bin/jest.js --config jest.live.config.js --runInBand src/__tests__/integration/db2.integration.test.ts",
     "db2:connect-probe": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-connect-probe.ts",
     "db2:seed-live-fixture": "cross-env NODE_ENV=test node extensions/db2/scripts/switch-runtime.js auto-for-live-tests -- node ./node_modules/ts-node/dist/bin.js --transpile-only scripts-private/db2-live-fixture/seed.ts",
