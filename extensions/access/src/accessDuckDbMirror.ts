@@ -2,8 +2,8 @@ import { createRequire } from 'node:module';
 import type {
     DuckDBConnection as DuckDbRuntimeConnection,
     DuckDBInstance,
+    DuckDBValue,
 } from '@duckdb/node-api';
-import type { DuckDBValue } from '@duckdb/node-api/lib/values/DuckDBValue';
 import type {
     AccessColumnDefinition,
     AccessComplexValue,
