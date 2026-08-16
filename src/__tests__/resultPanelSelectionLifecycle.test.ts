@@ -11,6 +11,21 @@ jest.mock('../../media/resultPanel/protocol.js', () => ({
     postHostMessage: jest.fn()
 }));
 
+jest.mock('../../media/resultPanel/selection/clipboard.js', () => ({
+    buildSelectedClipboardPayload: jest.fn(),
+    buildSelectedClipboardPayloadAsync: jest.fn(),
+    buildSelectedColumnClipboardPayloadAsync: jest.fn(),
+    writeMultiFormatToClipboard: jest.fn(),
+    copyAllRows: jest.fn(),
+    copyAllRowsAsync: jest.fn(),
+    copyAllRowsAsHtml: jest.fn(),
+    copyAllRowsAsHtmlAsync: jest.fn(),
+    copyAllRowsAsMd: jest.fn(),
+    copyAllRowsAsMdAsync: jest.fn(),
+    resolvePlainText: jest.fn((payload: { text: string }) => payload.text),
+    __testHooks: {}
+}));
+
 jest.mock('../../media/resultPanel/rangeChart.js', () => ({
     RANGE_CHART_MENU: [],
     canCreateRangeChart: jest.fn(() => false),
@@ -409,6 +424,135 @@ describe('result panel selection lifecycle', () => {
         expect(initialRow.children[1].classList.contains('selected-cell')).toBe(false);
         expect(virtualizedRow.children[1].classList.contains('selected-cell')).toBe(false);
         expect(handlers.hasSelection()).toBe(true);
+    });
+
+    it('copies every row for a selected column instead of only rendered virtual rows', async () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const clipboard = require('../../media/resultPanel/selection/clipboard.js') as {
+            buildSelectedColumnClipboardPayloadAsync: jest.MockedFunction<(...args: unknown[]) => Promise<unknown>>;
+            writeMultiFormatToClipboard: jest.MockedFunction<(...args: unknown[]) => void>;
+        };
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: {
+                wrappers: FakeWrapper[];
+                documentMock: { activeWrapper: FakeWrapper | null };
+            };
+        }).__selectionTestState;
+
+        const renderedRows = [0, 1].map(index => new FakeRow(index, [
+            new FakeCell(String(index + 1), ['row-number-cell']),
+            new FakeCell(`visible-${index}`),
+        ]));
+        const wrapper = new FakeWrapper(renderedRows);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+
+        const tableRows = [1, 2, 3, 4].map(value => ({
+            getValue: () => value,
+        }));
+        const tableApi = {
+            getAllColumns: () => [],
+            getRowModel: () => ({ rows: tableRows }),
+            getFilteredRowModel: () => ({ rows: tableRows }),
+            getVisibleLeafColumns: () => [{ id: '0', columnDef: { header: 'value' } }],
+        };
+        const resolver = {
+            fetchAllRowValues: jest.fn(() => Promise.resolve([
+                ['row-1'],
+                ['row-2'],
+                ['row-3'],
+                ['row-4'],
+            ])),
+        };
+        const payload = {
+            headers: ['value'],
+            matrix: [[{ text: 'row-1' }], [{ text: 'row-2' }], [{ text: 'row-3' }], [{ text: 'row-4' }]],
+            alignments: ['left'],
+            text: 'value\nrow-1\nrow-2\nrow-3\nrow-4',
+            html: '<table>all rows</table>',
+            md: '| value |',
+        };
+        clipboard.buildSelectedColumnClipboardPayloadAsync.mockResolvedValue(payload);
+
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1, resolver) as unknown as {
+            selectColumn: (columnIndex: number) => void;
+            copySelection: (withHeaders?: boolean, plainTextFormat?: string) => void;
+            copySelectionAsHtml: () => void;
+            copySelectionAsMd: (withHeaders?: boolean) => void;
+        };
+        handlers.selectColumn(0);
+
+        // This is the same call used by Ctrl+C and by the context-menu copy action.
+        handlers.copySelection(true, 'tabbed');
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(resolver.fetchAllRowValues).toHaveBeenCalledTimes(0);
+        expect(clipboard.buildSelectedColumnClipboardPayloadAsync).toHaveBeenCalledWith(
+            tableApi,
+            0,
+            true,
+            resolver,
+        );
+        expect(clipboard.writeMultiFormatToClipboard).toHaveBeenCalledWith(
+            payload.html,
+            payload.text,
+            payload.md,
+            '4 cells',
+        );
+
+        clipboard.buildSelectedColumnClipboardPayloadAsync.mockClear();
+        clipboard.writeMultiFormatToClipboard.mockClear();
+        handlers.copySelection(false, 'tabbed');
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(clipboard.buildSelectedColumnClipboardPayloadAsync).toHaveBeenCalledWith(
+            tableApi,
+            0,
+            false,
+            resolver,
+        );
+        expect(clipboard.writeMultiFormatToClipboard).toHaveBeenCalledWith(
+            payload.html,
+            payload.text,
+            payload.md,
+            '4 cells',
+        );
+
+        clipboard.buildSelectedColumnClipboardPayloadAsync.mockClear();
+        clipboard.writeMultiFormatToClipboard.mockClear();
+        handlers.copySelectionAsHtml();
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(clipboard.buildSelectedColumnClipboardPayloadAsync).toHaveBeenCalledWith(
+            tableApi,
+            0,
+            true,
+            resolver,
+        );
+        expect(clipboard.writeMultiFormatToClipboard).toHaveBeenCalledWith(
+            payload.html,
+            payload.text,
+            payload.md,
+            '4 cells',
+        );
+
+        clipboard.buildSelectedColumnClipboardPayloadAsync.mockClear();
+        clipboard.writeMultiFormatToClipboard.mockClear();
+        handlers.copySelectionAsMd(false);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(clipboard.buildSelectedColumnClipboardPayloadAsync).toHaveBeenCalledWith(
+            tableApi,
+            0,
+            false,
+            resolver,
+        );
+        expect(clipboard.writeMultiFormatToClipboard).toHaveBeenCalledWith(
+            payload.html,
+            payload.md,
+            payload.md,
+            '4 cells',
+        );
     });
 
     it('calculates header column statistics from all rows, not only rendered rows', async () => {

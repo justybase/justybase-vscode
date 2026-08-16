@@ -22,6 +22,7 @@ import { asHtml, getElementById } from './dom.js';
 import {
     buildSelectedClipboardPayload,
     buildSelectedClipboardPayloadAsync,
+    buildSelectedColumnClipboardPayloadAsync,
     writeMultiFormatToClipboard,
     copyAllRows,
     copyAllRowsAsync,
@@ -1540,13 +1541,29 @@ function performSelectAll() {
             requestResultsViewFocus();
 
             // Auto-select all if nothing is selected
-            if (!isAllSelected && selectedCells.size === 0) {
+            if (!isAllSelected && selectedColumnIndex === null && selectedCells.size === 0) {
                 performSelectAll();
             }
 
             void (async () => {
                 if (isAllSelected) {
                     await copyAllRowsAsync(table, withHeaders, plainTextFormat, clipboardResolver);
+                    return;
+                }
+
+                if (selectedColumnIndex !== null) {
+                    const payload = await buildSelectedColumnClipboardPayloadAsync(
+                        table,
+                        selectedColumnIndex,
+                        withHeaders,
+                        clipboardResolver,
+                    );
+                    if (!payload) {
+                        return;
+                    }
+
+                    const plainText = resolvePlainText(payload, plainTextFormat);
+                    writeMultiFormatToClipboard(payload.html, plainText, payload.md, `${payload.matrix.length} cells`);
                     return;
                 }
 
@@ -1569,13 +1586,28 @@ function performSelectAll() {
         copySelectionAsHtml: function () {
             requestResultsViewFocus();
 
-            if (!isAllSelected && selectedCells.size === 0) {
+            if (!isAllSelected && selectedColumnIndex === null && selectedCells.size === 0) {
                 performSelectAll();
             }
 
             void (async () => {
                 if (isAllSelected) {
                     await copyAllRowsAsHtmlAsync(table, clipboardResolver);
+                    return;
+                }
+
+                if (selectedColumnIndex !== null) {
+                    const payload = await buildSelectedColumnClipboardPayloadAsync(
+                        table,
+                        selectedColumnIndex,
+                        true,
+                        clipboardResolver,
+                    );
+                    if (!payload) {
+                        return;
+                    }
+
+                    writeMultiFormatToClipboard(payload.html, payload.text, payload.md, `${payload.matrix.length} cells`);
                     return;
                 }
 
@@ -1597,13 +1629,34 @@ function performSelectAll() {
         copySelectionAsMd: function (withHeaders = true) {
             requestResultsViewFocus();
 
-            if (!isAllSelected && selectedCells.size === 0) {
+            if (!isAllSelected && selectedColumnIndex === null && selectedCells.size === 0) {
                 performSelectAll();
             }
 
             void (async () => {
                 if (isAllSelected) {
                     await copyAllRowsAsMdAsync(table, withHeaders, clipboardResolver);
+                    return;
+                }
+
+                if (selectedColumnIndex !== null) {
+                    const payload = await buildSelectedColumnClipboardPayloadAsync(
+                        table,
+                        selectedColumnIndex,
+                        withHeaders,
+                        clipboardResolver,
+                    );
+                    if (!payload) {
+                        return;
+                    }
+
+                    vscode.postMessage({
+                        command: 'setContext',
+                        key: 'netezza.resultsCopyPrimed',
+                        value: false,
+                    });
+
+                    writeMultiFormatToClipboard(payload.html, payload.md, payload.md, `${payload.matrix.length} cells`);
                     return;
                 }
 
