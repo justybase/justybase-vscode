@@ -99,6 +99,7 @@ jobs:
       publish_core: ${{ steps.targets.outputs.publish_core }}
       publish_db2: ${{ steps.targets.outputs.publish_db2 }}
       publish_duckdb: ${{ steps.targets.outputs.publish_duckdb }}
+      publish_access: ${{ steps.targets.outputs.publish_access }}
       release_version: ${{ steps.version_check.outputs.release_version }}
 
     steps:
@@ -175,9 +176,8 @@ jobs:
             { id: 'mssql', display_name: 'MS SQL Server' },
             { id: 'mysql', display_name: 'MySQL' },
             { id: 'snowflake', display_name: 'Snowflake' },
-            { id: 'access', display_name: 'Microsoft Access' },
           ];
-          const known = new Set(['all', 'core', 'db2', 'duckdb', ...optional.map((item) => item.id)]);
+          const known = new Set(['all', 'core', 'db2', 'duckdb', 'access', ...optional.map((item) => item.id)]);
           const unknown = [...requested].filter((target) => !known.has(target));
           if (unknown.length > 0) {
             console.error(`Unknown publish target(s): ${unknown.join(', ')}`);
@@ -188,8 +188,9 @@ jobs:
           const publishCore = includes('core');
           const publishDb2 = includes('db2');
           const publishDuckdb = includes('duckdb');
+          const publishAccess = includes('access');
           const optionalTargets = optional.filter((item) => includes(item.id));
-          const anyTargets = publishCore || publishDb2 || publishDuckdb || optionalTargets.length > 0;
+          const anyTargets = publishCore || publishDb2 || publishDuckdb || publishAccess || optionalTargets.length > 0;
           if (!anyTargets) {
             console.error('No publish targets selected.');
             process.exit(1);
@@ -200,6 +201,7 @@ jobs:
             `publish_core=${publishCore}`,
             `publish_db2=${publishDb2}`,
             `publish_duckdb=${publishDuckdb}`,
+            `publish_access=${publishAccess}`,
             `optional_matrix=${JSON.stringify({ include: optionalTargets })}`,
             `optional_targets=${optionalTargets.map((item) => item.id).join(',')}`,
           ];
@@ -320,6 +322,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             extensions/duckdb/package-lock.json
+            extensions/access/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -328,11 +331,9 @@ jobs:
         working-directory: extensions/duckdb
         run: npm ci
 
-      - name: Setup Java 11 for the Access bridge
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '11'
+      - name: Install Access extension dependencies
+        working-directory: extensions/access
+        run: npm ci
 
       - name: Run DuckDB integration tests
         run: npm run test:duckdb:integration
@@ -635,6 +636,90 @@ jobs:
           path: extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
           retention-days: 1
 
+  build-access:
+    name: Build Access VSIX (${{ matrix.target }})
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+      - integration-gate
+    if: ${{ needs.validate-release.outputs.publish_access == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            expected_binding_package: '@duckdb/node-bindings-win32-x64'
+          - os: ubuntu-latest
+            target: linux-x64
+            expected_binding_package: '@duckdb/node-bindings-linux-x64'
+          - os: macos-14
+            target: darwin-arm64
+            expected_binding_package: '@duckdb/node-bindings-darwin-arm64'
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/access/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Access extension dependencies
+        working-directory: extensions/access
+        run: npm ci
+
+      - name: Build Access extension
+        run: npm run build:access
+
+      - name: Package Access extension
+        run: >
+          npm run package:access --
+          --target ${{ matrix.target }}
+          --out justybaselite-access-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+
+      - name: Verify packaged Access runtime files
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile
+
+          vsix_path = 'extensions/access/justybaselite-access-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
+          expected_binding = 'node_modules/${{ matrix.expected_binding_package }}/'
+
+          with zipfile.ZipFile(vsix_path, 'r') as archive:
+              names = archive.namelist()
+              has_api = any('node_modules/@duckdb/node-api/' in name for name in names)
+              has_binding = any(expected_binding in name and name.endswith(('.node', '.dll', '.so', '.dylib')) for name in names)
+
+          if not has_api:
+              raise SystemExit('Missing @duckdb/node-api runtime files in Access VSIX')
+
+          if not has_binding:
+              raise SystemExit(f'Missing expected DuckDB native binding in Access VSIX: {expected_binding}')
+
+          print('Access VSIX runtime asset verification passed')
+          PY
+
+      - name: Upload Access VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-access-${{ matrix.target }}
+          path: extensions/access/justybaselite-access-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          retention-days: 1
+
   build-optional:
     name: Build ${{ matrix.display_name }} VSIX
     needs:
@@ -670,13 +755,6 @@ jobs:
         working-directory: extensions/${{ matrix.id }}
         run: npm ci
 
-      - name: Setup Java 11 for Access bridge validation
-        if: ${{ matrix.id == 'access' }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '11'
-
       - name: Build extension
         run: npm run build:${{ matrix.id }}
 
@@ -703,6 +781,7 @@ jobs:
       - build-main
       - build-db2
       - build-duckdb
+      - build-access
       - build-optional
     if: |
       always()
@@ -714,6 +793,7 @@ jobs:
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
+      && (needs.build-access.result == 'success' || needs.build-access.result == 'skipped')
       && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
     runs-on: ubuntu-latest
 
@@ -761,6 +841,7 @@ jobs:
       - build-main
       - build-db2
       - build-duckdb
+      - build-access
       - build-optional
       - audit-vsix
     if: |
@@ -773,6 +854,7 @@ jobs:
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
+      && (needs.build-access.result == 'success' || needs.build-access.result == 'skipped')
       && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
       && needs.audit-vsix.result == 'success'
     runs-on: ubuntu-latest
@@ -837,6 +919,7 @@ jobs:
       - build-main
       - build-db2
       - build-duckdb
+      - build-access
       - build-optional
       - audit-vsix
       - attach-release-assets
@@ -851,6 +934,7 @@ jobs:
       && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
       && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
       && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
+      && (needs.build-access.result == 'success' || needs.build-access.result == 'skipped')
       && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
       && needs.audit-vsix.result == 'success'
       && needs.attach-release-assets.result == 'success'
@@ -978,6 +1062,38 @@ jobs:
           for target in win32-x64 linux-x64 darwin-arm64; do
             publish_with_retry "DuckDB (${target})" \
               "artifacts/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${target}.vsix"
+          done
+
+      - name: Publish Access extensions
+        if: ${{ needs.validate-release.outputs.publish_access == 'true' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          publish_with_retry() {
+            local label="$1"
+            local package_path="$2"
+            local attempt=1
+            while true; do
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+                echo "Published ${label}."
+                return 0
+              fi
+
+              if [ "$attempt" -ge 2 ]; then
+                echo "Publishing ${label} failed after ${attempt} attempts." >&2
+                return 1
+              fi
+
+              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              attempt=$((attempt + 1))
+              sleep 15
+            done
+          }
+
+          for target in win32-x64 linux-x64 darwin-arm64; do
+            publish_with_retry "Access (${target})" \
+              "artifacts/justybaselite-access-${{ needs.validate-release.outputs.release_version }}-${target}.vsix"
           done
 
       - name: Publish optional extensions
