@@ -7,6 +7,8 @@ export interface ApiConfig {
   dataDir: string;
   webDistDir: string;
   masterKey: string;
+  /** Root for per-user SQLite/DuckDB files. */
+  localDbRoot?: string;
   adminUsername?: string;
   adminPassword?: string;
 }
@@ -21,6 +23,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     host: env.JUSTYBASE_HOST ?? env.HOST ?? '127.0.0.1',
     port: Number(env.JUSTYBASE_PORT ?? env.PORT ?? 3000),
     dataDir: path.resolve(env.JUSTYBASE_DATA_DIR ?? '.justybase-web'),
+    localDbRoot: path.resolve(env.JUSTYBASE_LOCAL_DB_ROOT ?? path.join(env.JUSTYBASE_DATA_DIR ?? '.justybase-web', 'local-databases')),
     webDistDir: env.JUSTYBASE_WEB_DIST_DIR
       ? path.resolve(env.JUSTYBASE_WEB_DIST_DIR)
       : (existsSync(path.resolve('apps/web/dist'))
