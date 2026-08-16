@@ -10,7 +10,8 @@ interface CacheEntry<T> { value: T; expiresAt: number; }
 
 const cache = new Map<string, CacheEntry<unknown>>();
 
-export function invalidateSchemaCache(connectionId: string): void {
+export function invalidateSchemaCache(connectionId?: string): void {
+  if (!connectionId) { cache.clear(); return; }
   const prefix = `${connectionId}|`;
   for (const key of cache.keys()) if (key.startsWith(prefix)) cache.delete(key);
 }
