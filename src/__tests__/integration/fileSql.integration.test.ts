@@ -8,6 +8,7 @@ import { fileDialect } from '../../../extensions/duckdb/src/fileDialect';
 import { loadDuckDb } from '../../../extensions/duckdb/src/duckdbConnection';
 import { listXlsxSheetNames } from '../../../extensions/duckdb/src/xlsxSheets';
 import { listXlsbSheetNames } from '../../../extensions/duckdb/src/xlsbConversion';
+import { convertAccessTablesToCsvs, listAccessTableNames } from '../../../extensions/duckdb/src/accessConversion';
 import { duckdbMetadataProvider } from '../../../extensions/duckdb/src/duckdbSchemaProvider';
 import {
     buildSaveEditsSql,
@@ -69,6 +70,19 @@ async function readRows(reader: DatabaseDataReader): Promise<unknown[][]> {
     } finally {
         await reader.close();
     }
+}
+
+/** Stringify cells for deterministic assertions (Date → ISO, numbers → text). */
+function stringifyCells(rows: readonly (readonly unknown[])[]): string[][] {
+    return rows.map(row => row.map(value => (value instanceof Date ? value.toISOString() : String(value))));
+}
+
+/** Copy a committed Access fixture into the test temp dir (fixtures are read-only). */
+function copyAccessFixture(tempDir: string, fixtureName: string, destinationName: string): string {
+    const fixturePath = path.join(__dirname, '..', 'fixtures', 'access', fixtureName);
+    const targetPath = path.join(tempDir, destinationName);
+    fs.copyFileSync(fixturePath, targetPath);
+    return targetPath;
 }
 
 const duckdbRuntimeAvailable = hasDuckDbRuntime();
@@ -411,6 +425,118 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         }
     });
 
+    it('queries an Access database through conversion and exposes tables as views', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const accessPath = copyAccessFixture(tempDir, 'sample2007.accdb', 'sample2007.accdb');
+
+        expect(await listAccessTableNames(accessPath)).toEqual(['t_people']);
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: accessPath,
+            user: 'file',
+        });
+
+        try {
+            await connection.connect();
+            const views = await readRows(
+                await connection.createCommand(duckdbMetadataProvider.buildListViewsQuery('', 'main')).executeReader(),
+            );
+            const rows = await readRows(
+                await connection.createCommand(
+                    'SELECT name, age, active FROM "sample2007__t_people" ORDER BY id',
+                ).executeReader(),
+            );
+            expect(stringifyCells(rows)).toEqual([
+                ['Anna Kowalska', '34', 'true'],
+                ['Jan Nowak', '41', 'true'],
+                ['Ewa Wiśniewska', '29', 'false'],
+            ]);
+            expect(views.map(row => String(row[0]))).toEqual(
+                expect.arrayContaining(['sample2007__t_people', 'sample2007']),
+            );
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('keeps converted Access CSV paths distinct for separate source files', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const firstPath = copyAccessFixture(tempDir, 'sample2007.accdb', 'collision-first.accdb');
+        const secondPath = copyAccessFixture(tempDir, 'sample2007.accdb', 'collision-second.accdb');
+        const outputDir = path.join(tempDir, 'access-csvs');
+
+        const first = await convertAccessTablesToCsvs(firstPath, outputDir);
+        const second = await convertAccessTablesToCsvs(secondPath, outputDir);
+        const firstCsvPath = first.tableCsvPaths.get('t_people');
+        const secondCsvPath = second.tableCsvPaths.get('t_people');
+
+        expect(firstCsvPath).toBeDefined();
+        expect(secondCsvPath).toBeDefined();
+        expect(firstCsvPath).not.toBe(secondCsvPath);
+        expect(fs.existsSync(firstCsvPath as string)).toBe(true);
+        expect(fs.existsSync(secondCsvPath as string)).toBe(true);
+    });
+
+    it('joins Access tables with a csv file in a read-only File SQL workspace', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const accessPath = copyAccessFixture(tempDir, 'sample2007.accdb', 'workspace.accdb');
+        const csvPath = path.join(tempDir, 'people.csv');
+        fs.writeFileSync(csvPath, 'name,city\nAnna Kowalska,Warsaw\nJan Nowak,Krakow\n');
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: csvPath,
+            user: 'file',
+            options: { fileWorkspace: serializeFileWorkspace([accessPath, csvPath]) },
+        });
+
+        try {
+            await connection.connect();
+            const accessView = `${accessPath.split(path.sep).join('/')}#table=t_people`;
+            const csvView = csvPath.split(path.sep).join('/');
+            const views = await readRows(
+                await connection.createCommand(duckdbMetadataProvider.buildListViewsQuery('', 'main')).executeReader(),
+            );
+            const rows = await readRows(
+                await connection.createCommand(
+                    `SELECT p.name, c.city, p.age FROM "${accessView}" p JOIN "${csvView}" c ON p.name = c.name ORDER BY p.age`,
+                ).executeReader(),
+            );
+            expect(stringifyCells(rows)).toEqual([
+                ['Anna Kowalska', 'Warsaw', '34'],
+                ['Jan Nowak', 'Krakow', '41'],
+            ]);
+            expect(views.map(row => String(row[0]))).toEqual(
+                expect.arrayContaining([accessView, csvView]),
+            );
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('ignores a stale editable option for Access files and remains read-only', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const accessPath = copyAccessFixture(tempDir, 'sample2007.accdb', 'readonly.accdb');
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: accessPath,
+            user: 'file',
+            options: { editable: true },
+        });
+
+        try {
+            await connection.connect();
+            const rows = await readRows(
+                await connection.createCommand('SELECT COUNT(*) FROM "readonly__t_people"').executeReader(),
+            );
+            expect(rows).toEqual([[3n]]);
+        } finally {
+            await connection.close();
+        }
+    });
+
     it('supports INSERT/UPDATE on an xlsb editable copy and writes back in place via XlsbUpdater', async () => {
         fs.mkdirSync(tempDir, { recursive: true });
         const xlsbPath = path.join(tempDir, 'editable.xlsb');
@@ -597,13 +723,13 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         }
     });
 
-    it('cleans up the xlsb conversion temp directory on close', async () => {
+    it('cleans up the file conversion temp directory on close', async () => {
         fs.mkdirSync(tempDir, { recursive: true });
         const xlsbPath = path.join(tempDir, 'tempdir-check.xlsb');
         await writeXlsbFile(xlsbPath, [
             { name: 'Sheet1', headers: ['id'], rows: [[1]] },
         ]);
-        const tempPrefix = 'justybase-xlsb-';
+        const tempPrefix = 'justybase-file-sql-';
         const listTempDirs = (): string[] => fs.readdirSync(os.tmpdir()).filter(name => name.startsWith(tempPrefix));
         const beforeConnect = listTempDirs();
 

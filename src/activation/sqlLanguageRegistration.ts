@@ -107,8 +107,8 @@ export function registerSqlLanguageFeatures(params: SqlLanguageRegistrationParam
             semanticTokensProvider.getLegend()
         ),
         semanticTokensProvider,
-        metadataCache.onDidInvalidate(() => {
-            semanticTokensProvider.refresh();
+        metadataCache.onDidInvalidate((connectionName) => {
+            semanticTokensProvider.refresh(connectionName);
         }),
         metadataCache.onDidExternalRefresh((connectionName) => {
             semanticTokensProvider.refresh(connectionName);

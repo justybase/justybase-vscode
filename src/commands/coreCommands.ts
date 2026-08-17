@@ -24,7 +24,10 @@ import {
     runQueriesSequentially,
     queryResultToRows,
 } from '../core/queryRunner';
-import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
+import {
+    supportsLegacyMetadataPrefetch,
+    supportsLegacyMetadataPrefetchForConnection,
+} from '../metadata/prefetchSupport';
 import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf/performanceEvents';
 import { getUxPerfSession } from '../services/perf/uxPerfSession';
 import { findVisibleQueryFlowEditor } from '../utils/queryFlowEditor';
@@ -563,7 +566,35 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
         }),
 
         // Refresh schema
-        vscode.commands.registerCommand('netezza.refreshSchema', async () => {
+        vscode.commands.registerCommand('netezza.refreshSchema', async (connectionName?: string) => {
+            const requestedConnectionName = connectionName?.trim();
+            if (requestedConnectionName) {
+                metadataCache.clearConnectionMetadata(requestedConnectionName);
+                schemaProvider.clearConnectionError(requestedConnectionName);
+                schemaProvider.refresh();
+
+                if (supportsLegacyMetadataPrefetchForConnection(connectionManager, requestedConnectionName)) {
+                    metadataCache.triggerConnectionPrefetch(requestedConnectionName, (q) =>
+                        runQueryRaw(
+                            context,
+                            q,
+                            true,
+                            connectionManager,
+                            requestedConnectionName,
+                            undefined,
+                            undefined,
+                            undefined,
+                            1000000,
+                            false,
+                        ),
+                    );
+                    vscode.window.showInformationMessage('Schema refreshed. Metadata is rebuilding in background...');
+                } else {
+                    vscode.window.showInformationMessage('Schema refreshed (Cache cleared).');
+                }
+                return;
+            }
+
             await metadataCache.clearCache();
             schemaProvider.clearAllErrors();
             schemaProvider.refresh();

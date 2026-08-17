@@ -26,6 +26,7 @@ import {
   SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN,
   SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN,
   SCRIPT_SCOPE_DROP_STATEMENT_PATTERN,
+  SCRIPT_SCOPE_SELECT_INTO_TEMP_STATEMENT_PATTERN,
 } from "./scriptScopeStatements";
 
 interface FriendlyParserError {
@@ -46,8 +47,80 @@ export interface ScopeSeed {
   createdTables?: readonly TableInfo[];
 }
 
-const SCRIPT_SCOPE_DROP_TARGET_PATTERN =
-  /\bDROP\s+(?:TABLE|VIEW|PROCEDURE)(?:\s+IF\s+EXISTS)?\s+([A-Za-z0-9_."$]+(?:\.[A-Za-z0-9_."$]+)*(?:\.\.[A-Za-z0-9_."$]+)?)/gi;
+const SCRIPT_SCOPE_IDENTIFIER_PATTERN =
+  String.raw`(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[#A-Za-z0-9_$]+)`;
+const SCRIPT_SCOPE_DROP_TARGET_PATTERN = new RegExp(
+  String.raw`\bDROP\s+(?:TABLE|VIEW|PROCEDURE)(?:\s+IF\s+EXISTS)?\s+(${SCRIPT_SCOPE_IDENTIFIER_PATTERN}(?:\s*\.\s*${SCRIPT_SCOPE_IDENTIFIER_PATTERN})*(?:\s*\.\s*\.\s*${SCRIPT_SCOPE_IDENTIFIER_PATTERN})?)`,
+  "gi",
+);
+
+function normalizeDroppedRelationName(rawName: string): string {
+  const parts: string[] = [];
+  let current = "";
+  let quote: "]" | '"' | undefined;
+
+  for (let index = 0; index < rawName.length; index += 1) {
+    const character = rawName[index];
+
+    if (quote === "]") {
+      current += character;
+      if (character === "]") {
+        if (rawName[index + 1] === "]") {
+          current += rawName[index + 1];
+          index += 1;
+        } else {
+          quote = undefined;
+        }
+      }
+      continue;
+    }
+
+    if (quote === '"') {
+      current += character;
+      if (character === '"') {
+        if (rawName[index + 1] === '"') {
+          current += rawName[index + 1];
+          index += 1;
+        } else {
+          quote = undefined;
+        }
+      }
+      continue;
+    }
+
+    if (character === "[") {
+      quote = "]";
+      current += character;
+      continue;
+    }
+    if (character === '"') {
+      quote = '"';
+      current += character;
+      continue;
+    }
+    if (character === ".") {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+  parts.push(current);
+
+  return parts
+    .map((part) => {
+      const trimmed = part.trim();
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        return trimmed.slice(1, -1).replace(/\]\]/g, "]");
+      }
+      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        return trimmed.slice(1, -1).replace(/""/g, '"');
+      }
+      return trimmed;
+    })
+    .join(".");
+}
 
 function formatRelationName(
   database: string | undefined,
@@ -460,6 +533,10 @@ export class SqlValidator {
       return this.applyParseToScopeSeed(currentSeed, statementSql);
     }
 
+    if (SCRIPT_SCOPE_SELECT_INTO_TEMP_STATEMENT_PATTERN.test(statementSql)) {
+      return this.applyParseToScopeSeed(currentSeed, statementSql);
+    }
+
     if (!SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN.test(statementSql)) {
       return currentSeed;
     }
@@ -559,9 +636,11 @@ export class SqlValidator {
     );
     let match = pattern.exec(statementSql);
     while (match) {
-      const rawName = match[1]?.replace(/"/g, "").trim();
-      if (rawName) {
-        names.push(rawName);
+      const normalizedName = match[1]
+        ? normalizeDroppedRelationName(match[1])
+        : "";
+      if (normalizedName) {
+        names.push(normalizedName);
       }
       match = pattern.exec(statementSql);
     }

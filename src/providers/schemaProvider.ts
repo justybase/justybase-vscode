@@ -1079,7 +1079,7 @@ export class SchemaProvider
                     await attachFilesToFileConnection(this.connectionManager, target.connectionName, filePaths);
                 } else if (droppedPaths.length > 0) {
                     vscode.window.showWarningMessage(
-                        'No supported data files were dropped. Supported formats: xlsx, xlsb, csv, tsv, parquet, avro.',
+                        'No supported data files were dropped. Supported formats: xlsx, xlsb, mdb, accdb, csv, tsv, parquet, avro.',
                     );
                 }
                 return;

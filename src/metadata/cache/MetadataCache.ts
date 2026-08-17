@@ -29,7 +29,9 @@ import {
   MetadataDiskStorage,
   MetadataDiskIndexWatcher,
 } from '../diskStorage';
-import { supportsLegacyMetadataPrefetch } from '../prefetchSupport';
+import {
+  supportsLegacyMetadataPrefetchForConnection,
+} from '../prefetchSupport';
 import type { MetadataPrefetchTarget } from './MetadataPrefetchTarget';
 import { DEFAULT_CACHE_TTL_HOURS, MetadataStore } from './MetadataStore';
 import { MetadataLayerAccess } from './layerAccess';
@@ -98,8 +100,8 @@ export class MetadataCache implements MetadataPrefetchTarget {
     new vscode.EventEmitter<MetadataPrefetchProgress>();
   readonly onDidPrefetchProgress: vscode.Event<MetadataPrefetchProgress> =
     this._onDidPrefetchProgress.event;
-  private _onDidInvalidate = new vscode.EventEmitter<void>();
-  readonly onDidInvalidate: vscode.Event<void> = this._onDidInvalidate.event;
+  private _onDidInvalidate = new vscode.EventEmitter<string | undefined>();
+  readonly onDidInvalidate: vscode.Event<string | undefined> = this._onDidInvalidate.event;
   private _onDidNeedColumnRecovery = new vscode.EventEmitter<string>();
   readonly onDidNeedColumnRecovery: vscode.Event<string> =
     this._onDidNeedColumnRecovery.event;
@@ -251,6 +253,13 @@ export class MetadataCache implements MetadataPrefetchTarget {
     return this._crossWindowSyncEnabled;
   }
 
+  supportsLegacyMetadataPrefetch(connectionName: string): boolean {
+    return supportsLegacyMetadataPrefetchForConnection(
+      this._connectionManager,
+      connectionName,
+    );
+  }
+
   async initialize(): Promise<void> {
     if (!this._diskLifecycleState.diskInitPromise) {
       this._diskLifecycleState.diskInitPromise = initializeDiskCache(
@@ -345,6 +354,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     connectionName: string,
     options?: { concurrency?: number },
   ): Promise<void> {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return;
+    }
     return preloadColumnsForConnection(
       this.columnLoaderDeps,
       connectionName,
@@ -497,7 +509,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     Logger.getInstance().info(
       `[MetadataCache] Cleared in-memory metadata for connection '${connectionName}'`,
     );
-    this._onDidInvalidate.fire();
+    this._onDidInvalidate.fire(connectionName);
   }
 
   private resetLocalCacheAfterExternalGeneration(): void {
@@ -521,7 +533,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     this._invalidatedColumnLayerKeys.clear();
     this.prefetcher.reset();
     this._stats.clearAll();
-    this._onDidInvalidate.fire();
+    this._onDidInvalidate.fire(undefined);
   }
 
   getDatabases(connectionName: string): DatabaseMetadata[] | undefined {
@@ -827,8 +839,8 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   /** Notify tree/LSP subscribers after a precise cache mutation. */
-  notifyMetadataChanged(): void {
-    this._onDidInvalidate.fire();
+  notifyMetadataChanged(connectionName?: string): void {
+    this._onDidInvalidate.fire(connectionName);
   }
 
   getColumnsAnySchema(
@@ -891,7 +903,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
         viewsCatalogLoaded: this._viewsCatalogLoaded,
         objectsCatalogLoaded: this._objectsCatalogLoaded,
         isEntryValid: (timestamp) => this._store.isEntryValid(timestamp),
-        onInvalidated: () => this._onDidInvalidate.fire(),
+        onInvalidated: () => this._onDidInvalidate.fire(connectionName),
       },
       connectionName,
       dbName,
@@ -956,6 +968,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     schemaName: string | undefined,
     runQueryFn: QueryRunnerRawFn,
   ): Promise<void> {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return;
+    }
     return prefetchDelegation.prefetchColumnsForSchema(
       this.prefetchDeps,
       connectionName,
@@ -970,6 +985,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     runQueryFn: QueryRunnerRawFn,
     databases?: string[],
   ): Promise<void> {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return;
+    }
     return prefetchDelegation.prefetchAllObjects(
       this.prefetchDeps,
       connectionName,
@@ -1106,7 +1124,11 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   async checkpointSave(connectionName: string, lease?: import('../diskStorage/metadataDiskStorage').PrefetchLease): Promise<void> {
-    if (!this.isDiskPersistenceEnabled() || !this._diskStorage) {
+    if (
+      !this.isDiskPersistenceEnabled()
+      || !this._diskStorage
+      || !this.supportsLegacyMetadataPrefetch(connectionName)
+    ) {
       return;
     }
 
@@ -1132,9 +1154,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       hadError
       || !this.isDiskPersistenceEnabled()
       || !this._diskStorage
-      || !supportsLegacyMetadataPrefetch(
-        this._connectionManager?.getConnectionDatabaseKind(connectionName),
-      )
+      || !this.supportsLegacyMetadataPrefetch(connectionName)
     ) {
       return;
     }
@@ -1159,6 +1179,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     connectionName: string,
     runQueryFn: QueryRunnerRawFn,
   ): void {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return;
+    }
     prefetchDelegation.triggerConnectionPrefetch(
       this.prefetchDeps,
       connectionName,
@@ -1170,6 +1193,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     connectionName: string,
     runQueryFn: QueryRunnerRawFn,
   ): void {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return;
+    }
     this.prefetcher.triggerFullColumnPrefetch(connectionName, runQueryFn);
   }
 
@@ -1207,6 +1233,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     dbName: string,
     runQueryFn: QueryRunnerRawFn,
   ): Promise<void> {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return;
+    }
     return prefetchDelegation.prefetchColumnsForDatabase(
       this.prefetchDeps,
       connectionName,

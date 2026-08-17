@@ -135,7 +135,7 @@
     }
   },
   "dependencies": {
-    "ibm_db": "^4.0.0"
+    "ibm_db": "^4.0.1"
   },
   "devDependencies": {
     "node-gyp": "^11.5.0"

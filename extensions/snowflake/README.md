@@ -1,119 +1,66 @@
-# JustyBase SQL Editor (Snowflake)
+# JustyBase SQL Editor for Snowflake
 
-Snowflake support for JustyBase SQL Editor. The base JustyBase SQL Editor extension is installed automatically as a technical dependency; Netezza is not required, and you do not need to install or use it.
+![JustyBase SQL Editor for Snowflake](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
-## Purpose and status
+**Explore cloud data, author Snowflake SQL, review query plans, and prepare staged data workflows in VS Code.**
 
-This package is the first-class Snowflake optional runtime for JustyBase. It keeps the cloud SDK and account-specific runtime behavior out of the core extension while still plugging into the shared connection UI, schema explorer, metadata cache, LSP, DDL, import/export, and query-analysis workflows.
+This companion extension adds Snowflake connectivity to [JustyBase SQL Editor](../../README.md). The core extension is installed automatically; Netezza is not required.
 
-Current highlights:
+[![Marketplace](https://vsmarketplacebadges.dev/version/krzysztof-d.justybaselite-snowflake.svg?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-snowflake)
 
-- dedicated Snowflake SQL authoring profile
-- schema explorer coverage for databases, schemas, tables, views, procedures, functions, stages, streams, tasks, file formats, sequences, and warehouses
-- `GET_DDL(...)`-based DDL generation
-- `EXPLAIN USING JSON` parsing and recent query profile tooling
-- staged Snowflake import and export workflow generation
+## Snowflake in a familiar SQL workspace
 
-## Requirements
+![Snowflake workspace with schema browser, editor, and results](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/workspace-overview.png)
 
-- the base extension is installed automatically as a technical dependency; no separate Netezza installation is required
-- VS Code Desktop
-- network access to your Snowflake account
-- for real runtime connectivity or packaging, install the pure-JavaScript Snowflake driver inside this package:
+Use the shared connection panel, schema explorer, SQL editor, result grid, and query-analysis tools while keeping Snowflake account settings in the connection profile.
+
+## Features
+
+- Dedicated Snowflake SQL authoring profile.
+- Explorer coverage for databases, schemas, tables, views, procedures, functions, stages, streams, tasks, file formats, sequences, and warehouses.
+- `GET_DDL(...)`-based DDL generation.
+- `EXPLAIN USING JSON` parsing, query profile tooling, and shared plan visualization.
+- Staged import/export guidance for CSV, TXT, and Excel workflows.
+- Streaming result and shared result-analysis workflows.
+
+### Author and review SQL
+
+![Snowflake SQL validation and assisted correction](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/sql-validation-and-copilot.png)
+
+Use metadata-aware SQL assistance, then inspect results with filtering, profiling, exports, and charts.
+
+![Snowflake result explorer](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-explorer.png)
+
+![Snowflake result chart](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-chart.png)
+
+## Connect to Snowflake
+
+1. Install **JustyBase SQL Editor (Snowflake)**.
+2. Open **Connect** from the JustyBase view.
+3. Enter account/host, database, user, authentication, warehouse, role, and optional schema.
+4. Open a SQL file and run statements with `Ctrl+Enter` / `F5`.
+
+The form supports password, OAuth, external browser/SSO, key-pair authentication, private-key passphrases, access URLs, and session parameters. Values can reference local environment variables with `env:VAR`, `$VAR`, or `${VAR}`. Never commit credentials or keys.
+
+## Import and export boundaries
+
+- CSV and TXT imports produce inferred DDL plus `COPY INTO <table>` guidance.
+- Excel imports produce schema and staging guidance; Snowflake does not load workbooks directly.
+- Exports generate reviewable `COPY INTO @stage FROM <table>` scripts.
+- Snowflake stages, warehouses, roles, and cloud credentials remain under your account's permissions and policies.
+
+## Development and integration testing
 
 ```bash
 cd extensions/snowflake
 npm install snowflake-sdk
-```
-
-## Build and install
-
-Development build:
-
-```bash
-cd extensions/snowflake
 npm run lint
 npm run check-types
 npm run build
 ```
 
-From the repository root you can also run:
+Opt into live tests with `RUN_SNOWFLAKE_INTEGRATION=1 npm run test:snowflake:integration`.
 
-```bash
-npm run build:snowflake
-```
+## License
 
-To package the extension after installing the runtime dependency:
-
-```bash
-cd extensions/snowflake
-npm run package
-```
-
-## Runtime and dependency notes
-
-- this optional extension does not bundle native binaries
-- the intended runtime dependency is `snowflake-sdk`, which stays outside the core bundle
-- do not commit Snowflake credentials into the repository
-- the core extension stores saved credentials in VS Code secret storage; use that flow instead of hard-coding passwords, tokens, private keys, or account identifiers
-
-## Credential guidance
-
-Use the shared JustyBase connection form to supply connection details at runtime. The Snowflake dialect exposes fields for:
-
-- host or account locator
-- port
-- database
-- user
-- password
-- optional schema
-- authentication mode
-- optional warehouse
-- optional role
-- optional OAuth token
-- optional private key path and passphrase
-- optional authenticator
-- optional explicit account override
-- optional access URL
-- optional session parameters
-
-Environment-backed options are supported with `env:VAR_NAME`, `$VAR_NAME`, or `${VAR_NAME}`.
-
-If you use external browser, SSO, key pair authentication, or organization-level settings, keep those values in local environment-specific configuration only.
-
-## Import and export behavior
-
-Snowflake imports are staged-load workflows, not direct local uploads.
-
-- CSV and TXT imports generate inferred DDL plus `COPY INTO <table>` guidance with inline file format options
-- Excel imports generate schema and staging guidance, but not executable `COPY INTO` SQL, because Snowflake does not load Excel workbooks directly
-- shared import entry points in the core extension now surface Snowflake-specific workflow guidance instead of generic unsupported messages
-- export helpers generate `COPY INTO @stage FROM <table>` scripts for review and execution
-
-## Live integration testing
-
-Opt in explicitly with:
-
-```bash
-RUN_SNOWFLAKE_INTEGRATION=1 npm run test:snowflake:integration
-```
-
-`SNOWFLAKE_LIVE_TEST_ENABLED=1` is still accepted for backward compatibility, but `RUN_SNOWFLAKE_INTEGRATION` is the preferred flag.
-
-See [../../docs/snowflake.md](../../docs/snowflake.md) for the fuller implementation notes, test strategy, and cost guidance.
-
-## Enabling or disabling the optional extension
-
-To enable Snowflake support:
-
-1. install or launch this Snowflake support extension; VS Code installs the base extension automatically
-2. reload VS Code if needed so the optional dialect registers on startup
-
-To disable Snowflake support:
-
-- disable or uninstall `JustyBase SQL Editor (Snowflake)` in VS Code, or
-- remove the `extensions/snowflake` package from your development workspace when testing the core extension without Snowflake
-
-## License and third-party software
-
-This extension is licensed under Apache-2.0. Its Marketplace VSIX includes the full project license and a generated `THIRD_PARTY_NOTICES.md` covering locked runtime dependencies and their available license texts.
+Apache-2.0. The Marketplace VSIX includes `THIRD_PARTY_NOTICES.md`.

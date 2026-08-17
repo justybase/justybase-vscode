@@ -1354,6 +1354,23 @@ SELECT * FROM CTE1 A`);
       expect(metadataProvider.getTables).not.toHaveBeenCalled();
     });
 
+    it("completes columns and wildcard expansion for MSSQL temporary tables", async () => {
+      metadataProvider.databaseKind = "mssql";
+      metadataProvider.effectiveDatabase = "TESTDB";
+
+      const columnItems = await complete(
+        "CREATE TABLE #temp_completion (ID INT, NAME VARCHAR(20)); SELECT #temp_completion.|",
+      );
+      expect(labels(columnItems)).toEqual(expect.arrayContaining(["ID", "NAME"]));
+
+      const wildcardItems = await complete(
+        "CREATE TABLE #temp_completion (ID INT, NAME VARCHAR(20)); SELECT #temp_completion.*|",
+      );
+      expect(
+        wildcardItems.find((item) => item.label === "* (Expand Columns)")?.textEdit?.newText,
+      ).toBe("#temp_completion.ID, #temp_completion.NAME");
+    });
+
     it("returns alias columns for OF alias inside incomplete NZPLSQL procedure", async () => {
       const items = await complete(`CREATE OR REPLACE PROCEDURE SOME_NAME()
 RETURNS INTEGER

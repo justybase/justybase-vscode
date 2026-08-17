@@ -33,9 +33,17 @@ export function createTableStatement(
   host: DdlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
-  const isTemp = !!ctx.tableTypeClause;
   let createdTable: TableInfo | undefined;
   const isCtas = !!(ctx.selectStatement || ctx.withStatement);
+  const nameInfo = ctx.qualifiedName
+    ? host.visitAs<{
+        name: string;
+        schema?: string;
+        database?: string;
+      }>(ctx.qualifiedName[0])
+    : undefined;
+  const isTemp =
+    !!ctx.tableTypeClause || !!nameInfo?.name.trim().startsWith('#');
 
   if (isCtas && !isTemp && !ctx.distributeClause) {
     const token =
@@ -53,13 +61,7 @@ export function createTableStatement(
     }
   }
 
-  if (ctx.qualifiedName) {
-    const nameInfo = host.visitAs<{
-      name: string;
-      schema?: string;
-      database?: string;
-    }>(ctx.qualifiedName[0]);
-
+  if (nameInfo) {
     createdTable = {
       name: nameInfo.name || "",
       schema: nameInfo.schema,

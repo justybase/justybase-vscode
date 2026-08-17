@@ -186,6 +186,7 @@ jest.mock('../metadataCache', () => ({
         hasConnectionPrefetchTriggered: jest.fn().mockReturnValue(false),
         isConnectionPrefetchFresh: jest.fn().mockReturnValue(false),
         triggerConnectionPrefetch: jest.fn(),
+        clearConnectionMetadata: jest.fn(),
         isConnectionMetadataHydrating: jest.fn().mockReturnValue(false),
         clearCache: jest.fn().mockResolvedValue(undefined),
         onDidPrefetchProgress: jest.fn(() => ({ dispose: jest.fn() })),
@@ -199,7 +200,8 @@ jest.mock('../metadataCache', () => ({
 jest.mock('../providers/schemaProvider', () => ({
     SchemaProvider: jest.fn().mockImplementation(() => ({
         refresh: jest.fn(),
-        clearAllErrors: jest.fn()
+        clearAllErrors: jest.fn(),
+        clearConnectionError: jest.fn()
     }))
 }));
 
@@ -1033,6 +1035,28 @@ describe('extension.ts', () => {
             expect(window.showInformationMessage).toHaveBeenCalledWith(
                 'Schema refreshed. Metadata is rebuilding in background...'
             );
+        });
+
+        it('should refresh only a File SQL connection without running Netezza prefetch', async () => {
+            const { window } = jest.requireMock('vscode');
+            await activate(mockContext);
+
+            const { ConnectionManager } = jest.requireMock('../core/connectionManager');
+            const connInstance = (ConnectionManager as jest.Mock).mock.results[0].value;
+            (connInstance.getConnectionMetadata as jest.Mock).mockReturnValue({ dbType: 'file' });
+
+            const { MetadataCache } = jest.requireMock('../metadataCache');
+            const cacheInstance = (MetadataCache as jest.Mock).mock.results[0].value;
+
+            const { commands } = jest.requireMock('vscode');
+            const calls = (commands.registerCommand as jest.Mock).mock.calls;
+            const refreshCall = calls.find((call: unknown[]) => call[0] === 'netezza.refreshSchema');
+            const handler = refreshCall[1];
+            await handler('FILE_SQL');
+
+            expect(cacheInstance.clearConnectionMetadata).toHaveBeenCalledWith('FILE_SQL');
+            expect(cacheInstance.triggerConnectionPrefetch).not.toHaveBeenCalled();
+            expect(window.showInformationMessage).toHaveBeenCalledWith('Schema refreshed (Cache cleared).');
         });
     });
 

@@ -68,16 +68,28 @@ export class MsSqlSqlParser extends NetezzaSqlParser {
 		super(mssqlLexer);
 	}
 
-protected getNetezzaRelaxedNameTokens() {
+  protected getNetezzaRelaxedNameTokens() {
     return [
       ...super.getNetezzaRelaxedNameTokens(),
       mssqlLexer.MsSqlBracketedIdentifier,
       mssqlLexer.MsSqlVariable,
+      mssqlLexer.MsSqlTempTableIdentifier,
     ];
   }
 
   protected getNetezzaIdentifierTokens() {
-    return super.getNetezzaIdentifierTokens();
+    return [
+      ...super.getNetezzaIdentifierTokens(),
+      mssqlLexer.MsSqlTempTableIdentifier,
+    ];
+  }
+
+  protected supportsTableTypeClause(): boolean {
+    return false;
+  }
+
+  protected supportsDropIfExistsBeforeTarget(): boolean {
+    return true;
   }
 
 	protected supportsEmptyQualifiedNameSegment(): boolean {
@@ -235,6 +247,7 @@ protected getNetezzaRelaxedNameTokens() {
         { ALT: () => this.CONSUME(baseLexer.QuotedIdentifier) },
         { ALT: () => this.CONSUME(mssqlLexer.MsSqlBracketedIdentifier) },
         { ALT: () => this.CONSUME(mssqlLexer.MsSqlVariable) },
+        { ALT: () => this.CONSUME(mssqlLexer.MsSqlTempTableIdentifier) },
       ]);
     });
 
@@ -268,6 +281,14 @@ protected getNetezzaRelaxedNameTokens() {
 			this.OPTION1(() => this.SUBRULE(this.mssqlTopClause));
 			this.SUBRULE(this.selectList);
 			this.OPTION2(() => this.SUBRULE(this.intoClause));
+		});
+
+		this.OVERRIDE_RULE('starExpression', () => {
+			this.OPTION(() => {
+				this.SUBRULE(this.identifier);
+				this.CONSUME(baseLexer.Dot);
+			});
+			this.CONSUME(baseLexer.Multiply);
 		});
 
 		// No LIMIT (Netezza-only). Prefer OFFSET/FETCH.

@@ -1,7 +1,7 @@
 {
     "name": "justybaselite-duckdb",
     "displayName": "JustyBase SQL Editor (DuckDB + Files)",
-    "description": "Optional DuckDB companion for JustyBase SQL Editor. Query Excel (XLSX/XLSB), CSV, Parquet and Avro files with SQL.",
+    "description": "Optional DuckDB companion for JustyBase SQL Editor. Query Excel (XLSX/XLSB), Access, CSV, Parquet and Avro files with SQL.",
     "version": "3.16.30",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
@@ -31,6 +31,7 @@
         "xlsx",
         "xlsb",
         "excel",
+        "access",
         "csv",
         "parquet",
         "avro",
@@ -84,17 +85,17 @@
             "explorer/context": [
                 {
                     "command": "justybase.duckdb.queryFile",
-                    "when": "resourceExtname =~ /\\.(xlsx|xlsb|csv|tsv|parquet|avro)$/",
+                    "when": "resourceExtname =~ /\\.(xlsx|xlsb|csv|tsv|parquet|avro|mdb|accdb)$/",
                     "group": "JustyBase"
                 },
                 {
                     "command": "justybase.duckdb.queryFiles",
-                    "when": "resourceExtname =~ /\\.(xlsx|xlsb|csv|tsv|parquet|avro)$/",
+                    "when": "resourceExtname =~ /\\.(xlsx|xlsb|csv|tsv|parquet|avro|mdb|accdb)$/",
                     "group": "JustyBase"
                 },
                 {
                     "command": "justybase.duckdb.addFiles",
-                    "when": "resourceExtname =~ /\\.(xlsx|xlsb|csv|tsv|parquet|avro)$/",
+                    "when": "resourceExtname =~ /\\.(xlsx|xlsb|csv|tsv|parquet|avro|mdb|accdb)$/",
                     "group": "JustyBase"
                 }
             ],
@@ -137,7 +138,8 @@
     },
     "dependencies": {
         "@duckdb/node-api": "^1.5.0-r.1",
-        "@justybase/spreadsheet-tasks": "2.1.0"
+        "@justybase/spreadsheet-tasks": "2.1.0",
+        "mdb-reader": "^3.2.0"
     },
     "preview": true
 }

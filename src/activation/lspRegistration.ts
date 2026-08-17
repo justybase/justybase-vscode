@@ -211,8 +211,12 @@ export async function startSqlLanguageClient(
           documentUri,
         } satisfies DocumentContextChangedParams);
       }),
-      metadataCache.onDidInvalidate(() => {
-        sendNotificationSafely(client, NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION);
+      metadataCache.onDidInvalidate((connectionName) => {
+        sendNotificationSafely(
+          client,
+          NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
+          connectionName ? { connectionName } satisfies MetadataCacheInvalidatedParams : undefined,
+        );
       }),
       metadataCache.onDidExternalRefresh((connectionName) => {
         sendNotificationSafely(

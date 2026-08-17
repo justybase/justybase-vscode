@@ -8,6 +8,7 @@ import { getOrderedReferenceTokens } from "./referenceTokenCollector";
 import {
   findFirstNodeByName,
   getChildNodesByKey,
+  getChildNodesFlat,
   getFirstTokenFromCstNode,
   getIdentifierTokenByKey,
   getNodeRange,
@@ -267,7 +268,8 @@ export class ParserSqlContextCollector {
     const queryNode =
       getChildNodesByKey(node, "withStatement")[0] ??
       getChildNodesByKey(node, "selectStatement")[0];
-    if (!queryNode && !tableTypeClause) {
+    const isTemporaryTable = tableRef.table.trim().startsWith("#");
+    if (!queryNode && !tableTypeClause && !isTemporaryTable) {
       this.visitChildren(node);
       return;
     }
@@ -276,6 +278,8 @@ export class ParserSqlContextCollector {
     if (tableTypeClause) {
       const isGlobal = getTokensByKey(tableTypeClause, "Global").length > 0;
       type = isGlobal ? "Global Temp Table" : "Temp Table";
+    } else if (isTemporaryTable) {
+      type = "Temp Table";
     }
 
     const columnsFromDefinition = this.extractColumnsFromColumnDefinitionList(
@@ -287,7 +291,9 @@ export class ParserSqlContextCollector {
         ? columnsFromDefinition
         : columnsFromQuery;
 
-    const displayName = this.formatQualifiedTableDisplayName(tableRef);
+    const displayName = isTemporaryTable
+      ? tableRef.table
+      : this.formatQualifiedTableDisplayName(tableRef);
     this.setLocalDefinition(displayName, type, columns);
     this.visitChildren(node);
   }
@@ -488,8 +494,17 @@ export class ParserSqlContextCollector {
     }
 
     const result: string[] = [];
-    getChildNodesByKey(columnDefinitionListNode, "columnDefinition").forEach(
-      (columnDefinitionNode) => {
+    const columnDefinitionNodes: CstNode[] = [];
+    const collectColumnDefinitions = (node: CstNode): void => {
+      if (node.name === "columnDefinition") {
+        columnDefinitionNodes.push(node);
+        return;
+      }
+      getChildNodesFlat(node).forEach(collectColumnDefinitions);
+    };
+    collectColumnDefinitions(columnDefinitionListNode);
+
+    columnDefinitionNodes.forEach((columnDefinitionNode) => {
         const columnNameNode = getChildNodesByKey(
           columnDefinitionNode,
           "columnName",
@@ -498,8 +513,7 @@ export class ParserSqlContextCollector {
         if (token) {
           result.push(normalizeTokenText(token));
         }
-      },
-    );
+      });
     return result;
   }
 
@@ -1389,7 +1403,12 @@ export function isIdentifierToken(token: IToken | undefined): token is IToken {
     return false;
   }
   const tokenName = token.tokenType.name;
-  if (tokenName === "Identifier" || tokenName === "QuotedIdentifier") {
+  if (
+    tokenName === "Identifier" ||
+    tokenName === "QuotedIdentifier" ||
+    tokenName === "MsSqlBracketedIdentifier" ||
+    tokenName === "MsSqlTempTableIdentifier"
+  ) {
     return true;
   }
   const identifierLikeKeywords = new Set([

@@ -3,6 +3,7 @@ import {
 	mssqlSqlQualityRules,
 	ruleMSS001,
 	ruleMSS002,
+	ruleMSS003,
 	ruleMSS006,
 	ruleMSS007,
 	ruleMSS008,
@@ -33,6 +34,11 @@ describe('MSSQL quality rules', () => {
 	it('flags DELETE without WHERE', () => {
 		const issues = ruleMSS002.check('DELETE FROM dbo.T');
 		expect(issues.some((issue) => issue.ruleId === 'MSS002')).toBe(true);
+	});
+
+	it('flags DELETE and UPDATE without WHERE on temp tables', () => {
+		expect(ruleMSS002.check('DELETE FROM #temp_table').some((issue) => issue.ruleId === 'MSS002')).toBe(true);
+		expect(ruleMSS003.check('UPDATE ##global_temp SET ID = 1').some((issue) => issue.ruleId === 'MSS003')).toBe(true);
 	});
 
 	it('flags TOP without ORDER BY', () => {

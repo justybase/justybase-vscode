@@ -32,6 +32,16 @@ describe('MsSqlSqlParser T-SQL', () => {
 		expect(result.tokens.filter((token) => token.tokenType.name === 'MsSqlVariable')).toHaveLength(2);
 	});
 
+	it('tokenizes local and global temporary table names', () => {
+		const result = SqlLexer.tokenize(
+			'CREATE TABLE #local (id INT); CREATE TABLE ##global (id INT); CREATE TABLE #123 (id INT); CREATE TABLE ##123 (id INT);',
+		);
+		expect(result.errors).toHaveLength(0);
+		expect(
+			result.tokens.filter((token) => token.tokenType.name === 'MsSqlTempTableIdentifier')
+		).toHaveLength(4);
+	});
+
 	it('parses TOP and OFFSET/FETCH via authoring runtime', () => {
 		const parsed = parseSqlStatements({
 			sql: 'SELECT TOP 5 Id FROM dbo.Orders ORDER BY Id OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY',
@@ -54,6 +64,26 @@ describe('MsSqlSqlParser T-SQL', () => {
 	});
 
 	it.each([
+		[
+			'local temporary table DDL and DML',
+			`CREATE TABLE #local (ID INT, NAME VARCHAR(20));
+INSERT INTO #local (ID, NAME) VALUES (1, 'one');
+UPDATE #local SET NAME = 'updated' WHERE ID = 1;
+DELETE FROM #local WHERE ID = 1;
+DROP TABLE #local;`,
+		],
+		[
+			'global temporary table',
+			'CREATE TABLE ##global (ID INT); SELECT ID FROM ##global; DROP TABLE IF EXISTS ##global;',
+		],
+		[
+			'SELECT INTO local temporary table',
+			'SELECT ID INTO #selected FROM dbo.Source; SELECT ID FROM #selected;',
+		],
+		[
+			'qualified star from a temporary table',
+			'SELECT #local.* FROM #local;',
+		],
 		[
 			'top percent with ties',
 			'SELECT TOP (10) PERCENT WITH TIES Id FROM dbo.T ORDER BY Id',
@@ -127,6 +157,14 @@ describe('MsSqlSqlParser T-SQL', () => {
 		expect(result.lexResult.errors).toHaveLength(0);
 		expect(result.actionableParserErrors).toHaveLength(0);
 		expect(result.cst).toBeDefined();
+	});
+
+	it.each([
+		'CREATE TEMP TABLE local_table (ID INT);',
+		'CREATE GLOBAL TEMP TABLE global_table (ID INT);',
+	])('rejects non-T-SQL temporary table syntax: %s', (sql) => {
+		const result = parse(sql);
+		expect(result.actionableParserErrors.length).toBeGreaterThan(0);
 	});
 
 	it.each([

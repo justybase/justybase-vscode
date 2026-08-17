@@ -1,93 +1,86 @@
-# JustyBase SQL Editor (Db2)
+# JustyBase SQL Editor for Db2 LUW
 
-Db2 LUW support for JustyBase SQL Editor. The base JustyBase SQL Editor extension is installed automatically as a technical dependency; Netezza is not required, and you do not need to install or use it.
+![JustyBase SQL Editor for Db2 LUW](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
-This extension adds the `Db2 LUW` dialect and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry. Core ships a dedicated Db2 SQL lexer/parser (strict), grammar, snippets, dialect-aware semantic tokens, and **DB2001–DB2008** quality rules; this VSIX supplies the native `ibm_db` driver and runtime providers.
+**Db2 LUW connections, SQL authoring, metadata, explain plans, and maintenance tools inside VS Code.**
 
-## Requirements
+This companion extension adds Db2 LUW runtime support to [JustyBase SQL Editor](../../README.md). VS Code installs the core extension automatically; Netezza is not required.
 
-- The base extension is installed automatically as a technical dependency; no separate Netezza installation is required.
-- VS Code Desktop
-- Network access to your Db2 LUW server
+[![Marketplace](https://vsmarketplacebadges.dev/version/krzysztof-d.justybaselite-db2.svg?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-db2) · [Db2 documentation](../../docs/db2.md)
 
-## Supported Platforms
+## Db2 workflow in one workspace
 
-Built and packaged per target platform (native `ibm_db` / clidriver):
+![Db2 workspace with schema browser, SQL editor, and results](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/workspace-overview.png)
 
-- Windows (`win32-x64`)
-- Linux (`linux-x64`)
-- macOS Apple Silicon (`darwin-arm64`)
+Connect to a Db2 LUW database, browse `SYSCAT` metadata, write SQL, execute it, and inspect results without switching applications.
 
-## What This Extension Adds
+## What you get
 
-- Db2 LUW connection type (optional `currentSchema`, connect timeout, `ClientCodepage`, SSL)
-- Runtime driver integration with UTF-8 `ClientCodepage=1208` default (overridable)
-- Schema metadata for tables, views, nicknames, aliases, procedures, functions, and federated catalog groups
-- DDL fallback from `SYSCAT.*` (constraints, indexes, partitions, comments, alias/nickname DDL)
-- Explain plan parsing, tuning advisor, session monitor, and table maintenance (`RUNSTATS` / `REORG`, index/partition helpers)
-- Import type mapping for Db2 types
-- Copilot reference text for optimization and SQL PL
+- Db2 LUW connection profile with `currentSchema`, SSL, connect timeout, and UTF-8 `ClientCodepage=1208` by default.
+- Native `ibm_db` runtime with streaming results and cancellation.
+- Metadata for tables, views, nicknames, aliases, procedures, functions, indexes, constraints, partitions, and comments.
+- Db2-aware completion, hover information, semantic highlighting, snippets, and parser-backed diagnostics.
+- Quality rules **DB2001–DB2008** for common Db2 SQL problems.
+- DDL extraction, explain-plan graph, tuning advisor, session monitor, `RUNSTATS`, `REORG`, and index/partition helpers.
 
-## Capabilities (aligned with `db2Dialect`)
+### Write safer Db2 SQL
 
-| Capability | Enabled |
-| --- | --- |
-| Explain plan / graph | Yes |
-| Tuning advisor | Yes |
-| Procedures | Yes |
-| Table maintenance | Yes |
-| Session monitor | Yes |
-| External tables / distribution metrics | No (Netezza-only surfaces stay hidden) |
+![SQL validation and assisted correction in JustyBase](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/sql-validation-and-copilot.png)
 
-Editor depth is **Advanced (LUW SQL + CST linter/semantic)**; deep SQL PL visitor (SQL037–039) remains a follow-on. See [docs/db2.md](../../docs/db2.md).
+The Db2 authoring profile understands LUW syntax and keeps completion and diagnostics close to the active connection. Use the shared result grid, formatter, query history, and Copilot workflows alongside Db2-specific validation.
 
-## Windows ODBC registration
+### Investigate results visually
 
-The extension **never** registers an ODBC driver or changes the Windows registry automatically. If the driver reports **Data source name not found**, reinstall the current platform-specific Db2 VSIX. For source development, rebuild the shared Node-API driver with `npm run db2:runtime:napi`. Only when approved by an administrator, register the bundled driver manually:
+![Query result explorer with profiles and summaries](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-explorer.png)
 
-```powershell
-<path-to-clidriver>\bin\db2cli.exe install -setup
-```
+Profile columns, inspect distributions and nulls, filter and sort rows, export data, and turn result sets into charts.
 
-## Installation Order
+![Interactive query result chart](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-chart.png)
 
-1. Install `JustyBase SQL Editor (Db2)`; VS Code installs the base extension automatically.
+## Getting started
 
-The extension dependency allows Marketplace resolution; no separate Netezza installation is required.
+1. Install **JustyBase SQL Editor (Db2)** from the VS Code Marketplace.
+2. Open the **JustyBase** view and choose **Connect**.
+3. Select **Db2 LUW**, enter the host, port, database, user, and password.
+4. Optionally set the current schema, SSL options, and connection timeout.
+5. Open a `.sql` file and run the statement or selection with `Ctrl+Enter` / `F5`.
 
-## Development
+The saved password is handled by VS Code Secret Storage. Do not put Db2 credentials in SQL files or settings committed to source control.
 
-```powershell
+## Platform support
+
+The published VSIX contains the platform-specific `ibm_db` / clidriver runtime:
+
+- Windows x64
+- Linux x64
+- macOS Apple Silicon
+
+Install the VSIX matching the operating system and architecture running VS Code. No separate Netezza extension or ODBC registration is needed.
+
+## Development and verification
+
+From the repository root:
+
+```bash
 npm run install:db2
-npm run db2:runtime:napi     # shared Node-API runtime for F5 and Jest
-# F5 -> Run Core + Db2 Support
-
+npm run db2:runtime:napi
 npm run test:db2:integration
 npm run verify:db2
-DB2_VSCODE_TEST_VERSION=stable npm run test:db2:vscode-runtime
-# Optional real query in the Extension Host (requires DB2_LIVE_TEST_*):
-DB2_VSCODE_RUNTIME_LIVE=true DB2_VSCODE_TEST_VERSION=stable npm run test:db2:vscode-runtime
 ```
 
-Live env: `DB2_LIVE_TEST_*` — see [docs/db2.md](../../docs/db2.md). Persistent fixture: `npm run db2:seed-live-fixture`.
+Live database tests use `DB2_LIVE_TEST_*` variables. Optional VS Code Extension Host coverage is available with `DB2_VSCODE_TEST_VERSION=stable npm run test:db2:vscode-runtime`.
 
-For Linux/macOS library path notes see `extensions/DB2_DEBUG_AND_INSTALL.md` when present.
+## Capability snapshot
 
-## Packaging
-
-```powershell
-npm run package:db2:full
-```
-
-CI: `.github/workflows/db2-build.yml` (VSIX).
-
-## VS Code runtime compatibility
-
-`ibm_db` is packaged as a Node-API 8 module, rather than a binary tied to one
-Electron version. Release CI verifies it inside the Extension Host for VS Code
-`1.103.2`, current Stable, and Insiders. A platform-specific VSIX is still
-required for Windows x64, Linux x64, or macOS Apple Silicon.
+| Area | Db2 LUW support |
+| --- | --- |
+| Connections and cancellation | Native `ibm_db`, streaming |
+| Schema browser | Tables, views, nicknames, aliases, routines, keys, partitions |
+| SQL intelligence | Db2 parser, completion, snippets, semantic tokens, DB2001–DB2008 |
+| Explain and tuning | Explain graph and tuning advisor |
+| Maintenance | `RUNSTATS`, `REORG`, indexes, partitions |
+| Netezza-only features | Hidden when a Db2 connection is active |
 
 ## License
 
-Apache-2.0. Marketplace VSIX includes `THIRD_PARTY_NOTICES.md`.
+Apache-2.0. The Marketplace VSIX includes `THIRD_PARTY_NOTICES.md`.

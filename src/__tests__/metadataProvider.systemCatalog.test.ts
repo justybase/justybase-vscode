@@ -178,6 +178,36 @@ describe('MetadataProvider system catalog mirroring', () => {
         )
     })
 
+    it('fetches views when the cached table layer is empty but the catalog is not marked loaded', async () => {
+        metadataCache.getTables.mockReturnValue([])
+        ;(provider as unknown as {
+            getMetadataProvider: () => { buildListViewsQuery: () => string }
+        }).getMetadataProvider = jest.fn(() => ({
+            buildListViewsQuery: () => 'SELECT FILE VIEWS'
+        }))
+        runQueryRawMock.mockResolvedValue({ query: 'SELECT FILE VIEWS' } as unknown as RunQueryRawResult)
+        queryResultToRowsMock.mockReturnValue([
+            { OBJNAME: 'sample_database__Tabela1', SCHEMA: 'main', DESCRIPTION: 'Access table view' }
+        ])
+
+        const items = await provider.getViews('CONN_1', 'sample_database', 'main')
+
+        expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__Tabela1'])
+        expect(runQueryRawMock).toHaveBeenCalledWith(
+            expect.anything(),
+            'SELECT FILE VIEWS',
+            true,
+            expect.anything(),
+            'CONN_1',
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            false,
+        )
+        expect(metadataCache.markViewsCatalogLoaded).toHaveBeenCalledWith('CONN_1', 'SAMPLE_DATABASE.MAIN')
+    })
+
     it('resolves synonym columns from cached REFOBJNAME without a synonym lookup query', async () => {
         metadataCache.getTables.mockReturnValue([
             {

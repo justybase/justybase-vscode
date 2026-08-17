@@ -1,5 +1,5 @@
 /**
- * Shared logic for managing "file" connection profiles (xlsx/xlsb/csv/tsv/parquet/avro).
+ * Shared logic for managing "file" connection profiles (xlsx/xlsb/mdb/accdb/csv/tsv/parquet/avro).
  * Used by the File Connection Manager webview panel and by the schema tree
  * drag & drop handler. The workspace serialization format must stay compatible
  * with extensions/duckdb/src/fileSqlSetup.ts.
@@ -10,7 +10,7 @@ import * as path from 'path';
 import type { ConnectionDetails } from '../types';
 import type { ConnectionManager } from '../core/connectionManager';
 
-export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | 'xlsb';
+export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | 'xlsb' | 'access';
 
 export const FILE_WORKSPACE_OPTION = 'fileWorkspace';
 export const FILE_WORKSPACE_VERSION = 1;
@@ -22,6 +22,8 @@ export const FILE_DIALECT_EXTENSIONS: Readonly<Record<string, FileDataFormat>> =
     '.avro': 'avro',
     '.xlsx': 'xlsx',
     '.xlsb': 'xlsb',
+    '.mdb': 'access',
+    '.accdb': 'access',
 };
 
 export interface FileWorkspaceConfig {
@@ -131,7 +133,7 @@ export function toFileInfo(filePath: string): FileConnectionFileInfo {
 
 /**
  * Build updated connection details for a new file list.
- * Single file  -> single-file profile (editable copy allowed).
+ * Single file  -> single-file profile (editable copy allowed except Access).
  * Multiple     -> read-only workspace (editable forced off, `sheet` dropped).
  */
 export function buildFileConnectionDetails(
@@ -162,7 +164,15 @@ export function buildFileConnectionDetails(
     if (normalizedFiles.length <= 1) {
         delete options[FILE_WORKSPACE_OPTION];
         if (normalizedFiles.length === 1) {
-            options.editable = wasEditable;
+            if (detectFileDataFormat(normalizedFiles[0]) === 'access') {
+                if (wasEditable) {
+                    editableCleared = true;
+                }
+                delete options.editable;
+                delete options.sheet;
+            } else {
+                options.editable = wasEditable;
+            }
         } else {
             delete options.editable;
             delete options.sheet;
@@ -242,6 +252,7 @@ export function fileFormatLabel(format: FileDataFormat | undefined): string {
         case 'tsv': return 'TSV';
         case 'parquet': return 'Parquet';
         case 'avro': return 'Avro';
+        case 'access': return 'Access';
         default: return 'File';
     }
 }

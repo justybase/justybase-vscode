@@ -1,7 +1,9 @@
-import { SqlLexer } from './lexer'
+import type { DatabaseKind } from '../contracts/database'
+import type { IToken } from 'chevrotain'
 import { collectSqlSymbolUsages } from './symbols'
+import { resolveSqlParsingRuntime } from './parsingRuntime'
 
-export type SqlLineageAction = 'read' | 'update' | 'delete' | 'drop' | 'truncate' | 'other'
+export type SqlLineageAction = 'read' | 'insert' | 'update' | 'delete' | 'drop' | 'truncate' | 'other'
 
 export interface SqlLineageEdge {
     objectName: string
@@ -38,9 +40,9 @@ interface StatementRangeInfo {
     action: SqlLineageAction
 }
 
-export function analyzeSqlScriptFlow(sql: string): SqlScriptFlowAnalysis {
-    const statementRanges = buildStatementRanges(sql)
-    const symbolUsages = collectSqlSymbolUsages(sql)
+export function analyzeSqlScriptFlow(sql: string, databaseKind?: DatabaseKind): SqlScriptFlowAnalysis {
+    const statementRanges = buildStatementRanges(sql, databaseKind)
+    const symbolUsages = collectSqlSymbolUsages(sql, databaseKind)
 
     const lineage: SqlLineageEdge[] = []
     const unusedSymbols: SqlUnusedSymbolInfo[] = []
@@ -91,8 +93,8 @@ export function analyzeSqlScriptFlow(sql: string): SqlScriptFlowAnalysis {
     return { lineage, unusedSymbols, refactorCandidates }
 }
 
-function buildStatementRanges(sql: string): StatementRangeInfo[] {
-    const lexResult = SqlLexer.tokenize(sql)
+function buildStatementRanges(sql: string, databaseKind?: DatabaseKind): StatementRangeInfo[] {
+    const lexResult = resolveSqlParsingRuntime({ databaseKind }).SqlLexer.tokenize(sql)
     if (lexResult.errors.length > 0 || lexResult.tokens.length === 0) {
         if (!sql.trim()) {
             return []
@@ -108,6 +110,7 @@ function buildStatementRanges(sql: string): StatementRangeInfo[] {
     const ranges: StatementRangeInfo[] = []
     let currentStart: number | undefined
     let currentEnd = 0
+    let currentTokens: IToken[] = []
 
     lexResult.tokens.forEach(token => {
         const tokenName = token.tokenType.name
@@ -122,11 +125,12 @@ function buildStatementRanges(sql: string): StatementRangeInfo[] {
                         index: ranges.length,
                         startOffset: currentStart,
                         endOffset: tokenStart,
-                        action: classifyStatementAction(statementText)
+                        action: classifyStatementAction(statementText, currentTokens)
                     })
                 }
                 currentStart = undefined
                 currentEnd = tokenEnd
+                currentTokens = []
             }
             return
         }
@@ -135,6 +139,7 @@ function buildStatementRanges(sql: string): StatementRangeInfo[] {
             currentStart = tokenStart
         }
         currentEnd = tokenEnd
+        currentTokens.push(token)
     })
 
     if (currentStart !== undefined && currentEnd >= currentStart) {
@@ -144,7 +149,7 @@ function buildStatementRanges(sql: string): StatementRangeInfo[] {
                 index: ranges.length,
                 startOffset: currentStart,
                 endOffset: currentEnd,
-                action: classifyStatementAction(statementText)
+                action: classifyStatementAction(statementText, currentTokens)
             })
         }
     }
@@ -152,21 +157,52 @@ function buildStatementRanges(sql: string): StatementRangeInfo[] {
     return ranges
 }
 
-function classifyStatementAction(statementText: string): SqlLineageAction {
+function classifyStatementAction(
+    statementText: string,
+    statementTokens: readonly IToken[] = [],
+): SqlLineageAction {
     const normalized = statementText.trim().toUpperCase()
-    if (normalized.startsWith('DROP ')) {
+    const firstTokenName = statementTokens[0]?.tokenType.name
+    if (firstTokenName === 'Drop' || /^DROP(?:\s|$)/.test(normalized)) {
         return 'drop'
     }
-    if (normalized.startsWith('TRUNCATE ')) {
+    if (firstTokenName === 'Truncate' || /^TRUNCATE(?:\s|$)/.test(normalized)) {
         return 'truncate'
     }
-    if (normalized.startsWith('UPDATE ')) {
+    if (firstTokenName === 'Update' || /^UPDATE(?:\s|$)/.test(normalized)) {
         return 'update'
     }
-    if (normalized.startsWith('DELETE ')) {
+    if (firstTokenName === 'Insert' || /^INSERT(?:\s|$)/.test(normalized)) {
+        return 'insert'
+    }
+    if (firstTokenName === 'Delete' || /^DELETE(?:\s|$)/.test(normalized)) {
         return 'delete'
     }
-    if (normalized.startsWith('SELECT ') || normalized.startsWith('WITH ') || normalized.startsWith('CREATE ')) {
+    if (firstTokenName === 'With') {
+        let parenthesisDepth = 0
+        for (const token of statementTokens.slice(1)) {
+            const tokenName = token.tokenType.name
+            if (tokenName === 'LParen') {
+                parenthesisDepth += 1
+                continue
+            }
+            if (tokenName === 'RParen') {
+                parenthesisDepth = Math.max(0, parenthesisDepth - 1)
+                continue
+            }
+            if (parenthesisDepth === 0 && tokenName === 'Insert') {
+                return 'insert'
+            }
+        }
+    }
+    if (
+        firstTokenName === 'Select' ||
+        firstTokenName === 'With' ||
+        firstTokenName === 'Create' ||
+        /^SELECT(?:\s|$)/.test(normalized) ||
+        /^WITH(?:\s|$)/.test(normalized) ||
+        /^CREATE(?:\s|$)/.test(normalized)
+    ) {
         return 'read'
     }
     return 'other'

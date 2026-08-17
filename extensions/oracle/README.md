@@ -1,99 +1,76 @@
-# JustyBase SQL Editor (Oracle)
+# JustyBase SQL Editor for Oracle
 
-Oracle support for JustyBase SQL Editor. The base JustyBase SQL Editor extension is installed automatically as a technical dependency; Netezza is not required, and you do not need to install or use it.
+![JustyBase SQL Editor for Oracle](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
-This extension registers the `Oracle` dialect with the core extension: shared connection UI, schema browser, query execution, DDL/import/export workflows, and the `node-oracledb` runtime. **SQL editor intelligence** (Chevrotain lexer/parser, TextMate grammar, snippets, PL/SQL validation, completion, hover, semantic tokens) ships in the **core** extension and activates when an Oracle connection is active — install **both** extensions for the full experience.
+**Oracle SQL and PL/SQL, metadata, DDL, explain plans, and data workflows inside VS Code.**
 
-## Requirements
+This companion extension connects [JustyBase SQL Editor](../../README.md) to Oracle Database. VS Code installs the core extension automatically; Netezza is not required.
 
-- The base extension is installed automatically as a technical dependency; no separate Netezza installation is required.
-- VS Code Desktop
-- Oracle Database 12.1 or later
-- Network access to your Oracle service
+[![Marketplace](https://vsmarketplacebadges.dev/version/krzysztof-d.justybaselite-oracle.svg?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-oracle) · [Oracle documentation](../../docs/oracle.md)
 
-## Runtime model
+## Oracle work, from connection to insight
 
-`JustyBase SQL Editor (Oracle)` uses `node-oracledb` in **thin mode** by default:
+![Oracle workspace with schema browser, SQL editor, and results](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/workspace-overview.png)
 
-- No Oracle Client installation is required for the baseline runtime path
-- Standard Easy Connect strings (`host:port/service`) work out of the box
-- Optional Oracle Net configuration directories can be supplied from the connection form when TNS aliases or wallet files are needed
+Browse schemas and Oracle objects, edit SQL or PL/SQL, execute statements, and review results in the same VS Code workspace.
 
-## What this extension adds
+## What this pack adds
 
-- Oracle connection type in the shared JustyBase connection UI (service name, connect string override, optional `currentSchema`, Net config directory)
-- Oracle runtime integration via `node-oracledb` (thin mode)
-- Metadata for schemas, tables, views, procedures, functions, packages, triggers, sequences, and synonyms
-- Column metadata from `ALL_TAB_COLUMNS`, `ALL_COL_COMMENTS`, `ALL_CONSTRAINTS`, and `ALL_CONS_COLUMNS`
-- Advanced DDL extraction and batch schema migration DDL via `DBMS_METADATA.GET_DDL` (with `ALL_SOURCE` and catalog fallbacks), including indexes, partitions, and visible object grants where supported
-- Import type mapping, table maintenance (`DBMS_STATS`, `ALTER TABLE MOVE`, `ANALYZE TABLE`), session monitor, explain plan graph, tuning advisor, and dialect-specific Copilot reference hints
-- Pattern-based quality rules **ORA001–ORA004** (wired through the shared Oracle authoring profile)
+- `node-oracledb` in thin mode, so the baseline connection does not need Oracle Instant Client.
+- Easy Connect strings (`host:port/service`), optional TNS aliases, wallets, and Oracle Net configuration directories.
+- Metadata for schemas, tables, views, procedures, functions, packages, triggers, sequences, synonyms, constraints, and columns.
+- DDL and migration extraction through `DBMS_METADATA.GET_DDL`, with catalog fallbacks for supported objects.
+- Oracle type-aware import/export, `DBMS_STATS` and table-maintenance helpers, session monitor, explain graph, and tuning advisor.
+- Oracle parser, PL/SQL-aware validation, completion, hover, semantic tokens, snippets, and **ORA001–ORA004** quality rules.
 
-## SQL and PL/SQL editor (core + this pack)
+### SQL and PL/SQL assistance
 
-With the core extension installed, Oracle authoring includes:
+![Oracle SQL validation and assisted correction](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/sql-validation-and-copilot.png)
 
-- Dedicated Oracle lexer and parser (`src/dialects/oracle/sql/`) extending the shared Chevrotain stack
-- TextMate grammar and snippets under `dialects/oracle/`
-- Strict Oracle validation mode, anonymous PL/SQL blocks, packages, triggers, and shared procedure-scope diagnostics (**SQL037–SQL040** where applicable)
-- Metadata-aware completion, hover, rename, and semantic tokens on Oracle SQL files when connected to Oracle
+The core authoring layer recognizes Oracle SQL, anonymous PL/SQL blocks, packages, and triggers. Metadata-aware completion and diagnostics use the active Oracle connection.
 
-See [docs/oracle.md](../../docs/oracle.md) for parity boundaries versus Netezza and live-test setup.
+### Explain plans and result analysis
 
-## Runtime notes
+![Query result explorer with profiles and summaries](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-explorer.png)
 
-- The `database` field represents the Oracle service name by default.
-- An optional **Connect String Override** can be used for full Easy Connect Plus strings or TNS aliases.
-- `SELECT CURRENT_CATALOG`, `SELECT CURRENT_SCHEMA`, `SELECT CURRENT_SID`, and `SET CATALOG ...` are emulated for shared core compatibility. `SET CATALOG` does not open a new Oracle service connection; it only updates compatibility state in the JustyBase runtime.
-- Netezza distribution/skew metrics have no Oracle equivalent and are not shown.
-- Import/export supports advanced Oracle types (including LOB/time-zone columns) with streaming cancellation on large exports; see the core export/import documentation.
+Use the shared result grid to profile columns, inspect distributions, export data, and create charts.
 
-## Explain, tuning, and session monitor
+![Interactive result chart](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-chart.png)
 
-- Explain uses `EXPLAIN PLAN FOR` plus retrieval through `DBMS_XPLAN` / plan table display, with a shared explain graph view.
-- The Oracle tuning advisor consumes normalized plan text and applies Oracle-oriented heuristics.
-- Session monitor surfaces active sessions and related statistics from Oracle dynamic views.
+Explain uses `EXPLAIN PLAN FOR` and `DBMS_XPLAN` to populate the shared plan viewer. The tuning advisor applies Oracle-oriented heuristics to the normalized plan.
 
-## Unsupported or intentionally deferred
+## Connect in a minute
 
-- Netezza-only SQL (for example `GROOM`) is rejected in strict Oracle validation mode
-- Netezza-specific Copilot tools, GROOM/ETL designer workflows, and SQL/NZ/NZP rule depth remain on the Netezza-first path
-- Cross-service catalog switching is not supported through `SET CATALOG`
-- External-table workflows and advanced PL/SQL object-type / cursor / record semantics are outside the supported core
+1. Install **JustyBase SQL Editor (Oracle)**.
+2. Open the **JustyBase** view and choose **Connect**.
+3. Select **Oracle**, enter the service name and credentials, and optionally provide a full connect-string override.
+4. Set `currentSchema`, wallet/TNS options, or session settings when needed.
+5. Open a `.sql` file and run the statement or selection with `Ctrl+Enter` / `F5`.
 
-## Installation order
+Passwords are stored through VS Code Secret Storage. Keep wallet paths and credentials in local configuration only.
 
-Marketplace or manual VSIX installation should end with both extensions installed:
+## Runtime boundaries
 
-1. Install `JustyBase SQL Editor (Oracle)`; VS Code installs the base extension automatically.
+- `SET CATALOG` is emulated for core compatibility and does not switch to another Oracle service.
+- Netezza-only features such as GROOM, distribution metrics, and NZPLSQL tooling are not shown for Oracle connections.
+- Advanced PL/SQL object-type, cursor, and record semantics remain outside the supported parser surface.
 
-`JustyBase SQL Editor (Oracle)` declares `extensionDependencies` on the core extension, so VS Code can resolve the dependency automatically in Marketplace scenarios. No separate Netezza installation is required.
-
-## Integration testing
-
-From the repository root (optional, requires a live database):
+## Development and integration tests
 
 ```bash
 npm run install:oracle
 npm run test:oracle:integration
 ```
 
-Required: `ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_DATABASE` (service name), `ORACLE_LIVE_TEST_USER`, `ORACLE_LIVE_TEST_PASSWORD`. Optional: `ORACLE_LIVE_TEST_PORT` (default 1521), `ORACLE_LIVE_TEST_CURRENT_SCHEMA`.
+Live tests use `ORACLE_LIVE_TEST_HOST`, `ORACLE_LIVE_TEST_DATABASE`, `ORACLE_LIVE_TEST_USER`, and `ORACLE_LIVE_TEST_PASSWORD`; port defaults to `1521`. For a local build:
 
-See [docs/oracle.md](../../docs/oracle.md) for the full live coverage matrix (explain/tuning, DDL object families, maintenance, session monitor).
-
-## Development notes
-
-From `extensions\oracle`:
-
-```powershell
+```bash
+cd extensions/oracle
 npm install
 npm run check-types
 npm run build
 ```
 
-The extension bundle externalizes `oracledb`, so the package must keep `node_modules\oracledb` available at runtime.
+## License
 
-## License and third-party software
-
-This extension is licensed under Apache-2.0. Its Marketplace VSIX includes the full project license and a generated `THIRD_PARTY_NOTICES.md` covering locked runtime dependencies and their available license texts.
+Apache-2.0. The Marketplace VSIX includes `THIRD_PARTY_NOTICES.md`.

@@ -7,17 +7,17 @@ import type {
 import { createDatabaseCapabilities, createDatabaseDialectTraits } from '../../contracts/database';
 
 const INSTALL_HINT =
-    'Install the optional "JustyBase SQL Editor (DuckDB + Files)" extension to use Excel / CSV / Parquet / Avro (DuckDB) connections.';
+    'Install the optional "JustyBase SQL Editor (DuckDB + Files)" extension to use Excel / CSV / Parquet / Avro / Access (DuckDB) connections.';
 
 /**
- * Stub for the 'file' dialect (Excel/CSV/Parquet/Avro via DuckDB).
+ * Stub for the 'file' dialect (Excel/CSV/Parquet/Avro/Access via DuckDB).
  * Registered so the login panel shows the option with a file picker and an
  * install hint; the real dialect is registered by the DuckDB companion
  * extension.
  */
 export const fileDialectStub: DatabaseDialect = {
     kind: 'file',
-    displayName: 'Excel (XLSX/XLSB) / CSV / Parquet / Avro (DuckDB)',
+    displayName: 'Excel (XLSX/XLSB) / CSV / Parquet / Avro / Access (DuckDB)',
     capabilities: createDatabaseCapabilities(),
     connectionForm: {
         fields: [
@@ -27,9 +27,9 @@ export const fileDialectStub: DatabaseDialect = {
                 type: 'file',
                 storage: 'topLevel',
                 required: true,
-                placeholder: 'Select an .xlsx, .xlsb, .csv, .parquet or .avro file',
+                placeholder: 'Select an .xlsx, .xlsb, .csv, .parquet, .avro, .mdb or .accdb file',
                 description:
-                    'Data file queried with SQL through an in-memory DuckDB. Excel sheets appear as tables.',
+                    'Data file queried with SQL through an in-memory DuckDB. Excel sheets and Access tables appear as tables.',
                 layout: 'full'
             },
             {

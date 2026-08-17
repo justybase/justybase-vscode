@@ -30,6 +30,16 @@ DuckDB has no `read_xlsb` function, so `.xlsb` workbooks are converted to CSV wi
 - **Editable copy** works for single XLSB files: `INSERT`/`UPDATE`/`DELETE` on `<file>_edit` are written back **in place** with `XlsbUpdater` (other sheets, styles and pivots are preserved). DuckDB cannot write XLSB itself, so the write-back is performed client-side by the companion extension.
 - Because conversion happens at connect time, an XLSB file changed on disk is only visible after reconnecting (unlike XLSX, which DuckDB re-reads per query).
 
+## Microsoft Access Files (`.mdb` / `.accdb`)
+
+DuckDB has no Access reader, so every table of an Access database is converted to CSV with `@justybase/access-file` in the connection's temporary directory at connect time and read back through `read_csv`. The column types are inferred by DuckDB's CSV sniffer from the table's rows; the header comes from the Access column definitions.
+
+- Access is **read-only** in File SQL mode: there is no editable copy and no Save File Edits. Use the JustyBase SQL Editor (Microsoft Access) extension to modify the file.
+- Single-file connections expose one view per table (`<file>__<table>`), without a base `<file>` view; multi-file workspaces expose `<path>#table=<table>`.
+- Hidden complex flat tables (Jackcess `f_<GUID>_<field>` backing tables for attachment/multivalue columns) are skipped; their values are already serialized into the parent table's complex columns.
+- Password-protected Access databases are not supported.
+- Because conversion happens at connect time, an Access file changed on disk is only visible after reconnecting.
+
 ## Runtime Boundary
 
 Materialized Data Workspace source tables are replaced on refresh; local tables and views created separately in DuckDB remain intact. Legacy File SQL source views are still read-only, and existing legacy profiles are not migrated or deleted by the new manager.

@@ -232,7 +232,7 @@ export class TableDdlSynchronizer {
             );
         }
 
-        this.metadataCache.notifyMetadataChanged();
+        this.metadataCache.notifyMetadataChanged(connectionName);
         this.schemaProvider.refresh();
     }
 
@@ -277,7 +277,7 @@ export class TableDdlSynchronizer {
                 })),
             );
         }
-        this.metadataCache.notifyMetadataChanged();
+        this.metadataCache.notifyMetadataChanged(connectionName);
         this.schemaProvider.refresh();
     }
 
@@ -343,7 +343,7 @@ export class TableDdlSynchronizer {
             ),
         );
 
-        this.metadataCache.notifyMetadataChanged();
+        this.metadataCache.notifyMetadataChanged(connectionName);
         this.schemaProvider.refresh();
     }
 
@@ -474,7 +474,7 @@ export class TableDdlSynchronizer {
                 )),
         );
 
-        this.metadataCache.notifyMetadataChanged();
+        this.metadataCache.notifyMetadataChanged(connectionName);
         this.schemaProvider.refresh();
     }
 }

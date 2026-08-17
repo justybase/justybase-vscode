@@ -327,6 +327,10 @@ FROM TESTDB..EMPLOYEES d;`);
       expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
     });
 
+    it("should not require a cached qualified relation with trailing IF EXISTS", () => {
+      expectValid("DROP TABLE TESTDB.PUBLIC.MISSING_TABLE IF EXISTS;");
+    });
+
     it("should validate DROP TABLE with multiple targets", () => {
       expectValid(
         "DROP TABLE TESTDB.PUBLIC.EMPLOYEES, TESTDB.PUBLIC.DEPARTMENTS IF EXISTS;",
