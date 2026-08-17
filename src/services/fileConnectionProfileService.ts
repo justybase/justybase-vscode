@@ -1,5 +1,5 @@
 /**
- * Shared logic for managing "file" connection profiles (xlsx/csv/tsv/parquet/avro).
+ * Shared logic for managing "file" connection profiles (xlsx/xlsb/csv/tsv/parquet/avro).
  * Used by the File Connection Manager webview panel and by the schema tree
  * drag & drop handler. The workspace serialization format must stay compatible
  * with extensions/duckdb/src/fileSqlSetup.ts.
@@ -10,7 +10,7 @@ import * as path from 'path';
 import type { ConnectionDetails } from '../types';
 import type { ConnectionManager } from '../core/connectionManager';
 
-export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx';
+export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | 'xlsb';
 
 export const FILE_WORKSPACE_OPTION = 'fileWorkspace';
 export const FILE_WORKSPACE_VERSION = 1;
@@ -21,6 +21,7 @@ export const FILE_DIALECT_EXTENSIONS: Readonly<Record<string, FileDataFormat>> =
     '.parquet': 'parquet',
     '.avro': 'avro',
     '.xlsx': 'xlsx',
+    '.xlsb': 'xlsb',
 };
 
 export interface FileWorkspaceConfig {
@@ -236,6 +237,7 @@ export async function listXlsxSheetNames(filePath: string): Promise<string[]> {
 export function fileFormatLabel(format: FileDataFormat | undefined): string {
     switch (format) {
         case 'xlsx': return 'Excel';
+        case 'xlsb': return 'Excel (XLSB)';
         case 'csv': return 'CSV';
         case 'tsv': return 'TSV';
         case 'parquet': return 'Parquet';

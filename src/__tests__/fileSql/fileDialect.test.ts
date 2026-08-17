@@ -8,6 +8,7 @@ describe('file dialect (Excel/CSV/Parquet/Avro via DuckDB)', () => {
         expect(normalizeDatabaseKind('file')).toBe('file');
         expect(tryNormalizeDatabaseKind('files')).toBe('file');
         expect(tryNormalizeDatabaseKind('xlsx')).toBe('file');
+        expect(tryNormalizeDatabaseKind('xlsb')).toBe('file');
         expect(tryNormalizeDatabaseKind('csv')).toBe('file');
         expect(tryNormalizeDatabaseKind('parquet')).toBe('file');
         expect(tryNormalizeDatabaseKind('avro')).toBe('file');
@@ -28,7 +29,7 @@ describe('file dialect (Excel/CSV/Parquet/Avro via DuckDB)', () => {
 
     it('registers a dialect with a file picker field', () => {
         expect(fileDialect.kind).toBe('file');
-        expect(fileDialect.displayName).toBe('Excel / CSV / Parquet / Avro (DuckDB)');
+        expect(fileDialect.displayName).toBe('Excel (XLSX/XLSB) / CSV / Parquet / Avro (DuckDB)');
         const field = fileDialect.connectionForm?.fields[0];
         expect(field?.key).toBe('filePath');
         expect(field?.type).toBe('file');

@@ -17,7 +17,7 @@ const INSTALL_HINT =
  */
 export const fileDialectStub: DatabaseDialect = {
     kind: 'file',
-    displayName: 'Excel / CSV / Parquet / Avro (DuckDB)',
+    displayName: 'Excel (XLSX/XLSB) / CSV / Parquet / Avro (DuckDB)',
     capabilities: createDatabaseCapabilities(),
     connectionForm: {
         fields: [
@@ -27,7 +27,7 @@ export const fileDialectStub: DatabaseDialect = {
                 type: 'file',
                 storage: 'topLevel',
                 required: true,
-                placeholder: 'Select an .xlsx, .csv, .parquet or .avro file',
+                placeholder: 'Select an .xlsx, .xlsb, .csv, .parquet or .avro file',
                 description:
                     'Data file queried with SQL through an in-memory DuckDB. Excel sheets appear as tables.',
                 layout: 'full'

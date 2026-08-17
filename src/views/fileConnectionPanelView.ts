@@ -18,7 +18,7 @@ import {
     serializeDataWorkspaceProfileExport,
 } from '../services/dataWorkspaceService';
 
-const DATA_FILE_FILTERS = { 'Data files': ['xlsx', 'csv', 'tsv', 'parquet', 'avro'] };
+const DATA_FILE_FILTERS = { 'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro'] };
 
 function getNonce(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

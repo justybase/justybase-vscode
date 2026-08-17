@@ -7,6 +7,7 @@ import { registerDatabaseDialect } from '../../core/factories/databaseDialectReg
 import { fileDialect } from '../../../extensions/duckdb/src/fileDialect';
 import { loadDuckDb } from '../../../extensions/duckdb/src/duckdbConnection';
 import { listXlsxSheetNames } from '../../../extensions/duckdb/src/xlsxSheets';
+import { listXlsbSheetNames } from '../../../extensions/duckdb/src/xlsbConversion';
 import { duckdbMetadataProvider } from '../../../extensions/duckdb/src/duckdbSchemaProvider';
 import {
     buildSaveEditsSql,
@@ -25,6 +26,33 @@ function hasDuckDbRuntime(): boolean {
     } catch {
         return false;
     }
+}
+
+interface XlsbSheetFixture {
+    name: string;
+    headers: string[];
+    rows: unknown[][];
+}
+
+/** Write a real XLSB workbook through @justybase/spreadsheet-tasks XlsbWriter. */
+async function writeXlsbFile(filePath: string, sheets: XlsbSheetFixture[]): Promise<void> {
+    const { XlsbWriter } = extensionRequire('@justybase/spreadsheet-tasks') as {
+        XlsbWriter: new (filePath: string) => {
+            startSheet(sheetName: string, columnCount: number, headers?: string[]): void;
+            writeRow(row: unknown[]): void;
+            endSheet(): void;
+            finalize(): Promise<void>;
+        };
+    };
+    const writer = new XlsbWriter(filePath);
+    for (const sheet of sheets) {
+        writer.startSheet(sheet.name, sheet.headers.length, sheet.headers);
+        for (const row of sheet.rows) {
+            writer.writeRow(row);
+        }
+        writer.endSheet();
+    }
+    await writer.finalize();
 }
 
 async function readRows(reader: DatabaseDataReader): Promise<unknown[][]> {
@@ -320,6 +348,149 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         }
     });
 
+    it('queries an xlsb workbook through conversion and exposes discovered sheets as views', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const xlsbPath = path.join(tempDir, 'book.xlsb');
+        await writeXlsbFile(xlsbPath, [
+            { name: 'Orders', headers: ['id', 'title'], rows: [[1, 'Alice in Wonderland'], [2, 'Dune']] },
+            { name: 'Returns', headers: ['id', 'reason'], rows: [[1, 'damaged']] },
+        ]);
+
+        expect(await listXlsbSheetNames(xlsbPath)).toEqual(['Orders', 'Returns']);
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: xlsbPath,
+            user: 'file',
+        });
+
+        try {
+            await connection.connect();
+            const rows = await readRows(
+                await connection.createCommand('SELECT id, title FROM "book" ORDER BY id').executeReader(),
+            );
+            expect(rows).toEqual([[1n, 'Alice in Wonderland'], [2n, 'Dune']]);
+
+            const perSheet = await readRows(
+                await connection.createCommand('SELECT id, reason FROM "book__Returns" ORDER BY id').executeReader(),
+            );
+            expect(perSheet).toEqual([[1n, 'damaged']]);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('joins an xlsb sheet with a csv file in a read-only File SQL workspace', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const xlsbPath = path.join(tempDir, 'workspace.xlsb');
+        const csvPath = path.join(tempDir, 'regions.csv');
+        await writeXlsbFile(xlsbPath, [
+            { name: 'Sales', headers: ['region', 'amount'], rows: [['EU', 100], ['US', 200]] },
+        ]);
+        fs.writeFileSync(csvPath, 'region,name\nEU,Europe\nUS,United States\n');
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: csvPath,
+            user: 'file',
+            options: { fileWorkspace: serializeFileWorkspace([xlsbPath, csvPath]) },
+        });
+
+        try {
+            await connection.connect();
+            const xlsbView = xlsbPath.split(path.sep).join('/');
+            const csvView = csvPath.split(path.sep).join('/');
+            const rows = await readRows(
+                await connection.createCommand(
+                    `SELECT s.region, n.name, s.amount FROM "${xlsbView}" s JOIN "${csvView}" n ON s.region = n.region ORDER BY s.amount`,
+                ).executeReader(),
+            );
+            expect(rows).toEqual([['EU', 'Europe', 100n], ['US', 'United States', 200n]]);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('supports INSERT/UPDATE on an xlsb editable copy and writes back in place via XlsbUpdater', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const xlsbPath = path.join(tempDir, 'editable.xlsb');
+        await writeXlsbFile(xlsbPath, [
+            { name: 'Data', headers: ['region', 'amount'], rows: [['EU', 100], ['US', 200]] },
+        ]);
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: xlsbPath,
+            user: 'file',
+            options: { editable: true, sheet: 'Data' },
+        });
+
+        try {
+            await connection.connect();
+
+            await connection.createCommand(`INSERT INTO "editable_edit" VALUES ('APAC', 300)`).execute();
+            await connection.createCommand(`UPDATE "editable_edit" SET amount = 250 WHERE region = 'US'`).execute();
+            const rows = await readRows(
+                await connection.createCommand('SELECT region, amount FROM "editable_edit" ORDER BY amount').executeReader(),
+            );
+            expect(rows).toEqual([['EU', 100n], ['US', 250n], ['APAC', 300n]]);
+
+            // Client-side write-back — the same flow the Save File Edits command uses:
+            // fetch the editable table rows from DuckDB and rewrite the sheet in place.
+            const reader = await connection.createCommand('SELECT * FROM "editable_edit"').executeReader();
+            const columns: string[] = [];
+            for (let index = 0; index < reader.fieldCount; index += 1) {
+                columns.push(reader.getName(index));
+            }
+            const dataRows: unknown[][] = [];
+            while (await reader.read()) {
+                const values: unknown[] = [];
+                for (let index = 0; index < reader.fieldCount; index += 1) {
+                    values.push(reader.getValue(index));
+                }
+                dataRows.push(values);
+            }
+            await reader.close();
+
+            const { XlsbUpdater } = extensionRequire('@justybase/spreadsheet-tasks') as {
+                XlsbUpdater: new (filePath: string) => {
+                    getSheetNames(): string[];
+                    replaceSheetData(
+                        sheetName: string,
+                        rows: Array<Array<string | number | boolean | Date | null>>,
+                        options?: { headers?: string[]; styleFallback?: 'inherit' | 'general' },
+                    ): void;
+                    save(outputPath?: string): void;
+                };
+            };
+            const updater = new XlsbUpdater(xlsbPath);
+            expect(updater.getSheetNames()).toEqual(['Data']);
+            updater.replaceSheetData(
+                'Data',
+                dataRows.map(row => row.map(value => (value === undefined ? null : (value as string | number | boolean | Date | null)))),
+                { headers: columns },
+            );
+            updater.save();
+        } finally {
+            await connection.close();
+        }
+
+        const reloaded = fileDialect.createConnection({
+            host: 'local',
+            database: xlsbPath,
+            user: 'file',
+        });
+        try {
+            await reloaded.connect();
+            const rows = await readRows(
+                await reloaded.createCommand('SELECT region, amount FROM "editable" ORDER BY amount').executeReader(),
+            );
+            expect(rows).toEqual([['EU', 100n], ['US', 250n], ['APAC', 300n]]);
+        } finally {
+            await reloaded.close();
+        }
+    });
+
     it('queries an avro file through the FileDuckDbConnection', async () => {
         fs.mkdirSync(tempDir, { recursive: true });
         const avroPath = path.join(tempDir, 'events.avro');
@@ -424,6 +595,34 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         } finally {
             await connection.close();
         }
+    });
+
+    it('cleans up the xlsb conversion temp directory on close', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const xlsbPath = path.join(tempDir, 'tempdir-check.xlsb');
+        await writeXlsbFile(xlsbPath, [
+            { name: 'Sheet1', headers: ['id'], rows: [[1]] },
+        ]);
+        const tempPrefix = 'justybase-xlsb-';
+        const listTempDirs = (): string[] => fs.readdirSync(os.tmpdir()).filter(name => name.startsWith(tempPrefix));
+        const beforeConnect = listTempDirs();
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: xlsbPath,
+            user: 'file',
+        });
+
+        try {
+            await connection.connect();
+            await readRows(await connection.createCommand('SELECT id FROM "tempdir_check"').executeReader());
+            const duringConnect = listTempDirs();
+            expect(duringConnect.length).toBeGreaterThan(beforeConnect.length);
+        } finally {
+            await connection.close();
+        }
+
+        expect(listTempDirs()).toEqual(beforeConnect);
     });
 
     afterAll(() => {

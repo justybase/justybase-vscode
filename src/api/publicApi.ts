@@ -54,6 +54,15 @@ export interface JustyBaseLiteApi {
     } | undefined>;
     /** Execute SQL on the active editor's persistent connection. */
     executeActiveConnectionSql(sql: string, documentUri?: string): Promise<void>;
+    /**
+     * Execute SQL on the active editor's persistent connection and return the
+     * full result set. Used by companion extensions for client-side write-back
+     * (e.g. XLSB edits through @justybase/spreadsheet-tasks XlsbUpdater).
+     */
+    executeActiveConnectionSqlQuery?(sql: string, documentUri?: string): Promise<{
+        columns: string[];
+        rows: unknown[][];
+    }>;
 }
 
 export function createJustyBaseLiteApi(
@@ -74,6 +83,8 @@ export function createJustyBaseLiteApi(
         getActiveConnectionDetails: () => getActiveConnectionDetails(connectionManager),
         executeActiveConnectionSql: (sql, documentUri) =>
             executeActiveConnectionSql(connectionManager, sql, documentUri),
+        executeActiveConnectionSqlQuery: (sql, documentUri) =>
+            executeActiveConnectionSqlQuery(connectionManager, sql, documentUri),
     };
 }
 
@@ -132,6 +143,44 @@ async function executeActiveConnectionSql(
     await ensurePersistentConnectionReadyForQuery(connectionManager, documentUri, connectionName);
     const connection = await connectionManager.getDocumentPersistentConnection(documentUri, connectionName);
     await connection.createCommand(sql).execute();
+}
+
+async function executeActiveConnectionSqlQuery(
+    connectionManager: ConnectionManager | undefined,
+    sql: string,
+    requestedDocumentUri?: string,
+): Promise<{ columns: string[]; rows: unknown[][] }> {
+    if (!connectionManager) {
+        throw new Error('SQL execution is not available in this context.');
+    }
+    const documentUri = requestedDocumentUri ?? vscode.window.activeTextEditor?.document.uri.toString();
+    if (!documentUri) {
+        throw new Error('An active SQL editor is required.');
+    }
+    const connectionName = connectionManager.getConnectionForExecution(documentUri);
+    if (!connectionName) {
+        throw new Error('No connection selected for the active SQL editor.');
+    }
+    await ensurePersistentConnectionReadyForQuery(connectionManager, documentUri, connectionName);
+    const connection = await connectionManager.getDocumentPersistentConnection(documentUri, connectionName);
+    const reader = await connection.createCommand(sql).executeReader();
+    try {
+        const columns: string[] = [];
+        for (let index = 0; index < reader.fieldCount; index += 1) {
+            columns.push(reader.getName(index));
+        }
+        const rows: unknown[][] = [];
+        while (await reader.read()) {
+            const row: unknown[] = [];
+            for (let index = 0; index < reader.fieldCount; index += 1) {
+                row.push(reader.getValue(index));
+            }
+            rows.push(row);
+        }
+        return { columns, rows };
+    } finally {
+        await reader.close();
+    }
 }
 
 async function openFileSqlSession(

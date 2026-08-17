@@ -1,13 +1,17 @@
 /**
  * File SQL connection: opens an in-memory DuckDB, loads the required
  * extensions (xlsx / avro) and registers read_* views over the configured
- * data file so it behaves like a table.
+ * data file so it behaves like a table. XLSB workbooks are converted to CSV
+ * (via @justybase/spreadsheet-tasks) in a per-connection temporary directory
+ * and read back with read_csv.
  */
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import type { DatabaseConnectionConfig } from '@justybase/contracts';
 import { DuckDbConnection, loadDuckDb } from './duckdbConnection';
+import { convertXlsbToCsvs } from './xlsbConversion';
 import {
     buildFileWorkspaceViewSetupSql,
     buildEditableTableSql,
@@ -16,6 +20,8 @@ import {
     getFileWorkspacePaths,
     requiredDuckDbExtensions,
     type FileDataFormat,
+    type FileViewSetupResult,
+    type FileWorkspaceViewSource,
 } from './fileSqlSetup';
 import { listXlsxSheetNames } from './xlsxSheets';
 
@@ -28,12 +34,31 @@ function inferFileExtension(config: DatabaseConnectionConfig): FileDataFormat | 
 }
 
 export class FileDuckDbConnection extends DuckDbConnection {
+    private _tempDir: string | undefined;
+
     public constructor(public readonly config: DatabaseConnectionConfig) {
         super({
             ...config,
             database: ':memory:',
             options: { ...(config.options ?? {}), mode: 'memory' },
         });
+    }
+
+    public override async close(): Promise<void> {
+        await super.close();
+        if (this._tempDir) {
+            try {
+                fs.rmSync(this._tempDir, { recursive: true, force: true });
+            } catch {
+                // Ignore temp-dir cleanup failures; the OS will reclaim them eventually.
+            }
+            this._tempDir = undefined;
+        }
+    }
+
+    private _ensureTempDir(): string {
+        this._tempDir ??= fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-xlsb-'));
+        return this._tempDir;
     }
 
     public override async connect(): Promise<void> {
@@ -86,7 +111,7 @@ export class FileDuckDbConnection extends DuckDbConnection {
         const format = inferFileExtension(this.config);
         if (!format) {
             throw new Error(
-                `Unsupported data file '${filePath}'. Supported formats: .xlsx, .csv, .tsv, .parquet, .avro`,
+                `Unsupported data file '${filePath}'. Supported formats: .xlsx, .xlsb, .csv, .tsv, .parquet, .avro`,
             );
         }
 
@@ -107,17 +132,24 @@ export class FileDuckDbConnection extends DuckDbConnection {
 
         const sheetOption = typeof this.config.options?.sheet === 'string' ? this.config.options.sheet : undefined;
 
-        if (format === 'xlsx' && !sheetOption) {
-            const sheets = this._discoverSheets(filePath);
-            const setup = buildFileViewSetupSql(filePath, format, { discoveredSheets: sheets });
-            for (const statement of setup.statements) {
-                await connection.run(statement);
-            }
+        let setup: FileViewSetupResult;
+        if (format === 'xlsx') {
+            const sheets = sheetOption ? undefined : this._discoverSheets(filePath);
+            setup = buildFileViewSetupSql(filePath, format, { sheet: sheetOption, discoveredSheets: sheets });
+        } else if (format === 'xlsb') {
+            const converted = await convertXlsbToCsvs(filePath, this._ensureTempDir(), { sheet: sheetOption });
+            setup = buildFileViewSetupSql(filePath, format, {
+                sheet: sheetOption,
+                discoveredSheets: converted.sheetNames,
+                convertedTo: converted.firstCsvPath,
+                sheetCsvPaths: converted.sheetCsvPaths,
+            });
         } else {
-            const setup = buildFileViewSetupSql(filePath, format, { sheet: sheetOption });
-            for (const statement of setup.statements) {
-                await connection.run(statement);
-            }
+            setup = buildFileViewSetupSql(filePath, format, { sheet: sheetOption });
+        }
+
+        for (const statement of setup.statements) {
+            await connection.run(statement);
         }
 
         if (this.config.options?.editable === true) {
@@ -130,22 +162,32 @@ export class FileDuckDbConnection extends DuckDbConnection {
             throw new Error('The File SQL workspace does not contain any data files.');
         }
 
-        const sources = filePaths.map(filePath => {
+        const sources: FileWorkspaceViewSource[] = [];
+        for (const filePath of filePaths) {
             const format = detectFileDataFormat(filePath);
             if (!format) {
                 throw new Error(
-                    `Unsupported data file '${filePath}'. Supported formats: .xlsx, .csv, .tsv, .parquet, .avro`,
+                    `Unsupported data file '${filePath}'. Supported formats: .xlsx, .xlsb, .csv, .tsv, .parquet, .avro`,
                 );
             }
             if (!fs.existsSync(filePath)) {
                 throw new Error(`Data file does not exist: '${filePath}'.`);
             }
-            return {
-                filePath,
-                format,
-                discoveredSheets: format === 'xlsx' ? this._discoverSheets(filePath) : undefined,
-            };
-        });
+            if (format === 'xlsx') {
+                sources.push({ filePath, format, discoveredSheets: this._discoverSheets(filePath) });
+            } else if (format === 'xlsb') {
+                const converted = await convertXlsbToCsvs(filePath, this._ensureTempDir());
+                sources.push({
+                    filePath,
+                    format,
+                    discoveredSheets: converted.sheetNames,
+                    convertedTo: converted.firstCsvPath,
+                    sheetCsvPaths: converted.sheetCsvPaths,
+                });
+            } else {
+                sources.push({ filePath, format });
+            }
+        }
 
         const extensionNames = new Set(sources.flatMap(source => requiredDuckDbExtensions(source.format)));
         const connection = this.requireConnection();

@@ -278,7 +278,7 @@ export function defaultDataWorkspaceTableName(seed: string, existingNames: Itera
     const trimmedSeed = seed.trim();
     // A file source benefits from a basename; an external source retains its
     // connection/schema context so names from different servers stay distinct.
-    const fileSeed = /\.(?:xlsx|csv|tsv|parquet|avro)$/i.test(trimmedSeed)
+    const fileSeed = /\.(?:xlsx|xlsb|csv|tsv|parquet|avro)$/i.test(trimmedSeed)
         ? (trimmedSeed.split(/[\\/]/).pop() ?? trimmedSeed).replace(/\.[^.]+$/, '')
         : trimmedSeed;
     const base = fileSeed
