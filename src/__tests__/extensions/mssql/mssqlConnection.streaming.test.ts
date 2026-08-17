@@ -41,6 +41,13 @@ class MockStreamRequest extends EventEmitter implements MsSqlStreamRequest {
     }
 }
 
+class DelayedCancelStreamRequest extends MockStreamRequest {
+    public override cancel(): void {
+        this.cancelled = true;
+        setImmediate(() => this.emit('error', new Error('Canceled.')));
+    }
+}
+
 function createColumns(names: string[]): MockColumnMeta {
     const columns: MockColumnMeta = {};
     names.forEach((name, index) => {
@@ -188,6 +195,23 @@ describe('MsSqlConnection async streaming', () => {
         await command.cancel();
         await expect(reader.read()).resolves.toBe(false);
         expect(request.cancelled).toBe(true);
+    });
+
+    it('keeps the cancellation error listener until an asynchronous cancel settles', async () => {
+        const request = new DelayedCancelStreamRequest();
+        const connection = createConnectionWithRequest(request);
+        const executePromise = connection.createCommand('SELECT ID FROM EMP').executeReader();
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        request.emit('recordset', createColumns(['ID']));
+        request.emit('row', { ID: 1 });
+
+        const reader = await executePromise;
+        await expect(reader.read()).resolves.toBe(true);
+        await reader.close();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(request.listenerCount('error')).toBe(0);
     });
 
     it('supports nextResult for multiple recordsets', async () => {

@@ -74,6 +74,7 @@ describe('identifier / statement patterns', () => {
 			targetPattern: createUpdateSetPattern(createIdentifierPattern({ brackets: true })),
 		});
 		expect(rule.check('UPDATE [T] SET X = 1')).toHaveLength(1);
+		expect(rule.check('UPDATE [dbo].[T] SET X = 1')).toHaveLength(1);
 
 		const deleteRule = createDeleteWithoutWhereRule({
 			id: 'T022',

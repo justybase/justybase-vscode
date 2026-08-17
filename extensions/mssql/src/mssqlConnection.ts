@@ -727,6 +727,9 @@ class MsSqlCommand implements DatabaseCommand {
     let currentColumns: MsSqlColumnDefinition[] = [];
     let settledOpen = false;
     let openError: Error | undefined;
+    let requestFinished = false;
+    let cleanupRequested = false;
+    let listenersRemoved = false;
     let resolveOpen: ((columns: MsSqlColumnDefinition[] | null) => void) | undefined;
     let rejectOpen: ((error: Error) => void) | undefined;
 
@@ -753,19 +756,35 @@ class MsSqlCommand implements DatabaseCommand {
       resolveOpen?.(columns);
     };
 
-    const cleanupRequest = (): void => {
-      if (this._timeoutHandle) {
-        clearTimeout(this._timeoutHandle);
-        this._timeoutHandle = undefined;
+    const removeRequestListeners = (): void => {
+      if (listenersRemoved || !requestFinished) {
+        return;
       }
+      listenersRemoved = true;
       try {
         request.removeAllListeners();
       } catch {
         /* ignore */
       }
+    };
+
+    const markRequestFinished = (): void => {
+      requestFinished = true;
+      if (cleanupRequested) {
+        removeRequestListeners();
+      }
+    };
+
+    const cleanupRequest = (): void => {
+      cleanupRequested = true;
+      if (this._timeoutHandle) {
+        clearTimeout(this._timeoutHandle);
+        this._timeoutHandle = undefined;
+      }
       this._request = undefined;
       this._activeReader = undefined;
       this._connection.endCommand(this);
+      removeRequestListeners();
     };
 
     request.on("recordset", (columnsMeta) => {
@@ -794,6 +813,7 @@ class MsSqlCommand implements DatabaseCommand {
       queue.push({ kind: "error", error: normalized });
       finishOpen(null, normalized);
       queue.close();
+      markRequestFinished();
     });
 
     request.on("done", (result) => {
@@ -804,6 +824,7 @@ class MsSqlCommand implements DatabaseCommand {
       queue.push({ kind: "done", rowsAffected });
       finishOpen(currentColumns.length > 0 ? currentColumns : null);
       queue.close();
+      markRequestFinished();
     });
 
     if (this.commandTimeout > 0) {
@@ -821,6 +842,7 @@ class MsSqlCommand implements DatabaseCommand {
       queue.push({ kind: "error", error: normalized });
       finishOpen(null, normalized);
       queue.close();
+      markRequestFinished();
     });
 
     if (this._cancelled) {

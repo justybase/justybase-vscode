@@ -5,6 +5,7 @@ import type { NzConnection } from '../types';
 import { createCsvFileWriter, type CsvCompression } from './csvStream';
 import { escapeCsvField } from './csvExporter';
 import { validateExportPath } from './exportUtils';
+import { isValidSqlExportTarget } from './sqlTarget';
 import { formatBinaryValue } from './binaryValue';
 import {
     cancelCommandAndCloseReader,
@@ -218,7 +219,7 @@ export async function exportQueryToStreamFile(options: QueryStreamExportOptions)
             } else if (output && options.format === 'sql') {
                 const names = columns.map(name => `"${name.replace(/"/g, '""')}"`).join(', ');
                 const tableName = options.sqlTargetTable?.trim() || 'EXPORT_TABLE';
-                if (!/^(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$#]*)(?:\.(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$#]*))*$/.test(tableName)) {
+                if (!isValidSqlExportTarget(tableName, options.sqlDialect)) {
                     throw new Error(`Invalid SQL export target table: ${tableName}`);
                 }
                 await write(output, `INSERT INTO ${tableName} (${names}) VALUES (${values.map((value, index) => sqlValue(value, reader!.getTypeName(indices[index]), options.sqlDialect)).join(', ')});\n`);

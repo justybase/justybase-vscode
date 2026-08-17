@@ -9,6 +9,7 @@ import { createCsvFileWriter, type CsvCompression } from './csvStream';
 import { iterateResultRows } from '../core/resultDataProvider/resultDataReader';
 import { formatBinaryValue } from './binaryValue';
 import { ExportCancelledError } from '../core/cancellation';
+import { isValidSqlExportTarget } from './sqlTarget';
 
 export interface ExportOptions {
     format: 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'xml' | 'sql' | 'markdown' | 'parquet';
@@ -207,7 +208,7 @@ async function streamSql(
     countRow: () => void,
 ) {
     const tableName = sqlTargetTable?.trim() || 'EXPORT_TABLE';
-    if (!/^(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$#]*)(?:\.(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$#]*))*$/.test(tableName)) {
+    if (!isValidSqlExportTarget(tableName, sqlDialect)) {
         throw new Error(`Invalid SQL export target table: ${tableName}`);
     }
     const colNames = columns.map(c => c.name.replace(/[^a-zA-Z0-9_]/g, '') || 'COL').join(', ');
