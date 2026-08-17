@@ -152,7 +152,7 @@ export function createIdentifierPattern(options: IdentifierPatternOptions = {}):
 	const identifier: string = options.brackets
 		? `\\[[^\\]]*\\]|"[^"]+"|${temporaryTable}[A-Za-z_][\\w$#]*`
 		: `"[^"]+"|${temporaryTable}[A-Za-z_][\\w$#]*`;
-	return `(?:${identifier}(?:\\s*\\.\\s*(?:${identifier})){0,2})`;
+	return `(?:${identifier})(?:\\s*\\.\\s*(?:${identifier})){0,2}`;
 }
 
 export function createDeleteFromPattern(identifierPattern: string): RegExp {
