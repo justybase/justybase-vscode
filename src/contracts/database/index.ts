@@ -92,6 +92,7 @@ const DATABASE_KIND_ALIASES: Readonly<Record<string, DatabaseKindType>> = {
   files: "file",
   "file sql": "file",
   xlsx: "file",
+  xlsb: "file",
   csv: "file",
   parquet: "file",
   avro: "file",

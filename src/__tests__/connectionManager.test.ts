@@ -916,12 +916,19 @@ describe('ConnectionManager', () => {
             await newManager.dispose();
         });
 
-        it('should infer file kind for legacy data-file entries without dbType (xlsx/csv/parquet/avro)', async () => {
+        it('should infer file kind for legacy data-file entries without dbType (xlsx/xlsb/csv/parquet/avro)', async () => {
             globalState.set('justybase.connectionsCache', {
                 'File SQL: data1.xlsx': {
                     name: 'File SQL: data1.xlsx',
                     host: '',
                     database: '/home/dusko/source/sql_samples/data1.xlsx',
+                    user: '',
+                    dbType: undefined
+                },
+                'File SQL: data2.xlsb': {
+                    name: 'File SQL: data2.xlsb',
+                    host: '',
+                    database: '/home/dusko/source/sql_samples/data2.xlsb',
                     user: '',
                     dbType: undefined
                 }
@@ -933,6 +940,8 @@ describe('ConnectionManager', () => {
             expect(newManager.isFastLoaded()).toBe(true);
             expect(newManager.getConnectionMetadata('File SQL: data1.xlsx')?.dbType).toBe('file');
             expect(newManager.getConnectionDatabaseKind('File SQL: data1.xlsx')).toBe('file');
+            expect(newManager.getConnectionMetadata('File SQL: data2.xlsb')?.dbType).toBe('file');
+            expect(newManager.getConnectionDatabaseKind('File SQL: data2.xlsb')).toBe('file');
 
             await newManager.dispose();
         });

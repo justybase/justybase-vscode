@@ -41,6 +41,7 @@ beforeEach(() => {
 describe('detectFileDataFormat', () => {
     it('detects supported formats case-insensitively', () => {
         expect(detectFileDataFormat('/a/b/SALES.XLSX')).toBe('xlsx');
+        expect(detectFileDataFormat('file.xlsb')).toBe('xlsb');
         expect(detectFileDataFormat('file.csv')).toBe('csv');
         expect(detectFileDataFormat('file.tsv')).toBe('tsv');
         expect(detectFileDataFormat('file.parquet')).toBe('parquet');

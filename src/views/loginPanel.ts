@@ -243,7 +243,7 @@ export class LoginPanel {
                                 canSelectFolders: false,
                                 openLabel: 'Select File',
                                 filters: {
-                                    'Data files': ['xlsx', 'csv', 'tsv', 'parquet', 'avro'],
+                                    'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro'],
                                     'Access databases': ['mdb', 'accdb'],
                                     'All files': ['*'],
                                 },

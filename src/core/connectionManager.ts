@@ -41,7 +41,7 @@ const LEGACY_SQLITE_OPTION_KEYS = new Set([
 ]);
 
 /** Data-file extensions handled by the File SQL dialect (DuckDB). */
-const FILE_SQL_EXTENSION_PATTERN = /\.(xlsx|csv|tsv|parquet|avro)$/i;
+const FILE_SQL_EXTENSION_PATTERN = /\.(xlsx|xlsb|csv|tsv|parquet|avro)$/i;
 
 function isLikelyFileSqlDatabaseName(database: string | undefined): boolean {
     return Boolean(database && FILE_SQL_EXTENSION_PATTERN.test(database.trim()));

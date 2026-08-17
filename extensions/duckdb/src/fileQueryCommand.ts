@@ -1,10 +1,11 @@
 /**
  * "Query File with SQL (DuckDB)" command: opens a SQL editor bound to a
- * File SQL connection for the selected xlsx/csv/parquet/avro file.
+ * File SQL connection for the selected xlsx/xlsb/csv/parquet/avro file.
  */
 
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { createRequire } from 'node:module';
 import {
     buildSaveEditsSql,
     detectFileDataFormat,
@@ -15,6 +16,7 @@ import {
     sanitizeViewName,
 } from './fileSqlSetup';
 import { listXlsxSheetNames } from './xlsxSheets';
+import { listXlsbSheetNames } from './xlsbConversion';
 
 const FILE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFile';
 const FILE_WORKSPACE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFiles';
@@ -69,6 +71,11 @@ interface JustyBaseLiteApi {
         | undefined
     >;
     executeActiveConnectionSql(sql: string, documentUri?: string): Promise<void>;
+    /** Optional (core API >= companion pair): execute SQL and return all rows. */
+    executeActiveConnectionSqlQuery?(sql: string, documentUri?: string): Promise<{
+        columns: string[];
+        rows: unknown[][];
+    }>;
 }
 
 interface FileSqlSchemaItemResource {
@@ -92,7 +99,15 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
         const format = detectFileDataFormat(filePath);
         const connectionName = `File SQL: ${basename} — ${parentDir}`;
 
-        const isXlsx = format === 'xlsx';
+        const isExcel = format === 'xlsx' || format === 'xlsb';
+        let firstSheet: string | undefined;
+        if (format === 'xlsb') {
+            try {
+                firstSheet = (await listXlsbSheetNames(filePath))[0];
+            } catch {
+                firstSheet = undefined;
+            }
+        }
 
         try {
             await api.openFileSqlSession(
@@ -102,15 +117,22 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
                     database: filePath,
                     user: 'file',
                     dbType: 'file',
-                    options: { editable: true },
+                    options: {
+                        editable: true,
+                        // xlsx keeps the default per-sheet view layout; xlsb pins the
+                        // editable sheet so "Save File Edits" rewrites it in place.
+                        ...(format === 'xlsb' && firstSheet ? { sheet: firstSheet } : {}),
+                    },
                 },
                 {
                     connectionName,
                     content: [
                         `-- ${basename} — File SQL (DuckDB)`,
-                        isXlsx
-                            ? `-- Excel sheets appear as ${viewName}__<sheet>; ${viewName} reads the first sheet.`
-                            : '-- Query the file like a table.',
+                        format === 'xlsb'
+                            ? `-- ${viewName} reads the first sheet; "Save File Edits" rewrites it in place.`
+                            : isExcel
+                                ? `-- Excel sheets appear as ${viewName}__<sheet>; ${viewName} reads the first sheet.`
+                                : '-- Query the file like a table.',
                         `-- INSERT/UPDATE/DELETE work on ${editableTableName(filePath)} (editable copy).`,
                         '-- After editing run "JustyBase: Save File Edits" to write changes back.',
                         '',
@@ -195,7 +217,7 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
 
             await api.openFileSqlWorkspaceSession(selected.workspace.files, {
                 connectionName: selected.workspace.name,
-                content: buildWorkspaceSqlContent(selected.workspace.files, selected.workspace.name),
+                content: await buildWorkspaceSqlContent(selected.workspace.files, selected.workspace.name),
             });
         } catch (error) {
             vscode.window.showErrorMessage(
@@ -218,7 +240,7 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
             const details = active.details;
             if ((details.dbType ?? '') !== 'file') {
                 vscode.window.showInformationMessage(
-                    'Save File Edits only works for File SQL connections (xlsx/csv/parquet/avro).',
+                    'Save File Edits only works for File SQL connections (xlsx/xlsb/csv/parquet/avro).',
                 );
                 return;
             }
@@ -234,6 +256,11 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
             const format = detectFileDataFormat(filePath);
             if (!format) {
                 vscode.window.showErrorMessage(`Unsupported data file '${filePath}'.`);
+                return;
+            }
+
+            if (format === 'xlsb') {
+                await saveXlsbEdits(api, filePath, typeof details.options?.sheet === 'string' ? details.options.sheet : undefined, active.documentUri);
                 return;
             }
 
@@ -261,13 +288,93 @@ function isSupportedDataFile(filePath: string): boolean {
     return detectFileDataFormat(filePath) !== undefined;
 }
 
+/**
+ * Write the editable copy back into the original .xlsb workbook in place.
+ * DuckDB cannot write XLSB (COPY TO only knows CSV/Parquet/XLSX), so the
+ * command fetches the editable table rows from DuckDB and rewrites the target
+ * sheet with @justybase/spreadsheet-tasks XlsbUpdater (the rest of the
+ * workbook — other sheets, styles, pivots — is preserved byte-for-byte).
+ */
+async function saveXlsbEdits(
+    api: JustyBaseLiteApi,
+    filePath: string,
+    sheetName: string | undefined,
+    documentUri?: string,
+): Promise<void> {
+    if (typeof api.executeActiveConnectionSqlQuery !== 'function') {
+        throw new Error('The installed base extension does not support XLSB write-back. Update JustyBase SQL Editor.');
+    }
+
+    const tableName = editableTableName(filePath);
+    const { columns, rows } = await api.executeActiveConnectionSqlQuery(
+        `SELECT * FROM "${tableName}"`,
+        documentUri,
+    );
+
+    const { XlsbUpdater } = requireSpreadsheetTasks();
+    const updater = new XlsbUpdater(filePath);
+    const availableSheets = updater.getSheetNames();
+    const targetSheet = sheetName && availableSheets.includes(sheetName)
+        ? sheetName
+        : availableSheets[0];
+    if (!targetSheet) {
+        throw new Error(`XLSB workbook '${filePath}' contains no sheets.`);
+    }
+    if (sheetName && targetSheet !== sheetName) {
+        vscode.window.showWarningMessage(
+            `Sheet "${sheetName}" no longer exists in '${path.basename(filePath)}'; ` +
+            `saving edits to sheet "${targetSheet}" instead.`,
+        );
+    }
+
+    updater.replaceSheetData(
+        targetSheet,
+        rows.map(row => row.map(normalizeCellValue)),
+        { headers: columns },
+    );
+    updater.save();
+
+    vscode.window.showInformationMessage(`Saved edits to ${filePath} (sheet "${targetSheet}").`);
+}
+
+/** Map DuckDB cell values to values XlsbUpdater accepts (bigint → number). */
+function normalizeCellValue(value: unknown): string | number | boolean | Date | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (typeof value === 'bigint') {
+        return Number(value);
+    }
+    if (value instanceof Date || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return value;
+    }
+    return String(value);
+}
+
+function requireSpreadsheetTasks(): { XlsbUpdater: new (filePath: string) => XlsbUpdaterLike } {
+    const { XlsbUpdater } = createRequire(__filename)('@justybase/spreadsheet-tasks') as {
+        XlsbUpdater: new (filePath: string) => XlsbUpdaterLike;
+    };
+    return { XlsbUpdater };
+}
+
+interface XlsbUpdaterLike {
+    getSheetNames(): string[];
+    replaceSheetData(
+        sheetName: string,
+        rows: Array<Array<string | number | boolean | Date | null>>,
+        options?: { headers?: string[]; styleFallback?: 'inherit' | 'general' },
+    ): void;
+    save(outputPath?: string): void;
+}
+
 async function chooseWorkspaceFiles(initialPath?: string): Promise<string[] | undefined> {
     const result = await vscode.window.showOpenDialog({
         canSelectMany: true,
         canSelectFolders: false,
         openLabel: 'Open File SQL Workspace',
         filters: {
-            'Data files': ['xlsx', 'csv', 'tsv', 'parquet', 'avro'],
+            'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro'],
         },
     });
     const paths = result?.map(uri => uri.fsPath).filter(isSupportedDataFile) ?? [];
@@ -292,15 +399,15 @@ async function openWorkspace(api: JustyBaseLiteApi, filePaths: readonly string[]
 
     await api.openFileSqlWorkspaceSession(normalizedFiles, {
         connectionName,
-        content: buildWorkspaceSqlContent(normalizedFiles, connectionName),
+        content: await buildWorkspaceSqlContent(normalizedFiles, connectionName),
     });
 }
 
-function buildWorkspaceSqlContent(filePaths: readonly string[], connectionName: string): string {
+async function buildWorkspaceSqlContent(filePaths: readonly string[], connectionName: string): Promise<string> {
     const lines = [
         `-- ${connectionName} — File SQL (DuckDB)`,
         '-- Read-only workspace. Each source is a view named by its full path.',
-        '-- For XLSX files, every discovered sheet is available as "<path>#sheet=<sheet>".',
+        '-- For XLSX/XLSB files, every discovered sheet is available as "<path>#sheet=<sheet>".',
         '-- Use normal SQL aliases in your query when convenient.',
         '-- To add more files, run "Add Files to Active File SQL Workspace (DuckDB)".',
         '',
@@ -310,8 +417,13 @@ function buildWorkspaceSqlContent(filePaths: readonly string[], connectionName: 
     for (const filePath of filePaths) {
         const normalizedPath = normalizeFilePath(filePath);
         lines.push(`-- ${quoteIdentifier(normalizedPath)}`);
-        if (detectFileDataFormat(normalizedPath) === 'xlsx') {
+        const format = detectFileDataFormat(normalizedPath);
+        if (format === 'xlsx') {
             for (const sheet of discoverSheets(normalizedPath)) {
+                lines.push(`-- ${quoteIdentifier(fileSheetViewName(normalizedPath, sheet))}`);
+            }
+        } else if (format === 'xlsb') {
+            for (const sheet of await discoverXlsbSheets(normalizedPath)) {
                 lines.push(`-- ${quoteIdentifier(fileSheetViewName(normalizedPath, sheet))}`);
             }
         }
@@ -328,6 +440,14 @@ function buildWorkspaceSqlContent(filePaths: readonly string[], connectionName: 
 function discoverSheets(filePath: string): string[] {
     try {
         return listXlsxSheetNames(filePath);
+    } catch {
+        return [];
+    }
+}
+
+async function discoverXlsbSheets(filePath: string): Promise<string[]> {
+    try {
+        return await listXlsbSheetNames(filePath);
     } catch {
         return [];
     }
@@ -395,7 +515,7 @@ async function addFilesToActiveWorkspace(
 
     await api.openFileSqlWorkspaceSession(mergedFiles, {
         connectionName,
-        content: buildWorkspaceSqlContent(mergedFiles, connectionName),
+        content: await buildWorkspaceSqlContent(mergedFiles, connectionName),
     });
     vscode.window.showInformationMessage(
         `Added ${mergedFiles.length - currentFiles.length} file(s) to '${connectionName}'. A new SQL editor was opened.`,

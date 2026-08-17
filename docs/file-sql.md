@@ -22,6 +22,14 @@ For quick inspection, right-click a CSV or Excel file and choose **Open in Data 
 - Completion includes DuckDB table functions such as `read_csv`, `read_parquet` and `read_xlsx`.
 - `FSL001` warns on DML targeting a source view; generated `<file>_edit` tables are exempt.
 
+## XLSB (Excel Binary) Files
+
+DuckDB has no `read_xlsb` function, so `.xlsb` workbooks are converted to CSV with `@justybase/spreadsheet-tasks` (XlsbReader) in a per-connection temporary directory at connect time and read back through `read_csv` (DuckDB's CSV sniffer infers the header and column types, mirroring `read_xlsx` semantics). No DuckDB extension is required, so XLSB works offline.
+
+- XLSX connections expose one view per discovered sheet (`<file>__<sheet>`) plus `<file>` for the first sheet. XLSB single-file connections expose the first sheet only (it is the editable one); multi-file workspaces expose every discovered XLSX/XLSB sheet as `<path>#sheet=<sheet>`.
+- **Editable copy** works for single XLSB files: `INSERT`/`UPDATE`/`DELETE` on `<file>_edit` are written back **in place** with `XlsbUpdater` (other sheets, styles and pivots are preserved). DuckDB cannot write XLSB itself, so the write-back is performed client-side by the companion extension.
+- Because conversion happens at connect time, an XLSB file changed on disk is only visible after reconnecting (unlike XLSX, which DuckDB re-reads per query).
+
 ## Runtime Boundary
 
 Materialized Data Workspace source tables are replaced on refresh; local tables and views created separately in DuckDB remain intact. Legacy File SQL source views are still read-only, and existing legacy profiles are not migrated or deleted by the new manager.

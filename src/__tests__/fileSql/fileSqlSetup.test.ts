@@ -16,6 +16,7 @@ describe('fileSqlSetup', () => {
     describe('detectFileDataFormat', () => {
         it('detects supported formats case-insensitively', () => {
             expect(detectFileDataFormat('/data/sales.xlsx')).toBe('xlsx');
+            expect(detectFileDataFormat('/data/sales.xlsb')).toBe('xlsb');
             expect(detectFileDataFormat('/data/sales.csv')).toBe('csv');
             expect(detectFileDataFormat('/data/sales.TSV')).toBe('tsv');
             expect(detectFileDataFormat('/data/sales.parquet')).toBe('parquet');
@@ -49,10 +50,11 @@ describe('fileSqlSetup', () => {
             expect(requiredDuckDbExtensions('avro')).toEqual(['avro']);
         });
 
-        it('requires nothing for csv/tsv/parquet', () => {
+        it('requires nothing for csv/tsv/parquet/xlsb', () => {
             expect(requiredDuckDbExtensions('csv')).toEqual([]);
             expect(requiredDuckDbExtensions('tsv')).toEqual([]);
             expect(requiredDuckDbExtensions('parquet')).toEqual([]);
+            expect(requiredDuckDbExtensions('xlsb')).toEqual([]);
         });
     });
 
@@ -126,6 +128,40 @@ describe('fileSqlSetup', () => {
             expect(result.statements[1]).toContain('"sales__A_B_2"');
             expect(result.statements[1]).toContain("sheet='A_B'");
         });
+
+        it('creates per-sheet views over converted CSVs for xlsb', () => {
+            const result = buildFileViewSetupSql('/data/sales.xlsb', 'xlsb', {
+                discoveredSheets: ['Sheet1', 'Data 2024'],
+                convertedTo: '/tmp/xlsb/sales.csv',
+                sheetCsvPaths: new Map([
+                    ['Sheet1', '/tmp/xlsb/sales.csv'],
+                    ['Data 2024', '/tmp/xlsb/sales__Data_2024.csv'],
+                ]),
+            });
+            expect(result.statements).toEqual([
+                'CREATE OR REPLACE VIEW "sales__Sheet1" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales.csv\')',
+                'CREATE OR REPLACE VIEW "sales__Data_2024" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales__Data_2024.csv\')',
+                'CREATE OR REPLACE VIEW "sales" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales.csv\')',
+            ]);
+            expect(result.sheetViewNames).toEqual(['sales__Sheet1', 'sales__Data_2024']);
+            expect(result.usesPerSheetViews).toBe(true);
+        });
+
+        it('creates a single view for a selected xlsb sheet', () => {
+            const result = buildFileViewSetupSql('/data/sales.xlsb', 'xlsb', {
+                sheet: 'Data',
+                convertedTo: '/tmp/xlsb/sales.csv',
+            });
+            expect(result.statements).toHaveLength(1);
+            expect(result.statements[0]).toBe(
+                'CREATE OR REPLACE VIEW "sales" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales.csv\')',
+            );
+            expect(result.usesPerSheetViews).toBe(false);
+        });
+
+        it('throws when the converted CSV for xlsb is missing', () => {
+            expect(() => buildFileViewSetupSql('/data/sales.xlsb', 'xlsb')).toThrow(/Missing converted CSV/);
+        });
     });
 
     describe('multi-file workspace setup', () => {
@@ -160,6 +196,38 @@ describe('fileSqlSetup', () => {
             ]);
             expect(result.statements[0]).toContain('"/data/owner\'s.xlsx#sheet=Bob""s Data"');
             expect(result.statements[0]).toContain("read_xlsx('/data/owner''s.xlsx', sheet='Bob\"s Data')");
+        });
+
+        it('creates xlsb workspace views over converted CSVs', () => {
+            const result = buildFileWorkspaceViewSetupSql([
+                {
+                    filePath: '/data/sales.xlsb',
+                    format: 'xlsb',
+                    discoveredSheets: ['Sheet1', 'Data 2024'],
+                    convertedTo: '/tmp/xlsb/sales.csv',
+                    sheetCsvPaths: new Map([
+                        ['Sheet1', '/tmp/xlsb/sales.csv'],
+                        ['Data 2024', '/tmp/xlsb/sales__Data_2024.csv'],
+                    ]),
+                },
+                { filePath: '/data/a.csv', format: 'csv' },
+            ]);
+
+            expect(result.statements).toEqual([
+                'CREATE OR REPLACE VIEW "/data/sales.xlsb#sheet=Sheet1" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales.csv\')',
+                'CREATE OR REPLACE VIEW "/data/sales.xlsb#sheet=Data 2024" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales__Data_2024.csv\')',
+                'CREATE OR REPLACE VIEW "/data/sales.xlsb" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales.csv\')',
+                'CREATE OR REPLACE VIEW "/data/a.csv" AS SELECT * FROM read_csv(\'/data/a.csv\')',
+            ]);
+            expect(result.sheetViewNames).toEqual([
+                fileSheetViewName('/data/sales.xlsb', 'Sheet1'),
+                fileSheetViewName('/data/sales.xlsb', 'Data 2024'),
+            ]);
+        });
+
+        it('throws when the converted CSV for an xlsb workspace source is missing', () => {
+            expect(() => buildFileWorkspaceViewSetupSql([{ filePath: '/data/sales.xlsb', format: 'xlsb' }]))
+                .toThrow(/Missing converted CSV/);
         });
     });
 
@@ -199,6 +267,10 @@ describe('fileSqlSetup', () => {
             expect(built.targetPath).toBe('/data/sales_edited.parquet');
             expect(built.sql).toContain("TO '/data/sales_edited.parquet'");
             expect(built.sql).toContain('(FORMAT PARQUET)');
+        });
+
+        it('rejects xlsb save-back SQL (handled client-side by XlsbUpdater)', () => {
+            expect(() => buildSaveEditsSql('/data/sales.xlsb', 'xlsb')).toThrow(/XlsbUpdater/);
         });
     });
 });

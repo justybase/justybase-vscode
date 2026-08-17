@@ -6,7 +6,7 @@
 
 import * as path from 'path';
 
-export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx';
+export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | 'xlsb';
 
 export const FILE_WORKSPACE_OPTION = 'fileWorkspace';
 export const FILE_WORKSPACE_VERSION = 1;
@@ -22,6 +22,7 @@ export const FILE_DIALECT_EXTENSIONS: Readonly<Record<string, FileDataFormat>> =
     '.parquet': 'parquet',
     '.avro': 'avro',
     '.xlsx': 'xlsx',
+    '.xlsb': 'xlsb',
 };
 
 export function detectFileDataFormat(filePath: string): FileDataFormat | undefined {
@@ -157,6 +158,10 @@ export function buildSaveEditsSql(filePath: string, format: FileDataFormat): Sav
                 writesToNewFile: false,
                 targetPath: filePath,
             };
+        case 'xlsb':
+            throw new Error(
+                'XLSB files are written back client-side through @justybase/spreadsheet-tasks (XlsbUpdater); DuckDB cannot write XLSB.',
+            );
         case 'avro':
             {
                 const targetPath = filePath.replace(/\.avro$/i, '_edited.parquet');
@@ -176,8 +181,10 @@ function quoteLiteral(value: string): string {
 
 /**
  * Extensions that must be installed/loaded before read_* works.
- * CSV/TSV/Parquet are core; XLSX uses the DuckDB 'excel' extension and AVRO
- * the 'avro' extension — both downloaded once from the internet on first use.
+ * CSV/TSV/Parquet are core; XLSX uses the DuckDB 'excel' extension, AVRO the
+ * 'avro' extension — both downloaded once from the internet on first use.
+ * XLSB needs no DuckDB extension: it is converted to CSV by the companion
+ * extension (@justybase/spreadsheet-tasks) and read with read_csv.
  */
 export function requiredDuckDbExtensions(format: FileDataFormat): string[] {
     switch (format) {
@@ -203,13 +210,16 @@ function readFunctionSql(format: FileDataFormat, filePath: string): string {
             return `read_avro(${quoteLiteral(normalizedPath)})`;
         case 'xlsx':
             return `read_xlsx(${quoteLiteral(normalizedPath)})`;
+        case 'xlsb':
+            // XLSB views are built from converted CSV paths (see the builders).
+            throw new Error('XLSB files are read from converted CSV paths, not readFunctionSql.');
     }
 }
 
 export interface FileViewSetupResult {
     statements: string[];
     viewName: string;
-    /** Per-sheet view names created for xlsx files. */
+    /** Per-sheet view names created for xlsx/xlsb files. */
     sheetViewNames: string[];
     usesPerSheetViews: boolean;
 }
@@ -218,6 +228,14 @@ export interface FileWorkspaceViewSource {
     filePath: string;
     format: FileDataFormat;
     discoveredSheets?: string[];
+    /**
+     * Converted CSV path for the main view (xlsb only). XLSB workbooks are
+     * converted by @justybase/spreadsheet-tasks before view setup; views then
+     * read the CSV with DuckDB's built-in read_csv.
+     */
+    convertedTo?: string;
+    /** Per-sheet converted CSV paths keyed by sheet name (xlsb only). */
+    sheetCsvPaths?: ReadonlyMap<string, string>;
 }
 
 export interface FileWorkspaceViewSetupResult {
@@ -255,6 +273,26 @@ export function buildFileWorkspaceViewSetupSql(
             statements.push(
                 `CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM read_xlsx(${quoteLiteral(filePath)})`,
             );
+        } else if (source.format === 'xlsb') {
+            const sheets = (source.discoveredSheets ?? []).filter(sheet => sheet.trim().length > 0);
+            for (const sheet of sheets) {
+                const sheetViewName = fileSheetViewName(filePath, sheet);
+                const csvPath = source.sheetCsvPaths?.get(sheet);
+                if (!csvPath) {
+                    throw new Error(`Missing converted CSV for XLSB sheet '${sheet}' of '${filePath}'.`);
+                }
+                statements.push(
+                    `CREATE OR REPLACE VIEW ${quoteIdentifier(sheetViewName)} AS SELECT * FROM read_csv(${quoteLiteral(csvPath)})`,
+                );
+                sheetViewNames.push(sheetViewName);
+            }
+            const firstCsvPath = source.convertedTo;
+            if (!firstCsvPath) {
+                throw new Error(`Missing converted CSV for XLSB file '${filePath}'.`);
+            }
+            statements.push(
+                `CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM read_csv(${quoteLiteral(firstCsvPath)})`,
+            );
         } else {
             statements.push(
                 `CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM ${readFunctionSql(source.format, filePath)}`,
@@ -273,16 +311,19 @@ export function buildFileWorkspaceViewSetupSql(
  *   view per discovered sheet (`<name>__<sheet>`) plus a `<name>` view that
  *   reads the first sheet (the DuckDB 'excel' extension has no
  *   read_xlsx_all, so `<name>` always works).
+ * - XLSB: same view layout as XLSX, but views read the converted CSV paths
+ *   (`convertedTo` / `sheetCsvPaths`) with read_csv instead of read_xlsx.
  */
 export function buildFileViewSetupSql(
     filePath: string,
     format: FileDataFormat,
-    options: { sheet?: string; discoveredSheets?: string[] } = {},
+    options: { sheet?: string; discoveredSheets?: string[]; convertedTo?: string; sheetCsvPaths?: ReadonlyMap<string, string> } = {},
 ): FileViewSetupResult {
     const viewName = sanitizeViewName(filePath);
     const statements: string[] = [];
     const sheetViewNames: string[] = [];
     const normalizedPath = filePath.split(path.sep).join('/');
+    const usesPerSheetViews = format === 'xlsx' || format === 'xlsb';
 
     if (format === 'xlsx') {
         const sheet = options.sheet?.trim();
@@ -301,6 +342,32 @@ export function buildFileViewSetupSql(
             // First-sheet view: always available, even without sheet discovery.
             statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM read_xlsx(${quoteLiteral(normalizedPath)})`);
         }
+    } else if (format === 'xlsb') {
+        const sheet = options.sheet?.trim();
+        if (sheet) {
+            const csvPath = options.convertedTo ?? options.sheetCsvPaths?.get(sheet);
+            if (!csvPath) {
+                throw new Error(`Missing converted CSV for XLSB sheet '${sheet}' of '${filePath}'.`);
+            }
+            statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM read_csv(${quoteLiteral(csvPath)})`);
+        } else {
+            const sheets = (options.discoveredSheets ?? []).filter(item => item.trim().length > 0);
+            const usedSheetViewNames = new Set<string>();
+            for (const discoveredSheet of sheets) {
+                const csvPath = options.sheetCsvPaths?.get(discoveredSheet);
+                if (!csvPath) {
+                    continue;
+                }
+                const sheetViewName = nextUniqueSheetViewName(viewName, discoveredSheet, usedSheetViewNames);
+                statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(sheetViewName)} AS SELECT * FROM read_csv(${quoteLiteral(csvPath)})`);
+                sheetViewNames.push(sheetViewName);
+            }
+            const firstCsvPath = options.convertedTo;
+            if (!firstCsvPath) {
+                throw new Error(`Missing converted CSV for XLSB file '${filePath}'.`);
+            }
+            statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM read_csv(${quoteLiteral(firstCsvPath)})`);
+        }
     } else {
         statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM ${readFunctionSql(format, filePath)}`);
     }
@@ -309,6 +376,6 @@ export function buildFileViewSetupSql(
         statements,
         viewName,
         sheetViewNames,
-        usesPerSheetViews: format === 'xlsx' && !options.sheet?.trim() && sheetViewNames.length > 0,
+        usesPerSheetViews: usesPerSheetViews && !options.sheet?.trim() && sheetViewNames.length > 0,
     };
 }
