@@ -6,6 +6,8 @@ import {
     detectFileDataFormat,
     editableTableName,
     fileSheetViewName,
+    fileTableViewName,
+    fileTableViewNames,
     parseFileWorkspace,
     requiredDuckDbExtensions,
     serializeFileWorkspace,
@@ -21,6 +23,8 @@ describe('fileSqlSetup', () => {
             expect(detectFileDataFormat('/data/sales.TSV')).toBe('tsv');
             expect(detectFileDataFormat('/data/sales.parquet')).toBe('parquet');
             expect(detectFileDataFormat('/data/sales.avro')).toBe('avro');
+            expect(detectFileDataFormat('/data/sales.mdb')).toBe('access');
+            expect(detectFileDataFormat('/data/sales.ACCDB')).toBe('access');
         });
 
         it('returns undefined for unknown extensions', () => {
@@ -41,6 +45,11 @@ describe('fileSqlSetup', () => {
         });
     });
 
+    it('reuses collision-aware Access table view names', () => {
+        expect(Array.from(fileTableViewNames('/data/orders.accdb', ['A-B', 'A_B']).values()))
+            .toEqual(['orders__A_B', 'orders__A_B_2']);
+    });
+
     describe('requiredDuckDbExtensions', () => {
         it('requires the excel extension for xlsx files', () => {
             expect(requiredDuckDbExtensions('xlsx')).toEqual(['excel']);
@@ -50,11 +59,12 @@ describe('fileSqlSetup', () => {
             expect(requiredDuckDbExtensions('avro')).toEqual(['avro']);
         });
 
-        it('requires nothing for csv/tsv/parquet/xlsb', () => {
+        it('requires nothing for csv/tsv/parquet/xlsb/access', () => {
             expect(requiredDuckDbExtensions('csv')).toEqual([]);
             expect(requiredDuckDbExtensions('tsv')).toEqual([]);
             expect(requiredDuckDbExtensions('parquet')).toEqual([]);
             expect(requiredDuckDbExtensions('xlsb')).toEqual([]);
+            expect(requiredDuckDbExtensions('access')).toEqual([]);
         });
     });
 
@@ -162,6 +172,39 @@ describe('fileSqlSetup', () => {
         it('throws when the converted CSV for xlsb is missing', () => {
             expect(() => buildFileViewSetupSql('/data/sales.xlsb', 'xlsb')).toThrow(/Missing converted CSV/);
         });
+
+        it('creates one view per Access table and aliases the base view to the first table', () => {
+            const result = buildFileViewSetupSql('/data/orders.mdb', 'access', {
+                discoveredTables: ['Orders', 'Customers 2024'],
+                tableCsvPaths: new Map([
+                    ['Orders', '/tmp/file-sql/orders__Orders.csv'],
+                    ['Customers 2024', '/tmp/file-sql/orders__Customers_2024.csv'],
+                ]),
+            });
+            expect(result.statements).toEqual([
+                'CREATE OR REPLACE VIEW "orders__Orders" AS SELECT * FROM read_csv(\'/tmp/file-sql/orders__Orders.csv\')',
+                'CREATE OR REPLACE VIEW "orders__Customers_2024" AS SELECT * FROM read_csv(\'/tmp/file-sql/orders__Customers_2024.csv\')',
+                'CREATE OR REPLACE VIEW "orders" AS SELECT * FROM "orders__Orders"',
+            ]);
+            expect(result.sheetViewNames).toEqual(['orders__Orders', 'orders__Customers_2024']);
+            expect(result.usesPerSheetViews).toBe(true);
+        });
+
+        it('disambiguates Access table names that sanitize to the same view name', () => {
+            const result = buildFileViewSetupSql('/data/orders.accdb', 'access', {
+                discoveredTables: ['A-B', 'A_B'],
+                tableCsvPaths: new Map([
+                    ['A-B', '/tmp/file-sql/orders__A_B.csv'],
+                    ['A_B', '/tmp/file-sql/orders__A_B_2.csv'],
+                ]),
+            });
+            expect(result.sheetViewNames).toEqual(['orders__A_B', 'orders__A_B_2']);
+        });
+
+        it('throws when an Access file has no readable tables', () => {
+            expect(() => buildFileViewSetupSql('/data/empty.accdb', 'access', { discoveredTables: [] }))
+                .toThrow(/does not contain any readable tables/);
+        });
     });
 
     describe('multi-file workspace setup', () => {
@@ -229,6 +272,41 @@ describe('fileSqlSetup', () => {
             expect(() => buildFileWorkspaceViewSetupSql([{ filePath: '/data/sales.xlsb', format: 'xlsb' }]))
                 .toThrow(/Missing converted CSV/);
         });
+
+        it('creates #table= workspace views for Access sources (no path view)', () => {
+            const result = buildFileWorkspaceViewSetupSql([
+                {
+                    filePath: '/data/orders.mdb',
+                    format: 'access',
+                    discoveredTables: ['Orders', 'Customers'],
+                    tableCsvPaths: new Map([
+                        ['Orders', '/tmp/file-sql/orders__Orders.csv'],
+                        ['Customers', '/tmp/file-sql/orders__Customers.csv'],
+                    ]),
+                },
+                { filePath: '/data/a.csv', format: 'csv' },
+            ]);
+
+            expect(result.statements).toEqual([
+                'CREATE OR REPLACE VIEW "/data/orders.mdb#table=Orders" AS SELECT * FROM read_csv(\'/tmp/file-sql/orders__Orders.csv\')',
+                'CREATE OR REPLACE VIEW "/data/orders.mdb#table=Customers" AS SELECT * FROM read_csv(\'/tmp/file-sql/orders__Customers.csv\')',
+                'CREATE OR REPLACE VIEW "/data/a.csv" AS SELECT * FROM read_csv(\'/data/a.csv\')',
+            ]);
+            expect(result.viewNames).toEqual([
+                fileTableViewName('/data/orders.mdb', 'Orders'),
+                fileTableViewName('/data/orders.mdb', 'Customers'),
+                '/data/a.csv',
+            ]);
+            expect(result.sheetViewNames).toEqual([
+                fileTableViewName('/data/orders.mdb', 'Orders'),
+                fileTableViewName('/data/orders.mdb', 'Customers'),
+            ]);
+        });
+
+        it('throws when an Access workspace source has no readable tables', () => {
+            expect(() => buildFileWorkspaceViewSetupSql([{ filePath: '/data/empty.mdb', format: 'access' }]))
+                .toThrow(/does not contain any readable tables/);
+        });
     });
 
     describe('editable table + save-back SQL', () => {
@@ -271,6 +349,10 @@ describe('fileSqlSetup', () => {
 
         it('rejects xlsb save-back SQL (handled client-side by XlsbUpdater)', () => {
             expect(() => buildSaveEditsSql('/data/sales.xlsb', 'xlsb')).toThrow(/XlsbUpdater/);
+        });
+
+        it('rejects Access save-back SQL (read-only in File SQL mode)', () => {
+            expect(() => buildSaveEditsSql('/data/sales.accdb', 'access')).toThrow(/read-only/);
         });
     });
 });

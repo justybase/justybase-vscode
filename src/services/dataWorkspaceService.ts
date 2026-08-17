@@ -278,7 +278,7 @@ export function defaultDataWorkspaceTableName(seed: string, existingNames: Itera
     const trimmedSeed = seed.trim();
     // A file source benefits from a basename; an external source retains its
     // connection/schema context so names from different servers stay distinct.
-    const fileSeed = /\.(?:xlsx|xlsb|csv|tsv|parquet|avro)$/i.test(trimmedSeed)
+    const fileSeed = /\.(?:xlsx|xlsb|csv|tsv|parquet|avro|mdb|accdb)$/i.test(trimmedSeed)
         ? (trimmedSeed.split(/[\\/]/).pop() ?? trimmedSeed).replace(/\.[^.]+$/, '')
         : trimmedSeed;
     const base = fileSeed
@@ -750,6 +750,10 @@ export class DataWorkspaceService {
             source.lastRefresh = status;
             await this.saveWorkspace(details, config);
             await this.connectionManager.refreshDataWorkspaceConnection?.(connectionName);
+            // Refreshing the persistent DuckDB connection clears its metadata
+            // cache, but the schema tree is a separate provider and would
+            // otherwise keep displaying the pre-materialization object list.
+            await vscode.commands.executeCommand('netezza.refreshSchema', connectionName);
             return status;
         } catch (error) {
             const status = refreshErrorMetadata(error, this.now());

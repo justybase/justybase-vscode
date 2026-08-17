@@ -1,4 +1,5 @@
 import { SqlLexer } from "../sqlParser";
+import { resolveSqlParsingRuntime } from "../sqlParser/parsingRuntime";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import type { DatabaseKind } from "../contracts/database";
 import { SqlParser } from "../sql/sqlParser";
@@ -626,7 +627,7 @@ export class CompletionContextExtractor {
     linePrefix: string,
   ): { qualifier: string; columnPrefix: string } | undefined {
     const partialMatch = linePrefix.match(
-      /(\[[^\]\r\n]+\]|"[^"\r\n]+"|[A-Za-z_][A-Za-z0-9_$"]*)\.([A-Za-z_][A-Za-z0-9_$"]*)$/,
+      /(\[[^\]\r\n]+\]|"[^"\r\n]+"|[#A-Za-z_][A-Za-z0-9_$"]*)\.([A-Za-z_][A-Za-z0-9_$"]*)$/,
     );
     if (partialMatch) {
       return {
@@ -645,14 +646,14 @@ export class CompletionContextExtractor {
 
   public extractQualifierBeforeDot(linePrefix: string): string | undefined {
     const dottedQualifierMatch = linePrefix.match(
-      /(\[[^\]\r\n]+\]|"[^"\r\n]+"|[A-Za-z0-9_$"]+)\.$/,
+      /(\[[^\]\r\n]+\]|"[^"\r\n]+"|[#A-Za-z0-9_$"]+)\.$/,
     );
     if (dottedQualifierMatch) {
       return stripQuotes(dottedQualifierMatch[1]);
     }
 
     const bracketQualifierMatch = linePrefix.match(
-      /(\[[^\]\r\n]+\]|"[^"\r\n]+"|[A-Za-z0-9_$"]+)\.\s*\[[^\]\r\n]*$/,
+      /(\[[^\]\r\n]+\]|"[^"\r\n]+"|[#A-Za-z0-9_$"]+)\.\s*\[[^\]\r\n]*$/,
     );
     if (bracketQualifierMatch) {
       return stripQuotes(bracketQualifierMatch[1]);
@@ -675,8 +676,11 @@ export class CompletionContextExtractor {
 
   public extractQualifierBeforeDotAndStar(
     linePrefix: string,
+    databaseKind?: DatabaseKind,
   ): { qualifier: string; fullMatch: string } | undefined {
-    const lexResult = SqlLexer.tokenize(linePrefix);
+    const lexResult = resolveSqlParsingRuntime({ databaseKind }).SqlLexer.tokenize(
+      linePrefix,
+    );
     if (lexResult.errors.length > 0 || lexResult.tokens.length === 0) {
       return undefined;
     }
@@ -817,7 +821,7 @@ export class CompletionContextExtractor {
     if (!char) {
       return false;
     }
-    return /[A-Za-z0-9_$"]/.test(char);
+    return /[#A-Za-z0-9_$"]/.test(char);
   }
 
   /**

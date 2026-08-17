@@ -6,6 +6,9 @@ export const SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN =
 export const SCRIPT_SCOPE_DROP_STATEMENT_PATTERN =
   /\bDROP\s+(?:TABLE|VIEW|PROCEDURE)(?:\s+IF\s+EXISTS)?\b/i;
 
+export const SCRIPT_SCOPE_SELECT_INTO_TEMP_STATEMENT_PATTERN =
+  /\bSELECT\b[\s\S]*?\bINTO\s+(?:##?[A-Za-z0-9_][\w$]*|\[[^\]]+\])/i;
+
 export const SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN =
   /\bALTER\s+TABLE\b[^;]*\bRENAME\s+TO\b/i;
 
@@ -16,6 +19,7 @@ export function isScriptScopeAffectingStatement(statementSql: string): boolean {
   return (
     SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN.test(statementSql) ||
     SCRIPT_SCOPE_DROP_STATEMENT_PATTERN.test(statementSql) ||
+    SCRIPT_SCOPE_SELECT_INTO_TEMP_STATEMENT_PATTERN.test(statementSql) ||
     SCRIPT_SCOPE_ALTER_TABLE_STATEMENT_PATTERN.test(statementSql)
   );
 }

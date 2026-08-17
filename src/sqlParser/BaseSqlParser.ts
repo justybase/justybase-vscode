@@ -217,6 +217,14 @@ export class BaseSqlParser extends CstParser {
 
   protected registerCreateTableDialectClauses(): void {}
 
+  protected supportsTableTypeClause(): boolean {
+    return true;
+  }
+
+  protected supportsDropIfExistsBeforeTarget(): boolean {
+    return false;
+  }
+
   protected supportsEmptyQualifiedNameSegment(): boolean {
     return false;
   }
@@ -672,7 +680,10 @@ export class BaseSqlParser extends CstParser {
 
     this.RULE("createTableStatement", () => {
       this.CONSUME(Create);
-      this.OPTION(() => this.SUBRULE(this.tableTypeClause));
+      this.OPTION({
+        GATE: () => this.supportsTableTypeClause(),
+        DEF: () => this.SUBRULE(this.tableTypeClause),
+      });
       this.CONSUME(Table);
       // Optional IF NOT EXISTS
       this.OPTION6(() => {
@@ -886,8 +897,15 @@ export class BaseSqlParser extends CstParser {
         { ALT: () => this.CONSUME(User) },
         ...this.getAdditionalDropObjectAlternatives(),
       ]);
+      this.OPTION({
+        GATE: () => this.supportsDropIfExistsBeforeTarget(),
+        DEF: () => {
+          this.CONSUME1(If);
+          this.CONSUME1(Exists);
+        },
+      });
       this.SUBRULE(this.dropTargetList);
-      this.OPTION(() => {
+      this.OPTION1(() => {
         this.OR1([
           {
             GATE: () => this.LA(1).tokenType === If,

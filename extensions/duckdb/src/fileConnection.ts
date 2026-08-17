@@ -2,8 +2,9 @@
  * File SQL connection: opens an in-memory DuckDB, loads the required
  * extensions (xlsx / avro) and registers read_* views over the configured
  * data file so it behaves like a table. XLSB workbooks are converted to CSV
- * (via @justybase/spreadsheet-tasks) in a per-connection temporary directory
- * and read back with read_csv.
+ * (via @justybase/spreadsheet-tasks) and Access databases to per-table CSVs
+ * (via @justybase/access-file) in a per-connection temporary directory and
+ * read back with read_csv.
  */
 
 import * as path from 'path';
@@ -12,6 +13,7 @@ import * as os from 'os';
 import type { DatabaseConnectionConfig } from '@justybase/contracts';
 import { DuckDbConnection, loadDuckDb } from './duckdbConnection';
 import { convertXlsbToCsvs } from './xlsbConversion';
+import { convertAccessTablesToCsvs } from './accessConversion';
 import {
     buildFileWorkspaceViewSetupSql,
     buildEditableTableSql,
@@ -57,7 +59,7 @@ export class FileDuckDbConnection extends DuckDbConnection {
     }
 
     private _ensureTempDir(): string {
-        this._tempDir ??= fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-xlsb-'));
+        this._tempDir ??= fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-file-sql-'));
         return this._tempDir;
     }
 
@@ -111,7 +113,7 @@ export class FileDuckDbConnection extends DuckDbConnection {
         const format = inferFileExtension(this.config);
         if (!format) {
             throw new Error(
-                `Unsupported data file '${filePath}'. Supported formats: .xlsx, .xlsb, .csv, .tsv, .parquet, .avro`,
+                `Unsupported data file '${filePath}'. Supported formats: .xlsx, .xlsb, .csv, .tsv, .parquet, .avro, .mdb, .accdb`,
             );
         }
 
@@ -144,6 +146,12 @@ export class FileDuckDbConnection extends DuckDbConnection {
                 convertedTo: converted.firstCsvPath,
                 sheetCsvPaths: converted.sheetCsvPaths,
             });
+        } else if (format === 'access') {
+            const converted = await convertAccessTablesToCsvs(filePath, this._ensureTempDir());
+            setup = buildFileViewSetupSql(filePath, format, {
+                discoveredTables: converted.tableNames,
+                tableCsvPaths: converted.tableCsvPaths,
+            });
         } else {
             setup = buildFileViewSetupSql(filePath, format, { sheet: sheetOption });
         }
@@ -152,7 +160,7 @@ export class FileDuckDbConnection extends DuckDbConnection {
             await connection.run(statement);
         }
 
-        if (this.config.options?.editable === true) {
+        if (this.config.options?.editable === true && format !== 'access') {
             await connection.run(buildEditableTableSql(filePath));
         }
     }
@@ -167,7 +175,7 @@ export class FileDuckDbConnection extends DuckDbConnection {
             const format = detectFileDataFormat(filePath);
             if (!format) {
                 throw new Error(
-                    `Unsupported data file '${filePath}'. Supported formats: .xlsx, .xlsb, .csv, .tsv, .parquet, .avro`,
+                    `Unsupported data file '${filePath}'. Supported formats: .xlsx, .xlsb, .csv, .tsv, .parquet, .avro, .mdb, .accdb`,
                 );
             }
             if (!fs.existsSync(filePath)) {
@@ -183,6 +191,14 @@ export class FileDuckDbConnection extends DuckDbConnection {
                     discoveredSheets: converted.sheetNames,
                     convertedTo: converted.firstCsvPath,
                     sheetCsvPaths: converted.sheetCsvPaths,
+                });
+            } else if (format === 'access') {
+                const converted = await convertAccessTablesToCsvs(filePath, this._ensureTempDir());
+                sources.push({
+                    filePath,
+                    format,
+                    discoveredTables: converted.tableNames,
+                    tableCsvPaths: converted.tableCsvPaths,
                 });
             } else {
                 sources.push({ filePath, format });

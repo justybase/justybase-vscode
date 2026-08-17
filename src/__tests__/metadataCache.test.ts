@@ -20,6 +20,7 @@ import {
   ColumnMetadata,
 } from "../metadata/types";
 import { Logger } from "../utils/logger";
+import type { QueryRunnerRawFn } from "../metadata/prefetch";
 
 // Mock vscode
 jest.mock("vscode");
@@ -41,6 +42,23 @@ describe("MetadataCache", () => {
     Logger.initialize(mockOutputChannel);
 
     cache = new MetadataCache(mockContext);
+  });
+
+  it("does not run legacy Netezza prefetch for an explicit File SQL profile", async () => {
+    const fileCache = new MetadataCache(mockContext, {
+      getConnectionMetadata: jest.fn().mockReturnValue({ dbType: "file" }),
+      getConnectionDatabaseKind: jest.fn().mockReturnValue("file"),
+    } as never);
+    const runQuery = jest.fn(async () => undefined) as unknown as QueryRunnerRawFn;
+
+    expect(fileCache.supportsLegacyMetadataPrefetch("FILE_SQL")).toBe(false);
+    await fileCache.prefetchColumnsForDatabase("FILE_SQL", "main", runQuery);
+    await fileCache.prefetchAllObjects("FILE_SQL", runQuery);
+    fileCache.triggerConnectionPrefetch("FILE_SQL", runQuery);
+    fileCache.triggerFullColumnPrefetch("FILE_SQL", runQuery);
+
+    expect(runQuery).not.toHaveBeenCalled();
+    await fileCache.dispose();
   });
 
   describe("Basic Operations", () => {

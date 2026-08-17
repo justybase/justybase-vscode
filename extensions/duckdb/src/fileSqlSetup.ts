@@ -1,12 +1,12 @@
 /**
- * Pure SQL setup builder for the 'file' dialect (Excel/CSV/Parquet/Avro via
- * DuckDB). Generates the statements that register file-backed views so the
- * file behaves like a table (schema explorer, completion, SELECT).
+ * Pure SQL setup builder for the 'file' dialect (Excel/Access/CSV/Parquet/Avro
+ * via DuckDB). Generates the statements that register file-backed views so
+ * the file behaves like a table (schema explorer, completion, SELECT).
  */
 
 import * as path from 'path';
 
-export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | 'xlsb';
+export type FileDataFormat = 'csv' | 'tsv' | 'parquet' | 'avro' | 'xlsx' | 'xlsb' | 'access';
 
 export const FILE_WORKSPACE_OPTION = 'fileWorkspace';
 export const FILE_WORKSPACE_VERSION = 1;
@@ -23,6 +23,8 @@ export const FILE_DIALECT_EXTENSIONS: Readonly<Record<string, FileDataFormat>> =
     '.avro': 'avro',
     '.xlsx': 'xlsx',
     '.xlsb': 'xlsb',
+    '.mdb': 'access',
+    '.accdb': 'access',
 };
 
 export function detectFileDataFormat(filePath: string): FileDataFormat | undefined {
@@ -83,6 +85,10 @@ export function fileSheetViewName(filePath: string, sheetName: string): string {
     return `${normalizeFilePath(filePath)}#sheet=${sheetName}`;
 }
 
+export function fileTableViewName(filePath: string, tableName: string): string {
+    return `${normalizeFilePath(filePath)}#table=${tableName}`;
+}
+
 function nextUniqueSheetViewName(
     viewName: string,
     sheetName: string,
@@ -100,6 +106,28 @@ function nextUniqueSheetViewName(
 
     usedNames.add(key(candidate));
     return candidate;
+}
+
+/** Return the exact single-file view name assigned to each Access table. */
+export function fileTableViewNames(
+    filePath: string,
+    tableNames: readonly string[],
+): ReadonlyMap<string, string> {
+    const viewName = sanitizeViewName(filePath);
+    const usedTableViewNames = new Set<string>();
+    const names = new Map<string, string>();
+
+    for (const tableName of tableNames) {
+        if (tableName.trim().length === 0) {
+            continue;
+        }
+        names.set(
+            tableName,
+            nextUniqueSheetViewName(viewName, tableName, usedTableViewNames),
+        );
+    }
+
+    return names;
 }
 
 /** Name of the materialized editable table for a file. */
@@ -162,6 +190,10 @@ export function buildSaveEditsSql(filePath: string, format: FileDataFormat): Sav
             throw new Error(
                 'XLSB files are written back client-side through @justybase/spreadsheet-tasks (XlsbUpdater); DuckDB cannot write XLSB.',
             );
+        case 'access':
+            throw new Error(
+                'Access files are read-only in File SQL mode — write to the .mdb/.accdb file from the JustyBase SQL Editor (Microsoft Access) extension.',
+            );
         case 'avro':
             {
                 const targetPath = filePath.replace(/\.avro$/i, '_edited.parquet');
@@ -213,6 +245,9 @@ function readFunctionSql(format: FileDataFormat, filePath: string): string {
         case 'xlsb':
             // XLSB views are built from converted CSV paths (see the builders).
             throw new Error('XLSB files are read from converted CSV paths, not readFunctionSql.');
+        case 'access':
+            // Access tables are read from converted CSV paths (see the builders).
+            throw new Error('Access files are read from converted CSV paths, not readFunctionSql.');
     }
 }
 
@@ -236,6 +271,10 @@ export interface FileWorkspaceViewSource {
     convertedTo?: string;
     /** Per-sheet converted CSV paths keyed by sheet name (xlsb only). */
     sheetCsvPaths?: ReadonlyMap<string, string>;
+    /** Discovered table names (access only). */
+    discoveredTables?: string[];
+    /** Per-table converted CSV paths keyed by table name (access only). */
+    tableCsvPaths?: ReadonlyMap<string, string>;
 }
 
 export interface FileWorkspaceViewSetupResult {
@@ -259,6 +298,29 @@ export function buildFileWorkspaceViewSetupSql(
     for (const source of sources) {
         const filePath = normalizeFilePath(source.filePath);
         const viewName = filePath;
+
+        if (source.format === 'access') {
+            // Access files have no single "main" object: each table becomes a
+            // "<path>#table=<table>" view over its converted CSV.
+            const tables = (source.discoveredTables ?? []).filter(table => table.trim().length > 0);
+            for (const table of tables) {
+                const tableViewName = fileTableViewName(filePath, table);
+                const csvPath = source.tableCsvPaths?.get(table);
+                if (!csvPath) {
+                    throw new Error(`Missing converted CSV for Access table '${table}' of '${filePath}'.`);
+                }
+                statements.push(
+                    `CREATE OR REPLACE VIEW ${quoteIdentifier(tableViewName)} AS SELECT * FROM read_csv(${quoteLiteral(csvPath)})`,
+                );
+                sheetViewNames.push(tableViewName);
+                viewNames.push(tableViewName);
+            }
+            if (tables.length === 0) {
+                throw new Error(`The Access file '${filePath}' does not contain any readable tables.`);
+            }
+            continue;
+        }
+
         viewNames.push(viewName);
 
         if (source.format === 'xlsx') {
@@ -313,19 +375,57 @@ export function buildFileWorkspaceViewSetupSql(
  *   read_xlsx_all, so `<name>` always works).
  * - XLSB: same view layout as XLSX, but views read the converted CSV paths
  *   (`convertedTo` / `sheetCsvPaths`) with read_csv instead of read_xlsx.
+ * - Access: read-only; one view per table (`<name>__<table>`) over the
+ *   converted CSV paths (`tableCsvPaths`), plus `<name>` as an alias for the
+ *   first table for single-file consumers that expect a base view.
  */
 export function buildFileViewSetupSql(
     filePath: string,
     format: FileDataFormat,
-    options: { sheet?: string; discoveredSheets?: string[]; convertedTo?: string; sheetCsvPaths?: ReadonlyMap<string, string> } = {},
+    options: {
+        sheet?: string;
+        discoveredSheets?: string[];
+        convertedTo?: string;
+        sheetCsvPaths?: ReadonlyMap<string, string>;
+        discoveredTables?: string[];
+        tableCsvPaths?: ReadonlyMap<string, string>;
+    } = {},
 ): FileViewSetupResult {
     const viewName = sanitizeViewName(filePath);
     const statements: string[] = [];
     const sheetViewNames: string[] = [];
     const normalizedPath = filePath.split(path.sep).join('/');
-    const usesPerSheetViews = format === 'xlsx' || format === 'xlsb';
+    const usesPerSheetViews = format === 'xlsx' || format === 'xlsb' || format === 'access';
 
-    if (format === 'xlsx') {
+    if (format === 'access') {
+        const tables = (options.discoveredTables ?? []).filter(item => item.trim().length > 0);
+        const tableViewNames = fileTableViewNames(filePath, tables);
+        let firstTableViewName: string | undefined;
+        for (const table of tables) {
+            const csvPath = options.tableCsvPaths?.get(table);
+            if (!csvPath) {
+                continue;
+            }
+            const tableViewName = tableViewNames.get(table);
+            if (!tableViewName) {
+                continue;
+            }
+            firstTableViewName ??= tableViewName;
+            statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(tableViewName)} AS SELECT * FROM read_csv(${quoteLiteral(csvPath)})`);
+            sheetViewNames.push(tableViewName);
+        }
+        if (tables.length === 0) {
+            throw new Error(`The Access file '${filePath}' does not contain any readable tables.`);
+        }
+        // Access databases can contain multiple tables, so each table gets a
+        // dedicated view. Keep the base file view as an alias for the first
+        // table as well; callers that treat a single data file as one source
+        // (including Data Workspace materialization) use that conventional
+        // view name, just like the first-sheet view for Excel files.
+        if (firstTableViewName) {
+            statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS SELECT * FROM ${quoteIdentifier(firstTableViewName)}`);
+        }
+    } else if (format === 'xlsx') {
         const sheet = options.sheet?.trim();
         if (sheet) {
             const sheetSql = `read_xlsx(${quoteLiteral(normalizedPath)}, sheet=${quoteLiteral(sheet)})`;

@@ -13,6 +13,7 @@ type NormalizeMethod = (data: Record<string, unknown>) => {
     dbType: string;
     host: string;
     user: string;
+    options?: Record<string, unknown>;
 };
 
 function createPanelHarness(): { normalize: NormalizeMethod } {
@@ -25,6 +26,7 @@ function createPanelHarness(): { normalize: NormalizeMethod } {
             dbType: string;
             host: string;
             user: string;
+            options?: Record<string, unknown>;
         };
     };
     panel._getDialectDefinition = (dbType?: string) =>
@@ -67,5 +69,16 @@ describe('login panel file connection normalization', () => {
         expect(value).toBe('/data/sales.csv');
         expect(typeof value).toBe('string');
         expect(String(value).trim().length).toBeGreaterThan(0);
+    });
+
+    it('clears editable copy for Access files', () => {
+        const { normalize } = createPanelHarness();
+        const normalized = normalize({
+            dbType: 'file',
+            filePath: '/data/sample.accdb',
+            options: { editable: true },
+        });
+
+        expect(normalized.options?.editable).toBeUndefined();
     });
 });

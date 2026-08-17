@@ -10,6 +10,7 @@ import {
   MetadataDiskStorage,
 } from '../diskStorage';
 import type { CachePrefetcher } from '../prefetch';
+import { supportsLegacyMetadataPrefetchForConnection } from '../prefetchSupport';
 import type { MetadataCache } from './MetadataCache';
 import type { MetadataStore } from './MetadataStore';
 import {
@@ -83,8 +84,24 @@ export async function initializeDiskCache(deps: DiskLifecycleDeps): Promise<void
     manifests,
     deps.store.cacheTtl,
   );
+  const legacyLoadable = new Map(
+    [...loadable].filter(([connectionName]) =>
+      supportsLegacyMetadataPrefetchForConnection(
+        deps.connectionManager,
+        connectionName,
+      ),
+    ),
+  );
+  const legacyFreshTimestamps = new Map(
+    [...freshTimestamps].filter(([connectionName]) =>
+      supportsLegacyMetadataPrefetchForConnection(
+        deps.connectionManager,
+        connectionName,
+      ),
+    ),
+  );
 
-  for (const [connectionName, manifest] of loadable) {
+  for (const [connectionName, manifest] of legacyLoadable) {
     if (!deps.isCacheGenerationCurrent(generation)) {
       return;
     }
@@ -98,11 +115,11 @@ export async function initializeDiskCache(deps: DiskLifecycleDeps): Promise<void
   if (!deps.isCacheGenerationCurrent(generation)) {
     return;
   }
-  deps.prefetcher.restorePrefetchTimestamps(freshTimestamps);
+  deps.prefetcher.restorePrefetchTimestamps(legacyFreshTimestamps);
 
-  if (loadable.size > 0) {
+  if (legacyLoadable.size > 0) {
     Logger.getInstance().info(
-      `[MetadataCache] Loaded metadata manifests from disk (${loadable.size} connection(s), ${freshTimestamps.size} fresh, manifestRead=${manifestReadMs}ms, total=${Date.now() - initStartMs}ms)`,
+      `[MetadataCache] Loaded metadata manifests from disk (${legacyLoadable.size} connection(s), ${legacyFreshTimestamps.size} fresh, manifestRead=${manifestReadMs}ms, total=${Date.now() - initStartMs}ms)`,
     );
   }
 }
@@ -212,6 +229,9 @@ export async function onExternalCacheUpdate(
   }
 
   for (const connectionName of connectionNames) {
+    if (!supportsLegacyMetadataPrefetchForConnection(deps.connectionManager, connectionName)) {
+      continue;
+    }
     const refreshStartedAt = performance.now();
     if (deps.hasConnectionPrefetchInProgress(connectionName)) {
       continue;

@@ -5,6 +5,7 @@ import {
   getCstNodeTokenSpan,
   getTokenSpanPositionFromEndpoints,
 } from "../tokenSpanUtils";
+import { stripIdentifierQuoting } from "../../utils/identifierUtils";
 import type { ColumnInfo, TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 
@@ -115,6 +116,11 @@ export function selectStatement(
   const outputColumns = ctx.selectClause
     ? host.visitAs<ColumnInfo[]>(ctx.selectClause[0])
     : [];
+  const selectIntoTempTable = getSelectIntoTempTable(
+    host,
+    ctx.selectClause?.[0],
+    outputColumns,
+  );
   if (
     ctx.selectClause?.[0] &&
     host.getDuplicateOutputWarningSuppressionDepth() === 0
@@ -214,7 +220,54 @@ export function selectStatement(
   host.setCanReferenceSelectAliases(savedCanReferenceSelectAliases);
   scopeBuilder.exitScope();
 
+  if (selectIntoTempTable) {
+    if (host.getInProcedureContext()) {
+      scopeBuilder.addTable(selectIntoTempTable);
+    } else {
+      scopeBuilder.addTableToRoot(selectIntoTempTable);
+    }
+    if (!host.getInProcedureContext()) {
+      host.addScriptCreatedTable(selectIntoTempTable);
+    }
+  }
+
   return outputColumns;
+}
+
+function getSelectIntoTempTable(
+  host: SqlVisitorHost,
+  selectClause: CstNode | undefined,
+  columns: ColumnInfo[],
+): TableInfo | undefined {
+  if (!selectClause) {
+    return undefined;
+  }
+
+  const intoClause = (selectClause.children?.intoClause ?? []).find((child) =>
+    host.isCstNode(child),
+  );
+  if (!intoClause || !host.isCstNode(intoClause)) {
+    return undefined;
+  }
+
+  const targetIdentifier = (intoClause.children?.identifier ?? []).find((child) =>
+    host.isCstNode(child),
+  );
+  if (!targetIdentifier || !host.isCstNode(targetIdentifier)) {
+    return undefined;
+  }
+
+  const name = host.visitAs<string>(targetIdentifier);
+  if (!name.trim().startsWith('#')) {
+    return undefined;
+  }
+
+  return {
+    name,
+    isCte: false,
+    isTempTable: true,
+    columns: columns.map((column) => ({ ...column })),
+  };
 }
 
 export function fromClause(
@@ -703,16 +756,30 @@ export function selectItem(
 
 export function starExpression(
   host: SqlVisitorHost,
-  ctx: Record<string, IToken[]>,
+  ctx: Record<string, CstNode[] | IToken[]>,
 ): ColumnInfo[] {
-  const qualifier = ctx.Identifier?.[0]?.image;
+  const directQualifier = ctx.Identifier?.[0];
+  const directQualifierToken = directQualifier && host.isToken(directQualifier)
+    ? directQualifier
+    : undefined;
+  const identifierQualifier = ctx.identifier?.[0];
+  const identifierQualifierToken = identifierQualifier && host.isCstNode(identifierQualifier)
+    ? host.getFirstTokenFromCst(identifierQualifier)
+    : undefined;
+  const qualifierToken = directQualifierToken ?? identifierQualifierToken;
+  const qualifier = qualifierToken
+    ? stripIdentifierQuoting(
+        host.getTokenText(qualifierToken),
+        host.getValidationProfile().databaseKind,
+      )
+    : undefined;
 
-  if (qualifier) {
+  if (qualifier && qualifierToken) {
     const table = host.getScopeBuilder().findTable(qualifier);
     if (!table) {
       host.addError(
         `Table or alias '${qualifier}' not found in scope`,
-        ctx.Identifier[0],
+        qualifierToken,
         "error",
         "SQL003",
       );

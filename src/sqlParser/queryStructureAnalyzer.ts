@@ -296,8 +296,17 @@ class QueryFlowCollector {
     private visitInsertStatement(node: CstNode, parentNodeId: string): void {
         const insertWithClause = this._analyzer.getChildNodes(node, 'insertWithClause')[0];
         if (insertWithClause) {
+            const targetTable = this._analyzer.getChildNodes(node, 'tableName')[0];
+            if (targetTable) {
+                this.connectQualifiedTable(targetTable, parentNodeId, 'TARGET');
+            }
             this.visitStatementLikeNode(insertWithClause, parentNodeId);
             return;
+        }
+
+        const targetTable = this._analyzer.getChildNodes(node, 'tableName')[0];
+        if (targetTable) {
+            this.connectQualifiedTable(targetTable, parentNodeId, 'TARGET');
         }
 
         const selectStatement = this._analyzer.getChildNodes(node, 'selectStatement')[0];
@@ -556,6 +565,11 @@ class SqlQueryStructureAnalyzer {
             if (flow) {
                 statementFlows.push(flow);
             }
+
+            const selectIntoTemp = this.getSelectIntoTempDefinition(statement);
+            if (selectIntoTemp) {
+                tempTablesInScope.set(selectIntoTemp.name.toUpperCase(), selectIntoTemp);
+            }
         }
 
         for (let index = 0; index < statements.length; index++) {
@@ -692,6 +706,9 @@ class SqlQueryStructureAnalyzer {
         const text = token.image;
         if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
             return text.slice(1, -1);
+        }
+        if (text.length >= 2 && text.startsWith('[') && text.endsWith(']')) {
+            return text.slice(1, -1).replace(/\]\]/g, ']');
         }
         return text;
     }
@@ -965,6 +982,52 @@ class SqlQueryStructureAnalyzer {
         };
     }
 
+    private getSelectIntoTempDefinition(statement: StatementRecord): NamedDefinitionRecord | undefined {
+        const rootNode = statement.rootNode;
+        const selectNode = rootNode.name === 'selectStatement'
+            ? rootNode
+            : rootNode.name === 'withStatement' || rootNode.name === 'withAnyStatement'
+                ? this.getChildNodes(rootNode, 'selectStatement')[0]
+                : undefined;
+        if (!selectNode) {
+            return undefined;
+        }
+
+        const selectClause = this.getChildNodes(selectNode, 'selectClause')[0];
+        const intoClause = selectClause
+            ? this.getChildNodes(selectClause, 'intoClause')[0]
+            : undefined;
+        const targetIdentifier = intoClause
+            ? this.getChildNodes(intoClause, 'identifier')[0]
+            : undefined;
+        const targetToken = this.getFirstTokenFromCst(targetIdentifier);
+        const targetName = targetToken ? this.normalizeIdentifier(targetToken) : undefined;
+        if (!targetName || !targetName.trim().startsWith('#')) {
+            return undefined;
+        }
+
+        const definitionRange = this.getNodeRange(targetIdentifier);
+        if (!definitionRange) {
+            return undefined;
+        }
+
+        return {
+            name: targetName,
+            definitionRange,
+            statementIndex: statement.index,
+        };
+    }
+
+    private isTempTableDefinition(rootNode: CstNode): boolean {
+        if (this.getChildNodes(rootNode, 'tableTypeClause')[0]) {
+            return true;
+        }
+
+        const qualifiedName = this.getChildNodes(rootNode, 'qualifiedName')[0];
+        const name = this.parseQualifiedName(qualifiedName);
+        return !!name?.shortName.trim().startsWith('#');
+    }
+
     private getCreatedViewDefinition(statement: StatementRecord): NamedDefinitionRecord | undefined {
         if (statement.rootNode.name !== 'createViewStatement') {
             return undefined;
@@ -1128,8 +1191,7 @@ class SqlQueryStructureAnalyzer {
             case 'deleteStatement':
                 return 'delete';
             case 'createTableStatement':
-                return this.getChildNodes(rootNode, 'tableTypeClause')[0]
-                    && (this.getChildNodes(rootNode, 'withStatement')[0] || this.getChildNodes(rootNode, 'selectStatement')[0])
+                return this.isTempTableDefinition(rootNode)
                     ? 'create_temp_table'
                     : 'create_table';
             default:

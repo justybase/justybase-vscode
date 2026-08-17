@@ -14,6 +14,7 @@ import { createStandardConnectionForm } from '../core/connectionFormBuilder';
 import { ConnectionManager, ConnectionDetails } from '../core/connectionManager';
 import { getConnectionAccentOptions } from '../utils/connectionAccent';
 import { getDialectIconWebviewUri } from '../utils/dialectIcons';
+import { detectFileDataFormat } from '../services/fileConnectionProfileService';
 
 interface LoginPanelDialectDefinition {
     kind: DatabaseKind;
@@ -293,6 +294,10 @@ export class LoginPanel {
     private _normalizeIncomingConnection(data: Partial<ConnectionDetails>): ConnectionDetails {
         const dialect = this._getDialectDefinition(data.dbType);
         const normalizedOptions = this._normalizeOptions(data.options);
+        const filePath = (data as { filePath?: string }).filePath ?? data.database ?? '';
+        if (dialect.kind === 'file' && detectFileDataFormat(filePath) === 'access' && normalizedOptions) {
+            delete normalizedOptions.editable;
+        }
         if (normalizedOptions && dialect.kind === 'db2') {
             const clientCodepage = typeof normalizedOptions.clientCodepage === 'string'
                 ? normalizedOptions.clientCodepage.trim()
@@ -305,7 +310,6 @@ export class LoginPanel {
                 delete normalizedOptions.clientCodepageExplicit;
             }
         }
-        const filePath = (data as { filePath?: string }).filePath ?? data.database ?? '';
         const normalizedDatabase =
             dialect.kind === 'file' || dialect.kind === 'access'
                 ? filePath.trim()

@@ -84,6 +84,9 @@ class SqlSymbolCollector {
             case 'selectStatement':
                 this.visitSelectStatement(node)
                 return
+            case 'selectClause':
+                this.visitSelectClause(node)
+                return
             case 'createProcedureStatement':
                 if (this.getChildNodes(node, 'oracleAnonymousBlock').length > 0) {
                     this.visitOracleRoutine(node)
@@ -115,6 +118,9 @@ class SqlSymbolCollector {
                 return
             case 'updateStatement':
                 this.visitUpdateStatement(node)
+                return
+            case 'insertStatement':
+                this.visitInsertStatement(node)
                 return
             case 'deleteStatement':
                 this.visitDeleteStatement(node)
@@ -232,6 +238,26 @@ class SqlSymbolCollector {
         } finally {
             this.popAliasScope()
         }
+    }
+
+    private visitSelectClause(node: CstNode): void {
+        const intoClause = this.getChildNodes(node, 'intoClause')[0]
+        const targetIdentifier = intoClause
+            ? this.getChildNodes(intoClause, 'identifier')[0]
+            : undefined
+        const targetToken = this.getFirstTokenFromCst(targetIdentifier)
+
+        if (targetToken && this.normalizeIdentifier(targetToken).trim().startsWith('#')) {
+            const symbol = this.createDefinition('table', targetToken)
+            this.createdTables.set(symbol.normalizedName, symbol)
+        }
+
+        this.visitChildren(node)
+    }
+
+    private visitInsertStatement(node: CstNode): void {
+        this.registerTableNameReference(this.getChildNodes(node, 'tableName')[0])
+        this.visitChildren(node)
     }
 
     private visitOracleRoutine(node: CstNode): void {
@@ -406,6 +432,7 @@ class SqlSymbolCollector {
 
     private visitStarExpression(node: CstNode): void {
         const qualifier = this.getTokens(node, 'Identifier')[0]
+            ?? this.getFirstTokenFromCst(this.getChildNodes(node, 'identifier')[0])
         if (qualifier) {
             this.registerQualifierReference(qualifier)
         }
@@ -415,6 +442,9 @@ class SqlSymbolCollector {
         const text = token.image
         if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
             return text.slice(1, -1)
+        }
+        if (text.length >= 2 && text.startsWith('[') && text.endsWith(']')) {
+            return text.slice(1, -1).replace(/\]\]/g, ']')
         }
         return text
     }

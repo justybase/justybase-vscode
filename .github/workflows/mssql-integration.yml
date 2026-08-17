@@ -1,0 +1,83 @@
+name: MSSQL Integration
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  mssql-integration:
+    name: MSSQL Live Integration (Linux)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_TEST_SA_PASSWORD }}
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd="/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${{ secrets.MSSQL_TEST_SA_PASSWORD }}' -C -Q 'SELECT 1' -b -o /dev/null || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-start-period=30s
+          --health-retries=18
+
+    env:
+      MSSQL_LIVE_TEST_HOST: 127.0.0.1
+      MSSQL_LIVE_TEST_PORT: "1433"
+      MSSQL_LIVE_TEST_DATABASE: justybase_mssql_ci
+      MSSQL_LIVE_TEST_USER: sa
+      MSSQL_LIVE_TEST_PASSWORD: ${{ secrets.MSSQL_TEST_SA_PASSWORD }}
+      MSSQL_LIVE_TEST_ENCRYPT: "true"
+      MSSQL_LIVE_TEST_TRUST_SERVER_CERTIFICATE: "true"
+      MSSQL_LIVE_TEST_CONNECT_TIMEOUT: "30000"
+      MSSQL_LIVE_TEST_REQUEST_TIMEOUT: "30000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/mssql/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install MSSQL extension dependencies
+        working-directory: extensions/mssql
+        run: npm ci
+
+      - name: Create integration database
+        run: node scripts/mssql-integration-database.cjs create
+
+      - name: Run MSSQL live integration tests
+        run: npm run test:mssql:integration
+
+      - name: Remove integration database
+        if: always()
+        continue-on-error: true
+        run: node scripts/mssql-integration-database.cjs drop

@@ -13,7 +13,7 @@ import {
 } from '../../../../src/providers/qualityRuleFactory';
 
 const statementEnd = createStatementEndScanner({ brackets: true });
-const identifier = createIdentifierPattern({ brackets: true });
+const identifier = createIdentifierPattern({ brackets: true, temporaryTables: true });
 
 /** Prefer an explicit projection over SELECT * in production T-SQL. */
 export const ruleMSS001: LintRule = createSelectStarRule({

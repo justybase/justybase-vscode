@@ -237,6 +237,10 @@ describeIfConfigured('mssql integration', () => {
 	});
 
 	afterAll(async () => {
+		if (!connection) {
+			return;
+		}
+
 		await tryExecute(connection, `DROP PROCEDURE IF EXISTS ${buildQualifiedName(schemaName, procedureName)}`);
 		await tryExecute(connection, `DROP VIEW IF EXISTS ${buildQualifiedName(schemaName, viewName)}`);
 		await tryExecute(connection, `DROP TABLE IF EXISTS ${buildQualifiedName(schemaName, tableName)}`);

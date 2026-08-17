@@ -152,7 +152,12 @@ export function isIdentifierToken(token: IToken | undefined): token is IToken {
     return false;
   }
   const tokenName = token.tokenType.name;
-  return tokenName === "Identifier" || tokenName === "QuotedIdentifier";
+  return (
+    tokenName === "Identifier" ||
+    tokenName === "QuotedIdentifier" ||
+    tokenName === "MsSqlBracketedIdentifier" ||
+    tokenName === "MsSqlTempTableIdentifier"
+  );
 }
 
 export function getAliasTokenFromAliasOptional(

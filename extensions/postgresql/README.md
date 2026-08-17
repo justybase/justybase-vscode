@@ -1,55 +1,65 @@
-# JustyBase SQL Editor (PostgreSQL)
+# JustyBase SQL Editor for PostgreSQL
 
-PostgreSQL support for JustyBase SQL Editor. The base JustyBase SQL Editor extension is installed automatically as a technical dependency; Netezza is not required, and you do not need to install or use it.
+![JustyBase SQL Editor for PostgreSQL](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
-This extension adds a `PostgreSQL` dialect to JustyBase SQL Editor and integrates with the shared connection UI, schema browser, SQL execution flow, and dialect registry.
+**A PostgreSQL-aware SQL workspace for schema exploration, queries, plans, and data workflows in VS Code.**
 
-## Requirements
+This companion extension adds PostgreSQL connectivity to [JustyBase SQL Editor](../../README.md). The core extension is installed automatically; Netezza is not required.
 
-- The base extension is installed automatically as a technical dependency; no separate Netezza installation is required.
-- VS Code Desktop
-- Network access to your PostgreSQL server
-- Install runtime dependencies in this package before packaging:
+[![Marketplace](https://vsmarketplacebadges.dev/version/krzysztof-d.justybaselite-postgresql.svg?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-postgresql)
 
-```powershell
-Set-Location extensions\postgresql
+## PostgreSQL work in one place
+
+![PostgreSQL workspace with schema browser, editor, and results](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/workspace-overview.png)
+
+Browse schemas and routines, write SQL, run it, and investigate the output in the shared JustyBase workspace.
+
+## Features
+
+- Pure JavaScript `pg` runtime for query execution and cancellation.
+- Metadata for schemas, tables, views, sequences, functions, procedures, and columns.
+- PostgreSQL authoring profile with completion, diagnostics, snippets, semantic context, and types.
+- DDL generation for tables, views, routines, and sequences.
+- PostgreSQL `COPY` import for CSV, XLSX, and XLSB data.
+- `EXPLAIN (FORMAT JSON)` parsing and shared tuning-advisor scaffolding.
+
+### Write with database context
+
+![PostgreSQL validation and assisted SQL correction](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/sql-validation-and-copilot.png)
+
+Completion and diagnostics use the active database metadata. Copilot can help explain or improve SQL while you keep control of the final query.
+
+### Understand the output
+
+![PostgreSQL result explorer](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-explorer.png)
+
+Profile columns, inspect distributions, filter rows, export results, and create charts.
+
+![PostgreSQL result chart](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-chart.png)
+
+## Get started
+
+1. Install **JustyBase SQL Editor (PostgreSQL)**.
+2. Open the **JustyBase** view and choose **Connect**.
+3. Select **PostgreSQL**, enter host, port, database, user, and password.
+4. Run SQL with `Ctrl+Enter` / `F5`.
+
+Each connection targets one PostgreSQL database. Create another saved profile to work with a different database. System schemas such as `pg_catalog` and `information_schema` are intentionally omitted from the explorer.
+
+## Runtime notes
+
+The explain viewer normalizes PostgreSQL JSON plans. Tuning advice is heuristic and focuses on scans, join shape, planner cost, and row-estimate drift. Generic `DROP SESSION <pid>` compatibility maps to `pg_terminate_backend(pid)` when permissions allow it.
+
+## Development and packaging
+
+```bash
+cd extensions/postgresql
 npm install
-```
-
-## What This Extension Adds
-
-- PostgreSQL connection type in the shared login panel
-- `pg`-based pure JavaScript runtime for query execution and cancellation
-- PostgreSQL metadata queries for schemas, tables, views, sequences, functions, procedures, and column lookup
-- First-class PostgreSQL SQL authoring profile for shared completion/diagnostics
-- DDL generation for tables, views, routines, and sequences in the connected database
-- PostgreSQL `COPY` import flow for CSV/XLSX/XLSB ingestion
-- `EXPLAIN (FORMAT JSON)` parsing and shared tuning-advisor scaffolding
-
-## Current Runtime Notes
-
-- Each connection is scoped to a single PostgreSQL database. To browse another database, create a separate saved connection for that database.
-- Schema browsing intentionally excludes PostgreSQL system schemas such as `pg_catalog` and `information_schema`.
-- The explain command normalizes PostgreSQL JSON plans into the shared explain viewer.
-- Tuning advice is heuristic and currently focuses on scans, join shape, planner cost, and row-estimate drift.
-- Generic `DROP SESSION <pid>` compatibility is translated to `pg_terminate_backend(pid)` when permissions allow it.
-
-## Development
-
-```powershell
-Set-Location extensions\postgresql
 npm run check-types
 npm run build
-```
-
-## Packaging
-
-```powershell
-Set-Location extensions\postgresql
-npm install
 npm run package
 ```
 
-## License and third-party software
+## License
 
-This extension is licensed under Apache-2.0. Its Marketplace VSIX includes the full project license and a generated `THIRD_PARTY_NOTICES.md` covering locked runtime dependencies and their available license texts.
+Apache-2.0. The Marketplace VSIX includes `THIRD_PARTY_NOTICES.md`.

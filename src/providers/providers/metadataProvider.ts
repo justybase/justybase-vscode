@@ -41,6 +41,16 @@ export class MetadataProvider {
         return this.connectionManager.getConnectionDatabaseKind(connectionName);
     }
 
+    private supportsLegacyMetadataPrefetch(connectionName: string): boolean {
+        const cache = this.metadataCache as MetadataCache & {
+            supportsLegacyMetadataPrefetch?: (name: string) => boolean;
+        };
+        if (typeof cache.supportsLegacyMetadataPrefetch === 'function') {
+            return cache.supportsLegacyMetadataPrefetch(connectionName);
+        }
+        return supportsLegacyMetadataPrefetch(this.tryGetConnectionDatabaseKind(connectionName));
+    }
+
     private getConnectionDatabaseKind(connectionName?: string): DatabaseKind {
         if (!connectionName) {
             throw new Error('Connection name is required for metadata lookup.');
@@ -340,9 +350,6 @@ export class MetadataProvider {
             const cachedViews = toCompletionItems(cachedWithSystemCatalog);
             if (cachedViews.length > 0) {
                 return cachedViews;
-            }
-            if (cached.length === 0) {
-                return [];
             }
             if (this.metadataCache.isViewsCatalogLoaded(connectionName, cacheKey)) {
                 return [];
@@ -987,7 +994,7 @@ export class MetadataProvider {
         connectionName: string,
         normalizedDbName: string | undefined,
     ): void {
-        if (!normalizedDbName || !supportsLegacyMetadataPrefetch(this.tryGetConnectionDatabaseKind(connectionName))) {
+        if (!normalizedDbName || !this.supportsLegacyMetadataPrefetch(connectionName)) {
             return;
         }
 
@@ -1019,6 +1026,9 @@ export class MetadataProvider {
         databases: string[],
     ): Promise<void> {
         if (databases.length === 0) {
+            return;
+        }
+        if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
             return;
         }
 

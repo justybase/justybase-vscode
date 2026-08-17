@@ -46,6 +46,8 @@ describe('detectFileDataFormat', () => {
         expect(detectFileDataFormat('file.tsv')).toBe('tsv');
         expect(detectFileDataFormat('file.parquet')).toBe('parquet');
         expect(detectFileDataFormat('file.avro')).toBe('avro');
+        expect(detectFileDataFormat('file.mdb')).toBe('access');
+        expect(detectFileDataFormat('file.accdb')).toBe('access');
     });
 
     it('returns undefined for unsupported formats', () => {
@@ -132,6 +134,14 @@ describe('buildFileConnectionDetails', () => {
         expect(details.options?.sheet).toBe('Sheet1');
         expect(modeChanged).toBe(false);
         expect(editableCleared).toBe(false);
+    });
+
+    it('clears editable copy when the single file is an Access database', () => {
+        const access = { ...single, database: '/a.accdb' };
+        const { details, editableCleared } = buildFileConnectionDetails('C', ['/a.accdb'], access);
+        expect(details.options?.editable).toBeUndefined();
+        expect(details.options?.sheet).toBeUndefined();
+        expect(editableCleared).toBe(true);
     });
 
     it('converts to a read-only workspace for multiple files and clears the editable copy', () => {

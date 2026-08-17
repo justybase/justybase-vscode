@@ -173,6 +173,30 @@ describe('startSqlLanguageClient', () => {
         );
     });
 
+    it('forwards scoped metadata cache invalidation to the language server', async () => {
+        const { startSqlLanguageClient } = await import('../activation/lspRegistration');
+        const context = {
+            asAbsolutePath: jest.fn((value: string) => value),
+            subscriptions: []
+        } as unknown as vscode.ExtensionContext;
+        let invalidateListener: ((connectionName?: string) => void) | undefined;
+        const metadataCache = {
+            onDidInvalidate: jest.fn((listener: (connectionName?: string) => void) => {
+                invalidateListener = listener;
+                return { dispose: jest.fn() };
+            }),
+            onDidExternalRefresh: jest.fn(() => ({ dispose: jest.fn() }))
+        } as unknown as MetadataCache;
+
+        await startSqlLanguageClient(context, metadataCache, createConnectionManager());
+        invalidateListener?.('file-sql');
+
+        expect(mockSendNotification).toHaveBeenCalledWith(
+            NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
+            { connectionName: 'file-sql' }
+        );
+    });
+
     it('preserves the connection scope for cross-window metadata refresh', async () => {
         const { startSqlLanguageClient } = await import('../activation/lspRegistration');
         const context = {

@@ -30,6 +30,7 @@ export class CompletionQualifierResolver {
   ): Promise<CompletionItem[] | undefined> {
     const expandMatch = this.contextExtractor.extractQualifierBeforeDotAndStar(
       requestContext.linePrefix,
+      requestContext.databaseKind,
     );
     if (!expandMatch) {
       return undefined;

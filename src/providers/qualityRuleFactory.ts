@@ -141,12 +141,17 @@ export function createStatementEndScanner(
 export interface IdentifierPatternOptions {
 	/** Include the MSSQL `[bracket]` identifier alternative. */
 	brackets?: boolean;
+	/** Include SQL Server local/global temporary table names. */
+	temporaryTables?: boolean;
 }
 
 export function createIdentifierPattern(options: IdentifierPatternOptions = {}): string {
+	const temporaryTable = options.temporaryTables
+		? '##?[A-Za-z0-9_][\\w$]*|'
+		: '';
 	const identifier: string = options.brackets
-		? '\\[[^\\]]*\\]|"[^"]+"|[A-Za-z_][\\w$#]*'
-		: '"[^"]+"|[A-Za-z_][\\w$#]*';
+		? `\\[[^\\]]*\\]|"[^"]+"|${temporaryTable}[A-Za-z_][\\w$#]*`
+		: `"[^"]+"|${temporaryTable}[A-Za-z_][\\w$#]*`;
 	return `(?:${identifier}(?:\\s*\\.\\s*(?:${identifier})){0,2})`;
 }
 

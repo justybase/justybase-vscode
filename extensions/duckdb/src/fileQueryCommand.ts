@@ -11,12 +11,15 @@ import {
     detectFileDataFormat,
     editableTableName,
     fileSheetViewName,
+    fileTableViewName,
+    fileTableViewNames,
     normalizeFilePath,
     parseFileWorkspace,
     sanitizeViewName,
 } from './fileSqlSetup';
 import { listXlsxSheetNames } from './xlsxSheets';
 import { listXlsbSheetNames } from './xlsbConversion';
+import { listAccessTableNames } from './accessConversion';
 
 const FILE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFile';
 const FILE_WORKSPACE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFiles';
@@ -100,14 +103,29 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
         const connectionName = `File SQL: ${basename} — ${parentDir}`;
 
         const isExcel = format === 'xlsx' || format === 'xlsb';
+        const isAccess = format === 'access';
         let firstSheet: string | undefined;
+        let tableNames: string[] = [];
         if (format === 'xlsb') {
             try {
                 firstSheet = (await listXlsbSheetNames(filePath))[0];
             } catch {
                 firstSheet = undefined;
             }
+        } else if (isAccess) {
+            try {
+                tableNames = await listAccessTableNames(filePath);
+            } catch {
+                tableNames = [];
+            }
         }
+
+        const tableViewNames = isAccess
+            ? fileTableViewNames(filePath, tableNames)
+            : new Map<string, string>();
+        const defaultViewName = isAccess
+            ? tableViewNames.get(tableNames[0] ?? '') ?? viewName
+            : viewName;
 
         try {
             await api.openFileSqlSession(
@@ -118,7 +136,8 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
                     user: 'file',
                     dbType: 'file',
                     options: {
-                        editable: true,
+                        // Access files are read-only in File SQL mode.
+                        ...(isAccess ? {} : { editable: true }),
                         // xlsx keeps the default per-sheet view layout; xlsb pins the
                         // editable sheet so "Save File Edits" rewrites it in place.
                         ...(format === 'xlsb' && firstSheet ? { sheet: firstSheet } : {}),
@@ -128,15 +147,19 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
                     connectionName,
                     content: [
                         `-- ${basename} — File SQL (DuckDB)`,
-                        format === 'xlsb'
-                            ? `-- ${viewName} reads the first sheet; "Save File Edits" rewrites it in place.`
-                            : isExcel
-                                ? `-- Excel sheets appear as ${viewName}__<sheet>; ${viewName} reads the first sheet.`
-                                : '-- Query the file like a table.',
-                        `-- INSERT/UPDATE/DELETE work on ${editableTableName(filePath)} (editable copy).`,
-                        '-- After editing run "JustyBase: Save File Edits" to write changes back.',
+                        isAccess
+                            ? `-- Access tables appear as ${viewName}__<table> (read-only; queries only).`
+                            : format === 'xlsb'
+                                ? `-- ${viewName} reads the first sheet; "Save File Edits" rewrites it in place.`
+                                : isExcel
+                                    ? `-- Excel sheets appear as ${viewName}__<sheet>; ${viewName} reads the first sheet.`
+                                    : '-- Query the file like a table.',
+                        ...(isAccess
+                            ? tableNames.map(table => `-- Table: ${tableViewNames.get(table) ?? viewName}`)
+                            : [`-- INSERT/UPDATE/DELETE work on ${editableTableName(filePath)} (editable copy).`,
+                                '-- After editing run "JustyBase: Save File Edits" to write changes back.']),
                         '',
-                        `SELECT * FROM "${viewName}" LIMIT 100;`,
+                        `SELECT * FROM "${defaultViewName}" LIMIT 100;`,
                         '',
                     ].join('\n'),
                 },
@@ -244,7 +267,6 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
                 );
                 return;
             }
-
             if (parseFileWorkspace(details.options?.fileWorkspace)) {
                 vscode.window.showInformationMessage(
                     'Save File Edits is not available for multi-file SQL workspaces. Export the query result instead.',
@@ -256,6 +278,13 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
             const format = detectFileDataFormat(filePath);
             if (!format) {
                 vscode.window.showErrorMessage(`Unsupported data file '${filePath}'.`);
+                return;
+            }
+
+            if (format === 'access') {
+                vscode.window.showInformationMessage(
+                    'Access files are read-only in File SQL mode. Use the JustyBase SQL Editor (Microsoft Access) extension to modify the file.',
+                );
                 return;
             }
 
@@ -374,7 +403,7 @@ async function chooseWorkspaceFiles(initialPath?: string): Promise<string[] | un
         canSelectFolders: false,
         openLabel: 'Open File SQL Workspace',
         filters: {
-            'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro'],
+            'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro', 'mdb', 'accdb'],
         },
     });
     const paths = result?.map(uri => uri.fsPath).filter(isSupportedDataFile) ?? [];
@@ -408,30 +437,45 @@ async function buildWorkspaceSqlContent(filePaths: readonly string[], connection
         `-- ${connectionName} — File SQL (DuckDB)`,
         '-- Read-only workspace. Each source is a view named by its full path.',
         '-- For XLSX/XLSB files, every discovered sheet is available as "<path>#sheet=<sheet>".',
+        '-- For Access files, every table is available as "<path>#table=<table>" (read-only).',
         '-- Use normal SQL aliases in your query when convenient.',
         '-- To add more files, run "Add Files to Active File SQL Workspace (DuckDB)".',
         '',
         '-- Available sources:',
     ];
 
+    let defaultViewName = '';
     for (const filePath of filePaths) {
         const normalizedPath = normalizeFilePath(filePath);
-        lines.push(`-- ${quoteIdentifier(normalizedPath)}`);
         const format = detectFileDataFormat(normalizedPath);
-        if (format === 'xlsx') {
-            for (const sheet of discoverSheets(normalizedPath)) {
-                lines.push(`-- ${quoteIdentifier(fileSheetViewName(normalizedPath, sheet))}`);
+        if (format === 'access') {
+            for (const table of await discoverAccessTables(normalizedPath)) {
+                const tableViewName = fileTableViewName(normalizedPath, table);
+                lines.push(`-- ${quoteIdentifier(tableViewName)}`);
+                if (!defaultViewName) {
+                    defaultViewName = tableViewName;
+                }
             }
-        } else if (format === 'xlsb') {
-            for (const sheet of await discoverXlsbSheets(normalizedPath)) {
-                lines.push(`-- ${quoteIdentifier(fileSheetViewName(normalizedPath, sheet))}`);
+        } else {
+            lines.push(`-- ${quoteIdentifier(normalizedPath)}`);
+            if (!defaultViewName) {
+                defaultViewName = normalizedPath;
+            }
+            if (format === 'xlsx') {
+                for (const sheet of discoverSheets(normalizedPath)) {
+                    lines.push(`-- ${quoteIdentifier(fileSheetViewName(normalizedPath, sheet))}`);
+                }
+            } else if (format === 'xlsb') {
+                for (const sheet of await discoverXlsbSheets(normalizedPath)) {
+                    lines.push(`-- ${quoteIdentifier(fileSheetViewName(normalizedPath, sheet))}`);
+                }
             }
         }
     }
 
     lines.push(
         '',
-        `SELECT * FROM ${quoteIdentifier(normalizeFilePath(filePaths[0]))} LIMIT 100;`,
+        defaultViewName ? `SELECT * FROM ${quoteIdentifier(defaultViewName)} LIMIT 100;` : '-- No viewable sources.',
         '',
     );
     return lines.join('\n');
@@ -448,6 +492,14 @@ function discoverSheets(filePath: string): string[] {
 async function discoverXlsbSheets(filePath: string): Promise<string[]> {
     try {
         return await listXlsbSheetNames(filePath);
+    } catch {
+        return [];
+    }
+}
+
+async function discoverAccessTables(filePath: string): Promise<string[]> {
+    try {
+        return await listAccessTableNames(filePath);
     } catch {
         return [];
     }

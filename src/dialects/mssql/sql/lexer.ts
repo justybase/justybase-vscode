@@ -72,13 +72,19 @@ export const MsSqlPercent = createToken({
 /** Bracketed T-SQL identifier: [name] or [na]]me] */
 export const MsSqlBracketedIdentifier = createToken({
 	name: 'MsSqlBracketedIdentifier',
-	pattern: /\[(?:[^\]]|\])*\]/,
+	pattern: /\[(?:[^\]]|\]\])*\]/,
 });
 
 /** T-SQL local/global variable: @name or @@name */
 export const MsSqlVariable = createToken({
 	name: 'MsSqlVariable',
 	pattern: /@@?[A-Za-z_][\w$]*/,
+});
+
+/** SQL Server local/global temporary table name: #name or ##name. */
+export const MsSqlTempTableIdentifier = createToken({
+	name: 'MsSqlTempTableIdentifier',
+	pattern: /##?[A-Za-z0-9_][\w$]*/,
 });
 
 const mssqlOnlyTokens = [
@@ -95,6 +101,7 @@ const mssqlOnlyTokens = [
   MsSqlPercent,
   MsSqlBracketedIdentifier,
   MsSqlVariable,
+  MsSqlTempTableIdentifier,
 ];
 
 const mssqlAllTokens = [...mssqlOnlyTokens, ...baseLexer.allTokens];

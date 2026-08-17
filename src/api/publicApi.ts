@@ -213,11 +213,14 @@ async function openFileSqlSession(
     );
     if (!existing || shouldRefreshExistingWorkspace) {
         await connectionManager.saveConnection({ ...details, name: connectionName });
+        if (details.dbType === 'file' && typeof connectionManager.refreshFileConnection === 'function') {
+            await connectionManager.refreshFileConnection(connectionName);
+        }
         // File SQL objects (views + editable table) appear only after the
         // connection is established; drop stale negative metadata so the
         // linter does not report SQL006 for them before the first connect.
         try {
-            await vscode.commands.executeCommand('netezza.refreshSchema');
+            await vscode.commands.executeCommand('netezza.refreshSchema', connectionName);
         } catch {
             // Best-effort: the schema refresh command may be unavailable
             // during activation; the linter treats unknown tables as valid.

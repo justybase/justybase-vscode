@@ -91,6 +91,13 @@ export function normalizeTokenText(token: IToken): string {
   ) {
     return token.image.slice(1, -1);
   }
+  if (
+    token.image.length >= 2 &&
+    token.image.startsWith("[") &&
+    token.image.endsWith("]")
+  ) {
+    return token.image.slice(1, -1).replace(/\]\]/g, "]");
+  }
   return token.image;
 }
 

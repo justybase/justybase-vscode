@@ -18,6 +18,24 @@
     ],
     "description": "T-SQL OFFSET/FETCH pagination"
   },
+  "Local temporary table": {
+    "prefix": "mssql-temp-table",
+    "body": [
+      "CREATE TABLE #${1:temp_name} (",
+      "  ${2:id} INT",
+      ");"
+    ],
+    "description": "SQL Server local temporary table"
+  },
+  "Global temporary table": {
+    "prefix": "mssql-global-temp-table",
+    "body": [
+      "CREATE TABLE ##${1:temp_name} (",
+      "  ${2:id} INT",
+      ");"
+    ],
+    "description": "SQL Server global temporary table"
+  },
   "CROSS APPLY": {
     "prefix": "mssql-cross-apply",
     "body": [

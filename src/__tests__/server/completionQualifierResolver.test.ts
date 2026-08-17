@@ -1,3 +1,5 @@
+jest.unmock("chevrotain");
+
 import {
   CompletionItemKind,
   InsertTextFormat,
@@ -109,5 +111,29 @@ describe("CompletionQualifierResolver", () => {
       insertTextFormat: InsertTextFormat.PlainText,
     });
     expect(result?.[0].textEdit?.newText).toBe("T.ID, T.NAME");
+  });
+
+  it("preserves MSSQL temporary-table qualifiers for columns and wildcard expansion", async () => {
+    const columnResult = await resolver.resolveQualifierCompletions(
+      makeRequestContext({
+        databaseKind: "mssql",
+        linePrefix: "SELECT #temp.",
+        statementPrefix: "SELECT #temp.",
+        position: Position.create(0, 14),
+      }),
+    );
+    expect(scopeResolver.resolveColumnsForQualifier).toHaveBeenCalledWith(
+      expect.objectContaining({ qualifier: "#temp", databaseKind: "mssql" }),
+    );
+    expect(columnResult?.some((item) => item.label === "ID")).toBe(true);
+
+    const wildcardContext = makeRequestContext({
+        databaseKind: "mssql",
+        linePrefix: "SELECT #temp.*",
+        statementPrefix: "SELECT #temp.*",
+        position: Position.create(0, 15),
+      });
+    const wildcardResult = await resolver.resolveWildcardExpansionCompletions(wildcardContext);
+    expect(wildcardResult?.[0].textEdit?.newText).toBe("#temp.ID, #temp.NAME");
   });
 });

@@ -50,6 +50,22 @@ export class ScopeBuilder {
         return undefined
     }
 
+    /** Add a script-level relation while nested query scopes are active. */
+    addTableToRoot(table: TableInfo): TableInfo | undefined {
+        let root = this.currentScope
+        while (root.parent) {
+            root = root.parent
+        }
+
+        const key = (table.alias || table.name).toUpperCase()
+        const existing = root.tables.get(key)
+        if (existing) {
+            return existing
+        }
+        root.tables.set(key, table)
+        return undefined
+    }
+
     removeTable(table: TableInfo): void {
         const key = (table.alias || table.name).toUpperCase()
         const known = this.currentScope.tables.get(key)

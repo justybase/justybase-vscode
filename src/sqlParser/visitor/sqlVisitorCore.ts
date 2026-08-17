@@ -1011,7 +1011,7 @@ export class SqlVisitor
     return queryScopeVisitor.selectItem(this, ctx);
   }
 
-  starExpression(ctx: Record<string, IToken[]>): ColumnInfo[] {
+  starExpression(ctx: Record<string, CstNode[] | IToken[]>): ColumnInfo[] {
     return queryScopeVisitor.starExpression(this, ctx);
   }
 
