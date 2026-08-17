@@ -447,6 +447,15 @@ it('preserves the time component of Oracle DATE values', async () => {
             expect(content).toContain("TO_TIMESTAMP_TZ('2026-07-18 12:30:45.123 +02:00'");
         });
 
+        it('accepts bracketed qualified MSSQL export targets', async () => {
+            const content = await exportToTempFile(makeResultSet({ data: [[1, 'Alice', 100.5]] }), {
+                format: 'sql',
+                sqlTargetTable: '[dbo].[JBL_EXPORT_TARGET]',
+                sqlDialect: 'mssql',
+            });
+            expect(content).toContain('INSERT INTO [dbo].[JBL_EXPORT_TARGET]');
+        });
+
         it('should escape single quotes in string values', async () => {
             const resultSet = makeResultSet({
                 columns: [{ name: 'NAME', type: 'varchar' }],
