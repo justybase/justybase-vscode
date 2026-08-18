@@ -111,7 +111,7 @@ See the [SQL Results Filtering guide](docs/SQL_RESULTS_FILTERING.md) and [Export
 
 ### Work with files through SQL
 
-Install the optional [DuckDB + Files pack](extensions/duckdb), open **Data Workspace Manager**, and create a persistent DuckDB workspace. Add one local Excel/CSV/TSV/Parquet file or several files as sources, then query the materialized tables with SQL. The same workspace can also materialize saved Netezza tables, views, and read-only `SELECT`/`WITH` queries.
+Install the optional [DuckDB + Files pack](extensions/duckdb), open **Data Workspace Manager**, and create a persistent DuckDB workspace. Add one local Excel/CSV/TSV/Parquet/Access (`.mdb` or `.accdb`) file or several files as sources, then query the materialized tables with SQL. For XLSX, CSV/TSV, and Access sources, **Edit source** opens a separate editor for the original file; save it first, then use **Refresh** to rematerialize the local table. Parquet, Avro, and Netezza sources remain read-only. Access sources are read-only in the DuckDB File SQL dialect; the same workspace can also materialize saved Netezza tables, views, and read-only `SELECT`/`WITH` queries.
 
 For quick inspection, the existing **Open in Data File Preview** action remains available from the Explorer for CSV and Excel files. The preview includes **Add to Data Workspace**, which lets you choose a new or existing workspace.
 
