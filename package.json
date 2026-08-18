@@ -2183,7 +2183,7 @@
         },
         {
           "command": "netezza.openFileConnectionPanel",
-          "when": "view == netezza.schema && viewItem == serverInstance && (justybase.schemaIsDataWorkspace || justybase.schemaDatabaseKind == file)",
+          "when": "view == netezza.schema && viewItem == serverInstance && justybase.schemaIsDataWorkspace",
           "group": "0_file@2"
         },
         {
@@ -3786,6 +3786,25 @@
           "maximum": 7200,
           "description": "Query execution timeout in seconds (default: 1 hour)"
         },
+        "justybase.metadata.sessionSweep.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically drop stale metadata catalog sessions that exceed the configured age (DROP SESSION). Only affects sessions created by metadata/prefetch queries; user queries are never touched."
+        },
+        "justybase.metadata.sessionSweep.intervalMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "How often the metadata session sweeper checks for stale sessions."
+        },
+        "justybase.metadata.sessionSweep.maxAgeMinutes": {
+          "type": "number",
+          "default": 20,
+          "minimum": 5,
+          "maximum": 240,
+          "description": "Metadata catalog sessions older than this many minutes are dropped automatically (DROP SESSION). Requires system admin privileges on Netezza."
+        },
         "justybase.sqlParser.fastPathThreshold": {
           "type": "integer",
           "default": 1572864,
@@ -4419,7 +4438,7 @@
     ]
   },
   "dependencies": {
-    "@justybase/netezza-driver": "^2.4.1",
+    "@justybase/netezza-driver": "^2.4.2",
     "@justybase/spreadsheet-tasks": "*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@msgpack/msgpack": "^3.1.3",

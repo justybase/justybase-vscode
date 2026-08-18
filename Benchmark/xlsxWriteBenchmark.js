@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Side experiment — XLSX write benchmark: DuckDB COPY (FORMAT XLSX)
+ * Side experiment — XLSX write benchmark: DuckDB COPY (FORMAT XLSX, HEADER TRUE)
  * vs @justybase/spreadsheet-tasks XlsxUpdater (used by XLSB write-back).
  *
  * This is NOT part of the test suite. Run it ad-hoc:
@@ -11,7 +11,7 @@
  *   node Benchmark/xlsxWriteBenchmark.js --keep           # keep temp workbooks in Benchmark/.xlsx-bench/
  *
  * What it measures per row count:
- *   - DuckDB:    CREATE TABLE AS SELECT * FROM read_csv(...) + COPY TO 'out.xlsx' (FORMAT XLSX)
+ *   - DuckDB:    CREATE TABLE AS SELECT * FROM read_csv(...) + COPY TO 'out.xlsx' (FORMAT XLSX, HEADER TRUE)
  *                (the exact SQL the "Save File Edits" command runs for xlsx files).
  *                Requires the DuckDB 'excel' extension — downloaded once from the
  *                internet on first use; the DuckDB stage is SKIPPED when offline.
@@ -116,7 +116,7 @@ async function benchDuckDb(csvPath, xlsxPath) {
             const xlsxLiteral = xlsxPath.replace(/'/g, "''");
             await connection.run(`CREATE TABLE bench AS SELECT * FROM read_csv('${csvLiteral}')`);
             const start = process.hrtime.bigint();
-            await connection.run(`COPY bench TO '${xlsxLiteral}' (FORMAT XLSX)`);
+            await connection.run(`COPY bench TO '${xlsxLiteral}' (FORMAT XLSX, HEADER TRUE)`);
             const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
             return { elapsedMs, stage: 'copy' };
         } finally {
@@ -203,7 +203,7 @@ async function main() {
     const workDir = KEEP ? BENCH_DIR : fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-xlsx-bench-'));
     const startedAt = new Date();
 
-    console.log(`# XLSX write benchmark — DuckDB COPY (FORMAT XLSX) vs spreadsheet-tasks XlsxUpdater`);
+    console.log(`# XLSX write benchmark — DuckDB COPY (FORMAT XLSX, HEADER TRUE) vs spreadsheet-tasks XlsxUpdater`);
     console.log(`started: ${startedAt.toISOString()}, node ${process.version}`);
     console.log(`rows: ${ROW_COUNTS.join(', ')}`);
     console.log('columns: ' + HEADERS.join(', '));
@@ -246,8 +246,7 @@ async function main() {
             let duckVerification = null;
             try {
                 duckMs = (await benchDuckDb(csvPath, duckPath)).elapsedMs;
-                // DuckDB FORMAT XLSX writes no header row (row 1 = first data row).
-                duckVerification = await verifyWorkbook(duckPath, count, HEADERS.length, null, sample);
+                duckVerification = await verifyWorkbook(duckPath, count + 1, HEADERS.length, HEADERS, sample);
             } catch (error) {
                 output.duckdbExcel = 'skipped';
                 output.duckdbError = String(error.message);
