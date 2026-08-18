@@ -56,6 +56,7 @@ interface MockManager {
     getConnections: jest.Mock;
     getConnection: jest.Mock;
     saveConnection: jest.Mock;
+    testConnection: jest.Mock;
     deleteConnection: jest.Mock;
     setDocumentConnection: jest.Mock;
     onDidChangeConnections: jest.Mock;
@@ -75,6 +76,7 @@ function createMockManager(initialConnections: Array<Record<string, unknown>> = 
             if (index >= 0) connections[index] = details;
             else connections.push(details);
         }),
+        testConnection: jest.fn().mockResolvedValue(undefined),
         deleteConnection: jest.fn(async (name: string) => {
             const index = connections.findIndex(entry => entry.name === name);
             if (index >= 0) connections.splice(index, 1);
@@ -96,6 +98,12 @@ const mockedWindow = vscode.window as unknown as {
 
 const mockedWorkspace = vscode.workspace as unknown as {
     openTextDocument: jest.Mock;
+};
+const mockedCommands = vscode.commands as unknown as {
+    executeCommand: jest.Mock;
+};
+const mockedExtensions = vscode.extensions as unknown as {
+    getExtension: jest.Mock;
 };
 
 async function flush(): Promise<void> {
@@ -130,6 +138,8 @@ describe('FileConnectionPanelView Data Workspace mode', () => {
         mockedWindow.showInputBox ??= jest.fn();
         mockedWindow.showInputBox.mockResolvedValue(undefined);
         mockedWorkspace.openTextDocument.mockResolvedValue(undefined);
+        mockedCommands.executeCommand.mockResolvedValue(undefined);
+        mockedExtensions.getExtension.mockReturnValue(undefined);
     });
 
     function createView(connectionName?: string) {
@@ -238,5 +248,114 @@ describe('FileConnectionPanelView Data Workspace mode', () => {
             content: 'SELECT * FROM "sales" LIMIT 100;\n',
         }));
         expect(manager.setDocumentConnection).toHaveBeenCalledWith(sqlUri.toString(), 'Reporting');
+    });
+
+    it('opens an editable File SQL source from a local Data Workspace source', async () => {
+        manager = createMockManager([workspaceProfile('Reporting', [{
+            id: 'source-12345678',
+            kind: 'file',
+            path: '/data/sales.csv',
+            tableName: 'sales',
+            lastRefresh: { status: 'success' },
+        }])]);
+        mockedWindow.showWarningMessage.mockResolvedValue('Edit source');
+        const fake = createFakePanel();
+        mockedWindow.createWebviewPanel.mockReturnValue(fake.panel);
+        const view = createView('Reporting');
+        await flush();
+
+        const state = stateMessage(fake.posted).state;
+        expect(state.workspaceSources).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sourceFormat: 'csv',
+                canEditSource: true,
+            }),
+        ]));
+
+        await sendMessage(view, { type: 'editWorkspaceSource', sourceId: 'source-12345678' });
+
+        expect(mockedCommands.executeCommand).toHaveBeenCalledWith('justybase.duckdb.editFileSource', {
+            filePath: '/data/sales.csv',
+            connectionName: 'File SQL: sales.csv',
+        });
+    });
+
+    it('does not expose source editing for a Parquet Data Workspace source', async () => {
+        manager = createMockManager([workspaceProfile('Reporting', [{
+            id: 'source-12345678',
+            kind: 'file',
+            path: '/data/sales.parquet',
+            tableName: 'sales',
+            lastRefresh: { status: 'success' },
+        }])]);
+        const fake = createFakePanel();
+        mockedWindow.createWebviewPanel.mockReturnValue(fake.panel);
+        const view = createView('Reporting');
+        await flush();
+
+        const state = stateMessage(fake.posted).state;
+        expect(state.workspaceSources).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sourceFormat: 'parquet',
+                canEditSource: false,
+            }),
+        ]));
+        await sendMessage(view, { type: 'editWorkspaceSource', sourceId: 'source-12345678' });
+        expect(mockedCommands.executeCommand).not.toHaveBeenCalledWith('justybase.duckdb.editFileSource', expect.anything());
+    });
+
+    it('reports that the Access extension is required before editing an Access source', async () => {
+        manager = createMockManager([workspaceProfile('Reporting', [{
+            id: 'source-12345678',
+            kind: 'file',
+            path: '/data/sample.accdb',
+            tableName: 'sample_database',
+            lastRefresh: { status: 'success' },
+        }])]);
+        mockedWindow.showWarningMessage.mockResolvedValue('Edit source');
+        const fake = createFakePanel();
+        mockedWindow.createWebviewPanel.mockReturnValue(fake.panel);
+        const view = createView('Reporting');
+        await flush();
+
+        await sendMessage(view, { type: 'editWorkspaceSource', sourceId: 'source-12345678' });
+
+        expect(manager.saveConnection).not.toHaveBeenCalled();
+        expect(fake.posted).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'error',
+                message: expect.stringMatching(/requires.*Microsoft Access/i),
+            }),
+        ]));
+    });
+
+    it('opens Access editing with readOnly disabled when the Access extension is installed', async () => {
+        manager = createMockManager([workspaceProfile('Reporting', [{
+            id: 'source-12345678',
+            kind: 'file',
+            path: '/data/sample.accdb',
+            tableName: 'sample_database',
+            lastRefresh: { status: 'success' },
+        }])]);
+        mockedExtensions.getExtension.mockReturnValue({ activate: jest.fn().mockResolvedValue(undefined) });
+        mockedWindow.showWarningMessage.mockResolvedValue('Edit source');
+        const sqlUri = vscode.Uri.file('/tmp/access-edit.sql');
+        const document = { uri: sqlUri, languageId: 'sql' };
+        mockedWorkspace.openTextDocument.mockResolvedValue(document);
+        mockedWindow.showTextDocument.mockResolvedValue({ document });
+        const fake = createFakePanel();
+        mockedWindow.createWebviewPanel.mockReturnValue(fake.panel);
+        const view = createView('Reporting');
+        await flush();
+
+        await sendMessage(view, { type: 'editWorkspaceSource', sourceId: 'source-12345678' });
+
+        expect(manager.saveConnection).toHaveBeenCalledWith(expect.objectContaining({
+            name: 'File SQL: sample.accdb',
+            database: '/data/sample.accdb',
+            dbType: 'access',
+            options: expect.objectContaining({ readOnly: false }),
+        }));
+        expect(manager.setDocumentConnection).toHaveBeenCalledWith(sqlUri.toString(), 'File SQL: sample.accdb');
     });
 });

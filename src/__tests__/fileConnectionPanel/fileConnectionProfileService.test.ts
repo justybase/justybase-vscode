@@ -14,6 +14,7 @@ import {
     isFileWorkspaceProfile,
     listXlsxSheetNames,
     parseFileWorkspace,
+    resolveFileSourceConnectionName,
     serializeFileWorkspace,
     toFileInfo,
 } from '../../services/fileConnectionProfileService';
@@ -53,6 +54,41 @@ describe('detectFileDataFormat', () => {
     it('returns undefined for unsupported formats', () => {
         expect(detectFileDataFormat('file.txt')).toBeUndefined();
         expect(detectFileDataFormat('noext')).toBeUndefined();
+    });
+});
+
+describe('resolveFileSourceConnectionName', () => {
+    it('reuses a profile pointing at the same single file and dialect', () => {
+        expect(resolveFileSourceConnectionName([
+            {
+                name: 'File SQL: sales.csv',
+                database: '/data/./sales.csv',
+                dbType: 'file',
+                options: { editable: false },
+            },
+        ], '/data/sales.csv', 'file')).toBe('File SQL: sales.csv');
+    });
+
+    it('does not repoint a profile with the same name to another file', () => {
+        expect(resolveFileSourceConnectionName([
+            {
+                name: 'File SQL: sales.csv',
+                database: '/other/sales.csv',
+                dbType: 'file',
+                options: {},
+            },
+        ], '/data/sales.csv', 'file')).toBe('File SQL: sales.csv (2)');
+    });
+
+    it('does not reuse a multi-file File SQL workspace profile', () => {
+        expect(resolveFileSourceConnectionName([
+            {
+                name: 'File SQL: sales.csv',
+                database: '/data/sales.csv',
+                dbType: 'file',
+                options: { fileWorkspace: serializeFileWorkspace(['/data/sales.csv', '/data/regions.csv']) },
+            },
+        ], '/data/sales.csv', 'file')).toBe('File SQL: sales.csv (2)');
     });
 });
 

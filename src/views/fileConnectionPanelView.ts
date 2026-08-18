@@ -17,8 +17,14 @@ import {
     parseDataWorkspaceProfileExport,
     serializeDataWorkspaceProfileExport,
 } from '../services/dataWorkspaceService';
+import {
+    detectFileDataFormat,
+    resolveFileSourceConnectionName,
+} from '../services/fileConnectionProfileService';
 
 const DATA_FILE_FILTERS = { 'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro', 'mdb', 'accdb'] };
+const ACCESS_EXTENSION_ID = 'krzysztof-d.justybaselite-access';
+const EDITABLE_SOURCE_FORMATS = new Set(['xlsx', 'csv', 'tsv', 'access']);
 
 function getNonce(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -176,6 +182,9 @@ export class FileConnectionPanelView {
                 workspaceSources: dataWorkspace.sources.map(source => ({
                     id: source.id,
                     kind: source.kind,
+                    ...(source.kind === 'file' ? { sourceFormat: detectFileDataFormat(source.path) } : {}),
+                    canEditSource: source.kind === 'file'
+                        && EDITABLE_SOURCE_FORMATS.has(detectFileDataFormat(source.path) ?? ''),
                     label: source.kind === 'file'
                         ? source.path
                         : source.sourceKind === 'query'
@@ -230,6 +239,9 @@ export class FileConnectionPanelView {
                 return;
             case 'addNetezzaSource':
                 await this.addNetezzaSource();
+                return;
+            case 'editWorkspaceSource':
+                await this.editWorkspaceSource(message.sourceId);
                 return;
             case 'refreshWorkspaceSource':
                 await this.refreshWorkspaceSource(message.sourceId);
@@ -369,6 +381,114 @@ export class FileConnectionPanelView {
             this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
             this.postState();
         }
+    }
+
+    private async editWorkspaceSource(sourceId: string): Promise<void> {
+        if (!this.selectedConnectionName) return;
+        const details = await this.getSelectedDetails();
+        const config = parseDataWorkspace(details?.options?.dataWorkspace);
+        const source = config?.sources.find(candidate => candidate.id === sourceId);
+        if (!source || source.kind !== 'file') {
+            return;
+        }
+
+        const format = detectFileDataFormat(source.path);
+        if (!format || !EDITABLE_SOURCE_FORMATS.has(format)) {
+            this.post({
+                type: 'error',
+                message: 'This source format is read-only in the Data Workspace editor. Edit XLSX, CSV/TSV or Access files directly.',
+            });
+            return;
+        }
+
+        const confirmation = await vscode.window.showWarningMessage(
+            `Edit '${path.basename(source.path)}'? Changes will be written to the original file.`,
+            { modal: true },
+            'Edit source',
+        );
+        if (confirmation !== 'Edit source') {
+            return;
+        }
+
+        try {
+            const connections = await this.connectionManager.getConnections();
+            const targetKind = format === 'access' ? 'access' : 'file';
+            const connectionName = resolveFileSourceConnectionName(connections, source.path, targetKind);
+            if (format === 'access') {
+                await this.openAccessSourceForEditing(source.path, connectionName);
+            } else {
+                await vscode.commands.executeCommand('justybase.duckdb.editFileSource', {
+                    filePath: source.path,
+                    connectionName,
+                });
+            }
+            this.postNotice(`Opened '${path.basename(source.path)}' for editing. Refresh the source after saving the file.`);
+        } catch (error) {
+            this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async openAccessSourceForEditing(filePath: string, connectionName: string): Promise<void> {
+        const accessExtension = vscode.extensions.getExtension(ACCESS_EXTENSION_ID);
+        if (!accessExtension) {
+            throw new Error(
+                'Editing Access files requires the optional JustyBase SQL Editor (Microsoft Access) extension.',
+            );
+        }
+        await accessExtension.activate();
+
+        const existing = await this.connectionManager.getConnection(connectionName);
+        const profile: ConnectionDetails = {
+            name: connectionName,
+            host: '',
+            database: filePath,
+            user: '',
+            password: existing?.password,
+            dbType: 'access',
+            options: { ...(existing?.options ?? {}), readOnly: false },
+        };
+
+        if (!profile.password) {
+            let passwordRequired = false;
+            try {
+                await this.connectionManager.testConnection(profile);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (!/password|encrypted|protected|decrypt/i.test(message)) {
+                    throw error;
+                }
+                passwordRequired = true;
+            }
+            if (passwordRequired) {
+                const password = await vscode.window.showInputBox({
+                    prompt: `Password for Access database ${path.basename(filePath)} (optional)`,
+                    password: true,
+                    ignoreFocusOut: true,
+                });
+                if (password === undefined) {
+                    throw new Error('Access database password prompt was cancelled.');
+                }
+                profile.password = password || undefined;
+            }
+        }
+
+        await this.connectionManager.saveConnection(profile);
+        try {
+            await vscode.commands.executeCommand('netezza.refreshSchema', connectionName);
+        } catch {
+            // The schema command may not be registered during deferred activation.
+        }
+        const document = await vscode.workspace.openTextDocument({
+            language: 'sql',
+            content: [
+                `-- ${path.basename(filePath)} — Microsoft Access`,
+                '-- INSERT/UPDATE/DELETE and supported DDL write to the original Access file.',
+                '-- Refresh the related Data Workspace source after saving changes.',
+                '',
+            ].join('\n'),
+        });
+        const editor = await vscode.window.showTextDocument(document, { preview: false });
+        await this.connectionManager.setDocumentConnection(editor.document.uri.toString(), connectionName);
     }
 
     private async pickNetezzaObject(connectionName: string, sourceKind: 'table' | 'view'): Promise<string | undefined> {

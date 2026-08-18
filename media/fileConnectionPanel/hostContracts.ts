@@ -4,11 +4,15 @@
  */
 export type FileConnectionPanelMode = 'dataWorkspace';
 
+export type FileConnectionPanelSourceFormat = 'xlsx' | 'xlsb' | 'csv' | 'tsv' | 'parquet' | 'avro' | 'access';
+
 export interface FileConnectionPanelWorkspaceSource {
     id: string;
     kind: 'file' | 'external';
     label: string;
     tableName: string;
+    sourceFormat?: FileConnectionPanelSourceFormat;
+    canEditSource: boolean;
     rowCount?: number;
     lastRefresh?: string;
     refreshStatus: 'success' | 'error' | 'cancelled' | 'never';
@@ -29,6 +33,7 @@ export type FileConnectionPanelWebviewToHostMessage =
     | { type: 'createDataWorkspace' }
     | { type: 'addWorkspaceFile' }
     | { type: 'addNetezzaSource' }
+    | { type: 'editWorkspaceSource'; sourceId: string }
     | { type: 'refreshWorkspaceSource'; sourceId: string }
     | { type: 'removeWorkspaceSource'; sourceId: string }
     | { type: 'queryWorkspace' }

@@ -1,11 +1,15 @@
 /** The manager intentionally exposes one user-facing workspace variant. */
 export type FileConnectionPanelMode = 'dataWorkspace';
 
+export type FileConnectionPanelSourceFormat = 'xlsx' | 'xlsb' | 'csv' | 'tsv' | 'parquet' | 'avro' | 'access';
+
 export interface FileConnectionPanelWorkspaceSource {
     id: string;
     kind: 'file' | 'external';
     label: string;
     tableName: string;
+    sourceFormat?: FileConnectionPanelSourceFormat;
+    canEditSource: boolean;
     rowCount?: number;
     lastRefresh?: string;
     refreshStatus: 'success' | 'error' | 'cancelled' | 'never';
@@ -28,6 +32,7 @@ export type FileConnectionPanelWebviewToHostMessage =
     | { type: 'createDataWorkspace' }
     | { type: 'addWorkspaceFile' }
     | { type: 'addNetezzaSource' }
+    | { type: 'editWorkspaceSource'; sourceId: string }
     | { type: 'refreshWorkspaceSource'; sourceId: string }
     | { type: 'removeWorkspaceSource'; sourceId: string }
     | { type: 'queryWorkspace' }
@@ -47,6 +52,7 @@ export const FILE_CONNECTION_PANEL_WEBVIEW_TO_HOST_TYPES = [
     'createDataWorkspace',
     'addWorkspaceFile',
     'addNetezzaSource',
+    'editWorkspaceSource',
     'refreshWorkspaceSource',
     'removeWorkspaceSource',
     'queryWorkspace',

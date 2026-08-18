@@ -43,6 +43,7 @@ function formatIcon(format: string, size = 40): string {
 function smallIcon(name: string): string {
     const icons: Record<string, string> = {
         trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/>',
+        edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4zM13.5 6.5l4 4"/>',
         upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
         download: '<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>',
         refresh: '<path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/>',
@@ -78,11 +79,14 @@ function renderWorkspaceSources(state: FileConnectionPanelState): string {
         const count = source.rowCount === undefined ? '' : ` &middot; ${source.rowCount.toLocaleString()} rows`;
         const message = source.message ? `<div class="muted small-note">${escapeHtml(source.message)}</div>` : '';
         const iconFormat = source.kind === 'file' ? 'csv' : 'external';
+        const edit = source.canEditSource
+            ? `<button data-workspace-action="edit" data-source-id="${escapeHtml(source.id)}" class="icon-btn" title="Edit source file">${smallIcon('edit')}</button>`
+            : '';
         return `<li class="file-card">
             <div class="file-icon">${formatIcon(iconFormat)}</div>
             <div class="file-info"><div class="file-name-row"><span class="file-name">${escapeHtml(source.tableName)}</span><span class="file-format-badge">${escapeHtml(source.kind)}</span></div>
             <div class="file-meta">${escapeHtml(source.label)} &middot; ${escapeHtml(source.refreshStatus)}${count}${refresh}</div>${message}</div>
-            <div class="file-actions"><button data-workspace-action="refresh" data-source-id="${escapeHtml(source.id)}" class="icon-btn" title="Refresh source">${smallIcon('refresh')}</button><button data-workspace-action="remove" data-source-id="${escapeHtml(source.id)}" class="icon-btn danger" title="Remove source and local table">${smallIcon('trash')}</button></div>
+            <div class="file-actions">${edit}<button data-workspace-action="refresh" data-source-id="${escapeHtml(source.id)}" class="icon-btn" title="Refresh source">${smallIcon('refresh')}</button><button data-workspace-action="remove" data-source-id="${escapeHtml(source.id)}" class="icon-btn danger" title="Remove source and local table">${smallIcon('trash')}</button></div>
         </li>`;
     }).join('');
     const empty = '<p class="muted">Add a local file or a saved Netezza table, view, or read-only SELECT query. Each source becomes a real DuckDB table.</p>';
@@ -106,7 +110,7 @@ function render(): void {
 
     app.innerHTML = `<main class="file-connection-root">
         <header class="panel-header">
-            <div class="panel-title"><div class="panel-icon">${formatIcon('external', 34)}</div><div><h1>Data Workspace Manager</h1><p class="muted">Persistent DuckDB: local files and materialized Netezza sources</p></div></div>
+            <div class="panel-title"><div class="panel-icon">${formatIcon('external', 34)}</div><div><h1>Data Workspace Manager</h1><p class="muted">Persistent DuckDB: local files (including Access) and materialized Netezza sources</p></div></div>
             <div class="panel-toolbar">
                 <button id="new-data-workspace" class="tool-btn" title="Create a persistent local DuckDB Data Workspace">${smallIcon('add')} New Data Workspace</button>
                 <button id="export-connections" class="tool-btn"${noConnection ? ' disabled' : ''} title="Export the selected Data Workspace definition">${smallIcon('download')} Export</button>
@@ -135,7 +139,9 @@ document.addEventListener('click', event => {
 
     const workspaceAction = target.closest<HTMLElement>('[data-workspace-action]');
     if (workspaceAction?.dataset.sourceId) {
-        if (workspaceAction.dataset.workspaceAction === 'refresh') {
+        if (workspaceAction.dataset.workspaceAction === 'edit') {
+            sendToHost({ type: 'editWorkspaceSource', sourceId: workspaceAction.dataset.sourceId });
+        } else if (workspaceAction.dataset.workspaceAction === 'refresh') {
             sendToHost({ type: 'refreshWorkspaceSource', sourceId: workspaceAction.dataset.sourceId });
         } else if (workspaceAction.dataset.workspaceAction === 'remove') {
             sendToHost({ type: 'removeWorkspaceSource', sourceId: workspaceAction.dataset.sourceId });
