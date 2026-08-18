@@ -15,6 +15,8 @@ export interface OpenFileSqlSessionOptions {
     content?: string;
     /** Save the connection profile under this name (defaults to a generated name). */
     connectionName?: string;
+    /** Update an existing single-file profile when it points at the same source. */
+    updateExisting?: boolean;
 }
 
 export interface OpenFileSqlWorkspaceSessionOptions {
@@ -211,7 +213,16 @@ async function openFileSqlSession(
         && isWorkspaceProfile
         && typeof existing.options?.fileWorkspace === 'string',
     );
-    if (!existing || shouldRefreshExistingWorkspace) {
+    const shouldUpdateExistingFile = Boolean(
+        existing
+        && options.updateExisting
+        && details.dbType === 'file'
+        && existing.dbType === 'file'
+        && path.resolve(existing.database) === path.resolve(details.database)
+        && !existing.options?.fileWorkspace
+        && !details.options?.fileWorkspace,
+    );
+    if (!existing || shouldRefreshExistingWorkspace || shouldUpdateExistingFile) {
         await connectionManager.saveConnection({ ...details, name: connectionName });
         if (details.dbType === 'file' && typeof connectionManager.refreshFileConnection === 'function') {
             await connectionManager.refreshFileConnection(connectionName);

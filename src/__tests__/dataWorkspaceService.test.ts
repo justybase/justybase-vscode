@@ -233,6 +233,78 @@ describe('Data Workspace materialization', () => {
         expect(manager.refreshDataWorkspaceConnection).toHaveBeenCalledWith('Workspace');
     });
 
+    it('materializes an Access file source as the selected local table and refreshes Schema', async () => {
+        const accessSourceId = 'access-source-1234';
+        const workspace = {
+            ...createWorkspaceDetails(),
+            options: {
+                mode: 'file',
+                [DATA_WORKSPACE_OPTION]: JSON.stringify({
+                    version: DATA_WORKSPACE_VERSION,
+                    workspaceId,
+                    sources: [{
+                        id: accessSourceId,
+                        kind: 'file' as const,
+                        path: '/data/sample_database.accdb',
+                        tableName: 'sample_database',
+                    }],
+                }),
+            },
+        };
+        const sourceConnection = { close: jest.fn().mockResolvedValue(undefined) };
+        const localSql: string[] = [];
+        const localConnection = {
+            close: jest.fn().mockResolvedValue(undefined),
+            createCommand: jest.fn((sql: string) => ({ execute: jest.fn(async () => { localSql.push(sql); }) })),
+        };
+        const manager = {
+            getConnection: jest.fn().mockResolvedValue(workspace),
+            getConnections: jest.fn().mockResolvedValue([workspace]),
+            saveConnection: jest.fn().mockResolvedValue(undefined),
+            refreshDataWorkspaceConnection: jest.fn().mockResolvedValue(undefined),
+        };
+        const stream = jest.spyOn(streamingManager, 'executeWithStreaming')
+            .mockResolvedValueOnce({ totalRows: 3, limitReached: false, status: 'success' })
+            .mockImplementationOnce(async (_connection, _sql, _limit, _chunkSize, _timeout, _uri, onChunk) => {
+                await onChunk({
+                    columns: [{ name: 'id', type: 'INTEGER' }, { name: 'name', type: 'VARCHAR' }],
+                    rows: [[1, 'Anna'], [2, 'Jan'], [3, 'Ewa']],
+                    isFirstChunk: true,
+                    isLastChunk: true,
+                    totalRowsSoFar: 3,
+                    limitReached: false,
+                });
+                return { totalRows: 3, limitReached: false, status: 'success' };
+            });
+        const service = new DataWorkspaceService(
+            { globalStorageUri: vscode.Uri.file(storagePath) },
+            manager as never,
+            {
+                createConnection: jest.fn(async (details: { dbType?: string }) =>
+                    details.dbType === 'file' ? sourceConnection : localConnection) as never,
+                createId: () => 'access-stage-1234',
+                now: () => new Date('2026-08-14T12:00:00.000Z'),
+                withProgress: immediateProgress as never,
+            },
+        );
+
+        await expect(service.refreshSource('Workspace', accessSourceId)).resolves.toMatchObject({
+            status: 'success',
+            rowCount: 3,
+        });
+
+        expect(stream.mock.calls[0]?.[1]).toContain('SELECT * FROM "sample_database"');
+        expect(stream.mock.calls[1]?.[1]).toBe('SELECT * FROM "sample_database"');
+        expect(localSql).toEqual(expect.arrayContaining([
+            expect.stringContaining('CREATE OR REPLACE TABLE "sample_database"'),
+        ]));
+        expect(manager.refreshDataWorkspaceConnection).toHaveBeenCalledWith('Workspace');
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'netezza.refreshSchema',
+            'Workspace',
+        );
+    });
+
     it('coalesces simultaneous refreshes of the same source', async () => {
         const workspace = createWorkspaceDetails();
         const sourceConnection = { close: jest.fn().mockResolvedValue(undefined) };
