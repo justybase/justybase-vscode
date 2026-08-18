@@ -1,4 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect rx="8" width="64" height="64" fill="#800080"/>
-  <text x="50%" y="50%" dominant-baseline="middle" font-family="Segoe UI, Roboto, Arial" font-size="28" fill="#fff" font-weight="700" text-anchor="middle">MS</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Microsoft SQL Server database</title>
+  <defs>
+    <linearGradient id="mssqlGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9d4ca6" />
+      <stop offset="100%" stop-color="#5c2d5f" />
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="54" height="54" rx="13" fill="url(#mssqlGradient)" />
+  <!-- Stylized 'S' and database design -->
+  <!-- Curved S shape -->
+  <path d="M 42 20 Q 40 22 42 25 Q 44 28 42 30 Q 40 32 42 35 Q 44 38 42 40" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity="0.9" />
+  <!-- Database cylinder -->
+  <ellipse cx="26" cy="28" rx="8" ry="4" fill="#fff" opacity="0.85" />
+  <path d="M 18 28 L 18 38 A 8 4 0 0 0 26 42 A 8 4 0 0 0 34 38 L 34 28" fill="#fff" opacity="0.75" />
+  <ellipse cx="26" cy="42" rx="8" ry="4" fill="#fff" opacity="0.6" />
+  <!-- Accent lines -->
+  <line x1="18" y1="32" x2="34" y2="32" stroke="#5c2d5f" stroke-width="0.8" opacity="0.4" />
 </svg>

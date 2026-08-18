@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="12" fill="#1f2430"/>
-  <ellipse cx="32" cy="19" rx="18" ry="6" fill="#26c281"/>
-  <path d="M14 19v20c0 4 8 8 18 8s18-4 18-8V19" fill="#1f8a5b"/>
-  <ellipse cx="32" cy="39" rx="18" ry="6" fill="#22a36d"/>
-  <path d="M23 24l6 17 6-17h5l-9 24h-4l-9-24h5z" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Vertica</title>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#17212b"/>
+  <path d="M14 16h8l10 26 10-26h8L36 51h-8L14 16Z" fill="#26c281"/>
+  <path d="M19 22h6l7 18 7-18h6l-10 25h-6L19 22Z" fill="#fff"/>
+  <circle cx="32" cy="52" r="3" fill="#26c281"/>
 </svg>

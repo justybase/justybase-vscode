@@ -1,4 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect rx="8" width="64" height="64" fill="#F80000"/>
-  <text x="50%" y="50%" dominant-baseline="middle" font-family="Segoe UI, Roboto, Arial" font-size="28" fill="#fff" font-weight="700" text-anchor="middle">OR</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Oracle database</title>
+  <defs>
+    <linearGradient id="oracleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f84000" />
+      <stop offset="100%" stop-color="#c41800" />
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="54" height="54" rx="13" fill="url(#oracleGradient)" />
+  <!-- Database cylinder shape -->
+  <ellipse cx="32" cy="22" rx="14" ry="5" fill="#fff" opacity="0.95" />
+  <path d="M 18 22 L 18 38 A 14 5 0 0 0 32 43 A 14 5 0 0 0 46 38 L 46 22" fill="#fff" opacity="0.85" />
+  <ellipse cx="32" cy="43" rx="14" ry="5" fill="#fff" opacity="0.7" />
+  <!-- Horizontal lines suggesting data layers -->
+  <g stroke="#c41800" stroke-width="1.2" opacity="0.6">
+    <line x1="20" y1="27" x2="44" y2="27" />
+    <line x1="20" y1="32" x2="44" y2="32" />
+    <line x1="20" y1="37" x2="44" y2="37" />
+  </g>
 </svg>
