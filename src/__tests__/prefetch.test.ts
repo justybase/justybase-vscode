@@ -6,7 +6,10 @@
 import { CachePrefetcher, QueryRunnerRawFn, MetadataPrefetchProgress } from '../metadata/prefetch';
 import type { MetadataPrefetchTarget } from '../metadata/cache/MetadataPrefetchTarget';
 import type { PrefetchLease } from '../metadata/diskStorage/metadataDiskStorage';
-import { resetMetadataQueryLimiterForTests } from '../metadata/metadataQueryLimiter';
+import {
+  getMetadataQueryConcurrencyLimit,
+  resetMetadataQueryLimiterForTests,
+} from '../metadata/metadataQueryLimiter';
 import { Logger } from '../utils/logger';
 // Removed unused import
 
@@ -400,8 +403,8 @@ describe('CachePrefetcher', () => {
       const prefetchPromise = prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
 
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(maxInFlight).toBe(5);
-      expect(mockRunQuery).toHaveBeenCalledTimes(5);
+      expect(maxInFlight).toBe(getMetadataQueryConcurrencyLimit());
+      expect(mockRunQuery).toHaveBeenCalledTimes(getMetadataQueryConcurrencyLimit());
 
       while (release.length > 0) {
         release.shift()?.();
@@ -410,7 +413,7 @@ describe('CachePrefetcher', () => {
 
       await prefetchPromise;
       expect(mockRunQuery).toHaveBeenCalledTimes(dbCount);
-      expect(maxInFlight).toBe(5);
+      expect(maxInFlight).toBe(getMetadataQueryConcurrencyLimit());
       expect(inFlight).toBe(0);
     });
   });
@@ -685,7 +688,9 @@ describe('CachePrefetcher', () => {
       await new Promise(process.nextTick);
       await new Promise(process.nextTick);
 
-      expect(mockRunQuery.mock.calls.length).toBeGreaterThanOrEqual(5);
+      expect(mockRunQuery.mock.calls.length).toBeGreaterThanOrEqual(
+        getMetadataQueryConcurrencyLimit(),
+      );
       expect(mockCache.setDatabases).toHaveBeenCalled();
       expect(mockCache.setSchemas).toHaveBeenCalled();
     });
