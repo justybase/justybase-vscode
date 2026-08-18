@@ -131,6 +131,7 @@ import {
 } from '../core/singleQueryExecutor';
 import { isConnectionBrokenError } from '../core/queryRunnerUtils';
 import { streamingManager } from '../core/queryCancellation';
+import { metadataSessionSweeper } from '../metadata/metadataSessionSweeper';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -188,6 +189,7 @@ describe('singleQueryExecutor', () => {
         mockConn = createMockConnection();
         mockConnManager = createMockConnManager();
         mockContext = createMockContext();
+        metadataSessionSweeper.dispose();
 
         mockGetConnectionForDocument.mockResolvedValue({
             connection: mockConn,
@@ -236,6 +238,40 @@ describe('singleQueryExecutor', () => {
 
             expect(result.columns).toEqual([{ name: 'id' }]);
             expect(result.data).toEqual([[1]]);
+        });
+
+        it('registers metadata sessions (no documentUri, isUserQuery=false) with the sweeper', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [], rows: [], limitReached: false }],
+                error: null,
+                recordsAffected: undefined,
+            });
+
+            await runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 1',
+                connectionManager: mockConnManager,
+                isUserQuery: false,
+            });
+
+            expect(metadataSessionSweeper.hasSession('testConn', '99999')).toBe(true);
+        });
+
+        it('does not register user sessions (documentUri or isUserQuery default)', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [], rows: [], limitReached: false }],
+                error: null,
+                recordsAffected: undefined,
+            });
+
+            await runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 1',
+                connectionManager: mockConnManager,
+                documentUri: 'file:///test.sql',
+            });
+
+            expect(metadataSessionSweeper.getRegisteredSessionCount('testConn')).toBe(0);
         });
 
         it('passes include file context to the single-query variable scan', async () => {

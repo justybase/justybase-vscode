@@ -144,4 +144,47 @@ describe('createJustyBaseLiteApi', () => {
         )).rejects.toThrow('not a File SQL profile');
         expect(saveConnection).not.toHaveBeenCalled();
     });
+
+    it('updates and reconnects an existing single-file profile when requested', async () => {
+        const saveConnection = jest.fn().mockResolvedValue(undefined);
+        const refreshFileConnection = jest.fn().mockResolvedValue(undefined);
+        const connectionManager = {
+            getConnections: jest.fn().mockResolvedValue([
+                {
+                    name: 'File SQL: sales.csv',
+                    host: 'local',
+                    database: '/data/sales.csv',
+                    user: 'file',
+                    dbType: 'file',
+                    options: { editable: false },
+                },
+            ]),
+            saveConnection,
+            refreshFileConnection,
+            setDocumentConnection: jest.fn().mockResolvedValue(undefined),
+        } as unknown as ConnectionManager;
+        const api = createJustyBaseLiteApi({} as vscode.ExtensionContext, connectionManager);
+        const document = { uri: vscode.Uri.file('/tmp/file-sql-edit.sql') };
+        (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue(document);
+        (vscode.window.showTextDocument as jest.Mock).mockResolvedValue({ document });
+
+        await api.openFileSqlSession(
+            {
+                name: 'File SQL: sales.csv',
+                host: 'local',
+                database: '/data/sales.csv',
+                user: 'file',
+                dbType: 'file',
+                options: { editable: true },
+            },
+            { connectionName: 'File SQL: sales.csv', updateExisting: true },
+        );
+
+        expect(saveConnection).toHaveBeenCalledWith(expect.objectContaining({
+            name: 'File SQL: sales.csv',
+            database: '/data/sales.csv',
+            options: { editable: true },
+        }));
+        expect(refreshFileConnection).toHaveBeenCalledWith('File SQL: sales.csv');
+    });
 });

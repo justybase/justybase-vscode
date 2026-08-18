@@ -34,6 +34,7 @@ import {
   isConnectionRecoveryError,
   waitForPersistentConnectionReady,
 } from "./connectionReadiness";
+import { metadataSessionSweeper } from "../metadata/metadataSessionSweeper";
 
 // ---------------------------------------------------------------------------
 // Connection resolution
@@ -67,6 +68,8 @@ export interface RunQueryRawOptions {
   isUserQuery?: boolean;
   /** Overrides global query.executionTimeout for this call only (seconds). */
   timeoutSeconds?: number;
+  /** Called once with the server-side session id when it can be captured. */
+  onSessionId?: (sessionId: string) => void;
 }
 
 export function isRunQueryRawOptions(
@@ -128,6 +131,7 @@ export async function runQueryRaw(
     maxRows,
     isUserQuery = true,
     timeoutSeconds,
+    onSessionId,
   } = options;
 
   const connManager = connectionManager || new ConnectionManager(context);
@@ -169,6 +173,13 @@ export async function runQueryRaw(
     throw new Error(errorMessage, { cause: resolveError });
   }
 
+  const effectiveOnSessionId =
+    onSessionId ??
+    (!documentUri && !isUserQuery
+      ? (sessionId: string) =>
+          metadataSessionSweeper.register(resolvedConnectionName, sessionId)
+      : undefined);
+
   if (queryToExecute.trim().length === 0) {
     const message = "No SQL to execute after processing variable directives.";
     logOutput(logger, message);
@@ -194,6 +205,8 @@ export async function runQueryRaw(
       logger,
       promptValues,
       timeoutSeconds,
+      false,
+      effectiveOnSessionId,
     );
 
     const durationMs = Date.now() - queryStartTime;
@@ -236,6 +249,8 @@ export async function runQueryRaw(
           logger,
           promptValues,
           timeoutSeconds,
+          false,
+          effectiveOnSessionId,
         );
 
         const retryDurationMs = Date.now() - queryStartTime;
@@ -287,6 +302,8 @@ export async function runQueryRaw(
           logger,
           promptValues,
           timeoutSeconds,
+          false,
+          effectiveOnSessionId,
         );
 
         const retryDurationMs = Date.now() - queryStartTime;
@@ -380,6 +397,7 @@ export async function executeRawQuery(
   macroValues: Record<string, string> = {},
   timeoutSeconds?: number,
   isRetryAttempt = false,
+  onSessionId?: (sessionId: string) => void,
 ): Promise<QueryResult> {
   try {
     return await executeRawQueryOnce(
@@ -392,6 +410,7 @@ export async function executeRawQuery(
       logger,
       macroValues,
       timeoutSeconds,
+      onSessionId,
     );
   } catch (error: unknown) {
     if (
@@ -417,6 +436,7 @@ export async function executeRawQuery(
           macroValues,
           timeoutSeconds,
           true,
+          onSessionId,
         );
       } catch (retryError: unknown) {
         const retryErrObj = retryError as { message?: string };
@@ -439,6 +459,7 @@ async function executeRawQueryOnce(
   logger: OutputLogger,
   macroValues: Record<string, string> = {},
   timeoutSeconds?: number,
+  onSessionId?: (sessionId: string) => void,
 ): Promise<QueryResult> {
   const { connection, shouldCloseConnection } = await getConnectionForDocument(
     connManager,
@@ -475,6 +496,10 @@ async function executeRawQueryOnce(
     await sidReader.close();
   } catch {
     // Ignore if we can't get SID
+  }
+
+  if (sessionId) {
+    onSessionId?.(sessionId);
   }
 
   try {

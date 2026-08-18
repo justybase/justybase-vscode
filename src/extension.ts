@@ -65,6 +65,7 @@ import { registerMcpFeatures } from './activation/mcpRegistration';
 import { createPerformanceTimer, formatPerformanceEvent } from './services/perf/performanceEvents';
 import { SQL_AUTHORING_LANGUAGE_IDS } from './utils/sqlLanguage';
 import { TableDdlSynchronizer } from './metadata/tableDdlSynchronizer';
+import { metadataSessionSweeper } from './metadata/metadataSessionSweeper';
 
 let isExtensionShuttingDown = false;
 let deferredFeatureScheduler: DeferredFeatureScheduler | undefined;
@@ -195,6 +196,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
 
     const metadataPrefetchCoordinator = new MetadataPrefetchCoordinator(context, services, logger);
     metadataPrefetchCoordinator.register(context, metadataCacheInit);
+
+    metadataSessionSweeper.start(connectionManager);
+    context.subscriptions.push({
+        dispose: () => metadataSessionSweeper.dispose(),
+    });
 
     updateActiveConnectionStatusBar();
     updateActiveDatabaseStatusBar();

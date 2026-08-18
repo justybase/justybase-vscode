@@ -96,6 +96,10 @@ export const commands = {
   executeCommand: jest.fn(),
 };
 
+export const extensions = {
+  getExtension: jest.fn(),
+};
+
 export const ExtensionContext = {};
 
 export enum TreeItemCollapsibleState {
