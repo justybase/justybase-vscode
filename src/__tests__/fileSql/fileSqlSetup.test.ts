@@ -333,10 +333,9 @@ describe('fileSqlSetup', () => {
             expect(built.sql).toContain(`DELIMITER '${'\t'}'`);
         });
 
-        it('builds COPY TO for parquet and xlsx', () => {
+        it('builds COPY TO for parquet and keeps XLSX write-back client-side', () => {
             expect(buildSaveEditsSql('/data/sales.parquet', 'parquet').sql).toContain('(FORMAT PARQUET)');
-            expect(buildSaveEditsSql('/data/sales.xlsx', 'xlsx').sql).toContain('(FORMAT XLSX)');
-            expect(buildSaveEditsSql('/data/sales.xlsx', 'xlsx').writesToNewFile).toBe(false);
+            expect(() => buildSaveEditsSql('/data/sales.xlsx', 'xlsx')).toThrow(/XlsxUpdater/);
         });
 
         it('writes avro edits to a new parquet file', () => {

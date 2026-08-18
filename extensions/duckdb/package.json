@@ -46,7 +46,8 @@
         "onCommand:justybase.duckdb.queryFiles",
         "onCommand:justybase.duckdb.addFiles",
         "onCommand:justybase.duckdb.openWorkspace",
-        "onCommand:justybase.duckdb.saveFileEdits"
+        "onCommand:justybase.duckdb.saveFileEdits",
+        "onCommand:justybase.duckdb.editFileSource"
     ],
     "contributes": {
         "commands": [
@@ -79,6 +80,12 @@
                 "title": "Save File Edits (DuckDB)",
                 "icon": "$(save)",
                 "category": "JustyBase"
+            },
+            {
+                "command": "justybase.duckdb.editFileSource",
+                "title": "Edit File Source (DuckDB)",
+                "icon": "$(edit)",
+                "category": "JustyBase"
             }
         ],
         "menus": {
@@ -109,6 +116,10 @@
                 },
                 {
                     "command": "justybase.duckdb.openWorkspace"
+                },
+                {
+                    "command": "justybase.duckdb.editFileSource",
+                    "when": "false"
                 },
                 {
                     "command": "justybase.duckdb.addFiles"

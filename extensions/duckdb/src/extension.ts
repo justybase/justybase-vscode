@@ -17,7 +17,7 @@ interface JustyBaseLiteApi {
             dbType?: string;
             options?: Record<string, string | number | boolean>;
         },
-        options?: { content?: string; connectionName?: string },
+        options?: { content?: string; connectionName?: string; updateExisting?: boolean },
     ): Promise<void>;
     openFileSqlWorkspaceSession(
         filePaths: readonly string[],

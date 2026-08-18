@@ -10,10 +10,12 @@ Treat local files like database tables while staying inside VS Code: join severa
 
 1. Install the [DuckDB + Files pack](../extensions/duckdb/README.md).
 2. Open **Data Workspace Manager** and choose **New Data Workspace**.
-3. Use **Add local file**. A workspace containing one file is enough for a single-file SQL query; add more files when you need joins or unions.
+3. Use **Add local file**. Excel, CSV, TSV, Parquet, and Access (`.mdb`/`.accdb`) files are supported. A workspace containing one file is enough for a single-file SQL query; add more files when you need joins or unions.
 4. Use **Open SQL** and query the generated DuckDB table.
 
 For quick inspection, right-click a CSV or Excel file and choose **Open in Data File Preview**. The preview's **Add to Data Workspace** button lets you choose a new or existing workspace without leaving the preview.
+
+Data Workspace file sources also have **Edit source** for XLSX, CSV/TSV, and Access files. This opens a separate single-file editing session and asks for confirmation before changes can be written to the original file. After saving, use the source's **Refresh** action to replace its materialized DuckDB table; there is no automatic synchronization.
 
 ## Editor Support
 
@@ -27,14 +29,14 @@ For quick inspection, right-click a CSV or Excel file and choose **Open in Data 
 DuckDB has no `read_xlsb` function, so `.xlsb` workbooks are converted to CSV with `@justybase/spreadsheet-tasks` (XlsbReader) in a per-connection temporary directory at connect time and read back through `read_csv` (DuckDB's CSV sniffer infers the header and column types, mirroring `read_xlsx` semantics). No DuckDB extension is required, so XLSB works offline.
 
 - XLSX connections expose one view per discovered sheet (`<file>__<sheet>`) plus `<file>` for the first sheet. XLSB single-file connections expose the first sheet only (it is the editable one); multi-file workspaces expose every discovered XLSX/XLSB sheet as `<path>#sheet=<sheet>`.
-- **Editable copy** works for single XLSB files: `INSERT`/`UPDATE`/`DELETE` on `<file>_edit` are written back **in place** with `XlsbUpdater` (other sheets, styles and pivots are preserved). DuckDB cannot write XLSB itself, so the write-back is performed client-side by the companion extension.
+- **Editable copy** works for single XLSX/XLSB files: `INSERT`/`UPDATE`/`DELETE` on `<file>_edit` are written back **in place** with `XlsxUpdater` or `XlsbUpdater` (other sheets, styles and pivots are preserved). DuckDB cannot safely preserve an existing workbook with `COPY ... FORMAT XLSX`, so Excel write-back is performed client-side by the companion extension.
 - Because conversion happens at connect time, an XLSB file changed on disk is only visible after reconnecting (unlike XLSX, which DuckDB re-reads per query).
 
 ## Microsoft Access Files (`.mdb` / `.accdb`)
 
 DuckDB has no Access reader, so every table of an Access database is converted to CSV with `@justybase/access-file` in the connection's temporary directory at connect time and read back through `read_csv`. The column types are inferred by DuckDB's CSV sniffer from the table's rows; the header comes from the Access column definitions.
 
-- Access is **read-only** in File SQL mode: there is no editable copy and no Save File Edits. Use the JustyBase SQL Editor (Microsoft Access) extension to modify the file.
+- Access is **read-only** in the DuckDB File SQL dialect: there is no editable copy and no Save File Edits there. **Edit source** from Data Workspace opens a separate Microsoft Access session with write access when the optional Access extension is installed.
 - Single-file connections expose one view per table (`<file>__<table>`), without a base `<file>` view; multi-file workspaces expose `<path>#table=<table>`.
 - Hidden complex flat tables (Jackcess `f_<GUID>_<field>` backing tables for attachment/multivalue columns) are skipped; their values are already serialized into the parent table's complex columns.
 - Password-protected Access databases are not supported.
