@@ -24,6 +24,7 @@ import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
 import { getConnectionAccentResourceUri } from '../utils/connectionAccent';
 import { getDialectIconUri } from '../utils/dialectIcons';
 import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
+import { METADATA_QUERY_TIMEOUT_SECONDS } from '../metadata/metadataQueryLimiter';
 import { logWithFallback } from '../utils/logger';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 import { isLargeScriptDocument } from '../sqlParser/validationConfig';
@@ -38,7 +39,7 @@ import { buildFileConnectionDetails, detectFileDataFormat, getFilePaths, normali
 /**
  * Default timeout for schema queries (60 seconds)
  */
-const SCHEMA_QUERY_TIMEOUT = 60000;
+const SCHEMA_QUERY_TIMEOUT = METADATA_QUERY_TIMEOUT_SECONDS * 1000;
 const CTE_TREE_REFRESH_DEBOUNCE_MS = 400;
 
 const DB2_GLOBAL_TYPE_GROUPS = new Set([
@@ -84,41 +85,25 @@ async function runQueryWithTimeout(
     connectionName: string | undefined,
     timeoutMs: number = SCHEMA_QUERY_TIMEOUT,
 ): Promise<{ columns: { name: string }[]; data: unknown[][] } | undefined> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    let isTimedOut = false;
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-            isTimedOut = true;
-            reject(new SchemaQueryTimeoutError(`Query timed out after ${timeoutMs}ms. Server may be unreachable.`));
-        }, timeoutMs);
-    });
-
-    const queryPromise = (async () => {
-        const result = await runQueryRaw(
+    const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+    try {
+        return await runQueryRaw({
             context,
             query,
-            true,
+            silent: true,
             connectionManager,
             connectionName,
-            undefined,
-            undefined,
-            undefined,
-            1000000,
-            false,
-        );
-        if (isTimedOut) {
-            return undefined;
+            maxRows: 1000000,
+            isUserQuery: false,
+            timeoutSeconds,
+        });
+    } catch (error: unknown) {
+        if (error instanceof Error && /timeout|timed out/i.test(error.message)) {
+            throw new SchemaQueryTimeoutError(
+                `Query timed out after ${timeoutMs}ms. Server may be unreachable.`,
+            );
         }
-        return result;
-    })();
-
-    try {
-        return await Promise.race([queryPromise, timeoutPromise]);
-    } finally {
-        if (timeoutHandle) {
-            clearTimeout(timeoutHandle);
-        }
+        throw error;
     }
 }
 
@@ -2753,6 +2738,12 @@ async function attachFilesToFileConnection(
     );
     const { details, editableCleared } = buildFileConnectionDetails(connectionName, merged, current);
     await saveFileConnectionDetails(connectionManager, details);
+    // saveFileConnectionDetails reconnects the File SQL session and clears
+    // its metadata cache. ConnectionManager emits its profile-change event
+    // while saving, before that reconnect has completed, so the schema tree
+    // may otherwise refill the cache from the old session and keep hiding
+    // objects from the newly attached file (notably Access table views).
+    await vscode.commands.executeCommand('netezza.refreshSchema', connectionName);
     const addedCount = merged.length - getFilePaths(current).length;
     const message = editableCleared
         ? `Added ${addedCount} file(s) to '${connectionName}'. The connection is now a read-only multi-file workspace; the editable copy was disabled.`
