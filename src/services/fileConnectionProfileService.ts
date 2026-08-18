@@ -54,6 +54,44 @@ export function detectFileDataFormat(filePath: string): FileDataFormat | undefin
     return FILE_DIALECT_EXTENSIONS[path.extname(filePath).toLowerCase()];
 }
 
+/** Stable presentation name used when editing a Data Workspace file source. */
+export function fileSourceConnectionBaseName(filePath: string): string {
+    return `File SQL: ${path.basename(normalizeFilePath(filePath))}`;
+}
+
+/**
+ * Pick a non-destructive connection name for a source editor.
+ * Reuse the preferred name only when it already points at the same file and
+ * dialect; never silently repoint an unrelated saved profile.
+ */
+export function resolveFileSourceConnectionName(
+    connections: readonly Pick<ConnectionDetails, 'name' | 'database' | 'dbType' | 'options'>[],
+    filePath: string,
+    dbType: 'file' | 'access',
+): string {
+    const preferred = fileSourceConnectionBaseName(filePath);
+    const normalizedPath = normalizeFilePath(filePath);
+    const sameSource = (connection: Pick<ConnectionDetails, 'name' | 'database' | 'dbType' | 'options'>): boolean =>
+        connection.name === preferred
+        && String(connection.dbType ?? '').toLowerCase() === dbType
+        && normalizeFilePath(connection.database) === normalizedPath
+        && !parseFileWorkspace(connection.options?.[FILE_WORKSPACE_OPTION]);
+
+    const preferredConnection = connections.find(connection => connection.name === preferred);
+    if (!preferredConnection || sameSource(preferredConnection)) {
+        return preferred;
+    }
+
+    let suffix = 2;
+    let candidate = `${preferred} (${suffix})`;
+    const names = new Set(connections.map(connection => connection.name));
+    while (names.has(candidate)) {
+        suffix += 1;
+        candidate = `${preferred} (${suffix})`;
+    }
+    return candidate;
+}
+
 /** Normalize a local source path for stable DuckDB view names and persistence. */
 export function normalizeFilePath(filePath: string): string {
     const trimmed = filePath.trim();

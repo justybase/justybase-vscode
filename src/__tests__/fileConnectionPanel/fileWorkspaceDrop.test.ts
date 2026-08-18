@@ -111,6 +111,10 @@ describe('SchemaProvider handleDrop on File SQL connections', () => {
             version: 1,
             files: ['/data/sales.csv', '/data/sales.xlsx', '/data/extra.csv'],
         });
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'netezza.refreshSchema',
+            'Sales Files',
+        );
     });
 
     it('ignores unsupported file types on drop', async () => {
