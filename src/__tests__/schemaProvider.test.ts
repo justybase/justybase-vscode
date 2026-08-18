@@ -1049,18 +1049,12 @@ describe('SchemaProvider', () => {
             await schemaProvider.getChildren(procedureItem);
 
             // Check that query includes PROCEDURESIGNATURE
-            expect(runQueryRaw).toHaveBeenCalledWith(
-                expect.anything(),
-                expect.stringContaining('PROCEDURESIGNATURE'),
-                expect.anything(),
-                expect.anything(),
-                expect.anything(),
-                undefined,
-                undefined,
-                undefined,
-                1000000,
-                false
-            );
+            expect(runQueryRaw).toHaveBeenCalledWith(expect.objectContaining({
+                query: expect.stringContaining('PROCEDURESIGNATURE'),
+                maxRows: 1000000,
+                isUserQuery: false,
+                timeoutSeconds: 120,
+            }));
         });
 
         it('should quote only procedure name part before signature parentheses', async () => {

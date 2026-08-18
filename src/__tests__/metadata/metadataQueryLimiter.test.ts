@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+    getMetadataQueryConcurrencyLimit,
     resetMetadataQueryLimiterForTests,
     runWithMetadataQueryConcurrencyLimit,
 } from '../../metadata/metadataQueryLimiter';
@@ -23,7 +24,7 @@ describe('metadataQueryLimiter', () => {
         );
 
         await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(maxInFlight).toBe(5);
+        expect(maxInFlight).toBe(getMetadataQueryConcurrencyLimit());
 
         while (release.length > 0) {
             release.shift()?.();
@@ -31,7 +32,7 @@ describe('metadataQueryLimiter', () => {
         }
 
         await Promise.all(tasks);
-        expect(maxInFlight).toBe(5);
+        expect(maxInFlight).toBe(getMetadataQueryConcurrencyLimit());
         expect(inFlight).toBe(0);
     });
 });

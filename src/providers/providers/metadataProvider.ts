@@ -13,7 +13,10 @@ import { getTablesForScope, buildSchemaCacheKey } from '../../metadata/cache/sch
 import { DatabaseMetadata, SchemaMetadata, TableMetadata, ProcedureMetadata, ColumnMetadata } from '../../metadata/types';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
 import { formatIdentifierForSql } from '../../utils/identifierUtils';
-import { runWithMetadataQueryConcurrencyLimit } from '../../metadata/metadataQueryLimiter';
+import {
+    METADATA_QUERY_TIMEOUT_SECONDS,
+    runWithMetadataQueryConcurrencyLimit,
+} from '../../metadata/metadataQueryLimiter';
 import {
     normalizeCompletionDescription,
     toInlineCompletionDescription,
@@ -106,7 +109,15 @@ export class MetadataProvider {
 
         try {
             const query = this.getMetadataProvider(connectionName).buildListDatabasesQuery();
-            const result = await runQueryRaw(this.context, query, true, this.connectionManager, connectionName, undefined, undefined, undefined, undefined, false);
+            const result = await runQueryRaw({
+                context: this.context,
+                query,
+                silent: true,
+                connectionManager: this.connectionManager,
+                connectionName,
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            });
             if (!result) return [];
 
             const results = queryResultToRows<{ DATABASE: string }>(result);
@@ -153,7 +164,15 @@ export class MetadataProvider {
         const statusBarDisposable = vscode.window.setStatusBarMessage(`Fetching schemas for ${dbName}...`);
         try {
             const query = this.getMetadataProvider(connectionName).buildListSchemasQuery(dbName);
-            const result = await runQueryRaw(this.context, query, true, this.connectionManager, connectionName, undefined, undefined, undefined, undefined, false);
+            const result = await runQueryRaw({
+                context: this.context,
+                query,
+                silent: true,
+                connectionManager: this.connectionManager,
+                connectionName,
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            });
             if (!result) {
                 return [];
             }
@@ -241,7 +260,15 @@ export class MetadataProvider {
         try {
             const query = this.getMetadataProvider(connectionName).buildListTablesQuery(dbName, schemaName);
 
-            const result = await runQueryRaw(this.context, query, true, this.connectionManager, connectionName, undefined, undefined, undefined, undefined, false);
+            const result = await runQueryRaw({
+                context: this.context,
+                query,
+                silent: true,
+                connectionManager: this.connectionManager,
+                connectionName,
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            });
             if (!result) return [];
 
             const results = queryResultToRows<{ OBJNAME: string; OBJID: number; OBJTYPE: string; SCHEMA?: string; DESCRIPTION?: string; REFOBJNAME?: string }>(result);
@@ -374,18 +401,15 @@ export class MetadataProvider {
         try {
             const query = this.getMetadataProvider(connectionName).buildListViewsQuery(dbName, schemaName);
 
-            const result = await runQueryRaw(
-                this.context,
+            const result = await runQueryRaw({
+                context: this.context,
                 query,
-                true,
-                this.connectionManager,
+                silent: true,
+                connectionManager: this.connectionManager,
                 connectionName,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                false
-            );
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            });
             if (!result) return [];
 
             const results = queryResultToRows<{ OBJNAME: string; SCHEMA?: string; DESCRIPTION?: string }>(result);
@@ -456,18 +480,15 @@ export class MetadataProvider {
         const statusBarDisposable = vscode.window.setStatusBarMessage(statusBarMessage);
 
         try {
-            const result = await runQueryRaw(
-                this.context,
-                queryBuilder.call(metadataProvider, dbName, schemaName),
-                true,
-                this.connectionManager,
+            const result = await runQueryRaw({
+                context: this.context,
+                query: queryBuilder.call(metadataProvider, dbName, schemaName),
+                silent: true,
+                connectionManager: this.connectionManager,
                 connectionName,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                false,
-            );
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            });
             if (!result) return [];
 
             const results = queryResultToRows<{
@@ -575,18 +596,15 @@ export class MetadataProvider {
             const query = this.getMetadataProvider(connectionName).buildListProceduresQuery(dbName, schemaName);
 
             const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
-                runQueryRaw(
-                    this.context,
+                runQueryRaw({
+                    context: this.context,
                     query,
-                    true,
-                    this.connectionManager,
+                    silent: true,
+                    connectionManager: this.connectionManager,
                     connectionName,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    false,
-                ),
+                    isUserQuery: false,
+                    timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                }),
             );
 
             if (!result) return [];
@@ -929,7 +947,15 @@ export class MetadataProvider {
                 });
 
             const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
-                runQueryRaw(this.context, query, true, this.connectionManager, connectionName, undefined, undefined, undefined, undefined, false)
+                runQueryRaw({
+                    context: this.context,
+                    query,
+                    silent: true,
+                    connectionManager: this.connectionManager,
+                    connectionName,
+                    isUserQuery: false,
+                    timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                }),
             );
             if (!result) return [];
 
@@ -1002,7 +1028,16 @@ export class MetadataProvider {
         const cache = this.metadataCache;
         const connectionManager = this.connectionManager;
         const runMetadataQuery = (q: string) =>
-            runQueryRaw(context, q, true, connectionManager, connectionName, undefined, undefined, undefined, 1000000, false);
+            runQueryRaw({
+                context,
+                query: q,
+                silent: true,
+                connectionManager,
+                connectionName,
+                maxRows: 1000000,
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            });
 
         setImmediate(() => {
             try {
@@ -1034,7 +1069,16 @@ export class MetadataProvider {
 
         const uniqueDatabases = Array.from(new Set(databases.map(db => db.trim()).filter(Boolean)));
         const runMetadataQuery = (q: string) =>
-            runQueryRaw(this.context, q, true, this.connectionManager, connectionName, undefined, undefined, undefined, 1000000, false);
+            runQueryRaw({
+                context: this.context,
+                query: q,
+                silent: true,
+                connectionManager: this.connectionManager,
+                connectionName,
+                maxRows: 1000000,
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            });
 
         const prefetchFresh =
             this.metadataCache.isConnectionPrefetchFresh(connectionName);
@@ -1179,18 +1223,15 @@ export class MetadataProvider {
 
         const query = mirroredSystemCatalog.buildMirroredObjectsQuery();
 
-        const result = await runQueryRaw(
-            this.context,
+        const result = await runQueryRaw({
+            context: this.context,
             query,
-            true,
-            this.connectionManager,
+            silent: true,
+            connectionManager: this.connectionManager,
             connectionName,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            false
-        );
+            isUserQuery: false,
+            timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+        });
 
         if (!result) {
             return [];
@@ -1315,18 +1356,15 @@ export class MetadataProvider {
             cachedObject?.schema || schemaName,
         );
         const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
-            runQueryRaw(
-                this.context,
+            runQueryRaw({
+                context: this.context,
                 query,
-                true,
-                this.connectionManager,
+                silent: true,
+                connectionManager: this.connectionManager,
                 connectionName,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                false,
-            ),
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            }),
         );
         if (!result) {
             return undefined;
@@ -1364,18 +1402,15 @@ export class MetadataProvider {
             allowPublicSynonym ? undefined : schemaName,
         );
         const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
-            runQueryRaw(
-                this.context,
+            runQueryRaw({
+                context: this.context,
                 query,
-                true,
-                this.connectionManager,
+                silent: true,
+                connectionManager: this.connectionManager,
                 connectionName,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                false,
-            ),
+                isUserQuery: false,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+            }),
         );
         if (!result) {
             return undefined;

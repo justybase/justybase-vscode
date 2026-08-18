@@ -1,5 +1,8 @@
 /** Max concurrent metadata (_V_*) queries per logical connection name. */
-const MAX_CONCURRENT_METADATA_QUERIES = 5;
+const MAX_CONCURRENT_METADATA_QUERIES = 2;
+
+/** Maximum server-side execution time for one metadata catalog query. */
+export const METADATA_QUERY_TIMEOUT_SECONDS = 120;
 
 /** @internal Test / diagnostics */
 export function getMetadataQueryConcurrencyLimit(): number {
