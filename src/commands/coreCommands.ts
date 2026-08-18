@@ -28,6 +28,7 @@ import {
     supportsLegacyMetadataPrefetch,
     supportsLegacyMetadataPrefetchForConnection,
 } from '../metadata/prefetchSupport';
+import { METADATA_QUERY_TIMEOUT_SECONDS } from '../metadata/metadataQueryLimiter';
 import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf/performanceEvents';
 import { getUxPerfSession } from '../services/perf/uxPerfSession';
 import { findVisibleQueryFlowEditor } from '../utils/queryFlowEditor';
@@ -575,18 +576,16 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
 
                 if (supportsLegacyMetadataPrefetchForConnection(connectionManager, requestedConnectionName)) {
                     metadataCache.triggerConnectionPrefetch(requestedConnectionName, (q) =>
-                        runQueryRaw(
+                        runQueryRaw({
                             context,
-                            q,
-                            true,
+                            query: q,
+                            silent: true,
                             connectionManager,
-                            requestedConnectionName,
-                            undefined,
-                            undefined,
-                            undefined,
-                            1000000,
-                            false,
-                        ),
+                            connectionName: requestedConnectionName,
+                            maxRows: 1000000,
+                            isUserQuery: false,
+                            timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                        }),
                     );
                     vscode.window.showInformationMessage('Schema refreshed. Metadata is rebuilding in background...');
                 } else {
@@ -609,18 +608,16 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                 supportsLegacyMetadataPrefetch(connectionManager.getConnectionDatabaseKind(activeConnectionName))
             ) {
                 metadataCache.triggerConnectionPrefetch(activeConnectionName, (q) =>
-                    runQueryRaw(
+                    runQueryRaw({
                         context,
-                        q,
-                        true,
+                        query: q,
+                        silent: true,
                         connectionManager,
-                        activeConnectionName,
-                        undefined,
-                        undefined,
-                        undefined,
-                        1000000,
-                        false,
-                    ),
+                        connectionName: activeConnectionName,
+                        maxRows: 1000000,
+                        isUserQuery: false,
+                        timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                    }),
                 );
                 vscode.window.showInformationMessage('Schema refreshed. Metadata is rebuilding in background...');
             } else {
