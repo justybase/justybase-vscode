@@ -20,12 +20,19 @@ import {
 import { listXlsxSheetNames } from './xlsxSheets';
 import { listXlsbSheetNames } from './xlsbConversion';
 import { listAccessTableNames } from './accessConversion';
+import { resolveFileSourceConnectionName } from '../../../src/services/fileConnectionProfileService';
 
 const FILE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFile';
 const FILE_WORKSPACE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFiles';
 const ADD_FILES_TO_WORKSPACE_COMMAND_ID = 'justybase.duckdb.addFiles';
 const OPEN_FILE_WORKSPACE_COMMAND_ID = 'justybase.duckdb.openWorkspace';
 const SAVE_FILE_EDITS_COMMAND_ID = 'justybase.duckdb.saveFileEdits';
+const EDIT_FILE_SOURCE_COMMAND_ID = 'justybase.duckdb.editFileSource';
+
+export interface EditFileSourceRequest {
+    filePath: string;
+    connectionName?: string;
+}
 
 interface JustyBaseLiteApi {
     registerDatabaseDialect(dialect: unknown): unknown;
@@ -40,7 +47,7 @@ interface JustyBaseLiteApi {
             dbType?: string;
             options?: Record<string, string | number | boolean>;
         },
-        options?: { content?: string; connectionName?: string },
+        options?: { content?: string; connectionName?: string; updateExisting?: boolean },
     ): Promise<void>;
     openFileSqlWorkspaceSession(
         filePaths: readonly string[],
@@ -88,6 +95,16 @@ interface FileSqlSchemaItemResource {
 type AddFilesCommandResource = vscode.Uri | readonly vscode.Uri[] | FileSqlSchemaItemResource;
 
 export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: vscode.Disposable[]): void {
+    subscriptions.push(vscode.commands.registerCommand(EDIT_FILE_SOURCE_COMMAND_ID, async (request?: EditFileSourceRequest) => {
+        try {
+            await openEditableFileSource(api, request);
+        } catch (error) {
+            vscode.window.showErrorMessage(
+                `Failed to open file source for editing: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }
+    }));
+
     subscriptions.push(vscode.commands.registerCommand(FILE_QUERY_COMMAND_ID, async (resource?: vscode.Uri) => {
         const fileUri = resource ?? vscode.window.activeTextEditor?.document.uri;
         if (!fileUri || !fileUri.scheme) {
@@ -288,8 +305,14 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
                 return;
             }
 
-            if (format === 'xlsb') {
-                await saveXlsbEdits(api, filePath, typeof details.options?.sheet === 'string' ? details.options.sheet : undefined, active.documentUri);
+            if (format === 'xlsx' || format === 'xlsb') {
+                await saveSpreadsheetEdits(
+                    api,
+                    filePath,
+                    format,
+                    typeof details.options?.sheet === 'string' ? details.options.sheet : undefined,
+                    active.documentUri,
+                );
                 return;
             }
 
@@ -313,25 +336,78 @@ export function registerFileQueryCommand(api: JustyBaseLiteApi, subscriptions: v
     }));
 }
 
+async function openEditableFileSource(
+    api: JustyBaseLiteApi,
+    request?: EditFileSourceRequest,
+): Promise<void> {
+    const filePath = request?.filePath?.trim();
+    if (!filePath) {
+        throw new Error('A local file path is required to open an editable source.');
+    }
+    const normalizedPath = normalizeFilePath(filePath);
+    const format = detectFileDataFormat(normalizedPath);
+    if (!format || !['xlsx', 'xlsb', 'csv', 'tsv'].includes(format)) {
+        throw new Error('Only XLSX, XLSB, CSV and TSV sources can be opened in editable File SQL mode.');
+    }
+
+    const savedConnections = await api.listSavedConnections();
+    const connectionName = request?.connectionName?.trim()
+        || resolveFileSourceConnectionName(savedConnections.map(connection => connection.details), normalizedPath, 'file');
+    const firstSheet = format === 'xlsb'
+        ? (await listXlsbSheetNames(normalizedPath))[0]
+        : undefined;
+    const viewName = sanitizeViewName(normalizedPath);
+
+    await api.openFileSqlSession(
+        {
+            name: connectionName,
+            host: 'local',
+            database: normalizedPath,
+            user: 'file',
+            dbType: 'file',
+            options: {
+                editable: true,
+                ...(format === 'xlsb' && firstSheet ? { sheet: firstSheet } : {}),
+            },
+        },
+        {
+            connectionName,
+            updateExisting: true,
+            content: [
+                `-- ${path.basename(normalizedPath)} — File SQL (DuckDB)`,
+                '-- Changes are written to the original file by "JustyBase: Save File Edits".',
+                format === 'xlsb'
+                    ? `-- ${viewName} reads the first sheet; the workbook is updated in place.`
+                    : format === 'xlsx'
+                        ? `-- ${viewName} reads the first sheet; other workbook sheets are preserved on save.`
+                        : '-- Query and edit the generated _edit table, then save the file.',
+                `-- INSERT/UPDATE/DELETE work on ${editableTableName(normalizedPath)}.`,
+                '',
+                `SELECT * FROM "${editableTableName(normalizedPath)}" LIMIT 100;`,
+                '',
+            ].join('\n'),
+        },
+    );
+}
+
 function isSupportedDataFile(filePath: string): boolean {
     return detectFileDataFormat(filePath) !== undefined;
 }
 
 /**
- * Write the editable copy back into the original .xlsb workbook in place.
- * DuckDB cannot write XLSB (COPY TO only knows CSV/Parquet/XLSX), so the
- * command fetches the editable table rows from DuckDB and rewrites the target
- * sheet with @justybase/spreadsheet-tasks XlsbUpdater (the rest of the
- * workbook — other sheets, styles, pivots — is preserved byte-for-byte).
+ * Write an editable Excel copy back into the original workbook in place.
+ * XlsxUpdater/XlsbUpdater replace only the target sheet, preserving the rest
+ * of the workbook (other sheets, styles and pivots).
  */
-async function saveXlsbEdits(
+export async function saveSpreadsheetEdits(
     api: JustyBaseLiteApi,
     filePath: string,
+    format: 'xlsx' | 'xlsb',
     sheetName: string | undefined,
     documentUri?: string,
 ): Promise<void> {
     if (typeof api.executeActiveConnectionSqlQuery !== 'function') {
-        throw new Error('The installed base extension does not support XLSB write-back. Update JustyBase SQL Editor.');
+        throw new Error(`The installed base extension does not support ${format.toUpperCase()} write-back. Update JustyBase SQL Editor.`);
     }
 
     const tableName = editableTableName(filePath);
@@ -340,14 +416,14 @@ async function saveXlsbEdits(
         documentUri,
     );
 
-    const { XlsbUpdater } = requireSpreadsheetTasks();
-    const updater = new XlsbUpdater(filePath);
+    const { XlsxUpdater, XlsbUpdater } = requireSpreadsheetTasks();
+    const updater = format === 'xlsx' ? new XlsxUpdater(filePath) : new XlsbUpdater(filePath);
     const availableSheets = updater.getSheetNames();
     const targetSheet = sheetName && availableSheets.includes(sheetName)
         ? sheetName
         : availableSheets[0];
     if (!targetSheet) {
-        throw new Error(`XLSB workbook '${filePath}' contains no sheets.`);
+        throw new Error(`${format.toUpperCase()} workbook '${filePath}' contains no sheets.`);
     }
     if (sheetName && targetSheet !== sheetName) {
         vscode.window.showWarningMessage(
@@ -366,7 +442,7 @@ async function saveXlsbEdits(
     vscode.window.showInformationMessage(`Saved edits to ${filePath} (sheet "${targetSheet}").`);
 }
 
-/** Map DuckDB cell values to values XlsbUpdater accepts (bigint → number). */
+/** Map DuckDB cell values to values accepted by spreadsheet-tasks updaters. */
 function normalizeCellValue(value: unknown): string | number | boolean | Date | null {
     if (value === undefined || value === null) {
         return null;
@@ -380,14 +456,18 @@ function normalizeCellValue(value: unknown): string | number | boolean | Date | 
     return String(value);
 }
 
-function requireSpreadsheetTasks(): { XlsbUpdater: new (filePath: string) => XlsbUpdaterLike } {
-    const { XlsbUpdater } = createRequire(__filename)('@justybase/spreadsheet-tasks') as {
-        XlsbUpdater: new (filePath: string) => XlsbUpdaterLike;
+function requireSpreadsheetTasks(): {
+    XlsxUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
+    XlsbUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
+} {
+    const { XlsxUpdater, XlsbUpdater } = createRequire(__filename)('@justybase/spreadsheet-tasks') as {
+        XlsxUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
+        XlsbUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
     };
-    return { XlsbUpdater };
+    return { XlsxUpdater, XlsbUpdater };
 }
 
-interface XlsbUpdaterLike {
+interface SpreadsheetUpdaterLike {
     getSheetNames(): string[];
     replaceSheetData(
         sheetName: string,

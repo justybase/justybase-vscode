@@ -3,12 +3,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { createRequire } from 'node:module';
 import { afterAll, describe, expect, it } from '@jest/globals';
+import * as vscode from 'vscode';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import { fileDialect } from '../../../extensions/duckdb/src/fileDialect';
+import { duckdbDialect } from '../../../extensions/duckdb/src/duckdbDialect';
 import { loadDuckDb } from '../../../extensions/duckdb/src/duckdbConnection';
 import { listXlsxSheetNames } from '../../../extensions/duckdb/src/xlsxSheets';
 import { listXlsbSheetNames } from '../../../extensions/duckdb/src/xlsbConversion';
 import { convertAccessTablesToCsvs, listAccessTableNames } from '../../../extensions/duckdb/src/accessConversion';
+import { DATA_WORKSPACE_OPTION, DATA_WORKSPACE_VERSION, DataWorkspaceService } from '../../services/dataWorkspaceService';
 import { duckdbMetadataProvider } from '../../../extensions/duckdb/src/duckdbSchemaProvider';
 import {
     buildSaveEditsSql,
@@ -16,6 +19,7 @@ import {
     sanitizeViewName,
     serializeFileWorkspace
 } from '../../../extensions/duckdb/src/fileSqlSetup';
+import { saveSpreadsheetEdits } from '../../../extensions/duckdb/src/fileQueryCommand';
 import type { DatabaseDataReader } from '../../contracts/database';
 
 const extensionRequire = createRequire(path.join(process.cwd(), 'extensions', 'duckdb', 'package.json'));
@@ -53,6 +57,30 @@ async function writeXlsbFile(filePath: string, sheets: XlsbSheetFixture[]): Prom
         }
         writer.endSheet();
     }
+    await writer.finalize();
+}
+
+/** Write a real multi-sheet XLSX workbook through spreadsheet-tasks. */
+async function writeXlsxFile(filePath: string): Promise<void> {
+    const { XlsxWriter } = extensionRequire('@justybase/spreadsheet-tasks') as {
+        XlsxWriter: new (filePath: string) => {
+            addSheet(sheetName: string): void;
+            writeSheet(rows: unknown[][]): void;
+            finalize(): Promise<void>;
+        };
+    };
+    const writer = new XlsxWriter(filePath);
+    writer.addSheet('Data');
+    writer.writeSheet([
+        ['region', 'amount'],
+        ['EU', 100],
+        ['US', 200],
+    ]);
+    writer.addSheet('Keep');
+    writer.writeSheet([
+        ['preserve'],
+        ['yes'],
+    ]);
     await writer.finalize();
 }
 
@@ -362,6 +390,69 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         }
     });
 
+    it('saves xlsx edits with headers while preserving other worksheets', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const xlsxPath = path.join(tempDir, 'multi-sheet-editable.xlsx');
+        await writeXlsxFile(xlsxPath);
+
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: xlsxPath,
+            user: 'file',
+            options: { editable: true },
+        });
+
+        try {
+            await connection.connect();
+            await connection.createCommand(
+                `UPDATE "${editableTableName(xlsxPath)}" SET amount = 250 WHERE region = 'US'`,
+            ).execute();
+
+            const saveApi = {
+                executeActiveConnectionSqlQuery: async (sql: string) => {
+                    const reader = await connection.createCommand(sql).executeReader();
+                    const columns: string[] = [];
+                    for (let index = 0; index < reader.fieldCount; index += 1) {
+                        columns.push(reader.getName(index));
+                    }
+                    const rows: unknown[][] = [];
+                    try {
+                        while (await reader.read()) {
+                            const row: unknown[] = [];
+                            for (let index = 0; index < reader.fieldCount; index += 1) {
+                                row.push(reader.getValue(index));
+                            }
+                            rows.push(row);
+                        }
+                    } finally {
+                        await reader.close();
+                    }
+                    return { columns, rows };
+                },
+            };
+            await saveSpreadsheetEdits(saveApi as never, xlsxPath, 'xlsx', undefined);
+        } finally {
+            await connection.close();
+        }
+
+        const reloaded = fileDialect.createConnection({
+            host: 'local',
+            database: xlsxPath,
+            user: 'file',
+        });
+        try {
+            await reloaded.connect();
+            expect(await readRows(
+                await reloaded.createCommand('SELECT region, amount FROM "multi_sheet_editable" ORDER BY region').executeReader(),
+            )).toEqual([['EU', 100], ['US', 250]]);
+            expect(await readRows(
+                await reloaded.createCommand('SELECT * FROM "multi_sheet_editable__Keep"').executeReader(),
+            )).toEqual([['yes']]);
+        } finally {
+            await reloaded.close();
+        }
+    });
+
     it('queries an xlsb workbook through conversion and exposes discovered sheets as views', async () => {
         fs.mkdirSync(tempDir, { recursive: true });
         const xlsbPath = path.join(tempDir, 'book.xlsb');
@@ -455,6 +546,18 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
             expect(views.map(row => String(row[0]))).toEqual(
                 expect.arrayContaining(['sample2007__t_people', 'sample2007']),
             );
+            const columns = await readRows(
+                await connection.createCommand(
+                    duckdbMetadataProvider.buildColumnMetadataQuery(
+                        '',
+                        'main',
+                        'sample2007__t_people',
+                    ),
+                ).executeReader(),
+            );
+            expect(columns.map(row => String(row[3]))).toEqual(
+                expect.arrayContaining(['id', 'name', 'age', 'active']),
+            );
         } finally {
             await connection.close();
         }
@@ -510,6 +613,91 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
             expect(views.map(row => String(row[0]))).toEqual(
                 expect.arrayContaining([accessView, csvView]),
             );
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('materializes an Access source into a persistent Data Workspace table', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const accessPath = copyAccessFixture(tempDir, 'sample2007.accdb', 'sample_database.accdb');
+        const workspaceStorage = path.join(tempDir, 'workspace-storage');
+        const workspaceId = 'integration-access-workspace-1234';
+        const sourceId = 'integration-access-source-1234';
+        const workspaceDatabase = path.join(workspaceStorage, 'data-workspaces', `${workspaceId}.duckdb`);
+        fs.mkdirSync(path.dirname(workspaceDatabase), { recursive: true });
+
+        let workspaceDetails = {
+            name: 'Access Workspace',
+            host: 'local',
+            database: workspaceDatabase,
+            user: 'duckdb',
+            dbType: 'duckdb' as const,
+            options: {
+                mode: 'file',
+                [DATA_WORKSPACE_OPTION]: JSON.stringify({
+                    version: DATA_WORKSPACE_VERSION,
+                    workspaceId,
+                    sources: [{
+                        id: sourceId,
+                        kind: 'file' as const,
+                        path: accessPath,
+                        tableName: 'sample_database',
+                    }],
+                }),
+            },
+        };
+        const manager = {
+            getConnection: jest.fn(async (name: string) => name === workspaceDetails.name ? workspaceDetails : undefined),
+            getConnections: jest.fn(async () => [workspaceDetails]),
+            saveConnection: jest.fn(async (details: typeof workspaceDetails) => {
+                workspaceDetails = details;
+            }),
+            refreshDataWorkspaceConnection: jest.fn().mockResolvedValue(undefined),
+        };
+        const withProgress = async <T>(
+            _options: { location?: vscode.ProgressLocation; title?: string; cancellable?: boolean },
+            task: (progress: vscode.Progress<{ message?: string; increment?: number }>, token: vscode.CancellationToken) => T | Thenable<T>,
+        ): Promise<T> => task(
+            { report: () => undefined },
+            { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => undefined }) } as unknown as vscode.CancellationToken,
+        );
+        const service = new DataWorkspaceService(
+            { globalStorageUri: vscode.Uri.file(workspaceStorage) },
+            manager as never,
+            {
+                createConnection: async (details: { dbType?: string; host: string; database: string; user: string; options?: Record<string, string | number | boolean> }) => {
+                    const dialect = details.dbType === 'file' ? fileDialect : duckdbDialect;
+                    const connection = dialect.createConnection({
+                        host: details.host,
+                        database: details.database,
+                        user: details.user,
+                        options: details.options,
+                    });
+                    await connection.connect();
+                    return connection;
+                },
+                withProgress: withProgress as never,
+            },
+        );
+
+        await expect(service.refreshSource(workspaceDetails.name, sourceId)).resolves.toMatchObject({
+            status: 'success',
+            rowCount: 3,
+        });
+
+        const connection = duckdbDialect.createConnection({
+            host: 'local',
+            database: workspaceDatabase,
+            user: 'duckdb',
+            options: { mode: 'file' },
+        });
+        try {
+            await connection.connect();
+            const tables = await readRows(
+                await connection.createCommand(duckdbMetadataProvider.buildListTablesQuery('', 'main')).executeReader(),
+            );
+            expect(tables.map(row => String(row[0]))).toContain('sample_database');
         } finally {
             await connection.close();
         }

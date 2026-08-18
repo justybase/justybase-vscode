@@ -153,8 +153,9 @@ export interface SaveEditsSqlResult {
 }
 
 /**
- * SQL that writes the editable table back to disk. DuckDB's 'excel'
- * extension supports FORMAT XLSX, so xlsx files can be overwritten too.
+ * SQL that writes the editable table back to disk for formats written by
+ * DuckDB. XLSX is handled client-side by XlsxUpdater so other workbook
+ * sheets and their formatting are preserved.
  */
 export function buildSaveEditsSql(filePath: string, format: FileDataFormat): SaveEditsSqlResult {
     const tableName = editableTableName(filePath);
@@ -181,11 +182,9 @@ export function buildSaveEditsSql(filePath: string, format: FileDataFormat): Sav
                 targetPath: filePath,
             };
         case 'xlsx':
-            return {
-                sql: `COPY ${source} TO ${quoteLiteral(normalizedPath)} (FORMAT XLSX)`,
-                writesToNewFile: false,
-                targetPath: filePath,
-            };
+            throw new Error(
+                'XLSX files are written back client-side through @justybase/spreadsheet-tasks (XlsxUpdater) so other workbook sheets are preserved.',
+            );
         case 'xlsb':
             throw new Error(
                 'XLSB files are written back client-side through @justybase/spreadsheet-tasks (XlsbUpdater); DuckDB cannot write XLSB.',

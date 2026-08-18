@@ -28,7 +28,7 @@ Open a file from Explorer or create a File SQL connection. JustyBase exposes the
 - One view per discovered workbook sheet or Access table.
 - DuckDB readers for CSV, TSV, and Parquet; Excel and Avro extensions are downloaded once on first use.
 - XLSB conversion through `@justybase/spreadsheet-tasks`, so it works without the DuckDB Excel extension.
-- Optional **Editable copy** for supported single-file CSV/TSV/Parquet/XLSX workflows, saved with **JustyBase: Save File Edits**.
+- Optional **Editable copy** for supported single-file CSV/TSV/Parquet/XLSX workflows, saved with **JustyBase: Save File Edits**. XLSX write-back uses `XlsxUpdater` so headers and other workbook sheets are preserved.
 - Shared completion, hover, diagnostics, result profiling, visualizations, and exports.
 
 ![Explore file results with profiles and summaries](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-explorer.png)
@@ -50,6 +50,7 @@ To combine sources, choose **Query Multiple Files with SQL (DuckDB)**. Workspace
 - Excel and Avro extensions require internet access on first use. XLSB conversion does not.
 - Access sources in File SQL mode are read-only; use the dedicated Access companion for staged Access writes and DDL.
 - Multi-file write-back is intentionally unsupported. Export a result to create a new combined file.
+- Data Workspace source cards can open XLSX, CSV/TSV, and Access files in a separate editing session. Saving changes the original file; use **Refresh** in Data Workspace afterwards to rematerialize its local DuckDB table.
 
 ## Development
 
