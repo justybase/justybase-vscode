@@ -1,4 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect rx="8" width="64" height="64" fill="#336791"/>
-  <text x="50%" y="50%" dominant-baseline="middle" font-family="Segoe UI, Roboto, Arial" font-size="28" fill="#fff" font-weight="700" text-anchor="middle">PG</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>PostgreSQL database</title>
+  <defs>
+    <linearGradient id="pgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3d7fa0" />
+      <stop offset="100%" stop-color="#205475" />
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="54" height="54" rx="13" fill="url(#pgGradient)" />
+  <!-- Elephant head (PostgreSQL mascot) -->
+  <!-- Head -->
+  <ellipse cx="32" cy="28" rx="11" ry="12" fill="#fff" opacity="0.9" />
+  <!-- Ears -->
+  <ellipse cx="22" cy="18" rx="5" ry="7" fill="#fff" opacity="0.9" />
+  <ellipse cx="42" cy="18" rx="5" ry="7" fill="#fff" opacity="0.9" />
+  <ellipse cx="22" cy="18" rx="3" ry="5" fill="#205475" opacity="0.3" />
+  <ellipse cx="42" cy="18" rx="3" ry="5" fill="#205475" opacity="0.3" />
+  <!-- Trunk/nose curve -->
+  <path d="M 32 38 Q 28 42 26 46 Q 25 48 27 49 Q 29 48 30 46 Q 32 42 32 38" fill="#fff" opacity="0.9" />
+  <!-- Eyes -->
+  <circle cx="28" cy="26" r="2" fill="#205475" />
+  <circle cx="36" cy="26" r="2" fill="#205475" />
+  <!-- Database elements below -->
+  <g fill="none" stroke="#fff" stroke-width="1.5" opacity="0.7">
+    <circle cx="32" cy="50" r="4" />
+    <path d="M 28 50 Q 28 52 32 53 Q 36 52 36 50" />
+  </g>
 </svg>

@@ -1,27 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-    <title>SQLite</title>
-    <defs>
-        <linearGradient id="sqliteFill" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#5bb3ff" />
-            <stop offset="100%" stop-color="#0f74c8" />
-        </linearGradient>
-    </defs>
-    <ellipse cx="32" cy="14" rx="18" ry="8" fill="url(#sqliteFill)" />
-    <path d="M14 14v26c0 4.4 8.1 8 18 8s18-3.6 18-8V14" fill="url(#sqliteFill)" />
-    <ellipse cx="32" cy="40" rx="18" ry="8" fill="#0c5c9f" opacity="0.45" />
-    <path
-        d="M40.5 9.5c8.9 7.1 9.4 18 9.4 23.5 0 13.3-4.2 20.3-4.2 20.3"
-        fill="none"
-        stroke="#e8f4ff"
-        stroke-linecap="round"
-        stroke-width="4"
-    />
-    <path
-        d="M38.2 15.4c4.7 4.3 5 11.1 5 17.1 0 8.7-2.6 14.7-2.6 14.7"
-        fill="none"
-        stroke="#e8f4ff"
-        stroke-linecap="round"
-        stroke-width="2.8"
-        opacity="0.95"
-    />
+  <title>SQLite</title>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#0f78c9"/>
+  <ellipse cx="32" cy="19" rx="18" ry="7" fill="#73c5f5"/>
+  <path d="M14 19v23c0 4 8 7 18 7s18-3 18-7V19" fill="#3fa9e5"/>
+  <path d="M14 30c0 4 8 7 18 7s18-3 18-7M14 41c0 4 8 7 18 7s18-3 18-7" fill="none" stroke="#0f78c9" stroke-width="2"/>
+  <path d="M43 11c7 7 9 17 7 29-1 7-4 12-7 16" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+  <path d="m43 11 5 4M43 11l-2 6" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
 </svg>

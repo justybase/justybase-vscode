@@ -1,4 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect rx="8" width="64" height="64" fill="#F29111"/>
-  <text x="50%" y="50%" dominant-baseline="middle" font-family="Segoe UI, Roboto, Arial" font-size="28" fill="#fff" font-weight="700" text-anchor="middle">MY</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>MySQL database</title>
+  <defs>
+    <linearGradient id="mysqlGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5a623" />
+      <stop offset="100%" stop-color="#d68910" />
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="54" height="54" rx="13" fill="url(#mysqlGradient)" />
+  <!-- Stylized dolphin silhouette (MySQL mascot) -->
+  <!-- Body -->
+  <ellipse cx="28" cy="32" rx="8" ry="10" fill="#fff" opacity="0.95" />
+  <!-- Head/Rostrum -->
+  <path d="M 36 28 Q 42 26 46 28 Q 44 30 40 31 Z" fill="#fff" opacity="0.95" />
+  <!-- Dorsal fin -->
+  <path d="M 28 22 L 26 16 L 30 22 Z" fill="#fff" opacity="0.9" />
+  <!-- Tail flukes -->
+  <path d="M 22 36 Q 16 34 14 38 Q 16 40 22 38 Z" fill="#fff" opacity="0.9" />
+  <path d="M 22 40 Q 16 42 14 46 Q 16 44 22 42 Z" fill="#fff" opacity="0.9" />
+  <!-- Eye -->
+  <circle cx="40" cy="27" r="1.5" fill="#d68910" />
+  <!-- Wave element below -->
+  <path d="M 18 48 Q 22 50 26 48 Q 30 46 34 48 Q 38 50 42 48" fill="none" stroke="#fff" stroke-width="1.5" opacity="0.6" stroke-linecap="round" />
 </svg>

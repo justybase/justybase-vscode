@@ -2,14 +2,18 @@ This folder contains per-dialect SVG icons used by the Schema view and the
 Connect to Database panel.
 
 Files include:
-- postgresql-dialect.svg
-- oracle-dialect.svg
-- mysql-dialect.svg
+- db2-dialect.svg
+- duckdb-dialect.svg
+- file-dialect.svg
 - mssql-dialect.svg
+- mysql-dialect.svg
+- oracle-dialect.svg
+- postgresql-dialect.svg
 - snowflake-dialect.svg
+- sqlite-dialect.svg
+- vertica-dialect.svg
 - netezza-dialect.svg
 - access-dialect.svg
-- file-dialect.svg
 
 Icons are intentionally small, self-contained SVGs with no external network
 or font dependencies. Prefer high-contrast silhouettes and one distinctive
