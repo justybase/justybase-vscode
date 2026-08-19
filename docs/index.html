@@ -6,14 +6,14 @@
     <meta name="theme-color" content="#080d1a" />
     <meta
       name="description"
-      content="JustyBase is a professional Netezza SQL workspace for VS Code: connect, author, validate, explore, visualize, and export without leaving your editor."
+      content="JustyBase is a professional multi-database SQL workspace for VS Code: connect to Netezza, Db2, Oracle, PostgreSQL, DuckDB/File SQL, and more."
     />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="JustyBase" />
-    <meta property="og:title" content="JustyBase SQL Editor for Netezza" />
+    <meta property="og:title" content="JustyBase SQL Workspace | Multi-database SQL in VS Code" />
     <meta
       property="og:description"
-      content="A Netezza-aware SQL workspace inside VS Code, from first connection to production insight."
+      content="One VS Code workspace for Netezza, Db2, Oracle, PostgreSQL, DuckDB/File SQL, and more."
     />
     <meta property="og:url" content="https://justybase.github.io/justybase-vscode/" />
     <meta
@@ -21,16 +21,16 @@
       content="https://justybase.github.io/justybase-vscode/screenshots/marketplace-hero.png"
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="JustyBase SQL Editor for Netezza" />
+    <meta name="twitter:title" content="JustyBase SQL Workspace | Multi-database SQL in VS Code" />
     <meta
       name="twitter:description"
-      content="A professional Netezza SQL workspace inside VS Code."
+      content="A professional multi-database SQL workspace inside VS Code."
     />
     <meta
       name="twitter:image"
       content="https://justybase.github.io/justybase-vscode/screenshots/marketplace-hero.png"
     />
-    <title>JustyBase SQL Editor for Netezza | SQL workspace in VS Code</title>
+    <title>JustyBase SQL Workspace | Multi-database SQL in VS Code</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="stylesheet" href="./site.css" />
     <script defer src="./site.js"></script>
@@ -62,6 +62,7 @@
 
         <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
           <a href="#why">Why JustyBase</a>
+          <a href="#databases">Databases</a>
           <a href="#workflows">Workflows</a>
           <a href="#ai">AI with control</a>
           <a href="https://github.com/justybase/justybase-vscode#readme" target="_blank" rel="noreferrer">Documentation</a>
@@ -82,10 +83,10 @@
       <section id="top" class="hero section-grid">
         <div class="container hero-grid">
           <div class="hero-copy">
-            <p class="eyebrow"><span class="eyebrow-dot"></span>Netezza SQL, sharpened for VS Code</p>
-            <h1>From warehouse query <span>to insight.</span></h1>
+            <p class="eyebrow"><span class="eyebrow-dot"></span>Multi-database SQL, sharpened for VS Code</p>
+            <h1>One workspace.<span>Many databases.</span></h1>
             <p class="hero-lede">
-              A professional SQL workspace for IBM Netezza and PureData System for Analytics.
+              A professional SQL workspace for Netezza, Db2, Oracle, PostgreSQL, DuckDB/File SQL, and more.
               Connect, write, validate, explore, and move data without leaving the editor you already use.
             </p>
             <div class="hero-actions">
@@ -110,7 +111,7 @@
             </div>
             <p class="hero-note">
               <span class="check-mark" aria-hidden="true">✓</span>
-              No external Netezza driver is required for the core extension.
+              Netezza core needs no external ODBC driver; optional packs bring their own runtimes.
             </p>
           </div>
 
@@ -138,7 +139,7 @@
             </div>
             <div class="floating-badge floating-badge-bottom">
               <span class="badge-icon badge-icon-green" aria-hidden="true">✓</span>
-              <span><strong>Ready to query</strong><small>Netezza connection active</small></span>
+              <span><strong>Ready to query</strong><small>Database connection active</small></span>
             </div>
           </div>
         </div>
@@ -147,9 +148,61 @@
       <section class="signal-bar" aria-label="Product highlights">
         <div class="container signal-grid">
           <div class="signal-item"><strong>VS Code native</strong><span>SQL, schema, and results in one workspace</span></div>
-          <div class="signal-item"><strong>Netezza-aware</strong><span>Completion and diagnostics built for your dialect</span></div>
-          <div class="signal-item"><strong>Zero friction</strong><span>Connect without installing an IBM ODBC driver</span></div>
+          <div class="signal-item"><strong>Multi-database</strong><span>One shared workspace across your stack</span></div>
+          <div class="signal-item"><strong>Deep Db2 support</strong><span>Parser, metadata, maintenance, and quality workflows</span></div>
           <div class="signal-item"><strong>Open source</strong><span>Inspect the project and shape its future</span></div>
+        </div>
+      </section>
+
+      <section id="databases" class="section database-section section-light-grid">
+        <div class="container">
+          <div class="section-heading reveal">
+            <p class="eyebrow"><span class="eyebrow-dot"></span>Your database stack</p>
+            <h2>One editor for many database workflows.</h2>
+            <p>
+              Start with the connection you have today and keep the same familiar shell for the systems around it. Netezza remains a first-class core experience, while companion packs add dedicated support where your team needs it most.
+            </p>
+          </div>
+
+          <div class="database-grid">
+            <article class="database-card database-card-featured reveal">
+              <div class="database-card-top"><span class="database-logo">DB2</span><span class="database-tag">Dedicated support pack</span></div>
+              <h3>Db2 LUW</h3>
+              <p>Dedicated parser, metadata, maintenance, import/export, explain, and quality workflows for everyday Db2 work.</p>
+              <a class="text-link" href="https://github.com/justybase/justybase-vscode/tree/master/extensions/db2" target="_blank" rel="noreferrer">Explore Db2 support <span aria-hidden="true">→</span></a>
+            </article>
+            <article class="database-card reveal">
+              <div class="database-card-top"><span class="database-logo">NZ</span><span class="database-tag">Core</span></div>
+              <h3>Netezza</h3>
+              <p>Deep Netezza SQL/LSP support, schema intelligence, NZPLSQL analysis, warehouse workflows, and a built-in JavaScript driver.</p>
+            </article>
+            <article class="database-card reveal">
+              <div class="database-card-top"><span class="database-logo">PL</span><span class="database-tag">Companion packs</span></div>
+              <h3>Oracle &amp; PostgreSQL</h3>
+              <p>Dedicated dialect parsers, metadata, DDL, explain tooling, and database-specific authoring workflows.</p>
+            </article>
+            <article class="database-card reveal">
+              <div class="database-card-top"><span class="database-logo">DQ</span><span class="database-tag">Local data</span></div>
+              <h3>DuckDB &amp; File SQL</h3>
+              <p>Query Excel, CSV, Parquet, Avro, and Access files like tables, then explore and export the result in the same grid.</p>
+            </article>
+            <article class="database-card reveal">
+              <div class="database-card-top"><span class="database-logo">MS</span><span class="database-tag">Companion packs</span></div>
+              <h3>MS SQL &amp; MySQL</h3>
+              <p>Bring familiar connection, schema, query, result, and export workflows to Microsoft SQL Server and MySQL.</p>
+            </article>
+            <article class="database-card reveal">
+              <div class="database-card-top"><span class="database-logo">SF</span><span class="database-tag">Companion packs</span></div>
+              <h3>Snowflake &amp; Vertica</h3>
+              <p>Use shared workspace capabilities with dialect-aware runtimes and database-specific import/export paths.</p>
+            </article>
+            <article class="database-card reveal">
+              <div class="database-card-top"><span class="database-logo">AC</span><span class="database-tag">File support</span></div>
+              <h3>Microsoft Access</h3>
+              <p>Open, query, and edit MDB/ACCDB data through the native TypeScript reader and embedded DuckDB mirror.</p>
+            </article>
+          </div>
+          <p class="database-footnote">Connection panels, schema browsing, result grids, and export workflows are shared; editor depth varies by dialect and support pack.</p>
         </div>
       </section>
 
@@ -157,7 +210,7 @@
         <div class="container">
           <div class="section-heading reveal">
             <p class="eyebrow"><span class="eyebrow-dot"></span>One workspace, fewer handoffs</p>
-            <h2>Built for the way Netezza work actually happens.</h2>
+            <h2>Built for teams that work across databases.</h2>
             <p>
               Keep the database context, SQL authoring, operational workflows, and result analysis close together.
               JustyBase turns VS Code into a focused home for the work between a question and a trusted answer.
@@ -169,7 +222,7 @@
               <div class="capability-icon capability-icon-cyan" aria-hidden="true">01</div>
               <div>
                 <h3>Connect in minutes</h3>
-                <p>Save connections securely in VS Code secrets and start browsing databases, schemas, tables, views, and procedures.</p>
+                <p>Save connections securely in VS Code secrets and start browsing databases, schemas, tables, views, and procedures wherever they live.</p>
               </div>
             </article>
             <article class="capability-card reveal">
@@ -213,7 +266,7 @@
                 <span class="workflow-number">01 / START</span>
                 <h3>Go from a fresh install to a live schema.</h3>
                 <p>
-                  Open the JustyBase view, connect to Netezza, and browse the objects you need without leaving VS Code.
+                  Open the JustyBase view, connect to Db2, Netezza, or another supported database, and browse the objects you need without leaving VS Code.
                   Connection credentials stay in the editor's secrets storage.
                 </p>
                 <a class="text-link" href="https://github.com/justybase/justybase-vscode/blob/master/docs/QUERY_EXECUTION.md" target="_blank" rel="noreferrer">Read the query execution guide <span aria-hidden="true">→</span></a>
@@ -222,7 +275,7 @@
                 <img
                   src="./screenshots/workspace-overview.png"
                   data-animated-src="./gifs/setup.gif"
-                  alt="Connecting to a Netezza database and opening the JustyBase workspace"
+                  alt="Connecting to a supported database and opening the JustyBase workspace"
                   width="3000"
                   height="1950"
                   loading="lazy"
@@ -242,7 +295,7 @@
                 <img
                   src="./screenshots/sql-validation-and-copilot.png"
                   data-animated-src="./gifs/quick_fix.gif"
-                  alt="A Netezza SQL diagnostic and quick fix in the editor"
+                  alt="A SQL diagnostic and quick fix in the editor"
                   width="3000"
                   height="1950"
                   loading="lazy"
@@ -261,7 +314,7 @@
                 <img
                   src="./screenshots/visual_query_builder.png"
                   data-animated-src="./gifs/query_builder.gif"
-                  alt="Visual Query Builder creating a joined Netezza query"
+                  alt="Visual Query Builder creating a joined SQL query"
                   width="2980"
                   height="1884"
                   loading="lazy"
@@ -301,7 +354,7 @@
                 <img
                   src="./screenshots/results-explorer.png"
                   data-animated-src="./gifs/export_xlsb.gif"
-                  alt="Exporting a Netezza query result to an Excel workbook"
+                  alt="Exporting a query result to an Excel workbook"
                   width="2831"
                   height="1403"
                   loading="lazy"
@@ -404,7 +457,7 @@
           <div class="install-copy">
             <p class="eyebrow"><span class="eyebrow-dot"></span>Ready when you are</p>
             <h2>Install once. Query with confidence.</h2>
-            <p>Bring your Netezza workflow into VS Code and keep the path from SQL to insight in one familiar place.</p>
+            <p>Bring your database workflows into VS Code and keep the path from SQL to insight in one familiar place.</p>
           </div>
           <div class="install-actions">
             <div class="command-box">
@@ -441,7 +494,7 @@
             <span class="brand-mark" aria-hidden="true">N</span>
             <span class="brand-copy"><strong>JustyBase</strong><span>SQL Editor</span></span>
           </a>
-          <p class="footer-tagline">A focused Netezza SQL workspace for VS Code.</p>
+          <p class="footer-tagline">A focused multi-database SQL workspace for VS Code.</p>
         </div>
         <div class="footer-links">
           <a href="https://github.com/justybase/justybase-vscode#readme" target="_blank" rel="noreferrer">Documentation</a>
@@ -452,7 +505,7 @@
       </div>
       <div class="container footer-bottom">
         <span>Apache-2.0 licensed</span>
-        <span>Built for Netezza teams</span>
+        <span>Built for multi-database teams</span>
         <span>© <span data-current-year>2026</span> JustyBase</span>
       </div>
     </footer>
