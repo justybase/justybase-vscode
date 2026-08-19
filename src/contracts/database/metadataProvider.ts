@@ -46,6 +46,13 @@ export interface DatabaseMetadataProvider {
     buildTypeGroupsQuery(database: string): string;
     buildColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string;
     buildTableColumnsQuery(database: string, schema: string, tableName: string): string;
+    /**
+     * Builds a companion query for external/foreign-object columns (Netezza).
+     * It is executed separately (never UNIONed) and merged with
+     * `buildTableColumnsQuery` results in code. Dialects without this concept
+     * can leave it undefined.
+     */
+    buildExternalTableColumnsQuery?(database: string, schema: string, tableName: string): string;
     buildColumnMetadataQuery(database: string, schema: string, tableName: string): string;
     buildLookupColumnsQuery(params: DatabaseColumnLookupParams): string;
     buildTableCommentQuery(database: string, schema: string, tableName: string): string;

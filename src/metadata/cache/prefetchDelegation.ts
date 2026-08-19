@@ -70,6 +70,13 @@ export function isConnectionPrefetchFresh(
   return Date.now() - timestamp < deps.store.cacheTtl;
 }
 
+export function getLastPrefetchAttemptTime(
+  deps: PrefetchDelegationDeps,
+  connectionName: string,
+): number | undefined {
+  return deps.prefetcher.getLastPrefetchAttemptTime(connectionName);
+}
+
 export async function tryAcquirePrefetchLock(
   deps: PrefetchDelegationDeps,
   connectionName: string,

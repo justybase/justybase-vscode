@@ -16,6 +16,7 @@ import {
     type CancellationCleanupContext,
     type OperationStatus,
 } from '../cancellation';
+import type { MetadataQueryTiming } from '../../metadata/metadataQueryDiagnostics';
 
 /**
  * Streaming chunk callback interface for progressive result delivery
@@ -38,6 +39,8 @@ interface InternalResultSet {
     rows: unknown[][];
     limitReached: boolean;
 }
+
+export type StreamingExecutionTiming = MetadataQueryTiming;
 
 const CANCEL_TIMEOUT_MS = 5000;
 const EXTENDED_CANCEL_TIMEOUT_MS = 15000;
@@ -374,7 +377,13 @@ export class StreamingManager {
         connectionManager?: { closeDocumentPersistentConnection(uri: string): Promise<void> },
         maxRows?: number,
         onDropSession?: (sessionId: string) => Promise<void>
-    ): Promise<{ results: InternalResultSet[]; error?: Error; recordsAffected?: number; status: OperationStatus }> {
+    ): Promise<{
+        results: InternalResultSet[];
+        error?: Error;
+        recordsAffected?: number;
+        status: OperationStatus;
+        timing?: StreamingExecutionTiming;
+    }> {
         const cmd = connection.createCommand(query);
         if (timeoutSeconds && timeoutSeconds > 0) {
             cmd.commandTimeout = timeoutSeconds;
@@ -399,17 +408,33 @@ export class StreamingManager {
         let caughtError: Error | undefined;
         let operationStatus: OperationStatus = 'success';
         let commandCleanupDone = false;
+        const timingStartedAt = Date.now();
+        const executionTiming: StreamingExecutionTiming = { rowsRead: 0 };
+        let firstReadCompleted = false;
+        let readerReadyAt: number | undefined;
+        let rowFetchStartedAt: number | undefined;
 
         try {
             try {
+                const executeReaderStartedAt = Date.now();
                 reader = await cmd.executeReader();
+                executionTiming.executeReaderMs = Date.now() - executeReaderStartedAt;
+                readerReadyAt = Date.now();
             } catch (executeErr: unknown) {
                 caughtError = executeErr instanceof Error ? executeErr : new Error(String(executeErr));
                 operationStatus = signal?.aborted || isCancellationError(executeErr)
                     ? 'cancelled'
                     : isTimeoutError(executeErr) ? 'timeout' : 'error';
+                executionTiming.status = operationStatus;
+                executionTiming.totalMs = Date.now() - timingStartedAt;
                 await cancelCommandAndCloseReader(cmd, reader, cancellationContext);
-                return { results: [], error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
+                return {
+                    results: [],
+                    error: caughtError,
+                    recordsAffected: cmd._recordsAffected,
+                    status: operationStatus,
+                    timing: executionTiming,
+                };
             }
 
             const results: InternalResultSet[] = [];
@@ -438,7 +463,22 @@ export class StreamingManager {
 
                     // Fetch loop
                     let rowsSinceYield = 0;
-                    while (await reader.read()) {
+                    while (true) {
+                        const hasRow = await reader.read();
+                        if (!firstReadCompleted) {
+                            firstReadCompleted = true;
+                            const firstReadCompletedAt = Date.now();
+                            // executeReader() measures opening/server execution;
+                            // this interval isolates the wait from an available
+                            // reader to the first row (or EOF).
+                            executionTiming.serverWaitToFirstRowMs =
+                                firstReadCompletedAt - (readerReadyAt ?? timingStartedAt);
+                            rowFetchStartedAt = firstReadCompletedAt;
+                        }
+                        if (!hasRow) {
+                            break;
+                        }
+                        executionTiming.rowsRead = (executionTiming.rowsRead ?? 0) + 1;
                         // Check for cancellation
                         if (signal?.aborted) {
                             operationStatus = 'cancelled';
@@ -509,7 +549,18 @@ export class StreamingManager {
                 caughtError ??= new Error('Query cancelled');
             }
 
-            return { results, error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
+            if (rowFetchStartedAt !== undefined) {
+                executionTiming.rowFetchMs = Date.now() - rowFetchStartedAt;
+            }
+            executionTiming.status = operationStatus;
+            executionTiming.totalMs = Date.now() - timingStartedAt;
+            return {
+                results,
+                error: caughtError,
+                recordsAffected: cmd._recordsAffected,
+                status: operationStatus,
+                timing: executionTiming,
+            };
         } finally {
             if (reader && !commandCleanupDone) {
                 if (caughtError && isConnectionRecoveryError(caughtError)) {
@@ -524,7 +575,9 @@ export class StreamingManager {
                         cancellationContext,
                     );
                 } else {
+                    const closeStartedAt = Date.now();
                     await closeReaderBestEffort(reader, 'executeAndFetch');
+                    executionTiming.readerCloseMs = Date.now() - closeStartedAt;
                 }
             }
             if (alertTimeout) {
@@ -536,6 +589,10 @@ export class StreamingManager {
                 }
                 this.unregisterCommand(documentUri);
             }
+            // The returned timing object is mutated after the result payload is
+            // built so the caller observes reader-close time and a total that
+            // includes cleanup as well as server execution and row fetching.
+            executionTiming.totalMs = Date.now() - timingStartedAt;
         }
     }
 

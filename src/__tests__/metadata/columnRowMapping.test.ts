@@ -76,4 +76,19 @@ describe('columnRowMapping', () => {
         expect(buildColumnCacheKey('db1', 'admin', 'lower_table')).toBe('DB1.ADMIN.LOWER_TABLE');
         expect(buildColumnCacheKey('db1', 'public', '"orders"')).toBe('DB1.PUBLIC.orders');
     });
+
+    it('trims fixed-width catalog values before building cache keys', () => {
+        const grouped = groupColumnRowsByTableKey([
+            {
+                TABLENAME: ' ORDERS   ',
+                DBNAME: 'DB1   ',
+                SCHEMA: ' PUBLIC   ',
+                ATTNAME: ' ID ',
+                FORMAT_TYPE: 'INT4',
+            },
+        ]);
+
+        expect(grouped.get('DB1.PUBLIC.ORDERS')).toHaveLength(1);
+        expect(buildColumnCacheKey(' DB1 ', ' PUBLIC ', ' ORDERS ')).toBe('DB1.PUBLIC.ORDERS');
+    });
 });

@@ -447,6 +447,8 @@ describe("CompletionMetadataResolver", () => {
       "file:///test.sql",
       "JUST_DATA_5",
       "DIMACCOUNT_NS",
+      undefined,
+      { allowDatabaseFetch: false, requestSource: "completion" },
     );
     expect(metadataProvider.getColumns).not.toHaveBeenCalledWith(
       "file:///test.sql",
@@ -484,6 +486,7 @@ describe("CompletionMetadataResolver", () => {
       "JUST_DATA_5",
       "DIMACCOUNT_NS",
       "PUBLIC",
+      { allowDatabaseFetch: false, requestSource: "completion" },
     );
   });
 

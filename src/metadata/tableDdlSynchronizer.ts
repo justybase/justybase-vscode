@@ -203,6 +203,13 @@ export class TableDdlSynchronizer {
             connectionManager: this.connectionManager,
             connectionName,
             isUserQuery: false,
+            metadataContext: {
+                source: 'ddl-sync',
+                kind: 'objects',
+                connectionName,
+                database,
+                reason: `refresh-object-type:${normalizedType}`,
+            },
         });
         const rows = queryResultToRows<CatalogObjectRow>(result);
 
@@ -259,6 +266,15 @@ export class TableDdlSynchronizer {
             connectionManager: this.connectionManager,
             connectionName,
             isUserQuery: false,
+            metadataContext: {
+                source: 'ddl-sync',
+                kind: 'objects',
+                connectionName,
+                database: target.database,
+                schema: target.schema,
+                table: target.table,
+                reason: 'refresh-object-after-ddl',
+            },
         });
         const row = queryResultToRows<CatalogObjectRow>(result)[0];
         this.applyCatalogRow(connectionName, target, row);
@@ -274,6 +290,15 @@ export class TableDdlSynchronizer {
                     connectionManager: this.connectionManager,
                     connectionName,
                     isUserQuery: false,
+                    metadataContext: {
+                        source: 'ddl-sync',
+                        kind: 'columns',
+                        connectionName,
+                        database: target.database,
+                        schema: target.schema,
+                        table: target.table,
+                        reason: 'warm-columns-after-ddl',
+                    },
                 })),
             );
         }

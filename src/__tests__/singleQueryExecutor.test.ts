@@ -240,7 +240,7 @@ describe('singleQueryExecutor', () => {
             expect(result.data).toEqual([[1]]);
         });
 
-        it('registers metadata sessions (no documentUri, isUserQuery=false) with the sweeper', async () => {
+        it('removes normally completed metadata sessions from the sweeper', async () => {
             mockExecuteAndFetch.mockResolvedValue({
                 results: [{ columns: [], rows: [], limitReached: false }],
                 error: null,
@@ -254,7 +254,7 @@ describe('singleQueryExecutor', () => {
                 isUserQuery: false,
             });
 
-            expect(metadataSessionSweeper.hasSession('testConn', '99999')).toBe(true);
+            expect(metadataSessionSweeper.hasSession('testConn', '99999')).toBe(false);
         });
 
         it('does not register user sessions (documentUri or isUserQuery default)', async () => {

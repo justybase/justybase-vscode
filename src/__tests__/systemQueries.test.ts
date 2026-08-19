@@ -114,15 +114,39 @@ describe('metadata/systemQueries', () => {
             expect(query).toContain("D.OBJNAME = 'lower_case_name'");
         });
 
-        it('should include a NOT EXISTS-guarded external table branch', () => {
+        it('should NOT include an external table branch (split into getExternalTableColumns)', () => {
             const query = NZ_QUERIES.getTableColumns('MYDB', 'ADMIN', 'ET_TEMP');
-            expect(query).toContain('UNION ALL');
+            expect(query).not.toContain('UNION ALL');
+            expect(query).not.toContain('_V_EXTERNAL');
+            expect(query).toContain('ORDER BY OBJID, ATTNUM');
+        });
+    });
+
+    describe('NZ_QUERIES.getExternalTableColumns', () => {
+        it('should generate a separate external-only query without an anti-join', () => {
+            const query = NZ_QUERIES.getExternalTableColumns('MYDB', 'ADMIN', 'ET_TEMP');
+            expect(query).toContain('MYDB.._V_RELATION_COLUMN');
             expect(query).toContain('MYDB.._V_EXTERNAL');
             expect(query).toContain('C.OBJID = E.RELID');
-            expect(query).toContain("UPPER(E.SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(E.TABLENAME) = 'ET_TEMP'");
-            expect(query).toContain('NOT EXISTS');
+            expect(query).toContain("UPPER(TRIM(E.SCHEMA)) = 'ADMIN'");
+            expect(query).toContain("UPPER(TRIM(E.TABLENAME)) = 'ET_TEMP'");
+            expect(query).not.toContain('NOT EXISTS');
             expect(query).toContain('ORDER BY OBJID, ATTNUM');
+        });
+
+        it('should keep exact case for lowercase identifiers', () => {
+            const query = NZ_QUERIES.getExternalTableColumns('mydb', 'admin', 'customers');
+            expect(query).toContain('MYDB.._V_RELATION_COLUMN');
+            expect(query).toContain("TRIM(E.SCHEMA) = 'admin'");
+            expect(query).toContain("TRIM(E.TABLENAME) = 'customers'");
+        });
+
+        it('should expose the same row shape as getTableColumns', () => {
+            const query = NZ_QUERIES.getExternalTableColumns('MYDB', 'ADMIN', 'ET');
+            expect(query).toContain('C.OBJID::INT AS OBJID');
+            expect(query).toContain('C.FORMAT_TYPE AS FULL_TYPE');
+            expect(query).toContain('C.ATTNOTNULL::BOOL AS ATTNOTNULL');
+            expect(query).toContain('C.COLDEFAULT');
         });
     });
 
@@ -277,19 +301,10 @@ describe('metadata/systemQueries', () => {
             expect(query).toContain("UPPER(O.OBJNAME) = 'ORDERS'");
         });
 
-        it('should include a NOT EXISTS-guarded external table columns branch', () => {
+        it('should NOT include an external table columns branch (split into listExternalColumnsWithKeys)', () => {
             const query = NZ_QUERIES.listColumnsWithKeys('MYDB');
-            expect(query).toContain('UNION ALL');
-            expect(query).toContain('MYDB.._V_EXTERNAL');
-            expect(query).toContain('C.OBJID = E1.RELID');
-            expect(query).toContain('NOT EXISTS');
-            expect(query).toContain('UPPER(TRIM(O2.OBJTYPE)) = \'EXTERNAL TABLE\'');
-        });
-
-        it('should filter external table columns branch by schema and table', () => {
-            const query = NZ_QUERIES.listColumnsWithKeys('MYDB', { schema: 'ADMIN', tableName: 'ET_TEMP' });
-            expect(query).toContain("UPPER(E1.SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(E1.TABLENAME) = 'ET_TEMP'");
+            expect(query).not.toContain('UNION ALL');
+            expect(query).not.toContain('_V_EXTERNAL');
         });
 
         it('should keep exact case for quoted schema/table filters', () => {
@@ -302,10 +317,40 @@ describe('metadata/systemQueries', () => {
         });
     });
 
+    describe('NZ_QUERIES.listExternalColumnsWithKeys', () => {
+        it('should generate a separate external-only columns query', () => {
+            const query = NZ_QUERIES.listExternalColumnsWithKeys('MYDB');
+            expect(query).toContain('MYDB.._V_RELATION_COLUMN');
+            expect(query).toContain('MYDB.._V_EXTERNAL');
+            expect(query).toContain('C.OBJID = E1.RELID');
+            expect(query).toContain('0 AS IS_PK');
+            expect(query).toContain('0 AS IS_FK');
+            expect(query).toContain('0 AS IS_DISTRIBUTION_KEY');
+            expect(query).not.toContain('NOT EXISTS');
+            expect(query).not.toContain('_V_OBJECT_DATA');
+            expect(query).toContain('ORDER BY SCHEMA, TABLENAME, ATTNUM');
+        });
+
+        it('should filter external columns by schema and table', () => {
+            const query = NZ_QUERIES.listExternalColumnsWithKeys('MYDB', { schema: 'ADMIN', tableName: 'ET_TEMP' });
+            expect(query).toContain("UPPER(TRIM(E1.SCHEMA)) = 'ADMIN'");
+            expect(query).toContain("UPPER(TRIM(E1.TABLENAME)) = 'ET_TEMP'");
+        });
+
+        it('should keep exact case for quoted schema/table filters', () => {
+            const query = NZ_QUERIES.listExternalColumnsWithKeys('MYDB', {
+                schema: '"lower_schema"',
+                tableName: '"lower_table"'
+            });
+            expect(query).toContain("TRIM(E1.SCHEMA) = 'lower_schema'");
+            expect(query).toContain("TRIM(E1.TABLENAME) = 'lower_table'");
+        });
+    });
+
     describe('NZ_QUERIES.listTablesAndViews', () => {
         it('should include synonyms and synonym references in the prefetch query', () => {
             const query = NZ_QUERIES.listTablesAndViews(['MYDB']);
-            expect(query).toContain("O.OBJTYPE IN ('TABLE', 'VIEW', 'EXTERNAL TABLE', 'SYNONYM'");
+            expect(query).toContain("O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM'");
             expect(query).toContain("'SEQUENCE'");
             expect(query).toContain("'MATERIALIZED VIEW'");
             expect(query).toContain("'SYSTEM VIEW'");
@@ -320,15 +365,36 @@ describe('metadata/systemQueries', () => {
             expect(query).not.toContain('UPPER(S.SYNONYM_NAME)');
         });
 
-        it('should include a NOT EXISTS-guarded external table branch from _V_EXTERNAL/_V_EXTOBJECT', () => {
+        it('should NOT include an external table branch (split into listExternalTables)', () => {
             const query = NZ_QUERIES.listTablesAndViews(['MYDB']);
-            expect(query).toContain('UNION ALL');
+            expect(query).not.toContain('_V_EXTERNAL');
+            expect(query).not.toContain('_V_EXTOBJECT');
+        });
+    });
+
+    describe('NZ_QUERIES.listExternalTables', () => {
+        it('should generate a separate external-only query from _V_EXTERNAL/_V_EXTOBJECT', () => {
+            const query = NZ_QUERIES.listExternalTables(['MYDB']);
             expect(query).toContain('MYDB.._V_EXTERNAL');
             expect(query).toContain('MYDB.._V_EXTOBJECT');
             expect(query).toContain("'EXTERNAL TABLE' AS OBJTYPE");
             expect(query).toContain('E1.RELID AS OBJID');
-            expect(query).toContain('NOT EXISTS');
-            expect(query).toContain('UPPER(TRIM(O2.OBJTYPE)) = \'EXTERNAL TABLE\'');
+            expect(query).not.toContain('NOT EXISTS');
+            expect(query).not.toContain('_V_OBJECT_DATA');
+            expect(query).toContain('ORDER BY DBNAME, SCHEMA, OBJNAME');
+        });
+
+        it('should expose the same row shape as listTablesAndViews', () => {
+            const query = NZ_QUERIES.listExternalTables(['MYDB']);
+            expect(query).toContain('TRIM(E1.TABLENAME) AS OBJNAME');
+            expect(query).toContain('TRIM(E1.DATABASE) AS DBNAME');
+            expect(query).toContain("TRIM(COALESCE(E2.OWNER, '')) AS OWNER");
+            expect(query).toContain("'' AS REFOBJNAME");
+            expect(query).toContain("'' AS DESCRIPTION");
+        });
+
+        it('should require a non-empty databases array', () => {
+            expect(() => NZ_QUERIES.listExternalTables([])).toThrow(/non-empty/);
         });
     });
 

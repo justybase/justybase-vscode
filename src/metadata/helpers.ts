@@ -30,9 +30,10 @@ export function parseCacheKey(key: string): {
  * Build DB.SCHEMA or DB.. lookup key for table/procedure cache.
  */
 export function buildDbSchemaCacheKey(dbName: string, schemaName?: string): string {
-    const db = dbName.toUpperCase();
-    if (schemaName && schemaName.length > 0) {
-        return `${db}.${schemaName.toUpperCase()}`;
+    const db = dbName.trim().toUpperCase();
+    const schema = schemaName?.trim();
+    if (schema && schema.length > 0) {
+        return `${db}.${schema.toUpperCase()}`;
     }
     return `${db}..`;
 }

@@ -8,7 +8,9 @@ import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
 import type { DocumentParseSession } from '../sqlParser/documentParseSession';
 import { MetadataCache } from '../metadataCache';
-import { buildColumnMetadataQuery, parseColumnMetadata } from './tableMetadataProvider';
+import {
+    fetchTableColumnsWithFallback,
+} from './tableMetadataProvider';
 import { buildIdLookupKey, extractLabel } from '../metadata/helpers';
 import { getTablesForScope, refreshTableLikeTypeForSchema, hasTreeReadyColumnCache, normalizeColumnCacheEntry, isTableCacheObjectType, buildSchemaCacheKey } from '../metadata/cache/schemaTreeDataSource';
 import { buildColumnCacheKey } from '../metadata/columnRowMapping';
@@ -24,7 +26,10 @@ import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
 import { getConnectionAccentResourceUri } from '../utils/connectionAccent';
 import { getDialectIconUri } from '../utils/dialectIcons';
 import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
-import { METADATA_QUERY_TIMEOUT_SECONDS } from '../metadata/metadataQueryLimiter';
+import {
+    METADATA_QUERY_TIMEOUT_SECONDS,
+    runWithMetadataQueryConcurrencyLimit,
+} from '../metadata/metadataQueryLimiter';
 import { logWithFallback } from '../utils/logger';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 import { isLargeScriptDocument } from '../sqlParser/validationConfig';
@@ -35,6 +40,10 @@ import {
     tableMatchesSchemaFilter,
 } from './schemaFilterUtils';
 import { buildFileConnectionDetails, detectFileDataFormat, getFilePaths, normalizeFilePath, saveFileConnectionDetails } from '../services/fileConnectionProfileService';
+import type {
+    MetadataQueryContext,
+    MetadataQueryKind,
+} from '../metadata/metadataQueryDiagnostics';
 
 /**
  * Default timeout for schema queries (60 seconds)
@@ -84,6 +93,7 @@ async function runQueryWithTimeout(
     connectionManager: ConnectionManager,
     connectionName: string | undefined,
     timeoutMs: number = SCHEMA_QUERY_TIMEOUT,
+    metadataContext?: MetadataQueryContext,
 ): Promise<{ columns: { name: string }[]; data: unknown[][] } | undefined> {
     const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
     try {
@@ -96,6 +106,7 @@ async function runQueryWithTimeout(
             maxRows: 1000000,
             isUserQuery: false,
             timeoutSeconds,
+            metadataContext,
         });
     } catch (error: unknown) {
         if (error instanceof Error && /timeout|timed out/i.test(error.message)) {
@@ -1222,7 +1233,7 @@ export class SchemaProvider
                 if (this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
                     return;
                 }
-                this.metadataCache.triggerConnectionPrefetch(connectionName, async (query) => {
+                this.metadataCache.triggerConnectionPrefetch(connectionName, async (query, metadataContext) => {
                     try {
                         return await runQueryWithTimeout(
                             this.context,
@@ -1230,6 +1241,7 @@ export class SchemaProvider
                             this.connectionManager,
                             connectionName,
                             SCHEMA_QUERY_TIMEOUT,
+                            metadataContext,
                         );
                     } catch (e: unknown) {
                         if (e instanceof SchemaQueryTimeoutError) {
@@ -1906,20 +1918,38 @@ export class SchemaProvider
                     }
                 }
 
-                const query = buildColumnMetadataQuery(effectiveDbName, effectiveSchemaName, effectiveTableName, databaseKind);
-
-                const results = await runQueryWithTimeout(
-                    this.context,
-                    query,
-                    this.connectionManager,
-                    element.connectionName,
-                    SCHEMA_QUERY_TIMEOUT,
+                const parsedColumns = await fetchTableColumnsWithFallback(
+                    (columnQuery, queryKind: MetadataQueryKind = 'table-columns') =>
+                        runWithMetadataQueryConcurrencyLimit(element.connectionName!, (queueWaitMs) =>
+                            runQueryWithTimeout(
+                                this.context,
+                                columnQuery,
+                                this.connectionManager,
+                                element.connectionName,
+                                SCHEMA_QUERY_TIMEOUT,
+                                {
+                                    source: 'schema-tree',
+                                    kind: queryKind,
+                                    connectionName: element.connectionName,
+                                    database: effectiveDbName,
+                                    schema: effectiveSchemaName,
+                                    table: effectiveTableName,
+                                    reason: 'explicit-schema-tree-expand',
+                                    queueWaitMs,
+                                },
+                            ),
+                        ),
+                    effectiveDbName,
+                    effectiveSchemaName,
+                    effectiveTableName,
+                    databaseKind,
+                    { objectType: element.objType },
                 );
-                const parsedColumns = parseColumnMetadata(results);
+                const mergedColumns = parsedColumns;
 
                 // Cache the results
                 const columnKey = buildColumnCacheKey(dbName, schemaName, tableName as string);
-                const cacheItems = parsedColumns.map((col) =>
+                const cacheItems = mergedColumns.map((col) =>
                     normalizeColumnCacheEntry({
                         ATTNAME: col.attname,
                         FORMAT_TYPE: col.formatType,
@@ -1934,7 +1964,7 @@ export class SchemaProvider
                 );
                 this.metadataCache.setColumns(element.connectionName, columnKey, cacheItems);
 
-                const visibleParsedColumns = parsedColumns.filter((col) =>
+                const visibleParsedColumns = mergedColumns.filter((col) =>
                     columnVisibleInSchemaFilter({
                         regex: this._filterRegex,
                         tableName: tableName as string,
@@ -2434,20 +2464,38 @@ export class SchemaProvider
                     }
                 }
 
-                const query = buildColumnMetadataQuery(effectiveDbName, effectiveSchemaName, effectiveTableName, databaseKind);
-
-                const results = await runQueryWithTimeout(
-                    this.context,
-                    query,
-                    this.connectionManager,
-                    element.connectionName,
-                    SCHEMA_QUERY_TIMEOUT,
+                const parsedColumns = await fetchTableColumnsWithFallback(
+                    (columnQuery, queryKind: MetadataQueryKind = 'table-columns') =>
+                        runWithMetadataQueryConcurrencyLimit(element.connectionName!, (queueWaitMs) =>
+                            runQueryWithTimeout(
+                                this.context,
+                                columnQuery,
+                                this.connectionManager,
+                                element.connectionName,
+                                SCHEMA_QUERY_TIMEOUT,
+                                {
+                                    source: 'schema-tree',
+                                    kind: queryKind,
+                                    connectionName: element.connectionName,
+                                    database: effectiveDbName,
+                                    schema: effectiveSchemaName,
+                                    table: effectiveTableName,
+                                    reason: 'explicit-schema-tree-expand',
+                                    queueWaitMs,
+                                },
+                            ),
+                        ),
+                    effectiveDbName,
+                    effectiveSchemaName,
+                    effectiveTableName,
+                    databaseKind,
+                    { objectType: element.objType },
                 );
-                const parsedColumns = parseColumnMetadata(results);
+                const mergedColumns = parsedColumns;
 
                 // Cache the results under the synonym's own key
                 const columnKey = buildColumnCacheKey(dbName, schemaName, tableName as string);
-                const cacheItems = parsedColumns.map((col) =>
+                const cacheItems = mergedColumns.map((col) =>
                     normalizeColumnCacheEntry({
                         ATTNAME: col.attname,
                         FORMAT_TYPE: col.formatType,
@@ -2462,7 +2510,7 @@ export class SchemaProvider
                 );
                 this.metadataCache.setColumns(element.connectionName, columnKey, cacheItems);
 
-                const visibleParsedColumns = parsedColumns.filter((col) =>
+                const visibleParsedColumns = mergedColumns.filter((col) =>
                     columnVisibleInSchemaFilter({
                         regex: this._filterRegex,
                         tableName: tableName as string,

@@ -90,6 +90,27 @@ describe("MetadataBridge list cache", () => {
       expect(r2).toEqual(tablesList);
     });
 
+    it("A2b: Netezza list lookup asks the host for cache-only data", async () => {
+      sendRequest.mockImplementation(async (params) => {
+        if (params.kind === "context") {
+          return { connectionName: "CONN_1", databaseKind: "netezza" };
+        }
+        return tablesList;
+      });
+
+      await bridge.getContext(docUri);
+      const result = await bridge.getTables(docUri, db, schema);
+
+      expect(result).toEqual(tablesList);
+      expect(sendRequest).toHaveBeenLastCalledWith({
+        documentUri: docUri,
+        kind: "tables",
+        database: db,
+        schema,
+        cacheOnly: true,
+      });
+    });
+
     it("A3: getDatabases — cache hit", async () => {
       sendRequest.mockResolvedValue(databasesList);
 
@@ -142,6 +163,37 @@ describe("MetadataBridge list cache", () => {
     ).resolves.toEqual([
       { name: "ID", type: "INTEGER", description: undefined, isPk: undefined, isFk: undefined },
       { name: "Opis", type: "TEXT", description: "opis", isPk: undefined, isFk: undefined },
+    ]);
+  });
+
+  it("uses extension-host cached table info for cache-only completion", async () => {
+    sendRequest.mockImplementation(async (params) => {
+      if (params.kind === "context") {
+        return { connectionName: "CONN" };
+      }
+      if (params.kind === "cachedTableInfo") {
+        return {
+          exists: true,
+          table: "Tabela1",
+          database: db,
+          schema,
+          columns: [{ name: "ID", type: "INTEGER" }],
+        };
+      }
+      return null;
+    });
+
+    await expect(
+      bridge.getColumns(docUri, db, "Tabela1", schema, {
+        allowDatabaseFetch: false,
+        requestSource: "completion",
+      }),
+    ).resolves.toEqual([
+      { name: "ID", type: "INTEGER", description: undefined, isPk: undefined, isFk: undefined },
+    ]);
+    expect(sendRequest.mock.calls.map(([params]) => params.kind)).toEqual([
+      "context",
+      "cachedTableInfo",
     ]);
   });
 

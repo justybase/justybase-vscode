@@ -48,8 +48,34 @@ export async function getColumns(
 ): Promise<ColumnInfo[]> {
     const sql = NZ_QUERIES.getTableColumns(database, schema, tableName);
     const rows = await executeQueryHelper<RawTableColumnsRow>(connection, sql);
-    const canonicalColumns = mapTableColumnsRows(rows);
+    return mapDdlColumns(mapTableColumnsRows(rows));
+}
 
+/**
+ * Get columns for an external table from the external catalog.
+ *
+ * External-table DDL already knows the object type, so it should use the
+ * companion query directly instead of making the regular table query probe
+ * `_V_EXTERNAL` as a fallback.
+ */
+export async function getExternalColumns(
+    connection: NzConnection,
+    database: string,
+    schema: string,
+    tableName: string
+): Promise<ColumnInfo[]> {
+    const sql = NZ_QUERIES.getExternalTableColumns(database, schema, tableName);
+    const rows = await executeQueryHelper<RawTableColumnsRow>(connection, sql);
+    return mapDdlColumns(mapTableColumnsRows(rows));
+}
+
+function mapDdlColumns(canonicalColumns: Array<{
+    columnName: string;
+    dataType: string;
+    description?: string;
+    isNotNull: boolean;
+    defaultValue: string | null;
+}>): ColumnInfo[] {
     return canonicalColumns.map(column => ({
         name: column.columnName,
         description: column.description || null,

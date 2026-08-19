@@ -39,7 +39,7 @@ describe('metadataQueryLimiter', () => {
 
     it('honors a configured concurrency limit and resets to the default', async () => {
         resetMetadataQueryLimiterForTests();
-        expect(getMetadataQueryConcurrencyLimit()).toBe(5);
+        expect(getMetadataQueryConcurrencyLimit()).toBe(1);
         setMetadataQueryConcurrencyLimit(3);
         expect(getMetadataQueryConcurrencyLimit()).toBe(3);
 
@@ -70,7 +70,7 @@ describe('metadataQueryLimiter', () => {
         expect(inFlight).toBe(0);
 
         resetMetadataQueryLimiterForTests();
-        expect(getMetadataQueryConcurrencyLimit()).toBe(5);
+        expect(getMetadataQueryConcurrencyLimit()).toBe(1);
     });
 
     it('clamps invalid configured limits to at least 1', () => {
@@ -87,7 +87,29 @@ describe('metadataQueryLimiter', () => {
         setMetadataQueryConcurrencyLimit(100);
         expect(getMetadataQueryConcurrencyLimit()).toBe(16);
         setMetadataQueryConcurrencyLimit(NaN);
-        expect(getMetadataQueryConcurrencyLimit()).toBe(5);
+        expect(getMetadataQueryConcurrencyLimit()).toBe(1);
         resetMetadataQueryLimiterForTests();
+    });
+
+    it('passes queue wait time to the operation after a connection-level wait', async () => {
+        resetMetadataQueryLimiterForTests();
+        let releaseFirst: (() => void) | undefined;
+        const first = runWithMetadataQueryConcurrencyLimit('conn-queue', async (queueWaitMs) => {
+            expect(queueWaitMs).toBe(0);
+            await new Promise<void>((resolve) => {
+                releaseFirst = resolve;
+            });
+        });
+
+        let secondQueueWait = -1;
+        const second = runWithMetadataQueryConcurrencyLimit('conn-queue', async (queueWaitMs) => {
+            secondQueueWait = queueWaitMs;
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(secondQueueWait).toBe(-1);
+        releaseFirst?.();
+        await Promise.all([first, second]);
+        expect(secondQueueWait).toBeGreaterThanOrEqual(0);
     });
 });

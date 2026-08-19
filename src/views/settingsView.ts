@@ -177,7 +177,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 description: 'Maximum number of parallel metadata catalog queries per connection (1–16)',
                 type: 'number',
                 configKey: 'metadata.queryConcurrency',
-                defaultValue: 5
+                defaultValue: 1
             }
         ]
     },

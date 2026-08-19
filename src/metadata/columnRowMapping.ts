@@ -15,6 +15,11 @@ export interface RawColumnRowWithKeys {
     [key: string]: unknown;
 }
 
+/** Normalize fixed-width catalog values before they participate in cache keys. */
+export function normalizeCatalogPart(value: string | undefined | null): string {
+    return String(value ?? '').trim();
+}
+
 export function mapRawColumnRowToMetadata(row: RawColumnRowWithKeys): ColumnMetadata {
     return {
         ATTNAME: row.ATTNAME,
@@ -33,11 +38,11 @@ export function mapRawColumnRowToMetadata(row: RawColumnRowWithKeys): ColumnMeta
 }
 
 export function normalizeTableNameForColumnCacheKey(tableName: string): string {
-    const trimmed = tableName.trim();
+    const trimmed = normalizeCatalogPart(tableName);
     if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
         return unquoteIdentifier(trimmed);
     }
-    return unquoteIdentifier(tableName).toUpperCase();
+    return unquoteIdentifier(trimmed).toUpperCase();
 }
 
 export function buildColumnCacheKey(
@@ -46,13 +51,15 @@ export function buildColumnCacheKey(
     tableName: string,
     options?: { preserveCase?: boolean },
 ): string {
-    const schema = schemaName ?? '';
+    const database = normalizeCatalogPart(dbName);
+    const schema = normalizeCatalogPart(schemaName);
+    const table = normalizeCatalogPart(tableName);
     if (options?.preserveCase) {
-        return `${dbName}.${schema}.${tableName}`;
+        return `${database}.${schema}.${table}`;
     }
 
-    const normalizedTable = normalizeTableNameForColumnCacheKey(tableName);
-    return `${dbName.toUpperCase()}.${schema.toUpperCase()}.${normalizedTable}`;
+    const normalizedTable = normalizeTableNameForColumnCacheKey(table);
+    return `${database.toUpperCase()}.${schema.toUpperCase()}.${normalizedTable}`;
 }
 
 /** Normalize DB.SCHEMA.TABLE column cache lookup key (Netezza catalog semantics). */
@@ -72,10 +79,13 @@ export function groupColumnRowsByTableKey(
     const columnsByKey = new Map<string, ColumnMetadata[]>();
 
     for (const row of rows) {
+        const databaseName = normalizeCatalogPart(row.DBNAME) || normalizeCatalogPart(defaults?.dbName);
+        const schemaName = normalizeCatalogPart(row.SCHEMA) || normalizeCatalogPart(defaults?.schemaName);
+        const tableName = normalizeCatalogPart(row.TABLENAME);
         const key = buildColumnCacheKey(
-            row.DBNAME || defaults?.dbName || '',
-            row.SCHEMA ?? defaults?.schemaName,
-            row.TABLENAME,
+            databaseName,
+            schemaName,
+            tableName,
         );
 
         if (!columnsByKey.has(key)) {

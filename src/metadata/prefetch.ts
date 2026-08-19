@@ -7,6 +7,13 @@ import type { MetadataPrefetchTarget } from './cache/MetadataPrefetchTarget';
 import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 
 /**
+ * Minimum interval between automatic (warmup-triggered) full prefetches.
+ * Prevents a failed prefetch from being retriggered on every cache miss,
+ * which floods the database with heavy catalog queries.
+ */
+export const PREFETCH_RETRY_BACKOFF_MS = 5 * 60 * 1000;
+
+/**
  * Returns true for expected errors that occur during DDL scripts when metadata is
  * fetched before objects exist. These are harmless and should be logged as warn.
  */
@@ -38,7 +45,12 @@ function logPrefetchError(message: string, e: unknown): void {
         Logger.getInstance().error(message, e);
     }
 }
-import { buildColumnCacheKey, groupColumnRowsByTableKey, type RawColumnRowWithKeys } from './columnRowMapping';
+import {
+    buildColumnCacheKey,
+    groupColumnRowsByTableKey,
+    normalizeCatalogPart,
+    type RawColumnRowWithKeys,
+} from './columnRowMapping';
 import { buildDbSchemaCacheKey, extractLabel } from './helpers';
 import {
     getMetadataQueryConcurrencyLimit,
@@ -49,6 +61,11 @@ import { TableMetadata, ProcedureMetadata } from './types';
 import { QueryResult } from '../types';
 import { NZ_QUERIES } from './systemQueries';
 import { Logger } from '../utils/logger';
+import type {
+    MetadataQueryContext,
+    MetadataQueryKind,
+    MetadataRequestSource,
+} from './metadataQueryDiagnostics';
 
 /**
  * Type for query execution function (legacy - returns JSON string)
@@ -58,7 +75,25 @@ export type QueryRunnerFn = (query: string) => Promise<string | undefined>;
 /**
  * Type for raw query execution function (returns QueryResult directly - no JSON serialization)
  */
-export type QueryRunnerRawFn = (query: string) => Promise<QueryResult | undefined>;
+export type QueryRunnerRawFn = (
+    query: string,
+    metadataContext?: MetadataQueryContext,
+) => Promise<QueryResult | undefined>;
+
+async function runPrefetchQuery(
+    connectionName: string,
+    runQueryFn: QueryRunnerRawFn,
+    query: string,
+    context: Omit<MetadataQueryContext, 'connectionName'> & { source: MetadataRequestSource; kind: MetadataQueryKind },
+): Promise<QueryResult | undefined> {
+    return runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
+        runQueryFn(query, {
+            ...context,
+            connectionName,
+            queueWaitMs,
+        }),
+    );
+}
 
 export type MetadataPrefetchProgressStage =
     | 'start'
@@ -137,6 +172,9 @@ interface RawTypeGroupRow {
 
 function mapPrefetchObjectRow(row: RawObjectRow): TableMetadata {
     const normalizedObjectType = row.OBJTYPE?.trim().toUpperCase() || 'TABLE';
+    const objectName = normalizeCatalogPart(row.OBJNAME);
+    const schemaName = normalizeCatalogPart(row.SCHEMA);
+    const databaseName = normalizeCatalogPart(row.DBNAME);
     const isViewLike =
         normalizedObjectType === 'VIEW'
         || normalizedObjectType === 'MATERIALIZED VIEW'
@@ -154,17 +192,174 @@ function mapPrefetchObjectRow(row: RawObjectRow): TableMetadata {
     const typeLabel = typeLabelByObjType[normalizedObjectType] ?? normalizedObjectType;
 
     return {
-        OBJNAME: row.OBJNAME,
-        label: row.OBJNAME,
+        OBJNAME: objectName,
+        label: objectName,
         kind: isViewLike ? 18 : 6,
-        detail: row.SCHEMA ? typeLabel : `${typeLabel} (${row.SCHEMA})`,
+        detail: schemaName ? typeLabel : `${typeLabel} (${schemaName})`,
         objType: normalizedObjectType,
         OBJID: row.OBJID,
-        SCHEMA: row.SCHEMA,
-        OWNER: row.OWNER,
+        SCHEMA: schemaName,
+        DBNAME: databaseName,
+        OWNER: normalizeCatalogPart(row.OWNER),
         DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
-        REFOBJNAME: row.REFOBJNAME,
+        REFOBJNAME: normalizeCatalogPart(row.REFOBJNAME),
     };
+}
+
+function normalizeRawObjectRow(row: RawObjectRow): RawObjectRow {
+    return {
+        ...row,
+        OBJNAME: normalizeCatalogPart(row.OBJNAME),
+        SCHEMA: normalizeCatalogPart(row.SCHEMA),
+        DBNAME: normalizeCatalogPart(row.DBNAME),
+        OBJTYPE: normalizeCatalogPart(row.OBJTYPE).toUpperCase(),
+        OWNER: normalizeCatalogPart(row.OWNER),
+        REFOBJNAME: normalizeCatalogPart(row.REFOBJNAME),
+        DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
+    };
+}
+
+function objectMergeKey(row: RawObjectRow): string {
+    const normalized = normalizeRawObjectRow(row);
+    return [normalized.DBNAME, normalized.SCHEMA, normalized.OBJNAME]
+        .map((part) => part.toUpperCase())
+        .join('|');
+}
+
+function mergeObjectRows(
+    primaryRows: RawObjectRow[],
+    fallbackRows: RawObjectRow[],
+): RawObjectRow[] {
+    const rowsByKey = new Map<string, RawObjectRow>();
+    for (const row of [...primaryRows, ...fallbackRows]) {
+        const normalized = normalizeRawObjectRow(row);
+        const key = objectMergeKey(normalized);
+        if (!rowsByKey.has(key)) {
+            rowsByKey.set(key, normalized);
+        }
+    }
+    return [...rowsByKey.values()];
+}
+
+function tableMetadataMergeKey(table: TableMetadata, fallbackDatabase: string): string {
+    const label = typeof table.label === 'string'
+        ? table.label
+        : table.label?.label;
+    return [
+        normalizeCatalogPart(String(table.DBNAME ?? fallbackDatabase)),
+        normalizeCatalogPart(table.SCHEMA),
+        normalizeCatalogPart(table.OBJNAME ?? table.TABLENAME ?? label),
+    ]
+        .map((part) => part.toUpperCase())
+        .join('|');
+}
+
+/**
+ * Add newly discovered external objects to a hydrated cache without replacing
+ * unrelated objects already present in the schema/DB layer.
+ */
+function mergeCachedObjectRows(
+    existingRows: TableMetadata[],
+    discoveredRows: TableMetadata[],
+    fallbackDatabase: string,
+): TableMetadata[] {
+    const rowsByKey = new Map<string, TableMetadata>();
+    for (const row of existingRows) {
+        rowsByKey.set(tableMetadataMergeKey(row, fallbackDatabase), row);
+    }
+    for (const row of discoveredRows) {
+        const key = tableMetadataMergeKey(row, fallbackDatabase);
+        const existing = rowsByKey.get(key);
+        // An external row is a compatibility supplement. It may refresh an
+        // old EXTERNAL TABLE entry, but it must never replace a regular object
+        // with the same normalized name from the primary catalog.
+        if (!existing || String(existing.objType ?? existing.TYPE ?? '').trim().toUpperCase() === 'EXTERNAL TABLE') {
+            rowsByKey.set(key, row);
+        }
+    }
+    return [...rowsByKey.values()];
+}
+
+function buildObjectIdMap(
+    database: string,
+    rows: TableMetadata[],
+): Map<string, number> {
+    const idMap = new Map<string, number>();
+    for (const row of rows) {
+        const objectName = normalizeCatalogPart(row.OBJNAME ?? row.TABLENAME ?? (
+            typeof row.label === 'string' ? row.label : row.label?.label
+        ));
+        if (!objectName || typeof row.OBJID !== 'number') {
+            continue;
+        }
+        idMap.set(
+            buildColumnCacheKey(
+                normalizeCatalogPart(String(row.DBNAME ?? database)),
+                normalizeCatalogPart(row.SCHEMA) || undefined,
+                objectName,
+            ),
+            row.OBJID,
+        );
+    }
+    return idMap;
+}
+
+function normalizeRawColumnRow(row: RawColumnRowWithKeys): RawColumnRowWithKeys {
+    return {
+        ...row,
+        TABLENAME: normalizeCatalogPart(row.TABLENAME),
+        SCHEMA: normalizeCatalogPart(row.SCHEMA),
+        DBNAME: normalizeCatalogPart(row.DBNAME),
+        ATTNAME: normalizeCatalogPart(row.ATTNAME),
+    };
+}
+
+function columnMergeKey(row: RawColumnRowWithKeys): string {
+    const normalized = normalizeRawColumnRow(row);
+    return [normalized.DBNAME, normalized.SCHEMA, normalized.TABLENAME, normalized.ATTNAME]
+        .map((part) => normalizeCatalogPart(part).toUpperCase())
+        .join('|');
+}
+
+function mergeColumnRows(
+    primaryRows: RawColumnRowWithKeys[],
+    fallbackRows: RawColumnRowWithKeys[],
+): RawColumnRowWithKeys[] {
+    const rowsByKey = new Map<string, RawColumnRowWithKeys>();
+    for (const row of [...primaryRows, ...fallbackRows]) {
+        const normalized = normalizeRawColumnRow(row);
+        const key = columnMergeKey(normalized);
+        if (!rowsByKey.has(key)) {
+            rowsByKey.set(key, normalized);
+        }
+    }
+    return [...rowsByKey.values()];
+}
+
+function hasExternalTableForDatabase(
+    cache: MetadataPrefetchTarget,
+    connectionName: string,
+    dbName: string,
+    schemaName?: string,
+): boolean {
+    const normalizedDb = dbName.trim().toUpperCase();
+    const normalizedSchema = schemaName?.trim().toUpperCase();
+    const prefix = `${connectionName}|${normalizedDb}.`;
+
+    for (const [key, entry] of cache.tableCache) {
+        if (!key.startsWith(prefix)) {
+            continue;
+        }
+        for (const table of entry.data) {
+            if (String(table.objType ?? table.TYPE ?? '').trim().toUpperCase() !== 'EXTERNAL TABLE') {
+                continue;
+            }
+            if (!normalizedSchema || String(table.SCHEMA ?? '').trim().toUpperCase() === normalizedSchema) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /**
@@ -175,6 +370,7 @@ export class CachePrefetcher {
     private columnPrefetchInProgress: Set<string> = new Set();
     private databaseColumnPrefetchInFlight: Map<string, Promise<void>> = new Map();
     private allObjectsPrefetchTriggeredSet: Set<string> = new Set();
+    private externalObjectsPrefetchTriggeredSet: Set<string> = new Set();
     private connectionPrefetchTriggered: Map<string, number> = new Map();
     private connectionPrefetchInProgress: Set<string> = new Set();
 
@@ -242,32 +438,74 @@ export class CachePrefetcher {
                 return;
             }
 
-            // Use centralized query builder for columns with PK/FK info
+            // Use centralized query builder for columns with PK/FK info. The
+            // external query is only needed when this schema actually contains
+            // an external table; it never runs as a completion-side fallback.
             const query = NZ_QUERIES.listColumnsWithKeys(dbName, { schema: schemaName });
+            let mainRows: RawColumnRowWithKeys[] = [];
+            let mainCatalogFailure = false;
 
             try {
-                const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () => runQueryFn(query));
+                const result = await runPrefetchQuery(
+                    connectionName,
+                    runQueryFn,
+                    query,
+                    {
+                        source: 'schema-prefetch',
+                        kind: 'columns',
+                        database: dbName,
+                        schema: schemaName,
+                        reason: 'schema-column-prefetch',
+                    },
+                );
                 if (result) {
-                    const results = queryResultToRows<RawColumnRowWithKeys>(result);
-                    const columnsByKey = groupColumnRowsByTableKey(results, {
-                        dbName,
-                        schemaName,
-                    });
-
-                    for (const [key, columns] of columnsByKey) {
-                        if (!this.cache.getColumns(connectionName, key)) {
-                            this.cache.setColumns(connectionName, key, columns);
-                        }
-                    }
-
-                    await mirrorSynonymColumnsForConnection(this.cache, connectionName);
+                    mainRows = queryResultToRows<RawColumnRowWithKeys>(result);
                 }
             } catch (e: unknown) {
                 logPrefetchError(`[CachePrefetcher] Error fetching columns:`, e);
-                if (isDatabaseLevelCatalogError(e)) {
+                mainCatalogFailure = isDatabaseLevelCatalogError(e);
+                if (mainCatalogFailure) {
                     this.cache.markDatabaseDead(connectionName, dbName);
                 }
             }
+
+            let externalRows: RawColumnRowWithKeys[] = [];
+            if (!mainCatalogFailure
+                && !this.cache.isDatabaseDead(connectionName, dbName)
+                && hasExternalTableForDatabase(this.cache, connectionName, dbName, schemaName)) {
+                try {
+                    const externalResult = await runPrefetchQuery(
+                        connectionName,
+                        runQueryFn,
+                        NZ_QUERIES.listExternalColumnsWithKeys(dbName, { schema: schemaName }),
+                        {
+                            source: 'schema-prefetch',
+                            kind: 'external-columns',
+                            database: dbName,
+                            schema: schemaName,
+                            reason: 'external-table-columns',
+                        },
+                    );
+                    if (externalResult) {
+                        externalRows = queryResultToRows<RawColumnRowWithKeys>(externalResult);
+                    }
+                } catch (e: unknown) {
+                    logPrefetchError(`[CachePrefetcher] Error fetching external columns:`, e);
+                }
+            }
+
+            const columnsByKey = groupColumnRowsByTableKey(mergeColumnRows(mainRows, externalRows), {
+                dbName,
+                schemaName,
+            });
+
+            for (const [key, columns] of columnsByKey) {
+                if (!this.cache.getColumns(connectionName, key)) {
+                    this.cache.setColumns(connectionName, key, columns);
+                }
+            }
+
+            await mirrorSynonymColumnsForConnection(this.cache, connectionName);
         } finally {
             this.columnPrefetchInProgress.delete(fullPrefetchKey);
         }
@@ -288,7 +526,9 @@ export class CachePrefetcher {
         }
         this.allObjectsPrefetchTriggeredSet.add(key);
 
-        if (skipIfCached && this.cache.hasTableCacheForConnection(connectionName)) {
+        const hasCachedTables = skipIfCached && this.cache.hasTableCacheForConnection(connectionName);
+        const externalOnly = hasCachedTables && !forceRefresh && !this.externalObjectsPrefetchTriggeredSet.has(key);
+        if (hasCachedTables && !externalOnly) {
             Logger.getInstance().debug(
                 `[CachePrefetcher] Skipping objects prefetch — tables already cached for ${connectionName}`,
             );
@@ -303,7 +543,6 @@ export class CachePrefetcher {
             if (!targetDatabases || targetDatabases.length === 0) {
                 targetDatabases = await this.prefetchDatabases(connectionName, runQueryFn);
             }
-
 
             if (!targetDatabases || targetDatabases.length === 0) {
                 Logger.getInstance().warn(`[CachePrefetcher] prefetchAllObjects aborted - no databases found for ${connectionName}`);
@@ -327,56 +566,141 @@ export class CachePrefetcher {
                 );
             }
 
-            // Use centralized query for listing tables and views (global or per-database when provided)
-            const tablesQuery = NZ_QUERIES.listTablesAndViews(liveDatabases);
-            const queryStart = Date.now();
+            // Per-database serial queries (main tables + separate external-table
+            // query). A timeout/error in one database must not abort the rest,
+            // so each query is isolated in its own try/catch.
+            let anyQueryError = false;
+            for (const db of liveDatabases) {
+                const queryStart = Date.now();
+                let mainResults: RawObjectRow[] = [];
+                let externalResults: RawObjectRow[] = [];
+                let mainCatalogFailure = false;
 
-            const result = await runQueryFn(tablesQuery);
-            const queryDuration = Date.now() - queryStart;
-            if (!result) return;
-
-            const results = queryResultToRows<RawObjectRow>(result);
-            const tablesByKey = new Map<string, { tables: TableMetadata[]; idMap: Map<string, number> }>();
-
-            for (const row of results) {
-                const key = buildDbSchemaCacheKey(row.DBNAME, row.SCHEMA ?? undefined);
-                if (!tablesByKey.has(key)) {
-                    tablesByKey.set(key, { tables: [], idMap: new Map() });
+                if (!externalOnly) {
+                    try {
+                        const result = await runPrefetchQuery(
+                            connectionName,
+                            runQueryFn,
+                            NZ_QUERIES.listTablesAndViews([db]),
+                            {
+                                source: 'connection-prefetch',
+                                kind: 'objects',
+                                database: db,
+                                reason: 'object-catalog-prefetch',
+                            },
+                        );
+                        if (result) {
+                            mainResults = queryResultToRows<RawObjectRow>(result);
+                        }
+                    } catch (e: unknown) {
+                        anyQueryError = true;
+                        logPrefetchError(`[CachePrefetcher] Error fetching tables for DB ${db}:`, e);
+                        mainCatalogFailure = isDatabaseLevelCatalogError(e);
+                        if (mainCatalogFailure) {
+                            this.cache.markDatabaseDead(connectionName, db);
+                        }
+                    }
                 }
-                const entry = tablesByKey.get(key)!;
-                entry.tables.push(mapPrefetchObjectRow(row));
 
-                const fullKey = buildColumnCacheKey(
-                    row.DBNAME,
-                    row.SCHEMA ?? undefined,
-                    row.OBJNAME,
-                );
-                entry.idMap.set(fullKey, row.OBJID);
-            }
+                if (!mainCatalogFailure && !this.cache.isDatabaseDead(connectionName, db)) {
+                    try {
+                        const externalResult = await runPrefetchQuery(
+                            connectionName,
+                            runQueryFn,
+                            NZ_QUERIES.listExternalTables([db]),
+                            {
+                                source: 'connection-prefetch',
+                                kind: 'external-objects',
+                                database: db,
+                                reason: 'external-object-discovery',
+                            },
+                        );
+                        if (externalResult) {
+                            externalResults = queryResultToRows<RawObjectRow>(externalResult);
+                        }
+                    } catch (e: unknown) {
+                        anyQueryError = true;
+                        logPrefetchError(`[CachePrefetcher] Error fetching external tables for DB ${db}:`, e);
+                    }
+                }
 
-            // Count objects per database for logging
-            const countByDb = new Map<string, number>();
-            for (const row of results) {
-                const db = row.DBNAME || 'UNKNOWN';
-                countByDb.set(db, (countByDb.get(db) || 0) + 1);
-            }
-            const dbBreakdown = Array.from(countByDb.entries())
-                .sort((a, b) => a[0].localeCompare(b[0]))
-                .map(([db, cnt]) => `${db}:${cnt}`)
-                .join(', ');
-
-            for (const [key, entry] of tablesByKey) {
-                // Only skip if explicitly requested AND data already exists
-                if (skipIfCached && this.cache.getTables(connectionName, key)) {
+                const results = mergeObjectRows(mainResults, externalResults);
+                if (results.length === 0) {
                     continue;
                 }
-                this.cache.setTables(connectionName, key, entry.tables, entry.idMap);
-                this.cache.markPrefetchObjectTypesCatalogLoaded(connectionName, key);
+
+                const tablesByKey = new Map<string, { tables: TableMetadata[]; idMap: Map<string, number> }>();
+
+                for (const row of results) {
+                    const cacheKey = buildDbSchemaCacheKey(row.DBNAME, row.SCHEMA ?? undefined);
+                    if (!tablesByKey.has(cacheKey)) {
+                        tablesByKey.set(cacheKey, { tables: [], idMap: new Map() });
+                    }
+                    const entry = tablesByKey.get(cacheKey)!;
+                    entry.tables.push(mapPrefetchObjectRow(row));
+
+                    const fullKey = buildColumnCacheKey(
+                        row.DBNAME,
+                        row.SCHEMA ?? undefined,
+                        row.OBJNAME,
+                    );
+                    entry.idMap.set(fullKey, row.OBJID);
+                }
+
+                for (const [tableKey, entry] of tablesByKey) {
+                    const existingTables = skipIfCached
+                        ? this.cache.getTables(connectionName, tableKey)
+                        : undefined;
+                    // An old hydrated cache may contain only the DB.. aggregate
+                    // layer. Merge external rows into that aggregate as a unit,
+                    // otherwise setting one schema would hide the other ones.
+                    const aggregateKey = buildDbSchemaCacheKey(db);
+                    const existingAggregate = externalOnly && tableKey !== aggregateKey
+                        ? this.cache.getTables(connectionName, aggregateKey)
+                        : undefined;
+                    if (existingAggregate) {
+                        const discovered = entry.tables;
+                        const merged = mergeCachedObjectRows(existingAggregate, discovered, db);
+                        this.cache.setTables(
+                            connectionName,
+                            aggregateKey,
+                            merged,
+                            buildObjectIdMap(db, merged),
+                        );
+                        this.cache.markPrefetchObjectTypesCatalogLoaded(connectionName, aggregateKey);
+                        continue;
+                    }
+                    // Preserve the old skip behavior for ordinary cached data;
+                    // the external-only compatibility pass merges its supplement.
+                    if (skipIfCached && existingTables && !externalOnly) {
+                        continue;
+                    }
+                    const tablesToStore = externalOnly && existingTables
+                        ? mergeCachedObjectRows(existingTables, entry.tables, db)
+                        : entry.tables;
+                    const idMap = externalOnly && existingTables
+                        ? buildObjectIdMap(db, tablesToStore)
+                        : entry.idMap;
+                    this.cache.setTables(connectionName, tableKey, tablesToStore, idMap);
+                    this.cache.markPrefetchObjectTypesCatalogLoaded(connectionName, tableKey);
+                }
+
+                const queryDuration = Date.now() - queryStart;
+                Logger.getInstance().debug(
+                    `[CachePrefetcher] [TIMING]   Objects query for ${db}: ${queryDuration}ms — ${results.length} objects (${tablesByKey.size} schema(s))`,
+                );
             }
 
-            Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Objects query: ${queryDuration}ms — ${results.length} objects (${dbBreakdown})`);
-            Logger.getInstance().info(`[CachePrefetcher] Prefetched tables for ${tablesByKey.size} schema(s) on ${connectionName}`);
+            if (anyQueryError) {
+                // F2: clear the trigger so a later attempt re-runs stage 3 instead
+                // of silently skipping it forever after a failure.
+                this.allObjectsPrefetchTriggeredSet.delete(key);
+                return;
+            }
+            this.externalObjectsPrefetchTriggeredSet.add(key);
+            Logger.getInstance().info(`[CachePrefetcher] Prefetched tables for ${liveDatabases.length} database(s) on ${connectionName}`);
         } catch (e: unknown) {
+            this.allObjectsPrefetchTriggeredSet.delete(key);
             logPrefetchError(`[CachePrefetcher] Error in prefetchAllObjects:`, e);
         }
     }
@@ -415,6 +739,7 @@ export class CachePrefetcher {
 
     clearConnectionPrefetchTimestamp(connectionName: string): void {
         this.connectionPrefetchTriggered.delete(connectionName);
+        this.lastPrefetchAttemptTime.delete(connectionName);
     }
 
     /**
@@ -466,29 +791,71 @@ export class CachePrefetcher {
         }
 
         const query = NZ_QUERIES.listColumnsWithKeys(dbName);
+        let mainRows: RawColumnRowWithKeys[] = [];
+        let mainCatalogFailure = false;
 
         try {
-            const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () => runQueryFn(query));
-            if (!result) {
-                return;
+            const result = await runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                query,
+                {
+                    source: 'database-prefetch',
+                    kind: 'columns',
+                    database: dbName,
+                    reason: 'database-column-prefetch',
+                },
+            );
+            if (result) {
+                mainRows = queryResultToRows<RawColumnRowWithKeys>(result);
             }
-
-            const results = queryResultToRows<RawColumnRowWithKeys>(result);
-            const columnsByKey = groupColumnRowsByTableKey(results);
-
-            for (const [key, columns] of columnsByKey) {
-                if (!this.cache.getColumns(connectionName, key)) {
-                    this.cache.setColumns(connectionName, key, columns);
-                }
-            }
-
-            await mirrorSynonymColumnsForConnection(this.cache, connectionName);
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchColumnsForDatabase error for ${dbName}:`, e);
-            if (isDatabaseLevelCatalogError(e)) {
+            mainCatalogFailure = isDatabaseLevelCatalogError(e);
+            if (mainCatalogFailure) {
                 this.cache.markDatabaseDead(connectionName, dbName);
             }
         }
+
+        let externalRows: RawColumnRowWithKeys[] = [];
+
+        // External table columns are fetched only when the object stage
+        // proved that this database contains an external table. Keep this
+        // query independent from the regular catalog query: a transient
+        // failure in one catalog branch must not discard the other branch.
+        if (!mainCatalogFailure
+            && !this.cache.isDatabaseDead(connectionName, dbName)
+            && hasExternalTableForDatabase(this.cache, connectionName, dbName)) {
+            try {
+                const externalResult = await runPrefetchQuery(
+                    connectionName,
+                    runQueryFn,
+                    NZ_QUERIES.listExternalColumnsWithKeys(dbName),
+                    {
+                        source: 'database-prefetch',
+                        kind: 'external-columns',
+                        database: dbName,
+                        reason: 'external-table-columns',
+                    },
+                );
+                if (externalResult) {
+                    externalRows = queryResultToRows<RawColumnRowWithKeys>(externalResult);
+                }
+            } catch (e: unknown) {
+                logPrefetchError(`[CachePrefetcher] Error fetching external columns for DB ${dbName}:`, e);
+            }
+        }
+
+        const results = mergeColumnRows(mainRows, externalRows);
+        const columnsByKey = groupColumnRowsByTableKey(results);
+
+        for (const [key, columns] of columnsByKey) {
+            if (!this.cache.getColumns(connectionName, key)) {
+                this.cache.setColumns(connectionName, key, columns);
+            }
+        }
+
+        await mirrorSynonymColumnsForConnection(this.cache, connectionName);
     }
 
     triggerConnectionPrefetch(connectionName: string, runQueryFn: QueryRunnerRawFn): void {
@@ -502,6 +869,12 @@ export class CachePrefetcher {
 
     /** Threshold in ms for considering a prefetch 'slow' — used to suggest disk persistence. */
     private static readonly SLOW_PREFETCH_MS = 30_000;
+
+    private readonly lastPrefetchAttemptTime: Map<string, number> = new Map();
+
+    getLastPrefetchAttemptTime(connectionName: string): number | undefined {
+        return this.lastPrefetchAttemptTime.get(connectionName);
+    }
 
     private async runConnectionPrefetch(connectionName: string, runQueryFn: QueryRunnerRawFn): Promise<void> {
         const isInProgress = this.connectionPrefetchInProgress.has(connectionName);
@@ -522,8 +895,15 @@ export class CachePrefetcher {
             }
         }
 
+        // Mark in-progress BEFORE any await: concurrent triggerConnectionPrefetch
+        // calls otherwise both pass the check while the disk lock is being acquired,
+        // resulting in two parallel full prefetches (seen in production logs).
+        this.connectionPrefetchInProgress.add(connectionName);
+        this.lastPrefetchAttemptTime.set(connectionName, Date.now());
+
         const prefetchLease = await this.cache.tryAcquirePrefetchLock(connectionName);
         if (!prefetchLease) {
+            this.connectionPrefetchInProgress.delete(connectionName);
             return;
         }
 
@@ -532,7 +912,6 @@ export class CachePrefetcher {
                 Logger.getInstance().info(`[CachePrefetcher] Prefetch stale for ${connectionName}, re-triggering`);
             }
 
-            this.connectionPrefetchInProgress.add(connectionName);
             Logger.getInstance().info(`[CachePrefetcher] Starting eager prefetch for connection: ${connectionName}`);
             this.emitProgress({
                 connectionName,
@@ -551,8 +930,18 @@ export class CachePrefetcher {
         const prefetchStartMs = Date.now();
 
         try {
-            await this.executeConnectionPrefetch(connectionName, runQueryFn, isPrefetchStale, prefetchLease);
-            prefetchSucceeded = true;
+            prefetchSucceeded = await this.executeConnectionPrefetch(
+                connectionName,
+                runQueryFn,
+                isPrefetchStale,
+                prefetchLease,
+            );
+            if (!prefetchSucceeded) {
+                hasError = true;
+                Logger.getInstance().warn(
+                    `[CachePrefetcher] Connection prefetch is incomplete for ${connectionName}; freshness was not advanced`,
+                );
+            }
         } catch (e) {
             hasError = true;
             logPrefetchError(`[CachePrefetcher] Connection prefetch error:`, e);
@@ -591,7 +980,6 @@ export class CachePrefetcher {
             if (
                 prefetchSucceeded
                 && !hasError
-                && this.cache.verifyStagesComplete(connectionName)
             ) {
                 this.connectionPrefetchTriggered.set(connectionName, Date.now());
                 try {
@@ -613,7 +1001,7 @@ export class CachePrefetcher {
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
         prefetchLease: import('./diskStorage/metadataDiskStorage').PrefetchLease,
-    ): Promise<void> {
+    ): Promise<boolean> {
         const prefetchStartOverall = Date.now();
         const log = Logger.getInstance();
 
@@ -635,7 +1023,7 @@ export class CachePrefetcher {
                 percent: 100,
                 message: 'No databases found to refresh'
             });
-            return;
+            return false;
         }
         log.debug(`[CachePrefetcher] [TIMING] Stage 1/5 DATABASES: ${stage1Duration}ms — ${databases.length} databases found`);
         this.emitProgress({
@@ -735,6 +1123,9 @@ export class CachePrefetcher {
         });
         const stage5Duration = Date.now() - stage5Start;
 
+        const snapshotComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
+            ?? this.cache.verifyStagesComplete(connectionName);
+
         // ─── SUMMARY ───
         const totalDuration = Date.now() - prefetchStartOverall;
         log.debug(`[CachePrefetcher] [TIMING] ════════════════════════════════════════════════`);
@@ -748,6 +1139,7 @@ export class CachePrefetcher {
         const pctCol = totalDuration > 0 ? (stage5Duration / totalDuration * 100).toFixed(1) : '?';
         log.debug(`[CachePrefetcher] [TIMING]   TOTAL:             ${String(totalDuration).padStart(6)}ms  (columns=${pctCol}%)`);
         log.debug(`[CachePrefetcher] [TIMING] ════════════════════════════════════════════════`);
+        return snapshotComplete;
     }
 
     private async runPerDatabaseBatched(
@@ -768,9 +1160,7 @@ export class CachePrefetcher {
                         onItemComplete?.(completed, databases.length);
                         return;
                     }
-                    await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
-                        operation(database),
-                    );
+                    await operation(database);
                     completed += 1;
                     onItemComplete?.(completed, databases.length);
                 }),
@@ -792,7 +1182,16 @@ export class CachePrefetcher {
 
         try {
             const query = NZ_QUERIES.LIST_DATABASES;
-            const result = await runQueryFn(query);
+            const result = await runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                query,
+                {
+                    source: 'connection-prefetch',
+                    kind: 'databases',
+                    reason: 'database-list-prefetch',
+                },
+            );
             if (!result) return [];
 
             const results = queryResultToRows<RawDatabaseRow>(result);
@@ -827,7 +1226,17 @@ export class CachePrefetcher {
         try {
             const queryStart = Date.now();
             const query = NZ_QUERIES.listTypeGroups(dbName);
-            const result = await runQueryFn(query);
+            const result = await runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                query,
+                {
+                    source: 'connection-prefetch',
+                    kind: 'type-groups',
+                    database: dbName,
+                    reason: 'type-group-prefetch',
+                },
+            );
             const queryDuration = Date.now() - queryStart;
             if (!result) {
                 return;
@@ -863,7 +1272,17 @@ export class CachePrefetcher {
         try {
             const queryStart = Date.now();
             const query = NZ_QUERIES.listSchemas(dbName);
-            const result = await runQueryFn(query);
+            const result = await runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                query,
+                {
+                    source: 'connection-prefetch',
+                    kind: 'schemas',
+                    database: dbName,
+                    reason: 'schema-prefetch',
+                },
+            );
             const queryDuration = Date.now() - queryStart;
             if (!result) return;
 
@@ -915,7 +1334,17 @@ export class CachePrefetcher {
             }
 
             const queryStart = Date.now();
-            const result = await runQueryFn(query);
+            const result = await runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                query,
+                {
+                    source: 'connection-prefetch',
+                    kind: 'procedures',
+                    database: dbName,
+                    reason: 'procedure-prefetch',
+                },
+            );
             const queryDuration = Date.now() - queryStart;
             if (!result) {
                 return;
@@ -988,111 +1417,153 @@ export class CachePrefetcher {
     ): Promise<void> {
         try {
             const connPrefix = `${connectionName}|`;
-            const allTables: { schema: string; name: string; db: string }[] = [];
 
-            for (const [key, entry] of this.cache.tableCache) {
-                if (!key.startsWith(connPrefix)) continue;
+            // Database list comes from the cached database layer (stage 1) —
+            // NOT from the tables cache. A failed stage 3 must not silently
+            // starve stage 5 (columns would never be prefetched).
+            let databases: string[] = [];
+            const cachedDatabases = this.cache.getDatabases(connectionName);
+            if (cachedDatabases && cachedDatabases.length > 0) {
+                databases = cachedDatabases
+                    .map((item) => extractLabel(item))
+                    .filter(Boolean) as string[];
+            }
 
-                const parts = key.split('|');
-                if (parts.length < 2) continue;
+            let totalTables = 0;
+            if (databases.length === 0) {
+                // Fall back to databases present in the table cache (legacy path).
+                const seen = new Set<string>();
+                for (const [key, entry] of this.cache.tableCache) {
+                    if (!key.startsWith(connPrefix)) continue;
 
-                const dbKey = parts[1];
-                const dbParts = dbKey.split('.');
-                const dbName = dbParts[0];
-                const schemaName = dbParts.length > 1 ? dbParts[1] : '';
+                    const parts = key.split('|');
+                    if (parts.length < 2) continue;
 
-                for (const table of entry.data) {
-                    const tableName = extractLabel(table);
-                    if (tableName) {
-                        allTables.push({ schema: schemaName, name: tableName, db: dbName });
+                    const dbParts = parts[1].split('.');
+                    const dbName = dbParts[0];
+                    if (dbName && !seen.has(dbName)) {
+                        seen.add(dbName);
+                        databases.push(dbName);
+                    }
+                    totalTables += entry.data.length;
+                }
+            } else {
+                for (const [key, entry] of this.cache.tableCache) {
+                    if (key.startsWith(connPrefix)) {
+                        totalTables += entry.data.length;
                     }
                 }
             }
 
-            if (allTables.length === 0) {
+            if (databases.length === 0) {
+                Logger.getInstance().debug(
+                    `[CachePrefetcher] Skipping columns prefetch — no databases known for ${connectionName}`,
+                );
                 return;
             }
 
             let fetchedCount = 0;
             const prefetchStartTime = Date.now();
 
-            const tablesByDb = new Map<string, typeof allTables>();
-            for (const item of allTables) {
-                if (!tablesByDb.has(item.db)) {
-                    tablesByDb.set(item.db, []);
-                }
-                tablesByDb.get(item.db)!.push(item);
-            }
-
-            const dbEntries = Array.from(tablesByDb.entries());
-            const totalDatabases = dbEntries.length;
-            const totalTables = allTables.length;
+            const totalDatabases = databases.length;
             let completedDatabases = 0;
-            const concurrencyLimit = getMetadataQueryConcurrencyLimit();
 
-            for (let i = 0; i < dbEntries.length; i += concurrencyLimit) {
-                const batch = dbEntries.slice(i, i + concurrencyLimit);
-                await Promise.all(
-                    batch.map(async ([dbName, dbBatch]) => {
-                        if (this.cache.isDatabaseDead(connectionName, dbName)) {
-                            completedDatabases += 1;
-                            onProgress?.({
-                                completedDatabases,
-                                totalDatabases,
-                                completedTables: fetchedCount,
-                                totalTables,
-                            });
-                            return;
+            // Per-database serial execution: main columns query followed by the
+            // separate external-table columns query, merged in code. Serial order
+            // avoids flooding the database with concurrent sessions.
+            for (const dbName of databases) {
+                if (this.cache.isDatabaseDead(connectionName, dbName)) {
+                    completedDatabases += 1;
+                    onProgress?.({
+                        completedDatabases,
+                        totalDatabases,
+                        completedTables: fetchedCount,
+                        totalTables,
+                    });
+                    continue;
+                }
+
+                const query = NZ_QUERIES.listColumnsWithKeys(dbName);
+                const queryStartTime = Date.now();
+                let queryDuration = 0;
+                let mainRows: RawColumnRowWithKeys[] = [];
+                let mainCatalogFailure = false;
+
+                try {
+                    const result = await runPrefetchQuery(
+                        connectionName,
+                        runQueryFn,
+                        query,
+                        {
+                            source: 'connection-prefetch',
+                            kind: 'columns',
+                            database: dbName,
+                            reason: 'full-column-prefetch',
+                        },
+                    );
+                    queryDuration = Date.now() - queryStartTime;
+                    if (result) {
+                        mainRows = queryResultToRows<RawColumnRowWithKeys>(result);
+                    }
+                } catch (e: unknown) {
+                    queryDuration = Date.now() - queryStartTime;
+                    logPrefetchError(`[CachePrefetcher] Error fetching columns for DB ${dbName}:`, e);
+                    mainCatalogFailure = isDatabaseLevelCatalogError(e);
+                    if (mainCatalogFailure) {
+                        this.cache.markDatabaseDead(connectionName, dbName);
+                    }
+                }
+
+                let externalRows: RawColumnRowWithKeys[] = [];
+                if (!mainCatalogFailure
+                    && !this.cache.isDatabaseDead(connectionName, dbName)
+                    && hasExternalTableForDatabase(this.cache, connectionName, dbName)) {
+                    try {
+                        const externalResult = await runPrefetchQuery(
+                            connectionName,
+                            runQueryFn,
+                            NZ_QUERIES.listExternalColumnsWithKeys(dbName),
+                            {
+                                source: 'connection-prefetch',
+                                kind: 'external-columns',
+                                database: dbName,
+                                reason: 'external-table-columns',
+                            },
+                        );
+                        if (externalResult) {
+                            externalRows = queryResultToRows<RawColumnRowWithKeys>(externalResult);
                         }
+                    } catch (e: unknown) {
+                        logPrefetchError(`[CachePrefetcher] Error fetching external columns for DB ${dbName}:`, e);
+                    }
+                }
 
-                        const query = NZ_QUERIES.listColumnsWithKeys(dbName);
+                const results = mergeColumnRows(mainRows, externalRows);
+                const columnsByKey = groupColumnRowsByTableKey(results);
 
-                        try {
-                            const queryStartTime = Date.now();
-                            const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
-                                runQueryFn(query),
-                            );
-                            const queryDuration = Date.now() - queryStartTime;
+                for (const [key, columns] of columnsByKey) {
+                    if (forceRefresh || !this.cache.getColumns(connectionName, key)) {
+                        this.cache.setColumns(connectionName, key, columns);
+                        fetchedCount++;
+                    }
+                }
 
-                            if (result) {
-                                const parseStartTime = Date.now();
-                                const results = queryResultToRows<RawColumnRowWithKeys>(result);
-                                const parseDuration = Date.now() - parseStartTime;
-
-                                const columnsByKey = groupColumnRowsByTableKey(results);
-
-                                for (const [key, columns] of columnsByKey) {
-                                    if (forceRefresh || !this.cache.getColumns(connectionName, key)) {
-                                        this.cache.setColumns(connectionName, key, columns);
-                                        fetchedCount++;
-                                    }
-                                }
-
-                                Logger.getInstance().debug(
-                                `[CachePrefetcher] [TIMING]     Columns ${dbName}: ${results.length} columns across ${dbBatch.length} tables | query=${queryDuration}ms, parse=${parseDuration}ms`,
-                            );
-                            }
-                        } catch (e: unknown) {
-                            logPrefetchError(`[CachePrefetcher] Error fetching columns for DB ${dbName}:`, e);
-                            if (isDatabaseLevelCatalogError(e)) {
-                                this.cache.markDatabaseDead(connectionName, dbName);
-                            }
-                        } finally {
-                            completedDatabases += 1;
-                            onProgress?.({
-                                completedDatabases,
-                                totalDatabases,
-                                completedTables: fetchedCount,
-                                totalTables,
-                            });
-                        }
-                    }),
+                Logger.getInstance().debug(
+                    `[CachePrefetcher] [TIMING]     Columns ${dbName}: ${results.length} columns | query=${queryDuration}ms`,
                 );
+
+                completedDatabases += 1;
+                onProgress?.({
+                    completedDatabases,
+                    totalDatabases,
+                    completedTables: fetchedCount,
+                    totalTables,
+                });
             }
 
             const totalDuration = Date.now() - prefetchStartTime;
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Columns total: ${fetchedCount} tables cached in ${totalDuration}ms`);
-            Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Columns processed: ${dbEntries.length} databases, ${allTables.length} tables total`);
+            Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Columns processed: ${totalDatabases} databases, ${totalTables} tables total`);
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchAllColumnsForConnection error:`, e);
         } finally {
@@ -1135,8 +1606,10 @@ export class CachePrefetcher {
         this.columnPrefetchInProgress.clear();
         this.databaseColumnPrefetchInFlight.clear();
         this.allObjectsPrefetchTriggeredSet.clear();
+        this.externalObjectsPrefetchTriggeredSet.clear();
         this.connectionPrefetchTriggered.clear();
         this.connectionPrefetchInProgress.clear();
+        this.lastPrefetchAttemptTime.clear();
         this.lastCheckpointTime.clear();
         Logger.getInstance().info('[CachePrefetcher] Prefetch tracking state reset');
     }

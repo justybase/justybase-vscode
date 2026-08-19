@@ -43,6 +43,30 @@ function createTableMetadata(name: string, objectType: 'TABLE' | 'VIEW', schema?
 }
 
 describe('handleMetadataRequest view lookups', () => {
+    it('does not start a live Netezza list query for cache-only completion', async () => {
+        const metadataProvider = {
+            getDatabases: jest.fn().mockResolvedValue([])
+        } as unknown as MetadataProvider
+        const metadataCache = {
+            getDatabases: jest.fn().mockReturnValue(undefined)
+        } as unknown as MetadataCache
+
+        const response = await handleMetadataRequest(
+            {
+                documentUri: 'file:///completion.sql',
+                kind: 'databases',
+                cacheOnly: true
+            },
+            mockExtensionContext,
+            metadataProvider,
+            metadataCache,
+            createConnectionManager('netezza')
+        )
+
+        expect(metadataProvider.getDatabases).not.toHaveBeenCalled()
+        expect(response).toEqual([])
+    })
+
     it.each([
         ['postgresql', 'APPDB', 'public'],
         ['oracle', 'ORCL', 'HR']

@@ -13,6 +13,7 @@ import type {
 import { getMetadataQueryConcurrencyLimit } from "../metadata/metadataQueryLimiter";
 import { simpleHash } from "../providers/parsers/hashUtils";
 import { extractTableReferences } from "./diagnosticsUtils";
+import type { MetadataColumnLookupOptions } from "../metadata/metadataQueryDiagnostics";
 
 export interface Logger {
   error: (message: string) => void;
@@ -38,6 +39,10 @@ export class MetadataBridge {
 
   private readonly documentListEpoch = new Map<string, number>();
   private readonly documentConnectionNames = new Map<string, string>();
+  private readonly documentDatabaseKinds = new Map<
+    string,
+    MetadataContextResponse["databaseKind"] | null
+  >();
   private readonly validationWarmFingerprint = new Map<string, string>();
   private readonly validationMetadataEpoch = new Map<string, number>();
   private readonly qualificationCache = new Map<string, QualificationProposal[]>();
@@ -58,13 +63,14 @@ export class MetadataBridge {
     if (context.connectionName) {
       this.documentConnectionNames.set(documentUri, context.connectionName);
     }
+    this.documentDatabaseKinds.set(documentUri, context.databaseKind ?? null);
     return context;
   }
 
   async getDatabases(documentUri: string): Promise<MetadataObjectItem[]> {
     const cacheKey = `DBS|${documentUri}`;
     return this.getCachedOrFetchList(cacheKey, () =>
-      this.request({ documentUri, kind: "databases" }),
+      this.requestList({ documentUri, kind: "databases" }),
     );
   }
 
@@ -74,7 +80,7 @@ export class MetadataBridge {
   ): Promise<MetadataObjectItem[]> {
     const cacheKey = `SCH|${documentUri}|${database.toUpperCase()}`;
     return this.getCachedOrFetchList(cacheKey, () =>
-      this.request({ documentUri, kind: "schemas", database }),
+      this.requestList({ documentUri, kind: "schemas", database }),
     );
   }
 
@@ -85,7 +91,7 @@ export class MetadataBridge {
   ): Promise<MetadataObjectItem[]> {
     const cacheKey = `TBL|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
     return this.getCachedOrFetchList(cacheKey, () =>
-      this.request({ documentUri, kind: "tables", database, schema }),
+      this.requestList({ documentUri, kind: "tables", database, schema }),
     );
   }
 
@@ -96,7 +102,7 @@ export class MetadataBridge {
   ): Promise<MetadataObjectItem[]> {
     const cacheKey = `VEW|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
     return this.getCachedOrFetchList(cacheKey, () =>
-      this.request({ documentUri, kind: "views", database, schema }),
+      this.requestList({ documentUri, kind: "views", database, schema }),
     );
   }
 
@@ -107,7 +113,7 @@ export class MetadataBridge {
   ): Promise<MetadataObjectItem[]> {
     const cacheKey = `SRC|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
     return this.getCachedOrFetchList(cacheKey, () =>
-      this.request({ documentUri, kind: "sourceObjects", database, schema }),
+      this.requestList({ documentUri, kind: "sourceObjects", database, schema }),
     );
   }
 
@@ -118,7 +124,7 @@ export class MetadataBridge {
   ): Promise<MetadataObjectItem[]> {
     const cacheKey = `PRC|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
     return this.getCachedOrFetchList(cacheKey, () =>
-      this.request({ documentUri, kind: "procedures", database, schema }),
+      this.requestList({ documentUri, kind: "procedures", database, schema }),
     );
   }
 
@@ -127,8 +133,22 @@ export class MetadataBridge {
     database: string,
     table: string,
     schema?: string,
-    options?: { allowPublicSynonym?: boolean },
+    options?: MetadataColumnLookupOptions,
   ): Promise<MetadataColumnItem[]> {
+    if (options?.allowDatabaseFetch === false) {
+      // `cachedTableInfo` is explicitly backed by the extension-host cache;
+      // unlike `tableInfo`/`columns`, it never performs a live catalog fetch.
+      // Keep this request so LSP completion can consume the initial per-
+      // connection prefetch even though the language server has its own cache.
+      const cachedTableInfo = await this.getCachedTableInfo(
+        documentUri,
+        database,
+        table,
+        schema,
+      );
+      return cachedTableInfo?.columns ?? [];
+    }
+
     if (options?.allowPublicSynonym) {
       const connectionName = await this.resolveConnectionName(documentUri);
       const cacheKey = connectionName
@@ -583,6 +603,7 @@ export class MetadataBridge {
 
   clearDocument(documentUri: string): void {
     this.documentConnectionNames.delete(documentUri);
+    this.documentDatabaseKinds.delete(documentUri);
     this.validationWarmFingerprint.delete(documentUri);
     this.validationMetadataEpoch.delete(documentUri);
     this.clearQualificationCacheForDocument(documentUri);
@@ -616,6 +637,7 @@ export class MetadataBridge {
     this.listFetchInFlight.clear();
     this.documentListEpoch.clear();
     this.documentConnectionNames.clear();
+    this.documentDatabaseKinds.clear();
     this.validationWarmFingerprint.clear();
     this.validationMetadataEpoch.clear();
     this.qualificationCache.clear();
@@ -759,6 +781,13 @@ export class MetadataBridge {
 
     this.listFetchInFlight.set(cacheKey, { epoch: startEpoch, promise });
     return await promise;
+  }
+
+  private requestList(params: MetadataRequestParams): Promise<MetadataResponse> {
+    if (this.documentDatabaseKinds.get(params.documentUri) === "netezza") {
+      return this.request({ ...params, cacheOnly: true });
+    }
+    return this.request(params);
   }
 
   private extractDocUri(cacheKey: string): string {

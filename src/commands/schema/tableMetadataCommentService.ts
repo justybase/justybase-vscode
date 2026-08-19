@@ -3,12 +3,13 @@ import { getCachedColumnsFromMetadataCacheAsync } from '../../metadata/columnCac
 import { buildColumnCacheKey } from '../../metadata/columnRowMapping';
 import { normalizeColumnCacheEntry } from '../../metadata/cache/schemaTreeDataSource';
 import { runQueryRaw } from '../../core/queryRunner';
+import { runWithMetadataQueryConcurrencyLimit } from '../../metadata/metadataQueryLimiter';
 import {
-    buildColumnMetadataQuery,
-    parseColumnMetadata,
+    fetchTableColumnsWithFallback,
 } from '../../providers/tableMetadataProvider';
 import type { SchemaCommandsDependencies } from './types';
 import type { SchemaItemData } from './types';
+import type { MetadataQueryKind } from '../../metadata/metadataQueryDiagnostics';
 import { executeWithProgress, getFullName, getItemObjectName } from './helpers';
 import {
     buildTableMetadataCommentBlock,
@@ -117,24 +118,44 @@ async function loadTableColumns(
         return cached ?? [];
     }
 
-    const query = buildColumnMetadataQuery(
+    const objectType = deps.metadataCache.findObjectWithType(
+        connectionName,
         dbName,
         resolvedSchema,
         tableName,
-        databaseKind,
-    );
-    const result = await executeWithProgress(
+    )?.objType;
+    const mergedColumns = await executeWithProgress(
         `Loading columns for ${tableName}...`,
-        async () => runQueryRaw(
-            deps.context,
-            query,
-            true,
-            deps.connectionManager,
-            connectionName,
+        async () => fetchTableColumnsWithFallback(
+            async (columnQuery, queryKind: MetadataQueryKind = 'table-columns') =>
+                runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) => runQueryRaw({
+                    context: deps.context,
+                    query: columnQuery,
+                    silent: true,
+                    connectionManager: deps.connectionManager,
+                    connectionName,
+                    isUserQuery: false,
+                    metadataContext: {
+                        source: 'schema-tree',
+                        kind: queryKind,
+                        connectionName,
+                        database: dbName,
+                        schema: resolvedSchema,
+                        table: tableName,
+                        reason: 'table-metadata-comment',
+                        queueWaitMs,
+                    },
+                    metadataQueueWaitMs: queueWaitMs,
+                })),
+            dbName,
+            resolvedSchema,
+            tableName,
+            databaseKind,
+            { objectType },
         ),
     );
-    const parsedColumns = parseColumnMetadata(result);
-    const cacheItems = parsedColumns.map((column) =>
+
+    const cacheItems = mergedColumns.map((column) =>
         normalizeColumnCacheEntry({
             ATTNAME: column.attname,
             FORMAT_TYPE: column.formatType,

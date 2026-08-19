@@ -44,6 +44,8 @@ export interface MetadataRequestParams {
   schema?: string;
   table?: string;
   allowPublicSynonym?: boolean;
+  /** Completion list lookups may explicitly forbid a live catalog fallback. */
+  cacheOnly?: boolean;
   /** Batch-warm column metadata for these databases (one query per DB). */
   databases?: string[];
 }

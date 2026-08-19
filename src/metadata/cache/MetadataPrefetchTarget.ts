@@ -53,6 +53,8 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   releasePrefetchLock(lease: PrefetchLease | undefined): Promise<void>;
   isDiskPersistenceEnabled(): boolean;
   verifyStagesComplete(connectionName: string): boolean;
+  /** True only when every prefetched table-like object has column metadata. */
+  verifyCompleteSnapshot?(connectionName: string): boolean;
   saveConnectionToDiskAfterPrefetch(
     connectionName: string,
     hasError: boolean, lease: PrefetchLease,

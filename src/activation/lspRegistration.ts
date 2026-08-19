@@ -313,6 +313,7 @@ export async function handleMetadataRequest(
           connectionName,
           metadataProvider,
           metadataCache,
+          params.cacheOnly,
         );
       case "schemas":
         if (!connectionName || !effectiveDatabase) {
@@ -323,6 +324,7 @@ export async function handleMetadataRequest(
           effectiveDatabase,
           metadataProvider,
           metadataCache,
+          params.cacheOnly,
         );
       case "tables":
         if (!connectionName || !effectiveDatabase) {
@@ -335,6 +337,7 @@ export async function handleMetadataRequest(
           metadataProvider,
           metadataCache,
           "table",
+          params.cacheOnly,
         );
       case "views":
         if (!connectionName || !effectiveDatabase) {
@@ -347,6 +350,7 @@ export async function handleMetadataRequest(
           metadataProvider,
           metadataCache,
           "view",
+          params.cacheOnly,
         );
       case "sourceObjects":
         if (!connectionName || !effectiveDatabase) {
@@ -358,6 +362,7 @@ export async function handleMetadataRequest(
           params.schema,
           metadataProvider,
           metadataCache,
+          params.cacheOnly,
         );
       case "procedures":
         if (!connectionName || !effectiveDatabase) {
@@ -369,6 +374,7 @@ export async function handleMetadataRequest(
           params.schema,
           metadataProvider,
           metadataCache,
+          params.cacheOnly,
         );
       case "columns":
         if (!connectionName || !effectiveDatabase || !params.table) {
@@ -504,13 +510,14 @@ async function getDatabases(
   connectionName: string | undefined,
   metadataProvider: MetadataProvider,
   metadataCache: MetadataCache,
+  cacheOnly = false,
 ): Promise<MetadataObjectItem[]> {
   if (!connectionName) {
     return [];
   }
 
   let databases = metadataCache.getDatabases(connectionName);
-  if (!databases) {
+  if (!databases && !cacheOnly) {
     await metadataProvider.getDatabases(connectionName);
     databases = metadataCache.getDatabases(connectionName);
   }
@@ -538,9 +545,10 @@ async function getSchemas(
   database: string,
   metadataProvider: MetadataProvider,
   metadataCache: MetadataCache,
+  cacheOnly = false,
 ): Promise<MetadataObjectItem[]> {
   let schemas = metadataCache.getSchemas(connectionName, database);
-  if (!schemas) {
+  if (!schemas && !cacheOnly) {
     await metadataProvider.getSchemas(connectionName, database);
     schemas = metadataCache.getSchemas(connectionName, database);
   }
@@ -571,6 +579,7 @@ async function getTables(
   metadataProvider: MetadataProvider,
   metadataCache: MetadataCache,
   expectedType: "table" | "view",
+  cacheOnly = false,
 ): Promise<MetadataObjectItem[]> {
   const readCachedTables = (): TableMetadata[] | undefined =>
     getTablesForScope(metadataCache, connectionName, database, schema);
@@ -587,7 +596,7 @@ async function getTables(
   let tables = readCachedTables();
   let matchingItems = toMetadataItems(tables);
 
-  if (!tables) {
+  if (!tables && !cacheOnly) {
     // Cache MISS — no data at all for this DB/schema, need to fetch from server
     if (expectedType === "view") {
       await metadataProvider.getViews(connectionName, database, schema);
@@ -596,7 +605,7 @@ async function getTables(
     }
     tables = readCachedTables();
     matchingItems = toMetadataItems(tables);
-  } else if (expectedType === "view" && matchingItems.length === 0) {
+  } else if (!cacheOnly && expectedType === "view" && matchingItems.length === 0) {
     // Cache has objects but no views (e.g. tables-only prefetch on DB2/Oracle)
     await metadataProvider.getViews(connectionName, database, schema);
     tables = readCachedTables();
@@ -612,8 +621,11 @@ async function getSourceObjects(
   schema: string | undefined,
   metadataProvider: MetadataProvider,
   metadataCache: MetadataCache,
+  cacheOnly = false,
 ): Promise<MetadataObjectItem[]> {
-  await metadataProvider.getSourceObjects(connectionName, database, schema);
+  if (!cacheOnly) {
+    await metadataProvider.getSourceObjects(connectionName, database, schema);
+  }
   const items = getTablesForScope(metadataCache, connectionName, database, schema);
   return (items ?? [])
     .map((item) => mapTableMetadata(item, database))
@@ -632,6 +644,7 @@ async function getProcedures(
   schema: string | undefined,
   metadataProvider: MetadataProvider,
   metadataCache: MetadataCache,
+  cacheOnly = false,
 ): Promise<MetadataObjectItem[]> {
   const cacheKey = schema ? `${database}.${schema}` : `${database}..`;
   let procedures = schema
@@ -639,7 +652,7 @@ async function getProcedures(
     : (metadataCache.getProcedures(connectionName, cacheKey) ??
       metadataCache.getProceduresAllSchemas(connectionName, database));
 
-  if (!procedures) {
+  if (!procedures && !cacheOnly) {
     await metadataProvider.getProcedures(connectionName, database, schema);
     procedures = schema
       ? metadataCache.getProcedures(connectionName, cacheKey)

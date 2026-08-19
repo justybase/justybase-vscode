@@ -29,8 +29,7 @@ jest.mock('../core/queryRunner', () => ({
 }));
 
 jest.mock('../providers/tableMetadataProvider', () => ({
-    buildColumnMetadataQuery: jest.fn(() => 'SELECT * FROM columns'),
-    parseColumnMetadata: jest.fn(() => [])
+    fetchTableColumnsWithFallback: jest.fn(async () => [])
 }));
 
 // Import mocked modules
@@ -1177,8 +1176,8 @@ describe('SchemaProvider', () => {
         });
 
         it('should query columns when not in cache', async () => {
-            const { parseColumnMetadata } = require('../providers/tableMetadataProvider');
-            (parseColumnMetadata as jest.Mock).mockReturnValue([
+            const { fetchTableColumnsWithFallback } = require('../providers/tableMetadataProvider');
+            (fetchTableColumnsWithFallback as jest.Mock).mockResolvedValue([
                 { attname: 'ID', formatType: 'INTEGER', description: 'Identifier', isPk: true, isFk: false }
             ]);
 

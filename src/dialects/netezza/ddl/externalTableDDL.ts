@@ -4,7 +4,7 @@
 
 import type { ExternalTableInfo } from './types';
 import { executeQueryHelper, quoteNameIfNeeded } from './helpers';
-import { getColumns } from './metadata';
+import { getExternalColumns } from './metadata';
 import type { NzConnection } from '../../../types';
 
 /**
@@ -301,7 +301,7 @@ export async function generateExternalTableDDL(
     };
 
     // Get columns
-    const columns = await getColumns(connection, database, schema, tableName);
+    const columns = await getExternalColumns(connection, database, schema, tableName);
 
     return buildExternalTableDDLFromCache(database, schema, tableName, extInfo, columns);
 }

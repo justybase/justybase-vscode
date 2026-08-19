@@ -35,6 +35,11 @@ import {
   waitForPersistentConnectionReady,
 } from "./connectionReadiness";
 import { metadataSessionSweeper } from "../metadata/metadataSessionSweeper";
+import {
+  logMetadataQueryTiming,
+  type MetadataQueryContext,
+  type MetadataQueryTiming,
+} from "../metadata/metadataQueryDiagnostics";
 
 // ---------------------------------------------------------------------------
 // Connection resolution
@@ -70,6 +75,10 @@ export interface RunQueryRawOptions {
   timeoutSeconds?: number;
   /** Called once with the server-side session id when it can be captured. */
   onSessionId?: (sessionId: string) => void;
+  /** Optional context for client-observed metadata query diagnostics. */
+  metadataContext?: MetadataQueryContext;
+  /** Queue wait measured by the shared metadata limiter. */
+  metadataQueueWaitMs?: number;
 }
 
 export function isRunQueryRawOptions(
@@ -132,6 +141,8 @@ export async function runQueryRaw(
     isUserQuery = true,
     timeoutSeconds,
     onSessionId,
+    metadataContext,
+    metadataQueueWaitMs,
   } = options;
 
   const connManager = connectionManager || new ConnectionManager(context);
@@ -173,12 +184,7 @@ export async function runQueryRaw(
     throw new Error(errorMessage, { cause: resolveError });
   }
 
-  const effectiveOnSessionId =
-    onSessionId ??
-    (!documentUri && !isUserQuery
-      ? (sessionId: string) =>
-          metadataSessionSweeper.register(resolvedConnectionName, sessionId)
-      : undefined);
+  const trackMetadataSession = !documentUri && !isUserQuery;
 
   if (queryToExecute.trim().length === 0) {
     const message = "No SQL to execute after processing variable directives.";
@@ -206,7 +212,10 @@ export async function runQueryRaw(
       promptValues,
       timeoutSeconds,
       false,
-      effectiveOnSessionId,
+      onSessionId,
+      metadataContext,
+      trackMetadataSession,
+      metadataQueueWaitMs,
     );
 
     const durationMs = Date.now() - queryStartTime;
@@ -250,7 +259,10 @@ export async function runQueryRaw(
           promptValues,
           timeoutSeconds,
           false,
-          effectiveOnSessionId,
+          onSessionId,
+          metadataContext,
+          trackMetadataSession,
+          metadataQueueWaitMs,
         );
 
         const retryDurationMs = Date.now() - queryStartTime;
@@ -303,7 +315,10 @@ export async function runQueryRaw(
           promptValues,
           timeoutSeconds,
           false,
-          effectiveOnSessionId,
+          onSessionId,
+          metadataContext,
+          trackMetadataSession,
+          metadataQueueWaitMs,
         );
 
         const retryDurationMs = Date.now() - queryStartTime;
@@ -398,6 +413,9 @@ export async function executeRawQuery(
   timeoutSeconds?: number,
   isRetryAttempt = false,
   onSessionId?: (sessionId: string) => void,
+  metadataContext?: MetadataQueryContext,
+  trackMetadataSession = false,
+  metadataQueueWaitMs?: number,
 ): Promise<QueryResult> {
   try {
     return await executeRawQueryOnce(
@@ -411,6 +429,9 @@ export async function executeRawQuery(
       macroValues,
       timeoutSeconds,
       onSessionId,
+      metadataContext,
+      trackMetadataSession,
+      metadataQueueWaitMs,
     );
   } catch (error: unknown) {
     if (
@@ -437,6 +458,9 @@ export async function executeRawQuery(
           timeoutSeconds,
           true,
           onSessionId,
+          metadataContext,
+          trackMetadataSession,
+          metadataQueueWaitMs,
         );
       } catch (retryError: unknown) {
         const retryErrObj = retryError as { message?: string };
@@ -460,6 +484,9 @@ async function executeRawQueryOnce(
   macroValues: Record<string, string> = {},
   timeoutSeconds?: number,
   onSessionId?: (sessionId: string) => void,
+  metadataContext?: MetadataQueryContext,
+  trackMetadataSession = false,
+  metadataQueueWaitMs?: number,
 ): Promise<QueryResult> {
   const { connection, shouldCloseConnection } = await getConnectionForDocument(
     connManager,
@@ -468,6 +495,9 @@ async function executeRawQueryOnce(
     documentUri,
   );
   logOutput(logger, "Connected.");
+  const timingStartedAt = Date.now();
+  let executionTiming: MetadataQueryTiming | undefined;
+  let operationStatus: MetadataQueryTiming['status'] = 'success';
 
   // Attach listener for notices
   let noticeHandler: ((msg: unknown) => void) | undefined;
@@ -499,6 +529,9 @@ async function executeRawQueryOnce(
   }
 
   if (sessionId) {
+    if (trackMetadataSession) {
+      metadataSessionSweeper.register(resolvedConnectionName, sessionId);
+    }
     onSessionId?.(sessionId);
   }
 
@@ -545,7 +578,7 @@ async function executeRawQueryOnce(
     const effectiveTimeout = timeoutSeconds ?? queryTimeout;
     logOutput(logger, "Executing SQL on server...");
 
-    const { results, error, recordsAffected } =
+    const { results, error, recordsAffected, timing } =
       await streamingManager.executeAndFetch(
         connection,
         queryToExecute,
@@ -557,7 +590,9 @@ async function executeRawQueryOnce(
         undefined,
         createDropSessionCallback(connManager, documentUri),
       );
+    executionTiming = timing;
     if (error) {
+      operationStatus = timing?.status ?? 'error';
       if (keepConnectionOpen && documentUri && isConnectionRecoveryError(error)) {
         void waitForPersistentConnectionReady(
           connManager,
@@ -615,12 +650,40 @@ async function executeRawQueryOnce(
       refreshSql: queryToExecute,
       expandedSql,
     };
+  } catch (error: unknown) {
+    if (operationStatus === 'success') {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      operationStatus = /cancel/i.test(errorMessage)
+        ? 'cancelled'
+        : /timeout|timed out/i.test(errorMessage)
+          ? 'timeout'
+          : 'error';
+    }
+    throw error;
   } finally {
     if (noticeHandler) {
       connection.removeListener("notice", noticeHandler);
     }
     if (shouldCloseConnection && connection) {
       await connection.close();
+    }
+    if (trackMetadataSession && sessionId) {
+      metadataSessionSweeper.complete(resolvedConnectionName, sessionId);
+    }
+    if (metadataContext) {
+      logMetadataQueryTiming(
+        {
+          ...metadataContext,
+          connectionName: metadataContext.connectionName ?? resolvedConnectionName,
+        },
+        {
+          ...executionTiming,
+          queueWaitMs: metadataQueueWaitMs ?? executionTiming?.queueWaitMs ?? metadataContext.queueWaitMs,
+          sessionId,
+          status: executionTiming?.status ?? operationStatus ?? 'success',
+          totalMs: Date.now() - timingStartedAt,
+        },
+      );
     }
   }
 }
