@@ -78,12 +78,12 @@ describe('SqlLinterProvider lint modes', () => {
         expect(issues.some(issue => issue.ruleId.startsWith('SQL'))).toBe(false);
     });
 
-    it('adds supplemental NZ001 and NZ004 warnings for SELECT * and CROSS JOIN', async () => {
+    it('keeps parser-owned CROSS JOIN diagnostics out of quality-only lint', async () => {
         const issues = await provider.lintSql('SELECT * FROM T1 CROSS JOIN T2;', {}, false, 'advanced');
 
         expect(validateMock).not.toHaveBeenCalled();
         expect(issues.some(issue => issue.ruleId === 'NZ001')).toBe(true);
-        expect(issues.some(issue => issue.ruleId === 'NZ004')).toBe(true);
+        expect(issues.some(issue => issue.ruleId === 'NZ004')).toBe(false);
     });
 
     it('applies additional NZ rules from the unified SQL quality engine', async () => {

@@ -5,7 +5,7 @@
  */
 
 import * as vscode from 'vscode';
-import type { IToken } from 'chevrotain';
+import type { CstNode, IToken } from 'chevrotain';
 import type { DatabaseKind } from '../contracts/database';
 import type { ConnectionManager } from '../core/connectionManager';
 import type { MetadataCache } from '../metadataCache';
@@ -17,6 +17,7 @@ import {
 } from '../core/tableQualificationActions';
 import { SqlParser } from '../sql/sqlParser';
 import { SqlLexer, type Scope, type TableInfo } from '../sqlParser';
+import { parseSqlStatements } from '../sqlParser/parsingRuntime';
 import { createSqlValidatorForDocument } from '../commands/validationCommands';
 import { parseSemanticScopeWithParser } from './parsers/parserSqlContext';
 
@@ -47,6 +48,10 @@ const ERROR_CODE_ACTIONS: Record<string, { title: string; fix: string }> = {
     'SQL012': {
         title: "Add VARCHAR length (e.g., VARCHAR(100))",
         fix: '(100)'
+    },
+    'SQL004': {
+        title: 'Use suggested column name',
+        fix: ''
     },
     'PAR101': {
         title: 'Insert missing AS in CTE definition',
@@ -141,6 +146,34 @@ const QUICK_FIX_MATRIX: Record<string, QuickFixMatrixEntry> = {
         safety: 'safe',
         fixAllEligible: true,
         rationale: 'Deterministic syntax normalization DB.TABLE -> DB..TABLE.'
+    },
+    SQL004: {
+        code: 'SQL004',
+        title: ERROR_CODE_ACTIONS.SQL004.title,
+        safety: 'safe',
+        fixAllEligible: false,
+        rationale: 'Uses the single visible-column suggestion carried by the diagnostic.'
+    },
+    SQL051: {
+        code: 'SQL051',
+        title: ERROR_CODE_ACTIONS.NZ004.title,
+        safety: 'review-required',
+        fixAllEligible: false,
+        rationale: 'The replacement supplies only a tautological predicate; review the intended join semantics.'
+    },
+    SQL052: {
+        code: 'SQL052',
+        title: ERROR_CODE_ACTIONS.NZ010.title,
+        safety: 'review-required',
+        fixAllEligible: false,
+        rationale: 'Alias insertion also rewrites visible table references and is offered only for an unambiguous JOIN.'
+    },
+    SQL053: {
+        code: 'SQL053',
+        title: 'Review JOIN literal type',
+        safety: 'unsafe',
+        fixAllEligible: false,
+        rationale: 'The correct typed value or CAST target cannot be inferred safely while typing.'
     },
     SQL012: {
         code: 'SQL012',
@@ -311,7 +344,10 @@ const SAFE_FIX_ALL_CODES = new Set(
         .map(entry => entry.code)
 );
 
-const LSP_SERVED_CODES = new Set(['SQL007', 'SQL012', 'SQL019', 'SQL048', 'PAR003', 'PAR004']);
+const LSP_SERVED_CODES = new Set([
+    'SQL004', 'SQL007', 'SQL012', 'SQL019', 'SQL048', 'SQL051', 'SQL052', 'SQL053',
+    'PAR003', 'PAR004'
+]);
 
 export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvider {
     public static readonly providedCodeActionKinds = [
@@ -402,8 +438,15 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
                 }
             }
 
-            if (code === 'NZ004') {
+            if (code === 'NZ004' || code === 'SQL051') {
                 const action = this.createCrossJoinFix(document, diagnostic);
+                if (action) {
+                    actions.push(action);
+                }
+            }
+
+            if (code === 'SQL004') {
+                const action = this.createSuggestedColumnFix(document, diagnostic);
                 if (action) {
                     actions.push(action);
                 }
@@ -420,7 +463,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
                 actions.push(...this.createTableQualificationFixes(document, diagnostic, true));
             }
 
-            if (code === 'NZ010') {
+            if (code === 'NZ010' || code === 'SQL052') {
                 const action = this.createMissingAliasFix(document, diagnostic);
                 if (action) {
                     actions.push(action);
@@ -1478,12 +1521,103 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         return action;
     }
 
-    private createCrossJoinFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction {
+    private createCrossJoinFix(
+        document: vscode.TextDocument,
+        diagnostic: vscode.Diagnostic,
+    ): vscode.CodeAction | undefined {
+        const statementBoundary = this.getStatementBoundary(document, diagnostic);
+        if (!statementBoundary) {
+            return undefined;
+        }
+
+        const parsed = parseSqlStatements({
+            sql: statementBoundary.sql,
+            databaseKind: this.getDocumentDatabaseKind(document),
+        });
+        if (!parsed.cst || parsed.lexResult.errors.length > 0 || parsed.actionableParserErrors.length > 0) {
+            return undefined;
+        }
+
+        const diagnosticOffset = document.offsetAt(diagnostic.range.start) - statementBoundary.startOffset;
+        const joinSpan = this.findCrossJoinSpan(parsed.cst, diagnosticOffset);
+        if (!joinSpan) {
+            return undefined;
+        }
+
         const action = new vscode.CodeAction(ERROR_CODE_ACTIONS['NZ004'].title, vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
         action.isPreferred = true;
         action.edit = new vscode.WorkspaceEdit();
-        action.edit.replace(document.uri, diagnostic.range, ERROR_CODE_ACTIONS['NZ004'].fix);
+        action.edit.replace(
+            document.uri,
+            {
+                start: document.positionAt(statementBoundary.startOffset + joinSpan.startOffset),
+                end: document.positionAt(statementBoundary.startOffset + joinSpan.endOffset),
+            } as vscode.Range,
+            'INNER JOIN ON 1=1',
+        );
+        return action;
+    }
+
+    private findCrossJoinSpan(
+        root: CstNode,
+        diagnosticOffset: number,
+    ): { startOffset: number; endOffset: number } | undefined {
+        const visit = (node: CstNode): { startOffset: number; endOffset: number } | undefined => {
+            if (node.name === 'joinClause') {
+                const cross = this.getDirectToken(node, 'Cross');
+                const join = this.getDirectToken(node, 'Join');
+                if (cross && join && cross.startOffset !== undefined && join.endOffset !== undefined) {
+                    const startOffset = cross.startOffset;
+                    const endOffset = join.endOffset + 1;
+                    if (diagnosticOffset >= startOffset && diagnosticOffset <= endOffset) {
+                        return { startOffset, endOffset };
+                    }
+                }
+            }
+
+            for (const children of Object.values(node.children ?? {})) {
+                for (const child of children) {
+                    if (this.isCstNode(child)) {
+                        const found = visit(child);
+                        if (found) {
+                            return found;
+                        }
+                    }
+                }
+            }
+            return undefined;
+        };
+
+        return visit(root);
+    }
+
+    private getDirectToken(node: CstNode, childName: string): IToken | undefined {
+        const child = node.children?.[childName]?.[0];
+        return child && !this.isCstNode(child) ? child as IToken : undefined;
+    }
+
+    private isCstNode(value: unknown): value is CstNode {
+        return typeof value === 'object' && value !== null && 'name' in value && 'children' in value;
+    }
+
+    private createSuggestedColumnFix(
+        document: vscode.TextDocument,
+        diagnostic: vscode.Diagnostic,
+    ): vscode.CodeAction | undefined {
+        const suggestedFix = this.getDiagnosticSuggestedFix(diagnostic);
+        if (!suggestedFix) {
+            return undefined;
+        }
+
+        const action = new vscode.CodeAction(
+            `Did you mean '${suggestedFix}'?`,
+            vscode.CodeActionKind.QuickFix,
+        );
+        action.diagnostics = [diagnostic];
+        action.isPreferred = true;
+        action.edit = new vscode.WorkspaceEdit();
+        action.edit.replace(document.uri, diagnostic.range, suggestedFix);
         return action;
     }
 
@@ -1644,14 +1778,18 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
             this.getDocumentDatabaseKind(document)
         ).preferredAliasBindings;
         const usedAliases = new Set<string>(Array.from(aliasBindings.keys()).map(alias => alias.toUpperCase()));
-        const missingAliasTarget = this.findMissingAliasTarget(statementBoundary.sql);
+        const diagnosticOffsetInStatement = document.offsetAt(diagnostic.range.start) - statementBoundary.startOffset;
+        const missingAliasTarget = this.findMissingAliasTarget(
+            statementBoundary.sql,
+            diagnosticOffsetInStatement,
+        );
         if (!missingAliasTarget) {
             return undefined;
         }
 
         const aliasName = this.generateAliasName(missingAliasTarget.tableName, usedAliases);
         const action = new vscode.CodeAction(
-            `Add missing table alias '${aliasName}'`,
+            `Add missing table alias '${aliasName}'${missingAliasTarget.referenceRanges.length > 0 ? ' and update references' : ''}`,
             vscode.CodeActionKind.QuickFix
         );
         action.diagnostics = [diagnostic];
@@ -1660,6 +1798,16 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         const absoluteInsertOffset = statementBoundary.startOffset + missingAliasTarget.insertOffset;
         action.edit = new vscode.WorkspaceEdit();
         action.edit.insert(document.uri, document.positionAt(absoluteInsertOffset), ` ${aliasName}`);
+        for (const reference of missingAliasTarget.referenceRanges) {
+            action.edit.replace(
+                document.uri,
+                {
+                    start: document.positionAt(statementBoundary.startOffset + reference.startOffset),
+                    end: document.positionAt(statementBoundary.startOffset + reference.endOffset),
+                } as vscode.Range,
+                aliasName,
+            );
+        }
         return action;
     }
 
@@ -1983,16 +2131,31 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         return qualifiers;
     }
 
-    private findMissingAliasTarget(statementSql: string): { tableName: string; insertOffset: number } | undefined {
+    private findMissingAliasTarget(
+        statementSql: string,
+        diagnosticOffsetInStatement: number,
+    ): {
+        tableName: string;
+        insertOffset: number;
+        referenceRanges: Array<{ startOffset: number; endOffset: number }>;
+    } | undefined {
         const lexResult = SqlLexer.tokenize(statementSql);
         if (lexResult.errors.length > 0) {
             return undefined;
         }
 
         const tokens = lexResult.tokens;
+        const candidates: Array<{
+            tableName: string;
+            insertOffset: number;
+            sourceStart: number;
+            sourceEnd: number;
+        }> = [];
+        const relationDefinitions: Array<{ tableName: string; sourceStart: number; sourceEnd: number }> = [];
+
         for (let index = 0; index < tokens.length; index++) {
             const tokenName = tokens[index].tokenType.name;
-            if (tokenName !== 'From' && tokenName !== 'Join') {
+            if (tokenName !== 'Join') {
                 continue;
             }
 
@@ -2027,6 +2190,12 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
                 continue;
             }
 
+            const sourceStart = tokens[index + 1].startOffset ?? 0;
+            const sourceEnd = (lastIdentifierToken.endOffset ?? (lastIdentifierToken.startOffset ?? 0)) + 1;
+            const insertOffset = sourceEnd;
+            const tableName = lastIdentifierToken.image.replace(/^"|"$/g, '');
+            relationDefinitions.push({ tableName, sourceStart, sourceEnd });
+
             const nextToken = tokens[cursor];
             if (nextToken) {
                 const nextName = nextToken.tokenType.name;
@@ -2041,12 +2210,67 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
                 }
             }
 
-            const insertOffset = (lastIdentifierToken.endOffset ?? (lastIdentifierToken.startOffset ?? 0)) + 1;
-            const tableName = lastIdentifierToken.image.replace(/^"|"$/g, '');
-            return { tableName, insertOffset };
+            if (nextToken?.tokenType.name === 'On' || nextToken?.tokenType.name === 'Using') {
+                candidates.push({ tableName, insertOffset, sourceStart, sourceEnd });
+            }
         }
 
-        return undefined;
+        if (candidates.length === 0) {
+            return undefined;
+        }
+
+        candidates.sort(
+            (left, right) =>
+                Math.abs(left.sourceStart - diagnosticOffsetInStatement) -
+                Math.abs(right.sourceStart - diagnosticOffsetInStatement),
+        );
+        const candidate = candidates[0];
+        if (!candidate) {
+            return undefined;
+        }
+
+        const normalizedTableName = candidate.tableName.toUpperCase();
+        const sameTableDefinitions = relationDefinitions.filter(
+            (definition) => definition.tableName.toUpperCase() === normalizedTableName,
+        );
+        if (sameTableDefinitions.length !== 1) {
+            return undefined;
+        }
+
+        const referenceRanges: Array<{ startOffset: number; endOffset: number }> = [];
+        for (let index = 0; index < tokens.length - 1; index++) {
+            const token = tokens[index];
+            const nextToken = tokens[index + 1];
+            if (
+                (token.tokenType.name !== 'Identifier' && token.tokenType.name !== 'QuotedIdentifier') ||
+                nextToken.tokenType.name !== 'Dot' ||
+                token.startOffset === undefined ||
+                token.endOffset === undefined
+            ) {
+                continue;
+            }
+
+            const previousToken = tokens[index - 1];
+            if (previousToken?.tokenType.name === 'Dot') {
+                continue;
+            }
+
+            const tokenName = token.image.replace(/^"|"$/g, '');
+            if (
+                tokenName.toUpperCase() !== normalizedTableName ||
+                token.startOffset >= candidate.sourceStart && token.startOffset < candidate.sourceEnd
+            ) {
+                continue;
+            }
+
+            referenceRanges.push({ startOffset: token.startOffset, endOffset: token.endOffset + 1 });
+        }
+
+        return {
+            tableName: candidate.tableName,
+            insertOffset: candidate.insertOffset,
+            referenceRanges,
+        };
     }
 
     private generateAliasName(tableName: string, usedAliases: Set<string>): string {

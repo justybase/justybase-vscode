@@ -160,6 +160,9 @@ When `netezza.linter.mode` is set to `"advanced"` (default), the linter uses a f
 | **SQL018** | Warning | Unused CTE definition | `WITH cte AS (...) SELECT 1` |
 | **SQL019** | Warning | Unused table alias | `SELECT * FROM my_table t` (without `t.` usage) |
 | **SQL020** | Error | Subquery in FROM/JOIN requires alias | `SELECT * FROM (SELECT 1)` |
+| **SQL051** | Warning | CROSS JOIN produces a Cartesian product | `SELECT * FROM a CROSS JOIN b` |
+| **SQL052** | Information | JOIN source has no alias | `... JOIN departments ON ...` |
+| **SQL053** | Warning | JOIN comparison uses a string literal with a column | `... ON a.id = '1'` |
 | **SQL047** | Error | Invalid ordered-set aggregate (`PERCENTILE_CONT`/`PERCENTILE_DISC` missing `WITHIN GROUP` or combined with `OVER`) | `SELECT percentile_cont(0.4) FROM t` |
 | **SQL049** | Warning | Repeated projected column name requires an alias | `SELECT * FROM a JOIN b ON 1=1` when both sources contain `ID` |
 
@@ -177,7 +180,10 @@ Some diagnostic codes include automatic Quick Fixes:
 | Code | Quick Fix Action |
 |------|-----------------|
 | **SQL007** | Convert `DB.TABLE` to `DB..TABLE` (Netezza syntax) |
+| **SQL004** | Replace an unknown column with an unambiguous visible-column suggestion |
 | **SQL008** | Qualify ambiguous column with table alias (e.g. `a.id`) |
+| **SQL051** | Replace an unqualified `CROSS JOIN` with `INNER JOIN ON 1=1` for review |
+| **SQL052** | Add a generated JOIN alias and update unambiguous table references |
 | **SQL012** | Add default VARCHAR length `(100)` |
 | **NZ007** | Normalize inconsistent SQL keyword casing |
 | **NZ010** | Add missing table alias in `FROM`/`JOIN` |

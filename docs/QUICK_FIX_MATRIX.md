@@ -31,7 +31,7 @@ This document is the P53 inventory for all currently implemented `NZ*` and `NZP*
 ## Current implementation snapshot
 
 - Deterministic single-diagnostic quick fixes currently exist for:
-  `NZ001`, `NZ002`, `NZ003`, `NZ004`, `NZ006`, `NZ007`, `NZ010`, `NZ011`, `NZ012`, `NZ013`, `NZP012`.
+  `NZ001`, `NZ002`, `NZ003`, `NZ004`, `NZ006`, `NZ007`, `NZ010`, `NZ011`, `NZ012`, `NZ013`, `SQL004`, `SQL051`, `SQL052`, `NZP012`.
 - Guided template quick fixes are implemented for the prioritized P55 set:
   `NZ002`, `NZ003`, `NZ004`, `NZ011`, `NZ015`, `NZ020`,
   `NZP001`, `NZP002`, `NZP003`, `NZP011`, `NZP013`, `NZP024`, `NZP027`, `NZP028`.
@@ -49,12 +49,14 @@ This document is the P53 inventory for all currently implemented `NZ*` and `NZP*
 | `NZ003` | Update Without Where | Error | Yes | UNSAFE | High | P55 template | Guard rewrite changes DML behavior intentionally. |
 | `SQL044` | Update Without Where | Error | Yes | UNSAFE | High | P55 template | Parser-owned replacement for `NZ003`. |
 | `NZ004` | Cross Join | Warning | Yes | UNSAFE | High | P55 template | Requires join predicate choice; not safe for bulk rewrite. |
+| `SQL051` | Cross Join (parser-owned) | Warning | Yes | UNSAFE | High | P55 template | CST-bounded `INNER JOIN ON 1=1` replacement is deliberately review-required. |
 | `NZ005` | Leading Wildcard Like | Hint | No | UNSAFE | Medium | P55 template | Requires predicate redesign. |
 | `NZ006` | Order By Without Limit | Information | Yes | UNSAFE | Medium | P55 template | Row-limit choice depends on business intent. |
 | `NZ007` | Inconsistent Keyword Case | Warning | Yes | SAFE | Low | P54 safe fix-all | Keyword casing normalization is deterministic. |
 | `NZ008` | Truncate Table | Warning | No | UNSAFE | High | Manual/Copilot | Destructive operation warning; no direct auto-fix. |
 | `NZ009` | Or In Where Clause | Hint | No | UNSAFE | Medium | P55 template | Rewrite strategy (`UNION`, predicate split) is contextual. |
 | `NZ010` | Missing Table Alias | Information | Yes | UNSAFE | Medium | P55 template | Alias naming and downstream references require review. |
+| `SQL052` | Missing Table Alias (parser-owned) | Information | Yes | UNSAFE | Medium | P55 template | Offered only for one JOIN definition; qualified references are rewritten together. |
 | `NZ011` | CTAS Missing Distribution | Warning | Yes | UNSAFE | High | P55 template | Distribution key is workload-specific physical design. |
 | `SQL045` | CTAS Missing Distribution | Warning | Yes | UNSAFE | High | P55 template | Parser-owned replacement for `NZ011`. |
 | `NZ012` | Update Alias With AS | Error | Yes | SAFE | High | P54 safe fix-all | Netezza syntax normalization (`UPDATE t a` form). |
@@ -62,7 +64,7 @@ This document is the P53 inventory for all currently implemented `NZ*` and `NZP*
 | `NZ013` | Prefer Union All | Information | Yes | UNSAFE | Medium | P55 template | Duplicate semantics may change. |
 | `NZ014` | Or In Join Condition | Error | No | UNSAFE | High | Manual/Copilot | Join-logic rewrite requires domain intent. |
 | `NZ015` | Function in Where Clause | Warning | No | UNSAFE | High | P55 template | Function-to-range rewrite requires column semantics. |
-| `NZ016` | Implicit Casting in Join | Warning | No | UNSAFE | High | Manual/Copilot | Requires type metadata and validated cast direction. |
+| `NZ016` / `SQL053` | JOIN Literal Type Risk | Warning | No | UNSAFE | High | Manual/Copilot | `NZ016` is retained as the settings alias; the active check is the CST-owned `SQL053`. |
 | `NZ017` | Double Quoted Identifiers | Information | No | UNSAFE | Low | Manual/Copilot | Removing quotes can break case-sensitive identifiers. |
 | `NZ018` | Self Referential Join | Warning | No | UNSAFE | Medium | Manual/Copilot | Could indicate bug or intentional tautology handling. |
 | `NZ019` | Case Without End | Error | No | UNSAFE | High | Manual/Copilot | Structural completion cannot be inferred safely. |

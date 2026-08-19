@@ -11,6 +11,7 @@ import type { TextDocuments } from "vscode-languageserver/node";
 import { getDatabaseSqlAuthoring } from "../../core/connectionFactory";
 import type { MetadataBridge } from "../metadataBridge";
 import { runWithRequestBoundary } from "../requestBoundary";
+import { SqlLexer, buildStatementIndex, parseSqlStatements } from "../../sqlParser";
 import {
   buildTableQualificationCodeActions,
   getDiagnosticSuggestedFix,
@@ -143,6 +144,75 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
                 : String(diagnostic.code ?? "");
             const range = diagnostic.range;
 
+            if (code === "SQL004") {
+              const suggestedFix = getDiagnosticSuggestedFix(diagnostic);
+              if (suggestedFix) {
+                actions.push({
+                  title: `Did you mean '${suggestedFix}'?`,
+                  kind: CodeActionKind.QuickFix,
+                  diagnostics: [diagnostic],
+                  isPreferred: true,
+                  edit: {
+                    changes: {
+                      [document.uri]: [{ range, newText: suggestedFix }],
+                    },
+                  },
+                } satisfies CodeAction);
+              }
+            }
+
+            if (code === "SQL051") {
+              const crossJoin = findCrossJoinReplacement(text, document.offsetAt(range.start));
+              if (crossJoin) {
+                actions.push({
+                  title: "Replace CROSS JOIN with explicit INNER JOIN",
+                  kind: CodeActionKind.QuickFix,
+                  diagnostics: [diagnostic],
+                  isPreferred: true,
+                  edit: {
+                    changes: {
+                      [document.uri]: [{
+                        range: {
+                          start: document.positionAt(crossJoin.startOffset),
+                          end: document.positionAt(crossJoin.endOffset),
+                        },
+                        newText: "INNER JOIN ON 1=1",
+                      }],
+                    },
+                  },
+                } satisfies CodeAction);
+              }
+            }
+
+            if (code === "SQL052") {
+              const aliasFix = findJoinAliasRewrite(text, document.offsetAt(range.start));
+              if (aliasFix) {
+                const changes = [
+                  {
+                    range: {
+                      start: document.positionAt(aliasFix.insertOffset),
+                      end: document.positionAt(aliasFix.insertOffset),
+                    },
+                    newText: ` ${aliasFix.aliasName}`,
+                  },
+                  ...aliasFix.referenceRanges.map((reference) => ({
+                    range: {
+                      start: document.positionAt(reference.startOffset),
+                      end: document.positionAt(reference.endOffset),
+                    },
+                    newText: aliasFix.aliasName,
+                  })),
+                ];
+                actions.push({
+                  title: `Add missing table alias '${aliasFix.aliasName}'${aliasFix.referenceRanges.length > 0 ? " and update references" : ""}`,
+                  kind: CodeActionKind.QuickFix,
+                  diagnostics: [diagnostic],
+                  isPreferred: true,
+                  edit: { changes: { [document.uri]: changes } },
+                } satisfies CodeAction);
+              }
+            }
+
             if (code === "SQL007") {
               const rangeText = text.substring(
                 document.offsetAt(range.start),
@@ -273,4 +343,160 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
       );
     },
   );
+}
+
+function findCrossJoinReplacement(
+  text: string,
+  diagnosticOffset: number,
+): { startOffset: number; endOffset: number } | undefined {
+  const parsed = parseSqlStatements({ sql: text, databaseKind: "netezza" });
+  if (!parsed.cst || parsed.lexResult.errors.length > 0 || parsed.actionableParserErrors.length > 0) {
+    return undefined;
+  }
+
+  const statement = buildStatementIndex(text).statements.find(
+    (candidate) => diagnosticOffset >= candidate.startOffset && diagnosticOffset <= candidate.endOffset,
+  );
+  if (!statement) {
+    return undefined;
+  }
+
+  const tokens = SqlLexer.tokenize(statement.sql).tokens;
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].tokenType.name !== "Cross" || tokens[index + 1].tokenType.name !== "Join") {
+      continue;
+    }
+    const startOffset = statement.startOffset + (tokens[index].startOffset ?? 0);
+    const endOffset = statement.startOffset + (tokens[index + 1].endOffset ?? 0) + 1;
+    if (diagnosticOffset >= startOffset && diagnosticOffset <= endOffset) {
+      return { startOffset, endOffset };
+    }
+  }
+  return undefined;
+}
+
+interface JoinAliasRewrite {
+  aliasName: string;
+  insertOffset: number;
+  referenceRanges: Array<{ startOffset: number; endOffset: number }>;
+}
+
+function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAliasRewrite | undefined {
+  const statement = buildStatementIndex(text).statements.find(
+    (candidate) => diagnosticOffset >= candidate.startOffset && diagnosticOffset <= candidate.endOffset,
+  );
+  if (!statement) {
+    return undefined;
+  }
+
+  const lexResult = SqlLexer.tokenize(statement.sql);
+  if (lexResult.errors.length > 0) {
+    return undefined;
+  }
+
+  const tokens = lexResult.tokens;
+  const usedAliases = new Set<string>();
+  const candidates: Array<{
+    tableName: string;
+    insertOffset: number;
+    sourceStart: number;
+    sourceEnd: number;
+  }> = [];
+  const definitions: string[] = [];
+
+  for (let index = 0; index < tokens.length; index++) {
+    if (tokens[index].tokenType.name !== "Join") {
+      continue;
+    }
+    let cursor = index + 1;
+    if (tokens[cursor]?.tokenType.name === "LParen") {
+      continue;
+    }
+
+    let lastIdentifier: typeof tokens[number] | undefined;
+    while (cursor < tokens.length) {
+      const tokenName = tokens[cursor].tokenType.name;
+      if (tokenName === "Identifier" || tokenName === "QuotedIdentifier") {
+        lastIdentifier = tokens[cursor++];
+        continue;
+      }
+      if (tokenName === "Dot") {
+        cursor++;
+        continue;
+      }
+      break;
+    }
+    if (!lastIdentifier) {
+      continue;
+    }
+
+    const sourceStart = tokens[index + 1]?.startOffset ?? 0;
+    const sourceEnd = (lastIdentifier.endOffset ?? lastIdentifier.startOffset ?? 0) + 1;
+    const tableName = lastIdentifier.image.replace(/^"|"$/g, "");
+    definitions.push(tableName.toUpperCase());
+
+    const nextToken = tokens[cursor];
+    if (nextToken?.tokenType.name === "As") {
+      const aliasToken = tokens[cursor + 1];
+      if (aliasToken && isIdentifierToken(aliasToken.tokenType.name)) {
+        usedAliases.add(aliasToken.image.replace(/^"|"$/g, "").toUpperCase());
+        continue;
+      }
+    }
+    if (nextToken && isIdentifierToken(nextToken.tokenType.name)) {
+      usedAliases.add(nextToken.image.replace(/^"|"$/g, "").toUpperCase());
+      continue;
+    }
+    if (nextToken?.tokenType.name === "On" || nextToken?.tokenType.name === "Using") {
+      candidates.push({ tableName, insertOffset: statement.startOffset + sourceEnd, sourceStart, sourceEnd });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  candidates.sort(
+    (left, right) =>
+      Math.abs(statement.startOffset + left.sourceStart - diagnosticOffset) -
+      Math.abs(statement.startOffset + right.sourceStart - diagnosticOffset),
+  );
+  const candidate = candidates[0];
+  if (!candidate || definitions.filter((name) => name === candidate.tableName.toUpperCase()).length !== 1) {
+    return undefined;
+  }
+
+  const base = candidate.tableName.replace(/[^A-Za-z0-9_]/g, "").charAt(0).toUpperCase() || "T";
+  let aliasName = `${base}1`;
+  for (let index = 2; usedAliases.has(aliasName.toUpperCase()); index++) {
+    aliasName = `${base}${index}`;
+  }
+
+  const referenceRanges: Array<{ startOffset: number; endOffset: number }> = [];
+  for (let index = 0; index < tokens.length - 1; index++) {
+    const token = tokens[index];
+    if (!isIdentifierToken(token.tokenType.name) || tokens[index + 1].tokenType.name !== "Dot") {
+      continue;
+    }
+    if (tokens[index - 1]?.tokenType.name === "Dot") {
+      continue;
+    }
+    const tokenName = token.image.replace(/^"|"$/g, "");
+    if (
+      tokenName.toUpperCase() === candidate.tableName.toUpperCase() &&
+      (token.startOffset ?? 0) < candidate.sourceStart ||
+      tokenName.toUpperCase() === candidate.tableName.toUpperCase() &&
+      (token.startOffset ?? 0) >= candidate.sourceEnd
+    ) {
+      referenceRanges.push({
+        startOffset: statement.startOffset + (token.startOffset ?? 0),
+        endOffset: statement.startOffset + (token.endOffset ?? token.startOffset ?? 0) + 1,
+      });
+    }
+  }
+
+  return { aliasName, insertOffset: candidate.insertOffset, referenceRanges };
+}
+
+function isIdentifierToken(tokenName: string): boolean {
+  return tokenName === "Identifier" || tokenName === "QuotedIdentifier";
 }
