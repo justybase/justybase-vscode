@@ -6,7 +6,7 @@ const mockUnregisterImportStream = jest.fn();
 const mockExecute = jest.fn().mockResolvedValue(undefined);
 const mockConnect = jest.fn().mockResolvedValue(undefined);
 const mockClose = jest.fn().mockResolvedValue(undefined);
-const mockCreateCommand = jest.fn(() => ({ commandTimeout: 0, execute: mockExecute }));
+const mockCreateCommand = jest.fn((_sql: string) => ({ commandTimeout: 0, execute: mockExecute }));
 
 jest.mock('vscode', () => ({
     env: {
@@ -18,7 +18,9 @@ jest.mock('vscode', () => ({
 
 jest.mock('fs', () => ({
     existsSync: jest.fn(() => true),
-    mkdirSync: jest.fn()
+    mkdirSync: jest.fn(),
+    createWriteStream: jest.requireActual('fs').createWriteStream,
+    unlinkSync: jest.requireActual('fs').unlinkSync
 }));
 
 jest.mock('@justybase/netezza-driver', () => ({
@@ -66,7 +68,7 @@ describe('import/clipboardImporter real module', () => {
     });
 
     it('should import clipboard data successfully', async () => {
-        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('col1\tcol2\n1\t2\n3\t4');
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('col1\tcol2\n1\ta\n2\tb\n3\tc');
 
         const result = await importClipboardDataToNetezza(
             'DB1.ADMIN.T_IMPORT',
@@ -83,12 +85,16 @@ describe('import/clipboardImporter real module', () => {
         );
 
         expect(result.success).toBe(true);
-        expect(result.details?.rowsProcessed).toBe(2);
-        expect(mockRegisterImportStream).toHaveBeenCalled();
+        expect(result.details?.rowsProcessed).toBe(3);
+        expect(mockRegisterImportStream).not.toHaveBeenCalled();
         expect(mockConnect).toHaveBeenCalled();
         expect(mockCreateCommand).toHaveBeenCalled();
         expect(mockExecute).toHaveBeenCalled();
-        expect(mockUnregisterImportStream).toHaveBeenCalled();
+        expect(mockUnregisterImportStream).not.toHaveBeenCalled();
+
+        const executedSql = mockCreateCommand.mock.calls[0]?.[0] ?? '';
+        expect(executedSql).toContain('SELECT\n        COL1,\n        COL2\n    FROM EXTERNAL');
+        expect(executedSql).toContain('COL2 NVARCHAR(20)');
     });
 
     it('should fail fast for invalid parameters', async () => {

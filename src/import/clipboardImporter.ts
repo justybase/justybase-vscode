@@ -8,12 +8,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { ColumnTypeChooser, ProgressCallback, ImportResult } from './dataImporter';
 import { NzConnection, ConnectionDetails } from '../types';
-import {
-    createConnectedDatabaseConnectionFromDetails,
-    getDatabaseConnectionConstructor
-} from '../core/connectionFactory';
+import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { headerForcesTextImportType } from './importTypeInferenceUtils';
 
 // Helper to unblock event loop
@@ -510,7 +508,8 @@ export async function importClipboardDataToNetezza(
     progressCallback?: ProgressCallback
 ): Promise<ImportResult> {
     const startTime = Date.now();
-    let virtualFileName: string | null = null;
+    let virtualFileName: string;
+    let temporaryDataFile: string | null = null;
     let connection: NzConnection | null = null;
 
     try {
@@ -581,29 +580,33 @@ export async function importClipboardDataToNetezza(
             fs.mkdirSync(tempDir, { recursive: true });
         }
 
-        virtualFileName = `virtual_clipboard_import_${Date.now()}_${Math.floor(Math.random() * 1000)}.txt`;
-        progressCallback?.(`Registered virtual stream: ${virtualFileName}`);
+        const temporaryDataFileName = `virtual_clipboard_import_${Date.now()}_${Math.floor(Math.random() * 1000)}.txt`;
+        temporaryDataFile = path.join(tempDir, temporaryDataFileName);
 
-        // Register stream with driver
-        const connectionConstructor = getDatabaseConnectionConstructor(connectionDetails.dbType);
-        if (connectionConstructor.registerImportStream) {
-            connectionConstructor.registerImportStream(virtualFileName, dataStream);
-        } else {
-            throw new Error('Active database driver does not support stream registry');
-        }
+        // The Netezza driver consumes registered streams through separate DATA
+        // and DONE protocol messages. A generic in-memory Readable can emit its
+        // `end` event while the last DATA write is still awaiting socket
+        // backpressure, which makes Netezza roll the transaction back. Let the
+        // driver use its normal fs.ReadStream path instead; fs.ReadStream keeps
+        // EOF behind a paused chunk and preserves the DATA -> DONE ordering.
+        await pipeline(dataStream, fs.createWriteStream(temporaryDataFile));
+        virtualFileName = temporaryDataFile.replace(/\\/g, '/');
+        progressCallback?.(`Prepared temporary import file: ${virtualFileName}`);
 
         // Generate CREATE TABLE SQL
         const columns = sqlHeaders.map((header, i) =>
             `        ${header} ${dataTypes[i].currentType.toString()}`
         );
 
-        //const logDirUnix = tempDir.replace(/\\/g, '/');
         const delimiterPlain = '\\t';
         const recordDelimPlain = '\\n';
+        const logDirUnix = tempDir.replace(/\\/g, '/');
 
-        const createSql = `CREATE TABLE ${targetTable} AS 
+        const createSql = `CREATE TABLE ${targetTable} AS
 (
-    SELECT * FROM EXTERNAL '${virtualFileName}'
+    SELECT
+${sqlHeaders.map(header => `        ${header}`).join(',\n')}
+    FROM EXTERNAL '${virtualFileName}'
     (
 ${columns.join(',\n')}
     )
@@ -620,7 +623,7 @@ ${columns.join(',\n')}
         SKIPROWS 0
         MAXERRORS 1
         COMPRESS FALSE
-        LOGDIR '${tempDir}'
+        LOGDIR '${logDirUnix}'
     )
 ) DISTRIBUTE ON RANDOM;`;
 
@@ -676,10 +679,14 @@ ${columns.join(',\n')}
             }
         }
 
-        if (virtualFileName) {
-            const connectionConstructor = getDatabaseConnectionConstructor(connectionDetails.dbType);
-            if (connectionConstructor.unregisterImportStream) {
-                connectionConstructor.unregisterImportStream(virtualFileName);
+        if (temporaryDataFile) {
+            try {
+                if (fs.existsSync(temporaryDataFile)) {
+                    fs.unlinkSync(temporaryDataFile);
+                }
+            } catch {
+                // Best-effort cleanup; the import result is more important than
+                // a stale temporary clipboard file.
             }
         }
     }
