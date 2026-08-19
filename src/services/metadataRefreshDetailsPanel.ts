@@ -62,7 +62,7 @@ export class MetadataRefreshDetailsPanel implements vscode.Disposable {
     }
 }
 
-function getMetadataRefreshDetailsHtml(): string {
+export function getMetadataRefreshDetailsHtml(): string {
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -123,6 +123,12 @@ function getMetadataRefreshDetailsHtml(): string {
   const slowQueryThresholdMs = 5000;
   let currentDetails = [];
   const longestSqlByRefreshId = new Map();
+  // A running statement is sampled every second. Keep the highest sampled
+  // value for the individual query as well as for the refresh aggregate;
+  // otherwise the aggregate can correctly remain at (for example) 2.85 s
+  // while the same completed query is rendered/sorted using a later, smaller
+  // value from a stale lifecycle snapshot.
+  const longestSqlByQueryId = new Map();
   const labels = {
     running: 'Running now', queued: 'Queued', planned: 'Planned next',
     completed: 'Executed', failed: 'Failed', skipped: 'Skipped'
@@ -133,10 +139,15 @@ function getMetadataRefreshDetailsHtml(): string {
   };
   const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
   const formatTime = (timestamp) => timestamp ? new Date(timestamp).toLocaleTimeString() : '';
-  const durationMs = (query, now) => Math.max(
-    query.maxDurationMs || 0,
-    query.startedAt ? Math.max(0, (query.completedAt || now) - query.startedAt) : 0,
-  );
+  const durationMs = (query, now) => {
+    const currentDuration = Math.max(
+      query.maxDurationMs || 0,
+      query.startedAt ? Math.max(0, (query.completedAt || now) - query.startedAt) : 0,
+    );
+    const longestDuration = Math.max(longestSqlByQueryId.get(query.id) || 0, currentDuration);
+    longestSqlByQueryId.set(query.id, longestDuration);
+    return longestDuration;
+  };
   const formatDuration = (milliseconds) => milliseconds >= 1000
     ? (milliseconds / 1000).toFixed(milliseconds >= 10000 ? 1 : 2) + ' s'
     : milliseconds + ' ms';
@@ -204,9 +215,10 @@ function getMetadataRefreshDetailsHtml(): string {
       longestSqlByRefreshId.get(refresh.refreshId) || 0,
     );
     longestSqlByRefreshId.set(refresh.refreshId, longestDuration);
-    const slowest = refresh.longestSqlQueryId
+    const slowest = (refresh.longestSqlQueryId
       ? queries.find(query => query.id === refresh.longestSqlQueryId)
-      : timed.reduce((current, query) => !current || durationMs(query, now) > durationMs(current, now) ? query : current, undefined);
+      : undefined)
+      || timed.reduce((current, query) => !current || durationMs(query, now) > durationMs(current, now) ? query : current, undefined);
     const slowestValue = longestDuration > 0
       ? formatDuration(longestDuration) + (slowest ? ' · ' + (slowest.context.kind || 'catalog') : '')
       : '—';
