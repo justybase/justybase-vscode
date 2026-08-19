@@ -607,8 +607,8 @@ export class CachePrefetcher {
             const end = activity.completedAt ?? now;
             const durationMs = Math.max(0, end - activity.startedAt);
             activity.maxDurationMs = Math.max(activity.maxDurationMs ?? 0, durationMs);
-            if (durationMs > details.longestSqlDurationMs) {
-                details.longestSqlDurationMs = durationMs;
+            if (activity.maxDurationMs > details.longestSqlDurationMs) {
+                details.longestSqlDurationMs = activity.maxDurationMs;
                 details.longestSqlQueryId = activity.id;
             }
         }
