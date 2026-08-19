@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { mysqlDialect } from '../../extensions/mysql/src/mysqlDialect';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
+import type { RunQueryRawOptions } from '../core/queryRunner';
 import type { ConnectionManager } from '../core/connectionManager';
 import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
 import type { MetadataCache } from '../metadataCache';
@@ -55,8 +56,8 @@ describe('MetadataProvider MySQL quoted column lookup', () => {
         runQueryRawMock = runQueryRaw as jest.MockedFunction<typeof runQueryRaw>;
         queryResultToRowsMock = queryResultToRows as jest.MockedFunction<typeof queryResultToRows>;
 
-        runQueryRawMock.mockImplementation(async (...args: Parameters<typeof runQueryRaw>) => {
-            return { query: args[1] } as unknown as RunQueryRawResult;
+        runQueryRawMock.mockImplementation(async (options: unknown) => {
+            return { query: (options as RunQueryRawOptions).query } as unknown as RunQueryRawResult;
         });
 
         queryResultToRowsMock.mockReturnValue([
@@ -86,18 +87,13 @@ describe('MetadataProvider MySQL quoted column lookup', () => {
             tableName: 'employees',
             objectId: undefined,
         });
-        expect(runQueryRawMock).toHaveBeenCalledWith(
-            expect.anything(),
-            'SELECT MYSQL LOOKUP COLUMNS',
-            true,
+        expect(runQueryRawMock).toHaveBeenCalledWith(expect.objectContaining({
+            query: 'SELECT MYSQL LOOKUP COLUMNS',
+            silent: true,
             connectionManager,
-            'MySQL Conn',
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            false,
-        );
+            connectionName: 'MySQL Conn',
+            isUserQuery: false,
+        }));
         expect(metadataCache.setColumns).toHaveBeenCalledWith(
             'MySQL Conn',
             'salesdb..employees',

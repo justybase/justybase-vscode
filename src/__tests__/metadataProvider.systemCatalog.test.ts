@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner'
+import type { RunQueryRawOptions } from '../core/queryRunner'
 import { MetadataProvider } from '../providers/providers/metadataProvider'
 import { parseColumnMetadata } from '../providers/tableMetadataProvider'
 import type { ConnectionManager } from '../core/connectionManager'
@@ -64,8 +65,8 @@ describe('MetadataProvider system catalog mirroring', () => {
         queryResultToRowsMock = queryResultToRows as jest.MockedFunction<typeof queryResultToRows>
         parseColumnMetadataMock = parseColumnMetadata as jest.MockedFunction<typeof parseColumnMetadata>
 
-        runQueryRawMock.mockImplementation(async (...args: Parameters<typeof runQueryRaw>) => {
-            return { query: args[1] } as unknown as RunQueryRawResult
+        runQueryRawMock.mockImplementation(async (options: unknown) => {
+            return { query: (options as RunQueryRawOptions).query } as unknown as RunQueryRawResult
         })
 
         queryResultToRowsMock.mockImplementation((result: unknown) => {
@@ -114,7 +115,7 @@ describe('MetadataProvider system catalog mirroring', () => {
 
         expect(labels).toEqual(expect.arrayContaining(['ORDERS', 'ORDERS_SYNONYM', '_V_SESSION', '_V_TABLE']))
 
-        const executedQueries = runQueryRawMock.mock.calls.map(call => call[1])
+        const executedQueries = runQueryRawMock.mock.calls.map(call => (call[0] as RunQueryRawOptions).query)
         expect(executedQueries.some(query => query.includes('TARGET_DB.._V_OBJECT_DATA'))).toBe(true)
         expect(executedQueries.some(query => query.includes('SYSTEM.._V_OBJECT_DATA'))).toBe(true)
         expect(metadataCache.setTables).toHaveBeenCalled()
@@ -125,7 +126,7 @@ describe('MetadataProvider system catalog mirroring', () => {
 
         expect(columns.map(column => column.ATTNAME)).toEqual(['SESSIONID', 'USERNAME'])
 
-        const executedQueries = runQueryRawMock.mock.calls.map(call => call[1])
+        const executedQueries = runQueryRawMock.mock.calls.map(call => (call[0] as RunQueryRawOptions).query)
         expect(executedQueries.some(query => query.includes('FROM SYSTEM.._V_RELATION_COLUMN'))).toBe(true)
         expect(metadataCache.setColumns).toHaveBeenCalledWith(
             'CONN_1',
@@ -192,19 +193,13 @@ describe('MetadataProvider system catalog mirroring', () => {
 
         const items = await provider.getViews('CONN_1', 'sample_database', 'main')
 
-        expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__Tabela1'])
-        expect(runQueryRawMock).toHaveBeenCalledWith(
-            expect.anything(),
-            'SELECT FILE VIEWS',
-            true,
-            expect.anything(),
-            'CONN_1',
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            false,
-        )
+expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__Tabela1'])
+        expect(runQueryRawMock).toHaveBeenCalledWith(expect.objectContaining({
+            query: 'SELECT FILE VIEWS',
+            silent: true,
+            connectionName: 'CONN_1',
+            isUserQuery: false,
+        }))
         expect(metadataCache.markViewsCatalogLoaded).toHaveBeenCalledWith('CONN_1', 'SAMPLE_DATABASE.MAIN')
     })
 
@@ -258,7 +253,7 @@ describe('MetadataProvider system catalog mirroring', () => {
             })
         ])
 
-        const executedQueries = runQueryRawMock.mock.calls.map(call => call[1])
+        const executedQueries = runQueryRawMock.mock.calls.map(call => (call[0] as RunQueryRawOptions).query)
         expect(executedQueries.some(query => query.includes('.._V_SYNONYM'))).toBe(false)
         expect(executedQueries.some(query => query.includes('SELECT TARGET_DB.PUBLIC.ORDERS COLUMN METADATA'))).toBe(true)
         expect(metadataCache.setColumns).toHaveBeenCalledWith(
@@ -291,7 +286,7 @@ describe('MetadataProvider system catalog mirroring', () => {
         const columns = await provider.getTableColumnsMetadata('CONN_1', 'TARGET_DB', 'PUBLIC', 'ORDERS_SYNONYM')
 
         expect(columns).toHaveLength(1)
-        const executedQueries = runQueryRawMock.mock.calls.map(call => call[1])
+        const executedQueries = runQueryRawMock.mock.calls.map(call => (call[0] as RunQueryRawOptions).query)
         expect(executedQueries.some(query => query.includes('.._V_SYNONYM'))).toBe(true)
         expect(executedQueries.some(query => query.includes('SELECT TARGET_DB.PUBLIC.ORDERS COLUMN METADATA'))).toBe(true)
     })
