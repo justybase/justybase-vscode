@@ -1,13 +1,15 @@
 import type {
     QueryHistoryEntryDto,
+    QueryHistoryHostToWebviewMessage,
     QueryHistoryParameterDto,
     QueryHistoryRecoveryActionType,
     QueryHistorySavedViewDto,
     QueryHistoryStatsDto,
     QueryHistoryUiState,
     QueryHistoryWebviewStateSnapshot,
+    QueryHistoryWebviewToHostMessage,
 } from './hostContracts.js';
-import { postToHost, vscode, asHostMessage } from './protocol.js';
+import { postToHost as postProtocolMessage, vscode, asHostMessage } from './protocol.js';
 import { showParameterDialog as openParameterDialog } from './parameterDialog.js';
 import {
     escapeHtml,
@@ -36,6 +38,10 @@ let currentUiState: QueryHistoryUiState | null = null;
 let savedViews: QueryHistorySavedViewDto[] = [];
 let currentFilter: string | null = null;
 let pendingQuickRerunId: string | null = null;
+
+const postToHost = (message: QueryHistoryWebviewToHostMessage): void => {
+    postProtocolMessage(message);
+};
 
 function persistState(): void {
     vscode.setState({
@@ -476,7 +482,7 @@ function attachEventListeners(): void {
 }
 
 window.addEventListener('message', (event) => {
-    const message = asHostMessage(event.data);
+    const message: QueryHistoryHostToWebviewMessage = asHostMessage(event.data);
     console.log('queryHistory webview: received message', message);
 
     switch (message.type) {
