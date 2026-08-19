@@ -73,10 +73,25 @@ export function createActiveConnectionStatusBar(
             const documentUri = editor.document.uri.toString();
             const connectionName = connectionManager.getConnectionForExecution(documentUri);
             if (connectionName) {
-                statusBarItem.text = `$(database) ${connectionName}`;
+                const documentConnection = connectionManager.getDocumentConnection?.(documentUri);
+                const isDocumentSpecific = documentConnection === connectionName;
+                const availability = connectionManager.isConnectionAvailable?.(connectionName);
+
+                if (isDocumentSpecific && availability === false) {
+                    statusBarItem.text = `📌 $(warning) ${connectionName} (missing)`;
+                    statusBarItem.tooltip = `Connection '${connectionName}' assigned to this SQL tab is no longer available. Click to select another connection.`;
+                    statusBarItem.show();
+                    return;
+                }
+
+                statusBarItem.text = `${isDocumentSpecific ? '📌 ' : ''}$(database) ${connectionName}`;
+                statusBarItem.tooltip = isDocumentSpecific
+                    ? `Connection: ${connectionName} (assigned to this SQL tab) - Click to change`
+                    : `Connection: ${connectionName} (global active connection) - Click to change`;
                 statusBarItem.show();
             } else {
                 statusBarItem.text = '$(database) Select Connection';
+                statusBarItem.tooltip = 'No connection selected for this SQL tab. Click to select one.';
                 statusBarItem.show();
             }
         } else {
