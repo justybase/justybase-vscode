@@ -15,13 +15,13 @@ JustyBase presents one workspace shell, but a capability is only available when 
 | Database | Runtime / authentication | Parser, completion, LSP | Metadata / search | DDL / explain | Import, export, maintenance | Boundary |
 | --- | --- | --- | --- | --- | --- | --- |
 | Netezza | Bundled JavaScript driver; host/port/database/user/password; VS Code Secrets | First-class parser, CST semantics, NZPLSQL, LSP, quality, semantic tokens | Full lazy catalog/cache, source search, DDL, profiles, dependencies | DDL, EXPLAIN, plan analysis, query flow, tuning paths | XLSB/XLSX/CSV/compressed CSV/JSON/XML/SQL/Markdown/Parquet; GROOM, stats, skew, sessions, security | Production/core |
-| Db2 | Companion runtime; platform-specific driver package | Dialect authoring, completion, metadata-aware LSP; depth varies by statement | Catalog browsing, columns, DDL, compare | DDL and database-specific explain/maintenance where implemented | Spreadsheet/text import-export and Db2 maintenance paths | Supported with runtime setup |
-| MS SQL Server | Companion runtime and `mssql` driver | Dialect parser profile, completion, formatting, diagnostics | Metadata, object/column browsing, DDL | Explain/parser support depends on provider surface | Common import/export and maintenance operations | Partial by feature |
-| Oracle | Companion runtime | Oracle parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain and tuning provider paths where available | Common import/export and maintenance operations | Partial by feature |
-| PostgreSQL | Companion runtime | PostgreSQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain, partitions, indexes, and maintenance paths where implemented | Common import/export and maintenance operations | Partial by feature |
-| MySQL | Companion runtime | MySQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain and maintenance paths where implemented | Common import/export and maintenance operations | Partial by feature |
-| Access | Access reader/session plus local embedded runtime | File SQL authoring and local completion; not a warehouse dialect | MDB/ACCDB tables, columns, DDL boundary | File/session operations; no warehouse session model | Access file import/edit/export plus local result workflows | File/runtime boundary |
-| Files / DuckDB / SQLite | Local DuckDB or SQLite runtime; no server credential required | File SQL dialects, local completion and formatting | Lazy local catalogs and source profiles | Local DDL, explain, integrity/maintenance varies by runtime | CSV/TSV, XLSX/XLSB, Parquet, Avro, Access; result export | Desktop/local; file sources can be read-only |
+| Db2 | Preview companion runtime; platform-specific driver package | Dialect authoring, completion, metadata-aware LSP; depth varies by statement | Catalog browsing, columns, DDL, compare | DDL and database-specific explain/maintenance where implemented | Spreadsheet/text import-export and Db2 maintenance paths | Preview; runtime setup required |
+| MS SQL Server | Preview companion runtime and `mssql` driver | Dialect parser profile, completion, formatting, diagnostics | Metadata, object/column browsing, DDL | Explain/parser support depends on provider surface | Provider-specific import/export and maintenance operations | Preview; partial by feature |
+| Oracle | Preview companion runtime | Oracle parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain and tuning provider paths where available | Provider-specific import/export and maintenance operations | Preview; partial by feature |
+| PostgreSQL | Preview companion runtime | PostgreSQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain, partitions, indexes, and maintenance paths where implemented | Provider-specific import/export and maintenance operations | Preview; partial by feature |
+| MySQL | Preview companion runtime | MySQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain and maintenance paths where implemented | Provider-specific import/export and maintenance operations | Preview; partial by feature |
+| Access | Preview Access reader/session plus local embedded runtime | File SQL authoring and local completion; not a warehouse dialect | MDB/ACCDB tables, columns, DDL boundary | File/session operations; no warehouse session model | Access file import/edit/export plus local result workflows | Preview; file/runtime boundary |
+| Files / DuckDB / SQLite | Preview local DuckDB or SQLite runtime; no server credential required | File SQL dialects, local completion and formatting | Lazy local catalogs and source profiles | Local DDL, explain, integrity/maintenance varies by runtime | CSV/TSV, XLSX/XLSB, Parquet, Avro, Access; result export | Preview desktop/local; file sources can be read-only |
 
 ## Status interpretation
 
@@ -37,6 +37,6 @@ Include database kind, version, connection mode, a minimal SQL/object example, e
 
 ## Generated source inventory
 
-The Pages build also records the `DatabaseKind` values found in the shared contract:
+The Pages build records the advertised `DatabaseKind` values found in the shared contract. Shared contracts also contain preview-compatible kinds such as Snowflake and Vertica, but those are intentionally excluded from this public matrix until their product pages and validation boundary are ready; their repository appendices are technical references, not support promises:
 
 <!-- GENERATED:DATABASES -->

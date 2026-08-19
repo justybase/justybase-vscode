@@ -19,7 +19,7 @@ npm run lint
 npm run build
 ```
 
-The Pages workflow runs the documentation build and checker on pull requests. `docs:check` builds `_site`, validates generated catalogs and local links/anchors, checks stale setting/tool names, and verifies the six product pillars are present.
+The Pages workflow runs the documentation build and checker on pull requests. `docs:check` builds `_site`, validates generated catalogs for both missing and extra entries, checks product versions and calendar dates in front matter, records the source commit/counts in `build-info.json`, checks generated local links/anchors and stale setting/tool names, and verifies the six product pillars are present. New user-facing commands that need explanation must also appear in a canonical guide page; the generated command reference is not a substitute for workflow documentation.
 
 ## Parser changes
 

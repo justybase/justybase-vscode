@@ -35,7 +35,7 @@ The default listener is local at `http://127.0.0.1:3000`. For development, build
 
 ## User workflow
 
-Users log in, manage their own connection profiles, browse a lazy schema tree, search objects, edit preferences, run/cancel queries, view history, inspect streamed/disk-backed results, and export or import supported formats. The default connection profile is read-only unless the user explicitly enables writes in the request/preview flow.
+Users log in, manage their own connection profiles, browse a lazy schema tree, search objects, edit preferences, run/cancel queries, view history, inspect streamed/disk-backed results, and export or import the formats exposed by the Web contract. Web result export supports CSV, CSV.GZ, CSV.ZST, JSON, XML, SQL INSERT, Markdown, XLSX, and XLSB; file import accepts CSV, XLSX, and XLSB. Desktop-only Parquet, file-preview, and XPT workflows are not Web Editor support. The default connection profile is read-only unless the user explicitly enables writes in the request/preview flow.
 
 ## Security boundary
 

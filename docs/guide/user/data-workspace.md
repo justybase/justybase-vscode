@@ -3,14 +3,14 @@ title: Data Workspace, DuckDB, SQLite and Access files
 description: Query local files as tables, stage transformations locally, and understand which file sources can be edited.
 audience: user
 category: Product guides
-status: Supported
+status: Preview
 last_verified: 2026-08-19
 product_version: 3.16.35
 ---
 
 # Data Workspace, DuckDB, SQLite and Access files
 
-Data Workspace brings local files into the same schema/result workflow as a database connection. It uses DuckDB or SQLite-backed local runtimes and does not require a warehouse network connection.
+Data Workspace brings local files into the same schema/result workflow as a database connection. It uses the optional DuckDB/File SQL and Access companion runtimes; those companion workflows are Preview and do not require a warehouse network connection. Install the relevant companion extension before treating a local source as an available product capability.
 
 ## Add a file source
 

@@ -33,6 +33,8 @@ Metadata is lazy and cache-first. `justybase.cacheTTL` defaults to 12 hours. Wit
 
 Refresh only the affected selection when possible. A full multi-database refresh is more expensive and can be serialized for safety. Metadata session sweeping applies only to sessions created by metadata/prefetch queries and requires the configured Netezza privilege.
 
+For Netezza refresh investigations, open [Schema Refresh Details](guide/user/schema-browser/#schema-refresh-details). It shows generated catalog SQL by state, queue wait, execution time, row counts, snapshot completeness, and the longest statement for the current connection-scoped refresh. Use the final snapshot and frozen elapsed time when comparing runs; the panel is diagnostic and read-only, not a SQL execution console.
+
 ## Failure and recovery table
 
 | Situation | What remains usable | Next action |

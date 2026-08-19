@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,55 @@ const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), '
 const productVersion = packageJson.version;
 const lastVerified = process.env.DOCS_LAST_VERIFIED ?? '2026-08-19';
 const advertisedDatabaseKinds = new Set(['netezza', 'db2', 'mssql', 'oracle', 'postgresql', 'mysql', 'access', 'duckdb', 'sqlite']);
+
+function getBuildProvenance() {
+  let sourceCommit = '';
+  let workingTreeDirty = false;
+  try {
+    sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    workingTreeDirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root, encoding: 'utf8' }).trim().length > 0;
+  } catch {
+    // Some sandboxed local Node runtimes block child_process even though the
+    // checkout is readable. Resolve HEAD directly so local docs:check still
+    // records an auditable commit.
+    let gitDirectory = path.join(root, '.git');
+    try {
+      const gitFile = readFileSync(gitDirectory, 'utf8');
+      const match = gitFile.match(/^gitdir:\s*(.+)$/m);
+      if (match) gitDirectory = path.resolve(root, match[1].trim());
+    } catch {
+      // Normal repositories have a .git directory.
+    }
+    try {
+      const head = readFileSync(path.join(gitDirectory, 'HEAD'), 'utf8').trim();
+      if (head.startsWith('ref: ')) {
+        const ref = head.slice('ref: '.length).trim();
+        try {
+          sourceCommit = readFileSync(path.join(gitDirectory, ref), 'utf8').trim();
+        } catch {
+          const packedRefs = readFileSync(path.join(gitDirectory, 'packed-refs'), 'utf8');
+          sourceCommit = packedRefs.split('\n').find(line => line.endsWith(` ${ref}`))?.split(' ', 1)[0] ?? '';
+        }
+      } else {
+        sourceCommit = head;
+      }
+    } catch {
+      sourceCommit = '';
+    }
+    workingTreeDirty = true;
+  }
+  if (!sourceCommit) sourceCommit = process.env.GITHUB_SHA?.trim() ?? '';
+  const sourceCommitShort = sourceCommit && /^[0-9a-f]{7,40}$/i.test(sourceCommit) ? sourceCommit.slice(0, 12) : 'unknown';
+  return {
+    sourceCommit: sourceCommit || 'unknown',
+    sourceCommitShort,
+    sourceCommitUrl: sourceCommit && /^[0-9a-f]{40}$/i.test(sourceCommit)
+      ? `https://github.com/justybase/justybase-vscode/commit/${sourceCommit}`
+      : 'https://github.com/justybase/justybase-vscode',
+    workingTreeDirty,
+    generatedAt: new Date().toISOString(),
+  };
+}
 
 const navGroups = [
   { label: 'Start here', items: ['guide/user/getting-started', 'guide/user/connections'] },
@@ -258,7 +308,7 @@ function navHtml(currentUrl, rootRelative, pages) {
   }).join('');
 }
 
-function pageHtml(page, markdown, outputFile, pages, legacyPageUrls) {
+function pageHtml(page, markdown, outputFile, pages, legacyPageUrls, buildInfo) {
   const rootRelative = rootRelativeForOutput(outputFile);
   const body = renderMarkdown(markdown, rootRelative, page.sourceFile, legacyPageUrls);
   const canonical = `https://justybase.github.io/justybase-vscode/${page.url}`;
@@ -269,12 +319,14 @@ function pageHtml(page, markdown, outputFile, pages, legacyPageUrls) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#10182b">
     <meta name="description" content="${escapeHtml(page.description)}">
+    <meta name="justybase:product-version" content="${escapeHtml(productVersion)}">
+    <meta name="justybase:source-commit" content="${escapeHtml(buildInfo.sourceCommit)}">
     <link rel="canonical" href="${canonical}">
     <link rel="icon" type="image/svg+xml" href="${rootRelative}favicon.svg">
     <link rel="stylesheet" href="${rootRelative}guide-assets/guide.css">
     <title>${escapeHtml(page.title)} · JustyBase documentation</title>
   </head>
-  <body class="no-js" data-search-index="${rootRelative}guide/search-index.json" data-site-root="${rootRelative}">
+  <body class="no-js" data-search-index="${rootRelative}guide/search-index.json" data-site-root="${rootRelative}" data-source-commit="${escapeHtml(buildInfo.sourceCommit)}">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="guide-header">
       <div class="guide-container guide-header-inner">
@@ -296,7 +348,7 @@ function pageHtml(page, markdown, outputFile, pages, legacyPageUrls) {
         <div class="page-footer-nav"><a href="${rootRelative}guide/">← Documentation home</a><a href="${rootRelative}guide/reference/statuses-and-permissions/">Statuses and permissions →</a></div>
       </main>
     </div>
-    <footer class="guide-footer"><div class="guide-container"><span>JustyBase ${escapeHtml(productVersion)}</span><span>Apache-2.0</span><a href="https://github.com/justybase/justybase-vscode/issues">Report an issue</a></div></footer>
+    <footer class="guide-footer"><div class="guide-container"><span>JustyBase ${escapeHtml(productVersion)}</span><span>Source <a href="${buildInfo.sourceCommitUrl}" target="_blank" rel="noreferrer">${escapeHtml(buildInfo.sourceCommitShort)}</a>${buildInfo.workingTreeDirty ? ' · working tree' : ''}</span><span>Apache-2.0</span><a href="https://github.com/justybase/justybase-vscode/issues">Report an issue</a></div></footer>
     <script defer src="${rootRelative}guide-assets/guide.js"></script>
   </body>
 </html>`;
@@ -363,7 +415,8 @@ async function liveCatalogs() {
   const exportSource = await readFile(path.join(root, 'packages/contracts/src/webApi.ts'), 'utf8');
   const exportFormats = extractTypeUnionValues(exportSource, 'QueryExportFormat');
   const importFormats = extractTypeUnionValues(exportSource, 'QueryFileImportFormat');
-  return { commands, settings, copilotNames, mcpNames, contractNames, routes, databaseKinds, exportFormats, importFormats, manifests };
+  const formats = [...new Set([...exportFormats, ...importFormats, 'parquet', 'xpt'])].sort();
+  return { commands, settings, copilotNames, mcpNames, contractNames, routes, databaseKinds, exportFormats, importFormats, formats, manifests };
 }
 
 function catalogMarkdown(catalog) {
@@ -373,15 +426,15 @@ function catalogMarkdown(catalog) {
   const mcpRows = catalog.mcpNames.map(name => `| \`${name}\` | Read-only MCP catalog |`).join('\n');
   const routeRows = catalog.routes.map(route => `| \`${route}\` | Web API route |`).join('\n');
   const dbRows = catalog.databaseKinds.filter(kind => advertisedDatabaseKinds.has(kind)).map(kind => `| \`${kind}\` | ${kind === 'sqlite' || kind === 'duckdb' ? 'Local / file runtime' : 'Database or companion runtime'} |`).join('\n');
-  const formats = [...new Set([...catalog.exportFormats, ...catalog.importFormats, 'parquet', 'xpt'])].sort();
+  const formats = catalog.formats;
   return {
-    COMMANDS: `| Command | Title |\n| --- | --- |\n${commandRows}`,
-    SETTINGS: `| Setting | Default | Description |\n| --- | --- | --- |\n${settingRows}`,
-    AI_TOOLS: `| Tool | Surface |\n| --- | --- |\n${toolRows}`,
-    MCP_TOOLS: `| Tool | Surface |\n| --- | --- |\n${mcpRows}`,
-    ROUTES: `| Route | Contract surface |\n| --- | --- |\n${routeRows}`,
-    DATABASES: `| DatabaseKind | Runtime family |\n| --- | --- |\n${dbRows}`,
-    FORMATS: `| Format | Export | Import |\n| --- | --- | --- |\n${formats.map(format => `| **${format.toUpperCase()}** | ${catalog.exportFormats.includes(format) ? 'Export' : '—'} | ${catalog.importFormats.includes(format) ? 'Web/file import' : '—'} |`).join('\n')}`,
+    COMMANDS: `<!-- GENERATED_TABLE:COMMANDS -->\n| Command | Title |\n| --- | --- |\n${commandRows}`,
+    SETTINGS: `<!-- GENERATED_TABLE:SETTINGS -->\n| Setting | Default | Description |\n| --- | --- | --- |\n${settingRows}`,
+    AI_TOOLS: `<!-- GENERATED_TABLE:AI_TOOLS -->\n| Tool | Surface |\n| --- | --- |\n${toolRows}`,
+    MCP_TOOLS: `<!-- GENERATED_TABLE:MCP_TOOLS -->\n| Tool | Surface |\n| --- | --- |\n${mcpRows}`,
+    ROUTES: `<!-- GENERATED_TABLE:ROUTES -->\n| Route | Contract surface |\n| --- | --- |\n${routeRows}`,
+    DATABASES: `<!-- GENERATED_TABLE:DATABASES -->\n| DatabaseKind | Runtime family |\n| --- | --- |\n${dbRows}`,
+    FORMATS: `<!-- GENERATED_TABLE:FORMATS -->\n| Format | Export | Import |\n| --- | --- | --- |\n${formats.map(format => `| **${format.toUpperCase()}** | ${catalog.exportFormats.includes(format) ? 'Export' : '—'} | ${catalog.importFormats.includes(format) ? 'Web/file import' : '—'} |`).join('\n')}`,
   };
 }
 
@@ -430,25 +483,48 @@ async function build() {
     const slug = path.basename(file, '.md').toLowerCase();
     const url = `guide/legacy/${slug}/`;
     legacyPageUrls.set(toPosix(path.relative(docsRoot, file)), url);
-    pages.push({ ...pageMeta({ ...parsed.metadata, title: parsed.metadata.title ?? titleFromFile(file), category: 'Technical appendices', audience: 'reference' }, url), sourceFile: file, markdown: parsed.body });
+    pages.push({ ...pageMeta({ ...parsed.metadata, title: parsed.metadata.title ?? titleFromFile(file), category: 'Technical appendices', audience: 'reference', status: parsed.metadata.status ?? 'Legacy reference' }, url), sourceFile: file, markdown: parsed.body });
   }
   pages.push({
-    ...pageMeta({ title: 'Technical appendices', description: 'Compatibility pages for the repository Markdown references that predate the documentation portal.', category: 'Technical appendices', audience: 'reference', status: 'Supported' }, 'guide/legacy/'),
+    ...pageMeta({ title: 'Technical appendices', description: 'Compatibility pages for the repository Markdown references that predate the documentation portal.', category: 'Technical appendices', audience: 'reference', status: 'Legacy reference' }, 'guide/legacy/'),
     sourceFile: undefined,
     markdown: '# Technical appendices\n\nThese pages preserve the existing repository Markdown references while the maintained user, admin, reference, and developer guides live in the portal. Start with the [documentation home](guide/) or use the sidebar to browse an appendix.',
   });
   pages.sort((left, right) => left.url.localeCompare(right.url));
+  const provenance = getBuildProvenance();
+  const buildInfo = {
+    schemaVersion: 1,
+    sourceCommit: provenance.sourceCommit,
+    sourceCommitShort: provenance.sourceCommitShort,
+    sourceCommitUrl: provenance.sourceCommitUrl,
+    workingTreeDirty: provenance.workingTreeDirty,
+    generatedAt: provenance.generatedAt,
+    productVersion,
+    counts: {
+      pages: pages.length,
+      guidePages: sourceFiles.length,
+      legacyPages: pages.length - sourceFiles.length,
+      commands: catalog.commands.length,
+      settings: catalog.settings.length,
+      copilotTools: catalog.copilotNames.length,
+      mcpTools: catalog.mcpNames.length,
+      routes: catalog.routes.length,
+      databaseKinds: catalog.databaseKinds.filter(kind => advertisedDatabaseKinds.has(kind)).length,
+      formats: catalog.formats.length,
+    },
+  };
 
   for (const page of pages) {
     const outputFile = outputFileForUrl(page.url);
     await mkdir(path.dirname(outputFile), { recursive: true });
-    await writeFile(outputFile, pageHtml(page, page.markdown, outputFile, pages, legacyPageUrls), 'utf8');
+    await writeFile(outputFile, pageHtml(page, page.markdown, outputFile, pages, legacyPageUrls, buildInfo), 'utf8');
   }
   const searchIndex = pages.map(page => ({ title: page.title, description: page.description, category: page.category, status: page.status, url: page.url, text: stripMarkdown(page.markdown).slice(0, 5000) }));
   await writeFile(path.join(siteRoot, 'guide', 'search-index.json'), JSON.stringify(searchIndex, null, 2), 'utf8');
+  await writeFile(path.join(siteRoot, 'build-info.json'), `${JSON.stringify(buildInfo, null, 2)}\n`, 'utf8');
   await cp(path.join(docsRoot, 'guide-assets'), path.join(siteRoot, 'guide-assets'), { recursive: true });
 
-  console.log(`Documentation site built: ${pages.length} pages, ${catalog.commands.length} commands, ${catalog.settings.length} settings.`);
+  console.log(`Documentation site built: ${pages.length} pages, ${catalog.commands.length} commands, ${catalog.settings.length} settings, source ${provenance.sourceCommitShort}.`);
 }
 
 await build();
