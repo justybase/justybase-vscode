@@ -6,6 +6,26 @@ import { extractDatabaseFromLayerKey } from './diskStorage/metadataDiskPaths';
 import { buildNetezzaCacheDatabasePart } from './helpers';
 import { createNetezzaUserIdentifier } from '../dialects/netezza/metadata/identifierUtils';
 
+function buildDirectColumnCacheKey(
+    database: string,
+    schema: string | undefined,
+    table: string,
+    databaseKind?: DatabaseKind,
+): string {
+    const isNetezza = databaseKind === 'netezza';
+    const preserveCase = databaseKind !== undefined && !isNetezza;
+    return buildColumnCacheKey(
+        isNetezza
+            ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
+            : database,
+        isNetezza && schema !== undefined
+            ? createNetezzaUserIdentifier(schema).value
+            : schema,
+        isNetezza ? createNetezzaUserIdentifier(table).value : table,
+        isNetezza || preserveCase ? { preserveCase: true } : undefined,
+    );
+}
+
 /**
  * Reads column metadata from the in-memory cache using normalized cache keys.
  * Netezza unquoted identifiers are uppercased; non-Netezza dialects may preserve case.
@@ -19,17 +39,7 @@ export function getCachedColumnsFromMetadataCache(
     databaseKind?: DatabaseKind,
 ): ColumnMetadata[] | undefined {
     const isNetezza = databaseKind === 'netezza';
-    const preserveCase = databaseKind !== undefined && !isNetezza;
-    const directKey = buildColumnCacheKey(
-        isNetezza
-            ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
-            : database,
-        isNetezza && schema !== undefined
-            ? createNetezzaUserIdentifier(schema).value
-            : schema,
-        isNetezza ? createNetezzaUserIdentifier(table).value : table,
-        isNetezza || preserveCase ? { preserveCase: true } : undefined,
-    );
+    const directKey = buildDirectColumnCacheKey(database, schema, table, databaseKind);
     const directColumns = metadataCache.getColumns(connectionName, directKey);
     if (directColumns) {
         return directColumns;
@@ -59,11 +69,7 @@ export async function getCachedColumnsFromMetadataCacheAsync(
     table: string,
     databaseKind?: DatabaseKind,
 ): Promise<ColumnMetadata[] | undefined> {
-    const preserveCase =
-        databaseKind !== undefined && databaseKind !== 'netezza';
-    const directKey = buildColumnCacheKey(database, schema, table, {
-        preserveCase,
-    });
+    const directKey = buildDirectColumnCacheKey(database, schema, table, databaseKind);
     if (typeof metadataCache.ensureColumnsLoadedForTableKey === 'function') {
         await metadataCache.ensureColumnsLoadedForTableKey(connectionName, directKey);
     } else if (typeof metadataCache.ensureColumnsLoaded === 'function') {

@@ -134,6 +134,33 @@ describe('MetadataProvider column fetch deduplication', () => {
         expect(result).toBe(cached);
     });
 
+    it('uses the exact quoted Netezza column layer instead of folding schema/table names', async () => {
+        const cached: ColumnMetadata[] = [{
+            ATTNAME: 'id', FORMAT_TYPE: 'INT4', label: 'id', kind: 5, detail: 'INT4',
+        }];
+        const exactKey = buildColumnCacheKey(
+            buildNetezzaDatabaseCacheKey('"just_data"'),
+            'admin',
+            'lower_table',
+            { preserveCase: true },
+        );
+        metadataCache.getColumns.mockImplementation((_connectionName, key) =>
+            key === exactKey ? cached : undefined,
+        );
+
+        const result = await provider.getTableColumnsMetadata(
+            'CONN',
+            '"just_data"',
+            '"admin"',
+            '"lower_table"',
+            { allowDatabaseFetch: false, requestSource: 'completion' },
+        );
+
+        expect(metadataCache.ensureColumnsLoadedForTableKey).toHaveBeenCalledWith('CONN', exactKey);
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+        expect(result).toBe(cached);
+    });
+
     it('resolves DB.. table columns from schema-specific disk cache before querying', async () => {
         const cached: ColumnMetadata[] = [
             {

@@ -7,6 +7,9 @@ import * as vscode from 'vscode';
 import { registerUtilityCommands } from '../commands/schema/utilityCommands';
 import { SchemaCommandsDependencies } from '../commands/schema/types';
 import * as variableResolver from '../core/variableResolver';
+import { buildNetezzaCacheDatabasePart } from '../metadata/helpers';
+import { searchCache } from '../metadata/search';
+import type { MetadataStorageReader } from '../metadata/cache/MetadataStorageReader';
 
 // Mock vscode
 jest.mock('vscode', () => ({
@@ -355,6 +358,53 @@ describe('commands/schema/utilityCommands', () => {
             });
 
             expect(mockedRunQueryRaw).toHaveBeenCalled();
+            expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalled();
+        });
+
+        it('reveals an exact catalog object returned by Object Search', async () => {
+            const exactDatabase = buildNetezzaCacheDatabasePart('just_data');
+            const searchStorage: MetadataStorageReader = {
+                tableCache: new Map([[
+                    `test-connection|${exactDatabase}.admin`,
+                    {
+                        data: [{ label: 'dimaccount', objType: 'TABLE', kind: 6 }],
+                        timestamp: Date.now(),
+                    },
+                ]]),
+                schemaCache: new Map(),
+                columnCache: new Map(),
+            };
+            const searchResult = searchCache(searchStorage, 'dimaccount', 'test-connection')[0];
+            if (!searchResult) {
+                throw new Error('Expected Object Search to return dimaccount');
+            }
+
+            expect(searchResult).toEqual(expect.objectContaining({
+                database: '"just_data"', schema: '"admin"', name: '"dimaccount"', type: 'TABLE',
+            }));
+            (mockDeps.metadataCache.findObjectWithType as jest.Mock).mockReturnValue(undefined);
+            mockedRunQueryRaw.mockResolvedValue({
+                data: [['dimaccount', 'TABLE', 'admin', 123]],
+                columns: [{ name: 'OBJNAME' }, { name: 'OBJTYPE' }, { name: 'SCHEMA' }, { name: 'OBJID' }],
+            });
+            mockedQueryResultToRows.mockReturnValue([
+                { OBJNAME: 'dimaccount', OBJTYPE: 'TABLE', SCHEMA: 'admin', OBJID: 123 },
+            ]);
+
+            const handler = getCommandHandler('netezza.revealInSchema');
+            await handler({
+                name: searchResult.name,
+                database: searchResult.database,
+                schema: searchResult.schema,
+                objType: searchResult.type,
+                connectionName: searchResult.connectionName,
+            });
+
+            const sql = mockedRunQueryRaw.mock.calls[0][1] as string;
+            expect(sql).toContain('FROM "just_data".._V_OBJECT_DATA');
+            expect(sql).toContain("OBJNAME = 'dimaccount'");
+            expect(sql).toContain("DBNAME = 'just_data'");
+            expect(sql).toContain("SCHEMA = 'admin'");
             expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalled();
         });
 

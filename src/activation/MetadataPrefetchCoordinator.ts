@@ -9,11 +9,16 @@ import {
     createMetadataRefreshStatusBar,
     updateMetadataRefreshStatusBar,
 } from '../services/statusBarManager';
+import { MetadataRefreshDetailsPanel } from '../services/metadataRefreshDetailsPanel';
+import type { MetadataPrefetchRefreshDetails } from '../metadata/prefetch';
 import type { ExtensionServices } from './extensionServices';
 
 export class MetadataPrefetchCoordinator {
     private readonly metadataRefreshStatusBar: vscode.StatusBarItem;
+    private readonly metadataRefreshDetailsPanel: MetadataRefreshDetailsPanel;
     private metadataRefreshHideTimer: ReturnType<typeof setTimeout> | undefined;
+    private activeRefreshId: string | undefined;
+    private readonly refreshDetailsByConnection = new Map<string, MetadataPrefetchRefreshDetails>();
     private readonly currentSchemaRefreshPromises = new Map<string, Promise<void>>();
     private readonly currentSchemaRefreshedListeners = new Set<
         (connectionName: string, database: string) => void
@@ -25,17 +30,34 @@ export class MetadataPrefetchCoordinator {
         private readonly logger: Logger,
     ) {
         this.metadataRefreshStatusBar = createMetadataRefreshStatusBar(context);
+        this.metadataRefreshDetailsPanel = new MetadataRefreshDetailsPanel();
     }
 
     register(context: vscode.ExtensionContext, metadataCacheInit: Promise<void>): void {
         context.subscriptions.push({
             dispose: () => {
                 this.clearMetadataRefreshHideTimer();
+                this.metadataRefreshDetailsPanel.dispose();
             },
         });
 
         context.subscriptions.push(
+            vscode.commands.registerCommand('netezza.showMetadataRefreshDetails', () => {
+                this.metadataRefreshDetailsPanel.show();
+            }),
+        );
+
+        context.subscriptions.push(
             this.services.metadataCache.onDidPrefetchProgress(progress => {
+                if (progress.refreshId) {
+                    if (progress.stage === 'start') {
+                        this.activeRefreshId = progress.refreshId;
+                    } else if (this.activeRefreshId && progress.refreshId !== this.activeRefreshId) {
+                        // Events from an older refresh must not overwrite a
+                        // newer progress display (the former 100% → 98% jump).
+                        return;
+                    }
+                }
                 this.clearMetadataRefreshHideTimer();
                 updateMetadataRefreshStatusBar(this.metadataRefreshStatusBar, progress);
 
@@ -52,6 +74,18 @@ export class MetadataPrefetchCoordinator {
                 }
             }),
         );
+
+        const cacheWithRefreshDetails = this.services.metadataCache as typeof this.services.metadataCache & {
+            onDidPrefetchRefreshDetails?: vscode.Event<MetadataPrefetchRefreshDetails>;
+        };
+        if (cacheWithRefreshDetails.onDidPrefetchRefreshDetails) {
+            context.subscriptions.push(
+                cacheWithRefreshDetails.onDidPrefetchRefreshDetails(details => {
+                    this.refreshDetailsByConnection.set(details.connectionName, details);
+                    this.metadataRefreshDetailsPanel.update([...this.refreshDetailsByConnection.values()]);
+                }),
+            );
+        }
 
         context.subscriptions.push(
             this.services.metadataCache.onDidNeedColumnRecovery((connectionName) => {

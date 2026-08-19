@@ -6,6 +6,7 @@ import { fetchTableColumnsWithFallback } from '../providers/tableMetadataProvide
 import type { ConnectionManager } from '../core/connectionManager'
 import type { MetadataCache } from '../metadataCache'
 import type { TableMetadata } from '../metadata/types'
+import { buildNetezzaDbSchemaCacheKey } from '../metadata/helpers'
 
 function completionItemLabel(item: vscode.CompletionItem): string {
     return typeof item.label === 'string' ? item.label : item.label.label
@@ -40,6 +41,9 @@ describe('MetadataProvider system catalog mirroring', () => {
             setTables: jest.fn(),
             getColumns: jest.fn(),
             getColumnsAnySchema: jest.fn(),
+            getProcedures: jest.fn(),
+            getProceduresForDatabase: jest.fn(),
+            setProcedures: jest.fn(),
             ensureColumnsLoaded: jest.fn().mockResolvedValue(undefined),
             setColumns: jest.fn(),
             findTableId: jest.fn(),
@@ -178,6 +182,31 @@ describe('MetadataProvider system catalog mirroring', () => {
             ]),
             expect.any(Map),
             undefined,
+        )
+    })
+
+    it('stores a Netezza procedure lookup under the exact catalog schema layer', async () => {
+        queryResultToRowsMock.mockReturnValueOnce([
+            {
+                PROCEDURE: 'lower_proc',
+                PROCEDURESIGNATURE: 'lower_proc()',
+                SCHEMA: 'admin',
+                DATABASE: 'just_data',
+            },
+        ])
+
+        const procedures = await provider.getProcedures(
+            'CONN_1',
+            '"just_data"',
+            '"admin"',
+        )
+
+        const exactKey = buildNetezzaDbSchemaCacheKey('"just_data"', '"admin"')
+        expect(procedures).toHaveLength(1)
+        expect(metadataCache.setProcedures).toHaveBeenCalledWith(
+            'CONN_1',
+            exactKey,
+            [expect.objectContaining({ PROCEDURE: 'lower_proc', SCHEMA: 'admin' })],
         )
     })
 

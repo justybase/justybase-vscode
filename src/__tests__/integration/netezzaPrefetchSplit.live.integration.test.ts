@@ -20,6 +20,11 @@ import { afterAll, beforeAll, describe, expect, it } from "@jest/globals";
 import { NzConnection } from "@justybase/netezza-driver";
 import { ensureBuiltInDialectsRegistered } from "../../dialects";
 import { NZ_QUERIES } from "../../dialects/netezza/metadata/systemQueries";
+import {
+  buildColumnCacheKey,
+  groupColumnRowsByTableKey,
+  type RawColumnRowWithKeys,
+} from "../../metadata/columnRowMapping";
 
 const skipTests = !process.env.NZ_DEV_PASSWORD;
 const describeIfDb = skipTests ? describe.skip : describe;
@@ -75,23 +80,25 @@ async function queryRowsWithTiming(
   label: string,
   commandTimeout = 180,
 ): Promise<{ rows: Record<string, unknown>[]; timing: LiveQueryTiming }> {
-  const totalStart = Date.now();
+  // Use the monotonic clock: the wall clock can be corrected while a long
+  // live catalog query is running, which otherwise yields negative timings.
+  const totalStart = performance.now();
   const cmd = connection.createCommand(sql);
   cmd.commandTimeout = commandTimeout;
-  const executeStart = Date.now();
+  const executeStart = performance.now();
   const reader = await cmd.executeReader();
-  const executeReaderMs = Date.now() - executeStart;
+  const executeReaderMs = performance.now() - executeStart;
   const rows: Record<string, unknown>[] = [];
   const fieldCount = reader.fieldCount;
   let firstReadCompletedAt: number | undefined;
   let lastReadCompletedAt: number | undefined;
-  const rowFetchStart = Date.now();
+  const rowFetchStart = performance.now();
   let readerCloseMs: number | undefined;
 
   try {
     while (true) {
       const hasRow = await reader.read();
-      const readCompletedAt = Date.now();
+      const readCompletedAt = performance.now();
       firstReadCompletedAt ??= readCompletedAt;
       lastReadCompletedAt = readCompletedAt;
       if (!hasRow) {
@@ -105,18 +112,18 @@ async function queryRowsWithTiming(
       rows.push(row);
     }
   } finally {
-    const closeStart = Date.now();
+    const closeStart = performance.now();
     await reader.close();
-    readerCloseMs = Date.now() - closeStart;
+    readerCloseMs = performance.now() - closeStart;
   }
 
-  const firstRowOrEnd = firstReadCompletedAt ?? Date.now();
+  const firstRowOrEnd = firstReadCompletedAt ?? performance.now();
   const timing: LiveQueryTiming = {
-    executeReaderMs,
-    serverWaitToFirstRowMs: Math.max(0, firstRowOrEnd - (executeStart + executeReaderMs)),
-    rowFetchMs: Math.max(0, (lastReadCompletedAt ?? rowFetchStart) - firstRowOrEnd),
-    readerCloseMs: readerCloseMs ?? 0,
-    totalMs: Date.now() - totalStart,
+    executeReaderMs: Math.round(executeReaderMs),
+    serverWaitToFirstRowMs: Math.round(Math.max(0, firstRowOrEnd - (executeStart + executeReaderMs))),
+    rowFetchMs: Math.round(Math.max(0, (lastReadCompletedAt ?? rowFetchStart) - firstRowOrEnd)),
+    readerCloseMs: Math.round(readerCloseMs ?? 0),
+    totalMs: Math.round(performance.now() - totalStart),
     rowsRead: rows.length,
   };
   console.log(`PROBE TIMING ${label} ${JSON.stringify(timing)}`);
@@ -280,6 +287,51 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
     expect(first).toHaveProperty("IS_FK");
     expect(first).toHaveProperty("IS_DISTRIBUTION_KEY");
   });
+
+  itIfDb(
+    "T11a: every prefetched table/view layer has an exact Netezza column key",
+    async () => {
+      // One NzConnection permits one active reader. This matches the
+      // production prefetcher, which serializes catalog reads per connection.
+      const objectRows = await queryRows(
+        connection,
+        NZ_QUERIES.listTablesAndViews([targetDatabase]),
+      );
+      const mainColumnRows = await queryRows(
+        connection,
+        NZ_QUERIES.listColumnsWithKeys(targetDatabase),
+      );
+      const externalColumnRows = await queryRows(
+        connection,
+        NZ_QUERIES.listExternalColumnsWithKeys(targetDatabase),
+      );
+      const columnsByKey = groupColumnRowsByTableKey(
+        [...mainColumnRows, ...externalColumnRows] as RawColumnRowWithKeys[],
+        undefined,
+        { preserveCase: true, exactNetezza: true },
+      );
+      const relevantTypes = new Set(['TABLE', 'VIEW', 'EXTERNAL TABLE']);
+      const missing = objectRows
+        .filter(row => relevantTypes.has(String(row.OBJTYPE ?? '').trim().toUpperCase()))
+        .map(row => ({
+          name: `${String(row.DBNAME)}.${String(row.SCHEMA)}.${String(row.OBJNAME)}`,
+          key: buildColumnCacheKey(
+            String(row.DBNAME),
+            String(row.SCHEMA ?? ''),
+            String(row.OBJNAME),
+            { preserveCase: true, exactNetezza: true },
+          ),
+        }))
+        .filter(({ key }) => !columnsByKey.has(key));
+
+      console.log(
+        `PROBE T11a ${targetDatabase}: ${objectRows.length} object rows, `
+        + `${columnsByKey.size} exact column layers, ${missing.length} missing`,
+      );
+      expect(missing).toEqual([]);
+    },
+    PREFETCH_TIMEOUT_MS + 60_000,
+  );
 
   itIfDb("T11b: external columns query executes with the shared row shape", async () => {
     const probe = await queryRowsWithTiming(

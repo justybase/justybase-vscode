@@ -59,6 +59,7 @@ function reviveDatabasesFromCatalog(
   store: MetadataStore,
   connectionName: string,
   databases: DatabaseMetadata[],
+  preserveCatalogIdentity: boolean,
 ): void {
   const deadSet = store.deadDatabases.get(connectionName);
   if (!deadSet || deadSet.size === 0) {
@@ -68,7 +69,10 @@ function reviveDatabasesFromCatalog(
   for (const db of databases) {
     const dbName = db.DATABASE || extractLabel(db);
     if (dbName) {
-      deadSet.delete(dbName.toUpperCase());
+      // Netezza catalog rows are exact identities. In particular, `just_data`
+      // and `JUST_DATA` may be different quoted/unquoted databases, so do not
+      // fold a catalog value while reviving a previous database-level error.
+      deadSet.delete(preserveCatalogIdentity ? dbName : dbName.toUpperCase());
     }
   }
 
@@ -214,7 +218,12 @@ export class MetadataLayerAccess {
 
   setDatabases(connectionName: string, data: DatabaseMetadata[]): void {
     const startMs = Date.now();
-    reviveDatabasesFromCatalog(this.deps.store, connectionName, data);
+    reviveDatabasesFromCatalog(
+      this.deps.store,
+      connectionName,
+      data,
+      this.isNetezza(connectionName),
+    );
     this.deps.store.dbCache.set(connectionName, { data, timestamp: startMs });
     this.deps.stats.recordRefresh(
       connectionName,

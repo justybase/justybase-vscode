@@ -40,8 +40,8 @@ import {
     createNetezzaUserIdentifier,
 } from '../../dialects/netezza/metadata/identifierUtils';
 import {
+    buildDbSchemaCacheKey,
     buildNetezzaDatabaseCacheKey,
-    buildNetezzaDbSchemaCacheKey,
     buildNetezzaCacheDatabasePart,
 } from '../../metadata/helpers';
 import type {
@@ -121,14 +121,26 @@ export class MetadataProvider {
         connectionName: string,
         database: string,
         schema?: string,
+        sources?: {
+            database?: 'catalog';
+            schema?: 'catalog';
+        },
     ): string {
         const databaseKind = this.connectionManager.getConnectionDatabaseKind(connectionName);
         if (databaseKind !== 'netezza') {
             return buildSchemaCacheKey(database, schema);
         }
-        return buildNetezzaDbSchemaCacheKey(
-            database,
-            schema,
+        const databaseKey = sources?.database === 'catalog'
+            ? buildNetezzaCacheDatabasePart(database)
+            : buildNetezzaDatabaseCacheKey(database);
+        const schemaKey = schema === undefined
+            ? undefined
+            : sources?.schema === 'catalog'
+                ? schema
+                : createNetezzaUserIdentifier(schema).value;
+        return buildDbSchemaCacheKey(
+            databaseKey,
+            schemaKey,
         );
     }
 
@@ -147,15 +159,37 @@ export class MetadataProvider {
         database: string,
         schema: string | undefined,
         table: string,
+        sources?: {
+            database?: 'catalog';
+            schema?: 'catalog';
+            table?: 'catalog';
+        },
     ): string {
         const databaseKind = this.connectionManager.getConnectionDatabaseKind(connectionName);
+        const netezzaPart = (
+            value: string | undefined,
+            source: 'catalog' | undefined,
+        ): string | undefined => {
+            if (value === undefined) {
+                return undefined;
+            }
+            return source === 'catalog'
+                ? value
+                : createNetezzaUserIdentifier(value).value;
+        };
         const normalizedDatabase = databaseKind === 'netezza'
-            ? buildNetezzaCacheDatabasePart(database)
+            ? buildNetezzaCacheDatabasePart(
+                netezzaPart(database, sources?.database) ?? database,
+            )
             : database;
         return buildColumnCacheKey(
             normalizedDatabase,
-            this.normalizeNetezzaUserPart(schema, databaseKind),
-            this.normalizeNetezzaUserPart(table, databaseKind) ?? table,
+            databaseKind === 'netezza'
+                ? netezzaPart(schema, sources?.schema)
+                : schema,
+            databaseKind === 'netezza'
+                ? netezzaPart(table, sources?.table) ?? table
+                : table,
             { preserveCase: true },
         );
     }
@@ -722,17 +756,27 @@ export class MetadataProvider {
 
             const proceduresByKey = new Map<string, ProcedureMetadata[]>();
             const allProcedures: ProcedureMetadata[] = [];
+            const preserveCatalogIdentity = this.getConnectionDatabaseKind(connectionName) === 'netezza';
 
             for (const row of results) {
-                const procedureName = row.PROCEDURE?.trim();
+                const procedureName = preserveCatalogIdentity
+                    ? row.PROCEDURE
+                    : row.PROCEDURE?.trim();
                 if (!procedureName) {
                     continue;
                 }
 
-                const normalizedSchema = row.SCHEMA?.trim() || '';
+                const normalizedSchema = preserveCatalogIdentity
+                    ? (row.SCHEMA ?? '')
+                    : (row.SCHEMA?.trim() || '');
                 const signature = row.PROCEDURESIGNATURE?.trim();
                 const label = signature && signature.length > 0 ? signature : procedureName;
-                const key = buildSchemaCacheKey(dbName, normalizedSchema || undefined);
+                const key = this.buildMetadataSchemaCacheKey(
+                    connectionName,
+                    dbName,
+                    normalizedSchema || undefined,
+                    preserveCatalogIdentity ? { schema: 'catalog' } : undefined,
+                );
 
                 const item: ProcedureMetadata = {
                     PROCEDURE: procedureName,
@@ -856,9 +900,9 @@ export class MetadataProvider {
             const cachedObjectSchema = connectionKind === 'netezza' && !normalizedSchemaName && metadataDbName
                 ? this.metadataCache.findObjectWithType(
                     connectionName,
-                    metadataDbName,
+                    shouldMirrorSystemCatalog ? metadataDbName : (dbName ?? metadataDbName),
                     undefined,
-                    normalizedTableName,
+                    tableName,
                 )?.schema
                 : undefined;
             const cacheResolvedSchemaName = normalizedSchemaName || cachedObjectSchema;
@@ -879,9 +923,9 @@ export class MetadataProvider {
             const cacheKey = normalizedDbName
                 ? this.buildMetadataColumnCacheKey(
                     connectionName,
-                    normalizedDbName,
-                    normalizedSchemaName,
-                    normalizedTableName,
+                    connectionKind === 'netezza' ? (dbName ?? normalizedDbName) : normalizedDbName,
+                    connectionKind === 'netezza' ? schemaName : normalizedSchemaName,
+                    connectionKind === 'netezza' ? tableName : normalizedTableName,
                 )
                 : buildColumnCacheKey(
                     'CURRENT',
@@ -892,9 +936,14 @@ export class MetadataProvider {
             const diskCacheKey = normalizedDbName
                 ? this.buildMetadataColumnCacheKey(
                     connectionName,
-                    normalizedDbName,
-                    cacheResolvedSchemaName,
-                    normalizedTableName,
+                    connectionKind === 'netezza' ? (dbName ?? normalizedDbName) : normalizedDbName,
+                    connectionKind === 'netezza'
+                        ? (cachedObjectSchema ?? schemaName)
+                        : cacheResolvedSchemaName,
+                    connectionKind === 'netezza' ? tableName : normalizedTableName,
+                    connectionKind === 'netezza' && cachedObjectSchema
+                        ? { schema: 'catalog' }
+                        : undefined,
                 )
                 : cacheKey;
             if (normalizedDbName) {
@@ -941,6 +990,9 @@ export class MetadataProvider {
                                 metadataDbName,
                                 normalizedSchemaName,
                                 normalizedTableName,
+                                connectionKind === 'netezza'
+                                    ? { database: 'catalog' }
+                                    : undefined,
                             )
                             : cacheKey,
                     ) ||

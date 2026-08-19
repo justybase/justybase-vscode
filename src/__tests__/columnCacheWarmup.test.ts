@@ -4,6 +4,7 @@ import {
     type CatalogRowReader,
 } from '../metadata/cache/columnCacheWarmup';
 import { buildColumnCacheKey } from '../metadata/columnRowMapping';
+import { buildNetezzaCacheDatabasePart } from '../metadata/helpers';
 import { hasTreeReadyColumnCache } from '../metadata/cache/schemaTreeDataSource';
 import * as vscode from 'vscode';
 
@@ -50,6 +51,39 @@ describe('columnCacheWarmup', () => {
             isFk: false,
             isDistributionKey: true,
         }));
+    });
+
+    it('uses exact Netezza catalog identities for quoted lower-case DDL warmup', async () => {
+        const cache = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file('/tmp/column-cache-warmup-nz') } as vscode.ExtensionContext,
+            { getConnectionDatabaseKind: jest.fn().mockReturnValue('netezza') } as never,
+        );
+        const readRows: CatalogRowReader = async () => [{
+            TABLENAME: 'lower_table',
+            SCHEMA: 'admin',
+            DBNAME: 'just_data',
+            ATTNAME: 'id',
+            FORMAT_TYPE: 'INTEGER',
+        }];
+        const exactKey = buildColumnCacheKey(
+            buildNetezzaCacheDatabasePart('just_data'),
+            'admin',
+            'lower_table',
+            { preserveCase: true },
+        );
+
+        await warmTableColumnsFromCatalog(
+            cache,
+            'CONN',
+            { database: 'just_data', schema: 'admin', table: 'lower_table' },
+            readRows,
+            'netezza',
+        );
+
+        expect(cache.getColumns('CONN', exactKey)).toEqual([
+            expect.objectContaining({ ATTNAME: 'id', FORMAT_TYPE: 'INTEGER' }),
+        ]);
+        expect(cache.getColumns('CONN', 'JUST_DATA.ADMIN.LOWER_TABLE')).toBeUndefined();
     });
 
     it('does not throw when catalog returns no rows', async () => {
