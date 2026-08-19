@@ -1460,10 +1460,13 @@ export class CachePrefetcher {
         }
 
         if (lastPrefetchTime !== undefined && !isPrefetchStale) {
-            // Data in RAM is fresh — skip prefetch only if tables are present.
-            // Without this check, a partial checkpoint recovery (Phase 4) would skip
-            // prefetch even though tables/procedures are missing from RAM.
-            if (this.cache.hasTableCacheForConnection(connectionName)) {
+            // Data in RAM is fresh — skip only when the complete snapshot is
+            // still available. Checking only for a table layer is insufficient:
+            // a partial checkpoint recovery can retain tables while a column
+            // layer is missing, and that refresh must not be silently skipped.
+            const snapshotComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
+                ?? this.cache.hasTableCacheForConnection(connectionName);
+            if (snapshotComplete) {
                 return;
             }
         }
@@ -1747,8 +1750,21 @@ export class CachePrefetcher {
         const snapshotComplete = snapshotReport?.complete
             ?? this.cache.verifyCompleteSnapshot?.(connectionName)
             ?? this.cache.verifyStagesComplete(connectionName);
-        this.setRefreshSnapshotStatus(connectionName, snapshotReport);
         const stagesComplete = stage2Complete && stage3Complete && stage4Complete && stage5Complete;
+        const failedStageNames = [
+            stage2Complete ? undefined : 'schemas',
+            stage3Complete ? undefined : 'objects',
+            stage4Complete ? undefined : 'procedures',
+            stage5Complete ? undefined : 'columns',
+        ].filter((stage): stage is string => stage !== undefined);
+        const refreshSnapshotReport: MetadataSnapshotCompletenessReport | undefined = snapshotReport
+            ? {
+                ...snapshotReport,
+                complete: snapshotReport.complete && stagesComplete,
+                missingStages: [...new Set([...snapshotReport.missingStages, ...failedStageNames])],
+            }
+            : undefined;
+        this.setRefreshSnapshotStatus(connectionName, refreshSnapshotReport);
 
         // ─── SUMMARY ───
         const totalDuration = Date.now() - prefetchStartOverall;

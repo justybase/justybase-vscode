@@ -842,6 +842,20 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       expect(Logger.getInstance().info).not.toHaveBeenCalledWith(expect.stringContaining('Starting'));
     });
 
+    it('should refresh when a fresh timestamp has an incomplete snapshot', async () => {
+      const verifyCompleteSnapshot = jest.fn().mockReturnValue(false);
+      (mockCache as unknown as { verifyCompleteSnapshot: jest.Mock }).verifyCompleteSnapshot =
+        verifyCompleteSnapshot;
+      mockCache.hasTableCacheForConnection.mockReturnValue(true);
+      prefetcher['connectionPrefetchTriggered'].set(connName, Date.now() - 1000);
+      mockRunQuery.mockResolvedValue({ columns: [], data: [] });
+
+      await (prefetcher as any).runConnectionPrefetch(connName, mockRunQuery);
+
+      expect(verifyCompleteSnapshot).toHaveBeenCalledWith(connName);
+      expect(mockRunQuery).toHaveBeenCalled();
+    });
+
     it('should allow first prefetch when not yet triggered', async () => {
       expect(prefetcher.hasConnectionPrefetchTriggered(connName)).toBe(false);
 
