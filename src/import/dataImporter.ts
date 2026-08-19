@@ -5,13 +5,12 @@
  */
 
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { ConnectionDetails, NzConnection } from "../types";
-import {
-  createConnectedDatabaseConnectionFromDetails,
-  getDatabaseConnectionConstructor,
-} from "../core/connectionFactory";
+import { createConnectedDatabaseConnectionFromDetails } from "../core/connectionFactory";
 import {
   ColumnTypeChooser,
   type ColumnTypeChooserOptions,
@@ -21,6 +20,23 @@ import { quoteIdentifier } from "../utils/identifierUtils";
 
 // Helper to unblock event loop
 const delay = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+async function materializeImportStream(
+  dataStream: Readable,
+): Promise<{ directory: string; filePath: string }> {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "justybase-netezza-import-"),
+  );
+  const filePath = path.join(directory, "data.txt");
+
+  try {
+    await pipeline(dataStream, fs.createWriteStream(filePath));
+    return { directory, filePath };
+  } catch (error) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
 
 // XLSX import for Excel file support
 // Custom Excel Reader from ExcelHelpersTs
@@ -177,6 +193,7 @@ export class NetezzaImporter {
   private decimalDelimiter: string = ".";
 
   private isExcelFile: boolean = false;
+  private excelHasHeaderRow: boolean = true;
   private availableSheetNames: string[] = [];
   private selectedSheetName?: string;
 
@@ -258,6 +275,7 @@ export class NetezzaImporter {
     this.sqlHeaders = [];
     this.dataTypes = [];
     this.rowsCount = 0;
+    this.excelHasHeaderRow = true;
     this.selectedColumnIndexes = [];
     this.forcedColumnTypes.clear();
     this.columnNameOverrides.clear();
@@ -279,6 +297,60 @@ export class NetezzaImporter {
     if (typeof reader._initSheet === "function") {
       await reader._initSheet(targetIndex);
     }
+  }
+
+  private normalizeSqlHeaders(headers: readonly string[]): string[] {
+    const used = new Set<string>();
+
+    return headers.map((header, index) => {
+      const base = this.cleanColumnName(header || `COLUMN_${index + 1}`);
+      let candidate = base;
+      let suffix = 1;
+
+      while (used.has(candidate.toUpperCase())) {
+        candidate = `${base}_${suffix}`;
+        suffix += 1;
+      }
+
+      used.add(candidate.toUpperCase());
+      return candidate;
+    });
+  }
+
+  private setHeaders(headers: readonly string[]): void {
+    this.sourceHeaders = headers.map(
+      (header, index) => header.trim() || `COLUMN_${index + 1}`,
+    );
+    this.sqlHeaders = this.normalizeSqlHeaders(this.sourceHeaders);
+  }
+
+  private setGeneratedHeaders(width: number): void {
+    this.setHeaders(
+      Array.from({ length: width }, (_unused, index) => `COL_${index + 1}`),
+    );
+  }
+
+  private isLikelyExcelDataValue(value: unknown): boolean {
+    if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+      return true;
+    }
+    if (value instanceof Date) {
+      return true;
+    }
+
+    const text = this.excelValueToString(value).trim();
+    return /^[-+]?\d+(?:[.,]\d+)?$/.test(text);
+  }
+
+  private detectExcelHeaderRow(row: readonly unknown[]): boolean {
+    const hasValue = row.some(
+      (value) => this.excelValueToString(value).trim().length > 0,
+    );
+    return hasValue && !row.some((value) => this.isLikelyExcelDataValue(value));
+  }
+
+  public setVirtualFileName(fileName: string): void {
+    this.virtualFileName = fileName;
   }
 
   private getAllColumnIndexes(): number[] {
@@ -543,7 +615,7 @@ export class NetezzaImporter {
 
   /**
    * Read Excel sample rows (streaming, limited to N data rows).
-   * Opens the Excel reader, skips header, collects up to `limit` rows.
+   * Opens the Excel reader, skips a detected header, and collects rows.
    */
   private async readExcelSampleRows(limit: number): Promise<string[][]> {
     if (!ReaderFactory) {
@@ -560,7 +632,7 @@ export class NetezzaImporter {
       await this.selectExcelReaderSheet(reader);
 
       const rows: string[][] = [];
-      let headerSkipped = false;
+      let headerSkipped = !this.excelHasHeaderRow;
 
       while ((await reader.read()) && rows.length < limit) {
         if (!headerSkipped) {
@@ -786,10 +858,8 @@ export class NetezzaImporter {
 
           if (!headerProcessed) {
             // First non-empty line is header
-            this.sourceHeaders = row.map((col) => col || "COLUMN");
-            headers = this.sourceHeaders.map((col) =>
-              this.cleanColumnName(col),
-            );
+            this.setHeaders(row);
+            headers = [...this.sqlHeaders];
             columnCount = headers.length;
 
             // We'll detect decimal delimiter from first data row
@@ -901,10 +971,7 @@ export class NetezzaImporter {
     const dataTypes: ColumnTypeChooser[] = [];
 
     // Process headers (first row)
-    this.sourceHeaders = rows[0].map((col) => col || "COLUMN");
-    this.sqlHeaders = this.sourceHeaders.map((col) =>
-      this.cleanColumnName(col),
-    );
+    this.setHeaders(rows[0]);
     dataTypes.push(
       ...this.createColumnTypeChoosers(
         this.sourceHeaders,
@@ -962,15 +1029,57 @@ export class NetezzaImporter {
           : [];
       await this.selectExcelReaderSheet(reader);
 
-      let rowIndex = 0;
       let rowsCount = 0;
       let dataTypes: ColumnTypeChooser[] = [];
       let decimalFinalized = false;
+      let firstRawRow: unknown[] | undefined;
+      let firstRow: string[] | undefined;
+      let firstRowHandled = false;
       const decimalSamples: { dot: number; comma: number } = {
         dot: 0,
         comma: 0,
       };
       const maxDecimalSamples = 100;
+
+      const initializeDataTypes = () => {
+        if (decimalFinalized || this.sqlHeaders.length === 0) {
+          return;
+        }
+
+        this.decimalDelimiter =
+          decimalSamples.comma > decimalSamples.dot && decimalSamples.comma > 0
+            ? ","
+            : ".";
+        progressCallback?.(
+          `Detected decimal separator: '${this.decimalDelimiter}'`,
+        );
+
+        dataTypes = this.createColumnTypeChoosers(
+          this.sourceHeaders,
+          this.decimalDelimiter,
+        );
+        decimalFinalized = true;
+      };
+
+      const processDataRow = (row: string[]) => {
+        rowsCount++;
+
+        if (rowsCount <= maxDecimalSamples) {
+          for (const cell of row) {
+            const val = cell?.trim() || "";
+            if (/^\d+\.\d+$/.test(val)) decimalSamples.dot++;
+            if (/^\d+,\d+$/.test(val)) decimalSamples.comma++;
+          }
+        }
+
+        initializeDataTypes();
+
+        for (let j = 0; j < Math.min(row.length, dataTypes.length); j++) {
+          if (row[j] && row[j].trim()) {
+            dataTypes[j].refreshCurrentType(row[j].trim());
+          }
+        }
+      };
 
       while (await reader.read()) {
         const currentRow = reader._currentRow;
@@ -981,69 +1090,43 @@ export class NetezzaImporter {
           }
         }
 
-        if (rowIndex === 0) {
-          // First row is header
-          this.sourceHeaders = row.map((col) => col || "COLUMN");
-          this.sqlHeaders = this.sourceHeaders.map((col) =>
-            this.cleanColumnName(col),
-          );
-          rowIndex++;
+        if (!firstRawRow) {
+          firstRawRow = Array.isArray(currentRow) ? [...currentRow] : [];
+          firstRow = row;
           continue;
         }
 
-        // Data row processing
-        rowsCount++;
-
-        // Collect decimal delimiter samples from first N data rows
-        if (!decimalFinalized && rowsCount <= maxDecimalSamples) {
-          for (const cell of row) {
-            const val = cell?.trim() || "";
-            if (/^\d+\.\d+$/.test(val)) decimalSamples.dot++;
-            if (/^\d+,\d+$/.test(val)) decimalSamples.comma++;
+        if (!firstRowHandled) {
+          this.excelHasHeaderRow = this.detectExcelHeaderRow(firstRawRow);
+          if (this.excelHasHeaderRow) {
+            this.setHeaders(firstRow ?? []);
+          } else {
+            this.setGeneratedHeaders(Math.max(firstRow?.length ?? 0, row.length));
+            processDataRow(firstRow ?? []);
           }
+          firstRowHandled = true;
         }
 
-        // Initialize type choosers once decimal delimiter is determined
-        if (!decimalFinalized && this.sqlHeaders.length > 0) {
-          this.decimalDelimiter =
-            decimalSamples.comma > decimalSamples.dot &&
-            decimalSamples.comma > 0
-              ? ","
-              : ".";
-          progressCallback?.(
-            `Detected decimal separator: '${this.decimalDelimiter}'`,
-          );
+        processDataRow(row);
+      }
 
-          dataTypes = this.createColumnTypeChoosers(
-            this.sourceHeaders,
-            this.decimalDelimiter,
-          );
-          decimalFinalized = true;
+      if (firstRow && !firstRowHandled) {
+        this.excelHasHeaderRow = this.detectExcelHeaderRow(firstRawRow ?? []);
+        if (this.excelHasHeaderRow) {
+          this.setHeaders(firstRow);
+        } else {
+          this.setGeneratedHeaders(firstRow.length);
+          processDataRow(firstRow);
         }
+      }
 
-        // Type inference on all data rows
-        if (dataTypes.length > 0) {
-          for (
-            let j = 0;
-            j < Math.min(row.length, dataTypes.length);
-            j++
-          ) {
-            if (row[j] && row[j].trim()) {
-              dataTypes[j].refreshCurrentType(row[j].trim());
-            }
-          }
-        }
-
-        if (rowsCount % 10000 === 0) {
-          progressCallback?.(
-            `Analyzed ${rowsCount.toLocaleString()} rows...`,
-            undefined,
-            false,
-          );
-          await delay();
-        }
-
-        rowIndex++;
+      if (rowsCount > 0 && rowsCount % 10000 === 0) {
+        progressCallback?.(
+          `Analyzed ${rowsCount.toLocaleString()} rows...`,
+          undefined,
+          false,
+        );
+        await delay();
       }
 
       this.rowsCount = rowsCount;
@@ -1424,7 +1507,7 @@ ${this.getExternalUsingClause()}
           }
         }
 
-        let headerSkipped = false;
+        let headerSkipped = !self.excelHasHeaderRow;
         let lastReportTime = 0;
 
         while (readerOpened && (await reader.read())) {
@@ -1621,7 +1704,7 @@ ${this.getExternalUsingClause()}
   async getAllRows(): Promise<string[][]> {
     if (this.isExcelFile) {
       const allRows = await this.readExcelFile();
-      const rows = allRows.slice(1);
+      const rows = allRows.slice(this.excelHasHeaderRow ? 1 : 0);
       this.rowsCount = rows.length;
       return rows;
     }
@@ -1671,6 +1754,7 @@ export async function importDataToNetezza(
 ): Promise<ImportResult> {
   const startTime = Date.now();
   let connection: NzConnection | null = null;
+  let temporaryImportDirectory: string | null = null;
 
   try {
     // Validate parameters
@@ -1722,24 +1806,16 @@ export async function importDataToNetezza(
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
 
-    // Create data stream (in-memory)
+    // Materialize the transformed stream so the driver consumes a normal file
+    // stream. This keeps DATA and EOF ordering intact for Netezza's external
+    // table protocol.
     progressCallback?.("Preparing data stream...");
     const dataStream = await importer.createDataStream(progressCallback);
-    const virtualFileName = importer.getVirtualFileName();
-    progressCallback?.(`Registered virtual stream: ${virtualFileName}`);
-
-    // Register stream with driver static registry
-    // We need to access the class statically, so we require it
-    const connectionConstructor = getDatabaseConnectionConstructor(
-      connectionDetails.dbType,
-    );
-    if (connectionConstructor.registerImportStream) {
-      connectionConstructor.registerImportStream(virtualFileName, dataStream);
-    } else {
-      progressCallback?.(
-        "Warning: active database driver does not support stream registry. Import might fail.",
-      );
-    }
+    const materializedImport = await materializeImportStream(dataStream);
+    temporaryImportDirectory = materializedImport.directory;
+    const virtualFileName = materializedImport.filePath.replace(/\\/g, "/");
+    importer.setVirtualFileName(virtualFileName);
+    progressCallback?.(`Prepared temporary import file: ${virtualFileName}`);
 
     // Generate SQL
     const createSql = importer.generateCreateTableSql();
@@ -1783,11 +1859,6 @@ export async function importDataToNetezza(
       progressCallback?.("Import completed successfully");
     } finally {
       await connection.close();
-
-      // Clean up registry
-      if (connectionConstructor.unregisterImportStream) {
-        connectionConstructor.unregisterImportStream(virtualFileName);
-      }
     }
 
     const processingTime = (Date.now() - startTime) / 1000;
@@ -1819,6 +1890,9 @@ export async function importDataToNetezza(
       },
     };
   } finally {
+    if (temporaryImportDirectory) {
+      fs.rmSync(temporaryImportDirectory, { recursive: true, force: true });
+    }
     if (connection && connection._connected) {
       try {
         await connection.close();
@@ -1839,6 +1913,7 @@ export async function importDataToNetezzaAdvanced(
 ): Promise<ImportResult> {
   const startTime = Date.now();
   let connection: NzConnection | null = null;
+  let temporaryImportDirectory: string | null = null;
 
   try {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -1885,19 +1960,11 @@ export async function importDataToNetezzaAdvanced(
 
     progressCallback?.("Preparing data stream...");
     const dataStream = await importer.createDataStream(progressCallback);
-    const virtualFileName = importer.getVirtualFileName();
-    progressCallback?.(`Registered virtual stream: ${virtualFileName}`);
-
-    const connectionConstructor = getDatabaseConnectionConstructor(
-      connectionDetails.dbType,
-    );
-    if (connectionConstructor.registerImportStream) {
-      connectionConstructor.registerImportStream(virtualFileName, dataStream);
-    } else {
-      progressCallback?.(
-        "Warning: active database driver does not support stream registry. Import might fail.",
-      );
-    }
+    const materializedImport = await materializeImportStream(dataStream);
+    temporaryImportDirectory = materializedImport.directory;
+    const virtualFileName = materializedImport.filePath.replace(/\\/g, "/");
+    importer.setVirtualFileName(virtualFileName);
+    progressCallback?.(`Prepared temporary import file: ${virtualFileName}`);
 
     const createSql = importer.generateStandaloneCreateTableSql();
     const loadSql = importer.generateLoadIntoExistingTableSql();
@@ -1940,10 +2007,6 @@ export async function importDataToNetezzaAdvanced(
       progressCallback?.("Import completed successfully");
     } finally {
       await connection.close();
-
-      if (connectionConstructor.unregisterImportStream) {
-        connectionConstructor.unregisterImportStream(virtualFileName);
-      }
     }
 
     const processingTime = (Date.now() - startTime) / 1000;
@@ -1971,5 +2034,9 @@ export async function importDataToNetezzaAdvanced(
       success: false,
       message: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (temporaryImportDirectory) {
+      fs.rmSync(temporaryImportDirectory, { recursive: true, force: true });
+    }
   }
 }
