@@ -140,6 +140,64 @@ describe('CachePrefetcher', () => {
         }),
       ]));
     });
+
+    it('keeps the longest SQL duration and freezes refresh elapsed at finalization', () => {
+      const details: MetadataPrefetchRefreshDetails[] = [];
+      prefetcher = new CachePrefetcher(
+        mockCache,
+        undefined,
+        event => details.push(event),
+      );
+      prefetcher['beginRefreshDetails'](connName);
+      const lifecycle = prefetcher['getQueryLifecycleReporter'](connName)!;
+      const context = {
+        connectionName: connName,
+        source: 'connection-prefetch' as const,
+        kind: 'objects' as const,
+      };
+
+      const firstQueryId = lifecycle.queued('SELECT first', context)!;
+      lifecycle.started(firstQueryId, 0);
+      lifecycle.completed(firstQueryId, { columns: [], data: [] });
+      const active = prefetcher['refreshDetailsByConnection'].get(connName)!;
+      const firstActivity = active.queries.get(firstQueryId)!;
+      firstActivity.startedAt = 1_000;
+      firstActivity.completedAt = 3_200;
+      prefetcher['publishRefreshDetails'](active);
+      expect(firstActivity.maxDurationMs).toBe(2_200);
+
+      const secondQueryId = lifecycle.queued('SELECT second', context)!;
+      lifecycle.started(secondQueryId, 0);
+      lifecycle.completed(secondQueryId, { columns: [], data: [] });
+      const secondActivity = active.queries.get(secondQueryId)!;
+      secondActivity.startedAt = 3_200;
+      secondActivity.completedAt = 4_000;
+      prefetcher['publishRefreshDetails'](active);
+
+      prefetcher['finalizeRefreshDetails'](connName);
+      const finalized = details[details.length - 1]!;
+      expect(finalized.longestSqlDurationMs).toBe(2_200);
+      expect(finalized.longestSqlQueryId).toBe(firstQueryId);
+      expect(finalized.completedAt).toBeDefined();
+
+      const completedAt = finalized.completedAt;
+      expect(details[details.length - 1]!.completedAt).toBe(completedAt);
+      expect(details[details.length - 1]!.longestSqlDurationMs).toBe(2_200);
+    });
+
+    it('clears per-connection object completion markers with the metadata cache', () => {
+      prefetcher['allObjectsPrefetchTriggeredSet'].add(`ALL_OBJECTS|${connName}`);
+      prefetcher['primaryObjectsPrefetchCompletedSet'].add(`ALL_OBJECTS|${connName}`);
+      prefetcher['externalObjectsPrefetchTriggeredSet'].add(`ALL_OBJECTS|${connName}`);
+      prefetcher['connectionPrefetchTriggered'].set(connName, Date.now());
+
+      prefetcher.clearConnectionPrefetchState(connName);
+
+      expect(prefetcher.hasAllObjectsPrefetchTriggered(connName)).toBe(false);
+      expect(prefetcher['primaryObjectsPrefetchCompletedSet'].has(`ALL_OBJECTS|${connName}`)).toBe(false);
+      expect(prefetcher['externalObjectsPrefetchTriggeredSet'].has(`ALL_OBJECTS|${connName}`)).toBe(false);
+      expect(prefetcher.getConnectionPrefetchTimestamp(connName)).toBeUndefined();
+    });
   });
 
   describe('prefetchColumnsForSchema', () => {

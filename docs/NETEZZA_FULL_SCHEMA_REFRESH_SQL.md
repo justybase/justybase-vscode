@@ -287,9 +287,17 @@ extension. For each refresh it provides:
 - result-row counts for catalog objects (tables/views/external tables) and
   columns, plus the accumulated execution time for both groups;
 - elapsed refresh time and the longest individual metadata SQL;
+- `Refresh elapsed` stops at the terminal refresh event, and `Longest single
+  SQL` is a monotonic maximum for that refresh (it never falls when a shorter
+  statement finishes later);
+- the `Repeat full metadata refresh` button on each connection card invokes
+  the existing connection-scoped full-refresh command, clears that
+  connection's in-memory metadata, and starts the complete Netezza prefetch;
 - a status filter (`failed`, `timeout`, `running`, `slow` over five seconds,
   and the remaining states) and sorting by execution duration, queue wait, or
   start time;
+- a `Copy SQL` button on every query entry for quick investigation or replay
+  in a controlled SQL editor session;
 - the final snapshot state. An incomplete snapshot lists missing refresh stages
   and up to 100 exact missing column-layer keys, together with their total
   count.
@@ -306,6 +314,13 @@ found in memory or in the persisted cache at verification time. The refresh is
 not marked fresh in that state, so autocomplete cannot silently use a partial
 snapshot. Use the details panel to identify the missing key and its relevant
 column SQL; the next prefetch retries it.
+
+When the panel reports `missing stages: objects`, the connection has no
+non-empty table/view catalog layer at the final snapshot check. A `Tables /
+views` value of `0 rows` means the object catalog SQL returned no rows (or was
+skipped/failed); after manually clearing one connection, the refresh also
+resets the old object-catalog completion markers so the object SQL is executed
+again.
 
 ## SQL Queries That Are Not Part of the Full Connection Refresh
 
