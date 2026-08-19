@@ -34,6 +34,17 @@ jest.mock('../providers/tableMetadataProvider', () => ({
             description: '',
         },
     ]),
+    fetchExternalTableColumnsIfAvailable: jest.fn(async () => []),
+    fetchTableColumnsWithFallback: jest.fn(async () => [
+        {
+            attname: 'ID',
+            formatType: 'INT4',
+            isPk: false,
+            isFk: false,
+            isDistributionKey: false,
+            description: '',
+        },
+    ]),
 }));
 
 describe('MetadataProvider column fetch deduplication', () => {
@@ -94,7 +105,10 @@ describe('MetadataProvider column fetch deduplication', () => {
             provider.getTableColumnsMetadata('CONN', 'DB1', 'PUBLIC', 'ORDERS'),
         ]);
 
-        expect(runQueryRawMock).toHaveBeenCalledTimes(1);
+        const { fetchTableColumnsWithFallback } = jest.requireMock('../providers/tableMetadataProvider') as {
+            fetchTableColumnsWithFallback: jest.Mock;
+        };
+        expect(fetchTableColumnsWithFallback).toHaveBeenCalledTimes(1);
         expect(results[0]).toEqual(results[1]);
         expect(results[1]).toEqual(results[2]);
         expect(metadataCache.setColumns).toHaveBeenCalledTimes(1);
@@ -170,10 +184,10 @@ describe('MetadataProvider column fetch deduplication', () => {
     });
 
     it('resolves schema from cache and stores column descriptions', async () => {
-        const { parseColumnMetadata } = jest.requireMock('../providers/tableMetadataProvider') as {
-            parseColumnMetadata: jest.Mock;
+        const { fetchTableColumnsWithFallback } = jest.requireMock('../providers/tableMetadataProvider') as {
+            fetchTableColumnsWithFallback: jest.Mock;
         };
-        parseColumnMetadata.mockReturnValue([
+        fetchTableColumnsWithFallback.mockResolvedValue([
             {
                 attname: 'PRODUCT_ID',
                 formatType: 'INTEGER',

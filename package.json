@@ -3807,10 +3807,10 @@
         },
         "justybase.metadata.queryConcurrency": {
           "type": "integer",
-          "default": 5,
+          "default": 1,
           "minimum": 1,
           "maximum": 16,
-          "description": "Maximum number of concurrent metadata catalog queries. Applied to per-connection query limiting in the extension host and to metadata warm-up batching in the language server. Default: 5."
+          "description": "Maximum number of concurrent metadata catalog queries. The safe default is one query per connection; increase only when the Netezza workload allows it. Applied to per-connection query limiting in the extension host and metadata warm-up batching in the language server. Default: 1."
         },
         "justybase.sqlParser.fastPathThreshold": {
           "type": "integer",

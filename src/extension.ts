@@ -128,7 +128,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     const syncMetadataQueryConcurrency = (): void => {
         const limit = vscode.workspace
             .getConfiguration('justybase.metadata')
-            .get<number>('queryConcurrency', 5);
+            .get<number>('queryConcurrency', 1);
         setMetadataQueryConcurrencyLimit(limit);
     };
     syncMetadataQueryConcurrency();

@@ -687,6 +687,8 @@ export class CompletionMetadataResolver {
       if (!lookupTarget.database) {
         continue;
       }
+      const lookupDatabase = lookupTarget.database;
+      const lookupTable = lookupTarget.table;
 
       const omitSchemaArgument =
         isNetezzaDoubleDotSource(source, databaseKind) &&
@@ -697,30 +699,51 @@ export class CompletionMetadataResolver {
       const allowPublicSynonym =
         databaseKind === "oracle" && source.schema === undefined;
 
-      const columns =
+      const columnLookupOptions =
+        databaseKind === "netezza" || allowPublicSynonym
+          ? {
+              ...(allowPublicSynonym ? { allowPublicSynonym: true } : {}),
+              ...(databaseKind === "netezza"
+                ? {
+                    allowDatabaseFetch: false,
+                    requestSource: "completion" as const,
+                  }
+                : {}),
+            }
+          : undefined;
+
+      const omitSchema =
         omitSchemaArgument ||
         omitSchemaForFlatCatalog ||
-        (options?.omitSchemaArgumentWhenUndefined &&
-          lookupTarget.schema === undefined)
-          ? await this.metadataProvider.getColumns(
+        Boolean(
+          options?.omitSchemaArgumentWhenUndefined &&
+            lookupTarget.schema === undefined,
+        );
+
+      const getColumns = (lookupSchema: string | undefined, omitArgument: boolean) =>
+        columnLookupOptions
+          ? this.metadataProvider.getColumns(
               documentUri,
-              lookupTarget.database,
-              lookupTarget.table,
+              lookupDatabase,
+              lookupTable,
+              lookupSchema,
+              columnLookupOptions,
             )
-          : allowPublicSynonym
-            ? await this.metadataProvider.getColumns(
+          : omitArgument
+            ? this.metadataProvider.getColumns(
                 documentUri,
-                lookupTarget.database,
-                lookupTarget.table,
-                lookupTarget.schema,
-                { allowPublicSynonym: true },
+                lookupDatabase,
+                lookupTable,
               )
-          : await this.metadataProvider.getColumns(
-              documentUri,
-              lookupTarget.database,
-              lookupTarget.table,
-              lookupTarget.schema,
-            );
+            : this.metadataProvider.getColumns(
+                documentUri,
+                lookupDatabase,
+                lookupTable,
+                lookupSchema,
+              );
+
+      const columns =
+        await getColumns(lookupTarget.schema, omitSchema);
       if (columns.length > 0) {
         return columns;
       }

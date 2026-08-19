@@ -485,6 +485,29 @@ describe("StreamingManager", () => {
       expect(result.results).toBeDefined();
     });
 
+    it("reports client-observed reader timing and fetched row count", async () => {
+      const cmd = new MockNzCommand();
+      jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
+      const reader = new MockNzDataReader([[1]]);
+      jest.spyOn(cmd, "executeReader").mockResolvedValue(reader);
+
+      const result = await manager.executeAndFetch(
+        mockConnection,
+        "SELECT 1",
+        100,
+      );
+
+      expect(result.timing).toEqual(expect.objectContaining({
+        status: "success",
+        rowsRead: 1,
+      }));
+      expect(result.timing?.executeReaderMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.serverWaitToFirstRowMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.rowFetchMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.readerCloseMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.totalMs).toBeGreaterThanOrEqual(0);
+    });
+
     it("should close reader when executeAndFetch exits after a read error", async () => {
       const cmd = new MockNzCommand();
       jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);

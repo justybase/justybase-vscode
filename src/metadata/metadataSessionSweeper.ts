@@ -58,6 +58,18 @@ class MetadataSessionSweeper {
         }
     }
 
+    /** Remove a catalog session from the stale-session registry after normal completion. */
+    complete(connectionName: string, sessionId: string): void {
+        const perConnection = this.registry.get(connectionName);
+        if (!perConnection) {
+            return;
+        }
+        perConnection.delete(sessionId);
+        if (perConnection.size === 0) {
+            this.registry.delete(connectionName);
+        }
+    }
+
     start(connectionManager: ConnectionManager): void {
         if (this.timer || this.connectionManager) {
             return;

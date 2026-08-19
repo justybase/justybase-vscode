@@ -1278,6 +1278,8 @@ SELECT * FROM CTE1`);
         expect.any(String),
         "BAZA",
         "USERS",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -1289,6 +1291,8 @@ FROM (SELECT * FROM JUST_DATA..FACTPRODUCTINVENTORY LIMIT 5000) F1`);
         expect.any(String),
         "JUST_DATA",
         "FACTPRODUCTINVENTORY",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -1328,6 +1332,8 @@ SELECT * FROM CTE1 C1`);
         expect.any(String),
         "JUST_DATA",
         "DIMACCOUNT",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -1344,6 +1350,7 @@ SELECT * FROM CTE1 A`);
         "JUST_DATA",
         "DEPARTMENT",
         "ADMIN",
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -1393,6 +1400,8 @@ END_PROC;`);
         expect.any(String),
         "JUST_DATA",
         "DIMACCOUNT",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -1423,6 +1432,7 @@ END_PROC;`);
         "JUST_DATA",
         "DEPARTMENT",
         "ADMIN",
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -1514,6 +1524,7 @@ FROM (
         "JUST_DATA",
         "DEPARTMENT",
         "ADMIN",
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -1527,6 +1538,7 @@ FROM (
         "JUST_DATA",
         "DEPARTMENT",
         "ADMIN",
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -2305,6 +2317,8 @@ SELECT SQ.|`);
         expect.any(String),
         "BAZA",
         "SQ",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
   });
@@ -2347,6 +2361,8 @@ SELECT SQ.|`);
         expect.any(String),
         "JUST_DATA",
         "DIMACCOUNT",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
   });
@@ -2364,6 +2380,8 @@ WHEN MATCHED THEN UPDATE SET S.|`);
         expect.any(String),
         "JUST_DATA",
         "DIMEMPLOYEE",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -2378,6 +2396,8 @@ WHEN MATCHED THEN UPDATE SET T.|`);
         expect.any(String),
         "JUST_DATA",
         "DIMACCOUNT",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -2469,6 +2489,8 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
         expect.any(String),
         "JUST_DATA",
         "DIMACCOUNT",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
   });
@@ -2485,6 +2507,8 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
         expect.any(String),
         "JUST_DATA",
         "DIMACCOUNT",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
   });
@@ -3273,6 +3297,8 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
         expect.any(String),
         "JUST_DATA",
         "DIMACCOUNT",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -3288,6 +3314,7 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
         "JUST_DATA",
         "DEPARTMENT",
         "ADMIN",
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -3604,6 +3631,8 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
             expect.any(String),
             scenario.database,
             scenario.table,
+            undefined,
+            { allowDatabaseFetch: false, requestSource: "completion" },
           );
         } else {
           expect(metadataProvider.getColumns).toHaveBeenCalledWith(
@@ -4013,6 +4042,8 @@ SELECT M.| FROM MIXED M`);
         expect.any(String),
         "JUST_DATA_5",
         "DIMACCOUNT_NS",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
 
@@ -4043,6 +4074,7 @@ SELECT M.| FROM MIXED M`);
         "JUST_DATA_5",
         "DIMACCOUNT_NS",
         "PUBLIC",
+        { allowDatabaseFetch: false, requestSource: "completion" },
       );
     });
   });

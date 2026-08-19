@@ -218,6 +218,9 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
     buildTableColumnsQuery(database: string, schema: string, tableName: string): string {
         return NZ_QUERIES.getTableColumns(database, schema, tableName);
     },
+    buildExternalTableColumnsQuery(database: string, schema: string, tableName: string): string {
+        return NZ_QUERIES.getExternalTableColumns(database, schema, tableName);
+    },
     buildColumnMetadataQuery(database: string, schema: string, tableName: string): string {
         const escapedTableName = escapeSqlLiteral(tableName);
         const escapedSchema = escapeSqlLiteral(schema);

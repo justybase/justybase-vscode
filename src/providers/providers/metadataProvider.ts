@@ -12,6 +12,7 @@ import { mergeAndSetTables } from '../../metadata/cache/tableLikeMerge';
 import { getTablesForScope, buildSchemaCacheKey } from '../../metadata/cache/schemaTreeDataSource';
 import { DatabaseMetadata, SchemaMetadata, TableMetadata, ProcedureMetadata, ColumnMetadata } from '../../metadata/types';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
+import { PREFETCH_RETRY_BACKOFF_MS } from '../../metadata/prefetch';
 import { formatIdentifierForSql } from '../../utils/identifierUtils';
 import {
     METADATA_QUERY_TIMEOUT_SECONDS,
@@ -26,10 +27,18 @@ import {
     buildSynonymTargetQuery,
     parseSynonymTargetReference,
 } from '../../metadata/synonymColumns';
-import { buildColumnMetadataQuery, parseColumnMetadata } from '../tableMetadataProvider';
+import {
+    fetchTableColumnsWithFallback,
+} from '../tableMetadataProvider';
 import type { DatabaseKind } from '../../contracts/database';
 import { stripIdentifierQuoting } from '../../utils/identifierUtils';
 import { logWithFallback } from '../../utils/logger';
+import type {
+    MetadataColumnLookupOptions,
+    MetadataQueryContext,
+    MetadataQueryKind,
+    MetadataRequestSource,
+} from '../../metadata/metadataQueryDiagnostics';
 
 export class MetadataProvider {
     private readonly columnFetchInFlight = new Map<string, Promise<ColumnMetadata[]>>();
@@ -680,7 +689,7 @@ export class MetadataProvider {
         dbName: string | undefined,
         schemaName: string | undefined,
         tableName: string,
-        options?: { allowPublicSynonym?: boolean },
+        options?: MetadataColumnLookupOptions,
     ): Promise<vscode.CompletionItem[]> {
         const items = await this.getTableColumnsMetadata(
             connectionName,
@@ -700,7 +709,7 @@ export class MetadataProvider {
         dbName: string | undefined,
         schemaName: string | undefined,
         tableName: string,
-        options?: { allowPublicSynonym?: boolean },
+        options?: MetadataColumnLookupOptions,
         visited = new Set<string>(),
     ): Promise<ColumnMetadata[]> {
         if (!connectionName) return [];
@@ -810,6 +819,14 @@ export class MetadataProvider {
                 }
             }
 
+            if (options?.allowDatabaseFetch === false) {
+                logWithFallback(
+                    'debug',
+                    `[MetadataProvider] Cache-only column lookup miss for ${connectionName}/${normalizedDbName ?? 'CURRENT'}.${normalizedSchemaName ?? ''}.${normalizedTableName}; source=${options.requestSource ?? 'unknown'}`,
+                );
+                return [];
+            }
+
             if (connectionKind === 'netezza' && normalizedDbName) {
                 const synonymTarget = await this.resolveNetezzaSynonymReference(
                     connectionName,
@@ -883,6 +900,7 @@ export class MetadataProvider {
                 connectionKind,
                 objId,
                 tableName,
+                options?.requestSource ?? 'schema-tree',
             );
             this.columnFetchInFlight.set(inflightKey, fetchPromise);
 
@@ -910,6 +928,7 @@ export class MetadataProvider {
         connectionKind: DatabaseKind,
         objId: number | undefined,
         tableName: string,
+        requestSource: MetadataRequestSource,
     ): Promise<ColumnMetadata[]> {
         if (this.metadataCache.isDatabaseDead(connectionName, normalizedDbName)) {
             return [];
@@ -931,37 +950,48 @@ export class MetadataProvider {
 
             const effectiveSchema = resolvedSchemaName || '';
             const effectiveDb = metadataDbName || '';
-
-            const query = effectiveDb && effectiveSchema
-                ? buildColumnMetadataQuery(
+            const cachedObject = effectiveDb && effectiveSchema
+                ? this.metadataCache.findObjectWithType(
+                    connectionName,
                     effectiveDb,
                     effectiveSchema,
                     normalizedTableName,
-                    connectionKind
                 )
-                : this.buildSimpleColumnQuery(connectionName, {
-                    database: metadataDbName,
-                    schema: resolvedSchemaName,
-                    tableName: normalizedTableName,
-                    objectId: objId
-                });
-
-            const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () =>
-                runQueryRaw({
-                    context: this.context,
-                    query,
-                    silent: true,
-                    connectionManager: this.connectionManager,
-                    connectionName,
-                    isUserQuery: false,
-                    timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
-                }),
-            );
-            if (!result) return [];
+                : undefined;
+            const queryReason = cachedObject
+                ? 'explicit-column-fetch'
+                : 'column-cache-miss';
 
             let items: ColumnMetadata[];
             if (effectiveDb && effectiveSchema) {
-                const parsed = parseColumnMetadata(result);
+                const parsed = await fetchTableColumnsWithFallback(
+                    (columnQuery, queryKind: MetadataQueryKind = 'table-columns') => runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
+                        runQueryRaw({
+                            context: this.context,
+                            query: columnQuery,
+                            silent: true,
+                            connectionManager: this.connectionManager,
+                            connectionName,
+                            isUserQuery: false,
+                            timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                            metadataContext: {
+                                source: requestSource,
+                                kind: queryKind,
+                                connectionName,
+                                database: effectiveDb,
+                                schema: effectiveSchema,
+                                table: normalizedTableName,
+                                reason: queryReason,
+                            },
+                            metadataQueueWaitMs: queueWaitMs,
+                        }),
+                    ),
+                    effectiveDb,
+                    effectiveSchema,
+                    normalizedTableName,
+                    connectionKind,
+                    { objectType: cachedObject?.objType },
+                );
                 items = parsed.map(col => ({
                     ATTNAME: col.attname,
                     FORMAT_TYPE: col.formatType,
@@ -974,6 +1004,34 @@ export class MetadataProvider {
                     documentation: col.description
                 }));
             } else {
+                const query = this.buildSimpleColumnQuery(connectionName, {
+                    database: metadataDbName,
+                    schema: resolvedSchemaName,
+                    tableName: normalizedTableName,
+                    objectId: objId
+                });
+                const result = await runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
+                    runQueryRaw({
+                        context: this.context,
+                        query,
+                        silent: true,
+                        connectionManager: this.connectionManager,
+                        connectionName,
+                        isUserQuery: false,
+                        timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                        metadataContext: {
+                            source: requestSource,
+                            kind: 'table-columns',
+                            connectionName,
+                            database: effectiveDb,
+                            schema: effectiveSchema,
+                            table: normalizedTableName,
+                            reason: queryReason,
+                        },
+                        metadataQueueWaitMs: queueWaitMs,
+                    }),
+                );
+                if (!result) return [];
                 const results = queryResultToRows<{
                     ATTNAME: string;
                     FORMAT_TYPE: string;
@@ -1027,7 +1085,7 @@ export class MetadataProvider {
         const context = this.context;
         const cache = this.metadataCache;
         const connectionManager = this.connectionManager;
-        const runMetadataQuery = (q: string) =>
+        const runMetadataQuery = (q: string, metadataContext?: MetadataQueryContext) =>
             runQueryRaw({
                 context,
                 query: q,
@@ -1037,11 +1095,21 @@ export class MetadataProvider {
                 maxRows: 1000000,
                 isUserQuery: false,
                 timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                metadataContext,
             });
 
         setImmediate(() => {
             try {
                 if (!cache.isConnectionPrefetchFresh(connectionName)) {
+                    // Backoff: after a failed/slow prefetch, do not immediately
+                    // retrigger the full prefetch on every cache miss — that
+                    // floods the database with heavy catalog queries. Warm only
+                    // the requested database columns until the backoff elapses.
+                    const lastAttempt = cache.getLastPrefetchAttemptTime?.(connectionName);
+                    if (lastAttempt !== undefined && Date.now() - lastAttempt < PREFETCH_RETRY_BACKOFF_MS) {
+                        void cache.prefetchColumnsForDatabase(connectionName, normalizedDbName, runMetadataQuery);
+                        return;
+                    }
                     cache.triggerConnectionPrefetch(connectionName, runMetadataQuery);
                     return;
                 }
@@ -1068,7 +1136,7 @@ export class MetadataProvider {
         }
 
         const uniqueDatabases = Array.from(new Set(databases.map(db => db.trim()).filter(Boolean)));
-        const runMetadataQuery = (q: string) =>
+        const runMetadataQuery = (q: string, metadataContext?: MetadataQueryContext) =>
             runQueryRaw({
                 context: this.context,
                 query: q,
@@ -1078,6 +1146,7 @@ export class MetadataProvider {
                 maxRows: 1000000,
                 isUserQuery: false,
                 timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                metadataContext,
             });
 
         const prefetchFresh =

@@ -231,11 +231,23 @@ describe('CachePrefetcher', () => {
       expect(mockCache.setTables).toHaveBeenCalledTimes(1);
     });
 
-    it('should skip if skipIfCached is true and tables exist', async () => {
+    it('should discover external objects once when regular tables are already cached', async () => {
       (mockCache.hasTableCacheForConnection as jest.Mock).mockReturnValue(true);
+      mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
+      mockRunQuery.mockResolvedValue({
+        columns: [
+          { name: 'OBJNAME' },
+          { name: 'OBJID' },
+          { name: 'SCHEMA' },
+          { name: 'DBNAME' },
+          { name: 'OBJTYPE' },
+        ],
+        data: [['external_t', 201, 's1', 'db1', 'EXTERNAL TABLE']],
+      });
       await prefetcher.prefetchAllObjects(connName, mockRunQuery, true);
-      expect(mockRunQuery).not.toHaveBeenCalled();
-      expect(mockCache.setTables).not.toHaveBeenCalled();
+      expect(mockRunQuery).toHaveBeenCalledTimes(1);
+      expect(mockRunQuery.mock.calls[0][0]).not.toContain('_V_OBJECT_DATA');
+      expect(mockCache.setTables).toHaveBeenCalled();
     });
 
     it('should skip per-schema setTables when skipIfCached and schema cached', async () => {
@@ -256,7 +268,7 @@ describe('CachePrefetcher', () => {
       expect(Logger.getInstance().error).toHaveBeenCalled();
     });
 
-    it('skips dead databases in UNION query', async () => {
+    it('runs table queries per database serially, skipping dead databases', async () => {
       mockCache.isDatabaseDead.mockImplementation(
         (_connection: string, db: string | undefined) => (db ?? '').toUpperCase() === 'GHOST',
       );
@@ -267,10 +279,13 @@ describe('CachePrefetcher', () => {
 
       await prefetcher.prefetchAllObjects(connName, mockRunQuery, false, ['db1', 'GHOST'], true);
 
-      expect(mockRunQuery).toHaveBeenCalledTimes(1);
-      const query = mockRunQuery.mock.calls[0][0] as string;
-      expect(query).toMatch(/DB1/i);
-      expect(query).not.toMatch(/GHOST/i);
+      // main + external queries for the live database, none for the dead one
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+      for (const call of mockRunQuery.mock.calls) {
+        const query = call[0] as string;
+        expect(query).toMatch(/DB1/i);
+        expect(query).not.toMatch(/GHOST/i);
+      }
       expect(mockCache.setTables).toHaveBeenCalled();
     });
 
@@ -356,7 +371,7 @@ describe('CachePrefetcher', () => {
     });
   });
 
-  describe('prefetchAllColumnsForConnection parallelism', () => {
+describe('prefetchAllColumnsForConnection serial execution', () => {
     const emptyColumnResult = {
       columns: [
         { name: 'TABLENAME' },
@@ -375,7 +390,7 @@ describe('CachePrefetcher', () => {
       resetMetadataQueryLimiterForTests();
     });
 
-    it('runs up to 5 column queries per database in parallel', async () => {
+    it('runs one column query serially across databases when no external table is cached', async () => {
       const dbCount = 12;
       for (let i = 1; i <= dbCount; i++) {
         mockCache.tableCache.set(`${connName}|DB${String(i).padStart(2, '0')}.PUBLIC`, {
@@ -403,8 +418,7 @@ describe('CachePrefetcher', () => {
       const prefetchPromise = prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
 
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(maxInFlight).toBe(getMetadataQueryConcurrencyLimit());
-      expect(mockRunQuery).toHaveBeenCalledTimes(getMetadataQueryConcurrencyLimit());
+      expect(maxInFlight).toBe(1);
 
       while (release.length > 0) {
         release.shift()?.();
@@ -412,8 +426,9 @@ describe('CachePrefetcher', () => {
       }
 
       await prefetchPromise;
+      // The external companion query is conditional on a cached EXTERNAL TABLE.
       expect(mockRunQuery).toHaveBeenCalledTimes(dbCount);
-      expect(maxInFlight).toBe(getMetadataQueryConcurrencyLimit());
+      expect(maxInFlight).toBe(1);
       expect(inFlight).toBe(0);
     });
   });
@@ -443,6 +458,8 @@ describe('CachePrefetcher', () => {
         prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery),
       ]);
 
+      // Concurrent calls are deduplicated: only the regular catalog query runs
+      // when the database has no cached external table.
       expect(mockRunQuery).toHaveBeenCalledTimes(1);
       expect(mockCache.setColumns).toHaveBeenCalledWith(
         connName,
@@ -502,7 +519,7 @@ describe('CachePrefetcher', () => {
         ]),
       );
       expect(synonymColumns).toEqual(targetColumns);
-      expect(mockRunQuery).toHaveBeenCalledTimes(1);
+      expect(mockRunQuery).toHaveBeenCalledTimes(1); // regular catalog query only
     });
 
     it('skips when database is dead', async () => {
@@ -788,6 +805,206 @@ describe('CachePrefetcher', () => {
       expect(mockCache.setSchemas).toHaveBeenCalledWith(connName, 'db1', expect.arrayContaining([
         expect.objectContaining({ SCHEMA: 's1' })
       ]));
+    });
+  });
+
+  describe('external-table split regressions', () => {
+    const objectColumns = [
+      { name: 'OBJNAME' }, { name: 'OBJID' }, { name: 'SCHEMA' }, { name: 'DBNAME' }, { name: 'OBJTYPE' },
+    ];
+    const columnResult = (rows: unknown[][]) => ({
+      columns: [
+        { name: 'TABLENAME' }, { name: 'DBNAME' }, { name: 'SCHEMA' }, { name: 'ATTNAME' },
+        { name: 'FORMAT_TYPE' }, { name: 'IS_PK' }, { name: 'IS_FK' }, { name: 'IS_DISTRIBUTION_KEY' },
+      ],
+      data: rows,
+    });
+
+    it('T2: main query failure does not discard external-table rows (prefetchAllObjects)', async () => {
+      mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
+      mockRunQuery
+        .mockRejectedValueOnce(new Error('main failed'))
+        .mockResolvedValueOnce({
+          columns: objectColumns,
+          data: [['ET1', 55, 'S1', 'db1', 'EXTERNAL TABLE']],
+        });
+
+      await prefetcher.prefetchAllObjects(connName, mockRunQuery, false, ['db1'], true);
+
+      expect(mockCache.setTables).toHaveBeenCalledWith(
+        connName,
+        'DB1.S1',
+        expect.arrayContaining([expect.objectContaining({ OBJNAME: 'ET1', objType: 'EXTERNAL TABLE' })]),
+        expect.any(Map),
+      );
+    });
+
+    it('T3: F2 — prefetch trigger is cleared after a query failure so a retry re-runs stage 3', async () => {
+      mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
+      mockRunQuery.mockRejectedValue(new Error('fail'));
+
+      await prefetcher.prefetchAllObjects(connName, mockRunQuery);
+
+      expect(prefetcher.hasAllObjectsPrefetchTriggered(connName)).toBe(false);
+
+      mockRunQuery.mockResolvedValue({
+        columns: objectColumns,
+        data: [['t1', 1, 's1', 'db1', 'TABLE']],
+      });
+      await prefetcher.prefetchAllObjects(connName, mockRunQuery);
+      expect(mockCache.setTables).toHaveBeenCalled();
+    });
+
+    it('T4: F0 — columns prefetch runs from the cached database list even when the table cache is empty', async () => {
+      mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
+      mockRunQuery.mockResolvedValue(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]));
+
+      await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
+
+      expect(mockCache.setColumns).toHaveBeenCalledWith(
+        connName,
+        'DB1.PUBLIC.ORDERS',
+        expect.arrayContaining([expect.objectContaining({ ATTNAME: 'ID' })]),
+      );
+    });
+
+    it('T5: F0 — falls back to the table cache database list when no databases are cached', async () => {
+      mockCache.tableCache.set(`${connName}|DB1.PUBLIC`, {
+        data: [{ label: 'ORDERS' }],
+        timestamp: Date.now(),
+      });
+      mockRunQuery.mockResolvedValue(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]));
+
+      await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
+
+      expect(mockCache.setColumns).toHaveBeenCalledWith(
+        connName,
+        'DB1.PUBLIC.ORDERS',
+        expect.arrayContaining([expect.objectContaining({ ATTNAME: 'ID' })]),
+      );
+    });
+
+    it('T6: columns prefetch merges main and external rows in code', async () => {
+      mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
+      mockCache.tableCache.set(`${connName}|DB1.PUBLIC`, {
+        data: [{ OBJNAME: 'ET1', label: 'ET1', objType: 'EXTERNAL TABLE', SCHEMA: 'PUBLIC' }],
+        timestamp: Date.now(),
+      });
+      mockRunQuery
+        .mockResolvedValueOnce(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]))
+        .mockResolvedValueOnce(columnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
+
+      await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
+
+      expect(mockCache.setColumns).toHaveBeenCalledWith(
+        connName,
+        'DB1.PUBLIC.ORDERS',
+        expect.arrayContaining([expect.objectContaining({ ATTNAME: 'ID' })]),
+      );
+      expect(mockCache.setColumns).toHaveBeenCalledWith(
+        connName,
+        'DB1.PUBLIC.ET1',
+        expect.arrayContaining([expect.objectContaining({ ATTNAME: 'COL1' })]),
+      );
+    });
+
+    it('T8: database columns prefetch keeps main rows when the external query fails', async () => {
+      mockCache.tableCache.set(`${connName}|DB1.PUBLIC`, {
+        data: [{ OBJNAME: 'ET1', label: 'ET1', objType: 'EXTERNAL TABLE', SCHEMA: 'PUBLIC' }],
+        timestamp: Date.now(),
+      });
+      mockRunQuery
+        .mockResolvedValueOnce(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]))
+        .mockRejectedValueOnce(new Error('external failed'));
+
+      await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
+
+      expect(mockCache.setColumns).toHaveBeenCalledWith(
+        connName,
+        'DB1.PUBLIC.ORDERS',
+        expect.arrayContaining([expect.objectContaining({ ATTNAME: 'ID' })]),
+      );
+    });
+
+    it('T10: database columns prefetch still fetches external rows when the main query fails', async () => {
+      mockCache.tableCache.set(`${connName}|DB1.PUBLIC`, {
+        data: [{ OBJNAME: 'ET1', label: 'ET1', objType: 'EXTERNAL TABLE', SCHEMA: 'PUBLIC' }],
+        timestamp: Date.now(),
+      });
+      mockRunQuery
+        .mockRejectedValueOnce(new Error('main transient failure'))
+        .mockResolvedValueOnce(columnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
+
+      await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
+
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+      expect(mockCache.setColumns).toHaveBeenCalledWith(
+        connName,
+        'DB1.PUBLIC.ET1',
+        expect.arrayContaining([expect.objectContaining({ ATTNAME: 'COL1' })]),
+      );
+    });
+
+    it('T11: full connection column prefetch isolates the main and external queries', async () => {
+      mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
+      mockCache.tableCache.set(`${connName}|DB1.PUBLIC`, {
+        data: [{ OBJNAME: 'ET1', label: 'ET1', objType: 'EXTERNAL TABLE', SCHEMA: 'PUBLIC' }],
+        timestamp: Date.now(),
+      });
+      mockRunQuery
+        .mockRejectedValueOnce(new Error('main transient failure'))
+        .mockResolvedValueOnce(columnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
+
+      await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
+
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+      expect(mockCache.setColumns).toHaveBeenCalledWith(
+        connName,
+        'DB1.PUBLIC.ET1',
+        expect.arrayContaining([expect.objectContaining({ ATTNAME: 'COL1' })]),
+      );
+    });
+  });
+
+  describe('prefetch backoff and concurrency regressions', () => {
+    it('T7: records last prefetch attempt time and clears it with the prefetch timestamp', async () => {
+      prefetcher['lastPrefetchAttemptTime'].set(connName, 12345);
+      expect(prefetcher.getLastPrefetchAttemptTime(connName)).toBe(12345);
+
+      prefetcher.clearConnectionPrefetchTimestamp(connName);
+      expect(prefetcher.getLastPrefetchAttemptTime(connName)).toBeUndefined();
+    });
+
+    it('T9: concurrent triggerConnectionPrefetch calls run only one prefetch', async () => {
+      let releaseLock: (() => void) | undefined;
+      (mockCache.tryAcquirePrefetchLock as jest.Mock).mockImplementation(
+        () => new Promise((resolve) => {
+          releaseLock = () => resolve({ connectionName: connName, generation: 0, fence: 0 } satisfies PrefetchLease);
+        }),
+      );
+      mockRunQuery.mockResolvedValue({
+        columns: [{ name: 'DATABASE' }],
+        data: [['db1']],
+      });
+
+      prefetcher.triggerConnectionPrefetch(connName, mockRunQuery);
+      prefetcher.triggerConnectionPrefetch(connName, mockRunQuery);
+
+      // Let the first call get past whenDiskReady and start waiting on the lock
+      await new Promise(process.nextTick);
+      await new Promise(process.nextTick);
+
+      // Second call must be rejected while the first waits on the lock
+      expect(prefetcher.hasConnectionPrefetchInProgress(connName)).toBe(true);
+
+      releaseLock?.();
+      await new Promise(process.nextTick);
+      await new Promise(process.nextTick);
+
+      const startLogs = (Logger.getInstance().info as jest.Mock).mock.calls.filter(
+        (call) => typeof call[0] === 'string' && (call[0] as string).includes('Starting eager prefetch'),
+      );
+      expect(startLogs).toHaveLength(1);
     });
   });
 });

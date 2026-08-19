@@ -105,7 +105,7 @@ export class MetadataPrefetchCoordinator {
                 return;
             }
 
-            this.services.metadataCache.triggerConnectionPrefetch(connectionName, q =>
+            this.services.metadataCache.triggerConnectionPrefetch(connectionName, (q, metadataContext) =>
                 this.services.queryExecutor({
                     context: this.context,
                     query: q,
@@ -115,6 +115,7 @@ export class MetadataPrefetchCoordinator {
                     maxRows: 1000000,
                     isUserQuery: false,
                     timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                    metadataContext,
                 }),
             );
         });

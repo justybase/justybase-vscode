@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner'
 import type { RunQueryRawOptions } from '../core/queryRunner'
 import { MetadataProvider } from '../providers/providers/metadataProvider'
-import { parseColumnMetadata } from '../providers/tableMetadataProvider'
+import { fetchTableColumnsWithFallback } from '../providers/tableMetadataProvider'
 import type { ConnectionManager } from '../core/connectionManager'
 import type { MetadataCache } from '../metadataCache'
 import type { TableMetadata } from '../metadata/types'
@@ -19,7 +19,7 @@ jest.mock('../providers/tableMetadataProvider', () => ({
     buildColumnMetadataQuery: jest.fn((database: string, schema: string, tableName: string) =>
         `SELECT ${database}.${schema}.${tableName} COLUMN METADATA`
     ),
-    parseColumnMetadata: jest.fn()
+    fetchTableColumnsWithFallback: jest.fn(),
 }))
 
 type RunQueryRawResult = Awaited<ReturnType<typeof runQueryRaw>>
@@ -29,7 +29,7 @@ describe('MetadataProvider system catalog mirroring', () => {
     let provider: MetadataProvider
     let runQueryRawMock: jest.MockedFunction<typeof runQueryRaw>
     let queryResultToRowsMock: jest.MockedFunction<typeof queryResultToRows>
-    let parseColumnMetadataMock: jest.MockedFunction<typeof parseColumnMetadata>
+    let fetchTableColumnsWithFallbackMock: jest.MockedFunction<typeof fetchTableColumnsWithFallback>
 
     beforeEach(() => {
         jest.clearAllMocks()
@@ -63,7 +63,7 @@ describe('MetadataProvider system catalog mirroring', () => {
 
         runQueryRawMock = runQueryRaw as jest.MockedFunction<typeof runQueryRaw>
         queryResultToRowsMock = queryResultToRows as jest.MockedFunction<typeof queryResultToRows>
-        parseColumnMetadataMock = parseColumnMetadata as jest.MockedFunction<typeof parseColumnMetadata>
+        fetchTableColumnsWithFallbackMock = fetchTableColumnsWithFallback as jest.MockedFunction<typeof fetchTableColumnsWithFallback>
 
         runQueryRawMock.mockImplementation(async (options: unknown) => {
             return { query: (options as RunQueryRawOptions).query } as unknown as RunQueryRawResult
@@ -106,7 +106,7 @@ describe('MetadataProvider system catalog mirroring', () => {
 
             return []
         })
-        parseColumnMetadataMock.mockReset()
+        fetchTableColumnsWithFallbackMock.mockReset()
     })
 
     it('adds mirrored system catalog objects to database-level table completion', async () => {
@@ -229,7 +229,7 @@ expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__
             return undefined
         })
 
-        parseColumnMetadataMock.mockReturnValue([
+        fetchTableColumnsWithFallbackMock.mockResolvedValue([
             {
                 attname: 'ORDER_ID',
                 formatType: 'INTEGER',
@@ -255,7 +255,7 @@ expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__
 
         const executedQueries = runQueryRawMock.mock.calls.map(call => (call[0] as RunQueryRawOptions).query)
         expect(executedQueries.some(query => query.includes('.._V_SYNONYM'))).toBe(false)
-        expect(executedQueries.some(query => query.includes('SELECT TARGET_DB.PUBLIC.ORDERS COLUMN METADATA'))).toBe(true)
+        expect(executedQueries.some(query => query.includes('SELECT TARGET_DB.PUBLIC.ORDERS COLUMN METADATA'))).toBe(false)
         expect(metadataCache.setColumns).toHaveBeenCalledWith(
             'CONN_1',
             'TARGET_DB.PUBLIC.ORDERS_SYNONYM',
@@ -271,7 +271,7 @@ expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__
             objId: 12
         })
 
-        parseColumnMetadataMock.mockReturnValue([
+        fetchTableColumnsWithFallbackMock.mockResolvedValue([
             {
                 attname: 'ORDER_ID',
                 formatType: 'INTEGER',
@@ -288,7 +288,7 @@ expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__
         expect(columns).toHaveLength(1)
         const executedQueries = runQueryRawMock.mock.calls.map(call => (call[0] as RunQueryRawOptions).query)
         expect(executedQueries.some(query => query.includes('.._V_SYNONYM'))).toBe(true)
-        expect(executedQueries.some(query => query.includes('SELECT TARGET_DB.PUBLIC.ORDERS COLUMN METADATA'))).toBe(true)
+        expect(executedQueries.some(query => query.includes('SELECT TARGET_DB.PUBLIC.ORDERS COLUMN METADATA'))).toBe(false)
     })
 
     it('skips views fetch for DB.. when cache has tables but no views and catalog is complete', async () => {

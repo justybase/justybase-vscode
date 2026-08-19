@@ -4,6 +4,7 @@ import type { DatabaseKind } from "../contracts/database";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { LocalDefinition } from "../providers/types";
+import type { MetadataColumnLookupOptions } from "../metadata/metadataQueryDiagnostics";
 
 /**
  * Shared completion-engine types used across the extracted server modules.
@@ -136,7 +137,7 @@ export interface CompletionMetadataProvider {
     database: string,
     table: string,
     schema?: string,
-    options?: { allowPublicSynonym?: boolean },
+    options?: MetadataColumnLookupOptions,
   ): Promise<MetadataColumnItem[]>;
   getNetezzaDefaultSchema?(
     documentUri: string,

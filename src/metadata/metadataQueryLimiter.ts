@@ -1,5 +1,5 @@
 /** Default max concurrent metadata (_V_*) queries per logical connection name. */
-const DEFAULT_METADATA_QUERY_CONCURRENCY = 5;
+const DEFAULT_METADATA_QUERY_CONCURRENCY = 1;
 
 /** Upper bound matching the `justybase.metadata.queryConcurrency` setting maximum. */
 export const MAX_METADATA_QUERY_CONCURRENCY = 16;
@@ -17,7 +17,9 @@ export function getMetadataQueryConcurrencyLimit(): number {
 /**
  * Set the max concurrent metadata queries per connection from configuration.
  * The extension host and the LSP server both call this with the value of the
- * `justybase.metadata.queryConcurrency` setting.
+ * `justybase.metadata.queryConcurrency` setting. The conservative default is
+ * one active catalog query per connection; users can opt into higher
+ * parallelism when their Netezza workload allows it.
  */
 export function setMetadataQueryConcurrencyLimit(limit: number): void {
     if (!Number.isFinite(limit)) {
@@ -64,9 +66,10 @@ function drainQueue(state: ConnectionLimiterState): void {
  */
 export async function runWithMetadataQueryConcurrencyLimit<T>(
     connectionName: string,
-    operation: () => Promise<T>,
+    operation: (queueWaitMs: number) => Promise<T>,
 ): Promise<T> {
     const state = getLimiterState(connectionName);
+    const waitStartedAt = Date.now();
 
     if (state.active >= metadataQueryConcurrencyLimit) {
         await new Promise<void>((resolve) => {
@@ -74,9 +77,10 @@ export async function runWithMetadataQueryConcurrencyLimit<T>(
         });
     }
 
+    const queueWaitMs = Date.now() - waitStartedAt;
     state.active += 1;
     try {
-        return await operation();
+        return await operation(queueWaitMs);
     } finally {
         state.active -= 1;
         drainQueue(state);

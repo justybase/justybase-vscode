@@ -781,6 +781,23 @@ function buildIdentifierCondition(columnExpression: string, identifier: string):
     return `UPPER(${columnExpression}) = '${escapedIdentifier.toUpperCase()}'`;
 }
 
+/**
+ * Build an identifier predicate for catalog columns that may be CHAR padded.
+ * Keep this local to the external-table compatibility queries: applying TRIM
+ * to every catalog predicate would make the regular prefetch path less cheap.
+ */
+function buildTrimmedIdentifierCondition(columnExpression: string, identifier: string): string {
+    const normalizedIdentifier = unquoteIdentifier(identifier || '');
+    const escapedIdentifier = escapeSqlLiteral(normalizedIdentifier);
+    const useExactCase = isQuotedIdentifier(identifier) || requiresIdentifierQuoting(normalizedIdentifier);
+
+    if (useExactCase) {
+        return `TRIM(${columnExpression}) = '${escapedIdentifier}'`;
+    }
+
+    return `UPPER(TRIM(${columnExpression})) = '${escapedIdentifier.toUpperCase()}'`;
+}
+
 // =============================================================================
 // COMMON QUERY TEMPLATES
 // =============================================================================
@@ -834,12 +851,15 @@ export const NZ_QUERIES = {
      * @param databases - Array of database names (REQUIRED, must be non-empty)
      * Generates a UNION ALL of per-database `_V_OBJECT_DATA` queries.
      *
-     * External tables are additionally merged from `_V_EXTERNAL`/`_V_EXTOBJECT`
-     * because some NPS instances do not list them in `_V_OBJECT_DATA`. The
-     * NOT EXISTS guard prevents duplicates when they are listed there.
+     * External tables are NOT included here — they are fetched separately via
+     * `listExternalTables()` and merged in code, so this query stays lean.
      */
     listTablesAndViews: (databases: string[]): string => {
+        // External tables are read from _V_EXTERNAL below.  Keeping them out of
+        // the main catalog query avoids duplicate rows and lets the fallback
+        // query stay independent from _V_OBJECT_DATA.
         const objTypes = NZ_PREFETCH_CATALOG_OBJECT_TYPES
+            .filter((type) => type !== NZ_OBJECT_TYPES.EXTERNAL_TABLE)
             .map((type) => `'${type}'`)
             .join(', ');
 
@@ -864,27 +884,6 @@ export const NZ_QUERIES = {
                 FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
                 LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
                 WHERE O.DBNAME = '${db}' AND O.OBJTYPE IN (${objTypes})
-                UNION ALL
-                SELECT
-                    E1.TABLENAME AS OBJNAME,
-                    E1.RELID AS OBJID,
-                    E1.SCHEMA,
-                    E1.DATABASE AS DBNAME,
-                    'EXTERNAL TABLE' AS OBJTYPE,
-                    COALESCE(E2.OWNER, '') AS OWNER,
-                    '' AS REFOBJNAME,
-                    '' AS DESCRIPTION
-                FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E1
-                LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTOBJECT)} E2 ON E1.RELID = E2.OBJID
-                WHERE UPPER(E1.DATABASE) = '${db}'
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O2
-                    WHERE UPPER(O2.DBNAME) = '${db}'
-                      AND UPPER(TRIM(O2.OBJTYPE)) = 'EXTERNAL TABLE'
-                      AND UPPER(TRIM(O2.OBJNAME)) = UPPER(TRIM(E1.TABLENAME))
-                      AND UPPER(TRIM(O2.SCHEMA)) = UPPER(TRIM(E1.SCHEMA))
-                  )
             `.trim());
 
         if (parts.length === 0) {
@@ -901,34 +900,80 @@ ${unionSql}
     },
 
     /**
+     * Get external tables from a list of databases (separate query, merged
+     * with `listTablesAndViews` results in code).
+     *
+     * External tables come from `_V_EXTERNAL`/`_V_EXTOBJECT` because some NPS
+     * instances do not list them in `_V_OBJECT_DATA`. Duplicate resolution is
+     * performed in TypeScript, so this query must not read `_V_OBJECT_DATA`.
+     *
+     * Returns the same row shape as `listTablesAndViews`:
+     * OBJNAME, OBJID, SCHEMA, DBNAME, OBJTYPE, OWNER, REFOBJNAME, DESCRIPTION
+     *
+     * @param databases - Array of database names (REQUIRED, must be non-empty)
+     */
+    listExternalTables: (databases: string[]): string => {
+        if (!Array.isArray(databases) || databases.length === 0) {
+            throw new Error("NZ_QUERIES.listExternalTables requires a non-empty array of databases.");
+        }
+
+        const parts = databases
+            .map(d => d && d.trim())
+            .filter(Boolean)
+            .map(d => d!.toUpperCase())
+            .map(db => `
+                SELECT
+                    TRIM(E1.TABLENAME) AS OBJNAME,
+                    E1.RELID AS OBJID,
+                    TRIM(E1.SCHEMA) AS SCHEMA,
+                    TRIM(E1.DATABASE) AS DBNAME,
+                    'EXTERNAL TABLE' AS OBJTYPE,
+                    TRIM(COALESCE(E2.OWNER, '')) AS OWNER,
+                    '' AS REFOBJNAME,
+                    '' AS DESCRIPTION
+                FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E1
+                LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTOBJECT)} E2 ON E1.RELID = E2.OBJID
+                WHERE ${buildTrimmedIdentifierCondition('E1.DATABASE', db)}
+            `.trim());
+
+        if (parts.length === 0) {
+            throw new Error("NZ_QUERIES.listExternalTables requires a non-empty array of databases.");
+        }
+
+        const unionSql = parts.join('\nUNION ALL\n');
+        return `
+            SELECT * FROM (
+${unionSql}
+            ) TMP
+            ORDER BY DBNAME, SCHEMA, OBJNAME
+        `.trim();
+    },
+
+/**
      * Get column metadata for tables in a database with optional PK/FK info
      * Returns: TABLENAME, SCHEMA, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION, IS_PK, IS_FK
      *
      * Note: Uses DBNAME filter to ensure we only get objects from the specified database.
      * Column DESCRIPTION comes from _V_RELATION_COLUMN which doesn't have the cross-DB issue.
-     * 
-     * External table columns are merged from `_V_RELATION_COLUMN` joined with
-     * `_V_EXTERNAL` because some NPS instances do not list external tables in
-     * `_V_OBJECT_DATA`. The NOT EXISTS guard prevents duplicates otherwise.
+     *
+     * External table columns are NOT included here — they are fetched separately
+     * via `listExternalColumnsWithKeys()` and merged in code.
      *
      * @param database - Database name
-     * @param options - Optional filters: schema, tableName
+     * @param options - Optional filters: schema, tableName, objTypes
      */
     listColumnsWithKeys: (database: string, options?: { schema?: string; tableName?: string; objTypes?: string[] }): string => {
         const db = database.toUpperCase();
-        const objTypes = options?.objTypes || [NZ_OBJECT_TYPES.TABLE, NZ_OBJECT_TYPES.VIEW, NZ_OBJECT_TYPES.EXTERNAL_TABLE];
+        const objTypes = options?.objTypes || [NZ_OBJECT_TYPES.TABLE, NZ_OBJECT_TYPES.VIEW];
         const objTypesStr = objTypes.map(t => `'${t}'`).join(', ');
 
         // Always filter by DBNAME to ensure we get proper data from this database only
         let whereClause = `O.DBNAME = '${db}' AND O.OBJTYPE IN (${objTypesStr})`;
-        let externalWhereClause = `UPPER(E1.DATABASE) = '${db}'`;
         if (options?.schema) {
             whereClause += ` AND ${buildIdentifierCondition('O.SCHEMA', options.schema)}`;
-            externalWhereClause += ` AND ${buildIdentifierCondition('E1.SCHEMA', options.schema)}`;
         }
         if (options?.tableName) {
             whereClause += ` AND ${buildIdentifierCondition('O.OBJNAME', options.tableName)}`;
-            externalWhereClause += ` AND ${buildIdentifierCondition('E1.TABLENAME', options.tableName)}`;
         }
 
         return `
@@ -954,12 +999,40 @@ ${unionSql}
                 AND D.ATTNAME = C.ATTNAME
             WHERE ${whereClause}
             GROUP BY O.OBJNAME, O.SCHEMA, O.DBNAME, C.ATTNAME, C.FORMAT_TYPE, C.ATTNUM, C.DESCRIPTION
-            UNION ALL
+            ORDER BY SCHEMA, TABLENAME, ATTNUM
+        `.trim();
+    },
+
+    /**
+     * Get column metadata for external tables in a database (separate query,
+     * merged with `listColumnsWithKeys` results in code).
+     *
+     * External table columns come from `_V_RELATION_COLUMN` joined with
+     * `_V_EXTERNAL` because some NPS instances do not list external tables in
+     * `_V_OBJECT_DATA`. Duplicate resolution is performed in TypeScript.
+     *
+     * Returns the same row shape as `listColumnsWithKeys`:
+     * TABLENAME, SCHEMA, DBNAME, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION, IS_PK, IS_FK, IS_DISTRIBUTION_KEY
+     *
+     * @param database - Database name
+     * @param options - Optional filters: schema, tableName
+     */
+    listExternalColumnsWithKeys: (database: string, options?: { schema?: string; tableName?: string }): string => {
+        const db = database.toUpperCase();
+        let externalWhereClause = buildTrimmedIdentifierCondition('E1.DATABASE', db);
+        if (options?.schema) {
+            externalWhereClause += ` AND ${buildTrimmedIdentifierCondition('E1.SCHEMA', options.schema)}`;
+        }
+        if (options?.tableName) {
+            externalWhereClause += ` AND ${buildTrimmedIdentifierCondition('E1.TABLENAME', options.tableName)}`;
+        }
+
+        return `
             SELECT
-                E1.TABLENAME AS TABLENAME,
-                E1.SCHEMA,
-                E1.DATABASE AS DBNAME,
-                C.ATTNAME,
+                TRIM(E1.TABLENAME) AS TABLENAME,
+                TRIM(E1.SCHEMA) AS SCHEMA,
+                TRIM(E1.DATABASE) AS DBNAME,
+                TRIM(C.ATTNAME) AS ATTNAME,
                 C.FORMAT_TYPE,
                 C.ATTNUM,
                 COALESCE(C.DESCRIPTION, '') AS DESCRIPTION,
@@ -969,14 +1042,6 @@ ${unionSql}
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} C
             JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E1 ON C.OBJID = E1.RELID
             WHERE ${externalWhereClause}
-              AND NOT EXISTS (
-                SELECT 1
-                FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O2
-                WHERE UPPER(O2.DBNAME) = '${db}'
-                  AND UPPER(TRIM(O2.OBJTYPE)) = 'EXTERNAL TABLE'
-                  AND UPPER(TRIM(O2.OBJNAME)) = UPPER(TRIM(E1.TABLENAME))
-                  AND UPPER(TRIM(O2.SCHEMA)) = UPPER(TRIM(E1.SCHEMA))
-              )
             ORDER BY SCHEMA, TABLENAME, ATTNUM
         `.trim();
     },
@@ -992,8 +1057,6 @@ ${unionSql}
         const db = database.toUpperCase();
         const schemaFilter = buildIdentifierCondition('D.SCHEMA', schema);
         const tableFilter = buildIdentifierCondition('D.OBJNAME', tableName);
-        const externalSchemaFilter = buildIdentifierCondition('E.SCHEMA', schema);
-        const externalTableFilter = buildIdentifierCondition('E.TABLENAME', tableName);
         return `
             SELECT
                 X.OBJID::INT AS OBJID,
@@ -1005,11 +1068,34 @@ ${unionSql}
                 X.COLDEFAULT
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} X
             INNER JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} D ON X.OBJID = D.OBJID
-            WHERE X.TYPE IN ('${NZ_OBJECT_TYPES.TABLE}','${NZ_OBJECT_TYPES.VIEW}','${NZ_OBJECT_TYPES.EXTERNAL_TABLE}','${NZ_OBJECT_TYPES.SEQUENCE}','${NZ_OBJECT_TYPES.SYSTEM_VIEW}','${NZ_OBJECT_TYPES.SYSTEM_TABLE}')
+            WHERE X.TYPE IN ('${NZ_OBJECT_TYPES.TABLE}','${NZ_OBJECT_TYPES.VIEW}','${NZ_OBJECT_TYPES.SEQUENCE}','${NZ_OBJECT_TYPES.SYSTEM_VIEW}','${NZ_OBJECT_TYPES.SYSTEM_TABLE}')
                 AND X.OBJID NOT IN (4,5)
                 AND ${schemaFilter}
                 AND ${tableFilter}
-            UNION ALL
+            ORDER BY OBJID, ATTNUM
+        `.trim();
+    },
+
+    /**
+     * Get basic column information for an external table (separate query,
+     * merged with `getTableColumns` results in code).
+     *
+     * External table columns come from `_V_RELATION_COLUMN` joined with
+     * `_V_EXTERNAL` because some NPS instances do not list external tables in
+     * `_V_OBJECT_DATA`. Duplicate resolution is performed in TypeScript.
+     *
+     * Returns the same row shape as `getTableColumns`:
+     * OBJID, ATTNUM, ATTNAME, DESCRIPTION, FULL_TYPE, ATTNOTNULL, COLDEFAULT
+     *
+     * @param database - Database name
+     * @param schema - Schema name
+     * @param tableName - Table name
+     */
+    getExternalTableColumns: (database: string, schema: string, tableName: string): string => {
+        const db = database.toUpperCase();
+        const externalSchemaFilter = buildTrimmedIdentifierCondition('E.SCHEMA', schema);
+        const externalTableFilter = buildTrimmedIdentifierCondition('E.TABLENAME', tableName);
+        return `
             SELECT
                 C.OBJID::INT AS OBJID,
                 C.ATTNUM,
@@ -1021,16 +1107,9 @@ ${unionSql}
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} C
             INNER JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E ON C.OBJID = E.RELID
             WHERE C.OBJID NOT IN (4,5)
+                AND ${buildTrimmedIdentifierCondition('E.DATABASE', db)}
                 AND ${externalSchemaFilter}
                 AND ${externalTableFilter}
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O2
-                    WHERE UPPER(O2.DBNAME) = '${db}'
-                      AND UPPER(TRIM(O2.OBJTYPE)) = 'EXTERNAL TABLE'
-                      AND UPPER(TRIM(O2.OBJNAME)) = UPPER(TRIM(E.TABLENAME))
-                      AND UPPER(TRIM(O2.SCHEMA)) = UPPER(TRIM(E.SCHEMA))
-                )
             ORDER BY OBJID, ATTNUM
         `.trim();
     },

@@ -1011,7 +1011,22 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   isConnectionPrefetchFresh(connectionName: string): boolean {
-    return prefetchDelegation.isConnectionPrefetchFresh(
+    const freshByTimestamp = prefetchDelegation.isConnectionPrefetchFresh(
+      this.prefetchDeps,
+      connectionName,
+    );
+    // A complete disk snapshot exposes its database layer immediately, while
+    // the remaining metadata layers are hydrated in the background. The
+    // manifest's complete/fresh marker is authoritative during that window;
+    // verify the in-memory snapshot once hydration has finished.
+    if (freshByTimestamp && this.isConnectionMetadataHydrating(connectionName)) {
+      return true;
+    }
+    return freshByTimestamp && this.verifyCompleteSnapshot(connectionName, false);
+  }
+
+  getLastPrefetchAttemptTime(connectionName: string): number | undefined {
+    return prefetchDelegation.getLastPrefetchAttemptTime(
       this.prefetchDeps,
       connectionName,
     );
@@ -1078,7 +1093,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     );
   }
 
-  verifyCompleteSnapshot(connectionName: string): boolean {
+  verifyCompleteSnapshot(connectionName: string, logMissing = true): boolean {
     if (!this.verifyStagesComplete(connectionName)) {
       return false;
     }
@@ -1111,10 +1126,18 @@ export class MetadataCache implements MetadataPrefetchTarget {
           ? table.SCHEMA
           : schemaName;
         const columnKey = buildColumnCacheKey(dbName, schema || undefined, tableName);
-        if (!this._store.columnCache.has(`${connectionName}|${columnKey}`)) {
-          Logger.getInstance().warn(
-            `[MetadataCache] Snapshot incomplete for ${connectionName}: missing columns for ${columnKey}`,
-          );
+        const columnsLoadedInMemory = this._store.columnCache.has(`${connectionName}|${columnKey}`);
+        // Column files are intentionally hydrated lazily after the metadata
+        // manifest. Their presence is still a complete, restart-safe snapshot;
+        // a missing file is invalidated by ensureColumnsLoaded and will make a
+        // later freshness check fail.
+        const columnsAvailableOnDisk = this.hasColumnsOnDisk(connectionName, dbName);
+        if (!columnsLoadedInMemory && !columnsAvailableOnDisk) {
+          if (logMissing) {
+            Logger.getInstance().warn(
+              `[MetadataCache] Snapshot incomplete for ${connectionName}: missing columns for ${columnKey}`,
+            );
+          }
           return false;
         }
       }

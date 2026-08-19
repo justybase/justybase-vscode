@@ -142,33 +142,72 @@ describe('tableMetadataProvider', () => {
         expect(consoleSpy).toHaveBeenCalled();
     });
 
-    it('fetches complete table metadata using both queries', async () => {
+    it('fetches known external-table metadata using only comment and external-column queries', async () => {
         const runQueryFn = jest.fn(async (query: string) => {
             if (query.includes('_v_object_data')) {
                 return { columns: [{ name: 'DESCRIPTION' }], data: [['Orders table']] } as QueryResult;
+            }
+            if (query.includes('_V_EXTERNAL')) {
+                return { columns: [{ name: 'ATTNAME' }], data: [['EXT_COL']] } as QueryResult;
             }
             return { columns: [{ name: 'ATTNAME' }], data: [['ID']] } as QueryResult;
         });
 
         queryResultToRowsMock
-            .mockReturnValueOnce([{ DESCRIPTION: 'Orders table' }])
             .mockReturnValueOnce([
                 {
-                    ATTNAME: 'ID',
-                    FORMAT_TYPE: 'INTEGER',
-                    IS_NOT_NULL: 1,
+                    ATTNAME: 'EXT_COL',
+                    FORMAT_TYPE: 'VARCHAR(100)',
+                    IS_NOT_NULL: 0,
                     COLDEFAULT: null,
-                    DESCRIPTION: 'Identifier',
-                    IS_PK: 1,
+                    DESCRIPTION: 'External',
+                    IS_PK: 0,
                     IS_FK: 0
                 }
-            ]);
+            ])
+            .mockReturnValueOnce([{ DESCRIPTION: 'Orders table' }]);
 
-        const metadata = await getTableMetadata(runQueryFn, 'DB1', 'PUBLIC', 'ORDERS');
+        const metadata = await getTableMetadata(
+            runQueryFn,
+            'DB1',
+            'PUBLIC',
+            'ORDERS',
+            undefined,
+            { objectType: 'EXTERNAL TABLE' },
+        );
 
+        // Comment + external columns. The regular column query is skipped for
+        // an object whose type is already known from the object prefetch.
         expect(runQueryFn).toHaveBeenCalledTimes(2);
         expect(metadata.tableComment).toBe('Orders table');
         expect(metadata.columns).toHaveLength(1);
+        expect(metadata.columns[0].attname).toBe('EXT_COL');
+    });
+
+    it('does not run the external companion query for a normal table', async () => {
+        const runQueryFn = jest.fn(async () => dummyResult);
+        queryResultToRowsMock.mockReturnValueOnce([
+            {
+                ATTNAME: 'ID',
+                FORMAT_TYPE: 'INTEGER',
+                IS_NOT_NULL: 1,
+                COLDEFAULT: null,
+                DESCRIPTION: '',
+                IS_PK: 1,
+                IS_FK: 0,
+            },
+        ]).mockReturnValueOnce([]);
+
+        const metadata = await getTableMetadata(
+            runQueryFn,
+            'DB1',
+            'PUBLIC',
+            'ORDERS',
+            undefined,
+            { objectType: 'TABLE' },
+        );
+
+        expect(runQueryFn).toHaveBeenCalledTimes(2);
         expect(metadata.columns[0].attname).toBe('ID');
     });
 

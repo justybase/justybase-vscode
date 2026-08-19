@@ -7,6 +7,8 @@ import type {
 import { runQuery, runQueryRaw, runQueriesSequentially, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
 import { getTableMetadata, toWebviewFormat } from '../providers/tableMetadataProvider';
+import type { MetadataQueryKind } from '../metadata/metadataQueryDiagnostics';
+import { runWithMetadataQueryConcurrencyLimit } from '../metadata/metadataQueryLimiter';
 
 export interface EditDataItem {
     label: string;
@@ -202,7 +204,28 @@ export class EditDataProvider {
             this._postMessage(panel, { command: 'setLoading', loading: true, message: 'Fetching data...' });
 
             // Use centralized tableMetadataProvider for metadata queries
-            const queryRunner = (query: string) => runQueryRaw(context, query, true, connectionManager, connectionName);
+            const queryRunner = (query: string, queryKind: MetadataQueryKind = 'table-columns') =>
+                runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
+                    runQueryRaw({
+                        context,
+                        query,
+                        silent: true,
+                        connectionManager,
+                        connectionName,
+                        isUserQuery: false,
+                        metadataContext: {
+                            source: 'schema-tree',
+                            kind: queryKind,
+                            connectionName,
+                            database: db,
+                            schema,
+                            table,
+                            reason: 'edit-data-metadata',
+                            queueWaitMs,
+                        },
+                        metadataQueueWaitMs: queueWaitMs,
+                    }),
+                );
 
             // Prepare Query
             let selectList = 'ROWID, *';
