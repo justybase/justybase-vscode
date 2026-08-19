@@ -14,6 +14,15 @@ import {
     importDataToNetezza
 } from '../import/dataImporter';
 
+interface TestXlsxWriter {
+    startSheet(sheetName: string, columnCount: number, headers?: string[]): void;
+    writeRow(row: unknown[]): void;
+    endSheet(): void;
+    finalize(): Promise<void>;
+}
+
+const XlsxWriter = require('@justybase/spreadsheet-tasks').XlsxWriter as new (filePath: string) => TestXlsxWriter;
+
 describe('import/dataImporter', () => {
     describe('NetezzaDataType', () => {
         describe('constructor', () => {
@@ -363,6 +372,78 @@ describe('import/dataImporter', () => {
             const csvPath = writeTempFile('empty.csv', '');
             const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
             await expect(importer.analyzeDataTypes()).rejects.toThrow('No data found in file');
+        });
+    });
+
+    describe('NetezzaImporter (XLSX path)', () => {
+        let tempDir: string;
+
+        const writeXlsx = async (
+            fileName: string,
+            headers: string[] | undefined,
+            rows: readonly (readonly unknown[])[],
+        ): Promise<string> => {
+            const filePath = path.join(tempDir, fileName);
+            const writer = new XlsxWriter(filePath);
+            const columnCount = headers?.length ?? rows[0]?.length ?? 0;
+            writer.startSheet('Arkusz1', columnCount, headers);
+            for (const row of rows) {
+                writer.writeRow(Array.from(row));
+            }
+            writer.endSheet();
+            await writer.finalize();
+            return filePath;
+        };
+
+        beforeEach(() => {
+            tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-xlsx-import-test-'));
+        });
+
+        afterEach(() => {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        });
+
+        it.each([
+            {
+                name: 'keeps a normal header row',
+                fileName: 'data1.xlsx',
+                headers: ['col1', 'col2'],
+                rows: [[1, 'a'], [2, 'b'], [3, 'c'], [4, 'd']],
+                expectedHeaders: ['COL1', 'COL2'],
+                expectedRows: 4,
+            },
+            {
+                name: 'deduplicates repeated header names',
+                fileName: 'data2.xlsx',
+                headers: ['col', 'col'],
+                rows: [[1, 'a'], [2, 'b'], [3, 'c'], [4, 'd']],
+                expectedHeaders: ['COL', 'COL_1'],
+                expectedRows: 4,
+            },
+            {
+                name: 'generates headers for a numeric first row without dropping it',
+                fileName: 'data3.xlsx',
+                headers: undefined,
+                rows: [[1, 'a'], [2, 'b'], [3, 'c'], [4, 'd']],
+                expectedHeaders: ['COL_1', 'COL_2'],
+                expectedRows: 4,
+            },
+        ])('$name', async ({ fileName, headers, rows, expectedHeaders, expectedRows }) => {
+            const filePath = await writeXlsx(fileName, headers, rows);
+            const importer = new NetezzaImporter(filePath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getSqlHeaders()).toEqual(expectedHeaders);
+            expect(importer.getRowsCount()).toBe(expectedRows);
+
+            const stream = await importer.createDataStream();
+            const chunks: string[] = [];
+            for await (const chunk of stream) {
+                chunks.push(String(chunk));
+            }
+
+            expect(chunks.join('')).toBe('1\ta\n2\tb\n3\tc\n4\td\n');
         });
     });
 
