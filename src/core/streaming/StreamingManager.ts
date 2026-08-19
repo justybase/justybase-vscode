@@ -440,15 +440,35 @@ export class StreamingManager {
             const results: InternalResultSet[] = [];
             const finalRowLimit = maxRows !== undefined ? maxRows : limit;
             let hasMore = true;
+            const readRow = async (): Promise<boolean> => {
+                const hasRow = await reader!.read();
+                if (!firstReadCompleted) {
+                    firstReadCompleted = true;
+                    const firstReadCompletedAt = Date.now();
+                    // executeReader() measures opening/server execution;
+                    // this interval isolates the wait from an available
+                    // reader to the first row (or EOF).
+                    executionTiming.serverWaitToFirstRowMs =
+                        firstReadCompletedAt - (readerReadyAt ?? timingStartedAt);
+                    rowFetchStartedAt = firstReadCompletedAt;
+                }
+                return hasRow;
+            };
 
             try {
                 do {
+                    // Streaming readers such as PostgreSQL may not expose
+                    // column metadata until the first row description arrives.
+                    // Read once before inspecting fieldCount so zero-row
+                    // results still wait until metadata/EOF is available.
+                    let hasRow = await readRow();
                     const columns: ReaderColumn[] = [];
                     const rows: unknown[][] = [];
                     let fetchedCount = 0;
                     let limitReached = false;
 
-                    // Read column metadata BEFORE the fetch loop (even if there are 0 rows)
+                    // Read column metadata after the initial read so asynchronous
+                    // readers have had a chance to populate their fields.
                     for (let i = 0; i < reader.fieldCount; i++) {
                         const column: ReaderColumn = {
                             name: reader.getName(i),
@@ -463,21 +483,7 @@ export class StreamingManager {
 
                     // Fetch loop
                     let rowsSinceYield = 0;
-                    while (true) {
-                        const hasRow = await reader.read();
-                        if (!firstReadCompleted) {
-                            firstReadCompleted = true;
-                            const firstReadCompletedAt = Date.now();
-                            // executeReader() measures opening/server execution;
-                            // this interval isolates the wait from an available
-                            // reader to the first row (or EOF).
-                            executionTiming.serverWaitToFirstRowMs =
-                                firstReadCompletedAt - (readerReadyAt ?? timingStartedAt);
-                            rowFetchStartedAt = firstReadCompletedAt;
-                        }
-                        if (!hasRow) {
-                            break;
-                        }
+                    while (hasRow) {
                         executionTiming.rowsRead = (executionTiming.rowsRead ?? 0) + 1;
                         // Check for cancellation
                         if (signal?.aborted) {
@@ -526,6 +532,8 @@ export class StreamingManager {
                             commandCleanupDone = true;
                             break;
                         }
+
+                        hasRow = await readRow();
                     }
 
                     results.push({

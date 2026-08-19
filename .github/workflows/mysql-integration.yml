@@ -1,0 +1,80 @@
+name: MySQL Integration
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  mysql-integration:
+    name: MySQL Live Integration (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mysql:
+        image: mysql:8.0.34
+        env:
+          MYSQL_ROOT_PASSWORD: justybase-root
+          MYSQL_DATABASE: TESTDB
+          MYSQL_USER: justybase
+          MYSQL_PASSWORD: justybase
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pjustybase-root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-start-period=30s
+          --health-retries=18
+
+    env:
+      RUN_MYSQL_INTEGRATION: "1"
+      MYSQL_LIVE_TEST_HOST: 127.0.0.1
+      MYSQL_LIVE_TEST_PORT: "3306"
+      MYSQL_LIVE_TEST_DATABASE: TESTDB
+      MYSQL_LIVE_TEST_USER: justybase
+      MYSQL_LIVE_TEST_PASSWORD: justybase
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/mysql/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install MySQL extension dependencies
+        working-directory: extensions/mysql
+        run: npm ci
+
+      - name: Create MySQL integration fixture
+        run: node scripts/mysql-integration-fixture.cjs create
+
+      - name: Run MySQL live integration tests
+        run: npm run test:mysql:integration
+
+      - name: Remove MySQL integration fixture
+        if: always()
+        continue-on-error: true
+        run: node scripts/mysql-integration-fixture.cjs drop

@@ -508,6 +508,42 @@ describe("StreamingManager", () => {
       expect(result.timing?.totalMs).toBeGreaterThanOrEqual(0);
     });
 
+    it("waits for asynchronous reader metadata before collecting columns", async () => {
+      const cmd = new MockNzCommand();
+      jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
+
+      let metadataReady = false;
+      let readCount = 0;
+      const reader = {
+        get fieldCount() {
+          return metadataReady ? 1 : 0;
+        },
+        read: jest.fn().mockImplementation(async () => {
+          readCount += 1;
+          metadataReady = true;
+          return readCount === 1;
+        }),
+        nextResult: jest.fn().mockResolvedValue(false),
+        close: jest.fn().mockResolvedValue(undefined),
+        getValue: jest.fn().mockReturnValue(42),
+        getName: jest.fn().mockReturnValue("delayed_col"),
+        getTypeName: jest.fn().mockReturnValue("INT"),
+      } as unknown as NzDataReader;
+      jest.spyOn(cmd, "executeReader").mockResolvedValue(reader);
+
+      const result = await manager.executeAndFetch(
+        mockConnection,
+        "SELECT 42 AS delayed_col",
+        10,
+      );
+
+      expect(result.results[0].columns).toEqual([
+        { name: "delayed_col", type: "INT" },
+      ]);
+      expect(result.results[0].rows).toEqual([[42]]);
+      expect(reader.read).toHaveBeenCalledTimes(2);
+    });
+
     it("should close reader when executeAndFetch exits after a read error", async () => {
       const cmd = new MockNzCommand();
       jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
