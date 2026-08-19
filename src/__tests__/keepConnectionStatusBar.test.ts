@@ -42,6 +42,8 @@ describe('statusBarManager - keep connection & active connection', () => {
             getDocumentKeepConnectionOpen: jest.fn().mockReturnValue(true) as jest.Mock,
             hasDocumentKeepConnectionOpen: jest.fn().mockReturnValue(false) as jest.Mock,
             getConnectionForExecution: jest.fn().mockReturnValue('my-connection') as jest.Mock,
+            getDocumentConnection: jest.fn().mockReturnValue(undefined) as jest.Mock,
+            isConnectionAvailable: jest.fn().mockReturnValue(true) as jest.Mock,
             getEffectiveDatabase: jest.fn().mockResolvedValue('MY_DB') as jest.Mock,
             getDocumentDatabase: jest.fn().mockReturnValue(undefined) as jest.Mock
         };
@@ -204,6 +206,37 @@ describe('statusBarManager - keep connection & active connection', () => {
             await updateFn();
 
             expect(mockStatusBarItem.text).toContain('my-connection');
+            expect(mockStatusBarItem.show).toHaveBeenCalled();
+        });
+
+        it('updateFn should mark a connection assigned only to this tab', async () => {
+            mockConnectionManager.getDocumentConnection!.mockReturnValue('my-connection');
+
+            const { updateFn } = createActiveConnectionStatusBar(
+                mockContext,
+                mockConnectionManager as unknown as ConnectionManager
+            );
+
+            await updateFn();
+
+            expect(mockStatusBarItem.text).toContain('📌');
+            expect(mockStatusBarItem.tooltip).toContain('assigned to this SQL tab');
+        });
+
+        it('updateFn should mark a missing tab connection without hiding it', async () => {
+            mockConnectionManager.getDocumentConnection!.mockReturnValue('removed-connection');
+            mockConnectionManager.getConnectionForExecution!.mockReturnValue('removed-connection');
+            mockConnectionManager.isConnectionAvailable!.mockReturnValue(false);
+
+            const { updateFn } = createActiveConnectionStatusBar(
+                mockContext,
+                mockConnectionManager as unknown as ConnectionManager
+            );
+
+            await updateFn();
+
+            expect(mockStatusBarItem.text).toContain('(missing)');
+            expect(mockStatusBarItem.tooltip).toContain('no longer available');
             expect(mockStatusBarItem.show).toHaveBeenCalled();
         });
 

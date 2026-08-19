@@ -10,6 +10,7 @@ jest.mock("vscode", () => ({
     activeTextEditor: undefined,
     showWarningMessage: jest.fn(),
     showInformationMessage: jest.fn(),
+    showQuickPick: jest.fn(),
     openTextDocument: jest.fn(),
     showTextDocument: jest.fn(),
     createTextEditorDecorationType: jest.fn(() => ({})),
@@ -129,6 +130,8 @@ describe("registerCoreCommands", () => {
       connectionManager: {
         getConnectionForExecution: jest.fn(),
         getActiveConnectionName: jest.fn(),
+        getConnections: jest.fn(),
+        setActiveConnection: jest.fn(),
         setDocumentConnection: jest.fn(),
         getConnectionDatabaseKind: jest.fn(),
       } as unknown as CoreCommandsContext["connectionManager"],
@@ -148,6 +151,7 @@ describe("registerCoreCommands", () => {
 
     mockedOpenTextDocument.mockResolvedValue({ uri: { toString: () => "file:///tmp/stats.md" } });
     mockedShowTextDocument.mockResolvedValue(undefined);
+    (vscode.window.showQuickPick as jest.Mock).mockResolvedValue(undefined);
   });
 
   const getCommand = (name: string): ((...args: unknown[]) => Promise<void>) => {
@@ -281,5 +285,30 @@ describe("registerCoreCommands", () => {
     await command();
 
     expect(ctx.resultPanelProvider.clearPerformanceStats).not.toHaveBeenCalled();
+  });
+
+  it("shows connection target and current marker in the global connection picker", async () => {
+    (ctx.connectionManager.getConnections as jest.Mock).mockResolvedValue([
+      { name: "DEV", host: "db.example.test", port: 5480, database: "ANALYTICS" },
+      { name: "LOCAL", host: "", database: ":memory:" },
+    ]);
+    (ctx.connectionManager.getActiveConnectionName as jest.Mock).mockReturnValue("DEV");
+
+    const selected = getCommand("netezza.selectActiveConnection");
+    await selected();
+
+    expect(vscode.window.showQuickPick).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          label: "DEV",
+          description: "$(check) db.example.test:5480/ANALYTICS",
+        }),
+        expect.objectContaining({
+          label: "LOCAL",
+          description: ":memory:",
+        }),
+      ],
+      { placeHolder: "Select Active Connection" },
+    );
   });
 });

@@ -43,6 +43,7 @@ import {
     extractViewStatement,
 } from '../sqlParser/procedure/procedureCodeLens';
 import { registerSaveAccessFileAsConnectionCommand } from './saveAccessFileAsConnection';
+import { createConnectionQuickPickItems } from '../utils/connectionQuickPick';
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -305,13 +306,13 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
             }
 
             const selected = await vscode.window.showQuickPick(
-                connections.map((c) => c.name),
+                createConnectionQuickPickItems(connections, connectionManager.getActiveConnectionName()),
                 { placeHolder: 'Select Active Connection' },
             );
 
             if (selected) {
-                await connectionManager.setActiveConnection(selected);
-                vscode.window.showInformationMessage(`Active connection set to: ${selected}`);
+                await connectionManager.setActiveConnection(selected.name);
+                vscode.window.showInformationMessage(`Active connection set to: ${selected.name}`);
             }
         }),
 
@@ -333,12 +334,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
             const currentConnection =
                 connectionManager.getDocumentConnection(documentUri) || connectionManager.getActiveConnectionName();
 
-            const items = connections.map((c) => ({
-                label: c.name,
-                description:
-                    currentConnection === c.name ? '$(check) Currently selected' : `${c.host}:${c.port}/${c.database}`,
-                name: c.name,
-            }));
+            const items = createConnectionQuickPickItems(connections, currentConnection);
 
             const selected = await vscode.window.showQuickPick(items, {
                 placeHolder: 'Select connection for this SQL tab',

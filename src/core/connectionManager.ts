@@ -30,6 +30,33 @@ import type { MetadataCache } from '../metadataCache';
 
 export type ConnectionDetails = NamedConnectionDetails;
 
+/** Workspace-scoped state used to restore an explicit connection context for saved SQL files. */
+export const DOCUMENT_CONNECTION_CONTEXTS_STATE_KEY = 'justybase.documentConnectionContexts.v1';
+const DOCUMENT_CONNECTION_CONTEXTS_STATE_VERSION = 1;
+
+interface PersistedDocumentConnectionContext {
+    connectionName: string;
+    databaseOverride?: string;
+}
+
+interface PersistedDocumentConnectionContextsState {
+    version: number;
+    documents: Record<string, PersistedDocumentConnectionContext>;
+}
+
+/**
+ * Only persisted files get a durable tab context. Untitled documents and
+ * notebook cells are intentionally ephemeral, just like SQL Console tabs.
+ */
+export function isPersistableDocumentUri(documentUri: string): boolean {
+    try {
+        const scheme = vscode.Uri.parse(documentUri).scheme.toLowerCase();
+        return scheme === 'file' || scheme === 'vscode-remote';
+    } catch {
+        return false;
+    }
+}
+
 const LEGACY_DB2_OPTION_KEYS = new Set([
     'clientCodepage',
     'security',
@@ -301,6 +328,16 @@ export class ConnectionManager {
     // When set, overrides the default database from connection details
     private _documentDatabaseOverride: Map<string, string> = new Map();
 
+    // Workspace-scoped context restored for saved files. This deliberately
+    // excludes keepConnectionOpen and all connection credentials.
+    private _persistedDocumentContexts: Record<string, PersistedDocumentConnectionContext> = {};
+    private _documentContextWritePromise: Promise<void> = Promise.resolve();
+
+    // Used to avoid warning about a missing profile before Secrets API loading
+    // has completed, and to avoid showing the same warning repeatedly.
+    private _connectionsFullyLoaded = false;
+    private _missingDocumentConnectionWarnings = new Set<string>();
+
     private _metadataCache?: MetadataCache;
 
     // Promise that resolves when connections are loaded from Secrets API
@@ -323,6 +360,8 @@ export class ConnectionManager {
     readonly onDidChangeDocumentDatabase = this._onDidChangeDocumentDatabase.event;
 
     constructor(private context: vscode.ExtensionContext) {
+        this.restorePersistedDocumentContexts();
+
         // Fast-load: restore connection list from globalState cache (synchronous, <1ms)
         this._activeConnectionName = getMementoValue<string | null>(
             this.context.globalState,
@@ -341,7 +380,92 @@ export class ConnectionManager {
             logWithFallback('debug', '[perf] ConnectionManager: no cache found, waiting for Secrets API');
         }
         // Full load: read passwords from Secrets API (start immediately)
-        this._loadingPromise = this.loadConnections();
+        this._loadingPromise = this.loadConnections().finally(() => {
+            this._connectionsFullyLoaded = true;
+        });
+    }
+
+    private restorePersistedDocumentContexts(): void {
+        const stored = this.context.workspaceState?.get<unknown>(DOCUMENT_CONNECTION_CONTEXTS_STATE_KEY);
+        if (!stored || typeof stored !== 'object') {
+            return;
+        }
+
+        const state = stored as Partial<PersistedDocumentConnectionContextsState>;
+        if (state.version !== DOCUMENT_CONNECTION_CONTEXTS_STATE_VERSION || !state.documents || typeof state.documents !== 'object') {
+            return;
+        }
+
+        for (const [documentUri, value] of Object.entries(state.documents)) {
+            if (
+                !isPersistableDocumentUri(documentUri)
+                || !value
+                || typeof value !== 'object'
+                || typeof value.connectionName !== 'string'
+                || value.connectionName.trim().length === 0
+            ) {
+                continue;
+            }
+
+            const normalizedUri = normalizeUriKey(documentUri);
+            const restored: PersistedDocumentConnectionContext = {
+                connectionName: value.connectionName,
+                ...(typeof value.databaseOverride === 'string' && value.databaseOverride.length > 0
+                    ? { databaseOverride: value.databaseOverride }
+                    : {}),
+            };
+            this._persistedDocumentContexts[normalizedUri] = restored;
+            this._documentConnections.set(normalizedUri, restored.connectionName);
+            if (restored.databaseOverride) {
+                this._documentDatabaseOverride.set(normalizedUri, restored.databaseOverride);
+            }
+        }
+    }
+
+    private persistDocumentContext(documentUri: string): Promise<void> {
+        const normalizedUri = normalizeUriKey(documentUri);
+        if (!isPersistableDocumentUri(normalizedUri)) {
+            return Promise.resolve();
+        }
+
+        const connectionName = this._documentConnections.get(normalizedUri);
+        const databaseOverride = this._documentDatabaseOverride.get(normalizedUri);
+        if (connectionName) {
+            this._persistedDocumentContexts[normalizedUri] = {
+                connectionName,
+                ...(databaseOverride ? { databaseOverride } : {}),
+            };
+        } else {
+            delete this._persistedDocumentContexts[normalizedUri];
+        }
+
+        const snapshot: PersistedDocumentConnectionContextsState = {
+            version: DOCUMENT_CONNECTION_CONTEXTS_STATE_VERSION,
+            documents: { ...this._persistedDocumentContexts },
+        };
+        const write = this._documentContextWritePromise.then(async () => {
+            await this.context.workspaceState?.update(DOCUMENT_CONNECTION_CONTEXTS_STATE_KEY, snapshot);
+        });
+        this._documentContextWritePromise = write.catch(error => {
+            logWithFallback('warn', '[ConnectionManager] Failed to persist document connection context:', error);
+        });
+        return this._documentContextWritePromise;
+    }
+
+    private warnIfMissingDocumentConnection(documentUri: string, connectionName: string): void {
+        if (!this._connectionsFullyLoaded || this._connections[connectionName]) {
+            return;
+        }
+
+        const normalizedUri = normalizeUriKey(documentUri);
+        if (this._missingDocumentConnectionWarnings.has(normalizedUri)) {
+            return;
+        }
+
+        this._missingDocumentConnectionWarnings.add(normalizedUri);
+        void vscode.window.showWarningMessage(
+            `Saved connection '${connectionName}' for this SQL file is no longer available. Select a connection for this tab before running a query.`,
+        );
     }
 
     setMetadataCache(metadataCache: MetadataCache): void {
@@ -397,6 +521,7 @@ export class ConnectionManager {
         }
         // Update globalState cache for next fast-load
         await this._updateConnectionsCache();
+        this._connectionsFullyLoaded = true;
         this._onDidChangeConnections.fire();
     }
 
@@ -516,6 +641,18 @@ export class ConnectionManager {
 
     getConnectionMetadata(name: string): ConnectionDetails | undefined {
         return this._connections[name];
+    }
+
+    /**
+     * Return whether a profile is currently available without forcing a
+     * Secrets API load. `undefined` means the full profile load is still in
+     * progress and the status bar should avoid calling it missing yet.
+     */
+    isConnectionAvailable(name: string): boolean | undefined {
+        if (this._connections[name]) {
+            return true;
+        }
+        return this._connectionsFullyLoaded ? false : undefined;
     }
 
     getConnectionNames(): string[] {
@@ -878,9 +1015,24 @@ export class ConnectionManager {
      */
     async setDocumentDatabase(documentUri: string, database: string): Promise<void> {
         const normalizedUri = normalizeUriKey(documentUri);
+
+        // A database selected for a saved file is also a durable execution
+        // context. If the tab was still using the global connection, capture
+        // that connection now so a later global switch cannot change the file.
+        const shouldBindConnection =
+            isPersistableDocumentUri(normalizedUri)
+            && !this._documentConnections.has(normalizedUri)
+            && Boolean(this._activeConnectionName);
+        if (shouldBindConnection && this._activeConnectionName) {
+            this._documentConnections.set(normalizedUri, this._activeConnectionName);
+            this._missingDocumentConnectionWarnings.delete(normalizedUri);
+            this._onDidChangeDocumentConnection.fire(documentUri);
+        }
+
         this._documentDatabaseOverride.set(normalizedUri, database);
         // Close persistent connection to force reconnect with new database
         await this.closeDocumentPersistentConnection(normalizedUri);
+        await this.persistDocumentContext(documentUri);
         this._onDidChangeDocumentDatabase.fire(documentUri);
     }
 
@@ -891,20 +1043,23 @@ export class ConnectionManager {
         const normalizedUri = normalizeUriKey(documentUri);
         this._documentDatabaseOverride.delete(normalizedUri);
         this.closeDocumentPersistentConnection(normalizedUri);
+        void this.persistDocumentContext(documentUri);
         this._onDidChangeDocumentDatabase.fire(documentUri);
     }
 
     /**
      * Get the effective database for a document
-     * Returns override if set, otherwise falls back to connection's default database
+     * Returns override if set, otherwise falls back to the executed connection's
+     * default database. The optional connection name is important for callers
+     * that explicitly execute against a profile different from the tab default.
      */
-    async getEffectiveDatabase(documentUri: string): Promise<string | null> {
+    async getEffectiveDatabase(documentUri: string, connectionNameOverride?: string): Promise<string | null> {
       const normalizedUri = normalizeUriKey(documentUri);
       const override = this._documentDatabaseOverride.get(normalizedUri);
       if (override) {
         return override;
       }
-      const connectionName = this.getConnectionForExecution(documentUri);
+      const connectionName = connectionNameOverride || this.getConnectionForExecution(documentUri);
       if (!connectionName) return null;
       const details = await this.getConnection(connectionName);
       return getLogicalDefaultDatabase(details);
@@ -914,13 +1069,14 @@ export class ConnectionManager {
      * Get the effective schema for a document
      * Returns the schema from connection details if available, otherwise undefined
      * This allows dialects with schema concepts to use the configured schema
-     * rather than hardcoded defaults
+     * rather than hardcoded defaults. An explicit connection name follows the
+     * same execution precedence as getEffectiveDatabase.
      */
-    async getEffectiveSchema(documentUri: string): Promise<string | null> {
-      const connectionName = this.getConnectionForExecution(documentUri);
+    async getEffectiveSchema(documentUri: string, connectionNameOverride?: string): Promise<string | null> {
+      const connectionName = connectionNameOverride || this.getConnectionForExecution(documentUri);
       if (!connectionName) return null;
       const details = await this.getConnection(connectionName);
-      const effectiveDb = await this.getEffectiveDatabase(documentUri);
+      const effectiveDb = await this.getEffectiveDatabase(documentUri, connectionName);
       return this.resolveEffectiveSchemaFromDetails(
         connectionName,
         effectiveDb,
@@ -1041,6 +1197,7 @@ export class ConnectionManager {
     setDocumentConnection(documentUri: string, connectionName: string): Promise<void> {
         const normalizedUri = normalizeUriKey(documentUri);
         this._documentConnections.set(normalizedUri, connectionName);
+        this._missingDocumentConnectionWarnings.delete(normalizedUri);
         this.bumpDocumentConnectionGeneration(normalizedUri);
         // Invalidate an in-flight connection for the previous selection too.
         this._documentConnectionPromises.delete(normalizedUri);
@@ -1048,14 +1205,18 @@ export class ConnectionManager {
         // Callers that are about to execute SQL can await this promise so the old
         // Access/file connection is fully released first.
         const closePromise = this.closeDocumentPersistentConnection(normalizedUri);
+        const persistPromise = this.persistDocumentContext(documentUri);
         this._onDidChangeDocumentConnection.fire(documentUri);
-        return closePromise;
+        return Promise.all([closePromise, persistPromise]).then(() => undefined);
     }
 
     clearDocumentConnection(documentUri: string) {
         const normalizedUri = normalizeUriKey(documentUri);
         this._documentConnections.delete(normalizedUri);
         this._documentDatabaseOverride.delete(normalizedUri);
+        delete this._persistedDocumentContexts[normalizedUri];
+        void this.persistDocumentContext(documentUri);
+        this._missingDocumentConnectionWarnings.delete(normalizedUri);
         this._documentConnectionPromises.delete(normalizedUri);
         this.bumpDocumentConnectionGeneration(normalizedUri);
         this.closeDocumentPersistentConnection(normalizedUri);
@@ -1091,6 +1252,7 @@ export class ConnectionManager {
             const normalizedUri = normalizeUriKey(documentUri);
             const docConnection = this._documentConnections.get(normalizedUri);
             if (docConnection) {
+                this.warnIfMissingDocumentConnection(documentUri, docConnection);
                 return docConnection;
             }
         }
@@ -1125,7 +1287,7 @@ export class ConnectionManager {
         // `default`, `main`, or `memory`) and must never be passed to the
         // connection/import path in place of the configured file.
         if (documentUri && !isLocalFileDialect(resolvedKind)) {
-            const effectiveDb = await this.getEffectiveDatabase(documentUri);
+            const effectiveDb = await this.getEffectiveDatabase(documentUri, targetName);
             if (effectiveDb) {
                 resolvedDetails = { ...resolvedDetails, database: effectiveDb };
             }

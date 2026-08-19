@@ -25,6 +25,7 @@ describe('ConnectionManager', () => {
     let manager: ConnectionManager;
     let secretsStore: Map<string, string>;
     let globalState: Map<string, unknown>;
+    let workspaceState: Map<string, unknown>;
 
     const sampleConnection: ConnectionDetails = {
         name: 'TestConnection',
@@ -106,6 +107,7 @@ describe('ConnectionManager', () => {
         // Reset mocks and storage
         secretsStore = new Map();
         globalState = new Map();
+        workspaceState = new Map();
 
         // Create mock ExtensionContext
         mockContext = {
@@ -125,6 +127,16 @@ describe('ConnectionManager', () => {
                         globalState.delete(key);
                     } else {
                         globalState.set(key, value);
+                    }
+                })
+            },
+            workspaceState: {
+                get: jest.fn((key: string) => workspaceState.get(key)),
+                update: jest.fn(async (key: string, value: unknown) => {
+                    if (value === undefined) {
+                        workspaceState.delete(key);
+                    } else {
+                        workspaceState.set(key, value);
                     }
                 })
             },
@@ -544,6 +556,72 @@ describe('ConnectionManager', () => {
             expect(manager.getConnectionForExecution(docUri)).toBe('DocSpecificConnection');
         });
 
+        it('persists and restores saved-file connection and database context', async () => {
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection({ ...sampleConnection, name: 'OtherConnection', database: 'otherdb' });
+            await manager.setActiveConnection('OtherConnection');
+
+            const documentUri = 'file:///workspace/report.sql';
+            await manager.setDocumentConnection(documentUri, 'TestConnection');
+            await manager.setDocumentDatabase(documentUri, 'analytics');
+
+            expect(workspaceState.get('justybase.documentConnectionContexts.v1')).toEqual({
+                version: 1,
+                documents: {
+                    [documentUri]: {
+                        connectionName: 'TestConnection',
+                        databaseOverride: 'analytics'
+                    }
+                }
+            });
+
+            const restored = new ConnectionManager(mockContext);
+            await restored.ensureFullyLoaded();
+
+            expect(restored.getDocumentConnection(documentUri)).toBe('TestConnection');
+            expect(restored.getConnectionForExecution(documentUri)).toBe('TestConnection');
+            expect(restored.getDocumentDatabase(documentUri)).toBe('analytics');
+            expect(await restored.getEffectiveDatabase(documentUri)).toBe('analytics');
+
+            await restored.dispose();
+        });
+
+        it('does not persist untitled documents or notebook cells', async () => {
+            await manager.saveConnection(sampleConnection);
+            const workspaceUpdate = (mockContext.workspaceState as unknown as { update: jest.Mock }).update;
+            workspaceUpdate.mockClear();
+
+            await manager.setDocumentConnection('untitled:Console-Test.sql', 'TestConnection');
+            await manager.setDocumentDatabase('untitled:Console-Test.sql', 'testdb');
+            await manager.setDocumentConnection('vscode-notebook-cell:/workspace/notebook#cell1', 'TestConnection');
+            await manager.setDocumentDatabase('vscode-notebook-cell:/workspace/notebook#cell1', 'testdb');
+
+            expect(workspaceUpdate).not.toHaveBeenCalled();
+        });
+
+        it('keeps a missing restored profile as the document context and warns', async () => {
+            workspaceState.set('justybase.documentConnectionContexts.v1', {
+                version: 1,
+                documents: {
+                    'file:///workspace/missing.sql': { connectionName: 'RemovedConnection' }
+                }
+            });
+            await manager.saveConnection(sampleConnection);
+            await manager.setActiveConnection('TestConnection');
+
+            const warning = vscode.window.showWarningMessage as jest.Mock;
+            warning.mockClear();
+            const restored = new ConnectionManager(mockContext);
+            await restored.ensureFullyLoaded();
+
+            expect(restored.getConnectionForExecution('file:///workspace/missing.sql')).toBe('RemovedConnection');
+            expect(warning).toHaveBeenCalledWith(expect.stringContaining("Saved connection 'RemovedConnection'"));
+            expect(restored.getConnectionForExecution('file:///workspace/missing.sql')).toBe('RemovedConnection');
+            expect(warning).toHaveBeenCalledTimes(1);
+
+            await restored.dispose();
+        });
+
         it('should recreate the tab connection after switching from an old connection to Netezza', async () => {
             const oldConnection: ConnectionDetails = {
                 name: 'LegacyConnection',
@@ -654,6 +732,16 @@ describe('ConnectionManager', () => {
 
             const effectiveDb = await manager.getEffectiveDatabase(docUri);
             expect(effectiveDb).toBe('testdb');
+        });
+
+        it('should resolve effective database from an explicitly executed connection', async () => {
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection({ ...sampleConnection, name: 'OtherConnection', database: 'otherdb' });
+
+            const docUri = 'file:///test.sql';
+            manager.setDocumentConnection(docUri, 'TestConnection');
+
+            await expect(manager.getEffectiveDatabase(docUri, 'OtherConnection')).resolves.toBe('otherdb');
         });
 
         it('should resolve effective schema synchronously for Netezza connections', async () => {
