@@ -1013,6 +1013,20 @@ describe('extension.ts', () => {
             expect(window.showInformationMessage).toHaveBeenCalledWith('Schema refreshed (Cache cleared).');
         });
 
+        it('should tolerate a non-string command argument from a contributed view', async () => {
+            const { window } = jest.requireMock('vscode');
+
+            await activate(mockContext);
+
+            const { commands } = jest.requireMock('vscode');
+            const calls = (commands.registerCommand as jest.Mock).mock.calls;
+            const refreshCall = calls.find((call: unknown[]) => call[0] === 'netezza.refreshSchema');
+            const handler = refreshCall[1];
+            await handler({ label: 'Schema view item' });
+
+            expect(window.showInformationMessage).toHaveBeenCalledWith('Schema refreshed (Cache cleared).');
+        });
+
         it('should trigger metadata prefetch when active connection exists', async () => {
             const { window } = jest.requireMock('vscode');
 

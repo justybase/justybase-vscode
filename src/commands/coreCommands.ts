@@ -564,8 +564,11 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
         }),
 
         // Refresh schema
-        vscode.commands.registerCommand('netezza.refreshSchema', async (connectionName?: string) => {
-            const requestedConnectionName = connectionName?.trim();
+        vscode.commands.registerCommand('netezza.refreshSchema', async (connectionName?: unknown) => {
+            // Commands contributed to a view can receive a UI item as their
+            // argument. Only a string is a valid connection selector; treat
+            // any other runtime value like the no-argument refresh form.
+            const requestedConnectionName = typeof connectionName === 'string' ? connectionName.trim() : undefined;
             if (requestedConnectionName) {
                 metadataCache.clearConnectionMetadata(requestedConnectionName);
                 schemaProvider.clearConnectionError(requestedConnectionName);
