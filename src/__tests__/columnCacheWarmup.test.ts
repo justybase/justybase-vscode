@@ -70,6 +70,42 @@ describe('columnCacheWarmup', () => {
         ).toBeUndefined();
     });
 
+    it('falls back to the external-table catalog when the main catalog has no row', async () => {
+        const cache = createCache();
+        const queries: string[] = [];
+        const readRows: CatalogRowReader = async (sql) => {
+            queries.push(sql);
+            if (!sql.includes('_V_EXTERNAL')) {
+                return [];
+            }
+            return [{
+                TABLENAME: 'ET_ORDERS',
+                SCHEMA: 'ADMIN',
+                DBNAME: 'JUST_DATA',
+                ATTNAME: 'EXTERNAL_ID',
+                FORMAT_TYPE: 'VARCHAR(30)',
+                IS_NOT_NULL: 1,
+                IS_PK: 0,
+                IS_FK: 0,
+                IS_DISTRIBUTION_KEY: 0,
+            }];
+        };
+
+        await warmTableColumnsFromCatalog(
+            cache,
+            'CONN',
+            { database: 'JUST_DATA', schema: 'ADMIN', table: 'ET_ORDERS' },
+            readRows,
+        );
+
+        expect(queries).toHaveLength(2);
+        expect(queries[0]).not.toContain('_V_EXTERNAL');
+        expect(queries[1]).toContain('_V_EXTERNAL');
+        expect(cache.getColumns('CONN', 'JUST_DATA.ADMIN.ET_ORDERS')).toEqual([
+            expect.objectContaining({ ATTNAME: 'EXTERNAL_ID', FORMAT_TYPE: 'VARCHAR(30)' }),
+        ]);
+    });
+
     it('does not throw when catalog query fails', async () => {
         const cache = createCache();
         const readRows: CatalogRowReader = async () => {

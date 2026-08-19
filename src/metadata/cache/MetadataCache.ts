@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { CachePrefetcher, QueryRunnerRawFn } from '../prefetch';
+import { CachePrefetcher, DisposableQueryRunnerRawFn, QueryRunnerRawFn } from '../prefetch';
 import type { MetadataPrefetchProgress } from '../prefetch';
 import type { ConnectionManager } from '../../core/connectionManager';
 import { searchMetadataIndex, type SearchIndexOptions } from '../searchIndex';
@@ -47,6 +47,7 @@ import {
   ensureColumnsLoadedForTableKey,
   preloadColumnsForConnection,
   whenEagerPreloadComplete,
+  hasColumnLayerOnDisk,
   hasColumnsOnDisk,
   isColumnsLoaded,
   eagerPreloadColumnsIfEnabled,
@@ -70,6 +71,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
 
   private readonly _columnLoaderState: ColumnLoaderState = {
     columnsOnDisk: new Map(),
+    columnLayerKeysOnDisk: new Map(),
     columnsLoadedDatabases: new Map(),
     columnLoadPromises: new Map(),
     columnLayerLoadPromises: new Map(),
@@ -317,6 +319,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
     return hasColumnsOnDisk(this._columnLoaderState, connectionName, databaseName);
   }
 
+  hasColumnLayerOnDisk(connectionName: string, columnKey: string): boolean {
+    return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, columnKey);
+  }
+
   isColumnsLoaded(connectionName: string, databaseName: string): boolean {
     return isColumnsLoaded(this._columnLoaderState, connectionName, databaseName);
   }
@@ -487,6 +493,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     this._diskLifecycleState.metadataHydratingConnections.delete(connectionName);
     this._diskLifecycleState.metadataHydratePromises.delete(connectionName);
     this._columnLoaderState.columnsOnDisk.delete(connectionName);
+    this._columnLoaderState.columnLayerKeysOnDisk.delete(connectionName);
     this._columnLoaderState.columnsLoadedDatabases.delete(connectionName);
     for (const key of Array.from(this._columnLoaderState.columnLoadPromises.keys())) {
       if (key.startsWith(prefix)) {
@@ -521,6 +528,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   private clearLocalMetadataState(): void {
     this._store.clearLayerMaps();
     this._columnLoaderState.columnsOnDisk.clear();
+    this._columnLoaderState.columnLayerKeysOnDisk.clear();
     this._columnLoaderState.columnsLoadedDatabases.clear();
     this._columnLoaderState.columnLoadPromises.clear();
     this._columnLoaderState.columnLayerLoadPromises.clear();
@@ -1128,10 +1136,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
         const columnKey = buildColumnCacheKey(dbName, schema || undefined, tableName);
         const columnsLoadedInMemory = this._store.columnCache.has(`${connectionName}|${columnKey}`);
         // Column files are intentionally hydrated lazily after the metadata
-        // manifest. Their presence is still a complete, restart-safe snapshot;
-        // a missing file is invalidated by ensureColumnsLoaded and will make a
-        // later freshness check fail.
-        const columnsAvailableOnDisk = this.hasColumnsOnDisk(connectionName, dbName);
+        // manifest. A database-level file alone is not enough, though: it may
+        // predate a newly discovered table. Require the exact persisted layer.
+        const columnsAvailableOnDisk = this.hasColumnLayerOnDisk(connectionName, columnKey);
         if (!columnsLoadedInMemory && !columnsAvailableOnDisk) {
           if (logMissing) {
             Logger.getInstance().warn(
@@ -1200,7 +1207,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
 
   triggerConnectionPrefetch(
     connectionName: string,
-    runQueryFn: QueryRunnerRawFn,
+    runQueryFn: DisposableQueryRunnerRawFn,
   ): void {
     if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
       return;

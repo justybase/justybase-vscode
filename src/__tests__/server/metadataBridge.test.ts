@@ -357,6 +357,29 @@ describe("MetadataBridge list cache", () => {
       expect(r1).toEqual([]);
       expect(r2).toEqual([]);
     });
+
+    it("D4: Netezza cache-only empty response is not retained during prefetch", async () => {
+      sendRequest.mockImplementation(async (params) => {
+        if (params.kind === "context") {
+          return { connectionName: "NZ", databaseKind: "netezza" };
+        }
+        return [];
+      });
+
+      await bridge.getContext(docUri);
+      await expect(bridge.getTables(docUri, db, schema)).resolves.toEqual([]);
+      await expect(bridge.getTables(docUri, db, schema)).resolves.toEqual([]);
+
+      expect(sendRequest).toHaveBeenCalledTimes(3);
+      expect(sendRequest).toHaveBeenLastCalledWith({
+        documentUri: docUri,
+        kind: "tables",
+        database: db,
+        schema,
+        cacheOnly: true,
+      });
+      expect(internals(bridge).listCache.has(`TBL|${docUri}|${db}|${schema}`)).toBe(false);
+    });
   });
 
   // =========================================================================

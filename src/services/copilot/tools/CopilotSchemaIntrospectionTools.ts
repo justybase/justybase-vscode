@@ -3,6 +3,7 @@ import { ConnectionManager } from '../../../core/connectionManager';
 import {
     createConnectedDatabaseConnectionFromDetails,
     executeDatabaseQuery,
+    getDatabaseMetadataProvider,
     getRequiredDatabaseDdlProvider
 } from '../../../core/connectionFactory';
 import { runQueryRaw } from '../../../core/queryRunner';
@@ -153,45 +154,72 @@ export class CopilotSchemaIntrospectionTools {
 
         const databaseKind = this.deps.connectionManager.getConnectionDatabaseKind(connectionName);
         const objectTypes = buildCopilotDefaultObjectTypes(databaseKind);
+        const metadataProvider = getDatabaseMetadataProvider(databaseKind);
         const fetchedColumns: CanonicalColumnMetadata[] = [];
 
-        await Promise.all(
-            Array.from(targetsToQuery.values()).map(async target => {
-                const sql = buildColumnsWithKeysQuery(target.database, {
-                    schema: target.schema,
-                    tableName: target.tableName,
-                    objTypes: objectTypes
-                }, databaseKind);
+        // Keep targeted schema introspection serial. A user can request many
+        // tables at once, but parallel catalog connections create avoidable
+        // session pressure on Netezza.
+        for (const target of targetsToQuery.values()) {
+            const sql = buildColumnsWithKeysQuery(target.database, {
+                schema: target.schema,
+                tableName: target.tableName,
+                objTypes: objectTypes
+            }, databaseKind);
 
-                try {
-                    const result = await runQueryRaw(
-                        this.deps.context,
-                        sql,
-                        true,
-                        this.deps.connectionManager,
-                        connectionName,
-                        undefined,
-                        undefined,
-                        undefined,
-                        undefined,
-                        false
-                    );
-
-                    const parsedColumns = parseColumnsWithKeysResult(result, target.database);
-                    for (const column of parsedColumns) {
-                        if (column.tableName !== target.tableName.toUpperCase()) {
-                            continue;
-                        }
-                        if (target.schema && column.schema !== target.schema.toUpperCase()) {
-                            continue;
-                        }
-                        fetchedColumns.push(column);
+            const matchingColumns = (result: Awaited<ReturnType<typeof runQueryRaw>>) =>
+                parseColumnsWithKeysResult(result, target.database).filter((column) => {
+                    if (column.tableName !== target.tableName.toUpperCase()) {
+                        return false;
                     }
-                } catch {
-                    // Keep partial results when a single target lookup fails.
+                    return !target.schema || column.schema === target.schema.toUpperCase();
+                });
+
+            try {
+                let targetColumns = matchingColumns(await runQueryRaw(
+                    this.deps.context,
+                    sql,
+                    true,
+                    this.deps.connectionManager,
+                    connectionName,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    false
+                ));
+
+                // Regular catalog metadata intentionally excludes external
+                // tables. Probe their small companion query only after a
+                // targeted main lookup did not find this table.
+                if (targetColumns.length === 0
+                    && typeof metadataProvider.buildExternalTableColumnsQuery === 'function') {
+                    const externalSql = metadataProvider.buildExternalTableColumnsQuery(
+                        target.database,
+                        target.schema ?? '',
+                        target.tableName,
+                    );
+                    if (externalSql) {
+                        targetColumns = matchingColumns(await runQueryRaw(
+                            this.deps.context,
+                            externalSql,
+                            true,
+                            this.deps.connectionManager,
+                            connectionName,
+                            undefined,
+                            undefined,
+                            undefined,
+                            undefined,
+                            false
+                        ));
+                    }
                 }
-            })
-        );
+
+                fetchedColumns.push(...targetColumns);
+            } catch {
+                // Keep partial results when a single target lookup fails.
+            }
+        }
 
         const fetchedResults = groupCanonicalColumnsByTable(fetchedColumns).map(group => ({
             database: group.database,

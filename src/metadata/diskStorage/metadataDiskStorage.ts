@@ -348,6 +348,7 @@ export class MetadataDiskStorage {
         return {
             ...metadata,
             columnDatabases: [...indexEntry.columnDatabases],
+            columnLayerKeys: [...(indexEntry.columnLayerKeys ?? [])],
         };
     }
 
@@ -386,6 +387,9 @@ export class MetadataDiskStorage {
                 result.set(connectionName, {
                     ...manifest,
                     columnDatabases: [...entry.columnDatabases],
+                    columnLayerKeys: [
+                        ...(entry.columnLayerKeys ?? manifest.columnLayerKeys ?? []),
+                    ],
                     isComplete: entry.isComplete ?? manifest.isComplete ?? true,
                     hasManifestFile: true,
                 });
@@ -403,6 +407,7 @@ export class MetadataDiskStorage {
                 connectionFingerprint: entry.connectionFingerprint,
                 database: { timestamp: entry.prefetchCompletedAt, data: [] },
                 columnDatabases: [...entry.columnDatabases],
+                columnLayerKeys: [...(entry.columnLayerKeys ?? [])],
                 isComplete: entry.isComplete ?? true,
                 hasManifestFile: false,
             });
@@ -808,6 +813,13 @@ export class MetadataDiskStorage {
 
         const columnFiles = serializeColumnsByDatabase(metadataCache, connectionName);
         const columnDatabases = [...columnFiles.keys()];
+        const columnLayerKeys = [...new Set(
+            [...columnFiles.values()].flatMap((columnFile) =>
+                columnFile.schemaVersion === COLUMN_FILE_SCHEMA_VERSION
+                    ? Object.keys(columnFile.layers)
+                    : Object.keys(columnFile.column),
+            ),
+        )];
 
         await this.writeGzipJson(
             getV3ConnectionMetadataPath(this.storageDir, connectionName),
@@ -823,18 +835,25 @@ export class MetadataDiskStorage {
 
         await this.pruneStaleColumnFiles(connectionName, columnDatabases);
         const isComplete = options?.isComplete ?? true;
-        await this.writeConnectionManifest(connectionName, metadata, columnDatabases, isComplete);
+        await this.writeConnectionManifest(
+            connectionName,
+            metadata,
+            columnDatabases,
+            columnLayerKeys,
+            isComplete,
+        );
 
         index.connections[connectionName] = {
             prefetchCompletedAt,
             connectionFingerprint: fingerprint,
             columnDatabases,
+            columnLayerKeys,
             isComplete,
             committedFence: lease.fence,
             prefetchStartedAt: current?.prefetchStartedAt,
         };
         Logger.getInstance().info(
-            `[MetadataDisk] save: ${connectionName} (${columnDatabases.length} DB column file(s))`,
+            `[MetadataDisk] save: ${connectionName} (${columnDatabases.length} DB column file(s), complete=${isComplete})`,
         );
         return true;
     }
@@ -843,6 +862,7 @@ export class MetadataDiskStorage {
         connectionName: string,
         metadata: SerializedConnectionMetadata,
         columnDatabases: string[],
+        columnLayerKeys: string[],
         isComplete = true,
     ): Promise<void> {
         const manifest: SerializedConnectionManifest = {
@@ -851,6 +871,7 @@ export class MetadataDiskStorage {
             connectionFingerprint: metadata.connectionFingerprint,
             database: metadata.database,
             columnDatabases,
+            columnLayerKeys,
             isComplete,
         };
         await this.writeGzipJson(

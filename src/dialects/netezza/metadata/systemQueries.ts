@@ -903,9 +903,12 @@ ${unionSql}
      * Get external tables from a list of databases (separate query, merged
      * with `listTablesAndViews` results in code).
      *
-     * External tables come from `_V_EXTERNAL`/`_V_EXTOBJECT` because some NPS
-     * instances do not list them in `_V_OBJECT_DATA`. Duplicate resolution is
-     * performed in TypeScript, so this query must not read `_V_OBJECT_DATA`.
+     * External tables come from `_V_EXTERNAL` because some NPS instances do
+     * not list them in `_V_OBJECT_DATA`. Duplicate resolution is performed in
+     * TypeScript, so this query must not read `_V_OBJECT_DATA`. The bulk list
+     * deliberately omits OWNER: it would require an extra `_V_EXTOBJECT` join
+     * solely for display metadata; DDL/introspection paths fetch that detail
+     * only when an external object is actually inspected.
      *
      * Returns the same row shape as `listTablesAndViews`:
      * OBJNAME, OBJID, SCHEMA, DBNAME, OBJTYPE, OWNER, REFOBJNAME, DESCRIPTION
@@ -928,11 +931,10 @@ ${unionSql}
                     TRIM(E1.SCHEMA) AS SCHEMA,
                     TRIM(E1.DATABASE) AS DBNAME,
                     'EXTERNAL TABLE' AS OBJTYPE,
-                    TRIM(COALESCE(E2.OWNER, '')) AS OWNER,
+                    '' AS OWNER,
                     '' AS REFOBJNAME,
                     '' AS DESCRIPTION
                 FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E1
-                LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTOBJECT)} E2 ON E1.RELID = E2.OBJID
                 WHERE ${buildTrimmedIdentifierCondition('E1.DATABASE', db)}
             `.trim());
 
@@ -1084,8 +1086,9 @@ ${unionSql}
      * `_V_EXTERNAL` because some NPS instances do not list external tables in
      * `_V_OBJECT_DATA`. Duplicate resolution is performed in TypeScript.
      *
-     * Returns the same row shape as `getTableColumns`:
+     * Returns both the DDL row shape and the generic metadata row shape:
      * OBJID, ATTNUM, ATTNAME, DESCRIPTION, FULL_TYPE, ATTNOTNULL, COLDEFAULT
+     * plus TABLENAME, SCHEMA, DBNAME, FORMAT_TYPE, IS_NOT_NULL and key flags.
      *
      * @param database - Database name
      * @param schema - Schema name
@@ -1093,17 +1096,27 @@ ${unionSql}
      */
     getExternalTableColumns: (database: string, schema: string, tableName: string): string => {
         const db = database.toUpperCase();
-        const externalSchemaFilter = buildTrimmedIdentifierCondition('E.SCHEMA', schema);
+        const externalSchemaFilter = schema
+            ? buildTrimmedIdentifierCondition('E.SCHEMA', schema)
+            : '1=1';
         const externalTableFilter = buildTrimmedIdentifierCondition('E.TABLENAME', tableName);
         return `
             SELECT
                 C.OBJID::INT AS OBJID,
                 C.ATTNUM,
-                C.ATTNAME,
+                TRIM(C.ATTNAME) AS ATTNAME,
                 C.DESCRIPTION,
                 C.FORMAT_TYPE AS FULL_TYPE,
                 C.ATTNOTNULL::BOOL AS ATTNOTNULL,
-                C.COLDEFAULT
+                C.COLDEFAULT,
+                TRIM(E.TABLENAME) AS TABLENAME,
+                TRIM(E.SCHEMA) AS SCHEMA,
+                TRIM(E.DATABASE) AS DBNAME,
+                C.FORMAT_TYPE AS FORMAT_TYPE,
+                CASE WHEN C.ATTNOTNULL THEN 1 ELSE 0 END AS IS_NOT_NULL,
+                0 AS IS_PK,
+                0 AS IS_FK,
+                0 AS IS_DISTRIBUTION_KEY
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} C
             INNER JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E ON C.OBJID = E.RELID
             WHERE C.OBJID NOT IN (4,5)

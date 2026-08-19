@@ -40,6 +40,7 @@ import {
   type MetadataQueryContext,
   type MetadataQueryTiming,
 } from "../metadata/metadataQueryDiagnostics";
+import type { NzConnection } from "../types";
 
 // ---------------------------------------------------------------------------
 // Connection resolution
@@ -79,6 +80,19 @@ export interface RunQueryRawOptions {
   metadataContext?: MetadataQueryContext;
   /** Queue wait measured by the shared metadata limiter. */
   metadataQueueWaitMs?: number;
+  /**
+   * Caller-owned, already connected session. Used by one bounded metadata
+   * refresh to avoid a new TCP/login handshake for every catalog query.
+   */
+  connectionOverride?: NzConnection;
+  /** Shared state associated with `connectionOverride`, including its SID. */
+  metadataSession?: MetadataQuerySession;
+}
+
+/** State shared by sequential metadata queries on one physical connection. */
+export interface MetadataQuerySession {
+  connection: NzConnection;
+  sessionId?: string;
 }
 
 export function isRunQueryRawOptions(
@@ -143,6 +157,8 @@ export async function runQueryRaw(
     onSessionId,
     metadataContext,
     metadataQueueWaitMs,
+    connectionOverride,
+    metadataSession,
   } = options;
 
   const connManager = connectionManager || new ConnectionManager(context);
@@ -216,6 +232,8 @@ export async function runQueryRaw(
       metadataContext,
       trackMetadataSession,
       metadataQueueWaitMs,
+      connectionOverride,
+      metadataSession,
     );
 
     const durationMs = Date.now() - queryStartTime;
@@ -263,6 +281,8 @@ export async function runQueryRaw(
           metadataContext,
           trackMetadataSession,
           metadataQueueWaitMs,
+          connectionOverride,
+          metadataSession,
         );
 
         const retryDurationMs = Date.now() - queryStartTime;
@@ -319,6 +339,8 @@ export async function runQueryRaw(
           metadataContext,
           trackMetadataSession,
           metadataQueueWaitMs,
+          connectionOverride,
+          metadataSession,
         );
 
         const retryDurationMs = Date.now() - queryStartTime;
@@ -416,6 +438,8 @@ export async function executeRawQuery(
   metadataContext?: MetadataQueryContext,
   trackMetadataSession = false,
   metadataQueueWaitMs?: number,
+  connectionOverride?: NzConnection,
+  metadataSession?: MetadataQuerySession,
 ): Promise<QueryResult> {
   try {
     return await executeRawQueryOnce(
@@ -432,6 +456,8 @@ export async function executeRawQuery(
       metadataContext,
       trackMetadataSession,
       metadataQueueWaitMs,
+      connectionOverride,
+      metadataSession,
     );
   } catch (error: unknown) {
     if (
@@ -461,6 +487,8 @@ export async function executeRawQuery(
           metadataContext,
           trackMetadataSession,
           metadataQueueWaitMs,
+          connectionOverride,
+          metadataSession,
         );
       } catch (retryError: unknown) {
         const retryErrObj = retryError as { message?: string };
@@ -487,13 +515,17 @@ async function executeRawQueryOnce(
   metadataContext?: MetadataQueryContext,
   trackMetadataSession = false,
   metadataQueueWaitMs?: number,
+  connectionOverride?: NzConnection,
+  metadataSession?: MetadataQuerySession,
 ): Promise<QueryResult> {
-  const { connection, shouldCloseConnection } = await getConnectionForDocument(
-    connManager,
-    resolvedConnectionName,
-    keepConnectionOpen,
-    documentUri,
-  );
+  const { connection, shouldCloseConnection } = connectionOverride
+    ? { connection: connectionOverride, shouldCloseConnection: false }
+    : await getConnectionForDocument(
+      connManager,
+      resolvedConnectionName,
+      keepConnectionOpen,
+      documentUri,
+    );
   logOutput(logger, "Connected.");
   const timingStartedAt = Date.now();
   let executionTiming: MetadataQueryTiming | undefined;
@@ -510,22 +542,27 @@ async function executeRawQueryOnce(
   }
 
   // Capture session ID
-  let sessionId: string | undefined;
-  try {
-    const sidCmd = connection.createCommand("SELECT CURRENT_SID");
-    const sidReader = await sidCmd.executeReader();
-    if (await sidReader.read()) {
-      sessionId = String(sidReader.getValue(0));
-      if (documentUri) {
-        connManager.setDocumentLastSessionId(
-          normalizeUriKey(documentUri),
-          sessionId,
-        );
+  let sessionId = metadataSession?.sessionId;
+  if (!sessionId) {
+    try {
+      const sidCmd = connection.createCommand("SELECT CURRENT_SID");
+      const sidReader = await sidCmd.executeReader();
+      if (await sidReader.read()) {
+        sessionId = String(sidReader.getValue(0));
+        if (metadataSession) {
+          metadataSession.sessionId = sessionId;
+        }
+        if (documentUri) {
+          connManager.setDocumentLastSessionId(
+            normalizeUriKey(documentUri),
+            sessionId,
+          );
+        }
       }
+      await sidReader.close();
+    } catch {
+      // Ignore if we can't get SID
     }
-    await sidReader.close();
-  } catch {
-    // Ignore if we can't get SID
   }
 
   if (sessionId) {

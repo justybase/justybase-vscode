@@ -4,6 +4,7 @@ import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 import { Logger } from '../utils/logger';
 import { METADATA_QUERY_TIMEOUT_SECONDS } from '../metadata/metadataQueryLimiter';
+import { createConnectionScopedMetadataQueryRunner } from '../metadata/connectionScopedMetadataQueryRunner';
 import {
     createMetadataRefreshStatusBar,
     updateMetadataRefreshStatusBar,
@@ -105,17 +106,15 @@ export class MetadataPrefetchCoordinator {
                 return;
             }
 
-            this.services.metadataCache.triggerConnectionPrefetch(connectionName, (q, metadataContext) =>
-                this.services.queryExecutor({
+            this.services.metadataCache.triggerConnectionPrefetch(
+                connectionName,
+                createConnectionScopedMetadataQueryRunner({
                     context: this.context,
-                    query: q,
-                    silent: true,
                     connectionManager: this.services.connectionManager,
                     connectionName,
                     maxRows: 1000000,
-                    isUserQuery: false,
                     timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
-                    metadataContext,
+                    queryExecutor: this.services.queryExecutor,
                 }),
             );
         });

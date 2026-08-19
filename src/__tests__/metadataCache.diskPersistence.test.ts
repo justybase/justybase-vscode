@@ -123,6 +123,7 @@ describe('MetadataCache disk persistence integration', () => {
         expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(true);
         expect(cache2.hasAllObjectsPrefetchTriggered('NZ')).toBe(true);
         expect(cache2.getColumns('NZ', 'DB1.S1.T1')).toBeUndefined();
+        expect(cache2.hasColumnLayerOnDisk('NZ', 'DB1.S1.T1')).toBe(true);
 
         await cache2.ensureColumnsLoaded('NZ', 'DB1');
         expect(cache2.getColumns('NZ', 'DB1.S1.T1')).toEqual([
@@ -441,6 +442,25 @@ describe('MetadataCache disk persistence integration', () => {
 
         cache.setColumns('NZ', 'DB1.S1.T1', [{ ATTNAME: 'C1', FORMAT_TYPE: 'INT', label: 'C1' }]);
         expect(cache.verifyCompleteSnapshot('NZ')).toBe(true);
+    });
+
+    it('does not treat another table in the same database file as column coverage', () => {
+        cache.setDatabases('NZ', [{ DATABASE: 'DB1', label: 'DB1', kind: 9 }]);
+        cache.setSchemas('NZ', 'DB1', [{ SCHEMA: 'S1', label: 'S1', kind: 19 }]);
+        cache.setTables('NZ', 'DB1.S1', [
+            { OBJNAME: 'T1', OBJID: 1, SCHEMA: 'S1', label: 'T1', objType: 'TABLE', kind: 6 },
+            { OBJNAME: 'T2', OBJID: 2, SCHEMA: 'S1', label: 'T2', objType: 'TABLE', kind: 6 },
+        ], new Map([['DB1.S1.T1', 1], ['DB1.S1.T2', 2]]));
+        cache.setProcedures('NZ', 'DB1..', [{ PROCEDURE: 'P1', SCHEMA: 'S1', label: 'P1' }]);
+        cache.setColumns('NZ', 'DB1.S1.T1', [{ ATTNAME: 'C1', FORMAT_TYPE: 'INT', label: 'C1' }]);
+
+        cache['_columnLoaderState'].columnsOnDisk.set('NZ', ['DB1']);
+        cache['_columnLoaderState'].columnLayerKeysOnDisk.set(
+            'NZ',
+            new Set(['DB1.S1.T1']),
+        );
+
+        expect(cache.verifyCompleteSnapshot('NZ')).toBe(false);
     });
 
     it('should report stale prefetch after TTL even if triggered (E18)', () => {

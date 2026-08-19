@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { runQueryRaw } from '../../core/queryRunner';
+import { createConnectionScopedMetadataQueryRunner } from '../../metadata/connectionScopedMetadataQueryRunner';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
 import { METADATA_QUERY_TIMEOUT_SECONDS } from '../../metadata/metadataQueryLimiter';
 import type { SchemaItem } from '../../providers/schemaProvider';
@@ -52,15 +52,13 @@ export function registerRefreshMetadataCommands(
 								deps.schemaProvider.clearConnectionError(connectionName);
 								deps.schemaProvider.refresh();
 								if (supportsLegacyMetadataPrefetch(databaseKind)) {
-                                    deps.metadataCache.triggerConnectionPrefetch(connectionName, (query) =>
-                                        runQueryRaw({
+                                    deps.metadataCache.triggerConnectionPrefetch(
+                                        connectionName,
+                                        createConnectionScopedMetadataQueryRunner({
                                             context: deps.context,
-                                            query,
-                                            silent: true,
                                             connectionManager: deps.connectionManager,
                                             connectionName,
                                             maxRows: 1000000,
-                                            isUserQuery: false,
                                             timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
                                         }),
                                     );

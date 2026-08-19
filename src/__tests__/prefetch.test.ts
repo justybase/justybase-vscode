@@ -54,6 +54,12 @@ describe('CachePrefetcher', () => {
       getProcedures: jest.fn(),
       setProcedures: jest.fn(),
       getProceduresAllSchemas: jest.fn(),
+      markViewsCatalogLoaded: jest.fn(),
+      markPrefetchObjectTypesCatalogLoaded: jest.fn(),
+      markProcedureCatalogLoaded: jest.fn(),
+      getTypeGroups: jest.fn(),
+      hasCachedTypeGroups: jest.fn().mockReturnValue(false),
+      setTypeGroups: jest.fn(),
       tryAcquirePrefetchLock: jest.fn().mockResolvedValue({ connectionName: connName, generation: 0, fence: 0 } satisfies PrefetchLease),
       releasePrefetchLock: jest.fn().mockResolvedValue(undefined),
       saveConnectionToDiskAfterPrefetch: jest.fn().mockResolvedValue(undefined),
@@ -201,6 +207,8 @@ describe('CachePrefetcher', () => {
   describe('prefetchAllObjects', () => {
     it('should return early if already triggered', async () => {
       prefetcher['allObjectsPrefetchTriggeredSet'].add(`ALL_OBJECTS|${connName}`);
+      prefetcher['primaryObjectsPrefetchCompletedSet'].add(`ALL_OBJECTS|${connName}`);
+      prefetcher['externalObjectsPrefetchTriggeredSet'].add(`ALL_OBJECTS|${connName}`);
       await prefetcher.prefetchAllObjects(connName, mockRunQuery);
       expect(mockRunQuery).not.toHaveBeenCalled();
     });
@@ -228,11 +236,12 @@ describe('CachePrefetcher', () => {
       expect(mockCache.setTables).toHaveBeenCalledWith(
         connName, 'DB1.S1', expect.arrayContaining([expect.anything(), expect.anything()]), expect.any(Map)
       );
-      expect(mockCache.setTables).toHaveBeenCalledTimes(1);
+      expect(mockCache.setTables).toHaveBeenCalledTimes(2);
     });
 
     it('should discover external objects once when regular tables are already cached', async () => {
       (mockCache.hasTableCacheForConnection as jest.Mock).mockReturnValue(true);
+      prefetcher['primaryObjectsPrefetchCompletedSet'].add(`ALL_OBJECTS|${connName}`);
       mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
       mockRunQuery.mockResolvedValue({
         columns: [
@@ -839,6 +848,33 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       );
     });
 
+    it('retries the primary object catalog after a partial external-only result', async () => {
+      (mockCache.hasTableCacheForConnection as jest.Mock).mockReturnValue(true);
+      mockRunQuery
+        .mockRejectedValueOnce(new Error('main transient failure'))
+        .mockResolvedValueOnce({
+          columns: objectColumns,
+          data: [['ET1', 55, 'S1', 'db1', 'EXTERNAL TABLE']],
+        });
+
+      await expect(
+        prefetcher.prefetchAllObjects(connName, mockRunQuery, true, ['db1']),
+      ).resolves.toBe(false);
+
+      mockRunQuery.mockClear();
+      mockRunQuery.mockResolvedValue({
+        columns: objectColumns,
+        data: [['T1', 1, 'S1', 'db1', 'TABLE']],
+      });
+
+      await expect(
+        prefetcher.prefetchAllObjects(connName, mockRunQuery, true, ['db1']),
+      ).resolves.toBe(true);
+
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+      expect(mockRunQuery.mock.calls[0][0]).toContain('_V_OBJECT_DATA');
+    });
+
     it('T3: F2 — prefetch trigger is cleared after a query failure so a retry re-runs stage 3', async () => {
       mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
       mockRunQuery.mockRejectedValue(new Error('fail'));
@@ -1005,6 +1041,73 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         (call) => typeof call[0] === 'string' && (call[0] as string).includes('Starting eager prefetch'),
       );
       expect(startLogs).toHaveLength(1);
+    });
+
+    it('clears the in-progress marker when lock acquisition rejects', async () => {
+      (mockCache.tryAcquirePrefetchLock as jest.Mock).mockRejectedValue(
+        new Error('disk index write failed'),
+      );
+
+      await (prefetcher as any).runConnectionPrefetch(connName, mockRunQuery);
+
+      expect(prefetcher.hasConnectionPrefetchInProgress(connName)).toBe(false);
+      expect(Logger.getInstance().error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to acquire prefetch lock'),
+        expect.any(Error),
+      );
+    });
+
+    it('does not advance freshness when an object stage is only partially fetched', async () => {
+      const resultForKind = (kind: string | undefined) => {
+        switch (kind) {
+          case 'databases':
+            return { columns: [{ name: 'DATABASE' }], data: [['db1']] };
+          case 'schemas':
+            return { columns: [{ name: 'SCHEMA' }], data: [['S1']] };
+          case 'type-groups':
+            return { columns: [{ name: 'OBJTYPE' }], data: [['TABLE']] };
+          case 'external-objects':
+            return {
+              columns: [
+                { name: 'OBJNAME' }, { name: 'OBJID' }, { name: 'SCHEMA' },
+                { name: 'DBNAME' }, { name: 'OBJTYPE' },
+              ],
+              data: [['ET1', 10, 'S1', 'db1', 'EXTERNAL TABLE']],
+            };
+          case 'procedures':
+            return { columns: [{ name: 'PROCEDURE' }, { name: 'SCHEMA' }], data: [] };
+          case 'columns':
+            return {
+              columns: [
+                { name: 'TABLENAME' }, { name: 'DBNAME' }, { name: 'SCHEMA' },
+                { name: 'ATTNAME' }, { name: 'FORMAT_TYPE' },
+              ],
+              data: [['ET1', 'db1', 'S1', 'C1', 'VARCHAR(30)']],
+            };
+          case 'external-columns':
+            return {
+              columns: [
+                { name: 'TABLENAME' }, { name: 'DBNAME' }, { name: 'SCHEMA' },
+                { name: 'ATTNAME' }, { name: 'FORMAT_TYPE' },
+              ],
+              data: [['ET1', 'db1', 'S1', 'C1', 'VARCHAR(30)']],
+            };
+          default:
+            return { columns: [], data: [] };
+        }
+      };
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'objects') {
+          throw new Error('primary catalog timeout');
+        }
+        return resultForKind(context?.kind);
+      });
+
+      await (prefetcher as any).runConnectionPrefetch(connName, mockRunQuery);
+
+      expect(prefetcher.getConnectionPrefetchTimestamp(connName)).toBeUndefined();
+      expect(mockCache.saveConnectionToDiskAfterPrefetch).not.toHaveBeenCalled();
+      expect(prefetcher.hasConnectionPrefetchInProgress(connName)).toBe(false);
     });
   });
 });

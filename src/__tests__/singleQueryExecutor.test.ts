@@ -132,6 +132,8 @@ import {
 import { isConnectionBrokenError } from '../core/queryRunnerUtils';
 import { streamingManager } from '../core/queryCancellation';
 import { metadataSessionSweeper } from '../metadata/metadataSessionSweeper';
+import type { MetadataQuerySession } from '../core/queryRunner';
+import type { NzConnection } from '../types';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -255,6 +257,41 @@ describe('singleQueryExecutor', () => {
             });
 
             expect(metadataSessionSweeper.hasSession('testConn', '99999')).toBe(false);
+        });
+
+        it('reuses a scoped metadata connection and its SID across catalog queries', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'id' }], rows: [[1]], limitReached: false }],
+                error: null,
+                recordsAffected: undefined,
+            });
+            const scopedConnection = mockConn as unknown as NzConnection;
+            const metadataSession: MetadataQuerySession = { connection: scopedConnection };
+
+            await runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 1',
+                connectionManager: mockConnManager,
+                connectionName: 'testConn',
+                isUserQuery: false,
+                connectionOverride: scopedConnection,
+                metadataSession,
+            });
+            await runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 2',
+                connectionManager: mockConnManager,
+                connectionName: 'testConn',
+                isUserQuery: false,
+                connectionOverride: scopedConnection,
+                metadataSession,
+            });
+
+            expect(mockGetConnectionForDocument).not.toHaveBeenCalled();
+            expect(mockConn.createCommand).toHaveBeenCalledTimes(1);
+            expect(mockConn.createCommand).toHaveBeenCalledWith('SELECT CURRENT_SID');
+            expect(metadataSession.sessionId).toBe('99999');
+            expect(mockConn.close).not.toHaveBeenCalled();
         });
 
         it('does not register user sessions (documentUri or isUserQuery default)', async () => {

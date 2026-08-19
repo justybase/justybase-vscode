@@ -80,6 +80,15 @@ export type QueryRunnerRawFn = (
     metadataContext?: MetadataQueryContext,
 ) => Promise<QueryResult | undefined>;
 
+/**
+ * A query runner may own a short-lived connection shared by one full metadata
+ * refresh. The prefetcher disposes it after every terminal path, including a
+ * rejected lock acquisition, so the scoped session can never leak.
+ */
+export type DisposableQueryRunnerRawFn = QueryRunnerRawFn & {
+    dispose?: () => Promise<void>;
+};
+
 async function runPrefetchQuery(
     connectionName: string,
     runQueryFn: QueryRunnerRawFn,
@@ -370,6 +379,8 @@ export class CachePrefetcher {
     private columnPrefetchInProgress: Set<string> = new Set();
     private databaseColumnPrefetchInFlight: Map<string, Promise<void>> = new Map();
     private allObjectsPrefetchTriggeredSet: Set<string> = new Set();
+    /** Main _V_OBJECT_DATA catalog completed successfully for this connection. */
+    private primaryObjectsPrefetchCompletedSet: Set<string> = new Set();
     private externalObjectsPrefetchTriggeredSet: Set<string> = new Set();
     private connectionPrefetchTriggered: Map<string, number> = new Map();
     private connectionPrefetchInProgress: Set<string> = new Set();
@@ -519,22 +530,25 @@ export class CachePrefetcher {
         skipIfCached = false,
         databases?: string[],
         forceRefresh = false,
-    ): Promise<void> {
+    ): Promise<boolean> {
         const key = `ALL_OBJECTS|${connectionName}`;
-        if (!forceRefresh && this.allObjectsPrefetchTriggeredSet.has(key)) {
-            return;
-        }
-        this.allObjectsPrefetchTriggeredSet.add(key);
-
+        const primaryCatalogComplete = this.primaryObjectsPrefetchCompletedSet.has(key);
+        const externalCatalogComplete = this.externalObjectsPrefetchTriggeredSet.has(key);
         const hasCachedTables = skipIfCached && this.cache.hasTableCacheForConnection(connectionName);
-        const externalOnly = hasCachedTables && !forceRefresh && !this.externalObjectsPrefetchTriggeredSet.has(key);
-        if (hasCachedTables && !externalOnly) {
+        if (!forceRefresh && primaryCatalogComplete && externalCatalogComplete) {
             Logger.getInstance().debug(
-                `[CachePrefetcher] Skipping objects prefetch — tables already cached for ${connectionName}`,
+                `[CachePrefetcher] Skipping objects prefetch — catalogs already complete for ${connectionName}`,
             );
-            return;
+            return true;
         }
-
+        // Cached external rows alone do not prove that the primary catalog was
+        // ever fetched successfully. Keep that success state separately so a
+        // transient primary failure is retried rather than becoming an
+        // external-only refresh forever.
+        const externalOnly = hasCachedTables
+            && primaryCatalogComplete
+            && !forceRefresh
+            && !externalCatalogComplete;
         Logger.getInstance().info(`[CachePrefetcher] Starting background prefetch of all objects (Connection: ${connectionName})`);
 
         try {
@@ -546,7 +560,8 @@ export class CachePrefetcher {
 
             if (!targetDatabases || targetDatabases.length === 0) {
                 Logger.getInstance().warn(`[CachePrefetcher] prefetchAllObjects aborted - no databases found for ${connectionName}`);
-                return;
+                this.allObjectsPrefetchTriggeredSet.delete(key);
+                return false;
             }
 
             const liveDatabases = targetDatabases.filter(
@@ -557,7 +572,8 @@ export class CachePrefetcher {
                 Logger.getInstance().warn(
                     `[CachePrefetcher] prefetchAllObjects aborted - all databases marked dead for ${connectionName}`,
                 );
-                return;
+                this.allObjectsPrefetchTriggeredSet.delete(key);
+                return false;
             }
 
             if (liveDatabases.length < targetDatabases.length) {
@@ -570,6 +586,8 @@ export class CachePrefetcher {
             // query). A timeout/error in one database must not abort the rest,
             // so each query is isolated in its own try/catch.
             let anyQueryError = false;
+            let primaryCatalogError = false;
+            let externalCatalogError = false;
             for (const db of liveDatabases) {
                 const queryStart = Date.now();
                 let mainResults: RawObjectRow[] = [];
@@ -589,11 +607,18 @@ export class CachePrefetcher {
                                 reason: 'object-catalog-prefetch',
                             },
                         );
-                        if (result) {
+                        if (!result) {
+                            anyQueryError = true;
+                            primaryCatalogError = true;
+                            Logger.getInstance().warn(
+                                `[CachePrefetcher] Empty result while fetching tables for DB ${db}; object stage is incomplete`,
+                            );
+                        } else {
                             mainResults = queryResultToRows<RawObjectRow>(result);
                         }
                     } catch (e: unknown) {
                         anyQueryError = true;
+                        primaryCatalogError = true;
                         logPrefetchError(`[CachePrefetcher] Error fetching tables for DB ${db}:`, e);
                         mainCatalogFailure = isDatabaseLevelCatalogError(e);
                         if (mainCatalogFailure) {
@@ -615,11 +640,18 @@ export class CachePrefetcher {
                                 reason: 'external-object-discovery',
                             },
                         );
-                        if (externalResult) {
+                        if (!externalResult) {
+                            anyQueryError = true;
+                            externalCatalogError = true;
+                            Logger.getInstance().warn(
+                                `[CachePrefetcher] Empty result while fetching external tables for DB ${db}; object stage is incomplete`,
+                            );
+                        } else {
                             externalResults = queryResultToRows<RawObjectRow>(externalResult);
                         }
                     } catch (e: unknown) {
                         anyQueryError = true;
+                        externalCatalogError = true;
                         logPrefetchError(`[CachePrefetcher] Error fetching external tables for DB ${db}:`, e);
                     }
                 }
@@ -692,16 +724,33 @@ export class CachePrefetcher {
             }
 
             if (anyQueryError) {
-                // F2: clear the trigger so a later attempt re-runs stage 3 instead
-                // of silently skipping it forever after a failure.
+                // Keep whatever rows were successfully read, but never mark a
+                // split catalog stage as fresh. A later attempt must re-run the
+                // primary branch after a partial external-only result.
                 this.allObjectsPrefetchTriggeredSet.delete(key);
-                return;
+                if (!externalOnly && primaryCatalogError) {
+                    this.primaryObjectsPrefetchCompletedSet.delete(key);
+                }
+                if (externalCatalogError) {
+                    this.externalObjectsPrefetchTriggeredSet.delete(key);
+                }
+                return false;
+            }
+            if (!externalOnly) {
+                this.primaryObjectsPrefetchCompletedSet.add(key);
             }
             this.externalObjectsPrefetchTriggeredSet.add(key);
+            this.allObjectsPrefetchTriggeredSet.add(key);
             Logger.getInstance().info(`[CachePrefetcher] Prefetched tables for ${liveDatabases.length} database(s) on ${connectionName}`);
+            return true;
         } catch (e: unknown) {
             this.allObjectsPrefetchTriggeredSet.delete(key);
+            if (!externalOnly) {
+                this.primaryObjectsPrefetchCompletedSet.delete(key);
+            }
+            this.externalObjectsPrefetchTriggeredSet.delete(key);
             logPrefetchError(`[CachePrefetcher] Error in prefetchAllObjects:`, e);
+            return false;
         }
     }
 
@@ -710,7 +759,13 @@ export class CachePrefetcher {
     }
 
     markAllObjectsPrefetchTriggered(connectionName: string): void {
-        this.allObjectsPrefetchTriggeredSet.add(`ALL_OBJECTS|${connectionName}`);
+        const key = `ALL_OBJECTS|${connectionName}`;
+        // Disk metadata proves the primary table layer is present, but older
+        // snapshots may predate the separate external-table companion query.
+        // Leave that companion pending so the next refresh can supplement it.
+        this.allObjectsPrefetchTriggeredSet.add(key);
+        this.primaryObjectsPrefetchCompletedSet.add(key);
+        this.externalObjectsPrefetchTriggeredSet.delete(key);
     }
 
     // ========== Eager Connection Prefetch ==========
@@ -858,13 +913,33 @@ export class CachePrefetcher {
         await mirrorSynonymColumnsForConnection(this.cache, connectionName);
     }
 
-    triggerConnectionPrefetch(connectionName: string, runQueryFn: QueryRunnerRawFn): void {
-        void this.cache.whenDiskReady().then(async () => {
-            if (this.cache.isConnectionMetadataHydrating(connectionName)) {
-                await this.cache.whenConnectionMetadataHydrated(connectionName);
-            }
-            void this.runConnectionPrefetch(connectionName, runQueryFn);
-        });
+    triggerConnectionPrefetch(
+        connectionName: string,
+        runQueryFn: DisposableQueryRunnerRawFn,
+    ): void {
+        void this.cache.whenDiskReady()
+            .then(async () => {
+                if (this.cache.isConnectionMetadataHydrating(connectionName)) {
+                    await this.cache.whenConnectionMetadataHydrated(connectionName);
+                }
+                await this.runConnectionPrefetch(connectionName, runQueryFn);
+            })
+            .catch((error: unknown) => {
+                logPrefetchError(
+                    `[CachePrefetcher] Failed to start connection prefetch for ${connectionName}:`,
+                    error,
+                );
+            })
+            .finally(async () => {
+                try {
+                    await runQueryFn.dispose?.();
+                } catch (error: unknown) {
+                    logPrefetchError(
+                        `[CachePrefetcher] Failed to close metadata session for ${connectionName}:`,
+                        error,
+                    );
+                }
+            });
     }
 
     /** Threshold in ms for considering a prefetch 'slow' — used to suggest disk persistence. */
@@ -901,7 +976,26 @@ export class CachePrefetcher {
         this.connectionPrefetchInProgress.add(connectionName);
         this.lastPrefetchAttemptTime.set(connectionName, Date.now());
 
-        const prefetchLease = await this.cache.tryAcquirePrefetchLock(connectionName);
+        let prefetchLease: import('./diskStorage/metadataDiskStorage').PrefetchLease | undefined;
+        try {
+            prefetchLease = await this.cache.tryAcquirePrefetchLock(connectionName);
+        } catch (error: unknown) {
+            // The in-progress marker is set before awaiting the cross-process
+            // lock. Always clear it when lock acquisition itself fails, or all
+            // later metadata refreshes would be suppressed until restart.
+            this.connectionPrefetchInProgress.delete(connectionName);
+            logPrefetchError(
+                `[CachePrefetcher] Failed to acquire prefetch lock for ${connectionName}:`,
+                error,
+            );
+            this.emitProgress({
+                connectionName,
+                stage: 'error',
+                percent: 100,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return;
+        }
         if (!prefetchLease) {
             this.connectionPrefetchInProgress.delete(connectionName);
             return;
@@ -1037,12 +1131,23 @@ export class CachePrefetcher {
 
         // 2. Fetch schemas per database (bounded concurrency)
         const stage2Start = Date.now();
-        await this.runPerDatabaseBatched(
+        const stage2Complete = await this.runPerDatabaseBatched(
             connectionName,
             databases,
             async (dbName) => {
-                await this.prefetchSchemasForDb(connectionName, dbName, runQueryFn, forceRefresh);
-                await this.prefetchTypeGroupsForDb(connectionName, dbName, runQueryFn, forceRefresh);
+                const schemasComplete = await this.prefetchSchemasForDb(
+                    connectionName,
+                    dbName,
+                    runQueryFn,
+                    forceRefresh,
+                );
+                const typeGroupsComplete = await this.prefetchTypeGroupsForDb(
+                    connectionName,
+                    dbName,
+                    runQueryFn,
+                    forceRefresh,
+                );
+                return schemasComplete && typeGroupsComplete;
             },
             (schemaCompleted, total) => {
                 this.emitProgress({
@@ -1068,7 +1173,13 @@ export class CachePrefetcher {
             message: 'Fetching tables and views...'
         });
         const stage3Start = Date.now();
-        await this.prefetchAllObjects(connectionName, runQueryFn, !forceRefresh, databases, forceRefresh);
+        const stage3Complete = await this.prefetchAllObjects(
+            connectionName,
+            runQueryFn,
+            !forceRefresh,
+            databases,
+            forceRefresh,
+        );
         const stage3Duration = Date.now() - stage3Start;
         log.debug(`[CachePrefetcher] [TIMING] Stage 3/5 TABLES+VIEWS: ${stage3Duration}ms`);
         this.emitProgress({
@@ -1082,7 +1193,7 @@ export class CachePrefetcher {
 
         // 4. Fetch procedures per database (bounded concurrency)
         const stage4Start = Date.now();
-        await this.runPerDatabaseBatched(
+        const stage4Complete = await this.runPerDatabaseBatched(
             connectionName,
             databases,
             (dbName) => this.prefetchProceduresForDb(connectionName, dbName, runQueryFn, forceRefresh),
@@ -1110,7 +1221,7 @@ export class CachePrefetcher {
             message: 'Fetching columns...'
         });
         const stage5Start = Date.now();
-        await this.prefetchAllColumnsForConnection(connectionName, runQueryFn, forceRefresh, progress => {
+        const stage5Complete = await this.prefetchAllColumnsForConnection(connectionName, runQueryFn, forceRefresh, progress => {
             const denominator = progress.totalDatabases > 0 ? progress.totalDatabases : 1;
             this.emitProgress({
                 connectionName,
@@ -1125,6 +1236,7 @@ export class CachePrefetcher {
 
         const snapshotComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
             ?? this.cache.verifyStagesComplete(connectionName);
+        const stagesComplete = stage2Complete && stage3Complete && stage4Complete && stage5Complete;
 
         // ─── SUMMARY ───
         const totalDuration = Date.now() - prefetchStartOverall;
@@ -1139,33 +1251,44 @@ export class CachePrefetcher {
         const pctCol = totalDuration > 0 ? (stage5Duration / totalDuration * 100).toFixed(1) : '?';
         log.debug(`[CachePrefetcher] [TIMING]   TOTAL:             ${String(totalDuration).padStart(6)}ms  (columns=${pctCol}%)`);
         log.debug(`[CachePrefetcher] [TIMING] ════════════════════════════════════════════════`);
-        return snapshotComplete;
+        if (!stagesComplete) {
+            log.warn(
+                `[CachePrefetcher] One or more metadata stages failed for ${connectionName}; snapshot is intentionally incomplete`,
+            );
+        }
+        return stagesComplete && snapshotComplete;
     }
 
     private async runPerDatabaseBatched(
         connectionName: string,
         databases: string[],
-        operation: (database: string) => Promise<void>,
+        operation: (database: string) => Promise<boolean>,
         onItemComplete?: (completed: number, total: number) => void,
-    ): Promise<void> {
+    ): Promise<boolean> {
         const concurrencyLimit = getMetadataQueryConcurrencyLimit();
         let completed = 0;
+        let allComplete = true;
 
         for (let i = 0; i < databases.length; i += concurrencyLimit) {
             const batch = databases.slice(i, i + concurrencyLimit);
-            await Promise.all(
+            const results = await Promise.all(
                 batch.map(async (database) => {
                     if (this.cache.isDatabaseDead(connectionName, database)) {
                         completed += 1;
                         onItemComplete?.(completed, databases.length);
-                        return;
+                        return true;
                     }
-                    await operation(database);
+                    const complete = await operation(database);
                     completed += 1;
                     onItemComplete?.(completed, databases.length);
+                    return complete;
                 }),
             );
+            if (results.some((complete) => !complete)) {
+                allComplete = false;
+            }
         }
+        return allComplete;
     }
 
     private async prefetchDatabases(
@@ -1217,10 +1340,10 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
-    ): Promise<void> {
+    ): Promise<boolean> {
         if (!forceRefresh && this.cache.hasCachedTypeGroups(connectionName, dbName)) {
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   TypeGroups ${dbName}: skipped (cached)`);
-            return;
+            return true;
         }
 
         try {
@@ -1239,7 +1362,7 @@ export class CachePrefetcher {
             );
             const queryDuration = Date.now() - queryStart;
             if (!result) {
-                return;
+                return false;
             }
 
             const results = queryResultToRows<RawTypeGroupRow>(result);
@@ -1250,11 +1373,13 @@ export class CachePrefetcher {
             Logger.getInstance().debug(
                 `[CachePrefetcher] [TIMING]   TypeGroups ${dbName}: ${typeList.length} types in ${queryDuration}ms`,
             );
+            return true;
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchTypeGroupsForDb error for ${dbName}:`, e);
             if (isDatabaseLevelCatalogError(e)) {
                 this.cache.markDatabaseDead(connectionName, dbName);
             }
+            return false;
         }
     }
 
@@ -1263,10 +1388,10 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
-    ): Promise<void> {
+    ): Promise<boolean> {
         if (!forceRefresh && this.cache.getSchemas(connectionName, dbName)) {
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Schemas ${dbName}: skipped (cached)`);
-            return;
+            return true;
         }
 
         try {
@@ -1284,7 +1409,7 @@ export class CachePrefetcher {
                 },
             );
             const queryDuration = Date.now() - queryStart;
-            if (!result) return;
+            if (!result) return false;
 
             const results = queryResultToRows<RawSchemaRow>(result);
             const items = results
@@ -1301,11 +1426,13 @@ export class CachePrefetcher {
 
             this.cache.setSchemas(connectionName, dbName, items);
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Schemas ${dbName}: ${items.length} schemas in ${queryDuration}ms`);
+            return true;
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchSchemasForDb error for ${dbName}:`, e);
             if (isDatabaseLevelCatalogError(e)) {
                 this.cache.markDatabaseDead(connectionName, dbName);
             }
+            return false;
         }
     }
 
@@ -1314,7 +1441,7 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
-    ): Promise<void> {
+    ): Promise<boolean> {
         const dbCacheKey = `${dbName}..`;
         if (
             !forceRefresh &&
@@ -1324,13 +1451,13 @@ export class CachePrefetcher {
             )
         ) {
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Procedures ${dbName}: skipped (cached)`);
-            return;
+            return true;
         }
 
         try {
             const query = NZ_QUERIES.listProcedures(dbName);
             if (!query) {
-                return;
+                return true;
             }
 
             const queryStart = Date.now();
@@ -1347,7 +1474,7 @@ export class CachePrefetcher {
             );
             const queryDuration = Date.now() - queryStart;
             if (!result) {
-                return;
+                return false;
             }
 
             const results = queryResultToRows<RawProcedureRow>(result);
@@ -1394,11 +1521,13 @@ export class CachePrefetcher {
             this.cache.markProcedureCatalogLoaded(connectionName, dbName);
 
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Procedures ${dbName}: ${allProcedures.length} procedures in ${queryDuration}ms`);
+            return true;
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchProceduresForDb error for ${dbName}:`, e);
             if (isDatabaseLevelCatalogError(e)) {
                 this.cache.markDatabaseDead(connectionName, dbName);
             }
+            return false;
         }
     }
 
@@ -1414,7 +1543,7 @@ export class CachePrefetcher {
             completedTables: number;
             totalTables: number;
         }) => void
-    ): Promise<void> {
+    ): Promise<boolean> {
         try {
             const connPrefix = `${connectionName}|`;
 
@@ -1459,7 +1588,7 @@ export class CachePrefetcher {
                 Logger.getInstance().debug(
                     `[CachePrefetcher] Skipping columns prefetch — no databases known for ${connectionName}`,
                 );
-                return;
+                return false;
             }
 
             let fetchedCount = 0;
@@ -1467,6 +1596,7 @@ export class CachePrefetcher {
 
             const totalDatabases = databases.length;
             let completedDatabases = 0;
+            let allQueriesComplete = true;
 
             // Per-database serial execution: main columns query followed by the
             // separate external-table columns query, merged in code. Serial order
@@ -1504,9 +1634,12 @@ export class CachePrefetcher {
                     queryDuration = Date.now() - queryStartTime;
                     if (result) {
                         mainRows = queryResultToRows<RawColumnRowWithKeys>(result);
+                    } else {
+                        allQueriesComplete = false;
                     }
                 } catch (e: unknown) {
                     queryDuration = Date.now() - queryStartTime;
+                    allQueriesComplete = false;
                     logPrefetchError(`[CachePrefetcher] Error fetching columns for DB ${dbName}:`, e);
                     mainCatalogFailure = isDatabaseLevelCatalogError(e);
                     if (mainCatalogFailure) {
@@ -1532,8 +1665,11 @@ export class CachePrefetcher {
                         );
                         if (externalResult) {
                             externalRows = queryResultToRows<RawColumnRowWithKeys>(externalResult);
+                        } else {
+                            allQueriesComplete = false;
                         }
                     } catch (e: unknown) {
+                        allQueriesComplete = false;
                         logPrefetchError(`[CachePrefetcher] Error fetching external columns for DB ${dbName}:`, e);
                     }
                 }
@@ -1564,8 +1700,10 @@ export class CachePrefetcher {
             const totalDuration = Date.now() - prefetchStartTime;
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Columns total: ${fetchedCount} tables cached in ${totalDuration}ms`);
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Columns processed: ${totalDatabases} databases, ${totalTables} tables total`);
+            return allQueriesComplete;
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchAllColumnsForConnection error:`, e);
+            return false;
         } finally {
             const mirroredSynonyms = await mirrorSynonymColumnsForConnection(this.cache, connectionName);
             if (mirroredSynonyms > 0) {
@@ -1606,6 +1744,7 @@ export class CachePrefetcher {
         this.columnPrefetchInProgress.clear();
         this.databaseColumnPrefetchInFlight.clear();
         this.allObjectsPrefetchTriggeredSet.clear();
+        this.primaryObjectsPrefetchCompletedSet.clear();
         this.externalObjectsPrefetchTriggeredSet.clear();
         this.connectionPrefetchTriggered.clear();
         this.connectionPrefetchInProgress.clear();

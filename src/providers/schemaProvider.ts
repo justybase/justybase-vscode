@@ -26,6 +26,7 @@ import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
 import { getConnectionAccentResourceUri } from '../utils/connectionAccent';
 import { getDialectIconUri } from '../utils/dialectIcons';
 import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
+import { createConnectionScopedMetadataQueryRunner } from '../metadata/connectionScopedMetadataQueryRunner';
 import {
     METADATA_QUERY_TIMEOUT_SECONDS,
     runWithMetadataQueryConcurrencyLimit,
@@ -1233,25 +1234,16 @@ export class SchemaProvider
                 if (this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
                     return;
                 }
-                this.metadataCache.triggerConnectionPrefetch(connectionName, async (query, metadataContext) => {
-                    try {
-                        return await runQueryWithTimeout(
-                            this.context,
-                            query,
-                            this.connectionManager,
-                            connectionName,
-                            SCHEMA_QUERY_TIMEOUT,
-                            metadataContext,
-                        );
-                    } catch (e: unknown) {
-                        if (e instanceof SchemaQueryTimeoutError) {
-                            logWithFallback('warn', '[SchemaProvider] Prefetch query timeout:', e.message);
-                        } else {
-                            logWithFallback('error', '[SchemaProvider] Prefetch query error:', e);
-                        }
-                        return undefined;
-                    }
-                });
+                this.metadataCache.triggerConnectionPrefetch(
+                    connectionName,
+                    createConnectionScopedMetadataQueryRunner({
+                        context: this.context,
+                        connectionManager: this.connectionManager,
+                        connectionName,
+                        maxRows: 1000000,
+                        timeoutSeconds: Math.max(1, Math.ceil(SCHEMA_QUERY_TIMEOUT / 1000)),
+                    }),
+                );
             });
         }
     }

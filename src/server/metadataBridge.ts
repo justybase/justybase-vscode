@@ -771,7 +771,17 @@ export class MetadataBridge {
           return this.asObjectList(response);
         }
         const data = this.asObjectList(response);
-        this.listCache.set(cacheKey, { data, timestamp: Date.now() });
+        // A Netezza list request is deliberately cache-only: it must never
+        // make completion issue a live catalog query.  During cold start that
+        // cache can legitimately be empty while the background prefetch is
+        // still running.  Do not turn that transient miss into a 12-hour
+        // negative cache entry, otherwise completion stays empty after the
+        // host cache is populated.
+        const isNetezzaCacheOnly =
+          this.documentDatabaseKinds.get(docEpochKey) === "netezza";
+        if (data.length > 0 || !isNetezzaCacheOnly) {
+          this.listCache.set(cacheKey, { data, timestamp: Date.now() });
+        }
         return data;
       } catch {
         this.listFetchInFlight.delete(cacheKey);

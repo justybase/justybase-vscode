@@ -392,9 +392,38 @@ export class CopilotContextBuilder {
                 IS_FK: number;
             }
 
-            const result = await executeDatabaseQuery<SchemaRow>(nzConnection, sql);
+            const mainResult = await executeDatabaseQuery<SchemaRow>(nzConnection, sql);
+            let externalResult: SchemaRow[] = [];
+            const buildExternalQuery = metadataProvider.buildExternalColumnsWithKeysQuery;
+            if (typeof buildExternalQuery === 'function') {
+                try {
+                    const externalSql = buildExternalQuery(database, {
+                        objTypes: ['EXTERNAL TABLE'],
+                    });
+                    externalResult = await executeDatabaseQuery<SchemaRow>(nzConnection, externalSql) ?? [];
+                } catch (error: unknown) {
+                    // The regular catalog overview remains useful when an NPS
+                    // instance does not expose the external catalog.
+                    const message = error instanceof Error ? error.message : String(error);
+                    console.warn(`[CopilotContextBuilder] External columns unavailable: ${message}`);
+                }
+            }
 
-            if (!result || result.length === 0) {
+            // The two catalog queries intentionally stay separate. Resolve
+            // duplicate columns in process so an external compatibility row
+            // can never replace the regular catalog's richer metadata.
+            const resultByColumn = new Map<string, SchemaRow>();
+            for (const row of [...(mainResult ?? []), ...externalResult]) {
+                const key = [row.SCHEMA, row.TABLENAME, row.ATTNAME]
+                    .map(part => String(part ?? '').trim().toUpperCase())
+                    .join('|');
+                if (!resultByColumn.has(key)) {
+                    resultByColumn.set(key, row);
+                }
+            }
+            const result = [...resultByColumn.values()];
+
+            if (result.length === 0) {
                 return 'No tables found in database';
             }
 

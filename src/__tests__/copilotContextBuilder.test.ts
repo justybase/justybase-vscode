@@ -277,6 +277,54 @@ describe('CopilotContextBuilder', () => {
             expect(result).toBe('No tables found in database');
             expect(mockConnection.close).toHaveBeenCalled();
         });
+
+        it('merges external-table columns without a catalog UNION or anti-join', async () => {
+            const buildExternalColumnsWithKeysQuery = jest.fn().mockReturnValue('SELECT EXTERNAL COLUMNS');
+            (getDatabaseMetadataProvider as jest.Mock).mockReturnValue({
+                buildColumnsWithKeysQuery: jest.fn().mockReturnValue('SELECT REGULAR COLUMNS'),
+                buildExternalColumnsWithKeysQuery,
+            });
+            (executeDatabaseQuery as jest.Mock)
+                .mockResolvedValueOnce([{
+                    SCHEMA: 'ADMIN',
+                    TABLENAME: 'ORDERS',
+                    DESCRIPTION: '',
+                    ATTNAME: 'ID',
+                    FORMAT_TYPE: 'INTEGER',
+                    ATTNUM: 1,
+                    IS_PK: 1,
+                    IS_FK: 0,
+                }])
+                .mockResolvedValueOnce([{
+                    SCHEMA: 'ADMIN',
+                    TABLENAME: 'ET_ORDERS',
+                    DESCRIPTION: 'external orders',
+                    ATTNAME: 'EXT_ID',
+                    FORMAT_TYPE: 'VARCHAR(30)',
+                    ATTNUM: 1,
+                    IS_PK: 0,
+                    IS_FK: 0,
+                }]);
+
+            const result = await contextBuilder.gatherSchemaOverview();
+
+            expect(buildExternalColumnsWithKeysQuery).toHaveBeenCalledWith('TEST_DB', {
+                objTypes: ['EXTERNAL TABLE'],
+            });
+            expect(executeDatabaseQuery).toHaveBeenNthCalledWith(
+                1,
+                mockConnection,
+                'SELECT REGULAR COLUMNS',
+            );
+            expect(executeDatabaseQuery).toHaveBeenNthCalledWith(
+                2,
+                mockConnection,
+                'SELECT EXTERNAL COLUMNS',
+            );
+            expect(result).toContain('TABLE: ORDERS');
+            expect(result).toContain('TABLE: ET_ORDERS');
+            expect(result).toContain('EXT_ID: VARCHAR(30)');
+        });
     });
 
     describe('buildGenerateSqlPrompt', () => {
