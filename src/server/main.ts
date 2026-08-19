@@ -34,6 +34,7 @@ import {
   registerCodeActionHandler,
   registerSignatureHelpHandler,
 } from "./handlers/signatureAndCodeActionHandlers";
+import { setMetadataQueryConcurrencyLimit } from "../metadata/metadataQueryLimiter";
 
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -102,9 +103,29 @@ connection.onInitialize((_params: InitializeParams): InitializeResult => {
 
 connection.onInitialized(() => {
   connection.console.log("Netezza SQL language server initialized.");
+  void syncMetadataQueryConcurrency();
 });
 
+async function syncMetadataQueryConcurrency(): Promise<void> {
+  try {
+    const config = await connection.workspace.getConfiguration({
+      section: "justybase.metadata",
+    });
+    const limit = config?.queryConcurrency;
+    if (typeof limit === "number") {
+      setMetadataQueryConcurrencyLimit(limit);
+    }
+  } catch (error: unknown) {
+    connection.console.error(
+      `Failed to read metadata query concurrency configuration: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 connection.onDidChangeConfiguration(() => {
+  void syncMetadataQueryConcurrency();
   requestInlayHintRefresh(connection);
 });
 
