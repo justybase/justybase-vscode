@@ -1,0 +1,61 @@
+name: Data Grid Performance
+
+on:
+  pull_request:
+    paths:
+      - 'Benchmark/**'
+      - 'media/resultPanel/**'
+      - 'src/import/**'
+      - 'src/export/**'
+      - 'test-harness/data-grid-performance.html'
+      - 'test-harness/data-grid-performance.playwright.config.ts'
+      - 'test-harness/tests/data-grid-performance.spec.ts'
+      - 'package.json'
+      - 'package-lock.json'
+  schedule:
+    - cron: '30 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Data Grid benchmark and webview harness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run deterministic Node benchmark
+        run: npm run benchmark:data-grid
+
+      - name: Run real webview benchmark
+        run: npm run test:playwright:data-grid-performance
+
+      - name: Upload benchmark reports and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-grid-performance-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            Benchmark/data-grid.v1.results.json
+            Benchmark/data-grid.v1.results.md
+            Benchmark/data-grid-playwright.v1.results.json
+            Benchmark/data-grid-playwright.v1.results.md
+            test-results/data-grid-performance/

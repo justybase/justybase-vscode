@@ -23,6 +23,11 @@
 
 # Benchmark timing artifacts (regenerated locally; never published)
 Benchmark/*.results.md
+Benchmark/data-grid.v1.results.json
+Benchmark/data-grid-playwright.v1.results.json
+Benchmark/data-grid-playwright.v1.results.md
+Benchmark/data-grid-live.v1.results.json
+Benchmark/data-grid-live.v1.results.md
 
 
 # User-specific files
