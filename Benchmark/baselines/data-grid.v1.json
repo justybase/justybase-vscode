@@ -1,0 +1,12 @@
+{
+  "suiteVersion": "data-grid.v1",
+  "description": "Populate after three stable Ubuntu/Node 22/Chromium runs. Empty results intentionally keep new cases in BASELINE_PENDING.",
+  "environment": {
+    "runtime": "node",
+    "nodeMajor": 22,
+    "platform": "linux",
+    "arch": "x64",
+    "workerCount": 1
+  },
+  "results": []
+}

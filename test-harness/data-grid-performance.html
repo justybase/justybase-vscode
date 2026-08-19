@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Grid Performance Harness</title>
+    <link rel="stylesheet" href="/media/resultPanel.css">
+    <style>
+        :root {
+            --vscode-editor-background: #1e1e1e;
+            --vscode-editor-foreground: #cccccc;
+            --vscode-editor-font-family: 'Consolas', monospace;
+            --vscode-editor-font-size: 13px;
+            --vscode-panel-border: #3c3c3c;
+            --vscode-breadcrumb-background: #2d2d2d;
+            --vscode-input-background: #3c3c3c;
+            --vscode-input-foreground: #cccccc;
+            --vscode-focusBorder: #007fd4;
+            --vscode-errorForeground: #f48771;
+            --vscode-button-background: #0e639c;
+            --vscode-button-foreground: #ffffff;
+            --vscode-button-hoverBackground: #1177bb;
+            --vscode-list-hoverBackground: #2a2d2e;
+            --vscode-list-activeSelectionBackground: #094771;
+            --vscode-list-inactiveSelectionBackground: #37373d;
+            --justybase-results-grid-font-family: 'Consolas', monospace;
+        }
+        body { margin: 0; height: 100vh; overflow: hidden; background: #1e1e1e; color: #cccccc; font-family: sans-serif; }
+        .test-info { display: flex; gap: 16px; padding: 8px 16px; background: #2d2d2d; border-bottom: 1px solid #3c3c3c; font-size: 12px; color: #888; }
+        .test-info span { display: flex; gap: 4px; align-items: center; }
+    </style>
+</head>
+<body>
+    <div class="test-info" id="testInfo">
+        <span>Rows: <strong id="rowCount">0</strong></span>
+        <span>Columns: <strong id="colCount">0</strong></span>
+        <span id="renderStatus">⏳ Rendering...</span>
+    </div>
+
+    <div class="result-set-header" id="resultSetHeader">
+        <div id="resultSetTabs" class="result-set-tabs" style="display: none;"></div>
+        <span id="docIndicator" class="doc-indicator"></span>
+    </div>
+    <div id="executionStatusBanner" class="execution-status-banner" style="display: none;"></div>
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div><div class="executing-text">Executing SQL...</div>
+        <button id="cancelQueryBtn" class="secondary">Cancel</button>
+    </div>
+    <div class="controls">
+        <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter..." onkeyup="onFilterChanged()">
+        <div class="column-search-wrapper">
+            <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column...">
+            <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
+        </div>
+        <div class="toolbar-separator"></div>
+        <div class="split-btn view-split-btn" id="viewSplitBtn">
+            <button class="btn split-btn__primary view-split-btn__label" id="viewModeLabel">Table</button>
+            <button class="btn split-btn__arrow" id="viewModeArrow">▾</button>
+            <div class="split-btn__menu" id="viewSplitMenu" style="display:none"></div>
+            <select id="viewModeSelect" class="view-mode-select-hidden"><option value="table">Table</option></select>
+            <select id="diffBaselineSelect" class="view-mode-select-hidden" style="display:none"></select>
+        </div>
+        <div class="toolbar-separator"></div>
+        <button class="btn" id="columnVisibilityBtn">Columns</button>
+        <button class="btn" id="formattingBtn">Formatting</button>
+        <div class="toolbar-separator"></div>
+        <button id="editToggleBtn" style="display:none">Edit</button>
+        <button id="saveEditsBtn" style="display:none">Save Changes</button>
+        <button id="discardEditsBtn" style="display:none">Discard</button>
+        <div class="toolbar-separator"></div>
+        <div class="split-btn" id="exportSplitBtn">
+            <button class="btn split-btn__primary" id="exportBtn" onclick="toggleExportPrimaryMenu(event)">Export</button>
+            <button class="btn split-btn__arrow" id="exportArrow">▾</button>
+            <div class="split-btn__menu" id="exportSplitMenu" style="display:none"></div>
+            <div class="split-btn__menu" id="exportPrimaryMenu" style="display:none"></div>
+        </div>
+        <div class="toolbar-separator"></div>
+        <button class="btn btn-destructive" id="clearFiltersBtn">Clear Filters</button>
+        <button id="clearLogsBtn" style="display:none">Clear Logs</button>
+        <span id="rowCountInfo" class="row-count-info"></span>
+    </div>
+    <div id="groupingPanel" class="grouping-panel"><span class="drag-hint">Drag headers here to group</span></div>
+    <div id="mainSplitView" class="main-split-view">
+        <div id="gridContainer"></div>
+        <div id="analysisContainer" class="analysis-container" style="display:none"></div>
+        <div id="rowViewPanel" class="row-view-panel">
+            <div class="row-view-header"><span>Row Details &amp; Comparison</span><span class="row-view-close" id="rowViewClose">✕</span></div>
+            <div id="rowViewContent" class="row-view-content"><div class="row-view-placeholder">Select rows to view details</div></div>
+        </div>
+    </div>
+    <div id="valueViewerOverlay" class="value-viewer-overlay">
+        <div class="value-viewer-modal">
+            <div class="value-viewer-header"><div><div id="valueViewerTitle" class="value-viewer-title">Cell Value</div><div id="valueViewerMeta" class="value-viewer-meta"></div></div><button id="valueViewerCloseBtn" class="value-viewer-close">×</button></div>
+            <div id="valueViewerBody" class="value-viewer-body"></div>
+            <div class="value-viewer-actions"><button id="valueViewerCopyBtn" class="primary">Copy Value</button><button id="valueViewerDismissBtn">Close</button></div>
+        </div>
+    </div>
+
+    <script src="/media/tanstack-table-core.js"></script>
+    <script src="/media/tanstack-virtual-core.js"></script>
+    <script>
+        const params = new URLSearchParams(location.search);
+        const profile = params.get('profile') || 'inline';
+        const definitions = {
+            small: [1000, 8], inline: [10000, 8],
+            'worker-boundary-19999': [19999, 8], 'worker-boundary-20000': [20000, 8],
+            large: [100000, 16], wide: [10000, 32]
+        };
+        const [rowCount, columnCount] = definitions[profile] || definitions.inline;
+        const columnNames = ['ID', 'AMOUNT', 'NAME', 'EVENT_DATE', 'EVENT_AT', 'ACTIVE', 'OPTIONAL_TEXT', 'LONG_TEXT', 'CATEGORY', 'RATIO', 'QUANTITY', 'REFERENCE', 'OPTIONAL_AMOUNT', 'SEARCH_LABEL', 'RANKING', 'PAYLOAD'];
+        const columnTypes = ['INTEGER', 'NUMERIC(18,2)', 'VARCHAR(160)', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'VARCHAR(180)', 'VARCHAR(512)', 'VARCHAR(32)', 'DOUBLE', 'INTEGER', 'VARCHAR(48)', 'NUMERIC(18,2)', 'VARCHAR(64)', 'INTEGER', 'VARCHAR(256)'];
+        const columns = Array.from({ length: columnCount }, (_, index) => ({ name: columnNames[index] || `EXTRA_${String(index + 1).padStart(2, '0')}`, type: columnTypes[index] || (index % 3 === 0 ? 'INTEGER' : 'VARCHAR(96)'), index }));
+        const dateFor = index => `2024-${String((index % 12) + 1).padStart(2, '0')}-${String((index % 28) + 1).padStart(2, '0')}`;
+        const textFor = index => `deterministic long value ${String(index).padStart(6, '0')} — ${'x'.repeat(96 + (index % 128))}`;
+        const mixed = (index, salt) => ((Math.imul((index + 1) ^ salt, 2654435761) >>> 0) % 100000);
+        function buildRow(index) {
+            const middle = Math.floor(rowCount / 2);
+            const row = [
+                index + 1,
+                Number((((mixed(index, 1) % 100000) / 100) - 250).toFixed(2)),
+                index === 0 ? `needle-start customer-${String(index).padStart(6, '0')}` : index === middle ? `needle-middle customer-${String(index).padStart(6, '0')}` : `customer-${String(index).padStart(6, '0')}`,
+                dateFor(index), `${dateFor(index)} ${String(index % 24).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}:30`,
+                index % 3 !== 0, index % 11 === 0 ? null : `optional-${index % 19}`, textFor(index),
+                ['engineering', 'finance', 'operations', 'sales', 'support'][index % 5], Number(((mixed(index, 2) % 10000) / 997).toFixed(4)),
+                mixed(index, 3) % 500, `ref-${(mixed(index, 4) % 1000000).toString(16).padStart(6, '0')}`,
+                index % 13 === 0 ? null : Number(((index % 10000) / 3).toFixed(2)),
+                index === 0 ? 'search-start' : index === middle ? 'search-middle' : `label-${index % 23}`,
+                (mixed(index, 5) % 100) + 1, `payload-${String(index).padStart(6, '0')}-${'p'.repeat(32 + (index % 48))}`
+            ];
+            while (row.length < columnCount) row.push(row.length % 3 === 0 ? mixed(index, row.length) : `extra-${row.length}-${index % 37}`);
+            return row.slice(0, columnCount);
+        }
+        const rows = Array.from({ length: rowCount }, (_, index) => buildRow(index));
+
+        window.__hostMessages = [];
+        window.__workerEvents = [];
+        window.__mockState = null;
+        window.acquireVsCodeApi = function() {
+            return {
+                postMessage: message => window.__hostMessages.push({ message, time: performance.now() }),
+                setState: state => { window.__mockState = state; },
+                getState: () => window.__mockState
+            };
+        };
+        window.sources = [];
+        window.pinnedSources = new Set();
+        window.pinnedResults = [];
+        window.activeSource = 'data-grid-performance';
+        window.resultSets = [{ data: rows, columns, executionTimestamp: 1, isLog: false, isError: false, isTextContent: false, sourceUri: 'data-grid-performance' }];
+        window.executingSources = new Set();
+        window.justybaseHostCopyShortcut = true;
+        window.defaultCopyFormat = 'markdown';
+        window.columnSearchMap = {};
+        window.queryRowLimit = 200000;
+        window.workerUri = '/dist/media/searchWorker.js';
+
+        const RealWorker = window.Worker;
+        window.Worker = function(url, options) {
+            const worker = new RealWorker(url, options);
+            const post = worker.postMessage.bind(worker);
+            worker.postMessage = function(message, ...transfer) {
+                window.__workerEvents.push({ message, time: performance.now() });
+                return post(message, ...transfer);
+            };
+            worker.addEventListener('message', event => {
+                window.__workerEvents.push({ message: event.data, time: performance.now() });
+            });
+            return worker;
+        };
+
+        function displayedCount() {
+            const text = document.getElementById('rowCountInfo')?.textContent || '';
+            const match = text.match(/^([\d,\u00a0 ]+) row/);
+            return match ? Number(match[1].replace(/[\s,\u00a0]/g, '')) : null;
+        }
+        function expectedSearchCount(query) {
+            const normalized = String(query || '').toLowerCase();
+            if (!normalized) return rows.length;
+            if (normalized === 'needle-start' || normalized === 'needle-middle') return 1;
+            if (normalized === 'needle-absent') return 0;
+            return null;
+        }
+        function waitForSearchDone(startedAt, eventStart, requiredWorkerResults = 1, finalQuery = '') {
+            return new Promise((resolve, reject) => {
+                const deadline = performance.now() + 30000;
+                function poll() {
+                    const busy = document.getElementById('globalFilter')?.getAttribute('aria-busy') === 'true' || document.getElementById('rowCountInfo')?.textContent?.includes('Searching');
+                    const count = displayedCount();
+                    const firstVisibleRow = document.querySelector('.grid-wrapper.active tbody tr[data-index]');
+                    const firstVisibleText = firstVisibleRow?.textContent || '';
+                    const events = window.__workerEvents.slice(eventStart).map(item => item.message);
+                    const workerSearches = events.filter(message => message.command === 'search').length;
+                    const workerResults = events.filter(message => message.command === 'searchResult').length;
+                    const workerSettled = workerSearches === 0 || workerResults >= requiredWorkerResults;
+                    const expected = expectedSearchCount(finalQuery);
+                    const normalizedQuery = String(finalQuery || '').toLowerCase();
+                    const resultRowsReady = expected === null
+                        ? count !== null
+                        : count === expected && (expected === 0 || expected === rows.length || firstVisibleText.toLowerCase().includes(normalizedQuery));
+                    if (!busy && count !== null && resultRowsReady && workerSettled && performance.now() - startedAt >= 75) {
+                        resolve({
+                            durationMs: performance.now() - startedAt,
+                            rowCount: count,
+                            workerMessages: events,
+                            firstVisibleText,
+                        });
+                        return;
+                    }
+                    if (performance.now() > deadline) { reject(new Error('Timed out waiting for Result Panel search')); return; }
+                    requestAnimationFrame(poll);
+                }
+                poll();
+            });
+        }
+        window.__dataGridPerf = {
+            profile, rowCount, columnCount, rows,
+            initialRenderMs: null,
+            getState: () => ({ rowCount: displayedCount(), totalRows: rows.length, columnCount, filter: document.getElementById('globalFilter')?.value || '' }),
+            beginExport: () => { window.__hostMessages.length = 0; return performance.now(); },
+            exportState: startedAt => {
+                const event = window.__hostMessages.find(item => item.time >= startedAt && (item.message?.command === 'initiateExportWithSelection' || item.message?.command === 'exportCsv'));
+                const data = event?.message?.data;
+                const rowIndices = data?.rowIndices;
+                const rowCount = event
+                    ? event.message.command === 'initiateExportWithSelection' && Array.isArray(rowIndices) && rowIndices.length === 0
+                        ? rows.length
+                        : rowIndices?.length ?? null
+                    : null;
+                return { durationMs: event ? event.time - startedAt : null, rowCount, columnCount: data?.columnIds?.length ?? null, command: event?.message?.command || null };
+            },
+            search: query => {
+                const input = document.getElementById('globalFilter');
+                const startedAt = performance.now();
+                const eventStart = window.__workerEvents.length;
+                input.value = query;
+                input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+                return waitForSearchDone(startedAt, eventStart, 1, query);
+            },
+            searchBurst: async () => {
+                const input = document.getElementById('globalFilter');
+                const startedAt = performance.now();
+                const eventStart = window.__workerEvents.length;
+                input.value = 'needle-start'; input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+                await new Promise(resolve => setTimeout(resolve, 60));
+                input.value = 'needle-middle'; input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+                const result = await waitForSearchDone(startedAt, eventStart, 2, 'needle-middle');
+                return { ...result, finalFilter: input.value };
+            }
+        };
+
+        const script = document.createElement('script');
+        script.src = '/dist/media/resultPanel.js';
+        script.onload = function() {
+            try {
+                const startedAt = performance.now();
+                window.init();
+                requestAnimationFrame(() => {
+                    window.__dataGridPerf.initialRenderMs = performance.now() - startedAt;
+                    document.getElementById('rowCount').textContent = rowCount.toLocaleString('en-US');
+                    document.getElementById('colCount').textContent = String(columnCount);
+                    document.getElementById('renderStatus').textContent = '✅ Rendered';
+                });
+            } catch (error) {
+                document.getElementById('renderStatus').textContent = `❌ Error: ${error.message}`;
+                console.error('Data grid performance fixture init error:', error);
+            }
+        };
+        script.onerror = () => { document.getElementById('renderStatus').textContent = '❌ Failed to load resultPanel.js'; };
+        document.body.appendChild(script);
+    </script>
+</body>
+</html>

@@ -22,7 +22,7 @@ The deterministic generator uses a fixed seed and locale-independent values. It 
 | `inline` | 10,000 × 8 | Normal in-memory grid and inline search |
 | `worker-boundary-19999` | 19,999 × 8 | Just below the worker threshold |
 | `worker-boundary-20000` | 20,000 × 8 | Just at the worker threshold |
-| `large` | 100,000 × 16 | Worker cold/warm, SQLite, import stream, and exports |
+| `large` | 100,000 × 16 | Worker cold/warm and SQLite search |
 | `wide` | 10,000 × 32 | Reserved for width-sensitive additions |
 
 The Node/Jest matrix currently measures CSV preview/type analysis/validation/SQL generation, full import-stream preparation and consumption, CSV/CSV.GZ/CSV.ZST/JSON/XLSX/XLSB exports, inline search, worker cold and warm search, and SQLite `queryRows()` plus `countRows()`. XML, SQL, Markdown, Parquet, and XPT are registered as `SKIP` cases until they become part of the reference export matrix.
@@ -51,7 +51,7 @@ npm run test:playwright:data-grid-performance
 
 The first command runs the local deterministic Jest suite. The live command is a separate opt-in entry point and is `SKIP` when any of `NZ_DEV_HOST`, `NZ_DEV_PORT`, `NZ_DEV_DATABASE`, `NZ_DEV_USER`, or `NZ_DEV_PASSWORD` is absent. The Playwright command builds the bundles, starts a static fixture server, and saves traces on failure.
 
-Current reports are written to ignored `Benchmark/data-grid.v1.results.json` and `Benchmark/data-grid.v1.results.md`. Playwright traces are written below `test-results/data-grid-performance/`.
+The Node report is written to ignored `Benchmark/data-grid.v1.results.json` and `Benchmark/data-grid.v1.results.md`; the Playwright adapter uses `Benchmark/data-grid-playwright.v1.results.json` and `.md`, and the live adapter uses `Benchmark/data-grid-live.v1.results.json` and `.md`. Playwright traces are written below `test-results/data-grid-performance/`. The dedicated CI workflow uploads these reports and traces as artifacts.
 
 ## Warm-ups, samples, baselines, and alerts
 
