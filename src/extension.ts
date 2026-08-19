@@ -66,6 +66,7 @@ import { createPerformanceTimer, formatPerformanceEvent } from './services/perf/
 import { SQL_AUTHORING_LANGUAGE_IDS } from './utils/sqlLanguage';
 import { TableDdlSynchronizer } from './metadata/tableDdlSynchronizer';
 import { metadataSessionSweeper } from './metadata/metadataSessionSweeper';
+import { setMetadataQueryConcurrencyLimit } from './metadata/metadataQueryLimiter';
 
 let isExtensionShuttingDown = false;
 let deferredFeatureScheduler: DeferredFeatureScheduler | undefined;
@@ -120,6 +121,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
             if (e.affectsConfiguration('justybase.codeLens.enabled')) {
                 const enabled = vscode.workspace.getConfiguration('justybase').get<boolean>('codeLens.enabled', false);
                 void vscode.commands.executeCommand('setContext', 'justybase.codeLensEnabled', enabled);
+            }
+        }),
+    );
+
+    const syncMetadataQueryConcurrency = (): void => {
+        const limit = vscode.workspace
+            .getConfiguration('justybase.metadata')
+            .get<number>('queryConcurrency', 5);
+        setMetadataQueryConcurrencyLimit(limit);
+    };
+    syncMetadataQueryConcurrency();
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('justybase.metadata.queryConcurrency')) {
+                syncMetadataQueryConcurrency();
             }
         }),
     );

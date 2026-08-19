@@ -161,6 +161,7 @@ export async function startSqlLanguageClient(
         configurationSection: [
           "justybase.linter",
           "justybase.sql",
+          "justybase.metadata",
           "netezza.linter",
           "netezza.sql",
         ],

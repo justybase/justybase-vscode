@@ -55,6 +55,7 @@ export interface SettingsMcpIntegration {
 const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     cacheTTL: { min: 1, max: 168 },
     'metadataCache.memoryWarningBytes': { min: 0 },
+    'metadata.queryConcurrency': { min: 1, max: 16 },
     'sqlParser.fastPathThreshold': { min: 102400, max: 52428800 },
     streamingChunkSize: { min: 1000, max: 50000 },
     'query.rowLimit': { min: 1, max: 10000000 },
@@ -169,6 +170,14 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'number',
                 configKey: 'metadataCache.memoryWarningBytes',
                 defaultValue: 268435456
+            },
+            {
+                id: 'metadata-query-concurrency',
+                label: 'Metadata Query Concurrency',
+                description: 'Maximum number of parallel metadata catalog queries per connection (1–16)',
+                type: 'number',
+                configKey: 'metadata.queryConcurrency',
+                defaultValue: 5
             }
         ]
     },

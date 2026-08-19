@@ -1,12 +1,33 @@
-/** Max concurrent metadata (_V_*) queries per logical connection name. */
-const MAX_CONCURRENT_METADATA_QUERIES = 2;
+/** Default max concurrent metadata (_V_*) queries per logical connection name. */
+const DEFAULT_METADATA_QUERY_CONCURRENCY = 5;
+
+/** Upper bound matching the `justybase.metadata.queryConcurrency` setting maximum. */
+export const MAX_METADATA_QUERY_CONCURRENCY = 16;
+
+let metadataQueryConcurrencyLimit = DEFAULT_METADATA_QUERY_CONCURRENCY;
 
 /** Maximum server-side execution time for one metadata catalog query. */
 export const METADATA_QUERY_TIMEOUT_SECONDS = 120;
 
 /** @internal Test / diagnostics */
 export function getMetadataQueryConcurrencyLimit(): number {
-    return MAX_CONCURRENT_METADATA_QUERIES;
+    return metadataQueryConcurrencyLimit;
+}
+
+/**
+ * Set the max concurrent metadata queries per connection from configuration.
+ * The extension host and the LSP server both call this with the value of the
+ * `justybase.metadata.queryConcurrency` setting.
+ */
+export function setMetadataQueryConcurrencyLimit(limit: number): void {
+    if (!Number.isFinite(limit)) {
+        metadataQueryConcurrencyLimit = DEFAULT_METADATA_QUERY_CONCURRENCY;
+        return;
+    }
+    metadataQueryConcurrencyLimit = Math.min(
+        MAX_METADATA_QUERY_CONCURRENCY,
+        Math.max(1, Math.floor(limit)),
+    );
 }
 
 interface ConnectionLimiterState {
@@ -32,7 +53,7 @@ function getLimiterState(connectionName: string): ConnectionLimiterState {
 
 function drainQueue(state: ConnectionLimiterState): void {
     // Wake at most one waiter per completion; waiters increment `active` asynchronously.
-    if (state.active < MAX_CONCURRENT_METADATA_QUERIES && state.queue.length > 0) {
+    if (state.active < metadataQueryConcurrencyLimit && state.queue.length > 0) {
         const next = state.queue.shift();
         next?.();
     }
@@ -47,7 +68,7 @@ export async function runWithMetadataQueryConcurrencyLimit<T>(
 ): Promise<T> {
     const state = getLimiterState(connectionName);
 
-    if (state.active >= MAX_CONCURRENT_METADATA_QUERIES) {
+    if (state.active >= metadataQueryConcurrencyLimit) {
         await new Promise<void>((resolve) => {
             state.queue.push(resolve);
         });
@@ -65,4 +86,5 @@ export async function runWithMetadataQueryConcurrencyLimit<T>(
 /** @internal Test helper */
 export function resetMetadataQueryLimiterForTests(): void {
     limiters.clear();
+    metadataQueryConcurrencyLimit = DEFAULT_METADATA_QUERY_CONCURRENCY;
 }
