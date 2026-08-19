@@ -53,6 +53,21 @@ describe("DocumentParseSession", () => {
     expect(parseSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the full parse when prefix parses fill the per-document cache", () => {
+    const fullSql = "SELECT 1 FROM SOME_TABLE;";
+
+    session.getParseResult(createRequest("SELECT"));
+    session.getParseResult(createRequest(fullSql));
+    for (let index = 0; index < 8; index += 1) {
+      session.getParseResult(createRequest("SELECT " + index + ";"));
+    }
+
+    const missesBeforeFullLookup = parseSpy.mock.calls.length;
+    session.getParseResult(createRequest(fullSql));
+
+    expect(parseSpy).toHaveBeenCalledTimes(missesBeforeFullLookup);
+  });
+
   it("reuses parse cache when document version changes but sql is unchanged", () => {
     const sql = "SELECT 1;";
     session.getParseResult(createRequest(sql, { documentVersion: 1 }));
