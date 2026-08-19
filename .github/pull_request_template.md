@@ -10,6 +10,13 @@
 - [ ] `npm run lint`
 - [ ] `npm run test`
 - [ ] `npm run test:playwright` (if scroll persistence or WebView code changed)
+- [ ] `npm run docs:check` (if a public feature, manifest, contract, route, format, or setting changed)
+
+## Documentation impact
+
+- [ ] User/admin/developer guide updated for a user-visible behavior change.
+- [ ] Status, permission, platform, and database boundaries are documented.
+- [ ] Generated command/setting/capability tables were checked when source contracts changed.
 
 ## Branch Coverage Gate (TQ01-03)
 

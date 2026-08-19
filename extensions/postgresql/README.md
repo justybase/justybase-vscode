@@ -1,5 +1,7 @@
 # JustyBase SQL Editor for PostgreSQL
 
+Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) for the PostgreSQL capability matrix and shared SQL workflows.
+
 ![JustyBase SQL Editor for PostgreSQL](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
 **A PostgreSQL-aware SQL workspace for schema exploration, queries, plans, and data workflows in VS Code.**

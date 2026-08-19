@@ -268,8 +268,8 @@ See [SQL_RESULTS_FILTERING.md](./SQL_RESULTS_FILTERING.md) for how **Loaded rows
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `netezza.queryTimeout` | 0 (none) | Server-side query timeout in seconds |
-| `netezza.queryRowLimit` | 100000 | Maximum rows to fetch |
+| `justybase.query.executionTimeout` | 3600 | Query execution timeout in seconds |
+| `justybase.query.rowLimit` | 200000 | Maximum rows to fetch per execution |
 | `justybase.results.diskBackedResults.memoryRowThreshold` | 25000 | Host RAM spill trigger |
 | `justybase.results.diskBackedResults.rowThreshold` | 500000 | Hard upper spill bound |
 | `justybase.results.diskBackedResults.idleSpillMinutes` | 0 | Idle spill (0 = off) |

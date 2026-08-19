@@ -34,6 +34,7 @@ Benchmark/*.results.md
 
 **/dist/*
 dist/*
+_site/
 
 # Test output
 **/test-output/*

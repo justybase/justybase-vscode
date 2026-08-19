@@ -1,5 +1,7 @@
 # Web Database Editor
 
+The maintained portal guide is [Web Editor](https://justybase.github.io/justybase-vscode/guide/admin/web-editor/) and the generated route/type inventory is [Web Editor API reference](https://justybase.github.io/justybase-vscode/guide/reference/web-api/). This appendix remains the compatibility/developer reference.
+
 The project now ships two applications:
 
 - the existing VS Code extension,

@@ -1,5 +1,7 @@
 # Quick-Fix Coverage Matrix (P53)
 
+For the user workflow and fix review policy, see [SQL quality and diagnostics](https://justybase.github.io/justybase-vscode/guide/user/sql-quality/).
+
 This document is the P53 inventory for all currently implemented `NZ*` and `NZP*` diagnostics.
 
 ## Scope and source of truth

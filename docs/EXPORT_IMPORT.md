@@ -1,5 +1,7 @@
 # Data Export & Import Reference
 
+This technical reference is preserved for compatibility. The maintained workflow is [Import and export](https://justybase.github.io/justybase-vscode/guide/user/import-export/), including data-boundary rules for loaded rows, disk-backed results, and fresh query execution.
+
 JustyBase provides comprehensive data export and import capabilities for seamless data transfer.
 
 ---
@@ -77,6 +79,8 @@ The **Data File Preview** opens tabular data files directly in VS Code as a full
 
 Standard comma-separated format, compatible with any application.
 
+CSV can also be streamed as `CSV.GZ` (gzip) or `CSV.ZST` (Zstandard) from the result panel and Web Editor session export.
+
 ### JSON
 
 Export results as JSON array for use in applications and APIs.
@@ -92,6 +96,10 @@ Generate `INSERT INTO` statements for recreating data in another database.
 ### Markdown
 
 Export results as Markdown table for documentation.
+
+### XPT
+
+XPT is a **Partial** SAS-like macro/file workflow. It is not a general result-grid or Web Editor import format; verify the selected macro/runtime path before relying on it.
 
 ### Markdown File (Combined) — New
 
@@ -261,7 +269,7 @@ Paste data directly from Excel or other sources.
 
 1. Copy data in Excel (or other source)
 2. Right-click on table in Schema Browser → **Import Clipboard Data**
-3. Or use toolbar button ![clippy]($(clippy))
+3. Or use the clipboard toolbar button.
 4. Data is automatically parsed and inserted
 
 **Supported clipboard formats:**

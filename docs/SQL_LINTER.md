@@ -1,5 +1,7 @@
 # SQL Linter
 
+The maintained user-facing guide is [SQL quality and diagnostics](https://justybase.github.io/justybase-vscode/guide/user/sql-quality/). This file remains the implementation-oriented rule reference.
+
 JustyBase includes a built-in SQL linter that provides real-time feedback on common SQL anti-patterns and potential issues specific to Netezza.
 
 Bulk quick-fix policy and `Fix all` eligibility are documented in [QUICK_FIX_MATRIX.md](QUICK_FIX_MATRIX.md).

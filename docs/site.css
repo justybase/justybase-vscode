@@ -157,7 +157,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .button-ghost-dark { color: var(--paper-ink); background: transparent; border-color: rgba(21, 33, 58, 0.22); }
 .button-ghost-dark:hover { background: rgba(21, 33, 58, 0.06); }
 .button-small { min-height: 38px; padding: 0 14px; font-size: 12px; }
-.button-nav { color: #07152c; }
+.button-nav { color: #ffffff; background: linear-gradient(135deg, #315bd6, #24429d); border-color: rgba(255, 255, 255, 0.42); box-shadow: 0 8px 20px rgba(16, 37, 102, 0.35); }
+.button-nav:hover { color: #ffffff; background: linear-gradient(135deg, #456fe8, #3152b9); border-color: rgba(255, 255, 255, 0.75); box-shadow: 0 12px 26px rgba(16, 37, 102, 0.45); }
 
 .section { position: relative; padding: 120px 0; }
 .section-grid { position: relative; overflow: hidden; }
@@ -233,9 +234,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .database-card:hover { border-color: rgba(76, 125, 255, 0.3); box-shadow: 0 20px 45px rgba(35, 59, 98, 0.12); transform: translateY(-5px); }
 .database-card-featured { grid-column: span 2; background: linear-gradient(135deg, rgba(216, 244, 255, 0.95), rgba(235, 233, 255, 0.92)); border-color: rgba(76, 125, 255, 0.2); }
 .database-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.database-logo { display: inline-grid; min-width: 39px; height: 31px; padding: 0 7px; place-items: center; color: #164b73; font-size: 11px; font-weight: 900; letter-spacing: 0.04em; background: rgba(82, 215, 255, 0.22); border: 1px solid rgba(82, 160, 220, 0.22); border-radius: 8px; }
-.database-card:nth-child(3n + 2) .database-logo { color: #5444a4; background: rgba(170, 140, 255, 0.2); border-color: rgba(170, 140, 255, 0.24); }
-.database-card:nth-child(3n + 3) .database-logo { color: #8c5d0b; background: rgba(247, 198, 107, 0.24); border-color: rgba(247, 198, 107, 0.3); }
+.database-logo { display: inline-grid; min-width: 48px; height: 40px; padding: 0 8px; place-items: center; color: #164b73; font-size: 11px; font-weight: 950; letter-spacing: 0.04em; background: rgba(82, 215, 255, 0.22); border: 1px solid rgba(82, 160, 220, 0.32); border-radius: 12px; box-shadow: inset 0 0 0 3px rgba(255,255,255,.28), 0 6px 14px rgba(39,67,112,.09); }
+.database-logo::before { content: ""; width: 17px; height: 7px; margin-bottom: -8px; border: 2px solid currentColor; border-radius: 50%; opacity: .75; }
+.database-logo-db2 { color: #1559a6; background: linear-gradient(145deg, #d7ebff, #a9c9ff); }
+.database-logo-nz { color: #057b9b; background: linear-gradient(145deg, #d4f8ff, #8de5ef); }
+.database-logo-oracle { color: #a83232; background: linear-gradient(145deg, #ffe4e5, #ffb9bd); }
+.database-logo-postgres { color: #2f659c; background: linear-gradient(145deg, #e2efff, #b8d3f7); }
+.database-logo-mssql { color: #5e3ca1; background: linear-gradient(145deg, #eee7ff, #cdbbfa); }
+.database-logo-mysql { color: #936114; background: linear-gradient(145deg, #fff1cb, #f6cf7e); }
+.database-logo-access { color: #9c3e1f; background: linear-gradient(145deg, #ffe5d9, #f6b995); }
+.database-logo-files { color: #177052; background: linear-gradient(145deg, #dcf9e9, #a8e3c6); font-size: 9px; }
 .database-tag { color: #71809a; font-size: 9px; font-weight: 850; letter-spacing: 0.1em; text-align: right; text-transform: uppercase; }
 .database-card h3 { margin: 24px 0 0; color: var(--paper-ink); font-size: 19px; letter-spacing: -0.04em; }
 .database-card p { margin: 8px 0 0; color: var(--paper-muted); font-size: 12px; line-height: 1.65; }

@@ -1,5 +1,7 @@
 # SQL Results — Filtering and Aggregation Modes
 
+This technical reference is preserved for compatibility. The maintained user workflow is [Data Grid and Result Exploration](https://justybase.github.io/justybase-vscode/guide/user/data-grid/).
+
 The result panel supports **three complementary execution layers**. They are not interchangeable: each solves a different boundary (what data you see vs. what was fetched vs. what the database would return before `LIMIT`).
 
 ## Quick reference
@@ -13,7 +15,7 @@ The result panel supports **three complementary execution layers**. They are not
 ## Loaded rows (client / TanStack)
 
 - Filters, sort, grouping, and footer aggregations (`scope: visible`) run on rows **already loaded** in the webview.
-- Bounded by `justybase.query.rowLimit` (default 100,000).
+- Bounded by `justybase.query.rowLimit` (default 200,000).
 - Best for small and medium results; supports **inline cell editing**.
 - Global search scans loaded rows (or a background worker when ≥20,000 rows).
 
@@ -67,7 +69,7 @@ Both scopes can be pinned on different columns in the same result set.
 
 | Setting | Default | Role |
 |---------|---------|------|
-| `justybase.query.rowLimit` | 100000 | Max rows fetched from DB |
+| `justybase.query.rowLimit` | 200000 | Max rows fetched from DB |
 | `justybase.results.diskBackedResults.enabled` | true | Enable SQLite spill |
 | `justybase.results.diskBackedResults.memoryRowThreshold` | 25000 | Spill trigger |
 | `justybase.results.diskBackedResults.rowThreshold` | 500000 | Upper spill bound |
