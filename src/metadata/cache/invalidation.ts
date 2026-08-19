@@ -87,10 +87,16 @@ export function invalidateSchema(
   connectionName: string,
   dbName: string,
   schemaName?: string,
+  options?: {
+    layerKey?: string;
+    allSchemasKey?: string;
+    databaseKey?: string;
+  },
 ): void {
-  const targetSuffix = schemaName ? `${dbName}.${schemaName}` : `${dbName}..`;
+  const targetSuffix = options?.layerKey ?? (schemaName ? `${dbName}.${schemaName}` : `${dbName}..`);
   const fullKey = `${connectionName}|${targetSuffix}`;
-  const allSchemasKey = `${connectionName}|${dbName}..`;
+  const allSchemasKey = `${connectionName}|${options?.allSchemasKey ?? `${dbName}..`}`;
+  const databaseKey = options?.databaseKey ?? dbName;
 
   const removeEntry = (key: string): void => {
     removeTableCacheEntry(
@@ -122,13 +128,13 @@ export function invalidateSchema(
     removeProcedureCacheEntry(deps.store, allSchemasKey);
   }
   deps.objectsCatalogLoaded.delete(
-    buildProcedureCatalogLoadedKey(connectionName, dbName),
+    buildProcedureCatalogLoadedKey(connectionName, databaseKey),
   );
 
   removeColumnCacheEntriesForSchema(
     deps.store,
     connectionName,
-    dbName,
+    databaseKey,
     schemaName,
   );
 

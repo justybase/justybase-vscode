@@ -17,6 +17,12 @@ Maintainer reference for cache layers, write semantics, TTL, events, and host↔
 
 Connection names are passed through as provided by callers (some lookup methods normalize to uppercase).
 
+For Netezza, catalog-derived database names use an exact, encoded cache-key
+part (`@NZEX@...`). This prevents distinct catalog objects such as `JUST_DATA`
+and `just_data` from sharing a cache entry. The encoded marker is an internal
+key representation; values exposed to the schema tree and completion retain the
+catalog spelling, case, and meaningful whitespace.
+
 ## Table cache write policy
 
 ### `setTables` — complete replacement
@@ -77,6 +83,16 @@ Wipes all in-memory layers, bumps `_cacheGeneration` (cancels in-flight disk/col
 
 ## Netezza-specific behavior
 
+- **Identifier sources are distinct** — a name typed by the user follows
+  Netezza SQL rules (an unquoted identifier is folded to uppercase; a quoted
+  identifier is exact), while a value read from `_V_*` is catalog data and is
+  preserved exactly. Catalog predicates therefore use direct equality and
+  catalog qualifiers are quoted when required; system-view joins use stable
+  object identifiers rather than name normalization.
+- **Completion after a complete refresh** — once the in-memory cache contains
+  the complete database/schema/object/column snapshot, completion resolves from
+  cache and does not issue a metadata SQL request while typing. A cache miss is
+  reported as cache-only until the normal refresh/warmup path supplies data.
 - **`DB..TABLE`** — name-only lookup index; first-match wins across schemas; winner updates when first-match schema is removed.
 - **Multi-schema** — refreshing schema S1 does not remove schema S2 entries (separate cache keys).
 - **Table-like types** — TABLE, VIEW, NICKNAME, ALIAS, SYNONYM, SEQUENCE, MATERIALIZED VIEW, SYSTEM VIEW, and related types share the `table` cache layer; explorer merge is per `objType`.
@@ -112,6 +128,17 @@ When disk persistence is enabled (`justybase.metadataCache.diskPersistence`, def
 Self-writes are skipped when this window holds the prefetch lock.
 
 The manifest is written after metadata and column payloads, and the v2 index is written last. Startup accepts a manifest as fresh only when its timestamp/fingerprint matches the index and the snapshot is complete. Stale or partial snapshots are still usable as local data while background prefetch refreshes them.
+
+### Restart and expiry behavior
+
+After a complete refresh, the RAM cache is the first source for completion and
+schema navigation. On a program restart, a matching complete disk snapshot is
+hydrated and remains usable without re-querying metadata; column layers may be
+hydrated lazily from the per-database column files. The database is queried
+again when the snapshot is absent, incomplete, fingerprint-incompatible, or no
+longer fresh according to the configured `cacheTTL` (default 12 hours). A
+stale-but-readable snapshot can still provide immediate local results while a
+background refresh runs; it is not treated as proof that the prefetch is fresh.
 
 ### Column load paths (restart-safe)
 

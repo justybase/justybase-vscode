@@ -45,6 +45,8 @@ describe('MetadataProvider system catalog mirroring', () => {
             findTableId: jest.fn(),
             findObjectWithType: jest.fn(),
             triggerFullColumnPrefetch: jest.fn(),
+            prefetchColumnsForDatabase: jest.fn().mockResolvedValue(undefined),
+            isConnectionPrefetchFresh: jest.fn().mockReturnValue(true),
             isDatabaseDead: jest.fn().mockReturnValue(false),
             markDatabaseDead: jest.fn(),
             isViewsCatalogLoaded: jest.fn().mockReturnValue(false),
@@ -130,7 +132,7 @@ describe('MetadataProvider system catalog mirroring', () => {
         expect(executedQueries.some(query => query.includes('FROM SYSTEM.._V_RELATION_COLUMN'))).toBe(true)
         expect(metadataCache.setColumns).toHaveBeenCalledWith(
             'CONN_1',
-            'TARGET_DB.._V_SESSION',
+            '@NZEX@TARGET_DB.._V_SESSION',
             expect.any(Array)
         )
     })
@@ -169,7 +171,7 @@ describe('MetadataProvider system catalog mirroring', () => {
         expect(items.map(item => completionItemLabel(item))).toEqual(expect.arrayContaining(['EMP_VIEW']))
         expect(metadataCache.setTables).toHaveBeenCalledWith(
             'CONN_1',
-            'TESTDB.DB2INST1',
+            '@NZEX@TESTDB.DB2INST1',
             expect.arrayContaining([
                 expect.objectContaining({ label: 'EMPLOYEES', objType: 'TABLE' }),
                 expect.objectContaining({ label: 'EMP_VIEW', objType: 'VIEW' })
@@ -200,7 +202,7 @@ expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__
             connectionName: 'CONN_1',
             isUserQuery: false,
         }))
-        expect(metadataCache.markViewsCatalogLoaded).toHaveBeenCalledWith('CONN_1', 'SAMPLE_DATABASE.MAIN')
+        expect(metadataCache.markViewsCatalogLoaded).toHaveBeenCalledWith('CONN_1', '@NZEX@SAMPLE_DATABASE.MAIN')
     })
 
     it('resolves synonym columns from cached REFOBJNAME without a synonym lookup query', async () => {
@@ -258,7 +260,7 @@ expect(items.map(item => completionItemLabel(item))).toEqual(['sample_database__
         expect(executedQueries.some(query => query.includes('SELECT TARGET_DB.PUBLIC.ORDERS COLUMN METADATA'))).toBe(false)
         expect(metadataCache.setColumns).toHaveBeenCalledWith(
             'CONN_1',
-            'TARGET_DB.PUBLIC.ORDERS_SYNONYM',
+            '@NZEX@TARGET_DB.PUBLIC.ORDERS_SYNONYM',
             expect.arrayContaining([expect.objectContaining({ ATTNAME: 'ORDER_ID' })])
         )
     })

@@ -1,6 +1,10 @@
 import { unquoteIdentifier } from '../utils/identifierUtils';
 import type { ColumnMetadata } from './types';
 import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
+import {
+    buildNetezzaCacheDatabasePart,
+    isNetezzaExactCachePart,
+} from './helpers';
 
 export interface RawColumnRowWithKeys {
     TABLENAME: string;
@@ -16,8 +20,12 @@ export interface RawColumnRowWithKeys {
 }
 
 /** Normalize fixed-width catalog values before they participate in cache keys. */
-export function normalizeCatalogPart(value: string | undefined | null): string {
-    return String(value ?? '').trim();
+export function normalizeCatalogPart(
+    value: string | undefined | null,
+    options?: { preserveWhitespace?: boolean },
+): string {
+    const stringValue = String(value ?? '');
+    return options?.preserveWhitespace ? stringValue : stringValue.trim();
 }
 
 export function mapRawColumnRowToMetadata(row: RawColumnRowWithKeys): ColumnMetadata {
@@ -49,12 +57,18 @@ export function buildColumnCacheKey(
     dbName: string,
     schemaName: string | undefined,
     tableName: string,
-    options?: { preserveCase?: boolean },
+    options?: { preserveCase?: boolean; exactNetezza?: boolean },
 ): string {
-    const database = normalizeCatalogPart(dbName);
-    const schema = normalizeCatalogPart(schemaName);
-    const table = normalizeCatalogPart(tableName);
-    if (options?.preserveCase) {
+    const preserveCase = options?.preserveCase === true;
+    const normalizedDatabase = normalizeCatalogPart(dbName, { preserveWhitespace: preserveCase });
+    const database = options?.exactNetezza
+        ? (isNetezzaExactCachePart(normalizedDatabase)
+            ? normalizedDatabase
+            : buildNetezzaCacheDatabasePart(normalizedDatabase))
+        : normalizedDatabase;
+    const schema = normalizeCatalogPart(schemaName, { preserveWhitespace: preserveCase });
+    const table = normalizeCatalogPart(tableName, { preserveWhitespace: preserveCase });
+    if (preserveCase) {
         return `${database}.${schema}.${table}`;
     }
 
@@ -69,23 +83,32 @@ export function normalizeColumnLookupKey(key: string): string {
         return key;
     }
 
-    return buildColumnCacheKey(parts[0], parts[1], parts.slice(2).join('.'));
+    const exactNetezza = isNetezzaExactCachePart(parts[0]);
+    return buildColumnCacheKey(
+        parts[0],
+        parts[1],
+        parts.slice(2).join('.'),
+        exactNetezza ? { preserveCase: true } : undefined,
+    );
 }
 
 export function groupColumnRowsByTableKey(
     rows: RawColumnRowWithKeys[],
     defaults?: { dbName?: string; schemaName?: string },
+    options?: { preserveCase?: boolean; exactNetezza?: boolean },
 ): Map<string, ColumnMetadata[]> {
     const columnsByKey = new Map<string, ColumnMetadata[]>();
 
     for (const row of rows) {
-        const databaseName = normalizeCatalogPart(row.DBNAME) || normalizeCatalogPart(defaults?.dbName);
-        const schemaName = normalizeCatalogPart(row.SCHEMA) || normalizeCatalogPart(defaults?.schemaName);
-        const tableName = normalizeCatalogPart(row.TABLENAME);
+        const preserveCase = options?.preserveCase === true;
+        const databaseName = normalizeCatalogPart(row.DBNAME, { preserveWhitespace: preserveCase }) || normalizeCatalogPart(defaults?.dbName, { preserveWhitespace: preserveCase });
+        const schemaName = normalizeCatalogPart(row.SCHEMA, { preserveWhitespace: preserveCase }) || normalizeCatalogPart(defaults?.schemaName, { preserveWhitespace: preserveCase });
+        const tableName = normalizeCatalogPart(row.TABLENAME, { preserveWhitespace: preserveCase });
         const key = buildColumnCacheKey(
             databaseName,
             schemaName,
             tableName,
+            options,
         );
 
         if (!columnsByKey.has(key)) {

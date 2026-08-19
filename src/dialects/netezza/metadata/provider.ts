@@ -15,17 +15,20 @@ import {
     isMirroredSystemCatalogObjectName
 } from './systemCatalogUtils';
 import { escapeSqlString as escapeSqlLiteral } from '../../../utils/sqlUtils';
+import {
+    buildNetezzaIdentifierEquality,
+} from './identifierUtils';
 
 function buildSchemaPredicate(schemaName: string): string {
-    return `UPPER(SCHEMA) = UPPER('${escapeSqlLiteral(schemaName)}')`;
+    return buildNetezzaIdentifierEquality('SCHEMA', schemaName);
 }
 
 function buildDatabasePredicate(database: string): string {
-    return `UPPER(DBNAME) = UPPER('${escapeSqlLiteral(database)}')`;
+    return buildNetezzaIdentifierEquality('DBNAME', database);
 }
 
 function buildObjectSearchQuery(database: string, likePattern: string): string {
-    const db = database.toUpperCase();
+    const db = database;
     const objectDataView = qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA);
     const relationColumnView = qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN);
     const externalView = qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL);
@@ -47,19 +50,19 @@ function buildObjectSearchQuery(database: string, likePattern: string): string {
                    COALESCE(C.DESCRIPTION, '') AS DESCRIPTION, 'NAME' AS MATCH_TYPE
             FROM ${relationColumnView} C
             JOIN ${objectDataView} O ON C.OBJID = O.OBJID
-            WHERE O.DBNAME = '${escapeSqlLiteral(db)}' AND UPPER(C.ATTNAME) LIKE '${likePattern}' ESCAPE '\\'
+            WHERE ${buildNetezzaIdentifierEquality('O.DBNAME', db)} AND UPPER(C.ATTNAME) LIKE '${likePattern}' ESCAPE '\\'
             UNION ALL
             SELECT 2 AS PRIORITY, C.ATTNAME AS NAME, O.SCHEMA, O.DBNAME AS DATABASE, 'COLUMN' AS TYPE, O.OBJNAME AS PARENT,
                    COALESCE(C.DESCRIPTION, '') AS DESCRIPTION, 'COL_DESC' AS MATCH_TYPE
             FROM ${relationColumnView} C
             JOIN ${objectDataView} O ON C.OBJID = O.OBJID
-            WHERE O.DBNAME = '${escapeSqlLiteral(db)}' AND UPPER(C.DESCRIPTION) LIKE '${likePattern}' ESCAPE '\\' AND UPPER(C.ATTNAME) NOT LIKE '${likePattern}' ESCAPE '\\'
+            WHERE ${buildNetezzaIdentifierEquality('O.DBNAME', db)} AND UPPER(C.DESCRIPTION) LIKE '${likePattern}' ESCAPE '\\' AND UPPER(C.ATTNAME) NOT LIKE '${likePattern}' ESCAPE '\\'
             UNION ALL
             SELECT 3 AS PRIORITY, E1.TABLENAME AS NAME, E1.SCHEMA, E1.DATABASE, 'EXTERNAL TABLE' AS TYPE, '' AS PARENT,
                    COALESCE(E2.EXTOBJNAME, '') AS DESCRIPTION, 'DATAOBJECT' AS MATCH_TYPE
             FROM ${externalView} E1
             JOIN ${extObjectView} E2 ON E1.RELID = E2.OBJID
-            WHERE E1.DATABASE = '${escapeSqlLiteral(db)}' AND UPPER(E2.EXTOBJNAME) LIKE '${likePattern}' ESCAPE '\\'
+            WHERE ${buildNetezzaIdentifierEquality('E1.DATABASE', db)} AND UPPER(E2.EXTOBJNAME) LIKE '${likePattern}' ESCAPE '\\'
         ) AS R
         ORDER BY PRIORITY, NAME
         LIMIT 200
@@ -67,7 +70,7 @@ function buildObjectSearchQuery(database: string, likePattern: string): string {
 }
 
 function buildViewSourceSearchQuery(database: string, options: DatabaseSourceSearchQueryOptions): string {
-    const db = database.toUpperCase();
+    const db = database;
     const viewSource = qualifySystemView(db, NZ_SYSTEM_VIEWS.VIEW);
 
     if (options.useServerSideFilter) {
@@ -86,7 +89,7 @@ function buildViewSourceSearchQuery(database: string, options: DatabaseSourceSea
 }
 
 function buildProcedureSourceSearchQuery(database: string, options: DatabaseSourceSearchQueryOptions): string {
-    const db = database.toUpperCase();
+    const db = database;
     const procedureSource = qualifySystemView(db, NZ_SYSTEM_VIEWS.PROCEDURE);
 
     if (options.useServerSideFilter) {
@@ -131,10 +134,10 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                     O.OBJTYPE,
                     COALESCE(S.REFOBJNAME, '') AS REFOBJNAME,
                     COALESCE(O.DESCRIPTION, '') AS DESCRIPTION
-                FROM ${database}.._V_OBJECT_DATA O
-                LEFT JOIN ${database}.._V_SYNONYM S ON S.OBJID = O.OBJID
-                WHERE UPPER(O.DBNAME) = UPPER('${escapeSqlLiteral(database)}')
-                    AND UPPER(O.SCHEMA) = UPPER('${escapeSqlLiteral(schema)}')
+                FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+                LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
+                WHERE ${buildDatabasePredicate(database)}
+                    AND ${buildSchemaPredicate(schema)}
                     AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')
                 ORDER BY O.OBJNAME
             `.trim();
@@ -147,30 +150,30 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                 O.SCHEMA,
                 COALESCE(S.REFOBJNAME, '') AS REFOBJNAME,
                 COALESCE(O.DESCRIPTION, '') AS DESCRIPTION
-            FROM ${database}.._V_OBJECT_DATA O
-            LEFT JOIN ${database}.._V_SYNONYM S ON S.OBJID = O.OBJID
-            WHERE UPPER(O.DBNAME) = UPPER('${escapeSqlLiteral(database)}')
+            FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+            LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
+            WHERE ${buildDatabasePredicate(database)}
                 AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')
             ORDER BY O.OBJNAME
         `.trim();
     },
     buildListViewsQuery(database: string, schema?: string): string {
         if (schema) {
-            return `SELECT OBJNAME, SCHEMA, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${database}.._V_OBJECT_DATA WHERE ${buildDatabasePredicate(database)} AND ${buildSchemaPredicate(schema)} AND OBJTYPE = 'VIEW' ORDER BY OBJNAME`;
+            return `SELECT OBJNAME, SCHEMA, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildDatabasePredicate(database)} AND ${buildSchemaPredicate(schema)} AND OBJTYPE = 'VIEW' ORDER BY OBJNAME`;
         }
-        return `SELECT OBJNAME, SCHEMA, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${database}.._V_OBJECT_DATA WHERE ${buildDatabasePredicate(database)} AND OBJTYPE = 'VIEW' ORDER BY OBJNAME`;
+        return `SELECT OBJNAME, SCHEMA, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildDatabasePredicate(database)} AND OBJTYPE = 'VIEW' ORDER BY OBJNAME`;
     },
     buildListProceduresQuery(database: string, schema?: string): string {
-        let query = `SELECT SCHEMA, PROCEDURE, PROCEDURESIGNATURE FROM ${database}.._V_PROCEDURE WHERE DATABASE = '${escapeSqlLiteral(database)}'`;
+        let query = `SELECT SCHEMA, PROCEDURE, PROCEDURESIGNATURE FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.PROCEDURE)} WHERE ${buildNetezzaIdentifierEquality('DATABASE', database)}`;
         if (schema) {
-            query += ` AND UPPER(SCHEMA) = UPPER('${escapeSqlLiteral(schema)}')`;
+            query += ` AND ${buildSchemaPredicate(schema)}`;
         }
         query += ' ORDER BY SCHEMA, PROCEDURE';
         return query;
     },
     buildObjectTypeQuery(database: string, objectType: string): string {
         if (objectType === 'PROCEDURE') {
-            return `SELECT PROCEDURESIGNATURE AS OBJNAME, SCHEMA, OBJID::INT AS OBJID, COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER FROM ${database}.._V_PROCEDURE WHERE DATABASE = '${escapeSqlLiteral(database)}' ORDER BY PROCEDURESIGNATURE`;
+            return `SELECT PROCEDURESIGNATURE AS OBJNAME, SCHEMA, OBJID::INT AS OBJID, COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.PROCEDURE)} WHERE ${buildNetezzaIdentifierEquality('DATABASE', database)} ORDER BY PROCEDURESIGNATURE`;
         }
         if (objectType === 'SYNONYM') {
             return `
@@ -181,14 +184,14 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                     COALESCE(O.DESCRIPTION, '') AS DESCRIPTION,
                     O.OWNER,
                     COALESCE(S.REFOBJNAME, '') AS REFOBJNAME
-                FROM ${database}.._V_OBJECT_DATA O
-                LEFT JOIN ${database}.._V_SYNONYM S ON S.OBJID = O.OBJID
-                WHERE O.DBNAME = '${escapeSqlLiteral(database)}'
+                FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+                LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
+                WHERE ${buildNetezzaIdentifierEquality('O.DBNAME', database)}
                     AND O.OBJTYPE = 'SYNONYM'
                 ORDER BY O.OBJNAME
             `.trim();
         }
-        return `SELECT OBJNAME, SCHEMA, OBJID, COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER FROM ${database}.._V_OBJECT_DATA WHERE DBNAME = '${escapeSqlLiteral(database)}' AND OBJTYPE = '${escapeSqlLiteral(objectType)}' ORDER BY OBJNAME`;
+        return `SELECT OBJNAME, SCHEMA, OBJID, COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildNetezzaIdentifierEquality('DBNAME', database)} AND OBJTYPE = '${escapeSqlLiteral(objectType)}' ORDER BY OBJNAME`;
     },
     buildObjectByNameQuery(
         database: string,
@@ -202,15 +205,15 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
         return `
             SELECT OBJNAME, SCHEMA, OBJID, OBJTYPE,
                    COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER
-            FROM ${database}.._V_OBJECT_DATA
+            FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)}
             WHERE ${buildDatabasePredicate(database)}
               AND ${buildSchemaPredicate(schema)}
-              AND UPPER(OBJNAME) = UPPER('${escapeSqlLiteral(objectName)}')
+              AND ${buildNetezzaIdentifierEquality('OBJNAME', objectName)}
               AND OBJTYPE IN (${types})
         `.trim();
     },
     buildTypeGroupsQuery(database: string): string {
-        return `SELECT DISTINCT OBJTYPE FROM ${database}..${NZ_SYSTEM_VIEWS.OBJECT_DATA} WHERE DBNAME = '${escapeSqlLiteral(database)}' ORDER BY OBJTYPE`;
+        return `SELECT DISTINCT OBJTYPE FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildNetezzaIdentifierEquality('DBNAME', database)} ORDER BY OBJTYPE`;
     },
     buildColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string {
         return NZ_QUERIES.listColumnsWithKeys(database, options);
@@ -225,8 +228,10 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
         return NZ_QUERIES.getExternalTableColumns(database, schema, tableName);
     },
     buildColumnMetadataQuery(database: string, schema: string, tableName: string): string {
-        const escapedTableName = escapeSqlLiteral(tableName);
-        const escapedSchema = escapeSqlLiteral(schema);
+        const relationColumnView = qualifySystemView(database, NZ_SYSTEM_VIEWS.RELATION_COLUMN);
+        const objectDataView = qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA);
+        const relationKeyDataView = qualifySystemView(database, NZ_SYSTEM_VIEWS.RELATION_KEYDATA);
+        const tableDistMapView = qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE_DIST_MAP);
         return `
             SELECT 
                 X.ATTNAME
@@ -238,22 +243,22 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                 , MAX(CASE WHEN K.CONTYPE = 'f' THEN 1 ELSE 0 END) AS IS_FK
                 , MAX(CASE WHEN D.ATTNAME IS NOT NULL THEN 1 ELSE 0 END) AS IS_DISTRIBUTION_KEY
             FROM
-                ${database}.._V_RELATION_COLUMN X
+                ${relationColumnView} X
             INNER JOIN
-                ${database}.._V_OBJECT_DATA O ON X.OBJID = O.OBJID
+                ${objectDataView} O ON X.OBJID = O.OBJID
             LEFT JOIN
-                ${database}.._V_RELATION_KEYDATA K 
+                ${relationKeyDataView} K
                 ON K.OBJID = O.OBJID
                 AND K.ATTNAME = X.ATTNAME
                 AND K.CONTYPE IN ('p', 'f')
             LEFT JOIN
-                ${database}.._V_TABLE_DIST_MAP D
+                ${tableDistMapView} D
                 ON D.OBJID = O.OBJID
                 AND D.ATTNAME = X.ATTNAME
             WHERE
-                UPPER(O.OBJNAME) = UPPER('${escapedTableName}')
-                AND UPPER(O.DBNAME) = UPPER('${escapeSqlLiteral(database)}')
-                AND UPPER(O.SCHEMA) = UPPER('${escapedSchema}')
+                ${buildNetezzaIdentifierEquality('O.OBJNAME', tableName)}
+                AND ${buildNetezzaIdentifierEquality('O.DBNAME', database)}
+                AND ${buildNetezzaIdentifierEquality('O.SCHEMA', schema)}
             GROUP BY 
                 X.ATTNAME, X.FORMAT_TYPE, X.ATTNOTNULL, X.COLDEFAULT, X.DESCRIPTION, X.ATTNUM
             ORDER BY 
@@ -262,22 +267,27 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
     },
     buildLookupColumnsQuery(params: DatabaseColumnLookupParams): string {
         const { database, schema, tableName, objectId } = params;
-        const dbPrefix = database ? `${database}..` : '';
+        const relationColumnView = database
+            ? qualifySystemView(database, NZ_SYSTEM_VIEWS.RELATION_COLUMN)
+            : NZ_SYSTEM_VIEWS.RELATION_COLUMN;
+        const objectDataView = database
+            ? qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)
+            : NZ_SYSTEM_VIEWS.OBJECT_DATA;
         if (objectId !== undefined) {
-            return `SELECT ATTNAME, FORMAT_TYPE, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${dbPrefix}_V_RELATION_COLUMN WHERE OBJID = ${objectId} ORDER BY ATTNUM`;
+            return `SELECT ATTNAME, FORMAT_TYPE, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${relationColumnView} WHERE OBJID = ${objectId} ORDER BY ATTNUM`;
         }
-        const schemaClause = schema ? `AND UPPER(O.SCHEMA) = UPPER('${escapeSqlLiteral(schema)}')` : '';
-        const dbClause = database ? `AND UPPER(O.DBNAME) = UPPER('${escapeSqlLiteral(database)}')` : '';
+        const schemaClause = schema ? `AND ${buildNetezzaIdentifierEquality('O.SCHEMA', schema)}` : '';
+        const dbClause = database ? `AND ${buildNetezzaIdentifierEquality('O.DBNAME', database)}` : '';
         return `
             SELECT C.ATTNAME, C.FORMAT_TYPE, COALESCE(C.DESCRIPTION, '') AS DESCRIPTION
-            FROM ${dbPrefix}_V_RELATION_COLUMN C
-            JOIN ${dbPrefix}_V_OBJECT_DATA O ON C.OBJID = O.OBJID
-            WHERE UPPER(O.OBJNAME) = UPPER('${escapeSqlLiteral(tableName)}') ${schemaClause} ${dbClause}
+            FROM ${relationColumnView} C
+            JOIN ${objectDataView} O ON C.OBJID = O.OBJID
+            WHERE ${buildNetezzaIdentifierEquality('O.OBJNAME', tableName)} ${schemaClause} ${dbClause}
             ORDER BY C.ATTNUM
         `;
     },
     buildTableCommentQuery(database: string, schema: string, tableName: string): string {
-        return `SELECT description FROM ${database}.._v_object_data WHERE objtype='TABLE' AND objname='${escapeSqlLiteral(tableName)}' AND schema='${escapeSqlLiteral(schema)}'`;
+        return `SELECT DESCRIPTION FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE OBJTYPE='TABLE' AND ${buildNetezzaIdentifierEquality('OBJNAME', tableName)} AND ${buildNetezzaIdentifierEquality('SCHEMA', schema)} AND ${buildNetezzaIdentifierEquality('DBNAME', database)}`;
     },
     buildObjectSearchQuery(database: string, likePattern: string): string {
         return buildObjectSearchQuery(database, likePattern);

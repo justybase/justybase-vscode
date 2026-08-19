@@ -24,7 +24,12 @@ export function computeConnectionFingerprint(
     const dbKind = input.dbType
         ? (tryNormalizeDatabaseKind(input.dbType) ?? String(input.dbType).toLowerCase())
         : 'netezza';
-    const payload = `${host}|${port}|${database}|${dbKind}`;
+    // Netezza catalog identity is case-sensitive for quoted names. Bump only
+    // the Netezza fingerprint namespace so old lossy snapshots cannot merge
+    // JUST_DATA and just_data after the cache semantics change. Other dialects
+    // retain their existing fingerprint and restart behavior.
+    const cacheSemantics = dbKind === 'netezza' ? '|catalog-identities-v2' : '';
+    const payload = `${host}|${port}|${database}|${dbKind}${cacheSemantics}`;
     return createHash('sha256').update(payload, 'utf8').digest('hex');
 }
 

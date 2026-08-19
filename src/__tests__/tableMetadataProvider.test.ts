@@ -31,9 +31,9 @@ describe('tableMetadataProvider', () => {
     it('builds table comment query', () => {
         const query = buildTableCommentQuery('DB1', 'PUBLIC', 'ORDERS');
 
-        expect(query).toContain('DB1.._v_object_data');
-        expect(query).toContain("objname='ORDERS'");
-        expect(query).toContain("schema='PUBLIC'");
+        expect(query).toContain('DB1.._V_OBJECT_DATA');
+        expect(query).toContain("OBJNAME = 'ORDERS'");
+        expect(query).toContain("SCHEMA = 'PUBLIC'");
     });
 
     it('builds column metadata query with PK/FK clauses', () => {
@@ -42,8 +42,8 @@ describe('tableMetadataProvider', () => {
         expect(query).toContain('DB1.._V_RELATION_COLUMN');
         expect(query).toContain('MAX(CASE WHEN K.CONTYPE = \'p\' THEN 1 ELSE 0 END) AS IS_PK');
         expect(query).toContain('MAX(CASE WHEN K.CONTYPE = \'f\' THEN 1 ELSE 0 END) AS IS_FK');
-        expect(query).toContain('UPPER(\'ORDERS\')');
-        expect(query).toContain('UPPER(\'PUBLIC\')');
+        expect(query).toContain("O.OBJNAME = 'ORDERS'");
+        expect(query).toContain("O.SCHEMA = 'PUBLIC'");
     });
 
     it('parses column row with boolean, numeric and string flag variants', () => {

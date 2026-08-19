@@ -12,6 +12,10 @@ import {
     getTablesInSchema,
     RelationshipEdge
 } from './erdProvider';
+import {
+    createNetezzaCatalogIdentifier,
+    formatNetezzaIdentifier,
+} from '../dialects/netezza/metadata/identifierUtils';
 
 interface SchemaRow extends Record<string, unknown> {
     SCHEMA: string;
@@ -48,21 +52,30 @@ function isInformationSchemaQueryBuilderKind(kind: string | undefined): kind is 
  * never use it as a catalog predicate for File SQL metadata queries.
  */
 function metadataDatabaseName(kind: string | undefined, database: string): string {
-    return kind === 'file' ? '' : database;
+    if (kind === 'file') {
+        return '';
+    }
+    return kind === 'netezza'
+        ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(database))
+        : database;
 }
 
 /**
  * DuckDB catalog names are case-sensitive in the information_schema
  * predicates used by the metadata provider. Keep the catalog value supplied
- * by the connection/tree item for DuckDB and File SQL; Netezza continues to
- * use its historical uppercase display convention.
+ * by the connection/tree item for DuckDB, File SQL, and Netezza. Other
+ * dialects retain their existing display normalization.
  */
 function displayDatabaseName(kind: string | undefined, database: string): string {
-    return isInformationSchemaQueryBuilderKind(kind) ? database : database.toUpperCase();
+    return isInformationSchemaQueryBuilderKind(kind) || kind === 'netezza'
+        ? database
+        : database.toUpperCase();
 }
 
 function displaySchemaName(kind: string | undefined, schema: string): string {
-    return isInformationSchemaQueryBuilderKind(kind) ? schema : schema.toUpperCase();
+    return isInformationSchemaQueryBuilderKind(kind) || kind === 'netezza'
+        ? schema
+        : schema.toUpperCase();
 }
 
 function normalizeSchemaName(value: unknown, uppercase = true): string | undefined {
@@ -229,7 +242,10 @@ export async function getSchemasForDatabase(
             .filter((schema): schema is string => schema !== undefined)));
     }
 
-    const schemaQuery = `SELECT DISTINCT SCHEMA FROM ${database}.._V_TABLE ORDER BY SCHEMA`;
+    const schemaDatabase = kind === 'netezza'
+        ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(database))
+        : database;
+    const schemaQuery = `SELECT DISTINCT SCHEMA FROM ${schemaDatabase}.._V_TABLE ORDER BY SCHEMA`;
     const schemaResult = await runQueryRaw(
         context,
         schemaQuery,

@@ -68,6 +68,7 @@ describe("CompletionContextExtractor", () => {
     expect(context).toEqual({
       kind: "db_double_dot",
       dbName: "JUST_DATA",
+      dbQuoted: true,
       partial: "D",
     });
   });
@@ -124,7 +125,9 @@ describe("CompletionContextExtractor", () => {
         path: {
           kind: "db_schema_dot",
           dbName: "JUST_DATA",
+          dbQuoted: true,
           schemaName: "ADMIN",
+          schemaQuoted: true,
           partial: "",
         },
         targetType: "procedure",

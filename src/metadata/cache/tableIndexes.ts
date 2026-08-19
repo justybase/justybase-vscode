@@ -4,7 +4,13 @@
 
 import { Logger } from '../../utils/logger';
 import type { CacheStatsTracker } from '../cacheStats';
-import { extractLabel, buildIdLookupKey } from '../helpers';
+import {
+  extractLabel,
+  buildIdLookupKey,
+  buildNetezzaCacheDatabasePart,
+  isNetezzaExactCachePart,
+  parseCacheKey,
+} from '../helpers';
 import type { CachedObjectInfo, TableMetadata } from '../types';
 import type { MetadataStore } from './MetadataStore';
 import { invalidateObjectsByTypeForDb } from './invalidation';
@@ -12,14 +18,19 @@ import { invalidateObjectsByTypeForDb } from './invalidation';
 export function resolveTableSchemaName(
   item: TableMetadata,
   fallbackSchema?: string,
+  preserveCatalogIdentity = false,
 ): string | undefined {
   const itemSchemaName =
-    typeof item.SCHEMA === 'string' ? item.SCHEMA.trim() : '';
+    typeof item.SCHEMA === 'string'
+      ? (preserveCatalogIdentity ? item.SCHEMA : item.SCHEMA.trim())
+      : '';
   if (itemSchemaName) {
     return itemSchemaName;
   }
 
-  const normalizedFallbackSchema = fallbackSchema?.trim();
+  const normalizedFallbackSchema = preserveCatalogIdentity
+    ? fallbackSchema
+    : fallbackSchema?.trim();
   return normalizedFallbackSchema ? normalizedFallbackSchema : undefined;
 }
 
@@ -28,13 +39,18 @@ export function buildCachedObjectInfo(
   fallbackSchema: string | undefined,
   item: TableMetadata,
   idMap?: Map<string, number>,
+  preserveCatalogIdentity = false,
 ): CachedObjectInfo | undefined {
   const itemName = extractLabel(item);
   if (!itemName) {
     return undefined;
   }
 
-  const itemSchemaName = resolveTableSchemaName(item, fallbackSchema);
+  const itemSchemaName = resolveTableSchemaName(
+    item,
+    fallbackSchema,
+    preserveCatalogIdentity,
+  );
   const lookupKey = buildIdLookupKey(dbName, itemSchemaName, itemName);
   const objId =
     idMap?.get(lookupKey) ??
@@ -58,6 +74,7 @@ export function addTableIndexes(
   fallbackSchema: string | undefined,
   data: TableMetadata[],
   idMap: Map<string, number>,
+  preserveCatalogIdentity = false,
 ): void {
   for (const item of data) {
     const cachedInfo = buildCachedObjectInfo(
@@ -65,17 +82,20 @@ export function addTableIndexes(
       fallbackSchema,
       item,
       idMap,
+      preserveCatalogIdentity,
     );
     if (!cachedInfo) {
       continue;
     }
 
-    const indexKey =
-      `${connectionName}|${dbName}.${cachedInfo.schema}.${cachedInfo.name}`.toUpperCase();
+    const indexKey = preserveCatalogIdentity
+      ? `${connectionName.toUpperCase()}|${dbName}.${cachedInfo.schema}.${cachedInfo.name}`
+      : `${connectionName}|${dbName}.${cachedInfo.schema}.${cachedInfo.name}`.toUpperCase();
     store.objectLookupIndex.set(indexKey, cachedInfo);
 
-    const tableNameOnlyKey =
-      `${connectionName}|${dbName}..${cachedInfo.name}`.toUpperCase();
+    const tableNameOnlyKey = preserveCatalogIdentity
+      ? `${connectionName.toUpperCase()}|${dbName}..${cachedInfo.name}`
+      : `${connectionName}|${dbName}..${cachedInfo.name}`.toUpperCase();
     if (!store.tableNameOnlyIndex.has(tableNameOnlyKey)) {
       store.tableNameOnlyIndex.set(tableNameOnlyKey, cachedInfo);
     }
@@ -88,6 +108,7 @@ export function removeTableIndexes(
   dbName: string,
   fallbackSchema: string | undefined,
   data: TableMetadata[],
+  preserveCatalogIdentity = false,
 ): Set<string> {
   const affectedNames = new Set<string>();
 
@@ -97,22 +118,27 @@ export function removeTableIndexes(
       continue;
     }
 
-    affectedNames.add(itemName.toUpperCase());
+    affectedNames.add(preserveCatalogIdentity ? itemName : itemName.toUpperCase());
     const resolvedSchemaName =
-      resolveTableSchemaName(item, fallbackSchema) || '';
-    const indexKey =
-      `${connectionName}|${dbName}.${resolvedSchemaName}.${itemName}`.toUpperCase();
+      resolveTableSchemaName(item, fallbackSchema, preserveCatalogIdentity) || '';
+    const indexKey = preserveCatalogIdentity
+      ? `${connectionName.toUpperCase()}|${dbName}.${resolvedSchemaName}.${itemName}`
+      : `${connectionName}|${dbName}.${resolvedSchemaName}.${itemName}`.toUpperCase();
     store.objectLookupIndex.delete(indexKey);
 
-    const tableNameOnlyKey =
-      `${connectionName}|${dbName}..${itemName}`.toUpperCase();
+    const tableNameOnlyKey = preserveCatalogIdentity
+      ? `${connectionName.toUpperCase()}|${dbName}..${itemName}`
+      : `${connectionName}|${dbName}..${itemName}`.toUpperCase();
     const currentNameOnlyEntry =
       store.tableNameOnlyIndex.get(tableNameOnlyKey);
     if (
       currentNameOnlyEntry &&
-      currentNameOnlyEntry.name.toUpperCase() === itemName.toUpperCase() &&
-      (currentNameOnlyEntry.schema || '').toUpperCase() ===
-        resolvedSchemaName.toUpperCase()
+      (preserveCatalogIdentity
+        ? currentNameOnlyEntry.name === itemName
+        : currentNameOnlyEntry.name.toUpperCase() === itemName.toUpperCase()) &&
+      (preserveCatalogIdentity
+        ? (currentNameOnlyEntry.schema || '') === resolvedSchemaName
+        : (currentNameOnlyEntry.schema || '').toUpperCase() === resolvedSchemaName.toUpperCase())
     ) {
       store.tableNameOnlyIndex.delete(tableNameOnlyKey);
     }
@@ -126,20 +152,18 @@ export function parseTableCacheKey(
 ):
   | { connectionName: string; dbName: string; schemaName: string }
   | undefined {
-  const [connectionName, key] = fullKey.split('|');
-  if (!connectionName || !key) {
+  const parsed = parseCacheKey(fullKey);
+  if (!parsed) {
     return undefined;
   }
-
-  const keyParts = key.split('.');
-  if (keyParts.length < 2) {
+  const key = fullKey.slice(fullKey.indexOf('|') + 1);
+  if (!key) {
     return undefined;
   }
-
   return {
-    connectionName,
-    dbName: keyParts[0],
-    schemaName: keyParts[1] || '',
+    connectionName: parsed.connectionName,
+    dbName: parsed.dbName,
+    schemaName: parsed.schemaName || '',
   };
 }
 
@@ -151,14 +175,18 @@ export function restoreTableNameOnlyIndexes(
   tableNames: Iterable<string>,
   isEntryValid: (timestamp: number) => boolean,
   removeTableCacheEntryFn: (fullKey: string) => void,
+  preserveCatalogIdentity = false,
 ): void {
   const namesToRestore = new Set(tableNames);
   if (namesToRestore.size === 0) {
     return;
   }
 
-  const prefix = `${connectionName}|${dbName}.`;
-  const allSchemasKey = `${connectionName}|${dbName}..`;
+  const cacheDbName = preserveCatalogIdentity
+    ? buildNetezzaCacheDatabasePart(dbName)
+    : dbName;
+  const prefix = `${connectionName}|${cacheDbName}.`;
+  const allSchemasKey = `${connectionName}|${cacheDbName}..`;
   const staleKeys: string[] = [];
 
   for (const [key, entry] of store.tableCache) {
@@ -178,12 +206,13 @@ export function restoreTableNameOnlyIndexes(
     const idMapEntry = store.tableIdMap.get(key);
     for (const item of entry.data) {
       const itemName = extractLabel(item);
-      if (!itemName || !namesToRestore.has(itemName.toUpperCase())) {
+      if (!itemName || !namesToRestore.has(preserveCatalogIdentity ? itemName : itemName.toUpperCase())) {
         continue;
       }
 
-      const tableNameOnlyKey =
-        `${connectionName}|${dbName}..${itemName}`.toUpperCase();
+      const tableNameOnlyKey = preserveCatalogIdentity
+        ? `${connectionName.toUpperCase()}|${dbName}..${itemName}`
+        : `${connectionName}|${dbName}..${itemName}`.toUpperCase();
       if (store.tableNameOnlyIndex.has(tableNameOnlyKey)) {
         continue;
       }
@@ -193,6 +222,7 @@ export function restoreTableNameOnlyIndexes(
         parsedKey.schemaName || undefined,
         item,
         idMapEntry?.data,
+        preserveCatalogIdentity,
       );
       if (cachedInfo) {
         store.tableNameOnlyIndex.set(tableNameOnlyKey, cachedInfo);
@@ -245,6 +275,8 @@ export function removeTableCacheEntry(
 ): void {
   const entry = store.tableCache.get(fullKey);
   const parsedKey = parseTableCacheKey(fullKey);
+  const layerKey = fullKey.slice(fullKey.indexOf('|') + 1);
+  const preserveCatalogIdentity = isNetezzaExactCachePart(layerKey);
   if (!entry || !parsedKey) {
     store.tableCache.delete(fullKey);
     store.tableIdMap.delete(fullKey);
@@ -259,6 +291,7 @@ export function removeTableCacheEntry(
     parsedKey.dbName,
     parsedKey.schemaName || undefined,
     entry.data,
+    preserveCatalogIdentity,
   );
 
   store.tableCache.delete(fullKey);
@@ -266,7 +299,9 @@ export function removeTableCacheEntry(
   invalidateObjectsByTypeForDb(
     store,
     parsedKey.connectionName,
-    parsedKey.dbName,
+    preserveCatalogIdentity
+      ? buildNetezzaCacheDatabasePart(parsedKey.dbName)
+      : parsedKey.dbName,
   );
   restoreTableNameOnlyIndexes(
     store,
@@ -284,6 +319,7 @@ export function removeTableCacheEntry(
         isEntryValid,
         key,
       ),
+    preserveCatalogIdentity,
   );
   viewsCatalogLoaded.delete(fullKey);
   clearObjectsCatalogLoadedForLayer(objectsCatalogLoaded, fullKey);
@@ -301,9 +337,13 @@ export function rebuildTableIndexesForConnection(
       continue;
     }
     const layerKey = fullKey.slice(prefix.length);
-    const keyParts = layerKey.split('.');
-    const dbName = keyParts[0];
-    const schemaName = keyParts[1] || '';
+    const parsedKey = parseTableCacheKey(fullKey);
+    if (!parsedKey) {
+      continue;
+    }
+    const dbName = parsedKey.dbName;
+    const schemaName = parsedKey.schemaName || '';
+    const preserveCatalogIdentity = isNetezzaExactCachePart(layerKey);
     const idMapEntry = store.tableIdMap.get(fullKey);
     const idMap = idMapEntry?.data ?? new Map<string, number>();
     addTableIndexes(
@@ -313,6 +353,7 @@ export function rebuildTableIndexesForConnection(
       schemaName || undefined,
       entry.data,
       idMap,
+      preserveCatalogIdentity,
     );
   }
   deferredIndexConnections.delete(connectionName);

@@ -7,6 +7,10 @@ import {
 } from "./completionPathUtils";
 import { getChildNodes, getFirstTokenFromCst, getTokens, isIdentifierToken } from "./completionCstUtils";
 import type { FromJoinContext, QualifiedTableName } from "./completionTypes";
+import {
+  createNetezzaUserIdentifier,
+  formatNetezzaIdentifier,
+} from "../dialects/netezza/metadata/identifierUtils";
 
 /**
  * Dialect-aware identifier normalization and qualified-name parsing.
@@ -19,13 +23,80 @@ export function stripQuotes(value: string): string {
   if (trimmed.endsWith("]")) {
     return trimmed.slice(0, -1);
   }
+  if (trimmed.startsWith("`") && trimmed.endsWith("`")) {
+    return trimmed.slice(1, -1).replace(/``/g, "`");
+  }
+  if (trimmed.endsWith("`")) {
+    return trimmed.slice(0, -1);
+  }
   if (trimmed.startsWith('"')) {
-    return trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed.slice(1);
+    const unquoted = trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed.slice(1);
+    return unquoted.replace(/""/g, '"');
   }
   if (trimmed.endsWith('"')) {
     return trimmed.slice(0, -1);
   }
   return trimmed;
+}
+
+interface ParsedIdentifierSegment {
+  value: string;
+  quoted: boolean;
+}
+
+function parseIdentifierSegment(raw: string): ParsedIdentifierSegment {
+  const trimmed = raw.trim();
+  const quoted =
+    (trimmed.startsWith('"') && trimmed.length > 1) ||
+    trimmed.startsWith('`') ||
+    trimmed.startsWith('[');
+  return { value: stripQuotes(trimmed), quoted };
+}
+
+function splitQualifiedPath(fragment: string): {
+  parts: string[];
+  hasUnquotedWhitespace: boolean;
+} {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | '`' | '[' | undefined;
+  let hasUnquotedWhitespace = false;
+
+  for (let index = 0; index < fragment.length; index += 1) {
+    const char = fragment[index];
+    if (quote) {
+      current += char;
+      if ((quote === '"' || quote === '`') && char === quote) {
+        const next = fragment[index + 1];
+        if (next === quote) {
+          current += next;
+          index += 1;
+        } else {
+          quote = undefined;
+        }
+      } else if (quote === '[' && char === ']') {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === '`' || char === '[') {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      hasUnquotedWhitespace = true;
+    }
+    if (char === '.') {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return { parts, hasUnquotedWhitespace };
 }
 
 export function normalizeDialectQuotedIdentifiers(
@@ -47,6 +118,32 @@ export function normalizeDialectQuotedIdentifiers(
   return normalizedSql;
 }
 
+export function formatNetezzaUserIdentifierForLookup(
+  value: string,
+  quoted = false,
+): string {
+  return formatNetezzaIdentifier(createNetezzaUserIdentifier(value, quoted));
+}
+
+export function normalizeNetezzaFromJoinContext(
+  context: FromJoinContext,
+): FromJoinContext {
+  if (context.kind === "from_join_name") {
+    return context;
+  }
+  if (context.kind === "db_schema_dot") {
+    return {
+      ...context,
+      dbName: formatNetezzaUserIdentifierForLookup(context.dbName, context.dbQuoted),
+      schemaName: formatNetezzaUserIdentifierForLookup(context.schemaName, context.schemaQuoted),
+    };
+  }
+  return {
+    ...context,
+    dbName: formatNetezzaUserIdentifierForLookup(context.dbName, context.dbQuoted),
+  };
+}
+
 export function parseTablePathFragment(
   fragmentRaw: string,
   databaseKind?: DatabaseKind,
@@ -58,15 +155,6 @@ export function parseTablePathFragment(
   }
 
   if (hasTrailingWhitespace) {
-    return undefined;
-  }
-
-  if (
-    fragment.includes(" ") ||
-    fragment.includes("\n") ||
-    fragment.includes("\r") ||
-    fragment.includes("\t")
-  ) {
     return undefined;
   }
 
@@ -89,31 +177,58 @@ export function parseTablePathFragment(
     };
   }
 
-  const doubleDotIndex = fragment.indexOf("..");
-  if (doubleDotIndex > 0) {
+  const { parts, hasUnquotedWhitespace } = splitQualifiedPath(fragment);
+  if (hasUnquotedWhitespace) {
+    return undefined;
+  }
+
+  const hasDoubleDot = parts.length === 3 && parts[1] === '';
+  if (hasDoubleDot) {
     if (!supportsDoubleDotPath(databaseKind)) {
       return undefined;
     }
-    const dbName = stripQuotes(fragment.substring(0, doubleDotIndex));
-    const partial = stripQuotes(fragment.substring(doubleDotIndex + 2));
-    return { kind: "db_double_dot", dbName, partial };
+    const database = parseIdentifierSegment(parts[0]);
+    const table = parseIdentifierSegment(parts[2] ?? '');
+    return {
+      kind: "db_double_dot",
+      dbName: database.value,
+      partial: table.value,
+      ...(database.quoted ? { dbQuoted: true } : {}),
+      ...(table.quoted ? { partialQuoted: true } : {}),
+    };
   }
 
-  const dotParts = fragment.split(".");
-  if (dotParts.length === 2) {
-    const dbName = stripQuotes(dotParts[0]);
-    const partial = stripQuotes(dotParts[1] ?? "");
-    return { kind: "db_dot", dbName, partial };
+  if (parts.length === 2) {
+    const database = parseIdentifierSegment(parts[0]);
+    const table = parseIdentifierSegment(parts[1] ?? '');
+    return {
+      kind: "db_dot",
+      dbName: database.value,
+      partial: table.value,
+      ...(database.quoted ? { dbQuoted: true } : {}),
+      ...(table.quoted ? { partialQuoted: true } : {}),
+    };
   }
 
-  if (dotParts.length >= 3) {
-    const dbName = stripQuotes(dotParts[0]);
-    const schemaName = stripQuotes(dotParts[1]);
-    const partial = stripQuotes(dotParts.slice(2).join("."));
-    return { kind: "db_schema_dot", dbName, schemaName, partial };
+  if (parts.length >= 3) {
+    const database = parseIdentifierSegment(parts[0]);
+    const schema = parseIdentifierSegment(parts[1]);
+    const table = parseIdentifierSegment(parts.slice(2).join("."));
+    return {
+      kind: "db_schema_dot",
+      dbName: database.value,
+      schemaName: schema.value,
+      partial: table.value,
+      ...(database.quoted ? { dbQuoted: true } : {}),
+      ...(schema.quoted ? { schemaQuoted: true } : {}),
+      ...(table.quoted ? { partialQuoted: true } : {}),
+    };
   }
 
-  return { kind: "from_join_name", partial: stripQuotes(fragment) };
+  const identifier = parseIdentifierSegment(fragment);
+  return identifier.quoted
+    ? { kind: "from_join_name", partial: identifier.value, isQuoted: true }
+    : { kind: "from_join_name", partial: identifier.value };
 }
 
 export function parseQualifiedTableNameFromTokens(
@@ -125,7 +240,7 @@ export function parseQualifiedTableNameFromTokens(
     return undefined;
   }
 
-  const names: string[] = [stripQuotes(tokens[startIndex].image)];
+  const identifiers: ParsedIdentifierSegment[] = [parseIdentifierSegment(tokens[startIndex].image)];
   let dotCount = 0;
   let index = startIndex + 1;
 
@@ -142,23 +257,38 @@ export function parseQualifiedTableNameFromTokens(
       break;
     }
 
-    names.push(stripQuotes(tokens[index].image));
+    identifiers.push(parseIdentifierSegment(tokens[index].image));
     index += 1;
   }
 
-  if (names.length === 1) {
-    return { tableRef: { table: names[0] }, nextIndex: index };
+  if (identifiers.length === 1) {
+    return {
+      tableRef: identifiers[0].quoted
+        ? { table: identifiers[0].value, tableQuoted: true }
+        : { table: identifiers[0].value },
+      nextIndex: index,
+    };
   }
 
-  if (names.length === 2) {
+  if (identifiers.length === 2) {
     if (dotCount >= 2) {
       return {
-        tableRef: { database: names[0], table: names[1] },
+        tableRef: {
+          database: identifiers[0].value,
+          table: identifiers[1].value,
+          ...(identifiers[0].quoted ? { databaseQuoted: true } : {}),
+          ...(identifiers[1].quoted ? { tableQuoted: true } : {}),
+        },
         nextIndex: index,
       };
     }
     return {
-      tableRef: { schema: names[0], table: names[1] },
+      tableRef: {
+        schema: identifiers[0].value,
+        table: identifiers[1].value,
+        ...(identifiers[0].quoted ? { schemaQuoted: true } : {}),
+        ...(identifiers[1].quoted ? { tableQuoted: true } : {}),
+      },
       nextIndex: index,
     };
   }
@@ -169,9 +299,12 @@ export function parseQualifiedTableNameFromTokens(
 
   return {
     tableRef: {
-      database: names[0],
-      schema: names[1],
-      table: names[names.length - 1],
+      database: identifiers[0].value,
+      schema: identifiers[1].value,
+      table: identifiers[identifiers.length - 1].value,
+      ...(identifiers[0].quoted ? { databaseQuoted: true } : {}),
+      ...(identifiers[1].quoted ? { schemaQuoted: true } : {}),
+      ...(identifiers[identifiers.length - 1].quoted ? { tableQuoted: true } : {}),
     },
     nextIndex: index,
   };
@@ -192,24 +325,39 @@ export function parseQualifiedTableName(
     return undefined;
   }
 
-  const names = identifierTokens.map((token) => stripQuotes(token.image));
+  const identifiers = identifierTokens.map((token) => parseIdentifierSegment(token.image));
   const dotCount = getTokens(qualifiedNameNode, "Dot").length;
 
-  if (names.length === 1) {
-    return { table: names[0] };
+  if (identifiers.length === 1) {
+    return { table: identifiers[0].value, tableQuoted: identifiers[0].quoted };
   }
 
-  if (names.length === 2) {
+  if (identifiers.length === 2) {
     if (dotCount === 2) {
       if (!supportsDoubleDotPath(databaseKind)) {
         return undefined;
       }
-      return { database: names[0], table: names[1] };
+      return {
+        database: identifiers[0].value,
+        table: identifiers[1].value,
+        databaseQuoted: identifiers[0].quoted,
+        tableQuoted: identifiers[1].quoted,
+      };
     }
     if (usesDatabaseObjectTwoPartName(databaseKind)) {
-      return { database: names[0], table: names[1] };
+      return {
+        database: identifiers[0].value,
+        table: identifiers[1].value,
+        databaseQuoted: identifiers[0].quoted,
+        tableQuoted: identifiers[1].quoted,
+      };
     }
-    return { schema: names[0], table: names[1] };
+    return {
+      schema: identifiers[0].value,
+      table: identifiers[1].value,
+      schemaQuoted: identifiers[0].quoted,
+      tableQuoted: identifiers[1].quoted,
+    };
   }
 
   if (!supportsThreePartPath(databaseKind)) {
@@ -217,8 +365,11 @@ export function parseQualifiedTableName(
   }
 
   return {
-    database: names[0],
-    schema: names[1],
-    table: names[names.length - 1],
+    database: identifiers[0].value,
+    schema: identifiers[1].value,
+    table: identifiers[identifiers.length - 1].value,
+    databaseQuoted: identifiers[0].quoted,
+    schemaQuoted: identifiers[1].quoted,
+    tableQuoted: identifiers[identifiers.length - 1].quoted,
   };
 }

@@ -14,6 +14,7 @@ import { getMetadataQueryConcurrencyLimit } from "../metadata/metadataQueryLimit
 import { simpleHash } from "../providers/parsers/hashUtils";
 import { extractTableReferences } from "./diagnosticsUtils";
 import type { MetadataColumnLookupOptions } from "../metadata/metadataQueryDiagnostics";
+import { createNetezzaUserIdentifier } from "../dialects/netezza/metadata/identifierUtils";
 
 export interface Logger {
   error: (message: string) => void;
@@ -43,6 +44,10 @@ export class MetadataBridge {
     string,
     MetadataContextResponse["databaseKind"] | null
   >();
+  private readonly connectionDatabaseKinds = new Map<
+    string,
+    MetadataContextResponse["databaseKind"] | null
+  >();
   private readonly validationWarmFingerprint = new Map<string, string>();
   private readonly validationMetadataEpoch = new Map<string, number>();
   private readonly qualificationCache = new Map<string, QualificationProposal[]>();
@@ -62,6 +67,10 @@ export class MetadataBridge {
     const context = this.asContextResponse(response) ?? {};
     if (context.connectionName) {
       this.documentConnectionNames.set(documentUri, context.connectionName);
+      this.connectionDatabaseKinds.set(
+        context.connectionName,
+        context.databaseKind ?? null,
+      );
     }
     this.documentDatabaseKinds.set(documentUri, context.databaseKind ?? null);
     return context;
@@ -78,7 +87,7 @@ export class MetadataBridge {
     documentUri: string,
     database: string,
   ): Promise<MetadataObjectItem[]> {
-    const cacheKey = `SCH|${documentUri}|${database.toUpperCase()}`;
+    const cacheKey = `SCH|${documentUri}|${this.normalizeIdentifierForCache(documentUri, database)}`;
     return this.getCachedOrFetchList(cacheKey, () =>
       this.requestList({ documentUri, kind: "schemas", database }),
     );
@@ -89,7 +98,7 @@ export class MetadataBridge {
     database: string,
     schema?: string,
   ): Promise<MetadataObjectItem[]> {
-    const cacheKey = `TBL|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
+    const cacheKey = `TBL|${documentUri}|${this.normalizeIdentifierForCache(documentUri, database)}|${this.normalizeIdentifierForCache(documentUri, schema ?? "")}`;
     return this.getCachedOrFetchList(cacheKey, () =>
       this.requestList({ documentUri, kind: "tables", database, schema }),
     );
@@ -100,7 +109,7 @@ export class MetadataBridge {
     database: string,
     schema?: string,
   ): Promise<MetadataObjectItem[]> {
-    const cacheKey = `VEW|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
+    const cacheKey = `VEW|${documentUri}|${this.normalizeIdentifierForCache(documentUri, database)}|${this.normalizeIdentifierForCache(documentUri, schema ?? "")}`;
     return this.getCachedOrFetchList(cacheKey, () =>
       this.requestList({ documentUri, kind: "views", database, schema }),
     );
@@ -111,7 +120,7 @@ export class MetadataBridge {
     database: string,
     schema?: string,
   ): Promise<MetadataObjectItem[]> {
-    const cacheKey = `SRC|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
+    const cacheKey = `SRC|${documentUri}|${this.normalizeIdentifierForCache(documentUri, database)}|${this.normalizeIdentifierForCache(documentUri, schema ?? "")}`;
     return this.getCachedOrFetchList(cacheKey, () =>
       this.requestList({ documentUri, kind: "sourceObjects", database, schema }),
     );
@@ -122,7 +131,7 @@ export class MetadataBridge {
     database: string,
     schema?: string,
   ): Promise<MetadataObjectItem[]> {
-    const cacheKey = `PRC|${documentUri}|${database.toUpperCase()}|${(schema ?? "").toUpperCase()}`;
+    const cacheKey = `PRC|${documentUri}|${this.normalizeIdentifierForCache(documentUri, database)}|${this.normalizeIdentifierForCache(documentUri, schema ?? "")}`;
     return this.getCachedOrFetchList(cacheKey, () =>
       this.requestList({ documentUri, kind: "procedures", database, schema }),
     );
@@ -324,9 +333,13 @@ export class MetadataBridge {
       }
     }
 
-    const normalizedTable = table.toUpperCase();
-    const normalizedDatabase = database?.toUpperCase();
-    const normalizedSchema = schema?.toUpperCase();
+    const normalizedTable = this.normalizeIdentifierForCache(documentUri, table);
+    const normalizedDatabase = database
+      ? this.normalizeIdentifierForCache(documentUri, database)
+      : undefined;
+    const normalizedSchema = schema
+      ? this.normalizeIdentifierForCache(documentUri, schema)
+      : undefined;
 
     for (const [cacheKey, info] of this.tableInfoCache.entries()) {
       const parsed = this.parseTableCacheKey(cacheKey);
@@ -339,18 +352,18 @@ export class MetadataBridge {
       ) {
         continue;
       }
-      if (parsed.table.toUpperCase() !== normalizedTable) {
+      if (this.normalizeIdentifierForCache(documentUri, parsed.table) !== normalizedTable) {
         continue;
       }
       if (
         normalizedDatabase &&
-        parsed.database.toUpperCase() !== normalizedDatabase
+        this.normalizeIdentifierForCache(documentUri, parsed.database) !== normalizedDatabase
       ) {
         continue;
       }
       if (
         normalizedSchema &&
-        (parsed.schema || "").toUpperCase() !== normalizedSchema
+        this.normalizeIdentifierForCache(documentUri, parsed.schema || "") !== normalizedSchema
       ) {
         continue;
       }
@@ -382,7 +395,7 @@ export class MetadataBridge {
     documentUri: string,
     database: string,
   ): boolean {
-    const prefix = `TBL|${documentUri}|${database.toUpperCase()}|`;
+    const prefix = `TBL|${documentUri}|${this.normalizeIdentifierForCache(documentUri, database)}|`;
     for (const cacheKey of this.listCache.keys()) {
       if (cacheKey.startsWith(prefix)) {
         return true;
@@ -464,7 +477,7 @@ export class MetadataBridge {
       context.databaseKind,
     );
     const effectiveDatabase = context.effectiveDatabase;
-    const refsFingerprint = this.computeValidationRefsFingerprint(references);
+    const refsFingerprint = this.computeValidationRefsFingerprint(documentUri, references);
     const previousFingerprint = this.validationWarmFingerprint.get(documentUri);
 
     if (
@@ -638,6 +651,7 @@ export class MetadataBridge {
     this.documentListEpoch.clear();
     this.documentConnectionNames.clear();
     this.documentDatabaseKinds.clear();
+    this.connectionDatabaseKinds.clear();
     this.validationWarmFingerprint.clear();
     this.validationMetadataEpoch.clear();
     this.qualificationCache.clear();
@@ -690,12 +704,13 @@ export class MetadataBridge {
   }
 
   private computeValidationRefsFingerprint(
+    documentUri: string,
     references: ReturnType<typeof extractTableReferences>,
   ): string {
     const serialized = references
       .map(
         (reference) =>
-          `${(reference.database ?? "").toUpperCase()}|${(reference.schema ?? "").toUpperCase()}|${reference.table.toUpperCase()}`,
+          `${this.normalizeIdentifierForCache(documentUri, reference.database ?? "")}|${this.normalizeIdentifierForCache(documentUri, reference.schema ?? "")}|${this.normalizeIdentifierForCache(documentUri, reference.table)}`,
       )
       .sort()
       .join(";");
@@ -831,10 +846,33 @@ export class MetadataBridge {
     table: string,
   ): string {
     const normalizedConnection = (connectionName || "UNKNOWN").toUpperCase();
-    const normalizedDatabase = database.toUpperCase();
-    const normalizedSchema = (schema || "").toUpperCase();
-    const normalizedTable = table.toUpperCase();
+    const databaseKind = connectionName
+      ? (this.connectionDatabaseKinds.get(connectionName) ?? undefined)
+      : undefined;
+    const normalizedDatabase = this.normalizeIdentifierForCacheByKind(database, databaseKind);
+    const normalizedSchema = this.normalizeIdentifierForCacheByKind(schema || "", databaseKind);
+    const normalizedTable = this.normalizeIdentifierForCacheByKind(table, databaseKind);
     return `${normalizedConnection}|${normalizedDatabase}|${normalizedSchema}|${normalizedTable}`;
+  }
+
+  private normalizeIdentifierForCache(
+    documentUri: string,
+    value: string,
+  ): string {
+    return this.normalizeIdentifierForCacheByKind(
+      value,
+      this.documentDatabaseKinds.get(documentUri) ?? undefined,
+    );
+  }
+
+  private normalizeIdentifierForCacheByKind(
+    value: string,
+    databaseKind: MetadataContextResponse["databaseKind"] | undefined,
+  ): string {
+    if (databaseKind === "netezza") {
+      return createNetezzaUserIdentifier(value).value;
+    }
+    return value.toUpperCase();
   }
 
   private parseTableCacheKey(
@@ -865,7 +903,7 @@ export class MetadataBridge {
     schema: string | undefined,
     table: string,
   ): string {
-    return `${documentUri}|${(database ?? "").toUpperCase()}|${(schema ?? "").toUpperCase()}|${table.toUpperCase()}`;
+    return `${documentUri}|${this.normalizeIdentifierForCache(documentUri, database ?? "")}|${this.normalizeIdentifierForCache(documentUri, schema ?? "")}|${this.normalizeIdentifierForCache(documentUri, table)}`;
   }
 
   private clearQualificationCacheForDocument(documentUri: string): void {

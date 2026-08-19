@@ -3,6 +3,8 @@ import type { MetadataCache } from '../metadataCache';
 import type { ColumnMetadata } from './types';
 import { buildColumnCacheKey } from './columnRowMapping';
 import { extractDatabaseFromLayerKey } from './diskStorage/metadataDiskPaths';
+import { buildNetezzaCacheDatabasePart } from './helpers';
+import { createNetezzaUserIdentifier } from '../dialects/netezza/metadata/identifierUtils';
 
 /**
  * Reads column metadata from the in-memory cache using normalized cache keys.
@@ -16,18 +18,31 @@ export function getCachedColumnsFromMetadataCache(
     table: string,
     databaseKind?: DatabaseKind,
 ): ColumnMetadata[] | undefined {
-    const preserveCase =
-        databaseKind !== undefined && databaseKind !== 'netezza';
-    const directKey = buildColumnCacheKey(database, schema, table, {
-        preserveCase,
-    });
+    const isNetezza = databaseKind === 'netezza';
+    const preserveCase = databaseKind !== undefined && !isNetezza;
+    const directKey = buildColumnCacheKey(
+        isNetezza
+            ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
+            : database,
+        isNetezza && schema !== undefined
+            ? createNetezzaUserIdentifier(schema).value
+            : schema,
+        isNetezza ? createNetezzaUserIdentifier(table).value : table,
+        isNetezza || preserveCase ? { preserveCase: true } : undefined,
+    );
     const directColumns = metadataCache.getColumns(connectionName, directKey);
     if (directColumns) {
         return directColumns;
     }
 
     if (!schema) {
-        return metadataCache.getColumnsAnySchema(connectionName, database, table);
+        return metadataCache.getColumnsAnySchema(
+            connectionName,
+            isNetezza
+                ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
+                : database,
+            isNetezza ? createNetezzaUserIdentifier(table).value : table,
+        );
     }
 
     return undefined;

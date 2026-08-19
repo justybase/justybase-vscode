@@ -7,11 +7,24 @@ the server node.
 
 ## How to Read the Examples
 
-In the examples, `TEST_DB` is the name of one database returned by the first
-SQL statement. The application code substitutes the actual database name and
-normalizes it to uppercase. A full refresh is not limited to the database used
-to establish the initial connection: it first retrieves the list of databases
-and then processes each live database separately.
+In the examples, `TEST_DB` is the exact value of one database returned by the
+first SQL statement. The application does not apply a blanket `UPPER` or
+`TRIM` to catalog values. A full refresh is not limited to the database used to
+establish the initial connection: it first retrieves the list of databases and
+then processes each live database separately.
+
+For example, if `_V_DATABASE` returns `just_data`, the generated catalog SQL
+uses a quoted qualifier and an exact predicate:
+
+```sql
+FROM "just_data".._V_OBJECT_DATA
+WHERE DBNAME = 'just_data'
+```
+
+If the catalog value is `DATABASE ` (with a meaningful trailing space), the
+qualifier and literal retain that space. This is deliberately different from a
+database name typed by a user: unquoted `just_data` is interpreted by Netezza
+as `JUST_DATA`, while quoted `"just_data"` means the exact lower-case name.
 
 In the current implementation, the full refresh invokes the query builder with
 an array containing one database (`[db]`). Therefore, the SQL actually sent
@@ -132,16 +145,16 @@ Source: `NZ_QUERIES.listExternalTables([TEST_DB])`.
 ```sql
 SELECT * FROM (
     SELECT
-        TRIM(E1.TABLENAME) AS OBJNAME,
+        E1.TABLENAME AS OBJNAME,
         E1.RELID AS OBJID,
-        TRIM(E1.SCHEMA) AS SCHEMA,
-        TRIM(E1.DATABASE) AS DBNAME,
+        E1.SCHEMA AS SCHEMA,
+        E1.DATABASE AS DBNAME,
         'EXTERNAL TABLE' AS OBJTYPE,
         '' AS OWNER,
         '' AS REFOBJNAME,
         '' AS DESCRIPTION
     FROM TEST_DB.._V_EXTERNAL E1
-    WHERE UPPER(TRIM(E1.DATABASE)) = 'TEST_DB'
+    WHERE E1.DATABASE = 'TEST_DB'
 ) TMP
 ORDER BY DBNAME, SCHEMA, OBJNAME
 ```
@@ -221,10 +234,10 @@ in `TEST_DB` and the main column branch did not end with a catalog error.
 
 ```sql
 SELECT
-    TRIM(E1.TABLENAME) AS TABLENAME,
-    TRIM(E1.SCHEMA) AS SCHEMA,
-    TRIM(E1.DATABASE) AS DBNAME,
-    TRIM(C.ATTNAME) AS ATTNAME,
+    E1.TABLENAME AS TABLENAME,
+    E1.SCHEMA AS SCHEMA,
+    E1.DATABASE AS DBNAME,
+    C.ATTNAME AS ATTNAME,
     C.FORMAT_TYPE,
     C.ATTNUM,
     COALESCE(C.DESCRIPTION, '') AS DESCRIPTION,
@@ -233,7 +246,7 @@ SELECT
     0 AS IS_DISTRIBUTION_KEY
 FROM TEST_DB.._V_RELATION_COLUMN C
 JOIN TEST_DB.._V_EXTERNAL E1 ON C.OBJID = E1.RELID
-WHERE UPPER(TRIM(E1.DATABASE)) = 'TEST_DB'
+WHERE E1.DATABASE = 'TEST_DB'
 ORDER BY SCHEMA, TABLENAME, ATTNUM
 ```
 

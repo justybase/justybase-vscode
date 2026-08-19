@@ -23,7 +23,15 @@ import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { Logger } from '../../utils/logger';
 import { CacheStatsTracker } from '../cacheStats';
 import { buildColumnCacheKey } from '../columnRowMapping';
-import { extractLabel } from '../helpers';
+import {
+  buildNetezzaDatabaseCacheKey,
+  buildNetezzaDbSchemaCacheKey,
+  decodeNetezzaCacheDatabasePart,
+  extractLabel,
+  isNetezzaExactCachePart,
+  parseDbSchemaCacheKey,
+} from '../helpers';
+import { createNetezzaUserIdentifier } from '../../dialects/netezza/metadata/identifierUtils';
 import type { CacheStatsSnapshot, CacheLayer } from '../cacheStats';
 import {
   MetadataDiskStorage,
@@ -162,6 +170,19 @@ export class MetadataCache implements MetadataPrefetchTarget {
     });
   }
 
+  isNetezzaConnection(connectionName: string): boolean {
+    return this._connectionManager?.getConnectionDatabaseKind(connectionName) === 'netezza';
+  }
+
+  private databaseIdentity(connectionName: string, dbName: string): string {
+    if (this.isNetezzaConnection(connectionName) && isNetezzaExactCachePart(dbName)) {
+      return decodeNetezzaCacheDatabasePart(dbName);
+    }
+    return this.isNetezzaConnection(connectionName)
+      ? createNetezzaUserIdentifier(dbName).value
+      : dbName.toUpperCase();
+  }
+
   private get columnLoaderDeps(): ColumnLoaderDeps {
     return {
       state: this._columnLoaderState,
@@ -213,14 +234,14 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   markDatabaseDead(connectionName: string, dbName: string): void {
-    const upper = dbName.toUpperCase();
+    const normalized = this.databaseIdentity(connectionName, dbName);
     let set = this._store.deadDatabases.get(connectionName);
     if (!set) {
       set = new Set();
       this._store.deadDatabases.set(connectionName, set);
     }
-    if (!set.has(upper)) {
-      set.add(upper);
+    if (!set.has(normalized)) {
+      set.add(normalized);
       Logger.getInstance().info(
         `[MetadataCache] Database marked as non-existent: ${dbName} (connection: ${connectionName})`,
       );
@@ -230,7 +251,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   isDatabaseDead(connectionName: string, dbName: string | undefined): boolean {
     if (!dbName) return false;
     return (
-      this._store.deadDatabases.get(connectionName)?.has(dbName.toUpperCase()) ??
+      this._store.deadDatabases.get(connectionName)?.has(this.databaseIdentity(connectionName, dbName)) ??
       false
     );
   }
@@ -316,15 +337,38 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   hasColumnsOnDisk(connectionName: string, databaseName: string): boolean {
-    return hasColumnsOnDisk(this._columnLoaderState, connectionName, databaseName);
+    return hasColumnsOnDisk(
+      this._columnLoaderState,
+      connectionName,
+      databaseName,
+      this.isNetezzaConnection(connectionName),
+    );
   }
 
   hasColumnLayerOnDisk(connectionName: string, columnKey: string): boolean {
-    return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, columnKey);
+    if (!this.isNetezzaConnection(connectionName)) {
+      return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, columnKey);
+    }
+    const parts = columnKey.split('.');
+    if (parts.length < 3) {
+      return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, columnKey);
+    }
+    const normalizedKey = buildColumnCacheKey(
+      buildNetezzaDatabaseCacheKey(parts[0]),
+      createNetezzaUserIdentifier(parts[1]).value,
+      createNetezzaUserIdentifier(parts.slice(2).join('.')).value,
+      { preserveCase: true },
+    );
+    return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, normalizedKey);
   }
 
   isColumnsLoaded(connectionName: string, databaseName: string): boolean {
-    return isColumnsLoaded(this._columnLoaderState, connectionName, databaseName);
+    return isColumnsLoaded(
+      this._columnLoaderState,
+      connectionName,
+      databaseName,
+      this.isNetezzaConnection(connectionName),
+    );
   }
 
   async ensureColumnsLoaded(
@@ -571,7 +615,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     connectionName: string,
     dbName: string,
   ): string | undefined {
-    const key = `${connectionName}|${dbName.toUpperCase()}`;
+    const key = `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`;
     const entry = this._store.currentSchemaCache.get(key);
     if (!entry) {
       this._stats.recordMiss(connectionName, "schema");
@@ -596,7 +640,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       return;
     }
     this._store.currentSchemaCache.set(
-      `${connectionName}|${dbName.toUpperCase()}`,
+      `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
       { data: normalizedSchema, timestamp: Date.now() },
     );
   }
@@ -604,7 +648,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   invalidateCurrentSchema(connectionName: string, dbName?: string): void {
     if (dbName) {
       this._store.currentSchemaCache.delete(
-        `${connectionName}|${dbName.toUpperCase()}`,
+        `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
       );
       return;
     }
@@ -621,7 +665,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     connectionName: string,
     dbName: string,
   ): string | undefined {
-    const key = `${connectionName}|${dbName.toUpperCase()}`;
+    const key = `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`;
     const entry = this._store.defaultSchemaCache.get(key);
     if (!entry) {
       this._stats.recordMiss(connectionName, "schema");
@@ -646,7 +690,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       return;
     }
     this._store.defaultSchemaCache.set(
-      `${connectionName}|${dbName.toUpperCase()}`,
+      `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
       { data: normalizedSchema, timestamp: Date.now() },
     );
   }
@@ -838,8 +882,23 @@ export class MetadataCache implements MetadataPrefetchTarget {
     schema: string | undefined,
     tableName: string,
   ): void {
-    const directKey = buildColumnCacheKey(database, schema, tableName);
-    const aggregateKey = buildColumnCacheKey(database, undefined, tableName);
+    const exactNetezza = this.isNetezzaConnection(connectionName);
+    const cacheDatabase = exactNetezza
+      ? buildNetezzaDatabaseCacheKey(database)
+      : database;
+    const cacheOptions = exactNetezza ? { preserveCase: true } : undefined;
+    const directKey = buildColumnCacheKey(
+      cacheDatabase,
+      schema,
+      tableName,
+      cacheOptions,
+    );
+    const aggregateKey = buildColumnCacheKey(
+      cacheDatabase,
+      undefined,
+      tableName,
+      cacheOptions,
+    );
     this._store.columnCache.delete(`${connectionName}|${directKey}`);
     this._store.columnCache.delete(`${connectionName}|${aggregateKey}`);
     this._invalidatedColumnLayerKeys.add(`${connectionName}|${directKey}`);
@@ -904,6 +963,13 @@ export class MetadataCache implements MetadataPrefetchTarget {
     dbName: string,
     schemaName?: string,
   ): void {
+    const exactNetezza = this.isNetezzaConnection(connectionName);
+    const databaseKey = exactNetezza
+      ? buildNetezzaDatabaseCacheKey(dbName)
+      : dbName;
+    const normalizedSchema = exactNetezza && schemaName !== undefined
+      ? createNetezzaUserIdentifier(schemaName).value
+      : schemaName;
     invalidateSchemaCore(
       {
         store: this._store,
@@ -914,8 +980,15 @@ export class MetadataCache implements MetadataPrefetchTarget {
         onInvalidated: () => this._onDidInvalidate.fire(connectionName),
       },
       connectionName,
-      dbName,
-      schemaName,
+      databaseKey,
+      normalizedSchema,
+      exactNetezza
+        ? {
+            layerKey: buildNetezzaDbSchemaCacheKey(dbName, schemaName),
+            allSchemasKey: buildNetezzaDbSchemaCacheKey(dbName),
+            databaseKey,
+          }
+        : undefined,
     );
     this.invalidateCurrentSchema(connectionName, dbName);
   }
@@ -1112,7 +1185,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
         continue;
       }
       const layerKey = fullKey.slice(prefix.length);
-      const [dbName, schemaName = ''] = layerKey.split('.');
+      const parsedLayer = parseDbSchemaCacheKey(layerKey);
+      const dbName = layerKey.split('.')[0];
+      const schemaName = parsedLayer.schemaName ?? '';
       if (!dbName) {
         continue;
       }

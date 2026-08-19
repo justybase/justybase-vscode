@@ -564,6 +564,10 @@ describe('commands/schema/utilityCommands', () => {
             expect(mockedRunQueryRaw.mock.calls[1][1]).toContain('_V_EXTERNAL');
             expect(mockedRunQueryRaw.mock.calls[1][1]).toContain('_V_EXTOBJECT');
             expect(mockedRunQueryRaw.mock.calls[1][1]).toContain("E1.TABLENAME");
+            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain("E1.TABLENAME = 'ET_TEMP'");
+            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain("E1.DATABASE = 'TESTDB'");
+            expect(mockedRunQueryRaw.mock.calls[1][1]).toContain("E1.SCHEMA = 'ADMIN'");
+            expect(mockedRunQueryRaw.mock.calls[1][1]).not.toContain('UPPER(TRIM(E1.');
             expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalled();
             expect(mockDeps.schemaProvider.refresh).toHaveBeenCalled();
             expect(mockedShowWarningMessage).not.toHaveBeenCalled();
@@ -613,10 +617,10 @@ describe('commands/schema/utilityCommands', () => {
                 objType: 'EXTERNAL TABLE'
             });
 
-            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(OBJNAME)) = UPPER');
-            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(DBNAME))');
-            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(OBJTYPE))');
-            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain('UPPER(TRIM(SCHEMA))');
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain("OBJNAME = 'ET_TEMP'");
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain("DBNAME = 'TESTDB'");
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain("OBJTYPE = 'EXTERNAL TABLE'");
+            expect(mockedRunQueryRaw.mock.calls[0][1]).toContain("SCHEMA = 'ADMIN'");
             expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalled();
         });
 

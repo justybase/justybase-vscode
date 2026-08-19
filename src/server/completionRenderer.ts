@@ -8,6 +8,10 @@ import type { DatabaseKind } from "../contracts/database";
 import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { LocalDefinition } from "../providers/types";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
+import {
+  createNetezzaCatalogIdentifier,
+  formatNetezzaIdentifier,
+} from "../dialects/netezza/metadata/identifierUtils";
 import { isCompletableLocalDefinition } from "./completionLocalDefinitionUtils";
 import { matchesPrefix } from "./completionRanker";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
@@ -289,7 +293,9 @@ export function filterMetadataItems(
   return items
     .filter((item) => matchesPrefix(item.name, prefix))
     .map((item) => {
-      const insertText = formatIdentifierForSql(item.name, databaseKind);
+      const insertText = databaseKind === "netezza"
+        ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(item.name))
+        : formatIdentifierForSql(item.name, databaseKind);
       // Netezza system views (_V_*) stay available but sort after user objects.
       const sortPrefix =
         options?.sortPrefix?.(item) ??

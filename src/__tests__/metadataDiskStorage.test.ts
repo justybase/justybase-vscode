@@ -125,7 +125,7 @@ describe('MetadataDiskStorage', () => {
 
         const loaded = await storage.loadAllConnections();
         expect(loaded.get('conn1')).toBeDefined();
-        expect(loaded.get('conn1')?.column['DB1.S1.T1']).toBeDefined();
+        expect(loaded.get('conn1')?.column['@NZEX@DB1.S1.T1']).toBeDefined();
     });
 
     it('should load partial checkpoints without marking prefetch fresh', async () => {
@@ -156,7 +156,7 @@ describe('MetadataDiskStorage', () => {
         const raw = gunzipSync(fs.readFileSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB1')));
         const parsed = JSON.parse(raw.toString('utf8'));
         expect(parsed.schemaVersion).toBe(COLUMN_FILE_SCHEMA_VERSION);
-        expect(parsed.layers['DB1.S1.T1']).toBeDefined();
+        expect(parsed.layers['@NZEX@DB1.S1.T1']).toBeDefined();
         expect(parsed.schemas).toContain('S1');
     });
 
@@ -187,7 +187,7 @@ describe('MetadataDiskStorage', () => {
         expect(manifest?.hasManifestFile).toBe(false);
         expect(manifest?.prefetchCompletedAt).toBe(committedAt);
         expect(manifest?.database.data).toEqual([]);
-        expect(manifest?.columnDatabases).toEqual(['DB1']);
+        expect(manifest?.columnDatabases).toEqual(['@NZEX@DB1']);
     });
 
     it('should ignore v2 payloads', async () => {
@@ -246,8 +246,8 @@ describe('MetadataDiskStorage', () => {
 
         const loaded = await storage.loadAllConnections();
         const conn = loaded.get('conn1');
-        expect(conn?.column['DB1.S1.T1']).toBeDefined();
-        expect(conn?.column['DB2.S2.T2']).toBeDefined();
+        expect(conn?.column['@NZEX@DB1.S1.T1']).toBeDefined();
+        expect(conn?.column['@NZEX@DB2.S2.T2']).toBeDefined();
     });
 
     it('should not collide column files for database names that sanitize identically', async () => {
@@ -283,8 +283,8 @@ describe('MetadataDiskStorage', () => {
         expect(fs.existsSync(pathB)).toBe(true);
 
         const loaded = await storage.loadAllConnections();
-        expect(loaded.get('conn1')?.column['PROD:1.S1.T1']?.data[0].ATTNAME).toBe('C1');
-        expect(loaded.get('conn1')?.column['PROD_1.S1.T2']?.data[0].ATTNAME).toBe('C2');
+        expect(loaded.get('conn1')?.column['@NZEX@PROD%3A1.S1.T1']?.data[0].ATTNAME).toBe('C1');
+        expect(loaded.get('conn1')?.column['@NZEX@PROD_1.S1.T2']?.data[0].ATTNAME).toBe('C2');
     });
 
     it('does not persist a debounced snapshot without a prefetch lease', async () => {

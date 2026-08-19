@@ -5,6 +5,8 @@ import type { ConnectionManager } from '../core/connectionManager';
 import type { MetadataCache } from '../metadataCache';
 import type { ColumnMetadata } from '../metadata/types';
 import { resetMetadataQueryLimiterForTests } from '../metadata/metadataQueryLimiter';
+import { buildColumnCacheKey } from '../metadata/columnRowMapping';
+import { buildNetezzaDatabaseCacheKey } from '../metadata/helpers';
 
 jest.mock('../core/queryRunner', () => ({
     runQueryRaw: jest.fn(),
@@ -141,8 +143,14 @@ describe('MetadataProvider column fetch deduplication', () => {
                 isPk: false,
             },
         ];
+        const schemaColumnKey = buildColumnCacheKey(
+            buildNetezzaDatabaseCacheKey('JUST_DATA_2'),
+            'PUBLIC',
+            'FACT_SALES_2',
+            { preserveCase: true },
+        );
         metadataCache.getColumns.mockImplementation((_connectionName, key) => (
-            key === 'JUST_DATA_2.PUBLIC.FACT_SALES_2' ? cached : undefined
+            key === schemaColumnKey ? cached : undefined
         ));
 
         const result = await provider.getTableColumnsMetadata(
@@ -155,11 +163,21 @@ describe('MetadataProvider column fetch deduplication', () => {
         expect(metadataCache.whenConnectionMetadataHydrated).toHaveBeenCalledWith('CONN');
         expect(metadataCache.ensureColumnsLoadedForTableKey).toHaveBeenCalledWith(
             'CONN',
-            'JUST_DATA_2.PUBLIC.FACT_SALES_2',
+            buildColumnCacheKey(
+                buildNetezzaDatabaseCacheKey('JUST_DATA_2'),
+                'PUBLIC',
+                'FACT_SALES_2',
+                { preserveCase: true },
+            ),
         );
         expect(metadataCache.setColumns).toHaveBeenCalledWith(
             'CONN',
-            'JUST_DATA_2..FACT_SALES_2',
+            buildColumnCacheKey(
+                buildNetezzaDatabaseCacheKey('JUST_DATA_2'),
+                undefined,
+                'FACT_SALES_2',
+                { preserveCase: true },
+            ),
             cached,
         );
         expect(runQueryRawMock).not.toHaveBeenCalled();

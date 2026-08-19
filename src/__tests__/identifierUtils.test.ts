@@ -7,6 +7,12 @@ import {
     formatQualifiedObjectName,
     formatQualifiedObjectPathForDisplay
 } from '../utils/identifierUtils';
+import {
+    buildNetezzaIdentifierEquality,
+    createNetezzaCatalogIdentifier,
+    createNetezzaUserIdentifier,
+    formatNetezzaIdentifier,
+} from '../dialects/netezza/metadata/identifierUtils';
 
 describe('identifierUtils', () => {
     it('detects quoted identifiers', () => {
@@ -124,5 +130,24 @@ describe('identifierUtils', () => {
     it('formats qualified display paths with MySQL rules', () => {
         expect(formatQualifiedObjectPathForDisplay('catalog', undefined, 'sales', 'mysql')).toBe('catalog.sales');
         expect(formatQualifiedObjectPathForDisplay('catalog', 'analytics', 'sales', 'mysql')).toBe('catalog.sales');
+    });
+
+    it('applies Netezza user and catalog identifier rules independently', () => {
+        expect(createNetezzaUserIdentifier('just_data')).toEqual(expect.objectContaining({
+            value: 'JUST_DATA',
+            quoted: false,
+            source: 'user',
+        }));
+        expect(createNetezzaUserIdentifier('"just_data"')).toEqual(expect.objectContaining({
+            value: 'just_data',
+            quoted: true,
+            source: 'user',
+        }));
+
+        const catalogIdentifier = createNetezzaCatalogIdentifier('just_data ');
+        expect(catalogIdentifier.value).toBe('just_data ');
+        expect(formatNetezzaIdentifier(catalogIdentifier)).toBe('"just_data "');
+        expect(buildNetezzaIdentifierEquality('D.DATABASE', catalogIdentifier))
+            .toBe("D.DATABASE = 'just_data '");
     });
 });

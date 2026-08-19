@@ -674,8 +674,14 @@ SELECT * FROM  SAMPLE_DB.._V_EXTOBJECT WHERE DATABASE = 'SAMPLE_DB';
 // SYSTEM VIEW NAMES
 // =============================================================================
 
-import { isQuotedIdentifier, requiresIdentifierQuoting, unquoteIdentifier } from '../../../utils/identifierUtils';
 import { escapeSqlString as escapeSqlLiteral } from '../../../utils/sqlUtils';
+import {
+    buildNetezzaIdentifierEquality,
+    createNetezzaIdentifier,
+    createNetezzaUserIdentifier,
+    formatNetezzaIdentifier,
+    type NetezzaIdentifier,
+} from './identifierUtils';
 
 export const NZ_SYSTEM_VIEWS = {
     // Object/table related
@@ -765,37 +771,18 @@ export const NZ_CONSTRAINT_TYPES = {
  * @param database Database name
  * @param viewName System view name from NZ_SYSTEM_VIEWS
  */
-export function qualifySystemView(database: string, viewName: string): string {
-    return `${database.toUpperCase()}..${viewName}`;
+export function qualifySystemView(
+    database: string | NetezzaIdentifier,
+    viewName: string,
+): string {
+    return `${formatNetezzaIdentifier(createNetezzaIdentifier(database))}..${viewName}`;
 }
 
-function buildIdentifierCondition(columnExpression: string, identifier: string): string {
-    const normalizedIdentifier = unquoteIdentifier(identifier || '');
-    const escapedIdentifier = escapeSqlLiteral(normalizedIdentifier);
-    const useExactCase = isQuotedIdentifier(identifier) || requiresIdentifierQuoting(normalizedIdentifier);
-
-    if (useExactCase) {
-        return `${columnExpression} = '${escapedIdentifier}'`;
-    }
-
-    return `UPPER(${columnExpression}) = '${escapedIdentifier.toUpperCase()}'`;
-}
-
-/**
- * Build an identifier predicate for catalog columns that may be CHAR padded.
- * Keep this local to the external-table compatibility queries: applying TRIM
- * to every catalog predicate would make the regular prefetch path less cheap.
- */
-function buildTrimmedIdentifierCondition(columnExpression: string, identifier: string): string {
-    const normalizedIdentifier = unquoteIdentifier(identifier || '');
-    const escapedIdentifier = escapeSqlLiteral(normalizedIdentifier);
-    const useExactCase = isQuotedIdentifier(identifier) || requiresIdentifierQuoting(normalizedIdentifier);
-
-    if (useExactCase) {
-        return `TRIM(${columnExpression}) = '${escapedIdentifier}'`;
-    }
-
-    return `UPPER(TRIM(${columnExpression})) = '${escapedIdentifier.toUpperCase()}'`;
+function buildIdentifierCondition(
+    columnExpression: string,
+    identifier: string | NetezzaIdentifier,
+): string {
+    return buildNetezzaIdentifierEquality(columnExpression, identifier);
 }
 
 // =============================================================================
@@ -821,18 +808,18 @@ export const NZ_QUERIES = {
      * Get schemas in a database
      * @param database - Database name
      */
-    listSchemas: (database: string): string => `
+    listSchemas: (database: string | NetezzaIdentifier): string => `
         SELECT SCHEMA 
         FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.SCHEMA)} 
         ORDER BY SCHEMA
     `.trim(),
 
-    listTypeGroups: (database: string): string => {
-        const db = database.toUpperCase();
+    listTypeGroups: (database: string | NetezzaIdentifier): string => {
+        const db = database;
         return `
             SELECT DISTINCT TRIM(OBJTYPE) AS OBJTYPE
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)}
-            WHERE DBNAME = '${db}'
+            WHERE ${buildIdentifierCondition('DBNAME', db)}
             ORDER BY OBJTYPE
         `.trim();
     },
@@ -854,7 +841,7 @@ export const NZ_QUERIES = {
      * External tables are NOT included here — they are fetched separately via
      * `listExternalTables()` and merged in code, so this query stays lean.
      */
-    listTablesAndViews: (databases: string[]): string => {
+    listTablesAndViews: (databases: Array<string | NetezzaIdentifier>): string => {
         // External tables are read from _V_EXTERNAL below.  Keeping them out of
         // the main catalog query avoids duplicate rows and lets the fallback
         // query stay independent from _V_OBJECT_DATA.
@@ -868,10 +855,12 @@ export const NZ_QUERIES = {
         }
 
         const parts = databases
-            .map(d => d && d.trim())
-            .filter(Boolean)
-            .map(d => d!.toUpperCase())
-            .map(db => `
+            .filter((d) => typeof d !== 'string' || d.length > 0)
+            .map(d => createNetezzaIdentifier(d, 'catalog'))
+            .map(dbIdentifier => {
+                const db = formatNetezzaIdentifier(dbIdentifier);
+                const dbLiteral = escapeSqlLiteral(dbIdentifier.value);
+                return `
                 SELECT
                     O.OBJNAME,
                     O.OBJID,
@@ -883,8 +872,9 @@ export const NZ_QUERIES = {
                     COALESCE(O.DESCRIPTION, '') AS DESCRIPTION
                 FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
                 LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
-                WHERE O.DBNAME = '${db}' AND O.OBJTYPE IN (${objTypes})
-            `.trim());
+                WHERE O.DBNAME = '${dbLiteral}' AND O.OBJTYPE IN (${objTypes})
+            `.trim();
+            });
 
         if (parts.length === 0) {
             throw new Error("NZ_QUERIES.listTablesAndViews requires a non-empty array of databases.");
@@ -915,28 +905,30 @@ ${unionSql}
      *
      * @param databases - Array of database names (REQUIRED, must be non-empty)
      */
-    listExternalTables: (databases: string[]): string => {
+    listExternalTables: (databases: Array<string | NetezzaIdentifier>): string => {
         if (!Array.isArray(databases) || databases.length === 0) {
             throw new Error("NZ_QUERIES.listExternalTables requires a non-empty array of databases.");
         }
 
         const parts = databases
-            .map(d => d && d.trim())
-            .filter(Boolean)
-            .map(d => d!.toUpperCase())
-            .map(db => `
+            .filter((d) => typeof d !== 'string' || d.length > 0)
+            .map(d => createNetezzaIdentifier(d, 'catalog'))
+            .map(dbIdentifier => {
+                const db = formatNetezzaIdentifier(dbIdentifier);
+                return `
                 SELECT
-                    TRIM(E1.TABLENAME) AS OBJNAME,
+                    E1.TABLENAME AS OBJNAME,
                     E1.RELID AS OBJID,
-                    TRIM(E1.SCHEMA) AS SCHEMA,
-                    TRIM(E1.DATABASE) AS DBNAME,
+                    E1.SCHEMA AS SCHEMA,
+                    E1.DATABASE AS DBNAME,
                     'EXTERNAL TABLE' AS OBJTYPE,
                     '' AS OWNER,
                     '' AS REFOBJNAME,
                     '' AS DESCRIPTION
                 FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E1
-                WHERE ${buildTrimmedIdentifierCondition('E1.DATABASE', db)}
-            `.trim());
+                WHERE ${buildNetezzaIdentifierEquality('E1.DATABASE', dbIdentifier)}
+            `.trim();
+            });
 
         if (parts.length === 0) {
             throw new Error("NZ_QUERIES.listExternalTables requires a non-empty array of databases.");
@@ -964,13 +956,13 @@ ${unionSql}
      * @param database - Database name
      * @param options - Optional filters: schema, tableName, objTypes
      */
-    listColumnsWithKeys: (database: string, options?: { schema?: string; tableName?: string; objTypes?: string[] }): string => {
-        const db = database.toUpperCase();
+    listColumnsWithKeys: (database: string | NetezzaIdentifier, options?: { schema?: string | NetezzaIdentifier; tableName?: string | NetezzaIdentifier; objTypes?: string[] }): string => {
+        const db = database;
         const objTypes = options?.objTypes || [NZ_OBJECT_TYPES.TABLE, NZ_OBJECT_TYPES.VIEW];
         const objTypesStr = objTypes.map(t => `'${t}'`).join(', ');
 
         // Always filter by DBNAME to ensure we get proper data from this database only
-        let whereClause = `O.DBNAME = '${db}' AND O.OBJTYPE IN (${objTypesStr})`;
+        let whereClause = `${buildIdentifierCondition('O.DBNAME', db)} AND O.OBJTYPE IN (${objTypesStr})`;
         if (options?.schema) {
             whereClause += ` AND ${buildIdentifierCondition('O.SCHEMA', options.schema)}`;
         }
@@ -1019,22 +1011,22 @@ ${unionSql}
      * @param database - Database name
      * @param options - Optional filters: schema, tableName
      */
-    listExternalColumnsWithKeys: (database: string, options?: { schema?: string; tableName?: string }): string => {
-        const db = database.toUpperCase();
-        let externalWhereClause = buildTrimmedIdentifierCondition('E1.DATABASE', db);
+    listExternalColumnsWithKeys: (database: string | NetezzaIdentifier, options?: { schema?: string | NetezzaIdentifier; tableName?: string | NetezzaIdentifier }): string => {
+        const db = database;
+        let externalWhereClause = buildIdentifierCondition('E1.DATABASE', db);
         if (options?.schema) {
-            externalWhereClause += ` AND ${buildTrimmedIdentifierCondition('E1.SCHEMA', options.schema)}`;
+            externalWhereClause += ` AND ${buildIdentifierCondition('E1.SCHEMA', options.schema)}`;
         }
         if (options?.tableName) {
-            externalWhereClause += ` AND ${buildTrimmedIdentifierCondition('E1.TABLENAME', options.tableName)}`;
+            externalWhereClause += ` AND ${buildIdentifierCondition('E1.TABLENAME', options.tableName)}`;
         }
 
         return `
             SELECT
-                TRIM(E1.TABLENAME) AS TABLENAME,
-                TRIM(E1.SCHEMA) AS SCHEMA,
-                TRIM(E1.DATABASE) AS DBNAME,
-                TRIM(C.ATTNAME) AS ATTNAME,
+                E1.TABLENAME AS TABLENAME,
+                E1.SCHEMA AS SCHEMA,
+                E1.DATABASE AS DBNAME,
+                C.ATTNAME AS ATTNAME,
                 C.FORMAT_TYPE,
                 C.ATTNUM,
                 COALESCE(C.DESCRIPTION, '') AS DESCRIPTION,
@@ -1056,7 +1048,7 @@ ${unionSql}
      * @param tableName - Table name
      */
     getTableColumns: (database: string, schema: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const schemaFilter = buildIdentifierCondition('D.SCHEMA', schema);
         const tableFilter = buildIdentifierCondition('D.OBJNAME', tableName);
         return `
@@ -1095,23 +1087,23 @@ ${unionSql}
      * @param tableName - Table name
      */
     getExternalTableColumns: (database: string, schema: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const externalSchemaFilter = schema
-            ? buildTrimmedIdentifierCondition('E.SCHEMA', schema)
+            ? buildIdentifierCondition('E.SCHEMA', schema)
             : '1=1';
-        const externalTableFilter = buildTrimmedIdentifierCondition('E.TABLENAME', tableName);
+        const externalTableFilter = buildIdentifierCondition('E.TABLENAME', tableName);
         return `
             SELECT
                 C.OBJID::INT AS OBJID,
                 C.ATTNUM,
-                TRIM(C.ATTNAME) AS ATTNAME,
+                C.ATTNAME AS ATTNAME,
                 C.DESCRIPTION,
                 C.FORMAT_TYPE AS FULL_TYPE,
                 C.ATTNOTNULL::BOOL AS ATTNOTNULL,
                 C.COLDEFAULT,
-                TRIM(E.TABLENAME) AS TABLENAME,
-                TRIM(E.SCHEMA) AS SCHEMA,
-                TRIM(E.DATABASE) AS DBNAME,
+                E.TABLENAME AS TABLENAME,
+                E.SCHEMA AS SCHEMA,
+                E.DATABASE AS DBNAME,
                 C.FORMAT_TYPE AS FORMAT_TYPE,
                 CASE WHEN C.ATTNOTNULL THEN 1 ELSE 0 END AS IS_NOT_NULL,
                 0 AS IS_PK,
@@ -1120,7 +1112,7 @@ ${unionSql}
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} C
             INNER JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.EXTERNAL)} E ON C.OBJID = E.RELID
             WHERE C.OBJID NOT IN (4,5)
-                AND ${buildTrimmedIdentifierCondition('E.DATABASE', db)}
+                AND ${buildIdentifierCondition('E.DATABASE', db)}
                 AND ${externalSchemaFilter}
                 AND ${externalTableFilter}
             ORDER BY OBJID, ATTNUM
@@ -1135,7 +1127,7 @@ ${unionSql}
      * @param tableName - Table name
      */
     getDistributionKeys: (database: string, schema: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const schemaFilter = buildIdentifierCondition('SCHEMA', schema);
         const tableFilter = buildIdentifierCondition('TABLENAME', tableName);
         return `
@@ -1155,7 +1147,7 @@ ${unionSql}
      * @param tableName - Table name
      */
     getOrganizeColumns: (database: string, schema: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const schemaFilter = buildIdentifierCondition('SCHEMA', schema);
         const tableFilter = buildIdentifierCondition('TABLENAME', tableName);
         return `
@@ -1175,7 +1167,7 @@ ${unionSql}
      * @param tableName - Table name
      */
     getTableKeys: (database: string, schema: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const schemaFilter = buildIdentifierCondition('X.SCHEMA', schema);
         const tableFilter = buildIdentifierCondition('X.RELATION', tableName);
         return `
@@ -1206,7 +1198,7 @@ ${unionSql}
      * @param schema - Schema name
      */
     getForeignKeyRelationships: (database: string, schema: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const schemaFilter = buildIdentifierCondition('X.SCHEMA', schema);
         return `
             SELECT 
@@ -1240,14 +1232,14 @@ ${unionSql}
      * @param objectType - Optional object type filter
      */
     getObjectComment: (database: string, schema: string, objectName: string, objectType?: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const typeFilter = objectType ? ` AND OBJTYPE = '${objectType}'` : '';
         const schemaFilter = buildIdentifierCondition('SCHEMA', schema);
         const objectFilter = buildIdentifierCondition('OBJNAME', objectName);
         return `
             SELECT DESCRIPTION
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)}
-            WHERE DBNAME = '${db}'
+            WHERE ${buildIdentifierCondition('DBNAME', db)}
                 AND ${schemaFilter}
                 AND ${objectFilter}${typeFilter}
         `.trim();
@@ -1261,7 +1253,7 @@ ${unionSql}
      * @param tableName - Table name
      */
     getTableOwner: (database: string, schema: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const schemaFilter = buildIdentifierCondition('SCHEMA', schema);
         const tableFilter = buildIdentifierCondition('TABLENAME', tableName);
         return `
@@ -1287,7 +1279,7 @@ ${unionSql}
      * @param schema - Optional schema name
      */
     getViewDefinition: (database: string, viewName: string, schema?: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         let whereClause = buildIdentifierCondition('VIEWNAME', viewName);
         if (schema) {
             whereClause += ` AND ${buildIdentifierCondition('SCHEMA', schema)}`;
@@ -1311,7 +1303,7 @@ ${unionSql}
      * @param schema - Optional schema name
      */
     getProcedureDefinition: (database: string, procedureName: string, schema?: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         let whereClause = buildIdentifierCondition('PROCEDURE', procedureName);
         if (schema) {
             whereClause += ` AND ${buildIdentifierCondition('SCHEMA', schema)}`;
@@ -1330,9 +1322,9 @@ ${unionSql}
      * @param database - Optional database name (if not provided, searches all)
      * @param schema - Optional schema filter
      */
-    listProcedures: (database?: string, schema?: string): string => {
+    listProcedures: (database?: string | NetezzaIdentifier, schema?: string | NetezzaIdentifier): string => {
         if (database) {
-            let whereClause = `DATABASE = '${database.toUpperCase()}'`;
+            let whereClause = buildIdentifierCondition('DATABASE', database);
             if (schema) {
                 whereClause += ` AND ${buildIdentifierCondition('SCHEMA', schema)}`;
             }
@@ -1360,7 +1352,7 @@ ${unionSql}
                 whereClause = buildIdentifierCondition('SCHEMA', schema);
             }
             return `
-                SELECT SCHEMA, VIEWNAME, OWNER, '${database}' AS DATABASE
+                SELECT SCHEMA, VIEWNAME, OWNER, '${escapeSqlLiteral(createNetezzaUserIdentifier(database).value)}' AS DATABASE
                 FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.VIEW)}
                 WHERE ${whereClause}
                 ORDER BY SCHEMA, VIEWNAME
@@ -1376,7 +1368,7 @@ ${unionSql}
      * @param schema - Optional schema filter
      */
     getExternalTables: (database: string, schema?: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         let whereClause = '1=1';
         if (schema) {
             whereClause = buildIdentifierCondition('E1.SCHEMA', schema);
@@ -1406,12 +1398,12 @@ ${unionSql}
      * @param tableName - Table name
      */
     findTableSchema: (database: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const tableFilter = buildIdentifierCondition('OBJNAME', tableName);
         return `
             SELECT SCHEMA
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)}
-            WHERE DBNAME = '${db}'
+            WHERE ${buildIdentifierCondition('DBNAME', db)}
                 AND ${tableFilter}
                 AND OBJTYPE IN ('${NZ_OBJECT_TYPES.TABLE}', '${NZ_OBJECT_TYPES.VIEW}', '${NZ_OBJECT_TYPES.EXTERNAL_TABLE}')
             LIMIT 1
@@ -1458,9 +1450,9 @@ ${unionSql}
      * @param pattern - Search pattern (use % for wildcards)
      */
     searchColumns: (database: string, pattern: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         return `
-            SELECT '${database}' AS DATABASE, t.SCHEMA, t.TABLENAME, c.ATTNAME AS COLUMN_NAME, c.FORMAT_TYPE AS DATA_TYPE
+                SELECT '${escapeSqlLiteral(createNetezzaUserIdentifier(database).value)}' AS DATABASE, t.SCHEMA, t.TABLENAME, c.ATTNAME AS COLUMN_NAME, c.FORMAT_TYPE AS DATA_TYPE
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.TABLE)} t
             JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} c ON t.OBJID = c.OBJID
             WHERE UPPER(c.ATTNAME) LIKE '${pattern.toUpperCase()}'
@@ -1476,7 +1468,7 @@ ${unionSql}
      * @param tableName - Table name
      */
     getTableStats: (database: string, schema: string, tableName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         const schemaFilter = buildIdentifierCondition('t.SCHEMA', schema);
         const tableFilter = buildIdentifierCondition('t.TABLENAME', tableName);
         return `
@@ -1500,7 +1492,7 @@ ${unionSql}
      * @param objectName - Object name to search for in view definitions
      */
     findDependentViews: (database: string, objectName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         return `
             SELECT v.SCHEMA, v.VIEWNAME, v.OWNER
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.VIEW)} v
@@ -1520,7 +1512,7 @@ ${unionSql}
      * @param objectName - Object name to search for in procedure source
      */
     findDependentProcedures: (database: string, objectName: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
         return `
             SELECT SCHEMA, PROCEDURE AS PROC_NAME, OWNER
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.PROCEDURE)}
@@ -1537,11 +1529,11 @@ ${unionSql}
      * @param schema - Optional schema filter
      */
     listObjectsOfType: (database: string, objType: string, schema?: string): string => {
-        const db = database.toUpperCase();
+        const db = database;
 
         // Special handling for procedures
         if (objType === NZ_OBJECT_TYPES.PROCEDURE) {
-            let query = `SELECT PROCEDURESIGNATURE AS OBJNAME, SCHEMA FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.PROCEDURE)} WHERE DATABASE = '${db}'`;
+            let query = `SELECT PROCEDURESIGNATURE AS OBJNAME, SCHEMA FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.PROCEDURE)} WHERE ${buildIdentifierCondition('DATABASE', db)}`;
             if (schema) {
                 query += ` AND ${buildIdentifierCondition('SCHEMA', schema)}`;
             }
@@ -1549,7 +1541,7 @@ ${unionSql}
         }
 
         // All other object types
-        let query = `SELECT OBJNAME, SCHEMA FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE DBNAME = '${db}' AND OBJTYPE = '${objType}'`;
+        let query = `SELECT OBJNAME, SCHEMA FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildIdentifierCondition('DBNAME', db)} AND OBJTYPE = '${objType}'`;
         if (schema) {
             query += ` AND ${buildIdentifierCondition('SCHEMA', schema)}`;
         }
@@ -1560,12 +1552,12 @@ ${unionSql}
      * Get distinct object types in a database
      * @param database - Database name
      */
-    getObjectTypes: (database: string): string => {
-        const db = database.toUpperCase();
+    getObjectTypes: (database: string | NetezzaIdentifier): string => {
+        const db = database;
         return `
             SELECT DISTINCT OBJTYPE 
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} 
-            WHERE DBNAME = '${db}' 
+            WHERE ${buildIdentifierCondition('DBNAME', db)}
             ORDER BY OBJTYPE
         `.trim();
     },

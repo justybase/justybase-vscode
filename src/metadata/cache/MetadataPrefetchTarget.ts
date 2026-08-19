@@ -13,6 +13,8 @@ import type { MetadataStorageReader } from './MetadataStorageReader';
 import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
 
 export interface MetadataPrefetchTarget extends MetadataStorageReader {
+  /** Identifier case policy for catalog rows; only Netezza uses exact catalog identity here. */
+  isNetezzaConnection?(connectionName: string): boolean;
   isDatabaseDead(connectionName: string, dbName: string | undefined): boolean;
   markDatabaseDead(connectionName: string, dbName: string): void;
   getTables(connectionName: string, key: string): TableMetadata[] | undefined;

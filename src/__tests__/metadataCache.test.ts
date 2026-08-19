@@ -21,6 +21,7 @@ import {
 } from "../metadata/types";
 import { Logger } from "../utils/logger";
 import type { QueryRunnerRawFn } from "../metadata/prefetch";
+import { buildNetezzaDbSchemaCacheKey } from "../metadata/helpers";
 
 // Mock vscode
 jest.mock("vscode");
@@ -62,6 +63,23 @@ describe("MetadataCache", () => {
   });
 
   describe("Basic Operations", () => {
+    it("keeps quoted lower-case Netezza database cache entries separate from unquoted uppercase entries", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const upperKey = buildNetezzaDbSchemaCacheKey("JUST_DATA", "ADMIN");
+      const lowerKey = buildNetezzaDbSchemaCacheKey('"just_data"', '"ADMIN"');
+      const upperTable = [{ OBJNAME: "DIMDATE", label: "DIMDATE", objType: "TABLE", kind: 6 }];
+      const lowerTable = [{ OBJNAME: "DIMDATE", label: "DIMDATE", objType: "TABLE", kind: 6 }];
+
+      netezzaCache.setTables("conn1", upperKey, upperTable, new Map());
+      netezzaCache.setTables("conn1", lowerKey, lowerTable, new Map());
+
+      expect(netezzaCache.getTables("conn1", upperKey)).toBe(upperTable);
+      expect(netezzaCache.getTables("conn1", lowerKey)).toBe(lowerTable);
+      expect(netezzaCache.getTables("conn1", upperKey)).not.toBe(lowerTable);
+    });
+
     it("should set and get databases", () => {
       const dbs: DatabaseMetadata[] = [
         { DATABASE: "DB1", label: "DB1", kind: 17 },

@@ -25,7 +25,7 @@ import {
 } from '../../utils/completionDescriptionUtils';
 import { getMetadataQueryConcurrencyLimit } from '../../metadata/metadataQueryLimiter';
 import {
-    buildSynonymTargetQuery,
+    buildNetezzaSynonymTargetQuery,
     parseSynonymTargetReference,
 } from '../../metadata/synonymColumns';
 import {
@@ -34,6 +34,16 @@ import {
 import type { DatabaseKind } from '../../contracts/database';
 import { stripIdentifierQuoting } from '../../utils/identifierUtils';
 import { logWithFallback } from '../../utils/logger';
+import {
+    createNetezzaCatalogIdentifier,
+    formatNetezzaIdentifier,
+    createNetezzaUserIdentifier,
+} from '../../dialects/netezza/metadata/identifierUtils';
+import {
+    buildNetezzaDatabaseCacheKey,
+    buildNetezzaDbSchemaCacheKey,
+    buildNetezzaCacheDatabasePart,
+} from '../../metadata/helpers';
 import type {
     MetadataColumnLookupOptions,
     MetadataQueryContext,
@@ -86,6 +96,70 @@ export class MetadataProvider {
         return getDatabaseMetadataProvider(this.getConnectionDatabaseKind(connectionName));
     }
 
+    private formatMetadataIdentifier(
+        value: string,
+        databaseKind: DatabaseKind | undefined,
+    ): string {
+        return databaseKind === 'netezza'
+            ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(value))
+            : formatIdentifierForSql(value, databaseKind);
+    }
+
+    private normalizeNetezzaUserPart(
+        value: string | undefined,
+        databaseKind: DatabaseKind | undefined,
+    ): string | undefined {
+        if (value === undefined) {
+            return undefined;
+        }
+        return databaseKind === 'netezza'
+            ? createNetezzaUserIdentifier(value).value
+            : value;
+    }
+
+    private buildMetadataSchemaCacheKey(
+        connectionName: string,
+        database: string,
+        schema?: string,
+    ): string {
+        const databaseKind = this.connectionManager.getConnectionDatabaseKind(connectionName);
+        if (databaseKind !== 'netezza') {
+            return buildSchemaCacheKey(database, schema);
+        }
+        return buildNetezzaDbSchemaCacheKey(
+            database,
+            schema,
+        );
+    }
+
+    private buildMetadataCacheDatabaseName(
+        connectionName: string,
+        database: string,
+    ): string {
+        const databaseKind = this.connectionManager.getConnectionDatabaseKind(connectionName);
+        return databaseKind === 'netezza'
+            ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
+            : database;
+    }
+
+    private buildMetadataColumnCacheKey(
+        connectionName: string,
+        database: string,
+        schema: string | undefined,
+        table: string,
+    ): string {
+        const databaseKind = this.connectionManager.getConnectionDatabaseKind(connectionName);
+        const normalizedDatabase = databaseKind === 'netezza'
+            ? buildNetezzaCacheDatabasePart(database)
+            : database;
+        return buildColumnCacheKey(
+            normalizedDatabase,
+            this.normalizeNetezzaUserPart(schema, databaseKind),
+            this.normalizeNetezzaUserPart(table, databaseKind) ?? table,
+            { preserveCase: true },
+        );
+    }
+
     private async waitForConnectionMetadataReady(connectionName: string): Promise<void> {
         const cacheWithReadiness = this.metadataCache as MetadataCache & {
             whenConnectionMetadataReady?: (name: string) => Promise<void>;
@@ -113,6 +187,10 @@ export class MetadataProvider {
             return cached.map((item) => {
                 const ci = new vscode.CompletionItem(item.label || item.DATABASE, item.kind || vscode.CompletionItemKind.Module);
                 ci.detail = item.detail;
+                ci.insertText = this.formatMetadataIdentifier(
+                    item.label || item.DATABASE,
+                    this.connectionManager.getConnectionDatabaseKind(connectionName),
+                );
                 return ci;
             });
         }
@@ -159,7 +237,8 @@ export class MetadataProvider {
 
         await this.connectionManager.ensureFullyLoaded();
         await this.waitForConnectionMetadataReady(connectionName);
-        const cached = this.metadataCache.getSchemas(connectionName, dbName);
+        const cacheDatabase = this.buildMetadataCacheDatabaseName(connectionName, dbName);
+        const cached = this.metadataCache.getSchemas(connectionName, cacheDatabase);
         if (cached) {
             return cached.map((item) => {
                 const ci = new vscode.CompletionItem(item.label || item.SCHEMA, item.kind || vscode.CompletionItemKind.Folder);
@@ -203,12 +282,15 @@ export class MetadataProvider {
                     };
                 });
 
-            this.metadataCache.setSchemas(connectionName, dbName, items);
+            this.metadataCache.setSchemas(connectionName, cacheDatabase, items);
 
             return items.map(item => {
                 const ci = new vscode.CompletionItem(item.label!, item.kind);
                 ci.detail = item.detail;
                 ci.insertText = item.insertText;
+                if (this.connectionManager.getConnectionDatabaseKind(connectionName) === 'netezza') {
+                    ci.insertText = this.formatMetadataIdentifier(item.label!, 'netezza');
+                }
                 ci.sortText = item.sortText;
                 ci.filterText = item.filterText;
                 return ci;
@@ -233,13 +315,18 @@ export class MetadataProvider {
 
         await this.connectionManager.ensureFullyLoaded();
         await this.waitForConnectionMetadataReady(connectionName);
-        const cacheKey = buildSchemaCacheKey(dbName, schemaName);
+        const cacheDatabase = this.buildMetadataCacheDatabaseName(connectionName, dbName);
+        const cacheSchema = this.normalizeNetezzaUserPart(
+            schemaName,
+            this.connectionManager.getConnectionDatabaseKind(connectionName),
+        );
+        const cacheKey = this.buildMetadataSchemaCacheKey(connectionName, dbName, schemaName);
 
         const cached = getTablesForScope(
             this.metadataCache,
             connectionName,
-            dbName,
-            schemaName,
+            cacheDatabase,
+            cacheSchema,
         );
 
         if (cached) {
@@ -252,7 +339,7 @@ export class MetadataProvider {
                     connectionName,
                     cacheKey,
                     cachedWithSystemCatalog,
-                    this.buildTableIdMapForCacheKey(dbName, undefined, cachedWithSystemCatalog)
+                    this.buildTableIdMapForCacheKey(connectionName, dbName, undefined, cachedWithSystemCatalog)
                 );
             }
 
@@ -322,7 +409,7 @@ export class MetadataProvider {
                 connectionName,
                 cacheKey,
                 itemsWithSystemCatalog,
-                this.buildTableIdMapForCacheKey(dbName, schemaName, itemsWithSystemCatalog)
+                this.buildTableIdMapForCacheKey(connectionName, dbName, schemaName, itemsWithSystemCatalog)
             );
 
             return this.createTableCompletionItems(
@@ -349,12 +436,17 @@ export class MetadataProvider {
 
         await this.connectionManager.ensureFullyLoaded();
         await this.waitForConnectionMetadataReady(connectionName);
-        const cacheKey = buildSchemaCacheKey(dbName, schemaName);
+        const cacheDatabase = this.buildMetadataCacheDatabaseName(connectionName, dbName);
+        const cacheSchema = this.normalizeNetezzaUserPart(
+            schemaName,
+            this.connectionManager.getConnectionDatabaseKind(connectionName),
+        );
+        const cacheKey = this.buildMetadataSchemaCacheKey(connectionName, dbName, schemaName);
         const cached = getTablesForScope(
             this.metadataCache,
             connectionName,
-            dbName,
-            schemaName,
+            cacheDatabase,
+            cacheSchema,
         );
 
         const databaseKind = this.connectionManager.getConnectionDatabaseKind(connectionName);
@@ -371,7 +463,7 @@ export class MetadataProvider {
                 .map(item => {
                     const label = typeof item.label === 'string' ? item.label : (item.label?.label || item.OBJNAME || '?');
                     const ci = new vscode.CompletionItem(label, vscode.CompletionItemKind.Interface);
-                    ci.insertText = formatIdentifierForSql(label, databaseKind);
+                    ci.insertText = this.formatMetadataIdentifier(label, databaseKind);
                     const schemaSuffix = schemaName ? '' : (item.SCHEMA ? ` (${item.SCHEMA})` : '');
                     const detail = `View${schemaSuffix}`;
                     this.applySuggestDescription(ci, label, detail, item.DESCRIPTION);
@@ -446,7 +538,7 @@ export class MetadataProvider {
                 itemsWithSystemCatalog,
                 'VIEW',
                 (merged) =>
-                    this.buildTableIdMapForCacheKey(dbName, schemaName, merged),
+                    this.buildTableIdMapForCacheKey(connectionName, dbName, schemaName, merged),
             );
             this.metadataCache.markViewsCatalogLoaded(connectionName, cacheKey);
 
@@ -483,7 +575,7 @@ export class MetadataProvider {
             ];
         }
 
-        const cacheKey = buildSchemaCacheKey(dbName, schemaName);
+        const cacheKey = this.buildMetadataSchemaCacheKey(connectionName, dbName, schemaName);
         const statusBarMessage = schemaName
             ? `Fetching source objects for ${dbName}.${schemaName}...`
             : `Fetching source objects for ${dbName}...`;
@@ -552,7 +644,7 @@ export class MetadataProvider {
                 connectionName,
                 cacheKey,
                 items,
-                this.buildTableIdMapForCacheKey(dbName, schemaName, items),
+                this.buildTableIdMapForCacheKey(connectionName, dbName, schemaName, items),
             );
 
             return this.createTableCompletionItems(
@@ -579,10 +671,11 @@ export class MetadataProvider {
 
         await this.connectionManager.ensureFullyLoaded();
         await this.waitForConnectionMetadataReady(connectionName);
-        const cacheKey = buildSchemaCacheKey(dbName, schemaName);
+        const cacheDatabase = this.buildMetadataCacheDatabaseName(connectionName, dbName);
+        const cacheKey = this.buildMetadataSchemaCacheKey(connectionName, dbName, schemaName);
         const cached = schemaName
             ? this.metadataCache.getProcedures(connectionName, cacheKey)
-            : this.metadataCache.getProceduresForDatabase(connectionName, dbName);
+            : this.metadataCache.getProceduresForDatabase(connectionName, cacheDatabase);
 
         const toCompletionItems = (items: ProcedureMetadata[]): vscode.CompletionItem[] =>
             items.map(item => {
@@ -716,12 +809,29 @@ export class MetadataProvider {
         if (!connectionName) return [];
 
         const connectionKind = this.getConnectionDatabaseKind(connectionName);
-        const normalizedDbName = dbName ? stripIdentifierQuoting(dbName, connectionKind) : dbName;
+        const normalizedDbName = connectionKind === 'netezza'
+            ? this.normalizeNetezzaUserPart(dbName, connectionKind)
+            : dbName ? stripIdentifierQuoting(dbName, connectionKind) : dbName;
         const normalizedSchemaName = connectionKind === 'file'
             ? stripIdentifierQuoting(schemaName || 'main', connectionKind)
-            : schemaName ? stripIdentifierQuoting(schemaName, connectionKind) : schemaName;
-        const normalizedTableName = stripIdentifierQuoting(tableName, connectionKind);
-        const recursionKey = `${(normalizedDbName || 'CURRENT').toUpperCase()}|${(normalizedSchemaName || '').toUpperCase()}|${normalizedTableName.toUpperCase()}`;
+            : connectionKind === 'netezza'
+                ? this.normalizeNetezzaUserPart(schemaName, connectionKind)
+                : schemaName ? stripIdentifierQuoting(schemaName, connectionKind) : schemaName;
+        const normalizedTableName = connectionKind === 'netezza'
+            ? this.normalizeNetezzaUserPart(tableName, connectionKind) ?? tableName
+            : stripIdentifierQuoting(tableName, connectionKind);
+        const recursionKey = connectionKind === 'netezza'
+            ? `${normalizedDbName || 'CURRENT'}|${normalizedSchemaName || ''}|${normalizedTableName}`
+            : `${(normalizedDbName || 'CURRENT').toUpperCase()}|${(normalizedSchemaName || '').toUpperCase()}|${normalizedTableName.toUpperCase()}`;
+        const queryDbName = connectionKind === 'netezza' && dbName
+            ? formatNetezzaIdentifier(createNetezzaUserIdentifier(dbName))
+            : normalizedDbName;
+        const querySchemaName = connectionKind === 'netezza' && schemaName
+            ? formatNetezzaIdentifier(createNetezzaUserIdentifier(schemaName))
+            : normalizedSchemaName;
+        const queryTableName = connectionKind === 'netezza'
+            ? formatNetezzaIdentifier(createNetezzaUserIdentifier(tableName))
+            : normalizedTableName;
 
         if (visited.has(recursionKey)) {
             return [];
@@ -735,6 +845,14 @@ export class MetadataProvider {
             const mirroredSystemCatalog = metadataProvider?.mirroredSystemCatalog;
             const shouldMirrorSystemCatalog = !normalizedSchemaName && mirroredSystemCatalog?.isMirroredObjectName(normalizedTableName) === true;
             const metadataDbName = shouldMirrorSystemCatalog ? mirroredSystemCatalog?.sourceDatabase : normalizedDbName;
+            const effectiveQueryDbName = shouldMirrorSystemCatalog && metadataDbName
+                ? connectionKind === 'netezza'
+                    ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(metadataDbName))
+                    : metadataDbName
+                : queryDbName;
+            const effectiveQuerySchemaName = shouldMirrorSystemCatalog
+                ? undefined
+                : querySchemaName;
             const cachedObjectSchema = connectionKind === 'netezza' && !normalizedSchemaName && metadataDbName
                 ? this.metadataCache.findObjectWithType(
                     connectionName,
@@ -758,18 +876,27 @@ export class MetadataProvider {
             }
 
             const preserveColumnKeyCase = connectionKind !== 'netezza';
-            const cacheKey = buildColumnCacheKey(
-                normalizedDbName || 'CURRENT',
-                normalizedSchemaName,
-                normalizedTableName,
-                { preserveCase: preserveColumnKeyCase },
-            );
-            const diskCacheKey = buildColumnCacheKey(
-                normalizedDbName || 'CURRENT',
-                cacheResolvedSchemaName,
-                normalizedTableName,
-                { preserveCase: preserveColumnKeyCase },
-            );
+            const cacheKey = normalizedDbName
+                ? this.buildMetadataColumnCacheKey(
+                    connectionName,
+                    normalizedDbName,
+                    normalizedSchemaName,
+                    normalizedTableName,
+                )
+                : buildColumnCacheKey(
+                    'CURRENT',
+                    normalizedSchemaName,
+                    normalizedTableName,
+                    { preserveCase: preserveColumnKeyCase },
+                );
+            const diskCacheKey = normalizedDbName
+                ? this.buildMetadataColumnCacheKey(
+                    connectionName,
+                    normalizedDbName,
+                    cacheResolvedSchemaName,
+                    normalizedTableName,
+                )
+                : cacheKey;
             if (normalizedDbName) {
                 if (typeof this.metadataCache.ensureColumnsLoadedForTableKey === 'function') {
                     await this.metadataCache.ensureColumnsLoadedForTableKey(
@@ -777,7 +904,12 @@ export class MetadataProvider {
                         diskCacheKey,
                     );
                 } else {
-                    await this.metadataCache.ensureColumnsLoaded(connectionName, normalizedDbName);
+                    await this.metadataCache.ensureColumnsLoaded(
+                        connectionName,
+                        connectionKind === 'netezza'
+                            ? buildNetezzaDatabaseCacheKey(normalizedDbName)
+                            : normalizedDbName,
+                    );
                 }
             }
             const cached = this.metadataCache.getColumns(connectionName, cacheKey)
@@ -803,12 +935,14 @@ export class MetadataProvider {
                 const cachedMirroredColumns =
                     this.metadataCache.getColumns(
                         connectionName,
-                        buildColumnCacheKey(
-                            metadataDbName || '',
-                            normalizedSchemaName,
-                            normalizedTableName,
-                            { preserveCase: preserveColumnKeyCase },
-                        ),
+                        metadataDbName
+                            ? this.buildMetadataColumnCacheKey(
+                                connectionName,
+                                metadataDbName,
+                                normalizedSchemaName,
+                                normalizedTableName,
+                            )
+                            : cacheKey,
                     ) ||
                     (metadataDbName
                         ? this.metadataCache.getColumnsAnySchema(connectionName, metadataDbName, normalizedTableName)
@@ -902,6 +1036,9 @@ export class MetadataProvider {
                 objId,
                 tableName,
                 options?.requestSource ?? 'schema-tree',
+                effectiveQueryDbName,
+                effectiveQuerySchemaName,
+                queryTableName,
             );
             this.columnFetchInFlight.set(inflightKey, fetchPromise);
 
@@ -930,6 +1067,9 @@ export class MetadataProvider {
         objId: number | undefined,
         tableName: string,
         requestSource: MetadataRequestSource,
+        queryDatabaseName: string | undefined,
+        querySchemaName: string | undefined,
+        queryTableName: string,
     ): Promise<ColumnMetadata[]> {
         if (this.metadataCache.isDatabaseDead(connectionName, normalizedDbName)) {
             return [];
@@ -954,9 +1094,9 @@ export class MetadataProvider {
             const cachedObject = effectiveDb && effectiveSchema
                 ? this.metadataCache.findObjectWithType(
                     connectionName,
-                    effectiveDb,
-                    effectiveSchema,
-                    normalizedTableName,
+                    queryDatabaseName || effectiveDb,
+                    querySchemaName || effectiveSchema,
+                    queryTableName,
                 )
                 : undefined;
             const queryReason = cachedObject
@@ -1006,9 +1146,9 @@ export class MetadataProvider {
                 }));
             } else {
                 const query = this.buildSimpleColumnQuery(connectionName, {
-                    database: metadataDbName,
-                    schema: resolvedSchemaName,
-                    tableName: normalizedTableName,
+                    database: queryDatabaseName || metadataDbName,
+                    schema: querySchemaName || resolvedSchemaName,
+                    tableName: queryTableName,
                     objectId: objId
                 });
                 const result = await runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
@@ -1240,7 +1380,7 @@ export class MetadataProvider {
                     ? vscode.CompletionItemKind.Reference
                     : isView ? vscode.CompletionItemKind.Interface : vscode.CompletionItemKind.Class
             );
-            ci.insertText = formatIdentifierForSql(label, databaseKind);
+            ci.insertText = this.formatMetadataIdentifier(label, databaseKind);
             this.applySuggestDescription(ci, label, item.detail, item.DESCRIPTION);
             ci.sortText = item.sortText;
             return ci;
@@ -1345,7 +1485,7 @@ export class MetadataProvider {
             connectionName,
             cacheKey,
             items,
-            this.buildTableIdMapForCacheKey(mirroredSystemCatalog.sourceDatabase, undefined, items)
+            this.buildTableIdMapForCacheKey(connectionName, mirroredSystemCatalog.sourceDatabase, undefined, items)
         );
 
         return items;
@@ -1370,7 +1510,10 @@ export class MetadataProvider {
         schemaName: string | undefined,
         objectName: string
     ): TableMetadata | undefined {
-        const lookupName = objectName.toUpperCase();
+        const isNetezza = this.getConnectionDatabaseKind(connectionName) === 'netezza';
+        const lookupName = isNetezza
+            ? createNetezzaUserIdentifier(objectName).value
+            : objectName.toUpperCase();
         const candidates = getTablesForScope(
             this.metadataCache,
             connectionName,
@@ -1384,14 +1527,28 @@ export class MetadataProvider {
 
         return candidates.find(item => {
             const candidateName = this.getTableMetadataName(item);
-            const candidateSchema = typeof item.SCHEMA === 'string' ? item.SCHEMA.trim() : '';
-            if (!candidateName || candidateName.toUpperCase() !== lookupName) {
+            const normalizedCandidateName = candidateName === undefined
+                ? undefined
+                : isNetezza
+                    ? candidateName
+                    : candidateName.toUpperCase();
+            const candidateSchema = typeof item.SCHEMA === 'string'
+                ? (isNetezza ? item.SCHEMA : item.SCHEMA.trim())
+                : '';
+            const normalizedSchemaName = schemaName === undefined
+                ? undefined
+                : isNetezza
+                    ? createNetezzaUserIdentifier(schemaName).value
+                    : schemaName.toUpperCase();
+            if (!normalizedCandidateName || normalizedCandidateName !== lookupName) {
                 return false;
             }
             if (!schemaName) {
                 return true;
             }
-            return candidateSchema.toUpperCase() === schemaName.toUpperCase();
+            return isNetezza
+                ? candidateSchema === normalizedSchemaName
+                : candidateSchema.toUpperCase() === normalizedSchemaName;
         });
     }
 
@@ -1438,7 +1595,7 @@ export class MetadataProvider {
             return undefined;
         }
 
-        const query = buildSynonymTargetQuery(
+        const query = buildNetezzaSynonymTargetQuery(
             dbName,
             tableName,
             cachedObject?.schema || schemaName,
@@ -1524,11 +1681,16 @@ export class MetadataProvider {
     }
 
     private buildTableIdMapForCacheKey(
+        connectionName: string,
         dbName: string,
         schemaName: string | undefined,
         items: TableMetadata[]
     ): Map<string, number> {
         const idMap = new Map<string, number>();
+        const databaseKind = this.tryGetConnectionDatabaseKind(connectionName);
+        const normalizedDatabase = databaseKind === 'netezza'
+            ? createNetezzaUserIdentifier(dbName).value
+            : dbName;
 
         for (const item of items) {
             const name = this.getTableMetadataName(item);
@@ -1538,10 +1700,12 @@ export class MetadataProvider {
 
             const itemSchemaName =
                 schemaName ||
-                (typeof item.SCHEMA === 'string' && item.SCHEMA.trim().length > 0 ? item.SCHEMA.trim() : undefined);
+                (typeof item.SCHEMA === 'string' && item.SCHEMA.length > 0
+                    ? (databaseKind === 'netezza' ? item.SCHEMA : item.SCHEMA.trim())
+                    : undefined);
             const lookupKey = itemSchemaName
-                ? `${dbName}.${itemSchemaName}.${name}`
-                : `${dbName}..${name}`;
+                ? `${normalizedDatabase}.${itemSchemaName}.${name}`
+                : `${normalizedDatabase}..${name}`;
             idMap.set(lookupKey, item.OBJID);
         }
 

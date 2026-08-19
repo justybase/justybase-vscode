@@ -3,7 +3,14 @@
  */
 
 import type { MetadataCache } from '../../metadataCache';
-import { buildIdLookupKey, extractLabel, matchesConnection, parseCacheKey } from '../helpers';
+import {
+    buildIdLookupKey,
+    extractLabel,
+    isNetezzaExactCachePart,
+    matchesConnection,
+    parseCacheKey,
+    parseDbSchemaCacheKey,
+} from '../helpers';
 import type {
     ColumnMetadata,
     DatabaseMetadata,
@@ -114,10 +121,7 @@ function serializeConnectionMetadataLayers(
             cache._schemaCache,
             connectionName,
             (item) => stripUnknownKeys(item as SchemaMetadata, KNOWN_SCHEMA_KEYS),
-            (fullKey) => {
-                const parsed = parseCacheKey(fullKey);
-                return parsed?.dbName;
-            },
+            (fullKey) => fullKey.split('|')[1],
         ),
         table: layerMapToRecord(
             cache._tableCache,
@@ -271,9 +275,10 @@ export function buildTableIdMap(
     layerKey: string,
     tables: TableMetadata[],
 ): Map<string, number> {
-    const keyParts = layerKey.split('.');
-    const dbName = keyParts[0];
-    const schemaName = keyParts.length > 1 && keyParts[1] !== '' ? keyParts[1] : undefined;
+    const parsedKey = parseDbSchemaCacheKey(layerKey);
+    const dbName = parsedKey.dbName;
+    const schemaName = parsedKey.schemaName;
+    const exactNetezza = isNetezzaExactCachePart(layerKey.split('.')[0]);
     const idMap = new Map<string, number>();
 
     for (const table of tables) {
@@ -281,7 +286,7 @@ export function buildTableIdMap(
         const schema = table.SCHEMA ?? schemaName;
         if (table.OBJID !== undefined && objectName && schema) {
             const lookupKey = buildIdLookupKey(dbName, schema, objectName);
-            idMap.set(lookupKey.toUpperCase(), table.OBJID);
+            idMap.set(exactNetezza ? lookupKey : lookupKey.toUpperCase(), table.OBJID);
         }
     }
     return idMap;

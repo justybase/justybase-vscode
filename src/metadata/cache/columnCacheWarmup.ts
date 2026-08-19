@@ -8,6 +8,8 @@ import {
     groupColumnRowsByTableKey,
     type RawColumnRowWithKeys,
 } from '../columnRowMapping';
+import { buildNetezzaCacheDatabasePart } from '../helpers';
+import { createNetezzaUserIdentifier } from '../../dialects/netezza/metadata/identifierUtils';
 import type { MetadataCache } from './MetadataCache';
 
 export interface TableColumnWarmupTarget {
@@ -50,6 +52,17 @@ export async function warmTableColumnsFromCatalog(
     const provider = databaseKind
         ? getDatabaseMetadataProvider(databaseKind)
         : netezzaMetadataProvider;
+    const isNetezza = databaseKind === 'netezza'
+        || (databaseKind === undefined && cache.isNetezzaConnection(connectionName));
+    const cacheDatabase = isNetezza
+        ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(target.database).value)
+        : target.database;
+    const cacheSchema = isNetezza && target.schema !== undefined
+        ? createNetezzaUserIdentifier(target.schema).value
+        : target.schema;
+    const cacheTable = isNetezza
+        ? createNetezzaUserIdentifier(target.table).value
+        : target.table;
     const query = provider.buildColumnsWithKeysQuery(target.database, {
         schema: target.schema,
         tableName: target.table,
@@ -57,11 +70,16 @@ export async function warmTableColumnsFromCatalog(
 
     try {
         let rows = await readRows(query);
-        const columnKey = buildColumnCacheKey(target.database, target.schema, target.table);
+        const columnKey = buildColumnCacheKey(
+            cacheDatabase,
+            cacheSchema,
+            cacheTable,
+            isNetezza ? { preserveCase: true } : undefined,
+        );
         let columns = groupColumnRowsByTableKey(rows, {
             dbName: target.database,
             schemaName: target.schema,
-        }).get(columnKey);
+        }, isNetezza ? { preserveCase: true, exactNetezza: true } : undefined).get(columnKey);
 
         // Some NPS versions omit EXTERNAL TABLE entries from
         // _V_OBJECT_DATA. The main query intentionally stays lean, so only
@@ -79,7 +97,7 @@ export async function warmTableColumnsFromCatalog(
                 columns = groupColumnRowsByTableKey(rows, {
                     dbName: target.database,
                     schemaName: target.schema,
-                }).get(columnKey);
+                }, isNetezza ? { preserveCase: true, exactNetezza: true } : undefined).get(columnKey);
             }
         }
 

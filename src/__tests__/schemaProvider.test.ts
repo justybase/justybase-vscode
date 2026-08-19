@@ -1132,7 +1132,7 @@ describe('SchemaProvider', () => {
             expect(children[1].description).toBe('txt - User name');
         });
 
-        it('should resolve lowercase table names to uppercase cache keys', async () => {
+        it('should preserve catalog table identity in cache keys', async () => {
             const lowerTableItem = new SchemaItem(
                 'lower_table',
                 vscode.TreeItemCollapsibleState.Collapsed,
@@ -1170,7 +1170,7 @@ describe('SchemaProvider', () => {
             expect(children).toHaveLength(1);
             expect(mockMetadataCache.getColumns).toHaveBeenCalledWith(
                 'TestConnection',
-                'TESTDB.ADMIN.LOWER_TABLE',
+                '@NZEX@TESTDB.ADMIN.lower_table',
             );
             expect(runQueryRaw).not.toHaveBeenCalled();
         });

@@ -14,6 +14,11 @@ import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
 import { stripIdentifierQuoting } from '../../utils/identifierUtils';
 import { isTableCacheObjectType } from '../../metadata/cache/schemaTreeDataSource';
 import { toTableMetadata, upsertTableObject } from '../../metadata/cache/tableObjectMutation';
+import {
+    buildNetezzaIdentifierEquality,
+    createNetezzaUserIdentifier,
+    formatNetezzaIdentifier,
+} from '../../dialects/netezza/metadata/identifierUtils';
 
 interface RevealData {
     name: string;
@@ -41,7 +46,7 @@ interface NetezzaObjectRow extends Record<string, unknown> {
 }
 
 function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''").trim();
+    return value.replace(/'/g, "''");
 }
 
 function normalizeObjectId(value: number | string | undefined): number | undefined {
@@ -130,22 +135,22 @@ async function findNetezzaObjectForReveal(
     searchType: string | undefined,
     schemaName: string | undefined,
 ): Promise<NetezzaObjectRow | undefined> {
-    const db = database.toUpperCase();
-    const escapedName = escapeSqlLiteral(searchName);
+    const dbIdentifier = createNetezzaUserIdentifier(database);
+    const db = formatNetezzaIdentifier(dbIdentifier);
     const escapedSchema = escapeSqlLiteral(schemaName || '');
     const escapedType = escapeSqlLiteral(searchType || '');
     const typeFilter = escapedType && escapedType !== 'COLUMN'
-        ? `AND UPPER(TRIM(OBJTYPE)) = UPPER('${escapedType}')`
+        ? `AND OBJTYPE = '${escapedType.toUpperCase()}'`
         : '';
     const schemaFilter = escapedSchema
-        ? `AND UPPER(TRIM(SCHEMA)) = UPPER('${escapedSchema}')`
+        ? `AND ${buildNetezzaIdentifierEquality('SCHEMA', schemaName || '')}`
         : '';
 
     const objectDataQuery = `
         SELECT OBJNAME, OBJTYPE, SCHEMA, OBJID
         FROM ${db}.._V_OBJECT_DATA
-        WHERE UPPER(TRIM(OBJNAME)) = UPPER('${escapedName}')
-        AND UPPER(TRIM(DBNAME)) = '${db}'
+        WHERE ${buildNetezzaIdentifierEquality('OBJNAME', searchName)}
+        AND ${buildNetezzaIdentifierEquality('DBNAME', dbIdentifier)}
         ${typeFilter}
         ${schemaFilter}
         LIMIT 1
@@ -165,8 +170,8 @@ async function findNetezzaObjectForReveal(
             if (objects.length > 0) {
                 const obj = objects[0];
                 obj.OBJTYPE = (obj.OBJTYPE || '').trim().toUpperCase();
-                obj.OBJNAME = (obj.OBJNAME || searchName).trim();
-                obj.SCHEMA = (obj.SCHEMA || '').trim();
+                obj.OBJNAME = obj.OBJNAME || searchName;
+                obj.SCHEMA = obj.SCHEMA || '';
 
                 if (obj.OBJTYPE === 'PROCEDURE') {
                     try {
@@ -199,14 +204,14 @@ async function findNetezzaObjectForReveal(
 
     if (!escapedType || escapedType === 'EXTERNAL TABLE') {
         const extSchemaFilter = escapedSchema
-            ? `AND UPPER(TRIM(E1.SCHEMA)) = UPPER('${escapedSchema}')`
+            ? `AND ${buildNetezzaIdentifierEquality('E1.SCHEMA', schemaName || '')}`
             : '';
         const extQuery = `
             SELECT E1.TABLENAME AS OBJNAME, 'EXTERNAL TABLE' AS OBJTYPE, E1.SCHEMA, E1.RELID AS OBJID
             FROM ${db}.._V_EXTERNAL E1
             JOIN ${db}.._V_EXTOBJECT E2 ON E1.RELID = E2.OBJID
-            WHERE UPPER(TRIM(E1.TABLENAME)) = UPPER('${escapedName}')
-            AND UPPER(TRIM(E1.DATABASE)) = '${db}'
+            WHERE ${buildNetezzaIdentifierEquality('E1.TABLENAME', searchName)}
+            AND ${buildNetezzaIdentifierEquality('E1.DATABASE', dbIdentifier)}
             ${extSchemaFilter}
             LIMIT 1
         `;
@@ -225,8 +230,8 @@ async function findNetezzaObjectForReveal(
                 if (extObjects.length > 0) {
                     const obj = extObjects[0];
                     obj.OBJTYPE = 'EXTERNAL TABLE';
-                    obj.OBJNAME = (obj.OBJNAME || searchName).trim();
-                    obj.SCHEMA = (obj.SCHEMA || '').trim();
+                    obj.OBJNAME = obj.OBJNAME || searchName;
+                    obj.SCHEMA = obj.SCHEMA || '';
                     return obj;
                 }
             }

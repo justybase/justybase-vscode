@@ -3,7 +3,11 @@
  */
 
 import { buildColumnCacheKey } from '../columnRowMapping';
-import { buildDbSchemaCacheKey } from '../helpers';
+import {
+  buildDbSchemaCacheKey,
+  buildNetezzaDbSchemaCacheKey,
+  isNetezzaExactCachePart,
+} from '../helpers';
 import type { ColumnMetadata, TableMetadata } from '../types';
 import type { MetadataCache } from './MetadataCache';
 import { mergeAndSetTables } from './tableLikeMerge';
@@ -43,14 +47,18 @@ export function buildProcedureCatalogLoadedKey(
   connectionName: string,
   dbName: string,
 ): string {
-  return `${connectionName}|${dbName.toUpperCase()}|PROCEDURE`;
+  const normalizedDb = isNetezzaExactCachePart(dbName)
+    ? dbName
+    : dbName.toUpperCase();
+  return `${connectionName}|${normalizedDb}|PROCEDURE`;
 }
 
 export function buildSchemaCacheKey(
-  dbName: string,
-  schemaName?: string,
+    dbName: string,
+    schemaName?: string,
+    options?: { preserveCase?: boolean; exactNetezza?: boolean },
 ): string {
-  return buildDbSchemaCacheKey(dbName, schemaName);
+  return buildDbSchemaCacheKey(dbName, schemaName, options);
 }
 
 /**
@@ -62,7 +70,12 @@ export function getTablesForScope(
   dbName: string,
   schemaName?: string,
 ): TableMetadata[] | undefined {
-  const cacheKey = buildSchemaCacheKey(dbName, schemaName);
+  const isNetezza =
+    typeof cache.isNetezzaConnection === 'function' &&
+    cache.isNetezzaConnection(connectionName);
+  const cacheKey = isNetezza
+    ? buildNetezzaDbSchemaCacheKey(dbName, schemaName)
+    : buildSchemaCacheKey(dbName, schemaName);
   if (schemaName) {
     return cache.getTables(connectionName, cacheKey);
   }
@@ -86,7 +99,12 @@ export function refreshTableLikeTypeForSchema(
   tables: readonly TableMetadata[],
   buildIdMap: (merged: TableMetadata[]) => Map<string, number>,
 ): TableMetadata[] {
-  const schemaKey = buildSchemaCacheKey(dbName, schemaName);
+  const isNetezza =
+    typeof cache.isNetezzaConnection === 'function' &&
+    cache.isNetezzaConnection(connectionName);
+  const schemaKey = isNetezza
+    ? buildNetezzaDbSchemaCacheKey(dbName, schemaName)
+    : buildSchemaCacheKey(dbName, schemaName);
   return mergeAndSetTables(
     cache,
     connectionName,
