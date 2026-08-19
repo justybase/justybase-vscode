@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { QueryHistoryInboundMessage, QueryHistoryOutboundMessage, QueryHistoryUiState } from '../contracts/webviews';
 import { toQueryHistoryEntryDtos, toQueryHistoryEntryDto } from '../contracts/webviews';
 import { QueryHistoryManager, HistoryFilter, QueryParameter, QueryHistoryEntry } from '../core/queryHistoryManager';
+import type { ConnectionManager } from '../core/connectionManager';
 import { logWithFallback } from '../utils/logger';
 
 export class QueryHistoryView implements vscode.WebviewViewProvider {
@@ -13,7 +14,8 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
-        private readonly _context: vscode.ExtensionContext
+        private readonly _context: vscode.ExtensionContext,
+        private readonly _connectionManager?: ConnectionManager,
     ) { }
 
     public resolveWebviewView(
@@ -80,7 +82,13 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                     vscode.window.showInformationMessage('Query copied to clipboard');
                     break;
                 case 'executeQuery':
-                    await this.executeQuery(data.query);
+                    if (typeof data.queryId === 'string') {
+                        await this.executeQuery(data.queryId);
+                    } else if ('query' in data && typeof data.query === 'string') {
+                        // Keep already-open webviews functional during an
+                        // extension upgrade. New webviews always send queryId.
+                        await this.openUntitledQuery(data.query);
+                    }
                     break;
                 case 'getHistory':
                     await this.sendHistoryToWebview(true);
@@ -341,13 +349,68 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
         }
     }
 
-    private async executeQuery(query: string) {
-        // Create a new untitled document with the query
+    private async executeQuery(queryId: string): Promise<void> {
+        const historyManager = QueryHistoryManager.getInstance(this._context);
+        const entry = await this.findHistoryEntry(historyManager, queryId);
+        if (!entry) {
+            vscode.window.showErrorMessage('Query not found');
+            return;
+        }
+
+        await this.openHistoryQuery(entry, entry.query);
+    }
+
+    private async openHistoryQuery(entry: QueryHistoryEntry, query: string): Promise<void> {
+        // Create a new untitled document with the query. Opening is deliberately
+        // separate from execution; the user still confirms with F5/Ctrl+Enter.
+        const doc = await this.openUntitledQuery(query);
+
+        const connectionName = entry.connectionName?.trim();
+        if (!connectionName || !this._connectionManager) {
+            return;
+        }
+
+        const documentUri = doc.uri.toString();
+        await this._connectionManager.setDocumentConnection(documentUri, connectionName);
+        if (entry.database) {
+            await this._connectionManager.setDocumentDatabase(documentUri, entry.database);
+        }
+
+        const available = await this._connectionManager.getConnection(connectionName);
+        if (!available) {
+            if (typeof this._connectionManager.getConnectionForExecution === 'function') {
+                // ConnectionManager owns the once-per-document warning and
+                // keeps the missing name as the effective context.
+                this._connectionManager.getConnectionForExecution(documentUri);
+            } else {
+                vscode.window.showWarningMessage(
+                    `Connection '${connectionName}' from query history is no longer available. The SQL was opened, but it will not run until you select a valid connection for this tab.`,
+                );
+            }
+        }
+    }
+
+    private async openUntitledQuery(query: string): Promise<vscode.TextDocument> {
         const doc = await vscode.workspace.openTextDocument({
             content: query,
             language: 'sql'
         });
-        await vscode.window.showTextDocument(doc);
+        await vscode.window.showTextDocument(doc, { preview: false });
+        return doc;
+    }
+
+    private async findHistoryEntry(
+        historyManager: QueryHistoryManager,
+        id: string,
+    ): Promise<QueryHistoryEntry | undefined> {
+        if (typeof historyManager.getEntryById === 'function') {
+            return historyManager.getEntryById(id);
+        }
+
+        // Compatibility with lightweight test doubles and an already-loaded
+        // older extension host while the new manager API is being adopted.
+        const history = await historyManager.getHistory();
+        return history.find(entry => entry.id === id);
     }
 
     private async toggleFavorite(id: string) {
@@ -361,6 +424,12 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
 
     private async updateEntry(id: string, tags?: string, description?: string) {
         const historyManager = QueryHistoryManager.getInstance(this._context);
+        const activeEntries = await historyManager.getHistory();
+        if (!activeEntries.some(activeEntry => activeEntry.id === id)) {
+            vscode.window.showWarningMessage('Archived query history entries are read-only.');
+            return;
+        }
+
         await historyManager.updateEntry(id, tags, description);
         this.refresh();
         vscode.window.showInformationMessage('Entry updated successfully');
@@ -368,25 +437,15 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
 
     private async requestEdit(id: string) {
         const historyManager = QueryHistoryManager.getInstance(this._context);
-        const history = await historyManager.getHistory(); // Note: this gets only active page 0 if we changed it? 
-        // Wait, getHistory now has limit. calling without limit gives ALL active.
-        // We will assume the user clicks on an entry that IS loaded in UI.
-        // Finding it in backend might need full search if we only fetched partial?
-        // Actually getHistory() without args returns cache which is ALL Active. 
-        // So this is safe for Active items.
-        // Archive items? They might not be in cache. 
-        // But let's assume one step at a time.
-
-        const entry = history.find(e => e.id === id);
-
-        // If not found (maybe archived?), try searchArchive via manager is too slow...
-        // For now, edit works on Active.
-
+        const entry = await this.findHistoryEntry(historyManager, id);
         if (!entry) {
-            // Try to see if it was passed in the UI data? The UI has the data.
-            // But we need current state.
-            // Simplification: Edit only works for active history for now.
             vscode.window.showErrorMessage('Entry not found (might be archived)');
+            return;
+        }
+
+        const activeEntries = await historyManager.getHistory();
+        if (!activeEntries.some(activeEntry => activeEntry.id === id)) {
+            vscode.window.showWarningMessage('Archived query history entries are read-only.');
             return;
         }
 
@@ -624,7 +683,11 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
                     await this.handleExtendedStatusFilter(panel, data.status);
                     break;
                 case 'executeQuery':
-                    await this.executeQuery(data.query);
+                    if (typeof data.queryId === 'string') {
+                        await this.executeQuery(data.queryId);
+                    } else if ('query' in data && typeof data.query === 'string') {
+                        await this.openUntitledQuery(data.query);
+                    }
                     break;
                 case 'copyQuery':
                     await vscode.env.clipboard.writeText(data.query);
@@ -1005,8 +1068,7 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
 
     private async quickRerun(queryId: string, parameters: QueryParameter[]): Promise<void> {
         const historyManager = QueryHistoryManager.getInstance(this._context);
-        const history = await historyManager.getHistory();
-        const entry = history.find(e => e.id === queryId);
+        const entry = await this.findHistoryEntry(historyManager, queryId);
 
         if (!entry) {
             vscode.window.showErrorMessage('Query not found');
@@ -1016,12 +1078,7 @@ export class QueryHistoryView implements vscode.WebviewViewProvider {
         // Substitute parameters in the query
         const finalQuery = historyManager.substituteParameters(entry.query, parameters);
 
-        // Open the query in editor
-        const doc = await vscode.workspace.openTextDocument({
-            content: finalQuery,
-            language: 'sql'
-        });
-        await vscode.window.showTextDocument(doc);
+        await this.openHistoryQuery(entry, finalQuery);
 
         // Save the quick rerun config for future use
         await historyManager.saveQuickRerunConfig(queryId, {

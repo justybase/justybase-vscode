@@ -2,13 +2,11 @@ import type { TanStackCellContext } from '../shared/tanstackShims.js';
 import type {
     QueryHistoryEntryDto,
     QueryHistoryExtendedStateSnapshot,
-    QueryHistoryHostToWebviewMessage,
     QueryHistoryMessageSource,
     QueryHistoryParameterDto,
     QueryHistoryRecoveryActionType,
     QueryHistoryStatsDto,
     QueryHistoryUiState,
-    QueryHistoryWebviewToHostMessage,
     QueryExecutionStatus,
 } from './hostContracts.js';
 import { postToHost, vscode, asHostMessage } from './protocol.js';
@@ -69,9 +67,6 @@ interface TanStackVirtualizerHandle {
 
 type HistoryTableLeafColumn = ReturnType<TanStackTableHandle['getAllLeafColumns']>[number];
 
-type QueryHistoryEntry = QueryHistoryEntryDto;
-type QueryHistoryParameter = QueryHistoryParameterDto;
-
 let allHistory: QueryHistoryEntryDto[] = [];
 let selectedEntryId: string | null = null;
 let pendingQuickRerunId: string | null = null;
@@ -80,7 +75,6 @@ let currentUiState: QueryHistoryUiState | null = null;
 // ── TanStack Table state ────────────────────────────────────────────
 let tanTable: TanStackTableHandle | null = null;
 let rowVirtualizer: TanStackVirtualizerHandle | null = null;
-let virtualizerCleanup: (() => void) | null = null;
 let renderScheduled = false;
 
 function getPersistedState(): QueryHistoryExtendedStateSnapshot | undefined {
@@ -241,7 +235,7 @@ function initVirtualizer(): void {
             observeElementOffset: VirtualCore.observeElementOffset,
             onChange: () => scheduleRenderRows()
         });
-        virtualizerCleanup = rowVirtualizer._didMount();
+        rowVirtualizer._didMount();
     } else {
         rowVirtualizer.options.count = rows.length;
     }
@@ -667,7 +661,7 @@ function executeQuery(): void {
     if (!selectedEntryId) return;
     const entry = allHistory.find(historyEntry => historyEntry.id === selectedEntryId);
     if (entry) {
-        postToHost({ type: 'executeQuery', query: entry.query });
+        postToHost({ type: 'executeQuery', queryId: entry.id });
     }
 }
 

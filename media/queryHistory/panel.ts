@@ -1,13 +1,11 @@
 import type {
     QueryHistoryEntryDto,
-    QueryHistoryHostToWebviewMessage,
     QueryHistoryParameterDto,
     QueryHistoryRecoveryActionType,
     QueryHistorySavedViewDto,
     QueryHistoryStatsDto,
     QueryHistoryUiState,
     QueryHistoryWebviewStateSnapshot,
-    QueryHistoryWebviewToHostMessage,
 } from './hostContracts.js';
 import { postToHost, vscode, asHostMessage } from './protocol.js';
 import { showParameterDialog as openParameterDialog } from './parameterDialog.js';
@@ -30,11 +28,6 @@ import {
     iconTrash,
     iconWarning,
 } from './icons.js';
-
-type QueryHistoryEntry = QueryHistoryEntryDto;
-type QueryHistoryStats = QueryHistoryStatsDto;
-type QueryHistorySavedView = QueryHistorySavedViewDto;
-type QueryHistoryParameter = QueryHistoryParameterDto;
 
 let allHistory: QueryHistoryEntryDto[] = [];
 let isLoading = false;
@@ -261,10 +254,6 @@ function clearAllHistory(): void {
  * Delete a specific entry
  * @param {string} id
  */
-function deleteEntry(id: string): void {
-    postToHost({ type: 'deleteEntry', id });
-}
-
 /**
  * Copy query to clipboard
  * @param {string} id
@@ -283,7 +272,7 @@ function copyQuery(id: string): void {
 function executeQuery(id: string): void {
     const entry = allHistory.find(historyEntry => historyEntry.id === id);
     if (entry) {
-        postToHost({ type: 'executeQuery', query: entry.query });
+        postToHost({ type: 'executeQuery', queryId: entry.id });
     }
 }
 
@@ -331,10 +320,6 @@ function editEntry(id: string): void {
  * Filter by a specific tag
  * @param {string} tag
  */
-function filterByTag(tag: string): void {
-    postToHost({ type: 'filterByTag', tag });
-}
-
 /**
  * Attach all event listeners
  */
@@ -704,7 +689,7 @@ function handleQueryParameters(parameters: QueryHistoryParameterDto[]): void {
         if (currentEntryId) {
             const entry = allHistory.find((entryItem) => entryItem.id === currentEntryId);
             if (entry) {
-                postToHost({ type: 'executeQuery', query: entry.query });
+                postToHost({ type: 'executeQuery', queryId: entry.id });
             }
         }
         pendingQuickRerunId = null;
