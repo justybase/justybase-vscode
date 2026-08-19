@@ -51,7 +51,12 @@ import {
     normalizeCatalogPart,
     type RawColumnRowWithKeys,
 } from './columnRowMapping';
-import { buildDbSchemaCacheKey, extractLabel } from './helpers';
+import {
+    buildDbSchemaCacheKey,
+    buildNetezzaDbSchemaCacheKey,
+    buildNetezzaCacheDatabasePart,
+    extractLabel,
+} from './helpers';
 import {
     getMetadataQueryConcurrencyLimit,
     runWithMetadataQueryConcurrencyLimit,
@@ -60,6 +65,10 @@ import { mirrorSynonymColumnsForConnection } from './synonymColumns';
 import { TableMetadata, ProcedureMetadata } from './types';
 import { QueryResult } from '../types';
 import { NZ_QUERIES } from './systemQueries';
+import {
+    createNetezzaCatalogIdentifier,
+    createNetezzaUserIdentifier,
+} from '../dialects/netezza/metadata/identifierUtils';
 import { Logger } from '../utils/logger';
 import type {
     MetadataQueryContext,
@@ -179,11 +188,12 @@ interface RawTypeGroupRow {
     [key: string]: unknown;
 }
 
-function mapPrefetchObjectRow(row: RawObjectRow): TableMetadata {
+function mapPrefetchObjectRow(row: RawObjectRow, preserveCatalogIdentity = false): TableMetadata {
     const normalizedObjectType = row.OBJTYPE?.trim().toUpperCase() || 'TABLE';
-    const objectName = normalizeCatalogPart(row.OBJNAME);
-    const schemaName = normalizeCatalogPart(row.SCHEMA);
-    const databaseName = normalizeCatalogPart(row.DBNAME);
+    const identityOptions = preserveCatalogIdentity ? { preserveWhitespace: true } : undefined;
+    const objectName = normalizeCatalogPart(row.OBJNAME, identityOptions);
+    const schemaName = normalizeCatalogPart(row.SCHEMA, identityOptions);
+    const databaseName = normalizeCatalogPart(row.DBNAME, identityOptions);
     const isViewLike =
         normalizedObjectType === 'VIEW'
         || normalizedObjectType === 'MATERIALIZED VIEW'
@@ -209,18 +219,19 @@ function mapPrefetchObjectRow(row: RawObjectRow): TableMetadata {
         OBJID: row.OBJID,
         SCHEMA: schemaName,
         DBNAME: databaseName,
-        OWNER: normalizeCatalogPart(row.OWNER),
+        OWNER: normalizeCatalogPart(row.OWNER, identityOptions),
         DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
-        REFOBJNAME: normalizeCatalogPart(row.REFOBJNAME),
+        REFOBJNAME: normalizeCatalogPart(row.REFOBJNAME, identityOptions),
     };
 }
 
-function normalizeRawObjectRow(row: RawObjectRow): RawObjectRow {
+function normalizeRawObjectRow(row: RawObjectRow, preserveCatalogIdentity = false): RawObjectRow {
+    const identityOptions = preserveCatalogIdentity ? { preserveWhitespace: true } : undefined;
     return {
         ...row,
-        OBJNAME: normalizeCatalogPart(row.OBJNAME),
-        SCHEMA: normalizeCatalogPart(row.SCHEMA),
-        DBNAME: normalizeCatalogPart(row.DBNAME),
+        OBJNAME: normalizeCatalogPart(row.OBJNAME, identityOptions),
+        SCHEMA: normalizeCatalogPart(row.SCHEMA, identityOptions),
+        DBNAME: normalizeCatalogPart(row.DBNAME, identityOptions),
         OBJTYPE: normalizeCatalogPart(row.OBJTYPE).toUpperCase(),
         OWNER: normalizeCatalogPart(row.OWNER),
         REFOBJNAME: normalizeCatalogPart(row.REFOBJNAME),
@@ -228,21 +239,26 @@ function normalizeRawObjectRow(row: RawObjectRow): RawObjectRow {
     };
 }
 
-function objectMergeKey(row: RawObjectRow): string {
-    const normalized = normalizeRawObjectRow(row);
-    return [normalized.DBNAME, normalized.SCHEMA, normalized.OBJNAME]
-        .map((part) => part.toUpperCase())
-        .join('|');
+function objectMergeKey(row: RawObjectRow, preserveCatalogIdentity = false): string {
+    const normalized = normalizeRawObjectRow(row, preserveCatalogIdentity);
+    const identity = normalized.OBJID !== undefined
+        ? `id:${String(normalized.OBJID)}`
+        : `type:${normalized.OBJTYPE ?? ''}`;
+    const parts = [normalized.DBNAME, normalized.SCHEMA, normalized.OBJNAME, identity];
+    return preserveCatalogIdentity
+        ? parts.join('|')
+        : parts.map((part) => String(part ?? '').toUpperCase()).join('|');
 }
 
 function mergeObjectRows(
     primaryRows: RawObjectRow[],
     fallbackRows: RawObjectRow[],
+    preserveCatalogIdentity = false,
 ): RawObjectRow[] {
     const rowsByKey = new Map<string, RawObjectRow>();
     for (const row of [...primaryRows, ...fallbackRows]) {
-        const normalized = normalizeRawObjectRow(row);
-        const key = objectMergeKey(normalized);
+        const normalized = normalizeRawObjectRow(row, preserveCatalogIdentity);
+        const key = objectMergeKey(normalized, preserveCatalogIdentity);
         if (!rowsByKey.has(key)) {
             rowsByKey.set(key, normalized);
         }
@@ -250,17 +266,23 @@ function mergeObjectRows(
     return [...rowsByKey.values()];
 }
 
-function tableMetadataMergeKey(table: TableMetadata, fallbackDatabase: string): string {
+function tableMetadataMergeKey(
+    table: TableMetadata,
+    fallbackDatabase: string,
+    preserveCatalogIdentity = false,
+): string {
     const label = typeof table.label === 'string'
         ? table.label
         : table.label?.label;
-    return [
-        normalizeCatalogPart(String(table.DBNAME ?? fallbackDatabase)),
-        normalizeCatalogPart(table.SCHEMA),
-        normalizeCatalogPart(table.OBJNAME ?? table.TABLENAME ?? label),
-    ]
-        .map((part) => part.toUpperCase())
-        .join('|');
+    const parts = [
+        normalizeCatalogPart(String(table.DBNAME ?? fallbackDatabase), { preserveWhitespace: preserveCatalogIdentity }),
+        normalizeCatalogPart(table.SCHEMA, { preserveWhitespace: preserveCatalogIdentity }),
+        normalizeCatalogPart(table.OBJNAME ?? table.TABLENAME ?? label, { preserveWhitespace: preserveCatalogIdentity }),
+        String(table.OBJID ?? table.objType ?? table.TYPE ?? ''),
+    ];
+    return preserveCatalogIdentity
+        ? parts.join('|')
+        : parts.map((part) => String(part ?? '').toUpperCase()).join('|');
 }
 
 /**
@@ -271,13 +293,14 @@ function mergeCachedObjectRows(
     existingRows: TableMetadata[],
     discoveredRows: TableMetadata[],
     fallbackDatabase: string,
+    preserveCatalogIdentity = false,
 ): TableMetadata[] {
     const rowsByKey = new Map<string, TableMetadata>();
     for (const row of existingRows) {
-        rowsByKey.set(tableMetadataMergeKey(row, fallbackDatabase), row);
+        rowsByKey.set(tableMetadataMergeKey(row, fallbackDatabase, preserveCatalogIdentity), row);
     }
     for (const row of discoveredRows) {
-        const key = tableMetadataMergeKey(row, fallbackDatabase);
+        const key = tableMetadataMergeKey(row, fallbackDatabase, preserveCatalogIdentity);
         const existing = rowsByKey.get(key);
         // An external row is a compatibility supplement. It may refresh an
         // old EXTERNAL TABLE entry, but it must never replace a regular object
@@ -292,20 +315,24 @@ function mergeCachedObjectRows(
 function buildObjectIdMap(
     database: string,
     rows: TableMetadata[],
+    preserveCatalogIdentity = false,
 ): Map<string, number> {
     const idMap = new Map<string, number>();
     for (const row of rows) {
         const objectName = normalizeCatalogPart(row.OBJNAME ?? row.TABLENAME ?? (
             typeof row.label === 'string' ? row.label : row.label?.label
-        ));
+        ), { preserveWhitespace: preserveCatalogIdentity });
         if (!objectName || typeof row.OBJID !== 'number') {
             continue;
         }
         idMap.set(
             buildColumnCacheKey(
-                normalizeCatalogPart(String(row.DBNAME ?? database)),
-                normalizeCatalogPart(row.SCHEMA) || undefined,
+                normalizeCatalogPart(String(row.DBNAME ?? database), { preserveWhitespace: preserveCatalogIdentity }),
+                normalizeCatalogPart(row.SCHEMA, { preserveWhitespace: preserveCatalogIdentity }) || undefined,
                 objectName,
+                preserveCatalogIdentity
+                    ? { preserveCase: true, exactNetezza: true }
+                    : undefined,
             ),
             row.OBJID,
         );
@@ -313,31 +340,34 @@ function buildObjectIdMap(
     return idMap;
 }
 
-function normalizeRawColumnRow(row: RawColumnRowWithKeys): RawColumnRowWithKeys {
+function normalizeRawColumnRow(row: RawColumnRowWithKeys, preserveCatalogIdentity = false): RawColumnRowWithKeys {
+    const identityOptions = preserveCatalogIdentity ? { preserveWhitespace: true } : undefined;
     return {
         ...row,
-        TABLENAME: normalizeCatalogPart(row.TABLENAME),
-        SCHEMA: normalizeCatalogPart(row.SCHEMA),
-        DBNAME: normalizeCatalogPart(row.DBNAME),
-        ATTNAME: normalizeCatalogPart(row.ATTNAME),
+        TABLENAME: normalizeCatalogPart(row.TABLENAME, identityOptions),
+        SCHEMA: normalizeCatalogPart(row.SCHEMA, identityOptions),
+        DBNAME: normalizeCatalogPart(row.DBNAME, identityOptions),
+        ATTNAME: normalizeCatalogPart(row.ATTNAME, identityOptions),
     };
 }
 
-function columnMergeKey(row: RawColumnRowWithKeys): string {
-    const normalized = normalizeRawColumnRow(row);
-    return [normalized.DBNAME, normalized.SCHEMA, normalized.TABLENAME, normalized.ATTNAME]
-        .map((part) => normalizeCatalogPart(part).toUpperCase())
-        .join('|');
+function columnMergeKey(row: RawColumnRowWithKeys, preserveCatalogIdentity = false): string {
+    const normalized = normalizeRawColumnRow(row, preserveCatalogIdentity);
+    const parts = [normalized.DBNAME, normalized.SCHEMA, normalized.TABLENAME, normalized.ATTNAME];
+    return preserveCatalogIdentity
+        ? parts.join('|')
+        : parts.map((part) => (part ?? '').toUpperCase()).join('|');
 }
 
 function mergeColumnRows(
     primaryRows: RawColumnRowWithKeys[],
     fallbackRows: RawColumnRowWithKeys[],
+    preserveCatalogIdentity = false,
 ): RawColumnRowWithKeys[] {
     const rowsByKey = new Map<string, RawColumnRowWithKeys>();
     for (const row of [...primaryRows, ...fallbackRows]) {
-        const normalized = normalizeRawColumnRow(row);
-        const key = columnMergeKey(normalized);
+        const normalized = normalizeRawColumnRow(row, preserveCatalogIdentity);
+        const key = columnMergeKey(normalized, preserveCatalogIdentity);
         if (!rowsByKey.has(key)) {
             rowsByKey.set(key, normalized);
         }
@@ -351,8 +381,13 @@ function hasExternalTableForDatabase(
     dbName: string,
     schemaName?: string,
 ): boolean {
-    const normalizedDb = dbName.trim().toUpperCase();
-    const normalizedSchema = schemaName?.trim().toUpperCase();
+    const preserveCatalogIdentity = cache.isNetezzaConnection?.(connectionName) === true;
+    const normalizedDb = preserveCatalogIdentity
+        ? buildNetezzaCacheDatabasePart(dbName)
+        : dbName.trim().toUpperCase();
+    const normalizedSchema = preserveCatalogIdentity
+        ? schemaName
+        : schemaName?.trim().toUpperCase();
     const prefix = `${connectionName}|${normalizedDb}.`;
 
     for (const [key, entry] of cache.tableCache) {
@@ -414,11 +449,23 @@ export class CachePrefetcher {
         schemaName: string | undefined,
         runQueryFn: QueryRunnerRawFn
     ): Promise<void> {
-        if (this.cache.isDatabaseDead(connectionName, dbName)) {
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const userDatabase = preserveCatalogIdentity
+            ? createNetezzaUserIdentifier(dbName).value
+            : dbName;
+        const userSchema = preserveCatalogIdentity && schemaName !== undefined
+            ? createNetezzaUserIdentifier(schemaName).value
+            : schemaName;
+        const userDatabaseCachePart = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(userDatabase)
+            : dbName;
+        if (this.cache.isDatabaseDead(connectionName, userDatabaseCachePart)) {
             return;
         }
 
-        const prefetchKey = buildDbSchemaCacheKey(dbName, schemaName);
+        const prefetchKey = preserveCatalogIdentity
+            ? buildNetezzaDbSchemaCacheKey(userDatabase, userSchema)
+            : buildDbSchemaCacheKey(dbName, schemaName);
         const fullPrefetchKey = `${connectionName}|${prefetchKey}`;
 
         if (this.columnPrefetchInProgress.has(fullPrefetchKey)) {
@@ -438,7 +485,14 @@ export class CachePrefetcher {
                 const tableName = extractLabel(table);
                 if (!tableName) continue;
 
-                const columnKey = buildColumnCacheKey(dbName, schemaName, tableName);
+                const columnKey = buildColumnCacheKey(
+                    userDatabaseCachePart,
+                    userSchema,
+                    tableName,
+                    preserveCatalogIdentity
+                        ? { preserveCase: true, exactNetezza: true }
+                        : undefined,
+                );
                 if (!this.cache.getColumns(connectionName, columnKey)) {
                     tablesToFetch.push(tableName);
                 }
@@ -452,7 +506,14 @@ export class CachePrefetcher {
             // Use centralized query builder for columns with PK/FK info. The
             // external query is only needed when this schema actually contains
             // an external table; it never runs as a completion-side fallback.
-            const query = NZ_QUERIES.listColumnsWithKeys(dbName, { schema: schemaName });
+            const query = NZ_QUERIES.listColumnsWithKeys(
+                preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
+                {
+                    schema: preserveCatalogIdentity && schemaName !== undefined
+                        ? createNetezzaUserIdentifier(schemaName)
+                        : schemaName,
+                },
+            );
             let mainRows: RawColumnRowWithKeys[] = [];
             let mainCatalogFailure = false;
 
@@ -476,19 +537,26 @@ export class CachePrefetcher {
                 logPrefetchError(`[CachePrefetcher] Error fetching columns:`, e);
                 mainCatalogFailure = isDatabaseLevelCatalogError(e);
                 if (mainCatalogFailure) {
-                    this.cache.markDatabaseDead(connectionName, dbName);
+                    this.cache.markDatabaseDead(connectionName, userDatabaseCachePart);
                 }
             }
 
             let externalRows: RawColumnRowWithKeys[] = [];
             if (!mainCatalogFailure
-                && !this.cache.isDatabaseDead(connectionName, dbName)
-                && hasExternalTableForDatabase(this.cache, connectionName, dbName, schemaName)) {
+                && !this.cache.isDatabaseDead(connectionName, userDatabaseCachePart)
+                && hasExternalTableForDatabase(this.cache, connectionName, userDatabaseCachePart, userSchema)) {
                 try {
                     const externalResult = await runPrefetchQuery(
                         connectionName,
                         runQueryFn,
-                        NZ_QUERIES.listExternalColumnsWithKeys(dbName, { schema: schemaName }),
+                        NZ_QUERIES.listExternalColumnsWithKeys(
+                            preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
+                            {
+                                schema: preserveCatalogIdentity && schemaName !== undefined
+                                    ? createNetezzaUserIdentifier(schemaName)
+                                    : schemaName,
+                            },
+                        ),
                         {
                             source: 'schema-prefetch',
                             kind: 'external-columns',
@@ -505,10 +573,12 @@ export class CachePrefetcher {
                 }
             }
 
-            const columnsByKey = groupColumnRowsByTableKey(mergeColumnRows(mainRows, externalRows), {
+            const columnsByKey = groupColumnRowsByTableKey(mergeColumnRows(mainRows, externalRows, preserveCatalogIdentity), {
                 dbName,
                 schemaName,
-            });
+            }, preserveCatalogIdentity
+                ? { preserveCase: true, exactNetezza: true }
+                : undefined);
 
             for (const [key, columns] of columnsByKey) {
                 if (!this.cache.getColumns(connectionName, key)) {
@@ -564,8 +634,14 @@ export class CachePrefetcher {
                 return false;
             }
 
+            const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
             const liveDatabases = targetDatabases.filter(
-                (db) => !this.cache.isDatabaseDead(connectionName, db),
+                (db) => !this.cache.isDatabaseDead(
+                    connectionName,
+                    preserveCatalogIdentity
+                        ? buildNetezzaCacheDatabasePart(db)
+                        : db,
+                ),
             );
 
             if (liveDatabases.length === 0) {
@@ -589,6 +665,9 @@ export class CachePrefetcher {
             let primaryCatalogError = false;
             let externalCatalogError = false;
             for (const db of liveDatabases) {
+                const cacheDatabase = preserveCatalogIdentity
+                    ? buildNetezzaCacheDatabasePart(db)
+                    : db;
                 const queryStart = Date.now();
                 let mainResults: RawObjectRow[] = [];
                 let externalResults: RawObjectRow[] = [];
@@ -599,7 +678,11 @@ export class CachePrefetcher {
                         const result = await runPrefetchQuery(
                             connectionName,
                             runQueryFn,
-                            NZ_QUERIES.listTablesAndViews([db]),
+                            NZ_QUERIES.listTablesAndViews([
+                                preserveCatalogIdentity
+                                    ? createNetezzaCatalogIdentifier(db)
+                                    : db,
+                            ]),
                             {
                                 source: 'connection-prefetch',
                                 kind: 'objects',
@@ -622,17 +705,21 @@ export class CachePrefetcher {
                         logPrefetchError(`[CachePrefetcher] Error fetching tables for DB ${db}:`, e);
                         mainCatalogFailure = isDatabaseLevelCatalogError(e);
                         if (mainCatalogFailure) {
-                            this.cache.markDatabaseDead(connectionName, db);
+                            this.cache.markDatabaseDead(connectionName, cacheDatabase);
                         }
                     }
                 }
 
-                if (!mainCatalogFailure && !this.cache.isDatabaseDead(connectionName, db)) {
+                if (!mainCatalogFailure && !this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
                     try {
                         const externalResult = await runPrefetchQuery(
                             connectionName,
                             runQueryFn,
-                            NZ_QUERIES.listExternalTables([db]),
+                            NZ_QUERIES.listExternalTables([
+                                preserveCatalogIdentity
+                                    ? createNetezzaCatalogIdentifier(db)
+                                    : db,
+                            ]),
                             {
                                 source: 'connection-prefetch',
                                 kind: 'external-objects',
@@ -656,7 +743,7 @@ export class CachePrefetcher {
                     }
                 }
 
-                const results = mergeObjectRows(mainResults, externalResults);
+                const results = mergeObjectRows(mainResults, externalResults, preserveCatalogIdentity);
                 if (results.length === 0) {
                     continue;
                 }
@@ -664,17 +751,26 @@ export class CachePrefetcher {
                 const tablesByKey = new Map<string, { tables: TableMetadata[]; idMap: Map<string, number> }>();
 
                 for (const row of results) {
-                    const cacheKey = buildDbSchemaCacheKey(row.DBNAME, row.SCHEMA ?? undefined);
+                    const cacheKey = buildDbSchemaCacheKey(
+                        row.DBNAME,
+                        row.SCHEMA ?? undefined,
+                        preserveCatalogIdentity
+                            ? { preserveCase: true, exactNetezza: true }
+                            : undefined,
+                    );
                     if (!tablesByKey.has(cacheKey)) {
                         tablesByKey.set(cacheKey, { tables: [], idMap: new Map() });
                     }
                     const entry = tablesByKey.get(cacheKey)!;
-                    entry.tables.push(mapPrefetchObjectRow(row));
+                    entry.tables.push(mapPrefetchObjectRow(row, preserveCatalogIdentity));
 
                     const fullKey = buildColumnCacheKey(
                         row.DBNAME,
                         row.SCHEMA ?? undefined,
                         row.OBJNAME,
+                        preserveCatalogIdentity
+                            ? { preserveCase: true, exactNetezza: true }
+                            : undefined,
                     );
                     entry.idMap.set(fullKey, row.OBJID);
                 }
@@ -686,18 +782,24 @@ export class CachePrefetcher {
                     // An old hydrated cache may contain only the DB.. aggregate
                     // layer. Merge external rows into that aggregate as a unit,
                     // otherwise setting one schema would hide the other ones.
-                    const aggregateKey = buildDbSchemaCacheKey(db);
+                    const aggregateKey = buildDbSchemaCacheKey(
+                        preserveCatalogIdentity ? buildNetezzaCacheDatabasePart(db) : db,
+                        undefined,
+                        preserveCatalogIdentity
+                            ? { preserveCase: true, exactNetezza: true }
+                            : undefined,
+                    );
                     const existingAggregate = externalOnly && tableKey !== aggregateKey
                         ? this.cache.getTables(connectionName, aggregateKey)
                         : undefined;
                     if (existingAggregate) {
                         const discovered = entry.tables;
-                        const merged = mergeCachedObjectRows(existingAggregate, discovered, db);
+                        const merged = mergeCachedObjectRows(existingAggregate, discovered, db, preserveCatalogIdentity);
                         this.cache.setTables(
                             connectionName,
                             aggregateKey,
                             merged,
-                            buildObjectIdMap(db, merged),
+                            buildObjectIdMap(db, merged, preserveCatalogIdentity),
                         );
                         this.cache.markPrefetchObjectTypesCatalogLoaded(connectionName, aggregateKey);
                         continue;
@@ -708,10 +810,10 @@ export class CachePrefetcher {
                         continue;
                     }
                     const tablesToStore = externalOnly && existingTables
-                        ? mergeCachedObjectRows(existingTables, entry.tables, db)
+                        ? mergeCachedObjectRows(existingTables, entry.tables, db, preserveCatalogIdentity)
                         : entry.tables;
                     const idMap = externalOnly && existingTables
-                        ? buildObjectIdMap(db, tablesToStore)
+                        ? buildObjectIdMap(db, tablesToStore, preserveCatalogIdentity)
                         : entry.idMap;
                     this.cache.setTables(connectionName, tableKey, tablesToStore, idMap);
                     this.cache.markPrefetchObjectTypesCatalogLoaded(connectionName, tableKey);
@@ -822,7 +924,14 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
     ): Promise<void> {
-        const inflightKey = `${connectionName}|${dbName.toUpperCase()}`;
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const userDatabase = preserveCatalogIdentity
+            ? createNetezzaUserIdentifier(dbName).value
+            : dbName;
+        const inflightDatabase = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(userDatabase)
+            : dbName.toUpperCase();
+        const inflightKey = `${connectionName}|${inflightDatabase}`;
         const existing = this.databaseColumnPrefetchInFlight.get(inflightKey);
         if (existing) {
             return existing;
@@ -841,11 +950,20 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
     ): Promise<void> {
-        if (this.cache.isDatabaseDead(connectionName, dbName)) {
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const userDatabase = preserveCatalogIdentity
+            ? createNetezzaUserIdentifier(dbName).value
+            : dbName;
+        const cacheDatabase = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(userDatabase)
+            : dbName;
+        if (this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
             return;
         }
 
-        const query = NZ_QUERIES.listColumnsWithKeys(dbName);
+        const query = NZ_QUERIES.listColumnsWithKeys(
+            preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
+        );
         let mainRows: RawColumnRowWithKeys[] = [];
         let mainCatalogFailure = false;
 
@@ -868,7 +986,7 @@ export class CachePrefetcher {
             logPrefetchError(`[CachePrefetcher] prefetchColumnsForDatabase error for ${dbName}:`, e);
             mainCatalogFailure = isDatabaseLevelCatalogError(e);
             if (mainCatalogFailure) {
-                this.cache.markDatabaseDead(connectionName, dbName);
+                this.cache.markDatabaseDead(connectionName, cacheDatabase);
             }
         }
 
@@ -879,13 +997,15 @@ export class CachePrefetcher {
         // query independent from the regular catalog query: a transient
         // failure in one catalog branch must not discard the other branch.
         if (!mainCatalogFailure
-            && !this.cache.isDatabaseDead(connectionName, dbName)
-            && hasExternalTableForDatabase(this.cache, connectionName, dbName)) {
+            && !this.cache.isDatabaseDead(connectionName, cacheDatabase)
+            && hasExternalTableForDatabase(this.cache, connectionName, cacheDatabase)) {
             try {
                 const externalResult = await runPrefetchQuery(
                     connectionName,
                     runQueryFn,
-                    NZ_QUERIES.listExternalColumnsWithKeys(dbName),
+                    NZ_QUERIES.listExternalColumnsWithKeys(
+                        preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
+                    ),
                     {
                         source: 'database-prefetch',
                         kind: 'external-columns',
@@ -901,8 +1021,14 @@ export class CachePrefetcher {
             }
         }
 
-        const results = mergeColumnRows(mainRows, externalRows);
-        const columnsByKey = groupColumnRowsByTableKey(results);
+        const results = mergeColumnRows(mainRows, externalRows, preserveCatalogIdentity);
+        const columnsByKey = groupColumnRowsByTableKey(
+            results,
+            undefined,
+            preserveCatalogIdentity
+                ? { preserveCase: true, exactNetezza: true }
+                : undefined,
+        );
 
         for (const [key, columns] of columnsByKey) {
             if (!this.cache.getColumns(connectionName, key)) {
@@ -1266,6 +1392,7 @@ export class CachePrefetcher {
         onItemComplete?: (completed: number, total: number) => void,
     ): Promise<boolean> {
         const concurrencyLimit = getMetadataQueryConcurrencyLimit();
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
         let completed = 0;
         let allComplete = true;
 
@@ -1273,7 +1400,10 @@ export class CachePrefetcher {
             const batch = databases.slice(i, i + concurrencyLimit);
             const results = await Promise.all(
                 batch.map(async (database) => {
-                    if (this.cache.isDatabaseDead(connectionName, database)) {
+                    const cacheDatabase = preserveCatalogIdentity
+                        ? buildNetezzaCacheDatabasePart(database)
+                        : database;
+                    if (this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
                         completed += 1;
                         onItemComplete?.(completed, databases.length);
                         return true;
@@ -1341,14 +1471,22 @@ export class CachePrefetcher {
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
     ): Promise<boolean> {
-        if (!forceRefresh && this.cache.hasCachedTypeGroups(connectionName, dbName)) {
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const cacheDatabase = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(dbName)
+            : dbName;
+        if (!forceRefresh && this.cache.hasCachedTypeGroups(connectionName, cacheDatabase)) {
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   TypeGroups ${dbName}: skipped (cached)`);
             return true;
         }
 
         try {
             const queryStart = Date.now();
-            const query = NZ_QUERIES.listTypeGroups(dbName);
+            const query = NZ_QUERIES.listTypeGroups(
+                preserveCatalogIdentity
+                    ? createNetezzaCatalogIdentifier(dbName)
+                    : dbName,
+            );
             const result = await runPrefetchQuery(
                 connectionName,
                 runQueryFn,
@@ -1369,7 +1507,7 @@ export class CachePrefetcher {
             const typeList = results
                 .map((row) => row.OBJTYPE?.trim())
                 .filter((type): type is string => Boolean(type));
-            this.cache.setTypeGroups(connectionName, dbName, typeList);
+            this.cache.setTypeGroups(connectionName, cacheDatabase, typeList);
             Logger.getInstance().debug(
                 `[CachePrefetcher] [TIMING]   TypeGroups ${dbName}: ${typeList.length} types in ${queryDuration}ms`,
             );
@@ -1377,7 +1515,7 @@ export class CachePrefetcher {
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchTypeGroupsForDb error for ${dbName}:`, e);
             if (isDatabaseLevelCatalogError(e)) {
-                this.cache.markDatabaseDead(connectionName, dbName);
+                this.cache.markDatabaseDead(connectionName, cacheDatabase);
             }
             return false;
         }
@@ -1389,14 +1527,22 @@ export class CachePrefetcher {
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
     ): Promise<boolean> {
-        if (!forceRefresh && this.cache.getSchemas(connectionName, dbName)) {
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const cacheDatabase = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(dbName)
+            : dbName;
+        if (!forceRefresh && this.cache.getSchemas(connectionName, cacheDatabase)) {
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Schemas ${dbName}: skipped (cached)`);
             return true;
         }
 
         try {
             const queryStart = Date.now();
-            const query = NZ_QUERIES.listSchemas(dbName);
+            const query = NZ_QUERIES.listSchemas(
+                preserveCatalogIdentity
+                    ? createNetezzaCatalogIdentifier(dbName)
+                    : dbName,
+            );
             const result = await runPrefetchQuery(
                 connectionName,
                 runQueryFn,
@@ -1424,13 +1570,13 @@ export class CachePrefetcher {
                     filterText: row.SCHEMA
                 }));
 
-            this.cache.setSchemas(connectionName, dbName, items);
+            this.cache.setSchemas(connectionName, cacheDatabase, items);
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Schemas ${dbName}: ${items.length} schemas in ${queryDuration}ms`);
             return true;
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchSchemasForDb error for ${dbName}:`, e);
             if (isDatabaseLevelCatalogError(e)) {
-                this.cache.markDatabaseDead(connectionName, dbName);
+                this.cache.markDatabaseDead(connectionName, cacheDatabase);
             }
             return false;
         }
@@ -1442,12 +1588,16 @@ export class CachePrefetcher {
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
     ): Promise<boolean> {
-        const dbCacheKey = `${dbName}..`;
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const cacheDatabase = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(dbName)
+            : dbName;
+        const dbCacheKey = `${cacheDatabase}..`;
         if (
             !forceRefresh &&
             (
                 this.cache.getProcedures(connectionName, dbCacheKey) !== undefined
-                || this.cache.isProcedureCatalogLoaded(connectionName, dbName)
+                || this.cache.isProcedureCatalogLoaded(connectionName, cacheDatabase)
             )
         ) {
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Procedures ${dbName}: skipped (cached)`);
@@ -1455,7 +1605,11 @@ export class CachePrefetcher {
         }
 
         try {
-            const query = NZ_QUERIES.listProcedures(dbName);
+            const query = NZ_QUERIES.listProcedures(
+                preserveCatalogIdentity
+                    ? createNetezzaCatalogIdentifier(dbName)
+                    : dbName,
+            );
             if (!query) {
                 return true;
             }
@@ -1487,10 +1641,20 @@ export class CachePrefetcher {
                     continue;
                 }
 
-                const normalizedSchema = row.SCHEMA?.trim() || '';
+                const normalizedSchema = preserveCatalogIdentity
+                    ? (row.SCHEMA ?? '')
+                    : (row.SCHEMA?.trim() || '');
                 const signature = row.PROCEDURESIGNATURE?.trim();
                 const label = signature && signature.length > 0 ? signature : procedureName;
-                const key = normalizedSchema ? `${dbName}.${normalizedSchema}` : dbCacheKey;
+                const key = normalizedSchema
+                    ? preserveCatalogIdentity
+                        ? buildDbSchemaCacheKey(
+                            buildNetezzaCacheDatabasePart(dbName),
+                            normalizedSchema,
+                            { preserveCase: true, exactNetezza: true },
+                        )
+                        : `${dbName}.${normalizedSchema}`
+                    : dbCacheKey;
 
                 const item: ProcedureMetadata = {
                     PROCEDURE: procedureName,
@@ -1518,14 +1682,14 @@ export class CachePrefetcher {
             }
             // Aggregate must be written last — per-schema setProcedures invalidates DB..
             this.cache.setProcedures(connectionName, dbCacheKey, allProcedures);
-            this.cache.markProcedureCatalogLoaded(connectionName, dbName);
+            this.cache.markProcedureCatalogLoaded(connectionName, cacheDatabase);
 
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Procedures ${dbName}: ${allProcedures.length} procedures in ${queryDuration}ms`);
             return true;
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchProceduresForDb error for ${dbName}:`, e);
             if (isDatabaseLevelCatalogError(e)) {
-                this.cache.markDatabaseDead(connectionName, dbName);
+                this.cache.markDatabaseDead(connectionName, cacheDatabase);
             }
             return false;
         }
@@ -1597,12 +1761,16 @@ export class CachePrefetcher {
             const totalDatabases = databases.length;
             let completedDatabases = 0;
             let allQueriesComplete = true;
+            const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
 
             // Per-database serial execution: main columns query followed by the
             // separate external-table columns query, merged in code. Serial order
             // avoids flooding the database with concurrent sessions.
             for (const dbName of databases) {
-                if (this.cache.isDatabaseDead(connectionName, dbName)) {
+                const cacheDatabase = preserveCatalogIdentity
+                    ? buildNetezzaCacheDatabasePart(dbName)
+                    : dbName;
+                if (this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
                     completedDatabases += 1;
                     onProgress?.({
                         completedDatabases,
@@ -1613,7 +1781,9 @@ export class CachePrefetcher {
                     continue;
                 }
 
-                const query = NZ_QUERIES.listColumnsWithKeys(dbName);
+                const query = NZ_QUERIES.listColumnsWithKeys(
+                    preserveCatalogIdentity ? createNetezzaCatalogIdentifier(dbName) : dbName,
+                );
                 const queryStartTime = Date.now();
                 let queryDuration = 0;
                 let mainRows: RawColumnRowWithKeys[] = [];
@@ -1643,19 +1813,21 @@ export class CachePrefetcher {
                     logPrefetchError(`[CachePrefetcher] Error fetching columns for DB ${dbName}:`, e);
                     mainCatalogFailure = isDatabaseLevelCatalogError(e);
                     if (mainCatalogFailure) {
-                        this.cache.markDatabaseDead(connectionName, dbName);
+                        this.cache.markDatabaseDead(connectionName, cacheDatabase);
                     }
                 }
 
                 let externalRows: RawColumnRowWithKeys[] = [];
                 if (!mainCatalogFailure
-                    && !this.cache.isDatabaseDead(connectionName, dbName)
-                    && hasExternalTableForDatabase(this.cache, connectionName, dbName)) {
+                    && !this.cache.isDatabaseDead(connectionName, cacheDatabase)
+                    && hasExternalTableForDatabase(this.cache, connectionName, cacheDatabase)) {
                     try {
                         const externalResult = await runPrefetchQuery(
                             connectionName,
                             runQueryFn,
-                            NZ_QUERIES.listExternalColumnsWithKeys(dbName),
+                            NZ_QUERIES.listExternalColumnsWithKeys(
+                                preserveCatalogIdentity ? createNetezzaCatalogIdentifier(dbName) : dbName,
+                            ),
                             {
                                 source: 'connection-prefetch',
                                 kind: 'external-columns',
@@ -1674,8 +1846,14 @@ export class CachePrefetcher {
                     }
                 }
 
-                const results = mergeColumnRows(mainRows, externalRows);
-                const columnsByKey = groupColumnRowsByTableKey(results);
+                const results = mergeColumnRows(mainRows, externalRows, this.cache.isNetezzaConnection?.(connectionName) === true);
+                const columnsByKey = groupColumnRowsByTableKey(
+                    results,
+                    undefined,
+                    this.cache.isNetezzaConnection?.(connectionName) === true
+                        ? { preserveCase: true, exactNetezza: true }
+                        : undefined,
+                );
 
                 for (const [key, columns] of columnsByKey) {
                     if (forceRefresh || !this.cache.getColumns(connectionName, key)) {

@@ -86,6 +86,13 @@ export function buildMetadataLookupTargets(
     databaseKind,
     lookupOptions,
   );
+  // Netezza has two different resolutions for a lower-case name: an
+  // unquoted name is folded to upper case, while a quoted name is exact.
+  // The caller has already preserved that distinction in the target string;
+  // an uppercase fallback would collapse the two databases.
+  if (databaseKind === "netezza") {
+    return [primaryTarget];
+  }
   const normalizedTarget = normalizeMetadataLookupTargetCase(
     primaryTarget,
     databaseKind,

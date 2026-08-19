@@ -1,9 +1,14 @@
 import type { MetadataPrefetchTarget } from './cache/MetadataPrefetchTarget';
 import { buildColumnCacheKey } from './columnRowMapping';
-import { extractLabel, parseCacheKey } from './helpers';
+import { buildNetezzaCacheDatabasePart, extractLabel, parseCacheKey } from './helpers';
 import type { ColumnMetadata } from './types';
 import { stripIdentifierQuoting } from '../utils/identifierUtils';
 import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
+import { NZ_SYSTEM_VIEWS, qualifySystemView } from '../dialects/netezza/metadata/systemQueries';
+import {
+    buildNetezzaIdentifierEquality,
+    createNetezzaUserIdentifier,
+} from '../dialects/netezza/metadata/identifierUtils';
 
 /**
  * Parse REFOBJNAME from _V_SYNONYM into database/schema/table parts.
@@ -65,15 +70,25 @@ function resolveTargetColumns(
     cache: MetadataPrefetchTarget,
     connectionName: string,
     target: { database: string; schema?: string; table: string },
+    preserveCatalogIdentity = false,
 ): ColumnMetadata[] | undefined {
-    const directKey = buildColumnCacheKey(target.database, target.schema, target.table);
+    const directKey = buildColumnCacheKey(
+        preserveCatalogIdentity ? buildNetezzaCacheDatabasePart(target.database) : target.database,
+        target.schema,
+        target.table,
+        preserveCatalogIdentity ? { preserveCase: true } : undefined,
+    );
     const direct = cache.getColumns(connectionName, directKey);
     if (direct && direct.length > 0) {
         return direct;
     }
 
     if (!target.schema) {
-        return cache.getColumnsAnySchema(connectionName, target.database, target.table);
+        return cache.getColumnsAnySchema(
+            connectionName,
+            preserveCatalogIdentity ? buildNetezzaCacheDatabasePart(target.database) : target.database,
+            target.table,
+        );
     }
 
     return undefined;
@@ -100,6 +115,7 @@ export async function mirrorSynonymColumnsForConnection(
         }
 
         const { dbName, schemaName } = parsedKey;
+        const preserveCatalogIdentity = cache.isNetezzaConnection?.(connectionName) === true;
 
         for (const item of entry.data) {
             if ((item.objType || '').toUpperCase() !== 'SYNONYM') {
@@ -112,16 +128,23 @@ export async function mirrorSynonymColumnsForConnection(
             }
 
             const refObjName =
-                typeof item.REFOBJNAME === 'string' ? item.REFOBJNAME.trim() : '';
+                typeof item.REFOBJNAME === 'string'
+                    ? (preserveCatalogIdentity ? item.REFOBJNAME : item.REFOBJNAME.trim())
+                    : '';
             if (!refObjName) {
                 continue;
             }
 
             const itemSchema =
-                typeof item.SCHEMA === 'string' && item.SCHEMA.trim().length > 0
+                typeof item.SCHEMA === 'string' && (preserveCatalogIdentity ? item.SCHEMA.length > 0 : item.SCHEMA.trim().length > 0)
                     ? item.SCHEMA
                     : schemaName;
-            const synonymKey = buildColumnCacheKey(dbName, itemSchema, synonymName);
+            const synonymKey = buildColumnCacheKey(
+                preserveCatalogIdentity ? buildNetezzaCacheDatabasePart(dbName) : dbName,
+                itemSchema,
+                synonymName,
+                preserveCatalogIdentity ? { preserveCase: true } : undefined,
+            );
 
             if (cache.getColumns(connectionName, synonymKey)) {
                 continue;
@@ -133,7 +156,7 @@ export async function mirrorSynonymColumnsForConnection(
             }
 
             await cache.ensureColumnsLoaded(connectionName, target.database);
-            const targetColumns = resolveTargetColumns(cache, connectionName, target);
+            const targetColumns = resolveTargetColumns(cache, connectionName, target, preserveCatalogIdentity);
             if (!targetColumns || targetColumns.length === 0) {
                 continue;
             }
@@ -163,6 +186,28 @@ export function buildSynonymTargetQuery(
     return `
         SELECT REFOBJNAME
         FROM ${dbId}.._V_SYNONYM
+        WHERE ${whereClause}
+    `.trim();
+}
+
+/** Netezza synonym lookup: catalog identifiers are compared exactly. */
+export function buildNetezzaSynonymTargetQuery(
+    database: string,
+    synonymName: string,
+    schema?: string,
+): string {
+    const databaseIdentifier = createNetezzaUserIdentifier(database);
+    let whereClause = [
+        buildNetezzaIdentifierEquality('DATABASE', databaseIdentifier),
+        buildNetezzaIdentifierEquality('SYNONYM_NAME', synonymName),
+    ].join(' AND ');
+    if (schema) {
+        whereClause += ` AND ${buildNetezzaIdentifierEquality('SCHEMA', schema)}`;
+    }
+
+    return `
+        SELECT REFOBJNAME
+        FROM ${qualifySystemView(databaseIdentifier, NZ_SYSTEM_VIEWS.SYNONYM)}
         WHERE ${whereClause}
     `.trim();
 }

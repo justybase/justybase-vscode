@@ -4,6 +4,7 @@
  */
 
 import { NZ_QUERIES, NZ_SYSTEM_VIEWS, NZ_OBJECT_TYPES, NZ_CONSTRAINT_TYPES, qualifySystemView } from '../metadata/systemQueries';
+import { createNetezzaCatalogIdentifier } from '../dialects/netezza/metadata/identifierUtils';
 
 describe('metadata/systemQueries', () => {
     describe('NZ_SYSTEM_VIEWS constants', () => {
@@ -50,9 +51,13 @@ describe('metadata/systemQueries', () => {
             expect(result).toBe('MYDB.._V_TABLE');
         });
 
-        it('should uppercase database name', () => {
+        it('should fold an unquoted database name to uppercase', () => {
             const result = qualifySystemView('mydb', NZ_SYSTEM_VIEWS.VIEW);
             expect(result).toBe('MYDB.._V_VIEW');
+        });
+
+        it('should preserve a quoted database name exactly', () => {
+            expect(qualifySystemView('"just_data"', NZ_SYSTEM_VIEWS.VIEW)).toBe('"just_data".._V_VIEW');
         });
 
         it('should work with all system views', () => {
@@ -97,15 +102,15 @@ describe('metadata/systemQueries', () => {
         it('should generate query with proper filters', () => {
             const query = NZ_QUERIES.getTableColumns('MYDB', 'ADMIN', 'CUSTOMERS');
             expect(query).toContain('MYDB.._V_RELATION_COLUMN');
-            expect(query).toContain("UPPER(D.SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(D.OBJNAME) = 'CUSTOMERS'");
+            expect(query).toContain("D.SCHEMA = 'ADMIN'");
+            expect(query).toContain("D.OBJNAME = 'CUSTOMERS'");
         });
 
-        it('should preserve exact case for lowercase identifiers', () => {
+        it('should fold unquoted lowercase identifiers according to Netezza rules', () => {
             const query = NZ_QUERIES.getTableColumns('mydb', 'admin', 'customers');
             expect(query).toContain('MYDB.._V_RELATION_COLUMN');
-            expect(query).toContain("D.SCHEMA = 'admin'");
-            expect(query).toContain("D.OBJNAME = 'customers'");
+            expect(query).toContain("D.SCHEMA = 'ADMIN'");
+            expect(query).toContain("D.OBJNAME = 'CUSTOMERS'");
         });
 
         it('should keep exact case for quoted identifiers', () => {
@@ -128,8 +133,9 @@ describe('metadata/systemQueries', () => {
             expect(query).toContain('MYDB.._V_RELATION_COLUMN');
             expect(query).toContain('MYDB.._V_EXTERNAL');
             expect(query).toContain('C.OBJID = E.RELID');
-            expect(query).toContain("UPPER(TRIM(E.SCHEMA)) = 'ADMIN'");
-            expect(query).toContain("UPPER(TRIM(E.TABLENAME)) = 'ET_TEMP'");
+            expect(query).toContain("E.SCHEMA = 'ADMIN'");
+            expect(query).toContain("E.TABLENAME = 'ET_TEMP'");
+            expect(query).not.toContain('UPPER(TRIM(');
             expect(query).not.toContain('NOT EXISTS');
             expect(query).toContain('ORDER BY OBJID, ATTNUM');
         });
@@ -137,8 +143,8 @@ describe('metadata/systemQueries', () => {
         it('should keep exact case for lowercase identifiers', () => {
             const query = NZ_QUERIES.getExternalTableColumns('mydb', 'admin', 'customers');
             expect(query).toContain('MYDB.._V_RELATION_COLUMN');
-            expect(query).toContain("TRIM(E.SCHEMA) = 'admin'");
-            expect(query).toContain("TRIM(E.TABLENAME) = 'customers'");
+            expect(query).toContain("E.SCHEMA = 'ADMIN'");
+            expect(query).toContain("E.TABLENAME = 'CUSTOMERS'");
         });
 
         it('should expose the same row shape as getTableColumns', () => {
@@ -147,9 +153,9 @@ describe('metadata/systemQueries', () => {
             expect(query).toContain('C.FORMAT_TYPE AS FULL_TYPE');
             expect(query).toContain('C.ATTNOTNULL::BOOL AS ATTNOTNULL');
             expect(query).toContain('C.COLDEFAULT');
-            expect(query).toContain('TRIM(E.TABLENAME) AS TABLENAME');
-            expect(query).toContain('TRIM(E.SCHEMA) AS SCHEMA');
-            expect(query).toContain('TRIM(E.DATABASE) AS DBNAME');
+            expect(query).toContain('E.TABLENAME AS TABLENAME');
+            expect(query).toContain('E.SCHEMA AS SCHEMA');
+            expect(query).toContain('E.DATABASE AS DBNAME');
             expect(query).toContain('C.FORMAT_TYPE AS FORMAT_TYPE');
             expect(query).toContain('AS IS_NOT_NULL');
             expect(query).toContain('0 AS IS_PK');
@@ -161,8 +167,8 @@ describe('metadata/systemQueries', () => {
         it('should generate query for distribution columns', () => {
             const query = NZ_QUERIES.getDistributionKeys('MYDB', 'ADMIN', 'ORDERS');
             expect(query).toContain('MYDB.._V_TABLE_DIST_MAP');
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(TABLENAME) = 'ORDERS'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
+            expect(query).toContain("TABLENAME = 'ORDERS'");
             expect(query).toContain('DISTSEQNO');
         });
     });
@@ -171,8 +177,8 @@ describe('metadata/systemQueries', () => {
         it('should generate query for organize columns', () => {
             const query = NZ_QUERIES.getOrganizeColumns('MYDB', 'ADMIN', 'ORDERS');
             expect(query).toContain('MYDB.._V_TABLE_ORGANIZE_COLUMN');
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(TABLENAME) = 'ORDERS'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
+            expect(query).toContain("TABLENAME = 'ORDERS'");
             expect(query).toContain('ORGSEQNO');
         });
     });
@@ -181,8 +187,8 @@ describe('metadata/systemQueries', () => {
         it('should generate query for key constraints', () => {
             const query = NZ_QUERIES.getTableKeys('MYDB', 'ADMIN', 'ORDERS');
             expect(query).toContain('MYDB.._V_RELATION_KEYDATA');
-            expect(query).toContain("UPPER(X.SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(X.RELATION) = 'ORDERS'");
+            expect(query).toContain("X.SCHEMA = 'ADMIN'");
+            expect(query).toContain("X.RELATION = 'ORDERS'");
             expect(query).toContain('CONSTRAINTNAME');
             expect(query).toContain('CONTYPE');
         });
@@ -193,8 +199,8 @@ describe('metadata/systemQueries', () => {
             const query = NZ_QUERIES.getObjectComment('MYDB', 'ADMIN', 'ORDERS');
             expect(query).toContain('MYDB.._V_OBJECT_DATA');
             expect(query).toContain("DBNAME = 'MYDB'");
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(OBJNAME) = 'ORDERS'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
+            expect(query).toContain("OBJNAME = 'ORDERS'");
             expect(query).toContain('DESCRIPTION');
         });
 
@@ -208,8 +214,8 @@ describe('metadata/systemQueries', () => {
         it('should generate owner query with case-aware filters', () => {
             const query = NZ_QUERIES.getTableOwner('MYDB', 'ADMIN', 'ORDERS');
             expect(query).toContain('MYDB.._V_TABLE');
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
-            expect(query).toContain("UPPER(TABLENAME) = 'ORDERS'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
+            expect(query).toContain("TABLENAME = 'ORDERS'");
         });
 
         it('should keep exact case for quoted schema/table in owner query', () => {
@@ -223,13 +229,13 @@ describe('metadata/systemQueries', () => {
         it('should generate query for view definition', () => {
             const query = NZ_QUERIES.getViewDefinition('MYDB', 'MY_VIEW');
             expect(query).toContain('MYDB.._V_VIEW');
-            expect(query).toContain("UPPER(VIEWNAME) = 'MY_VIEW'");
+            expect(query).toContain("VIEWNAME = 'MY_VIEW'");
             expect(query).toContain('DEFINITION');
         });
 
         it('should include schema filter when provided', () => {
             const query = NZ_QUERIES.getViewDefinition('MYDB', 'MY_VIEW', 'ADMIN');
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
         });
     });
 
@@ -237,7 +243,7 @@ describe('metadata/systemQueries', () => {
         it('should generate query for procedure definition', () => {
             const query = NZ_QUERIES.getProcedureDefinition('MYDB', 'MY_PROC');
             expect(query).toContain('MYDB.._V_PROCEDURE');
-            expect(query).toContain("UPPER(PROCEDURE) = 'MY_PROC'");
+            expect(query).toContain("PROCEDURE = 'MY_PROC'");
             expect(query).toContain('PROCEDURESOURCE');
         });
     });
@@ -247,7 +253,7 @@ describe('metadata/systemQueries', () => {
             const query = NZ_QUERIES.findTableSchema('MYDB', 'ORDERS');
             expect(query).toContain('MYDB.._V_OBJECT_DATA');
             expect(query).toContain("DBNAME = 'MYDB'");
-            expect(query).toContain("UPPER(OBJNAME) = 'ORDERS'");
+            expect(query).toContain("OBJNAME = 'ORDERS'");
             expect(query).toContain('LIMIT 1');
         });
     });
@@ -300,12 +306,12 @@ describe('metadata/systemQueries', () => {
 
         it('should filter by schema when provided', () => {
             const query = NZ_QUERIES.listColumnsWithKeys('MYDB', { schema: 'ADMIN' });
-            expect(query).toContain("UPPER(O.SCHEMA) = 'ADMIN'");
+            expect(query).toContain("O.SCHEMA = 'ADMIN'");
         });
 
         it('should filter by table name when provided', () => {
             const query = NZ_QUERIES.listColumnsWithKeys('MYDB', { tableName: 'ORDERS' });
-            expect(query).toContain("UPPER(O.OBJNAME) = 'ORDERS'");
+            expect(query).toContain("O.OBJNAME = 'ORDERS'");
         });
 
         it('should NOT include an external table columns branch (split into listExternalColumnsWithKeys)', () => {
@@ -340,8 +346,9 @@ describe('metadata/systemQueries', () => {
 
         it('should filter external columns by schema and table', () => {
             const query = NZ_QUERIES.listExternalColumnsWithKeys('MYDB', { schema: 'ADMIN', tableName: 'ET_TEMP' });
-            expect(query).toContain("UPPER(TRIM(E1.SCHEMA)) = 'ADMIN'");
-            expect(query).toContain("UPPER(TRIM(E1.TABLENAME)) = 'ET_TEMP'");
+            expect(query).toContain("E1.SCHEMA = 'ADMIN'");
+            expect(query).toContain("E1.TABLENAME = 'ET_TEMP'");
+            expect(query).not.toContain('UPPER(TRIM(');
         });
 
         it('should keep exact case for quoted schema/table filters', () => {
@@ -349,8 +356,8 @@ describe('metadata/systemQueries', () => {
                 schema: '"lower_schema"',
                 tableName: '"lower_table"'
             });
-            expect(query).toContain("TRIM(E1.SCHEMA) = 'lower_schema'");
-            expect(query).toContain("TRIM(E1.TABLENAME) = 'lower_table'");
+            expect(query).toContain("E1.SCHEMA = 'lower_schema'");
+            expect(query).toContain("E1.TABLENAME = 'lower_table'");
         });
     });
 
@@ -388,13 +395,15 @@ describe('metadata/systemQueries', () => {
             expect(query).not.toContain('NOT EXISTS');
             expect(query).not.toContain('_V_OBJECT_DATA');
             expect(query).not.toContain('_V_EXTOBJECT');
+            expect(query).toContain("E1.DATABASE = 'MYDB'");
+            expect(query).not.toContain('UPPER(TRIM(');
             expect(query).toContain('ORDER BY DBNAME, SCHEMA, OBJNAME');
         });
 
         it('should expose the same row shape as listTablesAndViews', () => {
             const query = NZ_QUERIES.listExternalTables(['MYDB']);
-            expect(query).toContain('TRIM(E1.TABLENAME) AS OBJNAME');
-            expect(query).toContain('TRIM(E1.DATABASE) AS DBNAME');
+            expect(query).toContain('E1.TABLENAME AS OBJNAME');
+            expect(query).toContain('E1.DATABASE AS DBNAME');
             expect(query).toContain("'' AS OWNER");
             expect(query).toContain("'' AS REFOBJNAME");
             expect(query).toContain("'' AS DESCRIPTION");
@@ -402,6 +411,31 @@ describe('metadata/systemQueries', () => {
 
         it('should require a non-empty databases array', () => {
             expect(() => NZ_QUERIES.listExternalTables([])).toThrow(/non-empty/);
+        });
+
+        it('should preserve a catalog database value including lower case', () => {
+            const query = NZ_QUERIES.listExternalTables([
+                createNetezzaCatalogIdentifier('just_data'),
+            ]);
+            expect(query).toContain('"just_data".._V_EXTERNAL');
+            expect(query).toContain("E1.DATABASE = 'just_data'");
+        });
+    });
+
+    describe('NZ_QUERIES.listTablesAndViews catalog identity', () => {
+        it('should not collapse lower and upper catalog databases', () => {
+            const lowerQuery = NZ_QUERIES.listTablesAndViews([
+                createNetezzaCatalogIdentifier('just_data'),
+            ]);
+            const upperQuery = NZ_QUERIES.listTablesAndViews([
+                createNetezzaCatalogIdentifier('JUST_DATA'),
+            ]);
+
+            expect(lowerQuery).toContain('"just_data".._V_OBJECT_DATA');
+            expect(lowerQuery).toContain("O.DBNAME = 'just_data'");
+            expect(upperQuery).toContain('JUST_DATA.._V_OBJECT_DATA');
+            expect(upperQuery).toContain("O.DBNAME = 'JUST_DATA'");
+            expect(lowerQuery).not.toBe(upperQuery);
         });
     });
 
@@ -421,7 +455,7 @@ describe('metadata/systemQueries', () => {
 
         it('should filter by schema when provided', () => {
             const query = NZ_QUERIES.listObjectsOfType('MYDB', 'VIEW', 'ADMIN');
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
         });
 
         it('should keep exact case for quoted schema in listObjectsOfType', () => {
@@ -446,14 +480,14 @@ describe('metadata/systemQueries', () => {
 
         it('should filter by schema when provided', () => {
             const query = NZ_QUERIES.getExternalTables('MYDB', 'ADMIN');
-            expect(query).toContain("UPPER(E1.SCHEMA) = 'ADMIN'");
+            expect(query).toContain("E1.SCHEMA = 'ADMIN'");
         });
     });
 
     describe('NZ_QUERIES.listProcedures/listViews', () => {
         it('should use case-aware schema filter for listProcedures', () => {
             const query = NZ_QUERIES.listProcedures('MYDB', 'ADMIN');
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
         });
 
         it('should keep exact case for quoted schema in listProcedures', () => {
@@ -463,7 +497,7 @@ describe('metadata/systemQueries', () => {
 
         it('should use case-aware schema filter for listViews', () => {
             const query = NZ_QUERIES.listViews('MYDB', 'ADMIN');
-            expect(query).toContain("UPPER(SCHEMA) = 'ADMIN'");
+            expect(query).toContain("SCHEMA = 'ADMIN'");
         });
 
         it('should keep exact case for quoted schema in listViews', () => {
@@ -477,7 +511,7 @@ describe('metadata/systemQueries', () => {
             const query = NZ_QUERIES.getForeignKeyRelationships('MYDB', 'ADMIN');
             expect(query).toContain('MYDB.._V_RELATION_KEYDATA');
             expect(query).toContain("CONTYPE = 'f'");
-            expect(query).toContain("UPPER(X.SCHEMA) = 'ADMIN'");
+            expect(query).toContain("X.SCHEMA = 'ADMIN'");
             expect(query).toContain('PKRELATION');
             expect(query).toContain('PKATTNAME');
         });

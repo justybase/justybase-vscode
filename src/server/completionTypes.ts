@@ -16,13 +16,28 @@ export type FromJoinContext =
       isFilePath?: boolean;
       isQuoted?: boolean;
     }
-  | { kind: "db_dot"; dbName: string; partial: string }
-  | { kind: "db_double_dot"; dbName: string; partial: string }
+  | {
+      kind: "db_dot";
+      dbName: string;
+      partial: string;
+      dbQuoted?: boolean;
+      partialQuoted?: boolean;
+    }
+  | {
+      kind: "db_double_dot";
+      dbName: string;
+      partial: string;
+      dbQuoted?: boolean;
+      partialQuoted?: boolean;
+    }
   | {
       kind: "db_schema_dot";
       dbName: string;
       schemaName: string;
       partial: string;
+      dbQuoted?: boolean;
+      schemaQuoted?: boolean;
+      partialQuoted?: boolean;
     };
 
 export type TableTargetPathContext = {
@@ -53,6 +68,9 @@ export interface QualifiedTableName {
   database?: string;
   schema?: string;
   table: string;
+  databaseQuoted?: boolean;
+  schemaQuoted?: boolean;
+  tableQuoted?: boolean;
 }
 
 export interface TableSourceBinding {

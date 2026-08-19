@@ -10,8 +10,17 @@ import type { CacheStatsTracker } from '../cacheStats';
 import {
   extractLabel,
   buildIdLookupKey,
+  buildNetezzaDatabaseCacheKey,
+  decodeNetezzaCacheDatabasePart,
+  isNetezzaExactCachePart,
+  normalizeNetezzaDbSchemaLookupKey,
   normalizeDbSchemaLookupKey,
+  parseDbSchemaCacheKey,
 } from '../helpers';
+import {
+  createNetezzaUserIdentifier,
+} from '../../dialects/netezza/metadata/identifierUtils';
+import { buildColumnCacheKey } from '../columnRowMapping';
 import { normalizeTableNameForColumnCacheKey } from '../columnRowMapping';
 import type {
   CachedObjectInfo,
@@ -100,6 +109,69 @@ function mergeTypeGroupsWithDefaults(
 export class MetadataLayerAccess {
   constructor(private readonly deps: LayerAccessDeps) {}
 
+  private isNetezza(connectionName: string): boolean {
+    return this.deps.connectionManager?.getConnectionDatabaseKind(connectionName) === 'netezza';
+  }
+
+  private databaseCachePart(connectionName: string, dbName: string): string {
+    return this.isNetezza(connectionName)
+      ? (isNetezzaExactCachePart(dbName)
+        ? dbName
+        : buildNetezzaDatabaseCacheKey(dbName))
+      : dbName.toUpperCase();
+  }
+
+  private layerCacheKey(connectionName: string, key: string): string {
+    return this.isNetezza(connectionName)
+      ? normalizeNetezzaDbSchemaLookupKey(key)
+      : normalizeDbSchemaLookupKey(key);
+  }
+
+  private columnCacheKey(connectionName: string, key: string): string {
+    if (!this.isNetezza(connectionName)) {
+      return key;
+    }
+    const parts = key.split('.');
+    if (parts.length < 3) {
+      return key;
+    }
+    const database = isNetezzaExactCachePart(parts[0])
+      ? parts[0]
+      : buildNetezzaDatabaseCacheKey(parts[0]);
+    const schema = isNetezzaExactCachePart(parts[0])
+      ? parts[1]
+      : createNetezzaUserIdentifier(parts[1]).value;
+    const table = parts.slice(2).join('.');
+    return buildColumnCacheKey(
+      database,
+      schema,
+      table,
+      { preserveCase: true },
+    );
+  }
+
+  private databasePrefix(connectionName: string, dbName: string): string {
+    return `${connectionName}|${this.databaseCachePart(connectionName, dbName)}.`;
+  }
+
+  private databaseIdentity(connectionName: string, dbName: string): {
+    cachePart: string;
+    value: string;
+    preserveCase: boolean;
+  } {
+    const preserveCase = this.isNetezza(connectionName);
+    if (!preserveCase) {
+      const value = dbName.toUpperCase();
+      return { cachePart: value, value, preserveCase: false };
+    }
+    const cachePart = this.databaseCachePart(connectionName, dbName);
+    return {
+      cachePart,
+      value: decodeNetezzaCacheDatabasePart(cachePart),
+      preserveCase: true,
+    };
+  }
+
   private removeTableCacheEntry(fullKey: string): void {
     removeTableCacheEntryCore(
       this.deps.store,
@@ -159,7 +231,7 @@ export class MetadataLayerAccess {
     connectionName: string,
     dbName: string,
   ): SchemaMetadata[] | undefined {
-    const key = `${connectionName}|${dbName}`;
+    const key = `${connectionName}|${this.databaseCachePart(connectionName, dbName)}`;
     const entry = this.deps.store.schemaCache.get(key);
     if (!entry) {
       this.deps.stats.recordMiss(connectionName, "schema");
@@ -180,7 +252,7 @@ export class MetadataLayerAccess {
     data: SchemaMetadata[],
   ): void {
     const startMs = Date.now();
-    const key = `${connectionName}|${dbName}`;
+    const key = `${connectionName}|${this.databaseCachePart(connectionName, dbName)}`;
     this.deps.store.schemaCache.set(key, { data, timestamp: startMs });
     this.deps.stats.recordRefresh(
       connectionName,
@@ -198,7 +270,7 @@ export class MetadataLayerAccess {
     key: string,
   ): ProcedureMetadata[] | undefined {
     // incoming key is DB.SCHEMA or DB..
-    const fullKey = `${connectionName}|${key}`;
+    const fullKey = `${connectionName}|${this.layerCacheKey(connectionName, key)}`;
     const entry = this.deps.store.procedureCache.get(fullKey);
     if (!entry) {
       this.deps.stats.recordMiss(connectionName, "procedure");
@@ -217,7 +289,8 @@ export class MetadataLayerAccess {
     connectionName: string,
     dbName: string,
   ): ProcedureMetadata[] | undefined {
-    const prefix = `${connectionName}|${dbName}.`;
+    const preserveCatalogIdentity = this.isNetezza(connectionName);
+    const prefix = `${connectionName}|${this.databaseCachePart(connectionName, dbName)}.`;
     const allProcedures: ProcedureMetadata[] = [];
     const seenLabels = new Set<string>();
 
@@ -234,8 +307,9 @@ export class MetadataLayerAccess {
             typeof item.label === "string"
               ? item.label
               : item.PROCEDURESIGNATURE || item.PROCEDURE;
-          if (label && !seenLabels.has(label.toUpperCase())) {
-            seenLabels.add(label.toUpperCase());
+          const labelKey = preserveCatalogIdentity ? label : label.toUpperCase();
+          if (label && !seenLabels.has(labelKey)) {
+            seenLabels.add(labelKey);
             allProcedures.push(item);
           }
         }
@@ -253,7 +327,10 @@ export class MetadataLayerAccess {
     connectionName: string,
     dbName: string,
   ): ProcedureMetadata[] | undefined {
-    const aggregate = this.getProcedures(connectionName, `${dbName}..`);
+    const aggregate = this.getProcedures(
+      connectionName,
+      `${this.databaseCachePart(connectionName, dbName)}..`,
+    );
     if (aggregate !== undefined) {
       return aggregate;
     }
@@ -266,13 +343,14 @@ export class MetadataLayerAccess {
     data: ProcedureMetadata[],
   ): void {
     const startMs = Date.now();
-    const fullKey = `${connectionName}|${key}`;
-    const keyParts = key.split(".");
-    const dbName = keyParts[0];
-    const schemaName = keyParts[1] || "";
+    const normalizedKey = this.layerCacheKey(connectionName, key);
+    const fullKey = `${connectionName}|${normalizedKey}`;
+    const parsedKey = parseDbSchemaCacheKey(normalizedKey);
+    const dbCachePart = normalizedKey.split('.')[0];
+    const schemaName = parsedKey.schemaName || "";
 
     if (schemaName) {
-      const allSchemasKey = `${connectionName}|${dbName}..`;
+      const allSchemasKey = `${connectionName}|${dbCachePart}..`;
       if (allSchemasKey !== fullKey) {
         removeProcedureCacheEntry(this.deps.store, allSchemasKey);
       }
@@ -292,7 +370,7 @@ export class MetadataLayerAccess {
 
   getTables(connectionName: string, key: string): TableMetadata[] | undefined {
     // incoming key is DB.SCHEMA or DB..
-    const fullKey = `${connectionName}|${normalizeDbSchemaLookupKey(key)}`;
+    const fullKey = `${connectionName}|${this.layerCacheKey(connectionName, key)}`;
     const entry = this.deps.store.tableCache.get(fullKey);
     if (!entry) {
       this.deps.stats.recordMiss(connectionName, "table");
@@ -309,13 +387,13 @@ export class MetadataLayerAccess {
 
   isViewsCatalogLoaded(connectionName: string, cacheKey: string): boolean {
     return this.deps.viewsCatalogLoaded.has(
-      `${connectionName}|${normalizeDbSchemaLookupKey(cacheKey)}`,
+      `${connectionName}|${this.layerCacheKey(connectionName, cacheKey)}`,
     );
   }
 
   markViewsCatalogLoaded(connectionName: string, cacheKey: string): void {
     this.deps.viewsCatalogLoaded.add(
-      `${connectionName}|${normalizeDbSchemaLookupKey(cacheKey)}`,
+      `${connectionName}|${this.layerCacheKey(connectionName, cacheKey)}`,
     );
   }
 
@@ -327,7 +405,7 @@ export class MetadataLayerAccess {
     return this.deps.objectsCatalogLoaded.has(
       buildObjectsCatalogLoadedKey(
         connectionName,
-        normalizeDbSchemaLookupKey(layerKey),
+        this.layerCacheKey(connectionName, layerKey),
         objType,
       ),
     );
@@ -341,7 +419,7 @@ export class MetadataLayerAccess {
     this.deps.objectsCatalogLoaded.add(
       buildObjectsCatalogLoadedKey(
         connectionName,
-        normalizeDbSchemaLookupKey(layerKey),
+        this.layerCacheKey(connectionName, layerKey),
         objType,
       ),
     );
@@ -351,7 +429,7 @@ export class MetadataLayerAccess {
     connectionName: string,
     layerKey: string,
   ): void {
-    const normalizedLayerKey = normalizeDbSchemaLookupKey(layerKey);
+    const normalizedLayerKey = this.layerCacheKey(connectionName, layerKey);
     for (const objType of NZ_PREFETCH_CATALOG_OBJECT_TYPES) {
       this.deps.objectsCatalogLoaded.add(
         buildObjectsCatalogLoadedKey(connectionName, normalizedLayerKey, objType),
@@ -365,7 +443,10 @@ export class MetadataLayerAccess {
     dbName: string,
   ): boolean {
     return this.deps.objectsCatalogLoaded.has(
-      buildProcedureCatalogLoadedKey(connectionName, dbName),
+      buildProcedureCatalogLoadedKey(
+        connectionName,
+        this.databaseCachePart(connectionName, dbName),
+      ),
     );
   }
 
@@ -374,7 +455,10 @@ export class MetadataLayerAccess {
     dbName: string,
   ): void {
     this.deps.objectsCatalogLoaded.add(
-      buildProcedureCatalogLoadedKey(connectionName, dbName),
+      buildProcedureCatalogLoadedKey(
+        connectionName,
+        this.databaseCachePart(connectionName, dbName),
+      ),
     );
   }
 
@@ -383,10 +467,10 @@ export class MetadataLayerAccess {
     dbName: string,
     objType: string,
   ): boolean {
-    const upperDb = dbName.toUpperCase();
+    const dbKey = this.databaseCachePart(connectionName, dbName);
     const normalizedType = objType.toUpperCase();
     const connPrefix = `${connectionName}|`;
-    const dbPrefix = `${connPrefix}${upperDb}.`;
+    const dbPrefix = `${connPrefix}${dbKey}.`;
     let foundPerSchemaKey = false;
 
     for (const key of this.deps.store.tableCache.keys()) {
@@ -414,8 +498,8 @@ export class MetadataLayerAccess {
     dbName: string,
   ): string[] | undefined {
     const types = new Set<string>();
-    const upperDb = dbName.toUpperCase();
-    const prefix = `${connectionName}|${upperDb}.`;
+    const database = this.databaseIdentity(connectionName, dbName);
+    const prefix = `${connectionName}|${database.cachePart}.`;
 
     for (const [key, entry] of this.deps.store.tableCache) {
       if (!key.startsWith(prefix)) {
@@ -432,10 +516,13 @@ export class MetadataLayerAccess {
       }
     }
 
-    const aggregateProcedures = this.getProcedures(connectionName, `${upperDb}..`);
+    const aggregateProcedures = this.getProcedures(
+      connectionName,
+      `${database.cachePart}..`,
+    );
     if (aggregateProcedures !== undefined) {
       types.add('PROCEDURE');
-    } else if (this.isProcedureCatalogLoaded(connectionName, upperDb)) {
+    } else if (this.isProcedureCatalogLoaded(connectionName, database.cachePart)) {
       types.add('PROCEDURE');
     }
 
@@ -451,9 +538,9 @@ export class MetadataLayerAccess {
     connectionName: string,
     dbName: string,
   ): boolean {
-    const upperDb = dbName.toUpperCase();
+    const dbKey = this.databaseCachePart(connectionName, dbName);
     const connPrefix = `${connectionName}|`;
-    const dbPrefix = `${connPrefix}${upperDb}.`;
+    const dbPrefix = `${connPrefix}${dbKey}.`;
     let foundPerSchemaKey = false;
 
     for (const key of this.deps.store.tableCache.keys()) {
@@ -484,7 +571,8 @@ export class MetadataLayerAccess {
     connectionName: string,
     dbName: string,
   ): TableMetadata[] | undefined {
-    const prefix = `${connectionName}|${dbName.toUpperCase()}.`;
+    const database = this.databaseIdentity(connectionName, dbName);
+    const prefix = `${connectionName}|${database.cachePart}.`;
     const allTables: TableMetadata[] = [];
     const seenNames = new Set<string>();
     const staleKeys: string[] = [];
@@ -497,8 +585,12 @@ export class MetadataLayerAccess {
         }
         for (const item of entry.data) {
           const name = extractLabel(item);
-          if (name && !seenNames.has(name.toUpperCase())) {
-            seenNames.add(name.toUpperCase());
+          if (!name) {
+            continue;
+          }
+          const nameKey = database.preserveCase ? name : name.toUpperCase();
+          if (!seenNames.has(nameKey)) {
+            seenNames.add(nameKey);
             allTables.push(item);
           }
         }
@@ -540,14 +632,16 @@ export class MetadataLayerAccess {
     options?: { deferIndexes?: boolean },
   ): void {
     const startMs = Date.now();
-    const normalizedKey = normalizeDbSchemaLookupKey(key);
+    const normalizedKey = this.layerCacheKey(connectionName, key);
     const fullKey = `${connectionName}|${normalizedKey}`;
-    const keyParts = normalizedKey.split(".");
-    const dbName = keyParts[0];
-    const schemaName = keyParts[1] || "";
+    const parsedKey = parseDbSchemaCacheKey(normalizedKey);
+    const dbName = parsedKey.dbName;
+    const dbCachePart = normalizedKey.split('.')[0];
+    const schemaName = parsedKey.schemaName || "";
+    const preserveCatalogIdentity = isNetezzaExactCachePart(dbCachePart);
 
     if (schemaName) {
-      const allSchemasKey = `${connectionName}|${dbName}..`;
+      const allSchemasKey = `${connectionName}|${dbCachePart}..`;
       if (allSchemasKey !== fullKey && this.deps.store.tableCache.has(allSchemasKey)) {
         this.removeTableCacheEntry(allSchemasKey);
       }
@@ -560,12 +654,13 @@ export class MetadataLayerAccess {
           dbName,
           schemaName || undefined,
           existingEntry.data,
+          preserveCatalogIdentity,
         )
       : new Set<string>();
 
     this.deps.store.tableCache.set(fullKey, { data, timestamp: startMs });
     this.deps.store.tableIdMap.set(fullKey, { data: idMap, timestamp: startMs });
-    invalidateObjectsByTypeForDb(this.deps.store, connectionName, dbName);
+    invalidateObjectsByTypeForDb(this.deps.store, connectionName, dbCachePart);
     if (options?.deferIndexes) {
       this.deps.deferredIndexConnections.add(connectionName);
     } else {
@@ -575,9 +670,19 @@ export class MetadataLayerAccess {
         schemaName || undefined,
         data,
         idMap,
+        preserveCatalogIdentity,
       );
     }
-    restoreTableNameOnlyIndexes(this.deps.store, this.deps.stats, connectionName, dbName, replacedNames, this.deps.isEntryValid, (key) => this.removeTableCacheEntry(key));
+    restoreTableNameOnlyIndexes(
+      this.deps.store,
+      this.deps.stats,
+      connectionName,
+      dbName,
+      replacedNames,
+      this.deps.isEntryValid,
+      (key) => this.removeTableCacheEntry(key),
+      preserveCatalogIdentity,
+    );
 
     this.deps.stats.recordRefresh(
       connectionName,
@@ -601,9 +706,9 @@ export class MetadataLayerAccess {
     connectionName: string,
     dbName: string,
   ): ObjectWithSchema[] {
-    const upperDbName = dbName.toUpperCase();
-    const prefix = `${connectionName}|${upperDbName}.`;
-    const allSchemasKey = `${connectionName}|${upperDbName}..`;
+    const database = this.databaseIdentity(connectionName, dbName);
+    const prefix = `${connectionName}|${database.cachePart}.`;
+    const allSchemasKey = `${connectionName}|${database.cachePart}..`;
     const results: ObjectWithSchema[] = [];
     const seenKeys = new Set<string>();
     const staleKeys: string[] = [];
@@ -619,14 +724,13 @@ export class MetadataLayerAccess {
         if (parts.length < 2) continue;
 
         const dbKey = parts[1];
-        const dbParts = dbKey.split(".");
-        const entrySchemaName = (dbParts.length > 1 ? dbParts[1] : "") || "";
+        const entrySchemaName = parseDbSchemaCacheKey(dbKey).schemaName || "";
         const idMapEntry = this.deps.store.tableIdMap.get(key);
 
         for (const item of entry.data) {
           const label = extractLabel(item);
           const resolvedSchemaName =
-            resolveTableSchemaName(item, entrySchemaName || undefined) ||
+            resolveTableSchemaName(item, entrySchemaName || undefined, database.preserveCase) ||
             "";
           const uniqueKey = `${resolvedSchemaName}.${label}`;
 
@@ -636,7 +740,7 @@ export class MetadataLayerAccess {
             let objId: number | undefined;
             if (idMapEntry) {
               const lookupKey = buildIdLookupKey(
-                upperDbName,
+                database.value,
                 resolvedSchemaName || undefined,
                 label,
               );
@@ -671,7 +775,8 @@ export class MetadataLayerAccess {
     objType: string,
   ): ObjectWithSchema[] | undefined {
     const normalizedType = objType.toUpperCase();
-    const cacheKey = `${connectionName}|${dbName}|${normalizedType}`;
+    const database = this.databaseIdentity(connectionName, dbName);
+    const cacheKey = `${connectionName}|${database.cachePart}|${normalizedType}`;
     const startMs = Date.now();
     const cachedEntry = this.deps.store.objectsByTypeCache.get(cacheKey);
     if (cachedEntry) {
@@ -686,9 +791,8 @@ export class MetadataLayerAccess {
 
     this.deps.stats.recordMiss(connectionName, "objectsByType");
 
-    const upperDbName = dbName.toUpperCase();
-    const prefix = `${connectionName}|${upperDbName}.`;
-    const allSchemasKey = `${connectionName}|${upperDbName}..`;
+    const prefix = `${connectionName}|${database.cachePart}.`;
+    const allSchemasKey = `${connectionName}|${database.cachePart}..`;
     const results: ObjectWithSchema[] = [];
     const seenKeys = new Set<string>();
     const staleKeys: string[] = [];
@@ -705,8 +809,7 @@ export class MetadataLayerAccess {
         const parts = key.split("|");
         if (parts.length < 2) continue;
         const dbKey = parts[1];
-        const dbParts = dbKey.split(".");
-        const entrySchemaName = (dbParts.length > 1 ? dbParts[1] : "") || "";
+        const entrySchemaName = parseDbSchemaCacheKey(dbKey).schemaName || "";
         const idMapEntry = this.deps.store.tableIdMap.get(key);
 
         for (const item of entry.data) {
@@ -719,7 +822,7 @@ export class MetadataLayerAccess {
           if (itemObjType !== normalizedType) continue;
 
           const resolvedSchemaName =
-            resolveTableSchemaName(item, entrySchemaName || undefined) ||
+            resolveTableSchemaName(item, entrySchemaName || undefined, database.preserveCase) ||
             "";
           const uniqueKey = `${resolvedSchemaName}.${label}`;
           if (seenKeys.has(uniqueKey)) continue;
@@ -728,7 +831,7 @@ export class MetadataLayerAccess {
           let objId: number | undefined;
           if (idMapEntry) {
             const lookupKey = buildIdLookupKey(
-              upperDbName,
+              database.value,
               resolvedSchemaName || undefined,
               label,
             );
@@ -776,7 +879,7 @@ export class MetadataLayerAccess {
     dbName: string,
     threshold: number = LARGE_DB_TABLE_LIKE_OBJECT_THRESHOLD,
   ): boolean {
-    const dbPrefix = `${connectionName}|${dbName.toUpperCase()}.`;
+    const dbPrefix = this.databasePrefix(connectionName, dbName);
     let count = 0;
 
     for (const [key, entry] of this.deps.store.tableCache) {
@@ -802,7 +905,8 @@ export class MetadataLayerAccess {
     connectionName: string,
     key: string,
   ): ColumnMetadata[] | undefined {
-    const fullKey = `${connectionName}|${key}`;
+    const normalizedKey = this.columnCacheKey(connectionName, key);
+    const fullKey = `${connectionName}|${normalizedKey}`;
     const entry = this.deps.store.columnCache.get(fullKey);
     if (!entry) {
       this.deps.stats.recordMiss(connectionName, "column");
@@ -823,14 +927,15 @@ export class MetadataLayerAccess {
     data: ColumnMetadata[],
   ): void {
     const startMs = Date.now();
-    const fullKey = `${connectionName}|${key}`;
-    const keyParts = key.split(".");
-    const dbName = keyParts[0];
+    const normalizedKey = this.columnCacheKey(connectionName, key);
+    const fullKey = `${connectionName}|${normalizedKey}`;
+    const keyParts = normalizedKey.split(".");
+    const dbCachePart = keyParts[0];
     const schemaName = keyParts[1] || "";
     const tableName = keyParts.slice(2).join(".");
 
     if (schemaName && tableName) {
-      const allSchemasKey = `${connectionName}|${dbName}..${tableName}`;
+      const allSchemasKey = `${connectionName}|${dbCachePart}..${tableName}`;
       if (allSchemasKey !== fullKey && this.deps.store.columnCache.delete(allSchemasKey)) {
         Logger.getInstance().info(
           `[MetadataCache] Invalidated aggregated column cache for ${allSchemasKey}`,
@@ -858,8 +963,11 @@ export class MetadataLayerAccess {
     dbName: string,
     tableName: string,
   ): ColumnMetadata[] | undefined {
-    const prefix = `${connectionName}|${dbName.toUpperCase()}.`;
-    const normalizedTableName = normalizeTableNameForColumnCacheKey(tableName);
+    const database = this.databaseIdentity(connectionName, dbName);
+    const prefix = `${connectionName}|${database.cachePart}.`;
+    const normalizedTableName = database.preserveCase
+      ? createNetezzaUserIdentifier(tableName).value
+      : normalizeTableNameForColumnCacheKey(tableName);
     const staleKeys: string[] = [];
     let firstMatchingColumns: ColumnMetadata[] | undefined;
 
@@ -895,9 +1003,24 @@ export class MetadataLayerAccess {
 
   findTableId(connectionName: string, lookupKey: string): number | undefined {
     ensureTableIndexesBuilt(this.deps.store, this.deps.deferredIndexConnections, connectionName);
-    // lookupKey format: "DB.SCHEMA.TABLE" or "DB..TABLE" (upper case)
+    // lookupKey format: "DB.SCHEMA.TABLE" or "DB..TABLE".
     const upperConn = connectionName.toUpperCase();
-    const indexKey = `${upperConn}|${lookupKey}`;
+    let indexLookupKey = lookupKey;
+    if (this.isNetezza(connectionName)) {
+      const doubleDotIndex = lookupKey.indexOf('..');
+      const dotIndex = doubleDotIndex >= 0 ? doubleDotIndex : lookupKey.indexOf('.');
+      if (dotIndex > 0) {
+        const db = createNetezzaUserIdentifier(lookupKey.slice(0, dotIndex)).value;
+        const rest = lookupKey.slice(dotIndex);
+        const restParts = rest.startsWith('..')
+          ? [``, createNetezzaUserIdentifier(lookupKey.slice(dotIndex + 2)).value]
+          : lookupKey.slice(dotIndex + 1).split('.').map((part) => createNetezzaUserIdentifier(part).value);
+        indexLookupKey = rest.startsWith('..')
+          ? `${db}..${restParts[1]}`
+          : `${db}.${restParts[0]}.${restParts[1]}`;
+      }
+    }
+    const indexKey = `${upperConn}|${this.isNetezza(connectionName) ? indexLookupKey : lookupKey}`;
 
     // Try full lookup first (with schema)
     const cached = this.deps.store.objectLookupIndex.get(indexKey);
@@ -907,7 +1030,7 @@ export class MetadataLayerAccess {
 
     // For DB..TABLE pattern (no schema), try table-name-only index
     if (lookupKey.includes("..")) {
-      const tableNameOnlyKey = `${upperConn}|${lookupKey}`;
+      const tableNameOnlyKey = `${upperConn}|${this.isNetezza(connectionName) ? indexLookupKey : lookupKey}`;
       const cachedNoSchema = this.deps.store.tableNameOnlyIndex.get(tableNameOnlyKey);
       if (cachedNoSchema) {
         return cachedNoSchema.objId;
@@ -928,7 +1051,7 @@ export class MetadataLayerAccess {
    * Use hasCachedTypeGroups() to check if real data is cached.
    */
   getTypeGroups(connectionName: string, dbName: string): string[] | undefined {
-    const key = `${connectionName}|${dbName}`;
+    const key = `${connectionName}|${this.databaseCachePart(connectionName, dbName)}`;
     const entry = this.deps.store.typeGroupCache.get(key);
     if (!entry) {
       this.deps.stats.recordMiss(connectionName, "typeGroup");
@@ -951,14 +1074,14 @@ export class MetadataLayerAccess {
    * Used to determine if background refresh is needed.
    */
   hasCachedTypeGroups(connectionName: string, dbName: string): boolean {
-    const key = `${connectionName}|${dbName}`;
+    const key = `${connectionName}|${this.databaseCachePart(connectionName, dbName)}`;
     const entry = this.deps.store.typeGroupCache.get(key);
     return entry !== undefined && this.deps.isEntryValid(entry.timestamp);
   }
 
   setTypeGroups(connectionName: string, dbName: string, types: string[]): void {
     const startMs = Date.now();
-    const key = `${connectionName}|${dbName}`;
+    const key = `${connectionName}|${this.databaseCachePart(connectionName, dbName)}`;
     const mergedTypes = mergeTypeGroupsWithDefaults(this.deps.connectionManager, connectionName, types);
     this.deps.store.typeGroupCache.set(key, { data: mergedTypes, timestamp: startMs });
     this.deps.stats.recordRefresh(
@@ -985,12 +1108,20 @@ export class MetadataLayerAccess {
   ): CachedObjectInfo | undefined {
     ensureTableIndexesBuilt(this.deps.store, this.deps.deferredIndexConnections, connectionName);
     const upperConn = connectionName.toUpperCase();
-    const upperDbName = dbName.toUpperCase();
-    const upperObjName = objectName.toUpperCase();
+    const preserveCatalogIdentity = this.isNetezza(connectionName);
+    const lookupDbName = preserveCatalogIdentity
+      ? createNetezzaUserIdentifier(dbName).value
+      : dbName.toUpperCase();
+    const lookupObjectName = preserveCatalogIdentity
+      ? createNetezzaUserIdentifier(objectName).value
+      : objectName.toUpperCase();
 
     // O(1) lookup when schema is specified
     if (schemaName != null && schemaName !== "") {
-      const indexKey = `${upperConn}|${upperDbName}.${schemaName.toUpperCase()}.${upperObjName}`;
+      const lookupSchemaName = preserveCatalogIdentity
+        ? createNetezzaUserIdentifier(schemaName).value
+        : schemaName.toUpperCase();
+      const indexKey = `${upperConn}|${lookupDbName}.${lookupSchemaName}.${lookupObjectName}`;
       const cached = this.deps.store.objectLookupIndex.get(indexKey);
       if (cached) {
         this.deps.stats.recordHit(connectionName, "objectLookup");
@@ -1001,7 +1132,7 @@ export class MetadataLayerAccess {
     }
 
     // Schema not specified - use table-name-only index for O(1) lookup
-    const tableNameOnlyKey = `${upperConn}|${upperDbName}..${upperObjName}`;
+    const tableNameOnlyKey = `${upperConn}|${lookupDbName}..${lookupObjectName}`;
     const cached = this.deps.store.tableNameOnlyIndex.get(tableNameOnlyKey);
     if (cached) {
       this.deps.stats.recordHit(connectionName, "objectLookup");

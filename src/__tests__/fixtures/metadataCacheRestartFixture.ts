@@ -10,6 +10,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ConnectionManager } from '../../core/connectionManager';
 import { MetadataCache } from '../../metadataCache';
+import { decodeNetezzaCacheDatabasePart } from '../../metadata/helpers';
 import { SchemaItem } from '../../providers/schemaProvider';
 import type { ColumnMetadata } from '../../metadata/types';
 
@@ -286,10 +287,15 @@ export function countColumnLayersInRam(
     connectionName: string,
     dbName: string,
 ): number {
-    const prefix = `${connectionName}|${dbName.toUpperCase()}.`;
+    const prefix = `${connectionName}|`;
     let count = 0;
     for (const key of cache.columnCache.keys()) {
-        if (key.startsWith(prefix)) {
+        if (!key.startsWith(prefix)) {
+            continue;
+        }
+        const cacheDatabase = key.slice(prefix.length).split('.')[0];
+        const physicalDatabase = decodeNetezzaCacheDatabasePart(cacheDatabase);
+        if (physicalDatabase === dbName || physicalDatabase.toUpperCase() === dbName.toUpperCase()) {
             count += 1;
         }
     }
@@ -307,7 +313,7 @@ export function isDatabaseColumnsFullyLoaded(
     }
     const upperDb = dbName.toUpperCase();
     for (const name of loaded) {
-        if (name.toUpperCase() === upperDb) {
+        if (decodeNetezzaCacheDatabasePart(name).toUpperCase() === upperDb) {
             return true;
         }
     }

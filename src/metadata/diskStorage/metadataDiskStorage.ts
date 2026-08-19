@@ -32,6 +32,7 @@ import {
     isActiveColumnFileEntry,
     LEGACY_CACHE_FILE_NAME,
 } from './metadataDiskPaths';
+import { decodeNetezzaCacheDatabasePart, isNetezzaExactCachePart } from '../helpers';
 import {
     CACHE_FILE_NAME,
     CACHE_SCHEMA_VERSION,
@@ -333,8 +334,18 @@ export class MetadataDiskStorage {
         connectionName: string,
         databaseName: string,
     ): Promise<SerializedColumnFile | null> {
-        const columnPath = getV3ColumnFilePath(this.storageDir, connectionName, databaseName);
+        const columnPath = getV3ColumnFilePath(
+            this.storageDir,
+            connectionName,
+            this.physicalColumnDatabaseName(databaseName),
+        );
         return this.loadColumnFile(columnPath);
+    }
+
+    private physicalColumnDatabaseName(databaseName: string): string {
+        return isNetezzaExactCachePart(databaseName)
+            ? decodeNetezzaCacheDatabasePart(databaseName)
+            : databaseName;
     }
 
     async loadConnectionMetadataOnly(
@@ -828,7 +839,11 @@ export class MetadataDiskStorage {
 
         for (const [dbName, columnFile] of columnFiles) {
             await this.writeGzipJson(
-                getV3ColumnFilePath(this.storageDir, connectionName, dbName),
+                getV3ColumnFilePath(
+                    this.storageDir,
+                    connectionName,
+                    this.physicalColumnDatabaseName(dbName),
+                ),
                 columnFile,
             );
         }
@@ -892,9 +907,12 @@ export class MetadataDiskStorage {
             return;
         }
 
+        const physicalActiveDatabases = activeDatabases.map((databaseName) =>
+            this.physicalColumnDatabaseName(databaseName),
+        );
         for (const entry of entries) {
             const fileSegment = databaseFileSegmentFromColumnFileName(entry);
-            if (!fileSegment || isActiveColumnFileEntry(fileSegment, activeDatabases)) {
+            if (!fileSegment || isActiveColumnFileEntry(fileSegment, physicalActiveDatabases)) {
                 continue;
             }
             try {

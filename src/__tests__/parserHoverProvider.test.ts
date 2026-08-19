@@ -105,7 +105,7 @@ function createMockMetadataCache(
   return {
     getObjectsWithSchema: jest.fn((_conn: string, _db: string) => objects),
     getColumns: jest.fn((_conn: string, key: string) => {
-      const normalizedKey = key.toUpperCase();
+      const normalizedKey = key.replace(/^@NZEX@/, "").toUpperCase();
       for (const [k, table] of Object.entries(tables)) {
         const parts = k.split(".");
         const tableName = parts[parts.length - 1];

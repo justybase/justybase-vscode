@@ -1,5 +1,6 @@
 import {
     buildDbSchemaCacheKey,
+    buildNetezzaDatabaseCacheKey,
     normalizeDbSchemaLookupKey,
 } from '../../metadata/helpers';
 import {
@@ -31,7 +32,7 @@ describe('cache key normalization helpers', () => {
         const columns = [{ ATTNAME: 'ID', FORMAT_TYPE: 'INT4', label: 'ID', kind: 5, detail: 'INT4' }];
         const cache = {
             getColumns: jest.fn((_connectionName: string, key: string) =>
-                key === 'DB1.ADMIN.ORDERS' ? columns : undefined,
+                key === `${buildNetezzaDatabaseCacheKey('DB1')}.ADMIN.ORDERS` ? columns : undefined,
             ),
             getColumnsAnySchema: jest.fn(),
         } as unknown as MetadataCache;

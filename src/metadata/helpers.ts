@@ -4,6 +4,43 @@
  */
 
 import type { TableMetadata } from './types';
+import {
+    createNetezzaUserIdentifier,
+    isNetezzaQuotedIdentifier,
+    unquoteNetezzaIdentifier,
+} from '../dialects/netezza/metadata/identifierUtils';
+
+/** Prefix for Netezza cache keys whose identifier case is significant. */
+export const NETEZZA_EXACT_CACHE_KEY_PREFIX = '@NZEX@';
+
+function encodeNetezzaCachePart(value: string): string {
+    return encodeURIComponent(value).replace(/\./g, '%2E');
+}
+
+function decodeNetezzaCachePart(value: string): string {
+    try {
+        return decodeURIComponent(value);
+    } catch {
+        return value;
+    }
+}
+
+export function buildNetezzaCacheDatabasePart(databaseName: string): string {
+    if (isNetezzaExactCachePart(databaseName)) {
+        return databaseName;
+    }
+    return `${NETEZZA_EXACT_CACHE_KEY_PREFIX}${encodeNetezzaCachePart(databaseName)}`;
+}
+
+export function isNetezzaExactCachePart(value: string): boolean {
+    return value.startsWith(NETEZZA_EXACT_CACHE_KEY_PREFIX);
+}
+
+export function decodeNetezzaCacheDatabasePart(value: string): string {
+    return isNetezzaExactCachePart(value)
+        ? decodeNetezzaCachePart(value.slice(NETEZZA_EXACT_CACHE_KEY_PREFIX.length))
+        : value;
+}
 
 /**
  * Parse cache key to extract connection name and DB/Schema parts
@@ -20,8 +57,10 @@ export function parseCacheKey(key: string): {
     const connectionName = parts[0];
     const dbKey = parts[1];
     const dbParts = dbKey.split('.');
-    const dbName = dbParts[0];
-    const schemaName = dbParts.length > 1 && dbParts[1] !== '' ? dbParts[1] : undefined;
+    const dbName = decodeNetezzaCacheDatabasePart(dbParts[0]);
+    const schemaName = dbParts.length > 1 && dbParts[1] !== ''
+        ? decodeNetezzaCachePart(dbParts[1])
+        : undefined;
 
     return { connectionName, dbName, schemaName };
 }
@@ -29,7 +68,24 @@ export function parseCacheKey(key: string): {
 /**
  * Build DB.SCHEMA or DB.. lookup key for table/procedure cache.
  */
-export function buildDbSchemaCacheKey(dbName: string, schemaName?: string): string {
+export function buildDbSchemaCacheKey(
+    dbName: string,
+    schemaName?: string,
+    options?: { preserveCase?: boolean; exactNetezza?: boolean },
+): string {
+    if (isNetezzaExactCachePart(dbName)) {
+        const encodedSchema = schemaName === undefined ? '' : encodeNetezzaCachePart(schemaName);
+        return `${dbName}.${encodedSchema}`;
+    }
+    if (options?.exactNetezza) {
+        const exactDatabase = buildNetezzaCacheDatabasePart(dbName);
+        const encodedSchema = schemaName === undefined ? '' : encodeNetezzaCachePart(schemaName);
+        return `${exactDatabase}.${encodedSchema}`;
+    }
+    if (options?.preserveCase) {
+        const schema = schemaName ?? '';
+        return schema.length > 0 ? `${dbName}.${schema}` : `${dbName}..`;
+    }
     const db = dbName.trim().toUpperCase();
     const schema = schemaName?.trim();
     if (schema && schema.length > 0) {
@@ -42,6 +98,9 @@ export function buildDbSchemaCacheKey(dbName: string, schemaName?: string): stri
  * Normalize DB.SCHEMA or DB.. lookup key for table/procedure cache.
  */
 export function normalizeDbSchemaLookupKey(key: string): string {
+    if (isNetezzaExactCachePart(key)) {
+        return key;
+    }
     if (key.endsWith('..')) {
         return buildDbSchemaCacheKey(key.slice(0, -2));
     }
@@ -52,6 +111,73 @@ export function normalizeDbSchemaLookupKey(key: string): string {
     }
 
     return buildDbSchemaCacheKey(key.slice(0, dotIndex), key.slice(dotIndex + 1));
+}
+
+export function parseDbSchemaCacheKey(key: string): {
+    dbName: string;
+    schemaName?: string;
+} {
+    const parts = key.split('.');
+    return {
+        dbName: decodeNetezzaCacheDatabasePart(parts[0]),
+        schemaName: parts.length > 1 && parts[1] !== ''
+            ? decodeNetezzaCachePart(parts[1])
+            : undefined,
+    };
+}
+
+/**
+ * Convert a user-supplied Netezza database name to its exact cache identity.
+ * The returned value is a cache-only marker, never SQL text.
+ */
+export function buildNetezzaDatabaseCacheKey(databaseName: string): string {
+    return buildNetezzaCacheDatabasePart(
+        createNetezzaUserIdentifier(databaseName).value,
+    );
+}
+
+/**
+ * Build a Netezza DB.SCHEMA/DB.. cache layer key from user identifiers.
+ * Catalog-prefetch code should pass a database marker directly when it already
+ * has an exact catalog value.
+ */
+export function buildNetezzaDbSchemaCacheKey(
+    databaseName: string,
+    schemaName?: string,
+): string {
+    const databaseKey = isNetezzaExactCachePart(databaseName)
+        ? databaseName
+        : buildNetezzaDatabaseCacheKey(databaseName);
+    const schema = schemaName === undefined
+        ? undefined
+        : isNetezzaQuotedIdentifier(schemaName)
+            ? unquoteNetezzaIdentifier(schemaName)
+            : createNetezzaUserIdentifier(schemaName).value;
+    return buildDbSchemaCacheKey(databaseKey, schema);
+}
+
+/**
+ * Normalize a Netezza cache layer key. Existing non-Netezza keys retain the
+ * legacy normalization path in normalizeDbSchemaLookupKey().
+ */
+export function normalizeNetezzaDbSchemaLookupKey(key: string): string {
+    if (isNetezzaExactCachePart(key)) {
+        return key;
+    }
+
+    const doubleDotIndex = key.indexOf('..');
+    if (doubleDotIndex > 0) {
+        return buildNetezzaDbSchemaCacheKey(key.slice(0, doubleDotIndex));
+    }
+
+    const dotIndex = key.indexOf('.');
+    if (dotIndex < 0) {
+        return buildNetezzaDbSchemaCacheKey(key);
+    }
+    return buildNetezzaDbSchemaCacheKey(
+        key.slice(0, dotIndex),
+        key.slice(dotIndex + 1),
+    );
 }
 
 /**

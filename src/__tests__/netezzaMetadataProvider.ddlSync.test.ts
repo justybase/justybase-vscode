@@ -10,9 +10,9 @@ describe('netezzaMetadataProvider DDL synchronization', () => {
         );
 
         expect(sql).toContain('FROM JUST_DATA.._V_OBJECT_DATA');
-        expect(sql).toContain("UPPER(DBNAME) = UPPER('JUST_DATA')");
-        expect(sql).toContain("UPPER(SCHEMA) = UPPER('ADM''IN')");
-        expect(sql).toContain("UPPER(OBJNAME) = UPPER('T''1')");
+        expect(sql).toContain("DBNAME = 'JUST_DATA'");
+        expect(sql).toContain("SCHEMA = 'ADM''IN'");
+        expect(sql).toContain("OBJNAME = 'T''1'");
         expect(sql).toContain("OBJTYPE IN ('TABLE', 'GLOBAL TEMP TABLE')");
     });
 
@@ -24,6 +24,6 @@ describe('netezzaMetadataProvider DDL synchronization', () => {
             expect(query).toContain("O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')");
             expect(query).toContain('JUST_DATA.._V_OBJECT_DATA');
         }
-        expect(scoped).toContain("UPPER(O.SCHEMA) = UPPER('ADMIN')");
+        expect(scoped).toContain("SCHEMA = 'ADMIN'");
     });
 });

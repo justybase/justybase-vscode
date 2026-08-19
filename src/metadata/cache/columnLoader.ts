@@ -13,6 +13,11 @@ import {
 import type { MetadataDiskStorage, SerializedColumnFile } from '../diskStorage';
 import { yieldToEventLoop } from '../hydrateScheduler';
 import type { CachePrefetcher } from '../prefetch';
+import {
+  buildNetezzaDatabaseCacheKey,
+  decodeNetezzaCacheDatabasePart,
+  isNetezzaExactCachePart,
+} from '../helpers';
 
 export interface ColumnLoaderState {
   columnsOnDisk: Map<string, string[]>;
@@ -40,25 +45,44 @@ export function resolveOnDiskDatabaseName(
   state: ColumnLoaderState,
   connectionName: string,
   databaseName: string,
+  exactNetezza = false,
 ): string | undefined {
   const databases = state.columnsOnDisk.get(connectionName);
   if (!databases) {
     return undefined;
   }
-  const upperDb = databaseName.toUpperCase();
-  return databases.find((db) => db.toUpperCase() === upperDb);
+  const lookup = exactNetezza
+    ? (isNetezzaExactCachePart(databaseName)
+      ? databaseName
+      : buildNetezzaDatabaseCacheKey(databaseName))
+    : databaseName;
+  return databases.find((db) =>
+    (exactNetezza || isNetezzaExactCachePart(db) || isNetezzaExactCachePart(lookup))
+      ? (isNetezzaExactCachePart(db) ? db : buildNetezzaDatabaseCacheKey(db)) === lookup
+      : db.toUpperCase() === databaseName.toUpperCase(),
+  );
 }
 
 export function hasColumnsOnDisk(
   state: ColumnLoaderState,
   connectionName: string,
   databaseName: string,
+  exactNetezza = false,
 ): boolean {
-  return resolveOnDiskDatabaseName(state, connectionName, databaseName) !== undefined;
+  return resolveOnDiskDatabaseName(state, connectionName, databaseName, exactNetezza) !== undefined;
 }
 
 function normalizeColumnLayerKey(layerKey: string): string {
-  return layerKey.trim().toUpperCase();
+    const trimmed = layerKey.trim();
+    return isNetezzaExactCachePart(trimmed) ? trimmed : trimmed.toUpperCase();
+}
+
+function normalizeNetezzaLayerKey(layerKey: string): string {
+  const database = extractDatabaseFromLayerKey(layerKey);
+  const databasePart = buildNetezzaDatabaseCacheKey(database);
+  return layerKey.startsWith(database)
+    ? `${databasePart}${layerKey.slice(database.length)}`
+    : layerKey;
 }
 
 export function setColumnLayerKeysOnDisk(
@@ -81,9 +105,28 @@ export function hasColumnLayerOnDisk(
   connectionName: string,
   layerKey: string,
 ): boolean {
-  return state.columnLayerKeysOnDisk
-    .get(connectionName)
-    ?.has(normalizeColumnLayerKey(layerKey)) ?? false;
+  const layerKeys = state.columnLayerKeysOnDisk.get(connectionName);
+  if (!layerKeys) {
+    return false;
+  }
+  const normalized = normalizeColumnLayerKey(layerKey);
+  if (layerKeys.has(normalized)) {
+    return true;
+  }
+  const parts = layerKey.split('.');
+  if (parts.length < 3) {
+    return false;
+  }
+  const database = isNetezzaExactCachePart(parts[0])
+    ? parts[0]
+    : buildNetezzaDatabaseCacheKey(parts[0]);
+  const exactKey = `${database}.${parts[1]}.${parts.slice(2).join('.')}`;
+  if (layerKeys.has(exactKey)) {
+    return true;
+  }
+  const decodedDatabase = decodeNetezzaCacheDatabasePart(database);
+  const legacyKey = `${decodedDatabase}.${parts[1]}.${parts.slice(2).join('.')}`;
+  return layerKeys.has(legacyKey) || layerKeys.has(legacyKey.toUpperCase());
 }
 
 function rememberColumnFileLayerKeys(
@@ -105,14 +148,23 @@ export function isColumnsLoaded(
   state: ColumnLoaderState,
   connectionName: string,
   databaseName: string,
+  exactNetezza = false,
 ): boolean {
   const loaded = state.columnsLoadedDatabases.get(connectionName);
   if (!loaded) {
     return false;
   }
-  const upperDb = databaseName.toUpperCase();
+  const lookup = exactNetezza
+    ? (isNetezzaExactCachePart(databaseName)
+      ? databaseName
+      : buildNetezzaDatabaseCacheKey(databaseName))
+    : databaseName;
   for (const db of loaded) {
-    if (db.toUpperCase() === upperDb) {
+    if (
+      (exactNetezza || isNetezzaExactCachePart(db) || isNetezzaExactCachePart(lookup))
+        ? (isNetezzaExactCachePart(db) ? db : buildNetezzaDatabaseCacheKey(db)) === lookup
+        : db.toUpperCase() === databaseName.toUpperCase()
+    ) {
       return true;
     }
   }
@@ -124,7 +176,8 @@ export async function ensureColumnsLoaded(
   connectionName: string,
   databaseName: string,
 ): Promise<void> {
-  if (isColumnsLoaded(deps.state, connectionName, databaseName)) {
+  const exactNetezza = deps.cache.isNetezzaConnection(connectionName);
+  if (isColumnsLoaded(deps.state, connectionName, databaseName, exactNetezza)) {
     return;
   }
 
@@ -139,12 +192,13 @@ export async function ensureColumnsLoaded(
     deps.state,
     connectionName,
     databaseName,
+    exactNetezza,
   );
   if (!canonicalDatabaseName) {
     return;
   }
 
-  const loadKey = `${connectionName}|${canonicalDatabaseName.toUpperCase()}`;
+  const loadKey = `${connectionName}|${normalizeColumnLayerKey(canonicalDatabaseName)}`;
   const existing = deps.state.columnLoadPromises.get(loadKey);
   if (existing) {
     return existing;
@@ -173,11 +227,12 @@ export async function ensureColumnsLoadedForTableKey(
   }
 
   const databaseName = extractDatabaseFromLayerKey(layerKey);
-  if (isColumnsLoaded(deps.state, connectionName, databaseName)) {
+  const exactNetezza = deps.cache.isNetezzaConnection(connectionName);
+  if (isColumnsLoaded(deps.state, connectionName, databaseName, exactNetezza)) {
     return;
   }
 
-  if (hasColumnsOnDisk(deps.state, connectionName, databaseName)) {
+  if (hasColumnsOnDisk(deps.state, connectionName, databaseName, exactNetezza)) {
     await loadColumnLayerFromDisk(deps, connectionName, layerKey);
     if (deps.cache.getColumns(connectionName, layerKey)) {
       return;
@@ -287,12 +342,13 @@ async function loadColumnLayerFromDisk(
     deps.state,
     connectionName,
     databaseName,
+    deps.cache.isNetezzaConnection(connectionName),
   );
   if (!canonicalDatabaseName || !deps.diskStorage) {
     return;
   }
 
-  const layerLoadKey = `${connectionName}|${layerKey.toUpperCase()}`;
+  const layerLoadKey = `${connectionName}|${normalizeColumnLayerKey(layerKey)}`;
   const existing = deps.state.columnLayerLoadPromises.get(layerLoadKey);
   if (existing) {
     return existing;
@@ -301,7 +357,7 @@ async function loadColumnLayerFromDisk(
   const generation = deps.state.cacheGeneration;
   const loadStartMs = Date.now();
   const loadPromise = (async () => {
-    const fileCacheKey = `${connectionName}|${canonicalDatabaseName.toUpperCase()}`;
+    const fileCacheKey = `${connectionName}|${normalizeColumnLayerKey(canonicalDatabaseName)}`;
     let columnFile = deps.state.parsedColumnFileCache.get(fileCacheKey);
     if (!columnFile) {
       const loaded = await deps.diskStorage!.loadColumnFileForDatabase(
@@ -320,9 +376,16 @@ async function loadColumnLayerFromDisk(
     }
     rememberColumnFileLayerKeys(deps.state, connectionName, columnFile);
 
+    const requestedLayerKey = deps.cache.isNetezzaConnection(connectionName)
+      ? normalizeNetezzaLayerKey(layerKey)
+      : layerKey;
     const resolvedLayerKey =
-      resolveColumnLayerKeyInFile(columnFile, layerKey) ?? layerKey;
-    const columns = decodeColumnLayerFromFile(columnFile, layerKey);
+      resolveColumnLayerKeyInFile(columnFile, requestedLayerKey)
+      ?? (requestedLayerKey !== layerKey
+        ? resolveColumnLayerKeyInFile(columnFile, layerKey)
+        : undefined)
+      ?? requestedLayerKey;
+    const columns = decodeColumnLayerFromFile(columnFile, resolvedLayerKey);
     if (!columns || !deps.isCacheGenerationCurrent(generation)) {
       return;
     }
@@ -371,7 +434,7 @@ async function loadColumnsForDatabase(
     return;
   }
 
-  const fileCacheKey = `${connectionName}|${databaseName.toUpperCase()}`;
+  const fileCacheKey = `${connectionName}|${normalizeColumnLayerKey(databaseName)}`;
   deps.state.parsedColumnFileCache.set(fileCacheKey, columnFile);
   rememberColumnFileLayerKeys(deps.state, connectionName, columnFile);
   hydrateColumnsFromDatabase(deps.cache, connectionName, columnFile);
@@ -399,23 +462,36 @@ function markColumnDiskLoadFailed(
 ): void {
   const databases = deps.state.columnsOnDisk.get(connectionName);
   if (databases) {
-    const upperDb = databaseName.toUpperCase();
-    const remaining = databases.filter((db) => db.toUpperCase() !== upperDb);
+    const lookup = isNetezzaExactCachePart(databaseName)
+      ? databaseName
+      : buildNetezzaDatabaseCacheKey(databaseName);
+    const remaining = databases.filter((db) =>
+      isNetezzaExactCachePart(db) || isNetezzaExactCachePart(lookup)
+        ? (isNetezzaExactCachePart(db) ? db : buildNetezzaDatabaseCacheKey(db)) !== lookup
+        : db.toUpperCase() !== databaseName.toUpperCase(),
+    );
     if (remaining.length === 0) {
       deps.state.columnsOnDisk.delete(connectionName);
     } else {
       deps.state.columnsOnDisk.set(connectionName, remaining);
     }
   }
-  const fileCacheKey = `${connectionName}|${databaseName.toUpperCase()}`;
+  const fileCacheKey = `${connectionName}|${normalizeColumnLayerKey(databaseName)}`;
   deps.state.parsedColumnFileCache.delete(fileCacheKey);
   const layerKeys = deps.state.columnLayerKeysOnDisk.get(connectionName);
   if (layerKeys) {
-    const upperDb = databaseName.toUpperCase();
+    const lookup = isNetezzaExactCachePart(databaseName)
+      ? databaseName
+      : buildNetezzaDatabaseCacheKey(databaseName);
     const remaining = new Set(
-      [...layerKeys].filter((layerKey) =>
-        extractDatabaseFromLayerKey(layerKey).toUpperCase() !== upperDb,
-      ),
+      [...layerKeys].filter((layerKey) => {
+        const layerDatabase = extractDatabaseFromLayerKey(layerKey);
+        return isNetezzaExactCachePart(layerDatabase) || isNetezzaExactCachePart(lookup)
+          ? (isNetezzaExactCachePart(layerDatabase)
+            ? layerDatabase
+            : buildNetezzaDatabaseCacheKey(layerDatabase)) !== lookup
+          : layerDatabase.toUpperCase() !== databaseName.toUpperCase();
+      }),
     );
     if (remaining.size === 0) {
       deps.state.columnLayerKeysOnDisk.delete(connectionName);

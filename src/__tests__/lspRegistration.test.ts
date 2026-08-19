@@ -183,7 +183,7 @@ describe('handleMetadataRequest view lookups', () => {
 describe('handleMetadataRequest cachedTableInfo', () => {
     it('resolves uppercase cache keys when SQL identifiers are lowercase', async () => {
         const columnStore = new Map<string, Array<{ ATTNAME: string; FORMAT_TYPE: string }>>([
-            ['CONN_1|DB1.PUBLIC.ORDERS', [{ ATTNAME: 'ID', FORMAT_TYPE: 'INT4' }]],
+            ['CONN_1|@NZEX@DB1.PUBLIC.ORDERS', [{ ATTNAME: 'ID', FORMAT_TYPE: 'INT4' }]],
         ])
         const metadataCache = {
             getColumns: jest.fn((connectionName: string, key: string) =>
@@ -209,7 +209,7 @@ describe('handleMetadataRequest cachedTableInfo', () => {
             createConnectionManager('netezza', { effectiveDatabase: 'db1' }),
         )
 
-        expect(metadataCache.getColumns).toHaveBeenCalledWith('CONN_1', 'DB1.PUBLIC.ORDERS')
+        expect(metadataCache.getColumns).toHaveBeenCalledWith('CONN_1', '@NZEX@DB1.PUBLIC.ORDERS')
         expect(response).toEqual({
             exists: true,
             table: 'orders',
@@ -221,7 +221,7 @@ describe('handleMetadataRequest cachedTableInfo', () => {
 
     it('resolves schema from findObjectWithType for unqualified table names', async () => {
         const columnStore = new Map<string, Array<{ ATTNAME: string; FORMAT_TYPE: string }>>([
-            ['CONN_1|DB1.ADMIN.DIMACCOUNT', [{ ATTNAME: 'ACCOUNT_ID', FORMAT_TYPE: 'INT4' }]],
+            ['CONN_1|@NZEX@DB1.ADMIN.DIMACCOUNT', [{ ATTNAME: 'ACCOUNT_ID', FORMAT_TYPE: 'INT4' }]],
         ])
         const metadataCache = {
             findObjectWithType: jest.fn(() => ({
@@ -258,7 +258,7 @@ describe('handleMetadataRequest cachedTableInfo', () => {
         )
         expect(metadataCache.getColumns).toHaveBeenCalledWith(
             'CONN_1',
-            'DB1.ADMIN.DIMACCOUNT',
+            '@NZEX@DB1.ADMIN.DIMACCOUNT',
         )
         expect(response).toEqual({
             exists: true,

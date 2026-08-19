@@ -34,6 +34,7 @@ import {
   filterOracleSchemaItems,
   filterOracleSourceItems,
 } from "./completionRenderer";
+import { normalizeNetezzaFromJoinContext, formatNetezzaUserIdentifierForLookup } from "./completionDialectAdapter";
 import type {
   CompletionMetadataProvider,
   FromJoinContext,
@@ -61,6 +62,9 @@ export class CompletionMetadataResolver {
     includeViews = false,
     effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
+    if (databaseKind === "netezza") {
+      context = normalizeNetezzaFromJoinContext(context);
+    }
     if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
       return [];
     }
@@ -224,7 +228,7 @@ export class CompletionMetadataResolver {
       );
     }
 
-    return dedupeCompletionItems(result);
+    return dedupeCompletionItems(result, databaseKind);
   }
 
   public async resolveViewPathCompletions(
@@ -234,6 +238,9 @@ export class CompletionMetadataResolver {
     databaseKind?: DatabaseKind,
     effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
+    if (databaseKind === "netezza") {
+      context = normalizeNetezzaFromJoinContext(context);
+    }
     if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
       return [];
     }
@@ -329,7 +336,7 @@ export class CompletionMetadataResolver {
             effectiveSchema,
           )
         : [];
-      return dedupeCompletionItems(result);
+      return dedupeCompletionItems(result, databaseKind);
     }
 
     const result: CompletionItem[] = [];
@@ -372,7 +379,7 @@ export class CompletionMetadataResolver {
         ),
       );
     }
-    return dedupeCompletionItems(result);
+    return dedupeCompletionItems(result, databaseKind);
   }
 
   public async resolveProcedurePathCompletions(
@@ -382,6 +389,9 @@ export class CompletionMetadataResolver {
     databaseKind?: DatabaseKind,
     effectiveSchema?: string,
   ): Promise<CompletionItem[]> {
+    if (databaseKind === "netezza") {
+      context = normalizeNetezzaFromJoinContext(context);
+    }
     if (context.kind === "db_schema_dot" && !supportsThreePartPath(databaseKind)) {
       return [];
     }
@@ -512,7 +522,7 @@ export class CompletionMetadataResolver {
         ),
       );
     }
-    return dedupeCompletionItems(result);
+    return dedupeCompletionItems(result, databaseKind);
   }
 
   public async resolveCallArgumentCompletions(
@@ -647,7 +657,14 @@ export class CompletionMetadataResolver {
 
   public async getMetadataColumnsForSource(
     documentUri: string,
-    source: { db?: string; schema?: string; table: string },
+    source: {
+      db?: string;
+      schema?: string;
+      table: string;
+      dbQuoted?: boolean;
+      schemaQuoted?: boolean;
+      tableQuoted?: boolean;
+    },
     effectiveDb: string | undefined,
     effectiveSchema: string | undefined,
     databaseKind?: DatabaseKind,
@@ -656,6 +673,18 @@ export class CompletionMetadataResolver {
       netezzaSchemasEnabled?: boolean;
     },
   ): Promise<MetadataColumnItem[]> {
+    if (databaseKind === "netezza") {
+      source = {
+        ...source,
+        db: source.db
+          ? formatNetezzaUserIdentifierForLookup(source.db, source.dbQuoted)
+          : undefined,
+        schema: source.schema
+          ? formatNetezzaUserIdentifierForLookup(source.schema, source.schemaQuoted)
+          : undefined,
+        table: formatNetezzaUserIdentifierForLookup(source.table, source.tableQuoted),
+      };
+    }
     let lookupOptions: MetadataLookupOptions | undefined;
     if (isNetezzaDoubleDotSource(source, databaseKind)) {
       let defaultSchema: string | undefined;
@@ -954,7 +983,7 @@ export class CompletionMetadataResolver {
     return dedupeCompletionItems([
       ...result,
       ...viewItems,
-    ]);
+    ], databaseKind);
   }
 
   private async getOracleSourceCompletions(
