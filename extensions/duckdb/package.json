@@ -149,7 +149,7 @@
     },
     "dependencies": {
         "@duckdb/node-api": "^1.5.0-r.1",
-        "@justybase/spreadsheet-tasks": "2.1.0",
+        "@justybase/spreadsheet-tasks": "2.1.1",
         "mdb-reader": "^3.2.0"
     },
     "preview": true
