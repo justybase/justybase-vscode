@@ -17,6 +17,7 @@ product_version: 3.16.35
 | Supported | Implemented on the documented surface for the listed database/runtime. |
 | Partial | Common path works; dialect, object type, file format, or platform has a stated boundary. |
 | Preview | Available but subject to change or limited validation. |
+| Legacy reference | Technical or compatibility appendix retained for repository history; not a current support promise. |
 | Read-only | Catalog/introspection or result exploration does not write to the database. |
 | Desktop only | Requires VS Code extension-host/webview or native companion runtime. |
 | Web only | Available in the self-hosted Web Editor/API, not necessarily in the desktop extension. |

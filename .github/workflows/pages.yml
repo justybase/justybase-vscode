@@ -13,9 +13,15 @@ on:
       - "src/contracts/copilotTools/**"
       - "src/activation/copilotRegistration.ts"
       - "src/mcp/mcpToolCatalog.ts"
+      - "src/**"
+      - "media/**"
+      - "dialects/**"
       - "apps/api/src/server.ts"
+      - "apps/**"
       - "packages/contracts/src/**"
+      - "packages/**"
       - "extensions/*/package.json"
+      - "extensions/**"
       - ".github/workflows/pages.yml"
   pull_request:
     branches:
@@ -30,9 +36,15 @@ on:
       - "src/contracts/copilotTools/**"
       - "src/activation/copilotRegistration.ts"
       - "src/mcp/mcpToolCatalog.ts"
+      - "src/**"
+      - "media/**"
+      - "dialects/**"
       - "apps/api/src/server.ts"
+      - "apps/**"
       - "packages/contracts/src/**"
+      - "packages/**"
       - "extensions/*/package.json"
+      - "extensions/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 

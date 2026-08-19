@@ -22,6 +22,64 @@ function extractTypeUnionValues(source, typeName) {
   const declaration = source.match(new RegExp(`${typeName}\\s*=\\s*([^;]+)`))?.[1] ?? '';
   return [...declaration.matchAll(/'([^']+)'/g)].map(match => match[1]);
 }
+function decodeHtmlEntities(value) {
+  return value.replace(/&(amp|lt|gt|quot|#39|#x27);/gi, (_match, entity) => ({
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    '#39': "'",
+    '#x27': "'",
+  })[entity.toLowerCase()] ?? _match);
+}
+function textFromHtml(value) {
+  return decodeHtmlEntities(value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim());
+}
+function extractTables(source) {
+  return [...source.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map(match => match[0]);
+}
+function extractTableRows(table) {
+  return [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)]
+    .map(match => [...match[1].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map(cell => textFromHtml(cell[1])))
+    .filter(row => row.length > 0);
+}
+function generatedTable(html, name) {
+  const marker = `GENERATED_TABLE:${name}`;
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) return undefined;
+  return extractTables(html.slice(markerIndex))[0];
+}
+function tableValues(html, name, normalizer = value => value) {
+  const table = generatedTable(html, name);
+  if (!table) return undefined;
+  return extractTableRows(table).map(row => normalizer(row[0])).filter(Boolean);
+}
+function sorted(values) { return [...values].sort((left, right) => left.localeCompare(right)); }
+function assertExactCatalog(label, expected, actual) {
+  if (!actual) {
+    fail(`Generated ${label} table is missing its provenance marker.`);
+    return;
+  }
+  const expectedSet = new Set(expected);
+  const actualSet = new Set(actual);
+  for (const value of sorted(expectedSet)) if (!actualSet.has(value)) fail(`Missing ${label} in generated reference: ${value}`);
+  for (const value of sorted(actualSet)) if (!expectedSet.has(value)) fail(`Extra ${label} in generated reference: ${value}`);
+  if (actual.length !== actualSet.size) fail(`Duplicate ${label} in generated reference.`);
+}
+function frontMatterValue(source, key) {
+  const block = source.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+  const line = block?.[1].split('\n').find(value => value.match(new RegExp(`^${key}:\\s*`)));
+  if (!line) return undefined;
+  const value = line.replace(new RegExp(`^${key}:\\s*`), '').trim();
+  return (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
+    ? value.slice(1, -1)
+    : value;
+}
+function isValidIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
 
 async function filesUnder(directory, suffix = '') {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -62,7 +120,9 @@ async function catalogs() {
   const databaseKinds = unique(regexValues(database, /\|\s*'([^']+)'/g)).filter(kind => kind !== 'string');
   const webApi = await readFile(path.join(root, 'packages/contracts/src/webApi.ts'), 'utf8');
   const formats = unique([...extractTypeUnionValues(webApi, 'QueryExportFormat'), ...extractTypeUnionValues(webApi, 'QueryFileImportFormat'), 'parquet', 'xpt']);
-  return { commands, settings, contractTools, activeTools, mcpTools, routes, databaseKinds, formats };
+  const copilotNames = activeTools;
+  const mcpNames = mcpTools;
+  return { commands, settings, contractTools, activeTools, mcpTools, copilotNames, mcpNames, routes, databaseKinds, formats };
 }
 
 function pageFile(url) {
@@ -77,14 +137,15 @@ async function checkCatalogs(catalog) {
     api: await readFile(pageFile('guide/reference/web-api/'), 'utf8'),
     formats: await readFile(pageFile('guide/user/import-export/'), 'utf8'),
   };
-  for (const command of catalog.commands) if (!generated.commands.includes(command)) fail(`Missing public command in generated reference: ${command}`);
-  for (const setting of catalog.settings) if (!generated.settings.includes(setting)) fail(`Missing setting in generated reference: ${setting}`);
-  for (const kind of catalog.databaseKinds.filter(value => advertisedDatabaseKinds.has(value))) if (!generated.databases.includes(`>${kind}<`) && !generated.databases.includes(`\`${kind}\``)) fail(`Missing advertised DatabaseKind in generated reference: ${kind}`);
-  for (const route of catalog.routes) if (!generated.api.includes(route)) fail(`Missing Web API route in generated reference: ${route}`);
-  for (const format of catalog.formats) if (!generated.formats.toLowerCase().includes(format.toLowerCase())) fail(`Missing import/export format in generated reference: ${format}`);
+  assertExactCatalog('command', catalog.commands, tableValues(generated.commands, 'COMMANDS'));
+  assertExactCatalog('setting', catalog.settings, tableValues(generated.settings, 'SETTINGS'));
+  assertExactCatalog('advertised DatabaseKind', catalog.databaseKinds.filter(value => advertisedDatabaseKinds.has(value)), tableValues(generated.databases, 'DATABASES', value => value.toLowerCase()));
+  assertExactCatalog('Web API route', catalog.routes, tableValues(generated.api, 'ROUTES'));
+  assertExactCatalog('import/export format', catalog.formats, tableValues(generated.formats, 'FORMATS', value => value.toLowerCase()));
+  assertExactCatalog('Copilot tool', catalog.copilotNames, tableValues(generated.api, 'AI_TOOLS'));
+  assertExactCatalog('MCP tool', catalog.mcpNames, tableValues(generated.api, 'MCP_TOOLS'));
   for (const tool of catalog.activeTools) if (!catalog.contractTools.includes(tool)) fail(`Active Copilot tool has no contract: ${tool}`);
   for (const tool of catalog.contractTools) if (!catalog.activeTools.includes(tool)) fail(`Contract tool is not registered: ${tool}`);
-  for (const tool of catalog.mcpTools) if (!generated.api.includes(tool)) fail(`Missing MCP tool in generated reference: ${tool}`);
 }
 
 async function checkRequiredPages() {
@@ -115,9 +176,72 @@ async function checkFrontMatter() {
   const files = await filesUnder(guideRoot, '.md');
   for (const file of files) {
     const source = await readFile(file, 'utf8');
-    if (!/^---\s*\n/.test(source)) fail(`Guide page has no front matter: ${path.relative(root, file)}`);
-    if (!/^last_verified:/m.test(source)) fail(`Guide page has no last_verified: ${path.relative(root, file)}`);
-    if (!/^product_version:/m.test(source)) fail(`Guide page has no product_version: ${path.relative(root, file)}`);
+    const relative = path.relative(root, file);
+    if (!/^---\s*\n/.test(source)) {
+      fail(`Guide page has no front matter: ${relative}`);
+      continue;
+    }
+    const verified = frontMatterValue(source, 'last_verified');
+    if (!verified) fail(`Guide page has no last_verified: ${relative}`);
+    else if (!isValidIsoDate(verified)) fail(`Guide page has invalid last_verified: ${relative} (${verified})`);
+    const version = frontMatterValue(source, 'product_version');
+    if (!version) fail(`Guide page has no product_version: ${relative}`);
+    else if (version !== packageJson.version) fail(`Guide page product_version does not match package.json: ${relative} (${version} != ${packageJson.version})`);
+  }
+}
+
+async function checkBuildProvenance(catalog) {
+  const file = path.join(siteRoot, 'build-info.json');
+  let buildInfo;
+  try {
+    buildInfo = JSON.parse(await readFile(file, 'utf8'));
+  } catch {
+    fail('Generated build-info.json is missing or invalid.');
+    return;
+  }
+  if (buildInfo.schemaVersion !== 1) fail(`Unsupported documentation build-info schema: ${buildInfo.schemaVersion}`);
+  if (buildInfo.productVersion !== packageJson.version) fail(`Generated product version does not match package.json: ${buildInfo.productVersion} != ${packageJson.version}`);
+  if (!/^[0-9a-f]{40}$/i.test(buildInfo.sourceCommit ?? '')) fail(`Generated documentation has no full source commit: ${buildInfo.sourceCommit ?? 'missing'}`);
+  if (!isValidIsoDate(String(buildInfo.generatedAt ?? '').slice(0, 10))) fail(`Generated documentation has invalid generation timestamp: ${buildInfo.generatedAt ?? 'missing'}`);
+  if (typeof buildInfo.workingTreeDirty !== 'boolean') fail('Generated documentation build-info.json has no workingTreeDirty boolean.');
+
+  let currentCommit = '';
+  try { currentCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); } catch { /* source checkout may not contain .git */ }
+  if (/^[0-9a-f]{40}$/i.test(currentCommit) && buildInfo.sourceCommit !== currentCommit) fail(`Generated source commit does not match checkout: ${buildInfo.sourceCommit} != ${currentCommit}`);
+
+  let searchIndex;
+  try { searchIndex = JSON.parse(await readFile(path.join(siteRoot, 'guide', 'search-index.json'), 'utf8')); } catch { searchIndex = undefined; }
+  if (!Array.isArray(searchIndex)) fail('Generated search index is missing or invalid.');
+  const counts = buildInfo.counts ?? {};
+  const expectedCounts = {
+    pages: Array.isArray(searchIndex) ? searchIndex.length : undefined,
+    guidePages: Array.isArray(searchIndex) ? searchIndex.filter(page => !String(page.url ?? '').startsWith('guide/legacy/')).length : undefined,
+    legacyPages: Array.isArray(searchIndex) ? searchIndex.filter(page => String(page.url ?? '').startsWith('guide/legacy/')).length : undefined,
+    commands: catalog.commands.length,
+    settings: catalog.settings.length,
+    copilotTools: catalog.copilotNames.length,
+    mcpTools: catalog.mcpNames.length,
+    routes: catalog.routes.length,
+    databaseKinds: catalog.databaseKinds.filter(kind => advertisedDatabaseKinds.has(kind)).length,
+    formats: catalog.formats.length,
+  };
+  for (const [key, expected] of Object.entries(expectedCounts)) {
+    if (expected !== undefined && counts[key] !== expected) fail(`Generated build count ${key} is stale: ${counts[key]} != ${expected}`);
+  }
+}
+
+async function checkNarrativeCommands(catalog) {
+  const requiredNarrativeCommands = new Map([
+    ['netezza.showMetadataRefreshDetails', 'guide/user/schema-browser.md'],
+  ]);
+  const canonicalSources = await filesUnder(path.join(guideRoot, 'user'), '.md');
+  const canonicalText = (await Promise.all(canonicalSources.map(file => readFile(file, 'utf8')))).join('\n');
+  for (const [command, preferredPage] of requiredNarrativeCommands) {
+    if (!catalog.commands.includes(command)) {
+      fail(`Required narrative command is not present in the live manifest: ${command}`);
+      continue;
+    }
+    if (!canonicalText.includes(command)) fail(`Command has no description in the canonical user guide: ${command} (expected near ${preferredPage})`);
   }
 }
 
@@ -150,6 +274,8 @@ async function main() {
   const catalog = await catalogs();
   await checkCatalogs(catalog);
   await checkFrontMatter();
+  await checkBuildProvenance(catalog);
+  await checkNarrativeCommands(catalog);
   const landing = await checkRequiredPages();
   if (!landing.includes('./guide/')) fail('Landing page does not link to the portal at ./guide/.');
   if (/Snowflake|Vertica/i.test(landing)) fail('Landing page contains an unadvertised database card/name.');
