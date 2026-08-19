@@ -2,7 +2,7 @@
     "name": "justybaselite-access",
     "displayName": "JustyBase SQL Editor (Microsoft Access)",
     "description": "Optional Microsoft Access (.mdb/.accdb) companion for JustyBase SQL Editor. Pure Node.js/TypeScript file access with a DuckDB SQL mirror.",
-    "version": "3.16.34",
+    "version": "3.16.35",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
