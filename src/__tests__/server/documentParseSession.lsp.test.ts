@@ -9,6 +9,7 @@ import type {
   MetadataObjectItem,
 } from "../../lsp/protocol";
 import { LspCompletionEngine } from "../../server/completionEngine";
+import { LspInlayHintEngine } from "../../server/inlayHintEngine";
 import type { CompletionMetadataProvider } from "../../server/completionTypes";
 import { DocumentParseSession, SqlValidator } from "../../sqlParser";
 import * as parsingRuntime from "../../sqlParser/parsingRuntime";
@@ -117,6 +118,39 @@ describe("DocumentParseSession LSP integration", () => {
       document,
       Position.create(cursorLine, 8),
     );
+
+    const fullDocumentParseCalls = parseSpy.mock.calls.filter(
+      (call) => call[0]?.sql === sql,
+    ).length;
+    expect(fullDocumentParseCalls).toBe(1);
+  });
+
+  it("keeps the full CST when completion asks for a prefix before inlay hints", async () => {
+    const session = new DocumentParseSession();
+    const document = createLargeDocument(500);
+    const sql = document.getText();
+    const validationProfile = getDatabaseSqlAuthoring("netezza").validation;
+    const validator = new SqlValidator(undefined, validationProfile);
+    const metadata = new MockMetadataProvider();
+    const completionEngine = new LspCompletionEngine(metadata, session);
+    const inlayEngine = new LspInlayHintEngine(metadata, session);
+    const request = {
+      documentUri: document.uri,
+      documentVersion: document.version,
+      sql,
+      databaseKind: "netezza" as const,
+      validationProfile,
+    };
+
+    validator.validateWithSession(sql, session, request);
+    await completionEngine.provideCompletionItems(
+      document,
+      Position.create(250, 8),
+    );
+    await inlayEngine.provideInlayHints(document, {
+      start: Position.create(0, 0),
+      end: Position.create(document.lineCount, 0),
+    });
 
     const fullDocumentParseCalls = parseSpy.mock.calls.filter(
       (call) => call[0]?.sql === sql,

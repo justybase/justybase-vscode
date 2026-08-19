@@ -693,6 +693,129 @@ export function joinClause(
       "SQL002",
     );
   }
+
+  if (isCrossJoin) {
+    const crossToken = ctx.Cross?.[0] as unknown as IToken | undefined;
+    const joinToken = ctx.Join?.[0] as unknown as IToken | undefined;
+    if (crossToken && joinToken) {
+      host.addErrorAtPosition(
+        "CROSS JOIN produces a Cartesian product; verify that this is intentional",
+        getTokenSpanPositionFromEndpoints(crossToken, joinToken),
+        "warning",
+        "SQL051",
+      );
+    }
+  }
+
+  if (
+    !isCrossJoin &&
+    !isNaturalJoin &&
+    Boolean(ctx.expression?.length || ctx.columnList?.length) &&
+    ctx.tableSource?.[0] &&
+    !hasTableSourceAlias(host, ctx.tableSource[0])
+  ) {
+    const tableSource = ctx.tableSource[0];
+    const tableName = tableSource.children?.tableName?.[0] as
+      | CstNode
+      | undefined;
+    if (tableName) {
+      const token = host.getFirstTokenFromCst(tableName);
+      if (token) {
+        host.addError(
+          `Table '${host.getCstText(tableName).trim()}' in JOIN has no alias; add an alias before the ON/USING clause`,
+          token,
+          "information",
+          "SQL052",
+        );
+      }
+    }
+  }
+
+  if (ctx.expression?.[0]) {
+    validateJoinLiteralCastRisk(host, ctx.expression[0]);
+  }
+}
+
+function hasTableSourceAlias(host: SqlVisitorHost, tableSource: CstNode): boolean {
+  const aliasOptional = tableSource.children?.aliasOptional?.[0] as
+    | CstNode
+    | undefined;
+  if (!aliasOptional) {
+    return false;
+  }
+  return Boolean(host.visitAs<string | undefined>(aliasOptional));
+}
+
+function validateJoinLiteralCastRisk(
+  host: SqlVisitorHost,
+  expressionNode: CstNode,
+): void {
+  const stack: CstNode[] = [expressionNode];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+
+    if (node.name === "comparisonExpression") {
+      const hasColumnReference = findDescendantNode(host, node, "columnReference");
+      const literal = findStringLiteralToken(host, node);
+      if (hasColumnReference && literal) {
+        host.addError(
+          "JOIN condition compares a column with a string literal; use a typed value or an explicit CAST",
+          literal,
+          "warning",
+          "SQL053",
+        );
+        return;
+      }
+    }
+
+    for (const children of Object.values(node.children ?? {})) {
+      for (const child of children) {
+        if (host.isCstNode(child)) {
+          stack.push(child);
+        }
+      }
+    }
+  }
+}
+
+function findDescendantNode(
+  host: SqlVisitorHost,
+  node: CstNode,
+  name: string,
+): CstNode | undefined {
+  if (node.name === name) {
+    return node;
+  }
+  for (const children of Object.values(node.children ?? {})) {
+    for (const child of children) {
+      if (host.isCstNode(child)) {
+        const found = findDescendantNode(host, child, name);
+        if (found) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
+function findStringLiteralToken(
+  host: SqlVisitorHost,
+  node: CstNode,
+): IToken | undefined {
+  for (const children of Object.values(node.children ?? {})) {
+    for (const child of children) {
+      if (host.isToken(child)) {
+        const token = child as IToken;
+        if (token.tokenType.name === "StringLiteral") {
+          return token;
+        }
+      } else if (host.isCstNode(child)) {
+        const found = findStringLiteralToken(host, child);
+        if (found) return found;
+      }
+    }
+  }
+  return undefined;
 }
 
 export function selectClause(

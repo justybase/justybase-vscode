@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+jest.unmock('chevrotain');
 import { NetezzaLinterCodeActionProvider } from '../providers/linterCodeActions';
 import { SqlParser } from '../sql/sqlParser';
 import { parseSemanticScopeWithParser } from '../providers/parsers/parserSqlContext';
@@ -368,6 +369,11 @@ describe('providers/linterCodeActions', () => {
         const statementSql = 'SELECT * FROM T1 CROSS JOIN T2';
         const crossOffset = statementSql.indexOf('CROSS JOIN');
         const document = makeDocument(statementSql);
+        (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
+            sql: statementSql,
+            start: 0,
+            end: statementSql.length,
+        });
         const diagnostic = makeDiagnostic(
             'NZ004',
             'NZ004: CROSS JOIN produces a Cartesian product',
@@ -386,8 +392,11 @@ describe('providers/linterCodeActions', () => {
         expect(crossJoinFix).toBeDefined();
         expect((crossJoinFix?.edit as unknown as MockWorkspaceEdit).replace).toHaveBeenCalledWith(
             document.uri,
-            diagnostic.range,
-            'INNER JOIN'
+            {
+                start: { line: 0, character: crossOffset },
+                end: { line: 0, character: crossOffset + 'CROSS JOIN'.length },
+            },
+            'INNER JOIN ON 1=1'
         );
     });
 

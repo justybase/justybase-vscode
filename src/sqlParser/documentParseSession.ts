@@ -19,6 +19,7 @@ import {
 } from "./symbols";
 
 const MAX_SCOPE_ENTRIES_PER_DOCUMENT = 16;
+const MAX_PARSE_ENTRIES_PER_DOCUMENT = 8;
 const MAX_IN_FLIGHT_DOCUMENTS = 16;
 
 export interface DocumentParseRequest {
@@ -50,7 +51,12 @@ interface InFlightParse {
  * Older CSTs are discarded as soon as the URI is rebound to new content.
  */
 export class DocumentParseSession {
-  private readonly parseCache = new Map<string, CachedParseEntry>();
+  /**
+   * Keep full-document and cursor-prefix parses for the same document version
+   * side by side. Completion may ask for a shortened parser-friendly prefix;
+   * that request must not evict the full CST used by diagnostics and inlay.
+   */
+  private readonly parseCache = new Map<string, Map<string, CachedParseEntry>>();
   private readonly scopeCache = new Map<string, Map<string, ParserSemanticScope>>();
   private readonly inFlight = new Map<string, InFlightParse>();
   private readonly documentBindings = new Map<string, DocumentBinding>();
@@ -71,6 +77,12 @@ export class DocumentParseSession {
       current?.documentVersion === next.documentVersion &&
       current?.contentHash === next.contentHash
     ) {
+      return;
+    }
+    // A single LSP version can legitimately produce parser-friendly prefix
+    // requests for completion. They share the document version but are not a
+    // new document. Keep the full-document cache until the version advances.
+    if (current?.documentVersion === next.documentVersion) {
       return;
     }
     if (current?.contentHash === next.contentHash) {
@@ -109,8 +121,12 @@ export class DocumentParseSession {
     for (const entries of this.scopeCache.values()) {
       scopes += entries.size;
     }
+    let parses = 0;
+    for (const entries of this.parseCache.values()) {
+      parses += entries.size;
+    }
     return {
-      parses: this.parseCache.size,
+      parses,
       scopes,
       documents: this.documentBindings.size,
     };
@@ -119,8 +135,8 @@ export class DocumentParseSession {
   getParseResult(request: DocumentParseRequest): SqlStatementsParseResult {
     this.syncDocumentBinding(request);
     const parseKey = this.buildParseKey(request);
-    const cached = this.parseCache.get(request.documentUri);
-    if (cached?.parseKey === parseKey) {
+    const cached = this.parseCache.get(request.documentUri)?.get(parseKey);
+    if (cached) {
       this.parseCacheHits += 1;
       return cached.parseResult;
     }
@@ -132,8 +148,8 @@ export class DocumentParseSession {
   ): Promise<SqlStatementsParseResult> {
     this.syncDocumentBinding(request);
     const parseKey = this.buildParseKey(request);
-    const cached = this.parseCache.get(request.documentUri);
-    if (cached?.parseKey === parseKey) {
+    const cached = this.parseCache.get(request.documentUri)?.get(parseKey);
+    if (cached) {
       this.parseCacheHits += 1;
       return cached.parseResult;
     }
@@ -154,8 +170,8 @@ export class DocumentParseSession {
     }
 
     const promise = Promise.resolve().then(() => {
-      const cachedAfterSchedule = this.parseCache.get(request.documentUri);
-      if (cachedAfterSchedule?.parseKey === parseKey) {
+      const cachedAfterSchedule = this.parseCache.get(request.documentUri)?.get(parseKey);
+      if (cachedAfterSchedule) {
         this.parseCacheHits += 1;
         return cachedAfterSchedule.parseResult;
       }
@@ -232,7 +248,21 @@ export class DocumentParseSession {
 
     // A queued parse may finish after a newer version has rebound this URI.
     if (this.isCurrentBinding(request)) {
-      this.parseCache.set(request.documentUri, {
+      let entries = this.parseCache.get(request.documentUri);
+      if (!entries) {
+        entries = new Map();
+        this.parseCache.set(request.documentUri, entries);
+      }
+      if (!entries.has(parseKey) && entries.size >= MAX_PARSE_ENTRIES_PER_DOCUMENT) {
+        const currentHash = this.documentBindings.get(request.documentUri)?.contentHash;
+        const evictableKey = Array.from(entries.keys()).find(
+          (key) => !currentHash || !key.endsWith(`|${currentHash}`),
+        ) ?? entries.keys().next().value;
+        if (evictableKey !== undefined) {
+          entries.delete(evictableKey);
+        }
+      }
+      entries.set(parseKey, {
         documentVersion: request.documentVersion,
         contentHash: simpleHash(request.sql),
         parseKey,
@@ -253,8 +283,7 @@ export class DocumentParseSession {
   private isCurrentBinding(request: DocumentParseRequest): boolean {
     const binding = this.documentBindings.get(request.documentUri);
     return (
-      binding?.documentVersion === request.documentVersion &&
-      binding.contentHash === simpleHash(request.sql)
+      binding?.documentVersion === request.documentVersion
     );
   }
 

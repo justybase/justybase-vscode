@@ -396,6 +396,7 @@ export function columnReference(
         tokens[0],
         "error",
         "SQL004",
+        suggestVisibleColumn(host, columnName),
       );
     }
   } else if (tokens.length === 2) {
@@ -436,6 +437,83 @@ export function columnReference(
       validateColumnExists(host, table, columnName, tokens[2]);
     }
   }
+}
+
+const MAX_SQL004_SUGGESTION_COLUMNS = 256;
+
+function suggestVisibleColumn(
+  host: SqlVisitorHost,
+  columnName: string,
+): string | undefined {
+  const visibleColumns = host
+    .getScopeBuilder()
+    .getAllVisibleTables()
+    .flatMap((table) => table.columns);
+  if (
+    visibleColumns.length === 0 ||
+    visibleColumns.length > MAX_SQL004_SUGGESTION_COLUMNS
+  ) {
+    return undefined;
+  }
+
+  const uniqueColumns = new Map<string, string>();
+  for (const column of visibleColumns) {
+    const name = column.alias || column.name;
+    if (!name) continue;
+    const key = stripIdentifierQuoting(name).toUpperCase();
+    if (uniqueColumns.has(key)) {
+      return undefined;
+    }
+    uniqueColumns.set(key, name);
+  }
+
+  const normalizedInput = stripIdentifierQuoting(columnName).toUpperCase();
+  const maxDistance = normalizedInput.length <= 4 ? 1 : 2;
+  let best: { name: string; distance: number } | undefined;
+  let tied = false;
+
+  for (const [candidateKey, candidateName] of uniqueColumns) {
+    const distance = boundedLevenshtein(
+      normalizedInput,
+      candidateKey,
+      maxDistance,
+    );
+    if (distance > maxDistance) continue;
+    if (!best || distance < best.distance) {
+      best = { name: candidateName, distance };
+      tied = false;
+    } else if (distance === best.distance) {
+      tied = true;
+    }
+  }
+
+  return best && !tied ? best.name : undefined;
+}
+
+function boundedLevenshtein(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) {
+    return limit + 1;
+  }
+
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= a.length; row += 1) {
+    const current = [row];
+    let rowMinimum = row;
+    for (let column = 1; column <= b.length; column += 1) {
+      const value = Math.min(
+        current[column - 1] + 1,
+        previous[column] + 1,
+        previous[column - 1] + (a[row - 1] === b[column - 1] ? 0 : 1),
+      );
+      current.push(value);
+      rowMinimum = Math.min(rowMinimum, value);
+    }
+    if (rowMinimum > limit) {
+      return limit + 1;
+    }
+    previous = current;
+  }
+  return previous[b.length] ?? limit + 1;
 }
 
 export function functionCall(
@@ -897,6 +975,7 @@ function validateColumnExists(
           token,
           "error",
           "SQL004",
+          suggestVisibleColumn(host, columnName),
         );
       }
       return;
@@ -909,6 +988,7 @@ function validateColumnExists(
       token,
       "error",
       "SQL004",
+      suggestVisibleColumn(host, columnName),
     );
     return;
   }
