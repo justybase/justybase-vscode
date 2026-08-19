@@ -11,6 +11,8 @@ Connect without installing an ODBC driver, write and validate Netezza SQL, explo
 
 [Marketplace](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza) · [Publisher](https://marketplace.visualstudio.com/publishers/krzysztof-d)
 
+**[Open the complete JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/)** — user workflows, reference tables, Web Editor administration, and developer guidance.
+
 ## Why JustyBase?
 
 - **Connect in minutes** — the core extension includes a pure JavaScript/TypeScript Netezza driver, so no IBM ODBC installation is required.
@@ -59,7 +61,7 @@ Turn result sets into interactive charts and compare patterns without leaving th
 
 Compose multi-table `SELECT` queries by dragging tables or views onto a canvas, connecting columns to create joins, selecting fields, and adding filters, sorting, aggregates, `GROUP BY`, `HAVING`, and `LIMIT` clauses. Open the generated SQL in the editor, copy it, or run it immediately.
 
-Read the [Visual Query Builder guide](docs/VISUAL_QUERY_BUILDER.md) for the complete workflow.
+Read the [Visual Query Builder guide](https://justybase.github.io/justybase-vscode/guide/user/visual-builder-erd/) for the complete workflow.
 
 ### Use AI with explicit control
 
@@ -89,7 +91,7 @@ Inspect active sessions, running queries, host and SPU utilization, memory, and 
 - Format SQL with `Shift+Alt+F` and inspect explain plans with `Ctrl+L`.
 - Get real-time SQL and Netezza diagnostics for unknown objects, ambiguous references, invalid types, unsafe patterns, and NZPLSQL issues.
 
-Read the [Query Execution & Analysis Guide](docs/QUERY_EXECUTION.md) and [SQL Linter Reference](docs/SQL_LINTER.md).
+Read the [Getting started and query execution guide](https://justybase.github.io/justybase-vscode/guide/user/getting-started/) and [SQL Linter Reference](https://justybase.github.io/justybase-vscode/guide/user/sql-quality/).
 
 ### Explore, filter, and export data
 
@@ -98,7 +100,7 @@ Read the [Query Execution & Analysis Guide](docs/QUERY_EXECUTION.md) and [SQL Li
 - Export to XLSB/XLSX, CSV, JSON, XML, SQL `INSERT`, Markdown, and Apache Parquet.
 - Open Parquet, Excel, and `.nzpreview` files in the built-in data previewer.
 
-See the [SQL Results Filtering guide](docs/SQL_RESULTS_FILTERING.md) and [Export & Import Reference](docs/EXPORT_IMPORT.md).
+See the [SQL Results Filtering guide](https://justybase.github.io/justybase-vscode/guide/user/data-grid/) and [Export & Import Reference](https://justybase.github.io/justybase-vscode/guide/user/import-export/).
 
 ### Develop and maintain Netezza objects
 
@@ -117,7 +119,7 @@ For quick inspection, the existing **Open in Data File Preview** action remains 
 
 Install the optional [Microsoft Access pack](extensions/access) to query and edit `.mdb` and `.accdb` files through the native TypeScript reader and embedded DuckDB mirror. No Java runtime or JAR is required.
 
-Read the [File SQL guide](docs/file-sql.md) and [Access guide](extensions/access/README.md).
+Read the [File SQL guide](https://justybase.github.io/justybase-vscode/guide/user/data-workspace/) and [Access guide](https://justybase.github.io/justybase-vscode/guide/reference/database-support/).
 
 ### Use AI and read-only schema tools
 
@@ -130,14 +132,14 @@ The optional AI workflows integrate with GitHub Copilot Chat and can:
 
 AI features transmit SQL, schema information, selected metadata, and limited query history to external Microsoft/GitHub services. Privacy confirmations are shown before transmission and AI features can be disabled with `justybase.copilot.enabled`.
 
-Read the [Copilot SQL Assistant guide](docs/COPILOT_SQL_ASSISTANT.md), [MCP Server guide](docs/MCP_SERVER.md), and [Procedure Compilation guide](docs/PROCEDURE_COMPILATION.md).
+Read the [Copilot SQL Assistant guide](https://justybase.github.io/justybase-vscode/guide/user/ai-assistant/), [MCP Server guide](https://justybase.github.io/justybase-vscode/guide/legacy/mcp_server/), and [Procedure Compilation guide](https://justybase.github.io/justybase-vscode/guide/legacy/procedure_compilation/).
 
 ## SQL notebooks, history, and reusable workflows
 
-- **SQL Notebooks** — execute SQL cells with inline results in `.sqlnb` or `.nzsql-nb` files. See [Notebooks](docs/NOTEBOOKS.md).
+- **SQL Notebooks** — execute SQL cells with inline results in `.sqlnb` or `.nzsql-nb` files. See [Notebooks](https://justybase.github.io/justybase-vscode/guide/user/sql-console-notebooks/).
 - **Query History** — search, filter, tag, favorite, parameterize, and export previously executed queries.
 - **Favorites and snippets** — save tables, views, procedures, and parameterized SQL snippets; sync favorites through `.vscode/netezza-favorites.json`.
-- **SAS-like macros** — use `%let`, `%if/%do/%end`, `%export`, `%include`, `%python`, `%SQL`, `%SQLLIST`, and related workflow helpers. See [SAS-like macros](docs/macros/sas-like-macros.md).
+- **SAS-like macros** — use `%let`, `%if/%do/%end`, `%export`, `%include`, `%python`, `%SQL`, `%SQLLIST`, and related workflow helpers. See [SAS-like macros](https://justybase.github.io/justybase-vscode/guide/user/sql-console-notebooks/).
 - **File Search** — search and replace across SQL and Python files with comment/string-aware modes.
 
 ## Optional database support
@@ -149,10 +151,12 @@ The core extension is Netezza-first. Optional packs plug into the shared connect
 | Oracle | [Oracle support pack](extensions/oracle) | Dedicated SQL/PL/SQL parser and advanced workflows |
 | PostgreSQL | [PostgreSQL support pack](extensions/postgresql) | Dedicated parser, metadata, DDL, COPY, and explain tooling |
 | Db2 LUW | [Db2 support pack](extensions/db2) | Dedicated parser, maintenance, and quality rules |
-| DuckDB / File SQL | [DuckDB + Files pack](extensions/duckdb) | Local Excel, CSV, Parquet, and Avro workflows |
-| MySQL, MS SQL, Snowflake, Vertica | Separate optional packs | Companion runtimes with varying editor depth |
+| Files / DuckDB / SQLite | [Files support pack](extensions/duckdb) | Local Excel, CSV, Parquet, Avro, and file SQL workflows |
+| MS SQL Server | [MS SQL support pack](extensions/mssql) | Companion runtime with T-SQL authoring and shared result workflows |
+| MySQL | [MySQL support pack](extensions/mysql) | Companion runtime with dialect-aware authoring and metadata |
+| Microsoft Access | [Access support pack](extensions/access) | Local MDB/ACCDB reader and editing workflows |
 
-See the [Editor Capability Matrix](docs/EDITOR_CAPABILITY_MATRIX.md) for current parity details.
+See the [Editor Capability Matrix](https://justybase.github.io/justybase-vscode/guide/user/parser-lsp/) for current parity details.
 
 ## Requirements
 
@@ -164,8 +168,8 @@ See the [Editor Capability Matrix](docs/EDITOR_CAPABILITY_MATRIX.md) for current
 ## Support
 
 - [Report an issue](https://github.com/justybase/justybase-vscode/issues)
-- [Browse the documentation](docs/)
-- [Read the release process](docs/RELEASE_PROCESS.md)
+- [Browse the documentation](https://justybase.github.io/justybase-vscode/guide/)
+- [Read the release process](https://justybase.github.io/justybase-vscode/guide/developer/testing-and-docs/)
 
 ## License
 
@@ -186,6 +190,6 @@ npm run test:validate
 
 Optional support packs live under `extensions/`. Their build, test, and packaging commands are documented in the relevant pack README files. Version synchronization is managed by the repository workflow; do not use `npm version` locally.
 
-See [Release Process](docs/RELEASE_PROCESS.md), [Dialect Development](docs/DIALECT_DEVELOPMENT.md), and [Metadata Cache Contract](docs/METADATA_CACHE_CONTRACT.md).
+See [Release Process](https://justybase.github.io/justybase-vscode/guide/developer/testing-and-docs/), [Dialect Development](https://justybase.github.io/justybase-vscode/guide/legacy/dialect_development/), and [Metadata Cache Contract](https://justybase.github.io/justybase-vscode/guide/legacy/metadata_cache_contract/).
 
 </details>

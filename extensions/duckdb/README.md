@@ -1,5 +1,7 @@
 # JustyBase SQL Editor for DuckDB and Files
 
+Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/user/data-workspace/) for the Files/DuckDB workflow and capability boundaries.
+
 ![JustyBase SQL Editor for DuckDB and Files](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
 **Query local files and embedded DuckDB databases with SQL, directly inside VS Code.**

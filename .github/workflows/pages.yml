@@ -1,4 +1,4 @@
-name: Deploy GitHub Pages
+name: Build and deploy documentation
 
 on:
   push:
@@ -6,6 +6,33 @@ on:
       - master
     paths:
       - "docs/**"
+      - "scripts/build-docs.mjs"
+      - "scripts/docs-check.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "src/contracts/copilotTools/**"
+      - "src/activation/copilotRegistration.ts"
+      - "src/mcp/mcpToolCatalog.ts"
+      - "apps/api/src/server.ts"
+      - "packages/contracts/src/**"
+      - "extensions/*/package.json"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - "docs/**"
+      - "scripts/build-docs.mjs"
+      - "scripts/docs-check.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "src/contracts/copilotTools/**"
+      - "src/activation/copilotRegistration.ts"
+      - "src/mcp/mcpToolCatalog.ts"
+      - "apps/api/src/server.ts"
+      - "packages/contracts/src/**"
+      - "extensions/*/package.json"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -19,8 +46,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  docs-check:
+    name: Check documentation portal
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and check documentation
+        run: npm run docs:check
+
   deploy:
-    name: Publish marketing site
+    name: Publish GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: docs-check
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -33,10 +81,22 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Pages artifact
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build generated site
+        run: npm run docs:build
+
+      - name: Upload generated site
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment

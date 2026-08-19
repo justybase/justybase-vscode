@@ -1,5 +1,7 @@
 # JustyBase SQL Editor for Microsoft Access
 
+Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) for the Access capability matrix and [Data Workspace guide](https://justybase.github.io/justybase-vscode/guide/user/data-workspace/).
+
 ![JustyBase SQL Editor for Microsoft Access](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
 **Open, query, inspect, and carefully edit `.mdb` and `.accdb` files directly in VS Code.**
