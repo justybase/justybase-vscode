@@ -1,0 +1,70 @@
+name: PostgreSQL Integration
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  postgres-integration:
+    name: PostgreSQL Live Integration (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: justybase
+          POSTGRES_USER: justybase
+          POSTGRES_PASSWORD: justybase
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U justybase -d justybase"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-start-period=30s
+          --health-retries=18
+
+    env:
+      POSTGRES_LIVE_TEST_HOST: 127.0.0.1
+      POSTGRES_LIVE_TEST_PORT: "5432"
+      POSTGRES_LIVE_TEST_DATABASE: justybase
+      POSTGRES_LIVE_TEST_USER: justybase
+      POSTGRES_LIVE_TEST_PASSWORD: justybase
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/postgresql/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install PostgreSQL extension dependencies
+        working-directory: extensions/postgresql
+        run: npm ci
+
+      - name: Run PostgreSQL live integration tests
+        run: npm run test:postgres:integration
