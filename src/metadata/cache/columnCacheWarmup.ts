@@ -9,7 +9,6 @@ import {
     type RawColumnRowWithKeys,
 } from '../columnRowMapping';
 import { buildNetezzaCacheDatabasePart } from '../helpers';
-import { createNetezzaUserIdentifier } from '../../dialects/netezza/metadata/identifierUtils';
 import type { MetadataCache } from './MetadataCache';
 
 export interface TableColumnWarmupTarget {
@@ -55,13 +54,16 @@ export async function warmTableColumnsFromCatalog(
     const isNetezza = databaseKind === 'netezza'
         || (databaseKind === undefined && cache.isNetezzaConnection(connectionName));
     const cacheDatabase = isNetezza
-        ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(target.database).value)
+        // DDL synchronization supplies the runtime catalog context. Keep that
+        // exact value so a quoted lower-case database does not warm a second,
+        // upper-case-only cache layer.
+        ? buildNetezzaCacheDatabasePart(target.database)
         : target.database;
     const cacheSchema = isNetezza && target.schema !== undefined
-        ? createNetezzaUserIdentifier(target.schema).value
+        ? target.schema
         : target.schema;
     const cacheTable = isNetezza
-        ? createNetezzaUserIdentifier(target.table).value
+        ? target.table
         : target.table;
     const query = provider.buildColumnsWithKeysQuery(target.database, {
         schema: target.schema,

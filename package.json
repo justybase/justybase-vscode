@@ -243,6 +243,11 @@
         "icon": "$(pulse)"
       },
       {
+        "command": "netezza.showMetadataRefreshDetails",
+        "title": "JustyBase: Show Schema Refresh Details",
+        "icon": "$(list-selection)"
+      },
+      {
         "command": "netezza.showResultPanelPerformanceStats",
         "title": "JustyBase: Show Result Panel Performance Stats",
         "icon": "$(graph)"

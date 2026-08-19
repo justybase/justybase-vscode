@@ -3,7 +3,12 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { CachePrefetcher, QueryRunnerRawFn, MetadataPrefetchProgress } from '../metadata/prefetch';
+import {
+  CachePrefetcher,
+  QueryRunnerRawFn,
+  MetadataPrefetchProgress,
+  MetadataPrefetchRefreshDetails,
+} from '../metadata/prefetch';
 import type { MetadataPrefetchTarget } from '../metadata/cache/MetadataPrefetchTarget';
 import type { PrefetchLease } from '../metadata/diskStorage/metadataDiskStorage';
 import {
@@ -93,6 +98,47 @@ describe('CachePrefetcher', () => {
 
     it('should return false for untriggered connection prefetch', () => {
       expect(prefetcher.hasAllObjectsPrefetchTriggered(connName)).toBe(false);
+    });
+
+    it('keeps progress monotonic and exposes catalog SQL lifecycle details', async () => {
+      const progress: MetadataPrefetchProgress[] = [];
+      const details: MetadataPrefetchRefreshDetails[] = [];
+      prefetcher = new CachePrefetcher(
+        mockCache,
+        event => progress.push(event),
+        event => details.push(event),
+      );
+      prefetcher['beginRefreshDetails'](connName);
+
+      prefetcher['emitProgress']({
+        connectionName: connName,
+        stage: 'objects',
+        percent: 90,
+        message: 'Objects loaded',
+      });
+      prefetcher['emitProgress']({
+        connectionName: connName,
+        stage: 'columns',
+        percent: 80,
+        message: 'Fetching columns',
+      });
+      await prefetcher['runPrefetchQuery'](
+        connName,
+        async () => ({ columns: [], data: [] }),
+        'SELECT * FROM JUST_DATA.._V_OBJECT_DATA',
+        { source: 'connection-prefetch', kind: 'objects', database: 'JUST_DATA', reason: 'test' },
+      );
+
+      expect(progress.map(event => event.percent)).toEqual([90, 90]);
+      expect(progress.every(event => event.refreshId)).toBe(true);
+      expect(details[details.length - 1]?.queries).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          state: 'completed',
+          sql: 'SELECT * FROM JUST_DATA.._V_OBJECT_DATA',
+          rowsRead: 0,
+          context: expect.objectContaining({ kind: 'objects', database: 'JUST_DATA' }),
+        }),
+      ]));
     });
   });
 

@@ -4,6 +4,7 @@ import {
     searchResultToSchemaItem,
 } from '../metadata/searchIndex';
 import { MetadataCache } from '../metadataCache';
+import { buildNetezzaCacheDatabasePart } from '../metadata/helpers';
 
 describe('metadata/searchIndex', () => {
     let storage: MetadataCache;
@@ -53,6 +54,32 @@ describe('metadata/searchIndex', () => {
                 connectionName: 'conn1',
             }),
         );
+    });
+
+    it('never exposes an internal Netezza exact-cache marker in search results', () => {
+        const exactDatabase = buildNetezzaCacheDatabasePart('just_data');
+        storage.setTables(
+            'conn1',
+            `${exactDatabase}.admin`,
+            [{ label: 'dimaccount', objType: 'TABLE', kind: 6 }],
+            new Map(),
+        );
+        storage.setColumns(
+            'conn1',
+            `${exactDatabase}.admin.dimaccount`,
+            [{ ATTNAME: 'accountkey', FORMAT_TYPE: 'INTEGER', label: 'accountkey' }],
+        );
+
+        const tableResult = searchMetadataIndex(storage, 'dimaccount', { connectionName: 'conn1' })[0];
+        const columnResult = searchMetadataIndex(storage, 'accountkey', { connectionName: 'conn1' })[0];
+
+        expect(tableResult).toEqual(expect.objectContaining({
+            database: '"just_data"', schema: '"admin"', name: '"dimaccount"',
+        }));
+        expect(columnResult).toEqual(expect.objectContaining({
+            database: '"just_data"', schema: '"admin"', name: '"accountkey"', parent: '"dimaccount"',
+        }));
+        expect(JSON.stringify([tableResult, columnResult])).not.toContain('@NZEX@');
     });
 
     it('applySearchIndexFilters keeps only selected object type', () => {

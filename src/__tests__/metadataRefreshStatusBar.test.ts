@@ -33,6 +33,7 @@ describe('Metadata Refresh Status Bar', () => {
 
         expect(vscode.window.createStatusBarItem).toHaveBeenCalledWith(vscode.StatusBarAlignment.Right, 97);
         expect(item.tooltip).toBe('Metadata refresh progress');
+        expect(item.command).toBe('netezza.showMetadataRefreshDetails');
         expect(item.hide).toHaveBeenCalled();
         expect(mockContext.subscriptions).toContain(item);
     });

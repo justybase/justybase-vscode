@@ -5,7 +5,17 @@
 
 import type { MetadataStorageReader } from './cache/MetadataStorageReader';
 import { SearchResult } from './types';
-import { extractLabel, matchesConnection } from './helpers';
+import {
+    decodeNetezzaCacheDatabasePart,
+    extractLabel,
+    isNetezzaExactCachePart,
+    matchesConnection,
+    parseDbSchemaCacheKey,
+} from './helpers';
+import {
+    createNetezzaCatalogIdentifier,
+    formatNetezzaIdentifier,
+} from '../dialects/netezza/metadata/identifierUtils';
 
 export type CacheSearchMatchType = 'NAME' | 'OBJ_DESC' | 'COL_DESC' | 'TYPE';
 
@@ -34,22 +44,31 @@ function getColumnDescription(item: {
     return undefined;
 }
 
-function buildResultKey(result: SearchResult): string {
-    return [
+function formatNetezzaCatalogSearchIdentifier(value: string | undefined): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    return formatNetezzaIdentifier(createNetezzaCatalogIdentifier(value));
+}
+
+function buildResultKey(result: SearchResult, preserveCatalogIdentity = false): string {
+    const parts = [
         result.connectionName || '',
         result.database || '',
         result.schema || '',
         result.name,
         result.type,
         result.parent || '',
-    ].join('|').toUpperCase();
+    ];
+    return preserveCatalogIdentity ? parts.join('|') : parts.join('|').toUpperCase();
 }
 
 function upsertResult(
     resultsByKey: Map<string, SearchResult>,
     candidate: SearchResult,
+    preserveCatalogIdentity = false,
 ): void {
-    const key = buildResultKey(candidate);
+    const key = buildResultKey(candidate, preserveCatalogIdentity);
     const existing = resultsByKey.get(key);
     if (!existing) {
         resultsByKey.set(key, candidate);
@@ -87,9 +106,12 @@ export function searchCache(
 
         const cacheConnectionName = parts[0];
         const dbKey = parts[1];
-        const dbParts = dbKey.split('.');
-        const dbName = dbParts[0];
-        const schemaName = dbParts.length > 1 && dbParts[1] ? dbParts[1] : undefined;
+        // Cache markers are an internal Netezza implementation detail. Decode
+        // them before creating a user-facing search result or reveal payload.
+        const parsedLayer = parseDbSchemaCacheKey(dbKey);
+        const dbName = parsedLayer.dbName;
+        const schemaName = parsedLayer.schemaName;
+        const preserveCatalogIdentity = isNetezzaExactCachePart(dbKey);
 
         for (const item of entry.data) {
             const name = extractLabel(item);
@@ -114,14 +136,14 @@ export function searchCache(
             }
 
             upsertResult(resultsByKey, {
-                name,
+                name: preserveCatalogIdentity ? formatNetezzaCatalogSearchIdentifier(name)! : name,
                 type: objType,
-                database: dbName,
-                schema: resolvedSchema,
+                database: preserveCatalogIdentity ? formatNetezzaCatalogSearchIdentifier(dbName) : dbName,
+                schema: preserveCatalogIdentity ? formatNetezzaCatalogSearchIdentifier(resolvedSchema) : resolvedSchema,
                 connectionName: cacheConnectionName,
                 description: descriptionMatches ? description : undefined,
                 matchType: nameMatches ? 'NAME' : 'OBJ_DESC',
-            });
+            }, preserveCatalogIdentity);
         }
     }
 
@@ -135,9 +157,10 @@ export function searchCache(
         const cacheConnectionName = parts[0];
         const dbKey = parts[1];
         const dbParts = dbKey.split('.');
-        const dbName = dbParts[0];
+        const dbName = decodeNetezzaCacheDatabasePart(dbParts[0]);
         const schemaName = dbParts[1];
         const tableName = dbParts[2];
+        const preserveCatalogIdentity = isNetezzaExactCachePart(dbParts[0]);
 
         for (const item of entry.data) {
             const name = extractLabel(item) || item.ATTNAME;
@@ -163,16 +186,16 @@ export function searchCache(
             }
 
             upsertResult(resultsByKey, {
-                name,
+                name: preserveCatalogIdentity ? formatNetezzaCatalogSearchIdentifier(name)! : name,
                 type: 'COLUMN',
-                database: dbName,
-                schema: schemaName,
-                parent: tableName,
+                database: preserveCatalogIdentity ? formatNetezzaCatalogSearchIdentifier(dbName) : dbName,
+                schema: preserveCatalogIdentity ? formatNetezzaCatalogSearchIdentifier(schemaName) : schemaName,
+                parent: preserveCatalogIdentity ? formatNetezzaCatalogSearchIdentifier(tableName) : tableName,
                 connectionName: cacheConnectionName,
                 description: descriptionMatches ? description : undefined,
                 dataType: typeof dataType === 'string' ? dataType : undefined,
                 matchType,
-            });
+            }, preserveCatalogIdentity);
         }
     }
 

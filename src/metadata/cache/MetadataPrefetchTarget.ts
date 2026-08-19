@@ -12,6 +12,18 @@ import type {
 import type { MetadataStorageReader } from './MetadataStorageReader';
 import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
 
+/**
+ * Read-only completeness diagnosis for a persisted/in-memory metadata snapshot.
+ * Missing column layers are capped for presentation; missingColumnCount remains
+ * the full count.
+ */
+export interface MetadataSnapshotCompletenessReport {
+  complete: boolean;
+  missingStages: readonly string[];
+  missingColumnKeys: readonly string[];
+  missingColumnCount: number;
+}
+
 export interface MetadataPrefetchTarget extends MetadataStorageReader {
   /** Identifier case policy for catalog rows; only Netezza uses exact catalog identity here. */
   isNetezzaConnection?(connectionName: string): boolean;
@@ -57,6 +69,10 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   verifyStagesComplete(connectionName: string): boolean;
   /** True only when every prefetched table-like object has column metadata. */
   verifyCompleteSnapshot?(connectionName: string): boolean;
+  /** Detailed form of verifyCompleteSnapshot for refresh observability. */
+  getSnapshotCompletenessReport?(
+    connectionName: string,
+  ): MetadataSnapshotCompletenessReport;
   saveConnectionToDiskAfterPrefetch(
     connectionName: string,
     hasError: boolean, lease: PrefetchLease,

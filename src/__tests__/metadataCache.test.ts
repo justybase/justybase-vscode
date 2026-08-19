@@ -21,7 +21,12 @@ import {
 } from "../metadata/types";
 import { Logger } from "../utils/logger";
 import type { QueryRunnerRawFn } from "../metadata/prefetch";
-import { buildNetezzaDbSchemaCacheKey } from "../metadata/helpers";
+import {
+  buildDbSchemaCacheKey,
+  buildNetezzaCacheDatabasePart,
+  buildNetezzaDbSchemaCacheKey,
+} from "../metadata/helpers";
+import { buildColumnCacheKey } from "../metadata/columnRowMapping";
 
 // Mock vscode
 jest.mock("vscode");
@@ -78,6 +83,102 @@ describe("MetadataCache", () => {
       expect(netezzaCache.getTables("conn1", upperKey)).toBe(upperTable);
       expect(netezzaCache.getTables("conn1", lowerKey)).toBe(lowerTable);
       expect(netezzaCache.getTables("conn1", upperKey)).not.toBe(lowerTable);
+    });
+
+    it("revives an exact lower-case Netezza database when the catalog sees it again", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const exactDatabase = buildNetezzaCacheDatabasePart('just_data');
+
+      netezzaCache.markDatabaseDead('conn1', exactDatabase);
+      expect(netezzaCache.isDatabaseDead('conn1', exactDatabase)).toBe(true);
+
+      netezzaCache.setDatabases('conn1', [{ DATABASE: 'just_data', label: 'just_data', kind: 9 }]);
+      expect(netezzaCache.isDatabaseDead('conn1', exactDatabase)).toBe(false);
+    });
+
+    it("invalidates exact catalog layers without folding their schema or table names", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const database = 'just_data';
+      const schema = 'admin';
+      const table = 'lower_table';
+      const databaseKey = buildNetezzaCacheDatabasePart(database);
+      const tableLayer = buildDbSchemaCacheKey(databaseKey, schema);
+      const columnLayer = buildColumnCacheKey(databaseKey, schema, table, { preserveCase: true });
+
+      netezzaCache.setTables(
+        'conn1',
+        tableLayer,
+        [{ OBJNAME: table, SCHEMA: schema, objType: 'TABLE', label: table, kind: 6 }],
+        new Map(),
+      );
+      netezzaCache.setProcedures('conn1', tableLayer, [{ PROCEDURE: 'lower_proc', SCHEMA: schema, label: 'lower_proc' }]);
+      netezzaCache.setColumns('conn1', columnLayer, [{ ATTNAME: 'id', FORMAT_TYPE: 'INTEGER', label: 'id' }]);
+
+      netezzaCache.invalidateSchema('conn1', database, schema);
+
+      expect(netezzaCache.getTables('conn1', tableLayer)).toBeUndefined();
+      expect(netezzaCache.getProcedures('conn1', tableLayer)).toBeUndefined();
+      expect(netezzaCache.getColumns('conn1', columnLayer)).toBeUndefined();
+    });
+
+    it("accepts an exact persisted Netezza column layer during snapshot verification", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const database = 'just_data';
+      const schema = 'admin';
+      const table = 'lower_table';
+      const databaseKey = buildNetezzaCacheDatabasePart(database);
+      const schemaLayer = buildDbSchemaCacheKey(databaseKey, schema);
+      const aggregateLayer = buildDbSchemaCacheKey(databaseKey);
+      const columnLayer = buildColumnCacheKey(databaseKey, schema, table, { preserveCase: true });
+
+      netezzaCache.setDatabases('conn1', [{ DATABASE: database, label: database, kind: 9 }]);
+      netezzaCache.setSchemas('conn1', databaseKey, [{ SCHEMA: schema, label: schema, kind: 19 }]);
+      netezzaCache.setTables(
+        'conn1',
+        schemaLayer,
+        [{ OBJNAME: table, SCHEMA: schema, objType: 'TABLE', label: table, kind: 6 }],
+        new Map(),
+      );
+      netezzaCache.setProcedures('conn1', aggregateLayer, []);
+      netezzaCache['_columnLoaderState'].columnLayerKeysOnDisk.set('conn1', new Set([columnLayer]));
+
+      expect(netezzaCache.verifyCompleteSnapshot('conn1')).toBe(true);
+    });
+
+    it("reports every missing exact Netezza column layer for refresh diagnostics", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const database = "just_data";
+      const schema = "admin";
+      const table = "lower_table";
+      const databaseKey = buildNetezzaCacheDatabasePart(database);
+      const schemaLayer = buildDbSchemaCacheKey(databaseKey, schema);
+      const aggregateLayer = buildDbSchemaCacheKey(databaseKey);
+      const columnLayer = buildColumnCacheKey(databaseKey, schema, table, { preserveCase: true });
+
+      netezzaCache.setDatabases("conn1", [{ DATABASE: database, label: database, kind: 9 }]);
+      netezzaCache.setSchemas("conn1", databaseKey, [{ SCHEMA: schema, label: schema, kind: 19 }]);
+      netezzaCache.setTables(
+        "conn1",
+        schemaLayer,
+        [{ OBJNAME: table, SCHEMA: schema, objType: "TABLE", label: table, kind: 6 }],
+        new Map(),
+      );
+      netezzaCache.setProcedures("conn1", aggregateLayer, []);
+
+      expect(netezzaCache.getSnapshotCompletenessReport("conn1")).toEqual({
+        complete: false,
+        missingStages: [],
+        missingColumnKeys: [columnLayer],
+        missingColumnCount: 1,
+      });
     });
 
     it("should set and get databases", () => {

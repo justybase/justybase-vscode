@@ -3,7 +3,10 @@
  * Background data fetching logic for eager cache population
  */
 
-import type { MetadataPrefetchTarget } from './cache/MetadataPrefetchTarget';
+import type {
+    MetadataPrefetchTarget,
+    MetadataSnapshotCompletenessReport,
+} from './cache/MetadataPrefetchTarget';
 import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 
 /**
@@ -103,14 +106,24 @@ async function runPrefetchQuery(
     runQueryFn: QueryRunnerRawFn,
     query: string,
     context: Omit<MetadataQueryContext, 'connectionName'> & { source: MetadataRequestSource; kind: MetadataQueryKind },
+    lifecycle?: PrefetchQueryLifecycleReporter,
 ): Promise<QueryResult | undefined> {
-    return runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
-        runQueryFn(query, {
-            ...context,
-            connectionName,
-            queueWaitMs,
-        }),
-    );
+    const queryContext: MetadataQueryContext = { ...context, connectionName };
+    const queryId = lifecycle?.queued(query, queryContext);
+    try {
+        const result = await runWithMetadataQueryConcurrencyLimit(connectionName, async (queueWaitMs) => {
+            lifecycle?.started(queryId, queueWaitMs);
+            return runQueryFn(query, {
+                ...queryContext,
+                queueWaitMs,
+            });
+        });
+        lifecycle?.completed(queryId, result);
+        return result;
+    } catch (error: unknown) {
+        lifecycle?.failed(queryId, error);
+        throw error;
+    }
 }
 
 export type MetadataPrefetchProgressStage =
@@ -125,6 +138,8 @@ export type MetadataPrefetchProgressStage =
 
 export interface MetadataPrefetchProgress {
     connectionName: string;
+    /** Identifies one full refresh so UI progress never mixes two refreshes. */
+    refreshId?: string;
     stage: MetadataPrefetchProgressStage;
     percent: number;
     message: string;
@@ -133,6 +148,59 @@ export interface MetadataPrefetchProgress {
 }
 
 export type PrefetchProgressReporter = (progress: MetadataPrefetchProgress) => void;
+
+export type MetadataPrefetchQueryState =
+    | 'planned'
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'skipped';
+
+/** One generated catalog SQL statement visible in refresh diagnostics. */
+export interface MetadataPrefetchQueryActivity {
+    id: string;
+    state: MetadataPrefetchQueryState;
+    sql: string;
+    context: MetadataQueryContext;
+    queuedAt: number;
+    startedAt?: number;
+    completedAt?: number;
+    queueWaitMs?: number;
+    /** Rows returned by this catalog SQL, when it completed successfully. */
+    rowsRead?: number;
+    error?: string;
+}
+
+/** Snapshot state captured at the end of a metadata refresh. */
+export interface MetadataPrefetchSnapshotStatus {
+    complete: boolean;
+    missingStages: readonly string[];
+    missingColumnKeys: readonly string[];
+    missingColumnCount: number;
+}
+
+/** Live state for one full metadata refresh, retained until the next refresh. */
+export interface MetadataPrefetchRefreshDetails {
+    connectionName: string;
+    refreshId: string;
+    stage: MetadataPrefetchProgressStage;
+    percent: number;
+    message: string;
+    startedAt: number;
+    updatedAt: number;
+    queries: readonly MetadataPrefetchQueryActivity[];
+    snapshot?: MetadataPrefetchSnapshotStatus;
+}
+
+export type PrefetchRefreshDetailsReporter = (details: MetadataPrefetchRefreshDetails) => void;
+
+interface PrefetchQueryLifecycleReporter {
+    queued(query: string, context: MetadataQueryContext): string | undefined;
+    started(queryId: string | undefined, queueWaitMs: number): void;
+    completed(queryId: string | undefined, result: QueryResult | undefined): void;
+    failed(queryId: string | undefined, error: unknown): void;
+}
 
 /**
  * Convert QueryResult (columns[] + data[][]) to array of typed objects
@@ -150,6 +218,19 @@ function queryResultToRows<T extends Record<string, unknown>>(result: QueryResul
         });
         return obj as T;
     });
+}
+
+interface ActiveRefreshDetails {
+    connectionName: string;
+    refreshId: string;
+    stage: MetadataPrefetchProgressStage;
+    percent: number;
+    message: string;
+    startedAt: number;
+    updatedAt: number;
+    nextQueryId: number;
+    queries: Map<string, MetadataPrefetchQueryActivity>;
+    snapshot?: MetadataPrefetchSnapshotStatus;
 }
 
 interface RawObjectRow {
@@ -419,6 +500,8 @@ export class CachePrefetcher {
     private externalObjectsPrefetchTriggeredSet: Set<string> = new Set();
     private connectionPrefetchTriggered: Map<string, number> = new Map();
     private connectionPrefetchInProgress: Set<string> = new Set();
+    private readonly refreshDetailsByConnection = new Map<string, ActiveRefreshDetails>();
+    private refreshSequence = 0;
 
     /** Throttle: minimum ms between checkpoint saves during a prefetch. */
     private static readonly CHECKPOINT_THROTTLE_MS = 5_000;
@@ -427,18 +510,259 @@ export class CachePrefetcher {
 
     constructor(
         private cache: MetadataPrefetchTarget,
-        private reportProgress?: PrefetchProgressReporter
+        private reportProgress?: PrefetchProgressReporter,
+        private reportRefreshDetails?: PrefetchRefreshDetailsReporter,
     ) { }
 
     private emitProgress(progress: MetadataPrefetchProgress): void {
-        if (!this.reportProgress) {
-            return;
+        const details = this.refreshDetailsByConnection.get(progress.connectionName);
+        const percent = Math.max(0, Math.min(100, Math.round(progress.percent)));
+        const normalizedProgress = details
+            ? {
+                ...progress,
+                refreshId: details.refreshId,
+                // A single full refresh must never make its own percentage go
+                // backwards. Separate refreshes carry a different refreshId.
+                percent: progress.stage === 'start'
+                    ? percent
+                    : Math.max(details.percent, percent),
+            }
+            : { ...progress, percent };
+
+        if (details) {
+            details.stage = normalizedProgress.stage;
+            details.percent = normalizedProgress.percent;
+            details.message = normalizedProgress.message;
+            details.updatedAt = Date.now();
+            this.publishRefreshDetails(details);
         }
 
-        this.reportProgress({
-            ...progress,
-            percent: Math.max(0, Math.min(100, Math.round(progress.percent)))
+        this.reportProgress?.(normalizedProgress);
+    }
+
+    private beginRefreshDetails(connectionName: string): ActiveRefreshDetails {
+        const now = Date.now();
+        const details: ActiveRefreshDetails = {
+            connectionName,
+            refreshId: `${connectionName}:${now}:${++this.refreshSequence}`,
+            stage: 'start',
+            percent: 0,
+            message: 'Starting metadata refresh...',
+            startedAt: now,
+            updatedAt: now,
+            nextQueryId: 0,
+            queries: new Map(),
+        };
+        this.refreshDetailsByConnection.set(connectionName, details);
+        this.publishRefreshDetails(details);
+        return details;
+    }
+
+    private publishRefreshDetails(details: ActiveRefreshDetails): void {
+        this.reportRefreshDetails?.({
+            connectionName: details.connectionName,
+            refreshId: details.refreshId,
+            stage: details.stage,
+            percent: details.percent,
+            message: details.message,
+            startedAt: details.startedAt,
+            updatedAt: details.updatedAt,
+            queries: [...details.queries.values()].map(query => ({
+                ...query,
+                context: { ...query.context },
+            })),
+            snapshot: details.snapshot
+                ? {
+                    ...details.snapshot,
+                    missingStages: [...details.snapshot.missingStages],
+                    missingColumnKeys: [...details.snapshot.missingColumnKeys],
+                }
+                : undefined,
         });
+    }
+
+    private logRefreshQuery(activity: MetadataPrefetchQueryActivity): void {
+        const target = [activity.context.database, activity.context.schema, activity.context.table]
+            .filter((part): part is string => Boolean(part))
+            .join('.') || '-';
+        const timing = activity.completedAt && activity.startedAt
+            ? ` durationMs=${activity.completedAt - activity.startedAt}`
+            : '';
+        const queueWait = activity.queueWaitMs === undefined ? '' : ` queueWaitMs=${activity.queueWaitMs}`;
+        Logger.getInstance().debug(
+            `[MetadataRefresh] connection=${activity.context.connectionName ?? '-'} `
+            + `state=${activity.state} kind=${activity.context.kind ?? 'unknown'} target=${target}`
+            + `${queueWait}${timing} sql=${activity.sql}`,
+        );
+    }
+
+    private planRefreshQuery(
+        connectionName: string,
+        sql: string | undefined,
+        context: Omit<MetadataQueryContext, 'connectionName'>,
+    ): void {
+        if (!sql) {
+            return;
+        }
+        const details = this.refreshDetailsByConnection.get(connectionName);
+        if (!details) {
+            return;
+        }
+        const id = `${details.refreshId}:q${++details.nextQueryId}`;
+        const activity: MetadataPrefetchQueryActivity = {
+            id,
+            state: 'planned',
+            sql,
+            context: { ...context, connectionName },
+            queuedAt: Date.now(),
+        };
+        details.queries.set(id, activity);
+        details.updatedAt = Date.now();
+        this.publishRefreshDetails(details);
+    }
+
+    private getQueryLifecycleReporter(connectionName: string): PrefetchQueryLifecycleReporter | undefined {
+        const details = this.refreshDetailsByConnection.get(connectionName);
+        if (!details) {
+            return undefined;
+        }
+
+        const update = (
+            queryId: string | undefined,
+            updateActivity: (activity: MetadataPrefetchQueryActivity) => void,
+        ): void => {
+            if (!queryId) {
+                return;
+            }
+            const activity = details.queries.get(queryId);
+            if (!activity) {
+                return;
+            }
+            updateActivity(activity);
+            details.updatedAt = Date.now();
+            this.logRefreshQuery(activity);
+            this.publishRefreshDetails(details);
+        };
+
+        return {
+            queued: (sql, context) => {
+                const planned = [...details.queries.values()].find(activity =>
+                    activity.state === 'planned'
+                    && activity.sql === sql
+                    && activity.context.kind === context.kind
+                    && activity.context.database === context.database,
+                );
+                const queryId = planned?.id ?? `${details.refreshId}:q${++details.nextQueryId}`;
+                const activity = planned ?? {
+                    id: queryId,
+                    state: 'queued' as const,
+                    sql,
+                    context: { ...context },
+                    queuedAt: Date.now(),
+                };
+                activity.state = 'queued';
+                activity.context = { ...context };
+                activity.queuedAt = Date.now();
+                details.queries.set(queryId, activity);
+                details.updatedAt = Date.now();
+                this.logRefreshQuery(activity);
+                this.publishRefreshDetails(details);
+                return queryId;
+            },
+            started: (queryId, queueWaitMs) => update(queryId, activity => {
+                activity.state = 'running';
+                activity.startedAt = Date.now();
+                activity.queueWaitMs = queueWaitMs;
+            }),
+            completed: (queryId, result) => update(queryId, activity => {
+                activity.state = 'completed';
+                activity.completedAt = Date.now();
+                activity.rowsRead = result?.data?.length ?? 0;
+            }),
+            failed: (queryId, error) => update(queryId, activity => {
+                activity.state = 'failed';
+                activity.completedAt = Date.now();
+                activity.error = error instanceof Error ? error.message : String(error);
+            }),
+        };
+    }
+
+    private async runPrefetchQuery(
+        connectionName: string,
+        runQueryFn: QueryRunnerRawFn,
+        query: string,
+        context: Omit<MetadataQueryContext, 'connectionName'> & { source: MetadataRequestSource; kind: MetadataQueryKind },
+    ): Promise<QueryResult | undefined> {
+        return runPrefetchQuery(
+            connectionName,
+            runQueryFn,
+            query,
+            context,
+            this.getQueryLifecycleReporter(connectionName),
+        );
+    }
+
+    private planConnectionRefreshQueries(connectionName: string, databases: string[]): void {
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        for (const database of databases) {
+            const identifier = preserveCatalogIdentity
+                ? createNetezzaCatalogIdentifier(database)
+                : database;
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listSchemas(identifier), {
+                source: 'connection-prefetch', kind: 'schemas', database, reason: 'schema-prefetch',
+            });
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listTypeGroups(identifier), {
+                source: 'connection-prefetch', kind: 'type-groups', database, reason: 'type-group-prefetch',
+            });
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listTablesAndViews([identifier]), {
+                source: 'connection-prefetch', kind: 'objects', database, reason: 'object-catalog-prefetch',
+            });
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listExternalTables([identifier]), {
+                source: 'connection-prefetch', kind: 'external-objects', database, reason: 'external-object-discovery',
+            });
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listProcedures(identifier), {
+                source: 'connection-prefetch', kind: 'procedures', database, reason: 'procedure-prefetch',
+            });
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listColumnsWithKeys(identifier), {
+                source: 'connection-prefetch', kind: 'columns', database, reason: 'full-column-prefetch',
+            });
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listExternalColumnsWithKeys(identifier), {
+                source: 'connection-prefetch', kind: 'external-columns', database, reason: 'external-table-columns',
+            });
+        }
+    }
+
+    private finalizeRefreshDetails(connectionName: string): void {
+        const details = this.refreshDetailsByConnection.get(connectionName);
+        if (!details) {
+            return;
+        }
+        for (const activity of details.queries.values()) {
+            if (activity.state === 'planned') {
+                activity.state = 'skipped';
+                activity.completedAt = Date.now();
+            }
+        }
+        details.updatedAt = Date.now();
+        this.publishRefreshDetails(details);
+    }
+
+    private setRefreshSnapshotStatus(
+        connectionName: string,
+        report: MetadataSnapshotCompletenessReport | undefined,
+    ): void {
+        const details = this.refreshDetailsByConnection.get(connectionName);
+        if (!details || !report) {
+            return;
+        }
+        details.snapshot = {
+            complete: report.complete,
+            missingStages: [...report.missingStages],
+            missingColumnKeys: [...report.missingColumnKeys],
+            missingColumnCount: report.missingColumnCount,
+        };
+        details.updatedAt = Date.now();
+        this.publishRefreshDetails(details);
     }
 
     // ========== Column Prefetch for Schema ==========
@@ -518,7 +842,7 @@ export class CachePrefetcher {
             let mainCatalogFailure = false;
 
             try {
-                const result = await runPrefetchQuery(
+                const result = await this.runPrefetchQuery(
                     connectionName,
                     runQueryFn,
                     query,
@@ -546,7 +870,7 @@ export class CachePrefetcher {
                 && !this.cache.isDatabaseDead(connectionName, userDatabaseCachePart)
                 && hasExternalTableForDatabase(this.cache, connectionName, userDatabaseCachePart, userSchema)) {
                 try {
-                    const externalResult = await runPrefetchQuery(
+                    const externalResult = await this.runPrefetchQuery(
                         connectionName,
                         runQueryFn,
                         NZ_QUERIES.listExternalColumnsWithKeys(
@@ -675,7 +999,7 @@ export class CachePrefetcher {
 
                 if (!externalOnly) {
                     try {
-                        const result = await runPrefetchQuery(
+                        const result = await this.runPrefetchQuery(
                             connectionName,
                             runQueryFn,
                             NZ_QUERIES.listTablesAndViews([
@@ -712,7 +1036,7 @@ export class CachePrefetcher {
 
                 if (!mainCatalogFailure && !this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
                     try {
-                        const externalResult = await runPrefetchQuery(
+                        const externalResult = await this.runPrefetchQuery(
                             connectionName,
                             runQueryFn,
                             NZ_QUERIES.listExternalTables([
@@ -968,7 +1292,7 @@ export class CachePrefetcher {
         let mainCatalogFailure = false;
 
         try {
-            const result = await runPrefetchQuery(
+            const result = await this.runPrefetchQuery(
                 connectionName,
                 runQueryFn,
                 query,
@@ -1000,7 +1324,7 @@ export class CachePrefetcher {
             && !this.cache.isDatabaseDead(connectionName, cacheDatabase)
             && hasExternalTableForDatabase(this.cache, connectionName, cacheDatabase)) {
             try {
-                const externalResult = await runPrefetchQuery(
+                const externalResult = await this.runPrefetchQuery(
                     connectionName,
                     runQueryFn,
                     NZ_QUERIES.listExternalColumnsWithKeys(
@@ -1128,6 +1452,7 @@ export class CachePrefetcher {
         }
 
         try {
+            this.beginRefreshDetails(connectionName);
             if (isPrefetchStale) {
                 Logger.getInstance().info(`[CachePrefetcher] Prefetch stale for ${connectionName}, re-triggering`);
             }
@@ -1195,7 +1520,16 @@ export class CachePrefetcher {
                     percent: 100,
                     message: 'Metadata refresh complete'
                 });
+            } else {
+                this.emitProgress({
+                    connectionName,
+                    stage: 'error',
+                    percent: 100,
+                    message: 'Metadata refresh incomplete; inspect missing or failed catalog queries',
+                });
             }
+
+            this.finalizeRefreshDetails(connectionName);
 
             if (
                 prefetchSucceeded
@@ -1246,6 +1580,7 @@ export class CachePrefetcher {
             return false;
         }
         log.debug(`[CachePrefetcher] [TIMING] Stage 1/5 DATABASES: ${stage1Duration}ms — ${databases.length} databases found`);
+        this.planConnectionRefreshQueries(connectionName, databases);
         this.emitProgress({
             connectionName,
             stage: 'databases',
@@ -1360,8 +1695,11 @@ export class CachePrefetcher {
         });
         const stage5Duration = Date.now() - stage5Start;
 
-        const snapshotComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
+        const snapshotReport = this.cache.getSnapshotCompletenessReport?.(connectionName);
+        const snapshotComplete = snapshotReport?.complete
+            ?? this.cache.verifyCompleteSnapshot?.(connectionName)
             ?? this.cache.verifyStagesComplete(connectionName);
+        this.setRefreshSnapshotStatus(connectionName, snapshotReport);
         const stagesComplete = stage2Complete && stage3Complete && stage4Complete && stage5Complete;
 
         // ─── SUMMARY ───
@@ -1435,7 +1773,7 @@ export class CachePrefetcher {
 
         try {
             const query = NZ_QUERIES.LIST_DATABASES;
-            const result = await runPrefetchQuery(
+            const result = await this.runPrefetchQuery(
                 connectionName,
                 runQueryFn,
                 query,
@@ -1487,7 +1825,7 @@ export class CachePrefetcher {
                     ? createNetezzaCatalogIdentifier(dbName)
                     : dbName,
             );
-            const result = await runPrefetchQuery(
+            const result = await this.runPrefetchQuery(
                 connectionName,
                 runQueryFn,
                 query,
@@ -1543,7 +1881,7 @@ export class CachePrefetcher {
                     ? createNetezzaCatalogIdentifier(dbName)
                     : dbName,
             );
-            const result = await runPrefetchQuery(
+            const result = await this.runPrefetchQuery(
                 connectionName,
                 runQueryFn,
                 query,
@@ -1615,7 +1953,7 @@ export class CachePrefetcher {
             }
 
             const queryStart = Date.now();
-            const result = await runPrefetchQuery(
+            const result = await this.runPrefetchQuery(
                 connectionName,
                 runQueryFn,
                 query,
@@ -1790,7 +2128,7 @@ export class CachePrefetcher {
                 let mainCatalogFailure = false;
 
                 try {
-                    const result = await runPrefetchQuery(
+                    const result = await this.runPrefetchQuery(
                         connectionName,
                         runQueryFn,
                         query,
@@ -1822,7 +2160,7 @@ export class CachePrefetcher {
                     && !this.cache.isDatabaseDead(connectionName, cacheDatabase)
                     && hasExternalTableForDatabase(this.cache, connectionName, cacheDatabase)) {
                     try {
-                        const externalResult = await runPrefetchQuery(
+                        const externalResult = await this.runPrefetchQuery(
                             connectionName,
                             runQueryFn,
                             NZ_QUERIES.listExternalColumnsWithKeys(

@@ -267,7 +267,11 @@ function getConnectionKind(connectionManager: SchemaCommandsDependencies['connec
 
 function normalizeLookupValue(value: string | undefined, kind: DatabaseKind): string | undefined {
     const trimmed = value?.trim();
-    return trimmed ? stripIdentifierQuoting(trimmed, kind) : undefined;
+    // Netezza quoted identifiers are case-sensitive. Retain quote state until
+    // the Netezza-specific query/cache layer resolves the identifier.
+    return trimmed
+        ? (kind === 'netezza' ? trimmed : stripIdentifierQuoting(trimmed, kind))
+        : undefined;
 }
 
 function buildEscapedLikePattern(term: string): string {

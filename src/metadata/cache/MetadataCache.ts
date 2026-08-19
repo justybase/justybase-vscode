@@ -5,7 +5,10 @@
 
 import * as vscode from 'vscode';
 import { CachePrefetcher, DisposableQueryRunnerRawFn, QueryRunnerRawFn } from '../prefetch';
-import type { MetadataPrefetchProgress } from '../prefetch';
+import type {
+  MetadataPrefetchProgress,
+  MetadataPrefetchRefreshDetails,
+} from '../prefetch';
 import type { ConnectionManager } from '../../core/connectionManager';
 import { searchMetadataIndex, type SearchIndexOptions } from '../searchIndex';
 import {
@@ -24,8 +27,9 @@ import { Logger } from '../../utils/logger';
 import { CacheStatsTracker } from '../cacheStats';
 import { buildColumnCacheKey } from '../columnRowMapping';
 import {
+  buildDbSchemaCacheKey,
+  buildNetezzaCacheDatabasePart,
   buildNetezzaDatabaseCacheKey,
-  buildNetezzaDbSchemaCacheKey,
   decodeNetezzaCacheDatabasePart,
   extractLabel,
   isNetezzaExactCachePart,
@@ -40,7 +44,10 @@ import {
 import {
   supportsLegacyMetadataPrefetchForConnection,
 } from '../prefetchSupport';
-import type { MetadataPrefetchTarget } from './MetadataPrefetchTarget';
+import type {
+  MetadataPrefetchTarget,
+  MetadataSnapshotCompletenessReport,
+} from './MetadataPrefetchTarget';
 import { DEFAULT_CACHE_TTL_HOURS, MetadataStore } from './MetadataStore';
 import { MetadataLayerAccess } from './layerAccess';
 import {
@@ -110,6 +117,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
     new vscode.EventEmitter<MetadataPrefetchProgress>();
   readonly onDidPrefetchProgress: vscode.Event<MetadataPrefetchProgress> =
     this._onDidPrefetchProgress.event;
+  private _onDidPrefetchRefreshDetails =
+    new vscode.EventEmitter<MetadataPrefetchRefreshDetails>();
+  readonly onDidPrefetchRefreshDetails: vscode.Event<MetadataPrefetchRefreshDetails> =
+    this._onDidPrefetchRefreshDetails.event;
   private _onDidInvalidate = new vscode.EventEmitter<string | undefined>();
   readonly onDidInvalidate: vscode.Event<string | undefined> = this._onDidInvalidate.event;
   private _onDidNeedColumnRecovery = new vscode.EventEmitter<string>();
@@ -165,9 +176,15 @@ export class MetadataCache implements MetadataPrefetchTarget {
       isEntryValid: (timestamp) => this._store.isEntryValid(timestamp),
     });
 
-    this.prefetcher = new CachePrefetcher(this, (progress) => {
-      this._onDidPrefetchProgress.fire(progress);
-    });
+    this.prefetcher = new CachePrefetcher(
+      this,
+      (progress) => {
+        this._onDidPrefetchProgress.fire(progress);
+      },
+      (details) => {
+        this._onDidPrefetchRefreshDetails.fire(details);
+      },
+    );
   }
 
   isNetezzaConnection(connectionName: string): boolean {
@@ -353,12 +370,19 @@ export class MetadataCache implements MetadataPrefetchTarget {
     if (parts.length < 3) {
       return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, columnKey);
     }
-    const normalizedKey = buildColumnCacheKey(
-      buildNetezzaDatabaseCacheKey(parts[0]),
-      createNetezzaUserIdentifier(parts[1]).value,
-      createNetezzaUserIdentifier(parts.slice(2).join('.')).value,
-      { preserveCase: true },
-    );
+    const normalizedKey = isNetezzaExactCachePart(parts[0])
+      ? buildColumnCacheKey(
+        parts[0],
+        parts[1],
+        parts.slice(2).join('.'),
+        { preserveCase: true },
+      )
+      : buildColumnCacheKey(
+        buildNetezzaDatabaseCacheKey(parts[0]),
+        createNetezzaUserIdentifier(parts[1]).value,
+        createNetezzaUserIdentifier(parts.slice(2).join('.')).value,
+        { preserveCase: true },
+      );
     return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, normalizedKey);
   }
 
@@ -467,6 +491,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       }
     } finally {
       this._onDidPrefetchProgress.dispose();
+      this._onDidPrefetchRefreshDetails.dispose();
       this._onDidInvalidate.dispose();
       this._onDidNeedColumnRecovery.dispose();
       this._onDidExternalRefresh.dispose();
@@ -884,7 +909,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   ): void {
     const exactNetezza = this.isNetezzaConnection(connectionName);
     const cacheDatabase = exactNetezza
-      ? buildNetezzaDatabaseCacheKey(database)
+      ? buildNetezzaCacheDatabasePart(database)
       : database;
     const cacheOptions = exactNetezza ? { preserveCase: true } : undefined;
     const directKey = buildColumnCacheKey(
@@ -965,10 +990,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
   ): void {
     const exactNetezza = this.isNetezzaConnection(connectionName);
     const databaseKey = exactNetezza
-      ? buildNetezzaDatabaseCacheKey(dbName)
+      ? buildNetezzaCacheDatabasePart(dbName)
       : dbName;
     const normalizedSchema = exactNetezza && schemaName !== undefined
-      ? createNetezzaUserIdentifier(schemaName).value
+      ? schemaName
       : schemaName;
     invalidateSchemaCore(
       {
@@ -984,8 +1009,8 @@ export class MetadataCache implements MetadataPrefetchTarget {
       normalizedSchema,
       exactNetezza
         ? {
-            layerKey: buildNetezzaDbSchemaCacheKey(dbName, schemaName),
-            allSchemasKey: buildNetezzaDbSchemaCacheKey(dbName),
+            layerKey: buildDbSchemaCacheKey(databaseKey, normalizedSchema),
+            allSchemasKey: buildDbSchemaCacheKey(databaseKey),
             databaseKey,
           }
         : undefined,
@@ -1140,10 +1165,11 @@ export class MetadataCache implements MetadataPrefetchTarget {
     return onExternalCacheUpdate(this.diskLifecycleDeps, connectionNames);
   }
 
-  verifyStagesComplete(connectionName: string): boolean {
+  private getSnapshotMissingStages(connectionName: string): string[] {
+    const missingStages: string[] = [];
     const dbEntry = this._store.dbCache.get(connectionName);
     if (!dbEntry || dbEntry.data.length === 0) {
-      return false;
+      missingStages.push('databases');
     }
 
     const prefix = `${connectionName}|`;
@@ -1167,17 +1193,29 @@ export class MetadataCache implements MetadataPrefetchTarget {
       return false;
     };
 
-    return (
-      hasLayer(this._store.schemaCache)
-      && hasLayer(this._store.tableCache)
-      && hasProcedureLayer()
-    );
+    if (!hasLayer(this._store.schemaCache)) {
+      missingStages.push('schemas');
+    }
+    if (!hasLayer(this._store.tableCache)) {
+      missingStages.push('objects');
+    }
+    if (!hasProcedureLayer()) {
+      missingStages.push('procedures');
+    }
+    return missingStages;
   }
 
-  verifyCompleteSnapshot(connectionName: string, logMissing = true): boolean {
-    if (!this.verifyStagesComplete(connectionName)) {
-      return false;
-    }
+  verifyStagesComplete(connectionName: string): boolean {
+    return this.getSnapshotMissingStages(connectionName).length === 0;
+  }
+
+  getSnapshotCompletenessReport(
+    connectionName: string,
+  ): MetadataSnapshotCompletenessReport {
+    const missingStages = this.getSnapshotMissingStages(connectionName);
+    const missingColumnKeys: string[] = [];
+    let missingColumnCount = 0;
+    const maxReportedMissingColumnKeys = 100;
 
     const prefix = `${connectionName}|`;
     for (const [fullKey, entry] of this._store.tableCache) {
@@ -1208,24 +1246,56 @@ export class MetadataCache implements MetadataPrefetchTarget {
         const schema = typeof table.SCHEMA === 'string' && table.SCHEMA.trim().length > 0
           ? table.SCHEMA
           : schemaName;
-        const columnKey = buildColumnCacheKey(dbName, schema || undefined, tableName);
+        const columnKey = buildColumnCacheKey(
+          dbName,
+          schema || undefined,
+          tableName,
+          this.isNetezzaConnection(connectionName)
+            ? { preserveCase: true }
+            : undefined,
+        );
         const columnsLoadedInMemory = this._store.columnCache.has(`${connectionName}|${columnKey}`);
         // Column files are intentionally hydrated lazily after the metadata
         // manifest. A database-level file alone is not enough, though: it may
         // predate a newly discovered table. Require the exact persisted layer.
         const columnsAvailableOnDisk = this.hasColumnLayerOnDisk(connectionName, columnKey);
         if (!columnsLoadedInMemory && !columnsAvailableOnDisk) {
-          if (logMissing) {
-            Logger.getInstance().warn(
-              `[MetadataCache] Snapshot incomplete for ${connectionName}: missing columns for ${columnKey}`,
-            );
+          missingColumnCount += 1;
+          if (missingColumnKeys.length < maxReportedMissingColumnKeys) {
+            missingColumnKeys.push(columnKey);
           }
-          return false;
         }
       }
     }
 
-    return true;
+    return {
+      complete: missingStages.length === 0 && missingColumnCount === 0,
+      missingStages,
+      missingColumnKeys,
+      missingColumnCount,
+    };
+  }
+
+  verifyCompleteSnapshot(connectionName: string, logMissing = true): boolean {
+    const report = this.getSnapshotCompletenessReport(connectionName);
+    if (report.complete) {
+      return true;
+    }
+
+    if (logMissing && report.missingColumnCount > 0) {
+      Logger.getInstance().warn(
+        `[MetadataCache] Snapshot incomplete for ${connectionName}: missing columns for `
+        + `${report.missingColumnKeys[0] ?? '<unreported>'} `
+        + `(${report.missingColumnCount} missing column layer(s) total)`,
+      );
+    }
+    if (logMissing && report.missingStages.length > 0) {
+      Logger.getInstance().warn(
+        `[MetadataCache] Snapshot incomplete for ${connectionName}: missing stage(s) `
+        + report.missingStages.join(', '),
+      );
+    }
+    return false;
   }
 
   async checkpointSave(connectionName: string, lease?: import('../diskStorage/metadataDiskStorage').PrefetchLease): Promise<void> {

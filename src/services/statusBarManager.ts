@@ -176,6 +176,7 @@ export function createMetadataRefreshStatusBar(
 ): vscode.StatusBarItem {
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 97);
     statusBarItem.tooltip = 'Metadata refresh progress';
+    statusBarItem.command = 'netezza.showMetadataRefreshDetails';
     statusBarItem.hide();
     context.subscriptions.push(statusBarItem);
     return statusBarItem;
