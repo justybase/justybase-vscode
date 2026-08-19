@@ -98,6 +98,24 @@ describe("MetadataCache", () => {
       expect(netezzaCache.isDatabaseDead('conn1', exactDatabase)).toBe(false);
     });
 
+    it("clearing one connection resets its full-prefetch completion markers", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const prefetcher = netezzaCache["prefetcher"];
+      const marker = "ALL_OBJECTS|conn1";
+
+      prefetcher["allObjectsPrefetchTriggeredSet"].add(marker);
+      prefetcher["primaryObjectsPrefetchCompletedSet"].add(marker);
+      prefetcher["externalObjectsPrefetchTriggeredSet"].add(marker);
+
+      netezzaCache.clearConnectionMetadata("conn1");
+
+      expect(prefetcher.hasAllObjectsPrefetchTriggered("conn1")).toBe(false);
+      expect(prefetcher["primaryObjectsPrefetchCompletedSet"].has(marker)).toBe(false);
+      expect(prefetcher["externalObjectsPrefetchTriggeredSet"].has(marker)).toBe(false);
+    });
+
     it("invalidates exact catalog layers without folding their schema or table names", () => {
       const netezzaCache = new MetadataCache(mockContext, {
         getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),

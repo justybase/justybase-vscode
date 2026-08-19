@@ -166,6 +166,8 @@ export interface MetadataPrefetchQueryActivity {
     queuedAt: number;
     startedAt?: number;
     completedAt?: number;
+    /** Monotonic maximum duration observed while this SQL was running. */
+    maxDurationMs?: number;
     queueWaitMs?: number;
     /** Rows returned by this catalog SQL, when it completed successfully. */
     rowsRead?: number;
@@ -189,6 +191,11 @@ export interface MetadataPrefetchRefreshDetails {
     message: string;
     startedAt: number;
     updatedAt: number;
+    /** Set once the metadata refresh reaches a terminal state. */
+    completedAt?: number;
+    /** Monotonic maximum duration of any SQL statement in this refresh. */
+    longestSqlDurationMs: number;
+    longestSqlQueryId?: string;
     queries: readonly MetadataPrefetchQueryActivity[];
     snapshot?: MetadataPrefetchSnapshotStatus;
 }
@@ -228,6 +235,9 @@ interface ActiveRefreshDetails {
     message: string;
     startedAt: number;
     updatedAt: number;
+    completedAt?: number;
+    longestSqlDurationMs: number;
+    longestSqlQueryId?: string;
     nextQueryId: number;
     queries: Map<string, MetadataPrefetchQueryActivity>;
     snapshot?: MetadataPrefetchSnapshotStatus;
@@ -550,6 +560,7 @@ export class CachePrefetcher {
             message: 'Starting metadata refresh...',
             startedAt: now,
             updatedAt: now,
+            longestSqlDurationMs: 0,
             nextQueryId: 0,
             queries: new Map(),
         };
@@ -559,6 +570,7 @@ export class CachePrefetcher {
     }
 
     private publishRefreshDetails(details: ActiveRefreshDetails): void {
+        this.updateLongestSqlDuration(details);
         this.reportRefreshDetails?.({
             connectionName: details.connectionName,
             refreshId: details.refreshId,
@@ -567,6 +579,9 @@ export class CachePrefetcher {
             message: details.message,
             startedAt: details.startedAt,
             updatedAt: details.updatedAt,
+            completedAt: details.completedAt,
+            longestSqlDurationMs: details.longestSqlDurationMs,
+            longestSqlQueryId: details.longestSqlQueryId,
             queries: [...details.queries.values()].map(query => ({
                 ...query,
                 context: { ...query.context },
@@ -579,6 +594,24 @@ export class CachePrefetcher {
                 }
                 : undefined,
         });
+    }
+
+    private updateLongestSqlDuration(
+        details: ActiveRefreshDetails,
+        now = Date.now(),
+    ): void {
+        for (const activity of details.queries.values()) {
+            if (activity.startedAt === undefined) {
+                continue;
+            }
+            const end = activity.completedAt ?? now;
+            const durationMs = Math.max(0, end - activity.startedAt);
+            activity.maxDurationMs = Math.max(activity.maxDurationMs ?? 0, durationMs);
+            if (durationMs > details.longestSqlDurationMs) {
+                details.longestSqlDurationMs = durationMs;
+                details.longestSqlQueryId = activity.id;
+            }
+        }
     }
 
     private logRefreshQuery(activity: MetadataPrefetchQueryActivity): void {
@@ -743,6 +776,8 @@ export class CachePrefetcher {
                 activity.completedAt = Date.now();
             }
         }
+        details.completedAt = details.completedAt ?? Date.now();
+        this.updateLongestSqlDuration(details, details.completedAt);
         details.updatedAt = Date.now();
         this.publishRefreshDetails(details);
     }
@@ -1221,6 +1256,19 @@ export class CachePrefetcher {
     clearConnectionPrefetchTimestamp(connectionName: string): void {
         this.connectionPrefetchTriggered.delete(connectionName);
         this.lastPrefetchAttemptTime.delete(connectionName);
+    }
+
+    /**
+     * Clear per-connection completion markers after its metadata maps were
+     * discarded. Without this, the next refresh can incorrectly skip the
+     * object catalog because its old in-memory success marker survived.
+     */
+    clearConnectionPrefetchState(connectionName: string): void {
+        const key = `ALL_OBJECTS|${connectionName}`;
+        this.allObjectsPrefetchTriggeredSet.delete(key);
+        this.primaryObjectsPrefetchCompletedSet.delete(key);
+        this.externalObjectsPrefetchTriggeredSet.delete(key);
+        this.clearConnectionPrefetchTimestamp(connectionName);
     }
 
     /**

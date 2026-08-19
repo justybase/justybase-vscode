@@ -580,7 +580,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       }
     }
 
-    this.prefetcher.clearConnectionPrefetchTimestamp(connectionName);
+    this.prefetcher.clearConnectionPrefetchState(connectionName);
     this._stats.clearConnection(connectionName);
     Logger.getInstance().info(
       `[MetadataCache] Cleared in-memory metadata for connection '${connectionName}'`,

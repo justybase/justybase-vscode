@@ -7,8 +7,9 @@ jest.mock('vscode');
 describe('MetadataRefreshDetailsPanel', () => {
     it('opens a live panel and publishes executed, running and planned SQL state', () => {
         const postMessage = jest.fn();
+        const onDidReceiveMessage = jest.fn();
         const panel = {
-            webview: { html: '', postMessage },
+            webview: { html: '', postMessage, onDidReceiveMessage },
             reveal: jest.fn(),
             onDidDispose: jest.fn(),
             dispose: jest.fn(),
@@ -22,6 +23,7 @@ describe('MetadataRefreshDetailsPanel', () => {
             message: 'Fetching columns',
             startedAt: 1,
             updatedAt: 2,
+            longestSqlDurationMs: 0,
             queries: [
                 {
                     id: 'q1', state: 'completed', sql: 'SELECT DATABASE FROM _V_DATABASE',
@@ -37,7 +39,8 @@ describe('MetadataRefreshDetailsPanel', () => {
                 },
             ],
         };
-        const detailsPanel = new MetadataRefreshDetailsPanel();
+        const repeatFullRefresh = jest.fn();
+        const detailsPanel = new MetadataRefreshDetailsPanel(repeatFullRefresh);
 
         detailsPanel.update([details]);
         detailsPanel.show();
@@ -53,7 +56,13 @@ describe('MetadataRefreshDetailsPanel', () => {
         expect(panel.webview.html).toContain('duration-desc');
         expect(panel.webview.html).toContain('Longest single SQL');
         expect(panel.webview.html).toContain('slowQueryThresholdMs = 5000');
+        expect(panel.webview.html).toContain('Copy SQL');
+        expect(panel.webview.html).toContain('Repeat full metadata refresh');
         expect(postMessage).toHaveBeenCalledWith({ type: 'refresh-state', details: [details] });
         expect(panel.reveal).toHaveBeenCalledWith(vscode.ViewColumn.Beside, true);
+
+        const receiveMessage = onDidReceiveMessage.mock.calls[0]?.[0] as ((message: unknown) => void) | undefined;
+        receiveMessage?.({ type: 'repeat-full-refresh', connectionName: 'NZ' });
+        expect(repeatFullRefresh).toHaveBeenCalledWith('NZ');
     });
 });

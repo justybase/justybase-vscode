@@ -10,6 +10,10 @@ export class MetadataRefreshDetailsPanel implements vscode.Disposable {
     private panel: vscode.WebviewPanel | undefined;
     private latest: readonly MetadataPrefetchRefreshDetails[] = [];
 
+    constructor(
+        private readonly onRepeatFullRefresh?: (connectionName: string) => void,
+    ) { }
+
     update(details: readonly MetadataPrefetchRefreshDetails[]): void {
         this.latest = details;
         void this.panel?.webview.postMessage({ type: 'refresh-state', details: this.latest });
@@ -24,6 +28,26 @@ export class MetadataRefreshDetailsPanel implements vscode.Disposable {
                 { enableScripts: true, retainContextWhenHidden: true },
             );
             this.panel.webview.html = getMetadataRefreshDetailsHtml();
+            const webviewWithMessages = this.panel.webview as vscode.Webview & {
+                onDidReceiveMessage?: (
+                    listener: (message: unknown) => unknown,
+                ) => vscode.Disposable;
+            };
+            if (typeof webviewWithMessages.onDidReceiveMessage === 'function') {
+                webviewWithMessages.onDidReceiveMessage(message => {
+                    if (
+                        !message
+                        || typeof message !== 'object'
+                        || (message as { type?: unknown }).type !== 'repeat-full-refresh'
+                    ) {
+                        return;
+                    }
+                    const connectionName = (message as { connectionName?: unknown }).connectionName;
+                    if (typeof connectionName === 'string' && connectionName.trim()) {
+                        this.onRepeatFullRefresh?.(connectionName);
+                    }
+                });
+            }
             this.panel.onDidDispose(() => {
                 this.panel = undefined;
             });
@@ -63,6 +87,9 @@ function getMetadataRefreshDetailsHtml(): string {
   .query.failed { border-left-color: var(--vscode-errorForeground); }
   .query.slow { border-left-color: var(--vscode-editorWarning-foreground); }
   .query.skipped { opacity: .68; }
+  .query-header { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+  .copy-sql { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 3px; padding: 2px 7px; cursor: pointer; white-space: nowrap; }
+  .copy-sql:hover { background: var(--vscode-button-secondaryHoverBackground); }
   .meta { color: var(--vscode-descriptionForeground); font-size: .9em; }
   .state { font-weight: 600; text-transform: uppercase; margin-right: 8px; }
   pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); font-size: .9em; }
@@ -72,6 +99,8 @@ function getMetadataRefreshDetailsHtml(): string {
   .stat { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 7px 9px; }
   .stat-label { color: var(--vscode-descriptionForeground); font-size: .85em; }
   .stat-value { display: block; margin-top: 3px; font-weight: 600; }
+  .repeat-refresh { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; border-radius: 3px; padding: 4px 9px; cursor: pointer; margin-top: 8px; }
+  .repeat-refresh:hover { background: var(--vscode-button-hoverBackground); }
   .snapshot { color: var(--vscode-descriptionForeground); font-size: .9em; margin: 8px 0; }
   .snapshot.ok { color: var(--vscode-testing-iconPassed); }
   .snapshot.incomplete { color: var(--vscode-editorWarning-foreground); }
@@ -88,10 +117,12 @@ function getMetadataRefreshDetailsHtml(): string {
 <main id="content"><p class="empty">No schema refresh has started in this VS Code session.</p></main>
 <script>
   const content = document.getElementById('content');
+  const vscode = acquireVsCodeApi();
   const statusFilter = document.getElementById('status-filter');
   const sortOrder = document.getElementById('sort-order');
   const slowQueryThresholdMs = 5000;
   let currentDetails = [];
+  const longestSqlByRefreshId = new Map();
   const labels = {
     running: 'Running now', queued: 'Queued', planned: 'Planned next',
     completed: 'Executed', failed: 'Failed', skipped: 'Skipped'
@@ -102,7 +133,10 @@ function getMetadataRefreshDetailsHtml(): string {
   };
   const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
   const formatTime = (timestamp) => timestamp ? new Date(timestamp).toLocaleTimeString() : '';
-  const durationMs = (query, now) => query.startedAt ? (query.completedAt || now) - query.startedAt : 0;
+  const durationMs = (query, now) => Math.max(
+    query.maxDurationMs || 0,
+    query.startedAt ? Math.max(0, (query.completedAt || now) - query.startedAt) : 0,
+  );
   const formatDuration = (milliseconds) => milliseconds >= 1000
     ? (milliseconds / 1000).toFixed(milliseconds >= 10000 ? 1 : 2) + ' s'
     : milliseconds + ' ms';
@@ -116,8 +150,9 @@ function getMetadataRefreshDetailsHtml(): string {
     const target = [query.context.database, query.context.schema, query.context.table].filter(Boolean).join('.') || 'connection scope';
     const slow = isSlow(query, now) ? ' slow' : '';
     return '<article class="query ' + escapeHtml(query.state) + slow + '">'
-      + '<div><span class="state">' + escapeHtml(stateLabel[query.state] || query.state) + '</span>'
+      + '<div class="query-header"><div><span class="state">' + escapeHtml(stateLabel[query.state] || query.state) + '</span>'
       + '<span class="meta">' + escapeHtml(query.context.kind || 'catalog') + ' · ' + escapeHtml(target) + duration + queue + rows + '</span></div>'
+      + '<button class="copy-sql" type="button" data-copy-sql-id="' + escapeHtml(query.id) + '">Copy SQL</button></div>'
       + '<pre>' + escapeHtml(query.sql) + '</pre>'
       + (query.error ? '<div class="error">' + escapeHtml(query.error) + '</div>' : '')
       + '</article>';
@@ -142,7 +177,12 @@ function getMetadataRefreshDetailsHtml(): string {
     if (!snapshot) return '';
     if (snapshot.complete) return '<div class="snapshot ok">Snapshot complete: all prefetched object layers have columns.</div>';
     const parts = [];
-    if (snapshot.missingStages && snapshot.missingStages.length) parts.push('missing stages: ' + snapshot.missingStages.join(', '));
+    if (snapshot.missingStages && snapshot.missingStages.length) {
+      const stageText = snapshot.missingStages.map(stage => stage === 'objects'
+        ? 'objects (table/view catalog is empty or was not completed)'
+        : stage).join(', ');
+      parts.push('missing stages: ' + stageText);
+    }
     if (snapshot.missingColumnCount) parts.push('missing column layers: ' + snapshot.missingColumnCount);
     const examples = (snapshot.missingColumnKeys || []).map(key => '<li>' + escapeHtml(key) + '</li>').join('');
     return '<div class="snapshot incomplete">Snapshot incomplete' + (parts.length ? ' — ' + escapeHtml(parts.join('; ')) : '') + '</div>'
@@ -157,14 +197,24 @@ function getMetadataRefreshDetailsHtml(): string {
     const objectDuration = objectQueries.reduce((total, query) => total + durationMs(query, now), 0);
     const columnDuration = columnQueries.reduce((total, query) => total + durationMs(query, now), 0);
     const timed = queries.filter(query => query.startedAt);
-    const slowest = timed.reduce((current, query) => !current || durationMs(query, now) > durationMs(current, now) ? query : current, undefined);
-    const slowestValue = slowest
-      ? formatDuration(durationMs(slowest, now)) + ' · ' + (slowest.context.kind || 'catalog')
+    const runningLongest = timed.reduce((maximum, query) => Math.max(maximum, durationMs(query, now)), 0);
+    const longestDuration = Math.max(
+      refresh.longestSqlDurationMs || 0,
+      runningLongest,
+      longestSqlByRefreshId.get(refresh.refreshId) || 0,
+    );
+    longestSqlByRefreshId.set(refresh.refreshId, longestDuration);
+    const slowest = refresh.longestSqlQueryId
+      ? queries.find(query => query.id === refresh.longestSqlQueryId)
+      : timed.reduce((current, query) => !current || durationMs(query, now) > durationMs(current, now) ? query : current, undefined);
+    const slowestValue = longestDuration > 0
+      ? formatDuration(longestDuration) + (slowest ? ' · ' + (slowest.context.kind || 'catalog') : '')
       : '—';
+    const refreshElapsedMs = Math.max(0, (refresh.completedAt || now) - refresh.startedAt);
     const values = [
       ['Tables / views', objectRows + ' rows · ' + formatDuration(objectDuration)],
       ['Columns', columnRows + ' rows · ' + formatDuration(columnDuration)],
-      ['Refresh elapsed', formatDuration(now - refresh.startedAt)],
+      ['Refresh elapsed', formatDuration(refreshElapsedMs)],
       ['Longest single SQL', slowestValue],
     ];
     return '<div class="stats">' + values.map(value => '<div class="stat"><span class="stat-label">' + value[0] + '</span><span class="stat-value">' + escapeHtml(value[1]) + '</span></div>').join('') + '</div>';
@@ -182,6 +232,7 @@ function getMetadataRefreshDetailsHtml(): string {
         + '<span class="progress">' + escapeHtml(refresh.percent) + '%</span>'
         + '<span class="meta">' + escapeHtml(refresh.stage) + ' · updated ' + escapeHtml(formatTime(refresh.updatedAt)) + '</span>'
         + '<span class="message">' + escapeHtml(refresh.message) + '</span></div>'
+        + '<button class="repeat-refresh" type="button" data-repeat-full-refresh="' + escapeHtml(refresh.connectionName) + '">Repeat full metadata refresh</button>'
         + renderStats(refresh, allQueries)
         + renderSnapshot(refresh.snapshot)
         + renderGroup(queries, 'running')
@@ -195,6 +246,45 @@ function getMetadataRefreshDetailsHtml(): string {
   };
   statusFilter.addEventListener('change', () => render(currentDetails));
   sortOrder.addEventListener('change', () => render(currentDetails));
+  content.addEventListener('click', event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const copyButton = target.closest('[data-copy-sql-id]');
+    if (copyButton) {
+      const queryId = copyButton.getAttribute('data-copy-sql-id');
+      const query = currentDetails.flatMap(refresh => refresh.queries).find(entry => entry.id === queryId);
+      if (query) {
+        const button = copyButton;
+        const copied = () => {
+          button.textContent = 'Copied';
+          setTimeout(() => { button.textContent = 'Copy SQL'; }, 1400);
+        };
+        const fallbackCopy = () => {
+          const textarea = document.createElement('textarea');
+          textarea.value = query.sql;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          const copiedToClipboard = document.execCommand('copy');
+          textarea.remove();
+          if (copiedToClipboard) copied();
+        };
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(query.sql).then(copied, fallbackCopy);
+        } else {
+          fallbackCopy();
+        }
+      }
+      return;
+    }
+    const button = target.closest('[data-repeat-full-refresh]');
+    if (button) {
+      const connectionName = button.getAttribute('data-repeat-full-refresh');
+      if (connectionName) vscode.postMessage({ type: 'repeat-full-refresh', connectionName });
+    }
+  });
   setInterval(() => render(currentDetails), 1000);
   window.addEventListener('message', event => {
     if (event.data && event.data.type === 'refresh-state') {

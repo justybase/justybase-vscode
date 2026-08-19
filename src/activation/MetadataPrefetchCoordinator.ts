@@ -30,7 +30,9 @@ export class MetadataPrefetchCoordinator {
         private readonly logger: Logger,
     ) {
         this.metadataRefreshStatusBar = createMetadataRefreshStatusBar(context);
-        this.metadataRefreshDetailsPanel = new MetadataRefreshDetailsPanel();
+        this.metadataRefreshDetailsPanel = new MetadataRefreshDetailsPanel(connectionName => {
+            void vscode.commands.executeCommand('netezza.refreshSchema', connectionName);
+        });
     }
 
     register(context: vscode.ExtensionContext, metadataCacheInit: Promise<void>): void {
