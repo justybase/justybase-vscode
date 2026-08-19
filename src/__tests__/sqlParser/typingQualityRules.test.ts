@@ -57,6 +57,31 @@ describe("typing quality rules", () => {
     expect(diagnostic?.suggestedFix).toBe("CUSTOMER_ID");
   });
 
+  it("does not suggest a column from a different qualified table", () => {
+    const validator = new SqlValidator(
+      createMockSchemaProvider([
+        {
+          database: "DB",
+          name: "ORDERS",
+          columns: ["ID", "ORDER_TOTAL"],
+        },
+        {
+          database: "DB",
+          name: "CUSTOMERS",
+          columns: ["ID", "CUSTOMER_ID"],
+        },
+      ]),
+    );
+
+    const result = validator.validate(
+      "SELECT O.CUSTMER_ID FROM DB..ORDERS O JOIN DB..CUSTOMERS C ON O.ID = C.ID;",
+    );
+    const diagnostic = result.errors.find((error) => error.code === "SQL004");
+
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic?.suggestedFix).toBeUndefined();
+  });
+
   it("does not suggest SQL004 fixes for an oversized visible scope", () => {
     const columns = Array.from({ length: 257 }, (_, index) => `COLUMN_${index}`);
     const validator = new SqlValidator(

@@ -9,9 +9,15 @@ import {
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { TextDocuments } from "vscode-languageserver/node";
 import { getDatabaseSqlAuthoring } from "../../core/connectionFactory";
+import type { DatabaseKind } from "../../contracts/database";
 import type { MetadataBridge } from "../metadataBridge";
 import { runWithRequestBoundary } from "../requestBoundary";
-import { SqlLexer, buildStatementIndex, parseSqlStatements } from "../../sqlParser";
+import {
+  buildStatementIndex,
+  parseSqlStatements,
+  resolveSqlParsingRuntime,
+} from "../../sqlParser";
+import { stripIdentifierQuoting } from "../../utils/identifierUtils";
 import {
   buildTableQualificationCodeActions,
   getDiagnosticSuggestedFix,
@@ -136,6 +142,23 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
 
           const actions: (Command | CodeAction)[] = [];
           const text = document.getText();
+          const needsDialectAwareJoinFix = params.context.diagnostics.some(
+            (diagnostic) => {
+              const code =
+                typeof diagnostic.code === "string"
+                  ? diagnostic.code
+                  : String(diagnostic.code ?? "");
+              return code === "SQL051" || code === "SQL052";
+            },
+          );
+          let databaseKind: DatabaseKind = "netezza";
+          if (needsDialectAwareJoinFix && metadataBridge) {
+            const context = await metadataBridge.getContext(document.uri);
+            if (isCancellationRequested()) {
+              return null;
+            }
+            databaseKind = context.databaseKind ?? "netezza";
+          }
 
           for (const diagnostic of params.context.diagnostics) {
             const code =
@@ -162,7 +185,11 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
             }
 
             if (code === "SQL051") {
-              const crossJoin = findCrossJoinReplacement(text, document.offsetAt(range.start));
+              const crossJoin = findCrossJoinReplacement(
+                text,
+                document.offsetAt(range.start),
+                databaseKind,
+              );
               if (crossJoin) {
                 actions.push({
                   title: "Replace CROSS JOIN with explicit INNER JOIN",
@@ -185,7 +212,11 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
             }
 
             if (code === "SQL052") {
-              const aliasFix = findJoinAliasRewrite(text, document.offsetAt(range.start));
+              const aliasFix = findJoinAliasRewrite(
+                text,
+                document.offsetAt(range.start),
+                databaseKind,
+              );
               if (aliasFix) {
                 const changes = [
                   {
@@ -348,12 +379,8 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
 function findCrossJoinReplacement(
   text: string,
   diagnosticOffset: number,
+  databaseKind: DatabaseKind,
 ): { startOffset: number; endOffset: number } | undefined {
-  const parsed = parseSqlStatements({ sql: text, databaseKind: "netezza" });
-  if (!parsed.cst || parsed.lexResult.errors.length > 0 || parsed.actionableParserErrors.length > 0) {
-    return undefined;
-  }
-
   const statement = buildStatementIndex(text).statements.find(
     (candidate) => diagnosticOffset >= candidate.startOffset && diagnosticOffset <= candidate.endOffset,
   );
@@ -361,9 +388,26 @@ function findCrossJoinReplacement(
     return undefined;
   }
 
-  const tokens = SqlLexer.tokenize(statement.sql).tokens;
+  const runtime = resolveSqlParsingRuntime({ databaseKind });
+  const parsed = parseSqlStatements({
+    sql: statement.sql,
+    runtime,
+    databaseKind,
+  });
+  if (
+    !parsed.cst ||
+    parsed.lexResult.errors.length > 0 ||
+    parsed.actionableParserErrors.length > 0
+  ) {
+    return undefined;
+  }
+
+  const tokens = runtime.SqlLexer.tokenize(statement.sql).tokens;
   for (let index = 0; index < tokens.length - 1; index++) {
-    if (tokens[index].tokenType.name !== "Cross" || tokens[index + 1].tokenType.name !== "Join") {
+    if (
+      tokens[index].tokenType.name !== "Cross" ||
+      tokens[index + 1].tokenType.name !== "Join"
+    ) {
       continue;
     }
     const startOffset = statement.startOffset + (tokens[index].startOffset ?? 0);
@@ -381,7 +425,11 @@ interface JoinAliasRewrite {
   referenceRanges: Array<{ startOffset: number; endOffset: number }>;
 }
 
-function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAliasRewrite | undefined {
+function findJoinAliasRewrite(
+  text: string,
+  diagnosticOffset: number,
+  databaseKind: DatabaseKind,
+): JoinAliasRewrite | undefined {
   const statement = buildStatementIndex(text).statements.find(
     (candidate) => diagnosticOffset >= candidate.startOffset && diagnosticOffset <= candidate.endOffset,
   );
@@ -389,13 +437,14 @@ function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAlias
     return undefined;
   }
 
-  const lexResult = SqlLexer.tokenize(statement.sql);
+  const runtime = resolveSqlParsingRuntime({ databaseKind });
+  const lexResult = runtime.SqlLexer.tokenize(statement.sql);
   if (lexResult.errors.length > 0) {
     return undefined;
   }
 
   const tokens = lexResult.tokens;
-  const usedAliases = new Set<string>();
+  const reservedNames = new Set<string>();
   const candidates: Array<{
     tableName: string;
     insertOffset: number;
@@ -405,7 +454,9 @@ function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAlias
   const definitions: string[] = [];
 
   for (let index = 0; index < tokens.length; index++) {
-    if (tokens[index].tokenType.name !== "Join") {
+    const sourceKind = tokens[index].tokenType.name;
+    const isJoin = sourceKind === "Join";
+    if (sourceKind !== "From" && !isJoin) {
       continue;
     }
     let cursor = index + 1;
@@ -414,10 +465,12 @@ function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAlias
     }
 
     let lastIdentifier: typeof tokens[number] | undefined;
+    const relationIdentifiers: typeof tokens[number][] = [];
     while (cursor < tokens.length) {
       const tokenName = tokens[cursor].tokenType.name;
-      if (tokenName === "Identifier" || tokenName === "QuotedIdentifier") {
+      if (isIdentifierToken(tokenName)) {
         lastIdentifier = tokens[cursor++];
+        relationIdentifiers.push(lastIdentifier);
         continue;
       }
       if (tokenName === "Dot") {
@@ -432,23 +485,41 @@ function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAlias
 
     const sourceStart = tokens[index + 1]?.startOffset ?? 0;
     const sourceEnd = (lastIdentifier.endOffset ?? lastIdentifier.startOffset ?? 0) + 1;
-    const tableName = lastIdentifier.image.replace(/^"|"$/g, "");
+    const tableName = normalizeSqlIdentifier(lastIdentifier.image, databaseKind);
+    for (const relationIdentifier of relationIdentifiers) {
+      reservedNames.add(
+        normalizeSqlIdentifier(relationIdentifier.image, databaseKind).toUpperCase(),
+      );
+    }
     definitions.push(tableName.toUpperCase());
 
     const nextToken = tokens[cursor];
     if (nextToken?.tokenType.name === "As") {
       const aliasToken = tokens[cursor + 1];
       if (aliasToken && isIdentifierToken(aliasToken.tokenType.name)) {
-        usedAliases.add(aliasToken.image.replace(/^"|"$/g, "").toUpperCase());
+        reservedNames.add(
+          normalizeSqlIdentifier(aliasToken.image, databaseKind).toUpperCase(),
+        );
         continue;
       }
     }
     if (nextToken && isIdentifierToken(nextToken.tokenType.name)) {
-      usedAliases.add(nextToken.image.replace(/^"|"$/g, "").toUpperCase());
+      reservedNames.add(
+        normalizeSqlIdentifier(nextToken.image, databaseKind).toUpperCase(),
+      );
       continue;
     }
-    if (nextToken?.tokenType.name === "On" || nextToken?.tokenType.name === "Using") {
-      candidates.push({ tableName, insertOffset: statement.startOffset + sourceEnd, sourceStart, sourceEnd });
+    if (
+      isJoin &&
+      (nextToken?.tokenType.name === "On" ||
+        nextToken?.tokenType.name === "Using")
+    ) {
+      candidates.push({
+        tableName,
+        insertOffset: statement.startOffset + sourceEnd,
+        sourceStart,
+        sourceEnd,
+      });
     }
   }
 
@@ -461,31 +532,42 @@ function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAlias
       Math.abs(statement.startOffset + right.sourceStart - diagnosticOffset),
   );
   const candidate = candidates[0];
-  if (!candidate || definitions.filter((name) => name === candidate.tableName.toUpperCase()).length !== 1) {
+  if (
+    !candidate ||
+    definitions.filter(
+      (name) => name === candidate.tableName.toUpperCase(),
+    ).length !== 1
+  ) {
     return undefined;
   }
 
-  const base = candidate.tableName.replace(/[^A-Za-z0-9_]/g, "").charAt(0).toUpperCase() || "T";
-  let aliasName = `${base}1`;
-  for (let index = 2; usedAliases.has(aliasName.toUpperCase()); index++) {
-    aliasName = `${base}${index}`;
+  const base =
+    candidate.tableName.replace(/[^A-Za-z0-9_]/g, "").charAt(0).toUpperCase() ||
+    "T";
+  let suffix = 1;
+  let aliasName = base + suffix;
+  while (reservedNames.has(aliasName.toUpperCase())) {
+    suffix += 1;
+    aliasName = base + suffix;
   }
 
   const referenceRanges: Array<{ startOffset: number; endOffset: number }> = [];
   for (let index = 0; index < tokens.length - 1; index++) {
     const token = tokens[index];
-    if (!isIdentifierToken(token.tokenType.name) || tokens[index + 1].tokenType.name !== "Dot") {
+    if (
+      !isIdentifierToken(token.tokenType.name) ||
+      tokens[index + 1].tokenType.name !== "Dot"
+    ) {
       continue;
     }
     if (tokens[index - 1]?.tokenType.name === "Dot") {
       continue;
     }
-    const tokenName = token.image.replace(/^"|"$/g, "");
+    const tokenName = normalizeSqlIdentifier(token.image, databaseKind);
     if (
       tokenName.toUpperCase() === candidate.tableName.toUpperCase() &&
-      (token.startOffset ?? 0) < candidate.sourceStart ||
-      tokenName.toUpperCase() === candidate.tableName.toUpperCase() &&
-      (token.startOffset ?? 0) >= candidate.sourceEnd
+      ((token.startOffset ?? 0) < candidate.sourceStart ||
+        (token.startOffset ?? 0) >= candidate.sourceEnd)
     ) {
       referenceRanges.push({
         startOffset: statement.startOffset + (token.startOffset ?? 0),
@@ -498,5 +580,12 @@ function findJoinAliasRewrite(text: string, diagnosticOffset: number): JoinAlias
 }
 
 function isIdentifierToken(tokenName: string): boolean {
-  return tokenName === "Identifier" || tokenName === "QuotedIdentifier";
+  return tokenName === "Identifier" || tokenName.endsWith("Identifier");
+}
+
+function normalizeSqlIdentifier(
+  image: string,
+  databaseKind: DatabaseKind,
+): string {
+  return stripIdentifierQuoting(image, databaseKind);
 }

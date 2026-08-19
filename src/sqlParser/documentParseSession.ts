@@ -36,6 +36,10 @@ interface DocumentBinding {
   contentHash: string;
 }
 
+interface FullDocumentBinding extends DocumentBinding {
+  sqlLength: number;
+}
+
 interface CachedParseEntry extends DocumentBinding {
   parseKey: string;
   parseResult: SqlStatementsParseResult;
@@ -60,6 +64,7 @@ export class DocumentParseSession {
   private readonly scopeCache = new Map<string, Map<string, ParserSemanticScope>>();
   private readonly inFlight = new Map<string, InFlightParse>();
   private readonly documentBindings = new Map<string, DocumentBinding>();
+  private readonly fullDocumentBindings = new Map<string, FullDocumentBinding>();
   private parseCacheHits = 0;
   private parseCacheMisses = 0;
 
@@ -87,16 +92,25 @@ export class DocumentParseSession {
     }
     if (current?.contentHash === next.contentHash) {
       this.documentBindings.set(documentUri, next);
+      const fullDocument = this.fullDocumentBindings.get(documentUri);
+      if (fullDocument?.contentHash === next.contentHash) {
+        this.fullDocumentBindings.set(documentUri, {
+          ...fullDocument,
+          documentVersion,
+        });
+      }
       return;
     }
 
     this.documentBindings.set(documentUri, next);
+    this.fullDocumentBindings.delete(documentUri);
     this.parseCache.delete(documentUri);
     this.scopeCache.delete(documentUri);
   }
 
   invalidateDocument(documentUri: string): void {
     this.documentBindings.delete(documentUri);
+    this.fullDocumentBindings.delete(documentUri);
     this.parseCache.delete(documentUri);
     this.scopeCache.delete(documentUri);
     this.inFlight.delete(documentUri);
@@ -107,6 +121,7 @@ export class DocumentParseSession {
     this.scopeCache.clear();
     this.inFlight.clear();
     this.documentBindings.clear();
+    this.fullDocumentBindings.clear();
     this.parseCacheHits = 0;
     this.parseCacheMisses = 0;
   }
@@ -253,10 +268,14 @@ export class DocumentParseSession {
         entries = new Map();
         this.parseCache.set(request.documentUri, entries);
       }
+      const contentHash = simpleHash(request.sql);
+      this.trackFullDocumentBinding(request, contentHash);
       if (!entries.has(parseKey) && entries.size >= MAX_PARSE_ENTRIES_PER_DOCUMENT) {
-        const currentHash = this.documentBindings.get(request.documentUri)?.contentHash;
+        const fullDocument = this.fullDocumentBindings.get(request.documentUri);
         const evictableKey = Array.from(entries.keys()).find(
-          (key) => !currentHash || !key.endsWith(`|${currentHash}`),
+          (key) =>
+            !fullDocument ||
+            entries.get(key)?.contentHash !== fullDocument.contentHash,
         ) ?? entries.keys().next().value;
         if (evictableKey !== undefined) {
           entries.delete(evictableKey);
@@ -264,7 +283,7 @@ export class DocumentParseSession {
       }
       entries.set(parseKey, {
         documentVersion: request.documentVersion,
-        contentHash: simpleHash(request.sql),
+        contentHash,
         parseKey,
         parseResult,
       });
@@ -295,6 +314,24 @@ export class DocumentParseSession {
         databaseKind: request.databaseKind,
       })
     );
+  }
+
+  private trackFullDocumentBinding(
+    request: DocumentParseRequest,
+    contentHash: string,
+  ): void {
+    const current = this.fullDocumentBindings.get(request.documentUri);
+    if (
+      !current ||
+      current.documentVersion !== request.documentVersion ||
+      request.sql.length > current.sqlLength
+    ) {
+      this.fullDocumentBindings.set(request.documentUri, {
+        documentVersion: request.documentVersion,
+        contentHash,
+        sqlLength: request.sql.length,
+      });
+    }
   }
 
   private buildParseKey(request: DocumentParseRequest): string {

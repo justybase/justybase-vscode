@@ -444,11 +444,12 @@ const MAX_SQL004_SUGGESTION_COLUMNS = 256;
 function suggestVisibleColumn(
   host: SqlVisitorHost,
   columnName: string,
+  table?: TableInfo,
 ): string | undefined {
-  const visibleColumns = host
-    .getScopeBuilder()
-    .getAllVisibleTables()
-    .flatMap((table) => table.columns);
+  const visibleColumns = (table
+    ? [table]
+    : host.getScopeBuilder().getAllVisibleTables()
+  ).flatMap((visibleTable) => visibleTable.columns);
   if (
     visibleColumns.length === 0 ||
     visibleColumns.length > MAX_SQL004_SUGGESTION_COLUMNS
@@ -975,7 +976,7 @@ function validateColumnExists(
           token,
           "error",
           "SQL004",
-          suggestVisibleColumn(host, columnName),
+          suggestVisibleColumn(host, columnName, schemaTable),
         );
       }
       return;
@@ -988,7 +989,7 @@ function validateColumnExists(
       token,
       "error",
       "SQL004",
-      suggestVisibleColumn(host, columnName),
+      suggestVisibleColumn(host, columnName, table),
     );
     return;
   }
