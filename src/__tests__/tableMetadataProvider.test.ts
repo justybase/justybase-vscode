@@ -4,6 +4,7 @@ import {
     buildColumnMetadataQuery,
     buildTableCommentQuery,
     getTableMetadata,
+    fetchExternalTableColumnsIfAvailable,
     parseColumnMetadata,
     parseColumnRow,
     parseTableComment,
@@ -130,6 +131,33 @@ describe('tableMetadataProvider', () => {
             })
         );
         expect(parsed[1].isFk).toBe(true);
+    });
+
+    it('parses external column aliases with type and nullability intact', async () => {
+        queryResultToRowsMock.mockReturnValue([{
+            ATTNAME: 'EXTERNAL_ID',
+            FORMAT_TYPE: 'VARCHAR(30)',
+            IS_NOT_NULL: 1,
+            COLDEFAULT: null,
+            DESCRIPTION: 'External identifier',
+            IS_PK: 0,
+            IS_FK: 0,
+        }]);
+
+        const columns = await fetchExternalTableColumnsIfAvailable(
+            jest.fn().mockResolvedValue(dummyResult),
+            'DB1',
+            'PUBLIC',
+            'ET_ORDERS',
+        );
+
+        expect(columns).toEqual([
+            expect.objectContaining({
+                attname: 'EXTERNAL_ID',
+                formatType: 'VARCHAR(30)',
+                isNotNull: true,
+            }),
+        ]);
     });
 
     it('returns empty metadata on parsing errors', () => {

@@ -12,7 +12,12 @@ import { netezzaSqlAuthoring } from "./sql/authoring";
 import { netezzaDialectTraits } from "./traits";
 import { getOptionNumber } from "../../core/connectionUtils";
 
-const DEFAULT_CONNECTION_TIMEOUT_SECONDS = 5;
+/**
+ * NPS can take several seconds to accept a catalog connection while the
+ * appliance is busy. This is a TCP/handshake timeout, not SQL execution
+ * timeout; keep explicit user configuration authoritative.
+ */
+export const DEFAULT_NETEZZA_CONNECTION_TIMEOUT_SECONDS = 30;
 
 let _cachedAdvancedFeatures: DatabaseAdvancedFeatures | undefined;
 
@@ -59,7 +64,7 @@ export const netezzaDialect: DatabaseDialect = {
       connectionTimeout:
         configuredTimeout !== undefined && configuredTimeout >= 0
           ? configuredTimeout
-          : DEFAULT_CONNECTION_TIMEOUT_SECONDS,
+          : DEFAULT_NETEZZA_CONNECTION_TIMEOUT_SECONDS,
     } as DatabaseConnectionConfig);
   },
 };

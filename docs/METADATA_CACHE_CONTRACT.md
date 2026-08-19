@@ -27,7 +27,9 @@ Callers that refresh only one object type (TABLE, VIEW, NICKNAME, ALIAS) within 
 
 For `DB..` keys, `mergeAndSetTables` falls back to `getTablesAllSchemas` when the aggregate key is missing, so per-schema TABLE rows are preserved during a database-level VIEW refresh.
 
-**Prefetch** groups UNION results by schema and calls `setTables` per schema key with the full result set for that schema.
+**Prefetch** reads regular objects and external tables using separate catalog
+queries, merges/deduplicates them in TypeScript, then calls `setTables` per
+schema key with the full result set for that schema.
 
 **Schema explorer** refreshes one type at a time and merges with existing cache entries of other types.
 
@@ -78,7 +80,14 @@ Wipes all in-memory layers, bumps `_cacheGeneration` (cancels in-flight disk/col
 - **`DB..TABLE`** — name-only lookup index; first-match wins across schemas; winner updates when first-match schema is removed.
 - **Multi-schema** — refreshing schema S1 does not remove schema S2 entries (separate cache keys).
 - **Table-like types** — TABLE, VIEW, NICKNAME, ALIAS, SYNONYM, SEQUENCE, MATERIALIZED VIEW, SYSTEM VIEW, and related types share the `table` cache layer; explorer merge is per `objType`.
-- **Prefetch UNION (Netezza)** — stage 3 loads `NZ_PREFETCH_CATALOG_OBJECT_TYPES`: TABLE, VIEW, EXTERNAL TABLE, SYNONYM, SEQUENCE, MATERIALIZED VIEW, SYSTEM VIEW into `tableCache`. PROCEDURE uses the separate `procedure` layer (stage 4). Type groups are prefetched per DB (stage 2, after schemas).
+- **Split object prefetch (Netezza)** — stage 3 reads regular object types
+  (TABLE, VIEW, SYNONYM, SEQUENCE, MATERIALIZED VIEW, SYSTEM VIEW, and related
+  table-like types) from `_V_OBJECT_DATA`, then reads external tables from the
+  small `_V_EXTERNAL` companion query. The two results are normalized and
+  merged in the extension, never with `UNION ALL`, a correlated `NOT EXISTS`,
+  or an owner-only `_V_EXTOBJECT` join in Netezza. PROCEDURE uses the separate
+  `procedure` layer (stage 4). Type groups are prefetched per DB (stage 2,
+  after schemas).
 
 ## Host ↔ LSP synchronization
 
@@ -134,7 +143,7 @@ The manifest is written after metadata and column payloads, and the v2 index is 
 
 | Source | When `markViewsCatalogLoaded` runs |
 | --- | --- |
-| Prefetch UNION (`prefetchAllObjects`) | After every per-schema `setTables` (views may be zero) |
+| Split object prefetch (`prefetchAllObjects`) | After every per-schema `setTables` (views may be zero) |
 | Disk metadata hydrate | After each table layer `setTables` in `hydrateConnectionMetadataChunked` |
 | Live views fetch | After `MetadataProvider.getViews` writes merged VIEW rows |
 | Explorer partial `setTables` | Only when batch contains `objType === 'VIEW'` |
@@ -152,7 +161,7 @@ Without these flags, `getViews` may show **“Fetching views…”** even when t
 
 | Source | When catalog flags are set |
 | --- | --- |
-| Prefetch UNION (stage 3) | `markPrefetchObjectTypesCatalogLoaded` after each per-schema `setTables` |
+| Split object prefetch (stage 3) | `markPrefetchObjectTypesCatalogLoaded` after each per-schema `setTables` |
 | Prefetch procedures (stage 4) | `markProcedureCatalogLoaded` per database |
 | Disk metadata hydrate | Same marks after `hydrateConnectionMetadataChunked` |
 | Schema tree live fetch | `markObjectsCatalogLoaded` / `markProcedureCatalogLoaded` on write-back |

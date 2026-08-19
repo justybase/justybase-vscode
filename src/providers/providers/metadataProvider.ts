@@ -13,6 +13,7 @@ import { getTablesForScope, buildSchemaCacheKey } from '../../metadata/cache/sch
 import { DatabaseMetadata, SchemaMetadata, TableMetadata, ProcedureMetadata, ColumnMetadata } from '../../metadata/types';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
 import { PREFETCH_RETRY_BACKOFF_MS } from '../../metadata/prefetch';
+import { createConnectionScopedMetadataQueryRunner } from '../../metadata/connectionScopedMetadataQueryRunner';
 import { formatIdentifierForSql } from '../../utils/identifierUtils';
 import {
     METADATA_QUERY_TIMEOUT_SECONDS,
@@ -1110,7 +1111,16 @@ export class MetadataProvider {
                         void cache.prefetchColumnsForDatabase(connectionName, normalizedDbName, runMetadataQuery);
                         return;
                     }
-                    cache.triggerConnectionPrefetch(connectionName, runMetadataQuery);
+                    cache.triggerConnectionPrefetch(
+                        connectionName,
+                        createConnectionScopedMetadataQueryRunner({
+                            context,
+                            connectionManager,
+                            connectionName,
+                            maxRows: 1000000,
+                            timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                        }),
+                    );
                     return;
                 }
 
@@ -1163,7 +1173,16 @@ export class MetadataProvider {
         }
 
         if (!prefetchFresh) {
-            this.metadataCache.triggerConnectionPrefetch(connectionName, runMetadataQuery);
+            this.metadataCache.triggerConnectionPrefetch(
+                connectionName,
+                createConnectionScopedMetadataQueryRunner({
+                    context: this.context,
+                    connectionManager: this.connectionManager,
+                    connectionName,
+                    maxRows: 1000000,
+                    timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                }),
+            );
         }
     }
 

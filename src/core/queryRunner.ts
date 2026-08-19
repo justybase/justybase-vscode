@@ -32,7 +32,10 @@ export {
 } from "./queryCancellation";
 
 // Re-export single query execution functions
-export type { RunQueryRawOptions } from "./singleQueryExecutor";
+export type {
+  MetadataQuerySession,
+  RunQueryRawOptions,
+} from "./singleQueryExecutor";
 export {
   isRunQueryRawOptions,
   runQueryRaw,

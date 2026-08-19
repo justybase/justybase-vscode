@@ -28,6 +28,7 @@ import {
     supportsLegacyMetadataPrefetch,
     supportsLegacyMetadataPrefetchForConnection,
 } from '../metadata/prefetchSupport';
+import { createConnectionScopedMetadataQueryRunner } from '../metadata/connectionScopedMetadataQueryRunner';
 import { METADATA_QUERY_TIMEOUT_SECONDS } from '../metadata/metadataQueryLimiter';
 import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf/performanceEvents';
 import { getUxPerfSession } from '../services/perf/uxPerfSession';
@@ -575,15 +576,13 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                 schemaProvider.refresh();
 
                 if (supportsLegacyMetadataPrefetchForConnection(connectionManager, requestedConnectionName)) {
-                    metadataCache.triggerConnectionPrefetch(requestedConnectionName, (q) =>
-                        runQueryRaw({
+                    metadataCache.triggerConnectionPrefetch(
+                        requestedConnectionName,
+                        createConnectionScopedMetadataQueryRunner({
                             context,
-                            query: q,
-                            silent: true,
                             connectionManager,
                             connectionName: requestedConnectionName,
                             maxRows: 1000000,
-                            isUserQuery: false,
                             timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
                         }),
                     );
@@ -607,15 +606,13 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                 activeConnectionName &&
                 supportsLegacyMetadataPrefetch(connectionManager.getConnectionDatabaseKind(activeConnectionName))
             ) {
-                metadataCache.triggerConnectionPrefetch(activeConnectionName, (q) =>
-                    runQueryRaw({
+                metadataCache.triggerConnectionPrefetch(
+                    activeConnectionName,
+                    createConnectionScopedMetadataQueryRunner({
                         context,
-                        query: q,
-                        silent: true,
                         connectionManager,
                         connectionName: activeConnectionName,
                         maxRows: 1000000,
-                        isUserQuery: false,
                         timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
                     }),
                 );

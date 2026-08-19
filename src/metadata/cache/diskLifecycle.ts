@@ -16,6 +16,7 @@ import type { MetadataStore } from './MetadataStore';
 import {
   eagerPreloadColumnsIfEnabled,
   scheduleEagerColumnPreload,
+  setColumnLayerKeysOnDisk,
   type ColumnLoaderDeps,
   type ColumnLoaderState,
 } from './columnLoader';
@@ -106,6 +107,11 @@ export async function initializeDiskCache(deps: DiskLifecycleDeps): Promise<void
       return;
     }
     deps.state.columnsOnDisk.set(connectionName, [...manifest.columnDatabases]);
+    setColumnLayerKeysOnDisk(
+      deps.columnLoaderState,
+      connectionName,
+      manifest.columnLayerKeys ?? [],
+    );
     if (manifest.database.data.length > 0) {
       deps.cache.setDatabases(connectionName, manifest.database.data);
     }
@@ -181,6 +187,11 @@ async function hydrateConnectionMetadataFromDisk(
     }
 
     deps.state.columnsOnDisk.set(connectionName, [...loaded.columnDatabases]);
+    setColumnLayerKeysOnDisk(
+      deps.columnLoaderState,
+      connectionName,
+      loaded.columnLayerKeys,
+    );
     await hydrateConnectionMetadataChunked(deps.cache, connectionName, loaded, {
       deferIndexes: true,
       cacheGeneration: generation,
@@ -276,6 +287,11 @@ export async function onExternalCacheUpdate(
     );
 
     deps.state.columnsOnDisk.set(connectionName, [...loaded.columnDatabases]);
+    setColumnLayerKeysOnDisk(
+      deps.columnLoaderState,
+      connectionName,
+      loaded.columnLayerKeys,
+    );
     await hydrateConnectionMetadataChunked(deps.cache, connectionName, loaded, {
       deferIndexes: true,
       cacheGeneration: generation,

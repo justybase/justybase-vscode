@@ -250,6 +250,36 @@ describe('services/copilot/CopilotToolsHandler', () => {
         expect(result).toContain('FACT_SALES_2');
     });
 
+    it('falls back to the external-table catalog only when the main lookup is empty', async () => {
+        (runQueryRaw as jest.Mock).mockImplementation(async (_context: unknown, sql: string) => {
+            if (!sql.includes('_V_EXTERNAL')) {
+                return { columns: [], data: [] };
+            }
+            return {
+                columns: [
+                    { name: 'DBNAME' },
+                    { name: 'SCHEMA' },
+                    { name: 'TABLENAME' },
+                    { name: 'ATTNAME' },
+                    { name: 'FORMAT_TYPE' },
+                    { name: 'ATTNUM' },
+                    { name: 'DESCRIPTION' },
+                    { name: 'IS_PK' },
+                    { name: 'IS_FK' }
+                ],
+                data: [['JUST_DATA_2', 'ADMIN', 'ET_SALES', 'EXT_ID', 'VARCHAR(30)', 1, '', 0, 0]]
+            };
+        });
+
+        const result = await handler.getColumnsForTables(['JUST_DATA_2.ADMIN.ET_SALES']);
+
+        expect(runQueryRaw).toHaveBeenCalledTimes(2);
+        expect((runQueryRaw as jest.Mock).mock.calls[0][1]).not.toContain('_V_EXTERNAL');
+        expect((runQueryRaw as jest.Mock).mock.calls[1][1]).toContain('_V_EXTERNAL');
+        expect(result).toContain('ET_SALES');
+        expect(result).toContain('EXT_ID');
+    });
+
     it('should query multiple databases when tables span different databases', async () => {
         (runQueryRaw as jest.Mock).mockImplementation(async (_ctx: unknown, sql: string) => {
             if (sql.includes('JUST_DATA..')) {

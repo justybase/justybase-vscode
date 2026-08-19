@@ -147,6 +147,13 @@ describe('metadata/systemQueries', () => {
             expect(query).toContain('C.FORMAT_TYPE AS FULL_TYPE');
             expect(query).toContain('C.ATTNOTNULL::BOOL AS ATTNOTNULL');
             expect(query).toContain('C.COLDEFAULT');
+            expect(query).toContain('TRIM(E.TABLENAME) AS TABLENAME');
+            expect(query).toContain('TRIM(E.SCHEMA) AS SCHEMA');
+            expect(query).toContain('TRIM(E.DATABASE) AS DBNAME');
+            expect(query).toContain('C.FORMAT_TYPE AS FORMAT_TYPE');
+            expect(query).toContain('AS IS_NOT_NULL');
+            expect(query).toContain('0 AS IS_PK');
+            expect(query).toContain('0 AS IS_FK');
         });
     });
 
@@ -373,14 +380,14 @@ describe('metadata/systemQueries', () => {
     });
 
     describe('NZ_QUERIES.listExternalTables', () => {
-        it('should generate a separate external-only query from _V_EXTERNAL/_V_EXTOBJECT', () => {
+        it('should generate a separate external-only query from _V_EXTERNAL', () => {
             const query = NZ_QUERIES.listExternalTables(['MYDB']);
             expect(query).toContain('MYDB.._V_EXTERNAL');
-            expect(query).toContain('MYDB.._V_EXTOBJECT');
             expect(query).toContain("'EXTERNAL TABLE' AS OBJTYPE");
             expect(query).toContain('E1.RELID AS OBJID');
             expect(query).not.toContain('NOT EXISTS');
             expect(query).not.toContain('_V_OBJECT_DATA');
+            expect(query).not.toContain('_V_EXTOBJECT');
             expect(query).toContain('ORDER BY DBNAME, SCHEMA, OBJNAME');
         });
 
@@ -388,7 +395,7 @@ describe('metadata/systemQueries', () => {
             const query = NZ_QUERIES.listExternalTables(['MYDB']);
             expect(query).toContain('TRIM(E1.TABLENAME) AS OBJNAME');
             expect(query).toContain('TRIM(E1.DATABASE) AS DBNAME');
-            expect(query).toContain("TRIM(COALESCE(E2.OWNER, '')) AS OWNER");
+            expect(query).toContain("'' AS OWNER");
             expect(query).toContain("'' AS REFOBJNAME");
             expect(query).toContain("'' AS DESCRIPTION");
         });

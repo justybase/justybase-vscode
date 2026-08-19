@@ -56,12 +56,32 @@ export async function warmTableColumnsFromCatalog(
     });
 
     try {
-        const rows = await readRows(query);
+        let rows = await readRows(query);
         const columnKey = buildColumnCacheKey(target.database, target.schema, target.table);
-        const columns = groupColumnRowsByTableKey(rows, {
+        let columns = groupColumnRowsByTableKey(rows, {
             dbName: target.database,
             schemaName: target.schema,
         }).get(columnKey);
+
+        // Some NPS versions omit EXTERNAL TABLE entries from
+        // _V_OBJECT_DATA. The main query intentionally stays lean, so only
+        // when it found no target columns do we consult the separate external
+        // catalog query. Its aliases match RawColumnRowWithKeys.
+        if ((!columns || columns.length === 0)
+            && typeof provider.buildExternalTableColumnsQuery === 'function') {
+            const externalQuery = provider.buildExternalTableColumnsQuery(
+                target.database,
+                target.schema ?? '',
+                target.table,
+            );
+            if (externalQuery) {
+                rows = await readRows(externalQuery);
+                columns = groupColumnRowsByTableKey(rows, {
+                    dbName: target.database,
+                    schemaName: target.schema,
+                }).get(columnKey);
+            }
+        }
 
         if (!columns || columns.length === 0) {
             logWithFallback(

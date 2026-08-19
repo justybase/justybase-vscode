@@ -2,7 +2,7 @@
  * Thin delegation wrappers for CachePrefetcher and disk prefetch locks.
  */
 
-import type { QueryRunnerRawFn } from '../prefetch';
+import type { DisposableQueryRunnerRawFn, QueryRunnerRawFn } from '../prefetch';
 import type { CachePrefetcher } from '../prefetch';
 import type { MetadataDiskStorage } from '../diskStorage';
 import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
@@ -37,7 +37,7 @@ export async function prefetchAllObjects(
   runQueryFn: QueryRunnerRawFn,
   databases?: string[],
 ): Promise<void> {
-  return deps.prefetcher.prefetchAllObjects(
+  await deps.prefetcher.prefetchAllObjects(
     connectionName,
     runQueryFn,
     false,
@@ -114,7 +114,7 @@ export async function releasePrefetchLock(
 export function triggerConnectionPrefetch(
   deps: PrefetchDelegationDeps,
   connectionName: string,
-  runQueryFn: QueryRunnerRawFn,
+  runQueryFn: DisposableQueryRunnerRawFn,
 ): void {
   deps.prefetcher.triggerConnectionPrefetch(connectionName, runQueryFn);
 }

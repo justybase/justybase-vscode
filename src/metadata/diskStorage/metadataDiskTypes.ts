@@ -62,6 +62,8 @@ export interface SerializedConnectionManifest {
     connectionFingerprint: string;
     database: SerializedLayerEntry<DatabaseMetadata>;
     columnDatabases: string[];
+    /** Exact column cache layers persisted across the column database files. */
+    columnLayerKeys?: string[];
     isComplete?: boolean;
 }
 
@@ -110,6 +112,8 @@ export interface V2ConnectionIndexEntry {
     prefetchCompletedAt: number;
     connectionFingerprint: string;
     columnDatabases: string[];
+    /** Exact column cache layers persisted across the column database files. */
+    columnLayerKeys?: string[];
     isComplete?: boolean;
 }
 
@@ -143,6 +147,7 @@ export function isV3DiskIndex(value: unknown): value is V3DiskIndex {
 /** Metadata loaded from disk without column layers (lazy column load). */
 export interface LoadedConnectionMetadata extends SerializedConnectionMetadata {
     columnDatabases: string[];
+    columnLayerKeys: string[];
 }
 
 /** Manifest loaded from disk without heavy metadata layers. */

@@ -16,6 +16,8 @@ import type { CachePrefetcher } from '../prefetch';
 
 export interface ColumnLoaderState {
   columnsOnDisk: Map<string, string[]>;
+  /** Exact normalized layer keys advertised by persisted column files. */
+  columnLayerKeysOnDisk: Map<string, Set<string>>;
   columnsLoadedDatabases: Map<string, Set<string>>;
   columnLoadPromises: Map<string, Promise<void>>;
   columnLayerLoadPromises: Map<string, Promise<void>>;
@@ -53,6 +55,50 @@ export function hasColumnsOnDisk(
   databaseName: string,
 ): boolean {
   return resolveOnDiskDatabaseName(state, connectionName, databaseName) !== undefined;
+}
+
+function normalizeColumnLayerKey(layerKey: string): string {
+  return layerKey.trim().toUpperCase();
+}
+
+export function setColumnLayerKeysOnDisk(
+  state: ColumnLoaderState,
+  connectionName: string,
+  layerKeys: readonly string[],
+): void {
+  if (layerKeys.length === 0) {
+    state.columnLayerKeysOnDisk.delete(connectionName);
+    return;
+  }
+  state.columnLayerKeysOnDisk.set(
+    connectionName,
+    new Set(layerKeys.map(normalizeColumnLayerKey)),
+  );
+}
+
+export function hasColumnLayerOnDisk(
+  state: ColumnLoaderState,
+  connectionName: string,
+  layerKey: string,
+): boolean {
+  return state.columnLayerKeysOnDisk
+    .get(connectionName)
+    ?.has(normalizeColumnLayerKey(layerKey)) ?? false;
+}
+
+function rememberColumnFileLayerKeys(
+  state: ColumnLoaderState,
+  connectionName: string,
+  columnFile: SerializedColumnFile,
+): void {
+  const keys = columnFile.schemaVersion === 3
+    ? Object.keys(columnFile.layers)
+    : Object.keys(columnFile.column);
+  const existing = state.columnLayerKeysOnDisk.get(connectionName) ?? new Set<string>();
+  for (const key of keys) {
+    existing.add(normalizeColumnLayerKey(key));
+  }
+  state.columnLayerKeysOnDisk.set(connectionName, existing);
 }
 
 export function isColumnsLoaded(
@@ -272,6 +318,7 @@ async function loadColumnLayerFromDisk(
       columnFile = loaded;
       deps.state.parsedColumnFileCache.set(fileCacheKey, columnFile);
     }
+    rememberColumnFileLayerKeys(deps.state, connectionName, columnFile);
 
     const resolvedLayerKey =
       resolveColumnLayerKeyInFile(columnFile, layerKey) ?? layerKey;
@@ -326,6 +373,7 @@ async function loadColumnsForDatabase(
 
   const fileCacheKey = `${connectionName}|${databaseName.toUpperCase()}`;
   deps.state.parsedColumnFileCache.set(fileCacheKey, columnFile);
+  rememberColumnFileLayerKeys(deps.state, connectionName, columnFile);
   hydrateColumnsFromDatabase(deps.cache, connectionName, columnFile);
   await yieldToEventLoop();
   let loaded = deps.state.columnsLoadedDatabases.get(connectionName);
@@ -361,6 +409,20 @@ function markColumnDiskLoadFailed(
   }
   const fileCacheKey = `${connectionName}|${databaseName.toUpperCase()}`;
   deps.state.parsedColumnFileCache.delete(fileCacheKey);
+  const layerKeys = deps.state.columnLayerKeysOnDisk.get(connectionName);
+  if (layerKeys) {
+    const upperDb = databaseName.toUpperCase();
+    const remaining = new Set(
+      [...layerKeys].filter((layerKey) =>
+        extractDatabaseFromLayerKey(layerKey).toUpperCase() !== upperDb,
+      ),
+    );
+    if (remaining.size === 0) {
+      deps.state.columnLayerKeysOnDisk.delete(connectionName);
+    } else {
+      deps.state.columnLayerKeysOnDisk.set(connectionName, remaining);
+    }
+  }
   deps.prefetcher.clearConnectionPrefetchTimestamp(connectionName);
   Logger.getInstance().info(
     `[MetadataCache] Column disk load failed for ${connectionName}/${databaseName}; prefetch freshness cleared for DB recovery`,
