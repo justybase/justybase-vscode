@@ -37,7 +37,7 @@ Browse database objects, write SQL, and inspect results without leaving VS Code.
 
 ### Netezza-aware SQL authoring
 
-![Netezza SQL validation with Copilot-assisted correction](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/sql-validation-and-copilot.png)
+![Netezza SQL diagnostic with a quick fix in JustyBase](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/gifs/quick_fix.gif)
 
 Completion, semantic context, snippets, formatting, and parser-backed diagnostics help catch mistakes before execution.
 
@@ -55,7 +55,7 @@ Turn result sets into interactive charts and compare patterns without leaving th
 
 ### Build queries visually
 
-![Visual Query Builder with joined sources, selected columns, filter and sort controls, and SQL preview](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/visual_query_builder.png)
+![Visual Query Builder with joined sources, selected columns, filter and sort controls, and SQL preview](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/gifs/query_builder.gif)
 
 Compose multi-table `SELECT` queries by dragging tables or views onto a canvas, connecting columns to create joins, selecting fields, and adding filters, sorting, aggregates, `GROUP BY`, `HAVING`, and `LIMIT` clauses. Open the generated SQL in the editor, copy it, or run it immediately.
 
