@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { duckdbDialect } from '../../extensions/duckdb/src/duckdbDialect';
 import { fileDialect } from '../../extensions/duckdb/src/fileDialect';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
+import type { RunQueryRawOptions } from '../core/queryRunner';
 import type { ConnectionManager } from '../core/connectionManager';
 import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
 import type { MetadataCache } from '../metadataCache';
@@ -61,8 +62,8 @@ describe('MetadataProvider DuckDB column lookup', () => {
         runQueryRawMock = runQueryRaw as jest.MockedFunction<typeof runQueryRaw>;
         queryResultToRowsMock = queryResultToRows as jest.MockedFunction<typeof queryResultToRows>;
 
-        runQueryRawMock.mockImplementation(async (...args: Parameters<typeof runQueryRaw>) => {
-            return { query: args[1] } as unknown as RunQueryRawResult;
+        runQueryRawMock.mockImplementation(async (options: unknown) => {
+            return { query: (options as RunQueryRawOptions).query } as unknown as RunQueryRawResult;
         });
 
         queryResultToRowsMock.mockImplementation((result: unknown) => {
@@ -87,7 +88,7 @@ describe('MetadataProvider DuckDB column lookup', () => {
 
         expect(columns.map(column => column.ATTNAME)).toEqual(['id', 'name']);
 
-        const executedQuery = compactSql(runQueryRawMock.mock.calls[0][1]);
+        const executedQuery = compactSql((runQueryRawMock.mock.calls[0][0] as RunQueryRawOptions).query);
         expect(executedQuery).toContain('column_name AS ATTNAME');
         expect(executedQuery).toContain('data_type AS FORMAT_TYPE');
         expect(executedQuery).toContain("table_catalog = 'justybase-duckdb-bridge'");
@@ -117,7 +118,7 @@ describe('MetadataProvider DuckDB column lookup', () => {
         );
 
         expect(columns.map(column => column.ATTNAME)).toEqual(['id', 'name']);
-        const executedQuery = compactSql(runQueryRawMock.mock.calls[0][1]);
+        const executedQuery = compactSql((runQueryRawMock.mock.calls[0][0] as RunQueryRawOptions).query);
         expect(executedQuery).toContain("table_catalog = 'memory'");
         expect(executedQuery).toContain("table_schema = 'main'");
         expect(executedQuery).toContain(`table_name = '${fullPath}'`);
