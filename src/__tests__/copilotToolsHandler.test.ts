@@ -1,3 +1,5 @@
+jest.unmock('chevrotain');
+
 import { CopilotToolsHandler } from '../services/copilot/CopilotToolsHandler';
 import { CopilotExplainTuningTools } from '../services/copilot/tools/CopilotExplainTuningTools';
 import { runQuery, runQueryRaw, runExplainQuery, queryResultToRows } from '../core/queryRunner';

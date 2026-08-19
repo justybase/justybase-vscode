@@ -2,14 +2,16 @@ import type { TanStackCellContext } from '../shared/tanstackShims.js';
 import type {
     QueryHistoryEntryDto,
     QueryHistoryExtendedStateSnapshot,
+    QueryHistoryHostToWebviewMessage,
     QueryHistoryMessageSource,
     QueryHistoryParameterDto,
     QueryHistoryRecoveryActionType,
     QueryHistoryStatsDto,
     QueryHistoryUiState,
+    QueryHistoryWebviewToHostMessage,
     QueryExecutionStatus,
 } from './hostContracts.js';
-import { postToHost, vscode, asHostMessage } from './protocol.js';
+import { postToHost as postProtocolMessage, vscode, asHostMessage } from './protocol.js';
 import { showParameterDialog as openParameterDialog } from './parameterDialog.js';
 import { iconHistory, iconLoading, iconWarning } from './icons.js';
 import {
@@ -71,6 +73,10 @@ let allHistory: QueryHistoryEntryDto[] = [];
 let selectedEntryId: string | null = null;
 let pendingQuickRerunId: string | null = null;
 let currentUiState: QueryHistoryUiState | null = null;
+
+const postToHost = (message: QueryHistoryWebviewToHostMessage): void => {
+    postProtocolMessage(message);
+};
 
 // ── TanStack Table state ────────────────────────────────────────────
 let tanTable: TanStackTableHandle | null = null;
@@ -857,7 +863,7 @@ function handleQueryParametersExtended(parameters: QueryHistoryParameterDto[]): 
 }
 
 window.addEventListener('message', (event) => {
-    const message = asHostMessage(event.data);
+    const message: QueryHistoryHostToWebviewMessage = asHostMessage(event.data);
     console.log('queryHistoryExtended webview: received message', message);
 
     switch (message.type) {

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { createSqlValidatorForDocument, getSqlAuthoringForDocument } from '../../../commands/validationCommands';
 import { LintIssue } from '../../../providers/linterRules';
+import { getQualityRuleIdForParserCode } from '../../../providers/qualityRuleRegistry';
 import { analyzeExplainPlanSemantic, collectExplainHotspotNextActions } from '../../tuning/explainPlanSemanticAnalyzer';
 import { CopilotToolRuntime } from './copilotToolRuntime';
 import { buildSafeExplainSql } from '../../copilotTools/aiSqlSafety';
@@ -220,7 +221,7 @@ export class CopilotValidationTools {
         const { SqlQualityEngine } = await import('../../../providers/sqlQualityEngine');
         const qualityEngine = new SqlQualityEngine(validator, getSqlAuthoringForDocument().qualityRules);
         const qualityResult = qualityEngine.analyze(sql);
-        const issues = qualityResult.issues;
+        const issues = this.mapParserIssuesToQualityRuleIds(qualityResult.issues);
 
         if (issues.length === 0) {
             return 'SQL parser validation passed. No syntax, semantic, or lint issues found.';
@@ -268,6 +269,29 @@ export class CopilotValidationTools {
         }
 
         return lines.join('\n');
+    }
+
+    /**
+     * Parser diagnostics retain SQL/PAR codes in the shared validation layer.
+     * Copilot's tuning guidance is organized by stable quality-rule IDs, so
+     * translate only its presentation/candidate copy of the issues here.
+     */
+    private mapParserIssuesToQualityRuleIds(issues: readonly LintIssue[]): LintIssue[] {
+        return issues.map(issue => {
+            const qualityRuleId = getQualityRuleIdForParserCode(issue.ruleId);
+            if (!qualityRuleId) {
+                return issue;
+            }
+
+            const prefix = `${issue.ruleId}:`;
+            return {
+                ...issue,
+                ruleId: qualityRuleId,
+                message: issue.message.startsWith(prefix)
+                    ? `${qualityRuleId}:${issue.message.slice(prefix.length)}`
+                    : issue.message
+            };
+        });
     }
 
     async validateSqlOnDatabase(sql: string, database?: string): Promise<string> {
