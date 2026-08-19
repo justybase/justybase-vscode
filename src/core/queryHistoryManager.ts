@@ -265,6 +265,30 @@ export class QueryHistoryManager {
         }
     }
 
+    /**
+     * Find an entry in either the active history or the archive.
+     * History actions send only the stable id so the host can recover the
+     * complete execution context instead of trusting data echoed by a webview.
+     */
+    async getEntryById(id: string): Promise<QueryHistoryEntry | undefined> {
+        if (!this.initialized) {
+            await this.initialize();
+        }
+
+        const activeEntry = this.cache.find(entry => entry.id === id);
+        if (activeEntry) {
+            return activeEntry;
+        }
+
+        try {
+            const archive = await this.storage.getArchiveEntries();
+            return archive.find(entry => entry.id === id);
+        } catch (error) {
+            console.error(`Error finding history entry '${id}' in archive:`, error);
+            return undefined;
+        }
+    }
+
     async deleteEntry(id: string): Promise<void> {
         try {
             if (!this.initialized) await this.initialize();

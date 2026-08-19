@@ -10,8 +10,8 @@ export function registerHistoryCommands(deps: SchemaCommandsDependencies): vscod
     const { context } = deps;
 
     return [
-        vscode.commands.registerCommand('netezza.showQueryHistory', () => {
-            vscode.commands.executeCommand('netezza.queryHistory.focus');
+        vscode.commands.registerCommand('netezza.showQueryHistory', async () => {
+            await vscode.commands.executeCommand('netezza.queryHistory.focus');
         }),
 
         vscode.commands.registerCommand('netezza.clearQueryHistory', async () => {

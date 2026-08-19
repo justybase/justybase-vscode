@@ -95,7 +95,7 @@ async function resolveBatchHistorySchema(
     documentUri?: string,
 ): Promise<string | undefined> {
     if (documentUri && typeof connManager.getEffectiveSchema === 'function') {
-        return await connManager.getEffectiveSchema(documentUri) ?? undefined;
+        return await connManager.getEffectiveSchema(documentUri, connectionName) ?? undefined;
     }
     if (typeof connManager.getSchemaForConnection === 'function') {
         return connManager.getSchemaForConnection(connectionName) ?? undefined;
@@ -186,6 +186,9 @@ export async function runQueriesSequentially(
             resolvedConnectionName,
             documentUri,
         );
+        const historyDatabase = documentUri && typeof connManager.getEffectiveDatabase === 'function'
+            ? (await connManager.getEffectiveDatabase(documentUri, resolvedConnectionName)) ?? details.database
+            : details.database;
 
         logBatch(outputChannel, logCallback, `Using connection: ${resolvedConnectionName}`);
         logBatch(outputChannel, logCallback, "Connecting to database...");
@@ -356,7 +359,7 @@ export async function runQueriesSequentially(
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
-                        details.database,
+                        historyDatabase,
                         queryToExecute,
                         resolvedConnectionName,
                         historyTags,
@@ -373,7 +376,7 @@ export async function runQueriesSequentially(
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
-                        details.database,
+                        historyDatabase,
                         queryToExecute,
                         resolvedConnectionName,
                         historyTags,
@@ -535,6 +538,9 @@ export async function runQueriesWithStreaming(
             resolvedConnectionName,
             documentUri,
         );
+        const historyDatabase = documentUri && typeof connManager.getEffectiveDatabase === 'function'
+            ? (await connManager.getEffectiveDatabase(documentUri, resolvedConnectionName)) ?? details.database
+            : details.database;
 
         const { connection, shouldCloseConnection } =
             await getConnectionForDocument(
@@ -673,7 +679,7 @@ export async function runQueriesWithStreaming(
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
-                        details.database,
+                        historyDatabase,
                         queryToExecute,
                         resolvedConnectionName,
                         historyTags,
@@ -690,7 +696,7 @@ export async function runQueriesWithStreaming(
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
-                        details.database,
+                        historyDatabase,
                         queryToExecute,
                         resolvedConnectionName,
                         historyTags,

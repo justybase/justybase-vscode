@@ -223,6 +223,11 @@
         "icon": "$(server-environment)"
       },
       {
+        "command": "netezza.showQueryHistory",
+        "title": "JustyBase: Show Query History",
+        "icon": "$(history)"
+      },
+      {
         "command": "netezza.openSqlConsole",
         "title": "JustyBase: Open SQL Console",
         "icon": "$(terminal)"
@@ -4181,6 +4186,12 @@
         "command": "netezza.openSqlConsole",
         "key": "ctrl+shift+alt+s",
         "mac": "cmd+shift+alt+s",
+        "when": "!notebookEditorFocused"
+      },
+      {
+        "command": "netezza.showQueryHistory",
+        "key": "ctrl+alt+h",
+        "mac": "cmd+alt+h",
         "when": "!notebookEditorFocused"
       },
       {

@@ -290,6 +290,19 @@ describe('QueryHistoryManager', () => {
         await expect(manager.searchArchive('anything')).resolves.toEqual([]);
     });
 
+    it('finds entries by id in active history and archive', async () => {
+        const active = createEntry({ id: 'active-id', query: 'SELECT active' });
+        const archived = createEntry({ id: 'archived-id', query: 'SELECT archived' });
+        mockStorage.loadActive.mockResolvedValue([active]);
+        mockStorage.getArchiveEntries.mockResolvedValue([archived]);
+
+        const manager = new QueryHistoryManager(createContext());
+
+        await expect(manager.getEntryById('active-id')).resolves.toEqual(active);
+        await expect(manager.getEntryById('archived-id')).resolves.toEqual(archived);
+        await expect(manager.getEntryById('missing-id')).resolves.toBeUndefined();
+    });
+
     it('filters by host/database/schema and limit', async () => {
         mockStorage.loadActive.mockResolvedValue([
             createEntry({ id: 'e1', host: 'h1', database: 'db1', schema: 's1' }),

@@ -100,7 +100,7 @@ export type QueryHistoryWebviewToHostMessage =
     | { type: 'clearAll' }
     | { type: 'deleteEntry'; id: string; query?: string }
     | { type: 'copyQuery'; query: string }
-    | { type: 'executeQuery'; query: string }
+    | { type: 'executeQuery'; queryId: string }
     | { type: 'getHistory' }
     | { type: 'toggleFavorite'; id: string }
     | { type: 'updateEntry'; id: string; tags?: string; description?: string }

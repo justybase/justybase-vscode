@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { QueryHistoryView } from '../views/queryHistoryView';
+import type { ConnectionManager } from '../core/connectionManager';
 
 jest.mock('../core/queryHistoryManager', () => ({
     QueryHistoryManager: {
@@ -30,6 +31,11 @@ describe('QueryHistoryView', () => {
     let messageHandler: ((message: { type: string; [key: string]: unknown }) => Promise<void>) | undefined;
     let disposeHandler: (() => void) | undefined;
     let historyListener: ((entry: HistoryEntry) => void) | undefined;
+    let connectionManager: {
+        setDocumentConnection: jest.Mock;
+        setDocumentDatabase: jest.Mock;
+        getConnection: jest.Mock;
+    };
 
     const mockHistoryManager = {
         onDidAddEntry: jest.fn(),
@@ -43,7 +49,10 @@ describe('QueryHistoryView', () => {
         updateEntry: jest.fn(),
         getFavorites: jest.fn(),
         getByTag: jest.fn(),
-        getAllTags: jest.fn()
+        getAllTags: jest.fn(),
+        getEntryById: jest.fn(),
+        substituteParameters: jest.fn(),
+        saveQuickRerunConfig: jest.fn()
     };
 
     const createWebviewView = (): vscode.WebviewView =>
@@ -113,6 +122,16 @@ describe('QueryHistoryView', () => {
         mockHistoryManager.getFavorites.mockResolvedValue([]);
         mockHistoryManager.getByTag.mockResolvedValue([]);
         mockHistoryManager.getAllTags.mockResolvedValue(['tagA', 'tagB']);
+        mockHistoryManager.getEntryById.mockImplementation(async (id: string) => {
+            const entries = await mockHistoryManager.getHistory();
+            return entries.find((entry: HistoryEntry) => entry.id === id);
+        });
+
+        connectionManager = {
+            setDocumentConnection: jest.fn().mockResolvedValue(undefined),
+            setDocumentDatabase: jest.fn().mockResolvedValue(undefined),
+            getConnection: jest.fn().mockResolvedValue({ name: 'Warehouse' })
+        };
 
         getInstanceMock.mockReturnValue(mockHistoryManager);
 
@@ -130,7 +149,7 @@ describe('QueryHistoryView', () => {
             }
         };
 
-        historyView = new QueryHistoryView(extensionUri, context);
+        historyView = new QueryHistoryView(extensionUri, context, connectionManager as unknown as ConnectionManager);
     });
 
     it('initializes webview, subscribes to updates, and sends initial history', async () => {
@@ -260,6 +279,67 @@ describe('QueryHistoryView', () => {
         expect(vscode.window.showTextDocument).toHaveBeenCalled();
     });
 
+    it('opens a history entry with its saved connection and database context', async () => {
+        const webviewView = createWebviewView();
+        const document = { uri: { toString: () => 'untitled:history.sql' } };
+        (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue(document);
+        mockHistoryManager.getEntryById.mockResolvedValueOnce({
+            id: 'archived-entry',
+            host: 'warehouse.example.test',
+            database: 'REPORTING',
+            schema: 'PUBLIC',
+            query: 'SELECT * FROM reports',
+            timestamp: Date.now(),
+            connectionName: 'Warehouse'
+        });
+
+        historyView.resolveWebviewView(webviewView, {} as vscode.WebviewViewResolveContext, {} as vscode.CancellationToken);
+        await messageHandler?.({ type: 'executeQuery', queryId: 'archived-entry' });
+
+        expect(mockHistoryManager.getEntryById).toHaveBeenCalledWith('archived-entry');
+        expect(connectionManager.setDocumentConnection).toHaveBeenCalledWith('untitled:history.sql', 'Warehouse');
+        expect(connectionManager.setDocumentDatabase).toHaveBeenCalledWith('untitled:history.sql', 'REPORTING');
+        expect(vscode.window.showTextDocument).toHaveBeenCalledWith(document, { preview: false });
+    });
+
+    it('keeps the saved context when quick rerun substitutes parameters', async () => {
+        const webviewView = createWebviewView();
+        const document = { uri: { toString: () => 'file:///workspace/report.sql' } };
+        (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue(document);
+        mockHistoryManager.getEntryById.mockResolvedValueOnce({
+            id: 'quick-entry',
+            host: 'warehouse.example.test',
+            database: 'REPORTING',
+            schema: 'PUBLIC',
+            query: 'SELECT * FROM reports WHERE id = :reportId',
+            timestamp: Date.now(),
+            connectionName: 'Warehouse'
+        });
+        mockHistoryManager.substituteParameters.mockReturnValue('SELECT * FROM reports WHERE id = 42');
+
+        historyView.resolveWebviewView(webviewView, {} as vscode.WebviewViewResolveContext, {} as vscode.CancellationToken);
+        await messageHandler?.({
+            type: 'quickRerun',
+            queryId: 'quick-entry',
+            parameters: [{ name: 'reportId', value: '42', type: 'number', required: true }]
+        });
+
+        expect(mockHistoryManager.substituteParameters).toHaveBeenCalledWith(
+            'SELECT * FROM reports WHERE id = :reportId',
+            [{ name: 'reportId', value: '42', type: 'number', required: true }]
+        );
+        expect(connectionManager.setDocumentConnection).toHaveBeenCalledWith('file:///workspace/report.sql', 'Warehouse');
+        expect(connectionManager.setDocumentDatabase).toHaveBeenCalledWith('file:///workspace/report.sql', 'REPORTING');
+        expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith({
+            content: 'SELECT * FROM reports WHERE id = 42',
+            language: 'sql'
+        });
+        expect(mockHistoryManager.saveQuickRerunConfig).toHaveBeenCalledWith(
+            'quick-entry',
+            expect.objectContaining({ originalQuery: 'SELECT * FROM reports WHERE id = :reportId' })
+        );
+    });
+
     it('handles entry edit requests for not found, cancel, and success paths', async () => {
         const webviewView = createWebviewView();
         historyView.resolveWebviewView(webviewView, {} as vscode.WebviewViewResolveContext, {} as vscode.CancellationToken);
@@ -302,6 +382,31 @@ describe('QueryHistoryView', () => {
 
         expect(mockHistoryManager.updateEntry).toHaveBeenCalledWith('h1', 'new-tag', 'new-desc');
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Entry updated successfully');
+    });
+
+    it('does not offer editing for archived entries', async () => {
+        const webviewView = createWebviewView();
+        historyView.resolveWebviewView(webviewView, {} as vscode.WebviewViewResolveContext, {} as vscode.CancellationToken);
+        await Promise.resolve();
+
+        mockHistoryManager.getEntryById.mockResolvedValueOnce({
+            id: 'archived-entry',
+            host: 'h',
+            database: 'd',
+            schema: 's',
+            query: 'SELECT 1',
+            timestamp: Date.now(),
+            tags: 'old',
+            description: 'old description'
+        });
+        mockHistoryManager.getHistory.mockResolvedValueOnce([]);
+
+        await messageHandler?.({ type: 'requestEdit', id: 'archived-entry' });
+
+        expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('Archived query history entries are read-only.');
+        expect(vscode.window.showInputBox).not.toHaveBeenCalled();
+        expect(mockHistoryManager.updateEntry).not.toHaveBeenCalled();
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith('Entry updated successfully');
     });
 
     it('supports favorites and tag filtering including quick pick selection', async () => {

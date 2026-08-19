@@ -358,6 +358,44 @@ describe("queryRunnerHelpers", () => {
             );
         });
 
+        it("should record the effective database and schema for a SQL tab", async () => {
+            const connManager = {
+                getConnection: jest.fn().mockResolvedValue({
+                    host: "h",
+                    database: "profile_db",
+                }),
+                getEffectiveDatabase: jest.fn((_documentUri: string, connectionName?: string) =>
+                    Promise.resolve(connectionName === "C" ? "tab_db" : "wrong_db")),
+                getEffectiveSchema: jest.fn((_documentUri: string, connectionName?: string) =>
+                    Promise.resolve(connectionName === "C" ? "tab_schema" : "wrong_schema")),
+            } as any;
+            const ctx = {} as any;
+            const mockAddEntry = jest.fn().mockResolvedValue(undefined);
+            (QueryHistoryManager.getInstance as jest.Mock).mockReturnValue({
+                addEntry: mockAddEntry,
+            });
+            (isSqlConsoleDocument as jest.Mock).mockReturnValue(false);
+
+            await logQueryToHistory(ctx, connManager, "C", "SELECT 1", true, "file:///query.sql");
+
+            expect(mockAddEntry).toHaveBeenCalledWith(
+                "h",
+                "tab_db",
+                "tab_schema",
+                "SELECT 1",
+                "C",
+                undefined,
+                undefined,
+                true,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+            );
+            expect(connManager.getEffectiveDatabase).toHaveBeenCalledWith("file:///query.sql", "C");
+            expect(connManager.getEffectiveSchema).toHaveBeenCalledWith("file:///query.sql", "C");
+        });
+
         it("should handle history logging errors gracefully", async () => {
             const connManager = {
                 getConnection: jest.fn().mockResolvedValue({

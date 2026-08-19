@@ -107,10 +107,29 @@ export async function logQueryToHistory(
             return;
         }
 
+        // The profile database is only the fallback. A SQL tab may have an
+        // explicit database override, and history must describe the database
+        // that actually received the query.
+        let effectiveDatabase = details.database;
+        if (documentUri && typeof connManager.getEffectiveDatabase === 'function') {
+            try {
+                effectiveDatabase = (await connManager.getEffectiveDatabase(documentUri, resolvedConnectionName)) || details.database;
+            } catch (databaseError) {
+                logWithFallback('debug', '[History] Failed to resolve tab database, using profile default:', databaseError);
+            }
+        }
+
         // Keep this tolerant of lightweight ConnectionManager test doubles and
         // older integrations that do not expose the optional resolver yet.
-        const currentSchema = connManager.getSchemaForConnection?.(resolvedConnectionName)
+        let currentSchema = connManager.getSchemaForConnection?.(resolvedConnectionName)
             || (typeof details.schema === 'string' && details.schema.length > 0 ? details.schema : 'UNKNOWN');
+        if (documentUri && typeof connManager.getEffectiveSchema === 'function') {
+            try {
+                currentSchema = (await connManager.getEffectiveSchema(documentUri, resolvedConnectionName)) || currentSchema;
+            } catch (schemaError) {
+                logWithFallback('debug', '[History] Failed to resolve tab schema, using profile default:', schemaError);
+            }
+        }
 
         const historyManager = QueryHistoryManager.getInstance(context);
         const tags = documentUri && isSqlConsoleDocument(context, documentUri)
@@ -118,7 +137,7 @@ export async function logQueryToHistory(
             : undefined;
         await historyManager.addEntry(
             details.host,
-            details.database,
+            effectiveDatabase,
             currentSchema,
             query,
             resolvedConnectionName,
