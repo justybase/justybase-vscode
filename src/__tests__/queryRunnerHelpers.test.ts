@@ -94,13 +94,7 @@ describe("queryRunnerHelpers", () => {
 
         it("should create new connection when keepConnectionOpen is false", async () => {
             const connManager = {
-                getConnection: jest.fn().mockResolvedValue({
-                    host: "host1",
-                    port: 5480,
-                    database: "db1",
-                    user: "user1",
-                    password: "pass1",
-                }),
+                createTransientConnectionForDocument: jest.fn().mockResolvedValue(mockTransientConnection),
             } as any;
 
             const result = await getConnectionForDocument(
@@ -111,7 +105,11 @@ describe("queryRunnerHelpers", () => {
             );
 
             expect(result.shouldCloseConnection).toBe(true);
-            expect(result.connection).toBeDefined();
+            expect(result.connection).toBe(mockTransientConnection);
+            expect(connManager.createTransientConnectionForDocument).toHaveBeenCalledWith(
+                "file:///test.sql",
+                "ConnA",
+            );
         });
 
         it("should create new connection when documentUri is undefined", async () => {

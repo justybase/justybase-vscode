@@ -93,8 +93,10 @@ The language server (LSP) activates for notebook cells automatically.
 
 Notebooks use the same connection infrastructure as regular SQL files:
 
-- **Active connection** — cells execute against the currently selected connection in the JustyBase sidebar
-- **Per-cell connections** — not yet supported; all cells use the active connection
+- **Per-cell connections** — a cell's assigned connection is used first, so two cells in one notebook may execute against different profiles
+- **Global fallback** — when a cell has no assigned connection, execution falls back to the globally active connection
+- **Per-cell database** — an explicit database assigned to the cell takes precedence over the selected profile's default database
+- **Ephemeral context** — notebook-cell connection and database selections are held only for the current session; they are not written to the notebook or restored after the session closes
 - **Cancellation** — each cell execution is independent; cancelling one cell does not affect others
 
 > **Important:** Each notebook cell execution opens a new database connection and closes it after completion. Persistent connections (per-tab keep-connection) do not apply to notebook cells.
@@ -134,6 +136,5 @@ Notebooks are stored as plain JSON (`.sqlnb` / `.nzsql-nb`):
 
 ## Limitations
 
-- **Per-cell connection assignment** is not currently available
 - **Cell variable sharing** (piping results between cells) is not supported
 - **Notebook export** (e.g., exporting all cells and results as a report) is not yet implemented — use the Full Grid panel for individual result export

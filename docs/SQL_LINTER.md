@@ -19,6 +19,7 @@ flowchart TD
     Issues --> Host[Extension-host linter · MetadataCacheSchemaProvider]
     Lsp --> Panel[Problems panel]
     Host --> Panel
+```
 
 ## Configuration
 
