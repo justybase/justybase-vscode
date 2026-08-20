@@ -31,29 +31,14 @@ if (!process.env.DB2CODEPAGE) {
 }
 
 import * as vscode from 'vscode';
-import type { DatabaseDialect } from '@justybase/contracts';
 import { db2Dialect } from './db2Dialect';
 import { registerDb2PartitionCommands } from './db2PartitionCommands';
 import { registerDb2IndexCommands } from './db2IndexCommands';
 import { ConnectionManager } from '../../../src/core/connectionManager';
-
-interface JustyBaseLiteApi {
-    registerDatabaseDialect(dialect: DatabaseDialect): DatabaseDialect;
-}
-
-const CORE_EXTENSION_ID = 'krzysztof-d.justybaselite-netezza';
+import { activateCoreExtension } from '../../../src/api/companionActivation';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    const coreExtension = vscode.extensions.getExtension<JustyBaseLiteApi>(CORE_EXTENSION_ID);
-    if (!coreExtension) {
-        throw new Error(`Required extension dependency '${CORE_EXTENSION_ID}' is not installed.`);
-    }
-
-    const api = await coreExtension.activate();
-    if (!api || typeof api.registerDatabaseDialect !== 'function') {
-        throw new Error(`Extension '${CORE_EXTENSION_ID}' does not expose the JustyBase registration API.`);
-    }
-
+    const api = await activateCoreExtension();
     api.registerDatabaseDialect(db2Dialect);
 
     // Register DB2 specific commands
