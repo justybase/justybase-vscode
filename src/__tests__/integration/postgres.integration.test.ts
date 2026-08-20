@@ -22,6 +22,11 @@ import type {
 import { LspCompletionEngine, type CompletionMetadataProvider } from '../../server/completionEngine';
 import type { MetadataColumnItem, MetadataObjectItem } from '../../lsp/protocol';
 import type { ConnectionDetails } from '../../types';
+import {
+    cancelReaderExecution,
+    expectConnectionCloseIsIdempotent,
+    expectReaderCloseAndReuse,
+} from './connectionLifecycleHelpers';
 
 function readEnv(names: string | readonly string[]): string | undefined {
     const candidates = Array.isArray(names) ? names : [names];
@@ -280,6 +285,34 @@ describeIfConfigured('postgres integration', () => {
     afterAll(async () => {
         await connection.close();
     });
+
+    it('closes readers and connections idempotently', async () => {
+        await expectReaderCloseAndReuse(
+            connection,
+            'SELECT 1 AS lifecycle_value',
+            'SELECT 1 AS control_value',
+        );
+
+        await expectConnectionCloseIsIdempotent(
+            config => new PostgreSqlConnection(config),
+            config!,
+        );
+    });
+
+    it('cancels pg_sleep and keeps the PostgreSQL session usable', async () => {
+        const command = connection.createCommand('SELECT pg_sleep(10) AS cancelled_value');
+        const outcome = await cancelReaderExecution(command, command.executeReader(), {
+            cancelAfterMs: 250,
+            settleTimeoutMs: 15000,
+        });
+
+        expect(['reader', 'error']).toContain(outcome.kind);
+        await expectReaderCloseAndReuse(
+            connection,
+            'SELECT 1 AS lifecycle_value',
+            'SELECT 1 AS control_value',
+        );
+    }, 30000);
 
     it('runs metadata discovery queries against the configured PostgreSQL instance', async () => {
         const schemasReader = await connection

@@ -6,6 +6,12 @@ import { spawnSync } from 'node:child_process';
 import type { DatabaseConnectionConfig } from '../../contracts/database';
 import { AccessConnection } from '../../../extensions/access/src/accessConnection';
 import { AccessFileSession } from '../../../packages/access-file/src';
+import {
+    cancelReaderConsumption,
+    expectConnectionCloseIsIdempotent,
+    expectQueryReturnsRow,
+    expectReaderCloseAndReuse,
+} from './connectionLifecycleHelpers';
 
 const configuredFile = process.env.ACCESS_TEST_FILE?.trim();
 const hasAccessFixture = Boolean(configuredFile);
@@ -126,6 +132,61 @@ describe('native Microsoft Access integration', () => {
             await session.close();
         }
     });
+
+    test('closes readers and connections idempotently', async () => {
+        const connection = new AccessConnection(createConfig(configuredFile as string, true));
+        await connection.connect();
+        try {
+            await expectReaderCloseAndReuse(
+                connection,
+                'SELECT 1 AS lifecycle_value',
+                'SELECT 1 AS control_value',
+            );
+        } finally {
+            await connection.close();
+        }
+
+        await expectConnectionCloseIsIdempotent(
+            config => new AccessConnection(config),
+            createConfig(configuredFile as string, true),
+        );
+    });
+
+    test('cancels a large mirror query and keeps the Access session usable', async () => {
+        const fixtureSession = await AccessFileSession.open({
+            filePath: configuredFile as string,
+            password: process.env.ACCESS_TEST_PASSWORD,
+        });
+        const sourceTable = fixtureSession.listTables().find(table => table.rowCount > 1);
+        await fixtureSession.close();
+        if (!sourceTable) {
+            // A valid fixture may contain only empty or single-row tables, which cannot
+            // provide a deterministic long-running cancellation workload.
+            return;
+        }
+
+        const tableName = sourceTable.name.replace(/]/g, ']]');
+        const aliases = Array.from({ length: 20 }, (_value, index) => `t${index}`);
+        const connection = new AccessConnection(createConfig(configuredFile as string, true));
+        await connection.connect();
+        try {
+            const command = connection.createCommand(`
+                SELECT 1 AS lifecycle_value
+                FROM ${aliases.map(alias => `[${tableName}] AS ${alias}`).join(' CROSS JOIN ')}
+                LIMIT 1000000
+            `);
+            const reader = await command.executeReader();
+            const outcome = await cancelReaderConsumption(command, reader, {
+                cancelAfterMs: 50,
+                settleTimeoutMs: 15000,
+            });
+
+            expect(outcome.rowsRead).toBeLessThan(1000000);
+            await expectQueryReturnsRow(connection, 'SELECT 1 AS control_value');
+        } finally {
+            await connection.close();
+        }
+    }, 30000);
 
     test('writes through a staged file replacement when explicitly enabled', async () => {
         if (process.env.ACCESS_TEST_WRITE !== '1') {

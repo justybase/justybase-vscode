@@ -34,6 +34,10 @@ import { importDataToMsSql } from '../../import/mssqlImporter';
 import { importDataToOracle } from '../../import/oracleImporter';
 import { importDataToPostgreSql } from '../../import/postgresqlImporter';
 import { importDataToVertica } from '../../import/verticaImporter';
+import {
+    expectConnectionCloseIsIdempotent,
+    expectReaderCloseAndReuse,
+} from './connectionLifecycleHelpers';
 
 registerDatabaseDialect(db2Dialect);
 registerDatabaseDialect(mssqlDialect);
@@ -580,6 +584,14 @@ export function registerLiveIntegrationSuite(harness: LiveDialectHarness): void 
 
         itIfConfigured('connects and executes a smoke query', async () => {
             await expectQueryHasShape(connection, harness.smokeSql, true);
+        });
+
+        itIfConfigured('closes a reader twice and reuses the live connection', async () => {
+            await expectReaderCloseAndReuse(connection, harness.smokeSql, harness.smokeSql);
+        });
+
+        itIfConfigured('closes a dedicated live connection twice', async () => {
+            await expectConnectionCloseIsIdempotent(harness.createConnection, harness.config!);
         });
 
         itIfConfigured('executes metadata database and schema discovery queries', async () => {

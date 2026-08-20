@@ -11,6 +11,11 @@ import {
 import { MysqlTuningAdvisor } from "../../../extensions/mysql/src/mysqlTuningAdvisor";
 import { registerDatabaseDialect } from "../../core/factories/databaseDialectRegistry";
 import type { DatabaseConnectionConfig } from "../../contracts/database";
+import {
+  cancelReaderExecution,
+  expectConnectionCloseIsIdempotent,
+  expectReaderCloseAndReuse,
+} from "./connectionLifecycleHelpers";
 
 function readEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -117,6 +122,49 @@ describeIfConfigured("mysql integration", () => {
   afterAll(async () => {
     await connection.close();
   });
+
+  it("closes readers and connections idempotently", async () => {
+    await expectReaderCloseAndReuse(
+      connection,
+      "SELECT 1 AS lifecycle_value",
+      "SELECT 1 AS control_value",
+    );
+
+    await expectConnectionCloseIsIdempotent(
+      config => new MysqlConnection(config),
+      config!,
+    );
+  });
+
+  it("cancels SLEEP and reconnects after MySQL tears down the active socket", async () => {
+    const cancellationConnection = new MysqlConnection(config!);
+    await cancellationConnection.connect();
+    try {
+      const command = cancellationConnection.createCommand(
+        "SELECT SLEEP(10) AS cancelled_value",
+      );
+      const outcome = await cancelReaderExecution(command, command.executeReader(), {
+        cancelAfterMs: 100,
+        settleTimeoutMs: 15000,
+      });
+
+      expect(["reader", "error"]).toContain(outcome.kind);
+    } finally {
+      await cancellationConnection.close();
+    }
+
+    const recoveredConnection = new MysqlConnection(config!);
+    await recoveredConnection.connect();
+    try {
+      await expectReaderCloseAndReuse(
+        recoveredConnection,
+        "SELECT 1 AS lifecycle_value",
+        "SELECT 1 AS control_value",
+      );
+    } finally {
+      await recoveredConnection.close();
+    }
+  }, 30000);
 
   describe("connection and basic queries", () => {
     it("uses the MySQL 8.0.34 TESTDB fixture", async () => {

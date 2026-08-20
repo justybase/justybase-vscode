@@ -221,6 +221,7 @@ async function loadVertica(): Promise<VerticaModule> {
 export class VerticaConnection extends EventEmitter implements DatabaseConnection {
     public _connected = false;
     private _client?: VerticaRuntimeClient;
+    private _suppressClientErrors = false;
     private _currentDatabase = '';
     private _currentSchema = 'public';
     private _currentSessionId = '';
@@ -235,11 +236,16 @@ export class VerticaConnection extends EventEmitter implements DatabaseConnectio
             return;
         }
 
+        this._suppressClientErrors = false;
         const vertica = await loadVertica();
         this._clientLabel = getOptionString(this.config, 'clientLabel') ?? generateClientLabel();
         const client = new vertica.Client(buildClientConfig(this.config, this._clientLabel));
 
-        client.on('error', (error) => this.emit('error', error));
+        client.on('error', (error) => {
+            if (client === this._client && !this._suppressClientErrors) {
+                this.emit('error', error);
+            }
+        });
         client.on('notice', (notice) => this.emit('notice', notice));
         client.on('end', () => this.emit('end'));
         client.on('close', () => this.emit('close'));
@@ -276,6 +282,7 @@ export class VerticaConnection extends EventEmitter implements DatabaseConnectio
         const client = this._client;
         this._client = undefined;
         this._connected = false;
+        this._suppressClientErrors = true;
         this._currentSessionId = '';
         this._currentSchema = 'public';
         this._currentDatabase = this.config.database;
@@ -318,14 +325,22 @@ export class VerticaConnection extends EventEmitter implements DatabaseConnectio
         return { columns, rows, recordsAffected };
     }
 
-    public async terminateSession(sessionId: string): Promise<boolean> {
+    public async terminateSession(
+        sessionId: string,
+        options: { suppressConnectionErrors?: boolean } = {},
+    ): Promise<boolean> {
         const normalizedSessionId = sessionId.trim();
         if (!normalizedSessionId) {
             return false;
         }
 
+        if (options.suppressConnectionErrors) {
+            this._suppressClientErrors = true;
+        }
+
         const vertica = await loadVertica();
         const adminClient = new vertica.Client(buildClientConfig(this.config, `${this._clientLabel}-cancel`));
+        adminClient.on('error', () => undefined);
         await adminClient.connect();
         try {
             await adminClient.query(`SELECT CLOSE_SESSION('${normalizedSessionId.replace(/'/g, "''")}');`);
@@ -378,10 +393,14 @@ class VerticaCommand implements DatabaseCommand {
     public async cancel(): Promise<void> {
         this._cancelled = true;
         const sessionId = this._connection.getCurrentSessionId();
-        if (sessionId) {
-            await this._connection.terminateSession(sessionId).catch(() => undefined);
-        }
-        await this._connection.close().catch(() => undefined);
+        const closePromise = this._connection.close().catch(() => undefined);
+        const terminatePromise = sessionId
+            ? this._connection
+                .terminateSession(sessionId, { suppressConnectionErrors: true })
+                .catch(() => undefined)
+            : Promise.resolve();
+
+        await Promise.all([closePromise, terminatePromise]);
     }
 
     public async execute(): Promise<void> {
