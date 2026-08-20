@@ -32,6 +32,7 @@ import {
 } from '../import/accessImporter';
 import {
     buildNetezzaVirtualImportName,
+    destroyNetezzaImportStream,
     registerNetezzaImportStream,
 } from '../import/netezzaVirtualImport';
 import {
@@ -440,61 +441,66 @@ async function writeToNetezza(input: TargetWriterInput): Promise<TargetWriteResu
         },
         input.streamBatchSize,
     );
-    const unregisterImportStream = registerNetezzaImportStream(virtualFileName, stream);
-
-    const connection = await createConnectedDatabaseConnectionFromDetails(input.targetDetails);
+    let unregisterImportStream: (() => void) | undefined;
     try {
-        let lastReportedPercent = -1;
-        connection.on('importProgress', progressData => {
-            const progress = progressData as { percentComplete?: number };
-            if (typeof progress.percentComplete === 'number') {
-                const percent = Math.floor(progress.percentComplete);
-                if (percent !== lastReportedPercent) {
-                    lastReportedPercent = percent;
-                    input.progressCallback(
-                        createMigrationProgress(
-                            'finalize',
-                            rowsRead,
-                            input.totalRows,
-                            `Netezza external load: ${progress.percentComplete}%`,
-                            input.startedAt,
-                        ),
-                    );
+        unregisterImportStream = registerNetezzaImportStream(virtualFileName, stream);
+
+        const connection = await createConnectedDatabaseConnectionFromDetails(input.targetDetails);
+        try {
+            let lastReportedPercent = -1;
+            connection.on('importProgress', progressData => {
+                const progress = progressData as { percentComplete?: number };
+                if (typeof progress.percentComplete === 'number') {
+                    const percent = Math.floor(progress.percentComplete);
+                    if (percent !== lastReportedPercent) {
+                        lastReportedPercent = percent;
+                        input.progressCallback(
+                            createMigrationProgress(
+                                'finalize',
+                                rowsRead,
+                                input.totalRows,
+                                `Netezza external load: ${progress.percentComplete}%`,
+                                input.startedAt,
+                            ),
+                        );
+                    }
                 }
+            });
+            if (!input.target.appendToExistingTable) {
+                const createDdl = input.customCreateTableDdl ?? buildCreateTableDdl(
+                    'netezza',
+                    quoteNetezzaQualifiedName(qualifiedName),
+                    toDdlColumnSpecs(input.columns),
+                );
+                input.progressCallback(
+                    createMigrationProgress('finalize', 0, input.totalRows, 'Creating target table...', input.startedAt),
+                );
+                await executeStatement(connection, createDdl, STREAM_TIMEOUT_SECONDS);
             }
-        });
-        if (!input.target.appendToExistingTable) {
-            const createDdl = input.customCreateTableDdl ?? buildCreateTableDdl(
-                'netezza',
-                quoteNetezzaQualifiedName(qualifiedName),
-                toDdlColumnSpecs(input.columns),
-            );
+
+            const loadSql = buildNetezzaLoadSql(virtualFileName, qualifiedName, input.columns, logDir);
             input.progressCallback(
-                createMigrationProgress('finalize', 0, input.totalRows, 'Creating target table...', input.startedAt),
+                createMigrationProgress(
+                    'finalize',
+                    rowsRead,
+                    input.totalRows,
+                    'Finalizing on Netezza (loading external table)...',
+                    input.startedAt,
+                ),
             );
-            await executeStatement(connection, createDdl, STREAM_TIMEOUT_SECONDS);
+
+            const command = connection.createCommand(loadSql);
+            command.commandTimeout = 3600;
+            await command.execute();
+            rowsRead = stream.rowsReadCount;
+
+            return { rowsInserted: rowsRead };
+        } finally {
+            await connection.close().catch(() => undefined);
         }
-
-        const loadSql = buildNetezzaLoadSql(virtualFileName, qualifiedName, input.columns, logDir);
-        input.progressCallback(
-            createMigrationProgress(
-                'finalize',
-                rowsRead,
-                input.totalRows,
-                'Finalizing on Netezza (loading external table)...',
-                input.startedAt,
-            ),
-        );
-
-        const command = connection.createCommand(loadSql);
-        command.commandTimeout = 3600;
-        await command.execute();
-        rowsRead = stream.rowsReadCount;
-
-        return { rowsInserted: rowsRead };
     } finally {
-        await connection.close().catch(() => undefined);
-        unregisterImportStream();
+        unregisterImportStream?.();
+        destroyNetezzaImportStream(stream);
     }
 }
 

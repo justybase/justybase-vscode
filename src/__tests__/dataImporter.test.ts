@@ -31,7 +31,6 @@ describe('import/dataImporter', () => {
                 { bytesSent: 512, totalSize: 0, percentComplete: 0 },
                 4,
                 2,
-                1024,
             )).toEqual({ percentComplete: 50, estimatedRows: 2 });
         });
 
@@ -40,17 +39,15 @@ describe('import/dataImporter', () => {
                 { bytesSent: 500, totalSize: 1000, percentComplete: 50 },
                 4,
                 1,
-                1024,
             )).toEqual({ percentComplete: 50, estimatedRows: 2 });
         });
 
-        it('falls back to source-file bytes when row progress is unavailable', () => {
+        it('reports zero when neither byte nor row progress is available', () => {
             expect(resolveNetezzaImportProgress(
                 { bytesSent: 256, totalSize: 0, percentComplete: 0 },
                 0,
                 0,
-                1024,
-            )).toEqual({ percentComplete: 25, estimatedRows: 0 });
+            )).toEqual({ percentComplete: 0, estimatedRows: 0 });
         });
     });
 

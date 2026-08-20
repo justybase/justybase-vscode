@@ -141,27 +141,23 @@ function finitePositiveNumber(value: number | undefined): number {
  * The Netezza driver can calculate byte progress for a filesystem stream, but
  * a virtual Readable has no stat-able length and therefore reports a zero
  * total. In that case the importer-owned row counter is the authoritative
- * progress source; source-file bytes are retained as a last-resort fallback.
+ * progress source. If neither source can provide progress, report zero rather
+ * than comparing transformed stream bytes with the source file size.
  */
 export function resolveNetezzaImportProgress(
   progress: NetezzaImportProgressData,
   totalRows: number,
   streamedRows: number,
-  sourceFileSize: number,
 ): NetezzaImportProgress {
   const safeTotalRows = finitePositiveNumber(totalRows);
   const safeStreamedRows = finitePositiveNumber(streamedRows);
   const driverTotalSize = finitePositiveNumber(progress.totalSize);
-  const bytesSent = finitePositiveNumber(progress.bytesSent);
-  const safeSourceFileSize = finitePositiveNumber(sourceFileSize);
 
   let percentComplete: number;
   if (driverTotalSize > 0) {
     percentComplete = finitePositiveNumber(progress.percentComplete);
   } else if (safeTotalRows > 0 && safeStreamedRows > 0) {
     percentComplete = (safeStreamedRows / safeTotalRows) * 100;
-  } else if (safeSourceFileSize > 0 && bytesSent > 0) {
-    percentComplete = (bytesSent / safeSourceFileSize) * 100;
   } else {
     percentComplete = 0;
   }
@@ -1901,7 +1897,6 @@ export async function importDataToNetezza(
           progressData as NetezzaImportProgressData,
           totalRows,
           importer.getStreamedRowsCount(),
-          fileSize,
         );
         progressCallback?.(
           `Importing: ${progress.percentComplete}% complete (${progress.estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
@@ -2037,7 +2032,6 @@ export async function importDataToNetezzaAdvanced(
           progressData as NetezzaImportProgressData,
           totalRows,
           importer.getStreamedRowsCount(),
-          fileSize,
         );
         progressCallback?.(
           `Importing: ${progress.percentComplete}% complete (${progress.estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
