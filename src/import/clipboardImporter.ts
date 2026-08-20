@@ -5,14 +5,19 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
 import { ColumnTypeChooser, ProgressCallback, ImportResult } from './dataImporter';
 import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { headerForcesTextImportType } from './importTypeInferenceUtils';
+import {
+    buildNetezzaVirtualImportName,
+    destroyNetezzaImportStream,
+    registerNetezzaImportStream,
+} from './netezzaVirtualImport';
 
 // Helper to unblock event loop
 const delay = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -509,7 +514,8 @@ export async function importClipboardDataToNetezza(
 ): Promise<ImportResult> {
     const startTime = Date.now();
     let virtualFileName: string;
-    let temporaryDataFile: string | null = null;
+    let importStream: Readable | undefined;
+    let unregisterImportStream: (() => void) | undefined;
     let connection: NzConnection | null = null;
 
     try {
@@ -575,23 +581,15 @@ export async function importClipboardDataToNetezza(
         );
 
         // Create temp directory for logs
-        const tempDir = path.join(require('os').tmpdir(), 'netezza_clipboard_logs');
+        const tempDir = path.join(os.tmpdir(), 'netezza_clipboard_logs');
         if (!fs.existsSync(tempDir)) {
             fs.mkdirSync(tempDir, { recursive: true });
         }
 
-        const temporaryDataFileName = `virtual_clipboard_import_${Date.now()}_${Math.floor(Math.random() * 1000)}.txt`;
-        temporaryDataFile = path.join(tempDir, temporaryDataFileName);
-
-        // The Netezza driver consumes registered streams through separate DATA
-        // and DONE protocol messages. A generic in-memory Readable can emit its
-        // `end` event while the last DATA write is still awaiting socket
-        // backpressure, which makes Netezza roll the transaction back. Let the
-        // driver use its normal fs.ReadStream path instead; fs.ReadStream keeps
-        // EOF behind a paused chunk and preserves the DATA -> DONE ordering.
-        await pipeline(dataStream, fs.createWriteStream(temporaryDataFile));
-        virtualFileName = temporaryDataFile.replace(/\\/g, '/');
-        progressCallback?.(`Prepared temporary import file: ${virtualFileName}`);
+        importStream = dataStream;
+        virtualFileName = buildNetezzaVirtualImportName('virtual_clipboard_import');
+        unregisterImportStream = registerNetezzaImportStream(virtualFileName, importStream);
+        progressCallback?.(`Registered virtual clipboard stream: ${virtualFileName}`);
 
         // Generate CREATE TABLE SQL
         const columns = sqlHeaders.map((header, i) =>
@@ -679,15 +677,7 @@ ${columns.join(',\n')}
             }
         }
 
-        if (temporaryDataFile) {
-            try {
-                if (fs.existsSync(temporaryDataFile)) {
-                    fs.unlinkSync(temporaryDataFile);
-                }
-            } catch {
-                // Best-effort cleanup; the import result is more important than
-                // a stale temporary clipboard file.
-            }
-        }
+        unregisterImportStream?.();
+        destroyNetezzaImportStream(importStream);
     }
 }

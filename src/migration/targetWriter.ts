@@ -31,6 +31,10 @@ import {
     accessBatchImportConfig,
 } from '../import/accessImporter';
 import {
+    buildNetezzaVirtualImportName,
+    registerNetezzaImportStream,
+} from '../import/netezzaVirtualImport';
+import {
     duckdbBatchImportConfig,
 } from '../import/duckdbImporter';
 import {
@@ -76,7 +80,7 @@ export interface TargetWriterInput {
     columns: PreparedTargetColumn[];
     /** User-edited CREATE TABLE DDL; used verbatim instead of the generated one. */
     customCreateTableDdl?: string;
-    /** Reserved: the Netezza external-table load paces one row per event-loop turn (kept for API compatibility). */
+    /** Reserved for future stream tuning; the driver owns socket backpressure. */
     streamBatchSize?: number;
     /** Rows in source column order, formatted string cells. */
     rows: AsyncIterable<string[]>;
@@ -222,12 +226,9 @@ abstract class MigrationRowsReadable extends Readable {
     }
 }
 
-class NetezzaMigrationReadable extends Readable {
-    private readonly rowIterator: AsyncIterator<string[]>;
-    private isReading = false;
-    private readonly formatRow: (cells: string[]) => string;
+class NetezzaMigrationReadable extends MigrationRowsReadable {
+    private readonly rowFormatter: (cells: string[]) => string;
     private readonly onRow: (rowsRead: number) => void;
-    private rowsRead = 0;
 
     constructor(
         rows: AsyncIterable<string[]>,
@@ -235,53 +236,21 @@ class NetezzaMigrationReadable extends Readable {
         onRow: (rowsRead: number) => void,
         _batchSize?: number,
     ) {
-        super({ objectMode: true, highWaterMark: 65536 });
-        this.rowIterator = rows[Symbol.asyncIterator]();
-        this.formatRow = formatRow;
+        super(rows);
+        this.rowFormatter = formatRow;
         this.onRow = onRow;
     }
 
     public get rowsReadCount(): number {
-        return this.rowsRead;
+        return this.rowsPushedCount;
     }
 
-    _read(_size: number): void {
-        if (this.isReading) {
-            return;
-        }
-        this.isReading = true;
-        void this.readOneRow();
+    protected formatRow(cells: string[]): string {
+        return this.rowFormatter(cells);
     }
 
-    private async readOneRow(): Promise<void> {
-        try {
-            // The driver's JDBC remote-source protocol requires paced chunk
-            // delivery; yield to the event loop before each row so the load
-            // never sees bursts (bursts abort the load with a transaction
-            // rollback on the server side).
-            await new Promise<void>(resolve => setImmediate(resolve));
-            const next = await this.rowIterator.next();
-            if (next.done) {
-                if (this.rowsRead > 0 && this.rowsRead % STREAM_PROGRESS_REPORT_EVERY_ROWS !== 0) {
-                    this.onRow(this.rowsRead);
-                }
-                // Delaying EOF gives the driver's external-table handler time
-                // to flush the last DATA chunk before the DONE marker; ending
-                // too early races the in-flight write and rolls back the load.
-                setTimeout(() => this.push(null), 100);
-                return;
-            }
-
-            this.rowsRead++;
-            if (this.rowsRead % STREAM_PROGRESS_REPORT_EVERY_ROWS === 0) {
-                this.onRow(this.rowsRead);
-            }
-            this.push(this.formatRow(next.value));
-        } catch (error) {
-            this.emit('error', error);
-        } finally {
-            this.isReading = false;
-        }
+    protected onRowsPushed(rowsRead: number): void {
+        this.onRow(rowsRead);
     }
 }
 
@@ -438,11 +407,6 @@ function formatNetezzaRow(cells: string[], columns: PreparedTargetColumn[]): str
 }
 
 async function writeToNetezza(input: TargetWriterInput): Promise<TargetWriteResult> {
-    const connectionConstructor = getDatabaseConnectionConstructor('netezza');
-    if (!connectionConstructor.registerImportStream) {
-        throw new Error('Active Netezza driver does not support stream registry.');
-    }
-
     const targetDatabase = input.target.database
         && input.targetDetails.database
         && input.target.database.trim().toUpperCase() === input.targetDetails.database.trim().toUpperCase()
@@ -454,7 +418,7 @@ async function writeToNetezza(input: TargetWriterInput): Promise<TargetWriteResu
         input.target.table,
         'netezza',
     );
-    const virtualFileName = buildVirtualStreamName('virtual_migration_import');
+    const virtualFileName = buildNetezzaVirtualImportName('virtual_migration_import');
     const logDir = path.join(os.tmpdir(), 'netezza_migration_logs');
     if (!fs.existsSync(logDir)) {
         fs.mkdirSync(logDir, { recursive: true });
@@ -476,7 +440,7 @@ async function writeToNetezza(input: TargetWriterInput): Promise<TargetWriteResu
         },
         input.streamBatchSize,
     );
-    connectionConstructor.registerImportStream(virtualFileName, stream);
+    const unregisterImportStream = registerNetezzaImportStream(virtualFileName, stream);
 
     const connection = await createConnectedDatabaseConnectionFromDetails(input.targetDetails);
     try {
@@ -530,9 +494,7 @@ async function writeToNetezza(input: TargetWriterInput): Promise<TargetWriteResu
         return { rowsInserted: rowsRead };
     } finally {
         await connection.close().catch(() => undefined);
-        if (connectionConstructor.unregisterImportStream) {
-            connectionConstructor.unregisterImportStream(virtualFileName);
-        }
+        unregisterImportStream();
     }
 }
 

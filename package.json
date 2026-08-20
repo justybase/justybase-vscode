@@ -4391,6 +4391,7 @@
     "test:playwright:web-sql": "npx playwright test --config=test-harness/web-sql-playwright.config.ts",
     "test:playwright:install": "npx playwright install chromium",
     "test:duckdb:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/duckdb.integration.test.ts",
+    "test:netezza:import:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/netezzaImport.live.integration.test.ts",
     "test:netezza:metadata:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/netezzaSchemaRefresh.live.integration.test.ts",
     "test:file:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/fileSql.integration.test.ts",
     "test:access:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/access.integration.test.ts",
@@ -4469,7 +4470,7 @@
     ]
   },
   "dependencies": {
-    "@justybase/netezza-driver": "^2.4.3",
+    "@justybase/netezza-driver": "^2.4.4",
     "@justybase/spreadsheet-tasks": "^2.1.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@msgpack/msgpack": "^3.1.3",

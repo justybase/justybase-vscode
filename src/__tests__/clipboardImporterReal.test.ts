@@ -86,15 +86,16 @@ describe('import/clipboardImporter real module', () => {
 
         expect(result.success).toBe(true);
         expect(result.details?.rowsProcessed).toBe(3);
-        expect(mockRegisterImportStream).not.toHaveBeenCalled();
+        expect(mockRegisterImportStream).toHaveBeenCalledTimes(1);
         expect(mockConnect).toHaveBeenCalled();
         expect(mockCreateCommand).toHaveBeenCalled();
         expect(mockExecute).toHaveBeenCalled();
-        expect(mockUnregisterImportStream).not.toHaveBeenCalled();
+        expect(mockUnregisterImportStream).toHaveBeenCalledTimes(1);
 
         const executedSql = mockCreateCommand.mock.calls[0]?.[0] ?? '';
         expect(executedSql).toContain('SELECT\n        COL1,\n        COL2\n    FROM EXTERNAL');
         expect(executedSql).toContain('COL2 NVARCHAR(20)');
+        expect(executedSql).toMatch(/FROM EXTERNAL 'virtual_clipboard_import_[^']+\.txt'/);
     });
 
     it('should fail fast for invalid parameters', async () => {

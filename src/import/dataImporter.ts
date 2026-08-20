@@ -5,10 +5,8 @@
  */
 
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { Readable } from "stream";
-import { pipeline } from "stream/promises";
 import { ConnectionDetails, NzConnection } from "../types";
 import { createConnectedDatabaseConnectionFromDetails } from "../core/connectionFactory";
 import {
@@ -17,26 +15,14 @@ import {
 } from "../dialects/netezza/import/typeMapping";
 import { headerForcesTextImportType } from "./importTypeInferenceUtils";
 import { quoteIdentifier } from "../utils/identifierUtils";
+import {
+  buildNetezzaVirtualImportName,
+  destroyNetezzaImportStream,
+  registerNetezzaImportStream,
+} from "./netezzaVirtualImport";
 
 // Helper to unblock event loop
 const delay = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-async function materializeImportStream(
-  dataStream: Readable,
-): Promise<{ directory: string; filePath: string }> {
-  const directory = fs.mkdtempSync(
-    path.join(os.tmpdir(), "justybase-netezza-import-"),
-  );
-  const filePath = path.join(directory, "data.txt");
-
-  try {
-    await pipeline(dataStream, fs.createWriteStream(filePath));
-    return { directory, filePath };
-  } catch (error) {
-    fs.rmSync(directory, { recursive: true, force: true });
-    throw error;
-  }
-}
 
 // XLSX import for Excel file support
 // Custom Excel Reader from ExcelHelpersTs
@@ -132,6 +118,66 @@ export type ProgressCallback = (
   logToOutput?: boolean,
 ) => void;
 
+export interface NetezzaImportProgressData {
+  bytesSent?: number;
+  totalSize?: number;
+  percentComplete?: number;
+}
+
+export interface NetezzaImportProgress {
+  percentComplete: number;
+  estimatedRows: number;
+}
+
+function finitePositiveNumber(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
+}
+
+/**
+ * Resolve import progress for both regular files and virtual streams.
+ *
+ * The Netezza driver can calculate byte progress for a filesystem stream, but
+ * a virtual Readable has no stat-able length and therefore reports a zero
+ * total. In that case the importer-owned row counter is the authoritative
+ * progress source; source-file bytes are retained as a last-resort fallback.
+ */
+export function resolveNetezzaImportProgress(
+  progress: NetezzaImportProgressData,
+  totalRows: number,
+  streamedRows: number,
+  sourceFileSize: number,
+): NetezzaImportProgress {
+  const safeTotalRows = finitePositiveNumber(totalRows);
+  const safeStreamedRows = finitePositiveNumber(streamedRows);
+  const driverTotalSize = finitePositiveNumber(progress.totalSize);
+  const bytesSent = finitePositiveNumber(progress.bytesSent);
+  const safeSourceFileSize = finitePositiveNumber(sourceFileSize);
+
+  let percentComplete: number;
+  if (driverTotalSize > 0) {
+    percentComplete = finitePositiveNumber(progress.percentComplete);
+  } else if (safeTotalRows > 0 && safeStreamedRows > 0) {
+    percentComplete = (safeStreamedRows / safeTotalRows) * 100;
+  } else if (safeSourceFileSize > 0 && bytesSent > 0) {
+    percentComplete = (bytesSent / safeSourceFileSize) * 100;
+  } else {
+    percentComplete = 0;
+  }
+
+  const roundedPercent = Math.max(0, Math.min(100, Math.round(percentComplete)));
+  const estimatedRows =
+    safeTotalRows > 0
+      ? Math.min(safeTotalRows, Math.round((roundedPercent / 100) * safeTotalRows))
+      : 0;
+
+  return {
+    percentComplete: roundedPercent,
+    estimatedRows,
+  };
+}
+
 const FORCED_TYPE_PATTERN =
   /^[A-Za-z][A-Za-z0-9_ ]*(\(\s*\d+\s*(,\s*\d+\s*)?\))?$/;
 
@@ -202,6 +248,7 @@ export class NetezzaImporter {
   private sqlHeaders: string[] = [];
   private dataTypes: ColumnTypeChooser[] = [];
   private rowsCount: number = 0;
+  private streamedRowsCount: number = 0;
   private valuesToEscape: string[] = [];
   private selectedColumnIndexes: number[] = [];
   private forcedColumnTypes: Map<number, string> = new Map();
@@ -275,6 +322,7 @@ export class NetezzaImporter {
     this.sqlHeaders = [];
     this.dataTypes = [];
     this.rowsCount = 0;
+    this.streamedRowsCount = 0;
     this.excelHasHeaderRow = true;
     this.selectedColumnIndexes = [];
     this.forcedColumnTypes.clear();
@@ -1416,6 +1464,7 @@ ${this.getExternalUsingClause()}
       let headerSkipped = false;
       let totalRowsPushed = 0;
       let lastReportTime = 0;
+      self.streamedRowsCount = 0;
 
       try {
         for await (const line of rl) {
@@ -1437,6 +1486,7 @@ ${this.getExternalUsingClause()}
             self.getRecordDelim();
 
           totalRowsPushed++;
+          self.streamedRowsCount = totalRowsPushed;
 
           // Progress reporting based on bytes read from file
           const now = Date.now();
@@ -1487,6 +1537,7 @@ ${this.getExternalUsingClause()}
       const reader = factory.create(self.filePath);
       let readerOpened = false;
       let rowsPushed = 0;
+      self.streamedRowsCount = 0;
 
       try {
         await reader.open(self.filePath);
@@ -1530,6 +1581,7 @@ ${this.getExternalUsingClause()}
             self.getRecordDelim();
 
           rowsPushed++;
+          self.streamedRowsCount = rowsPushed;
 
           // Progress reporting
           const now = Date.now();
@@ -1573,6 +1625,14 @@ ${this.getExternalUsingClause()}
    */
   getRowsCount(): number {
     return this.rowsCount;
+  }
+
+  /**
+   * Get the number of rows already pulled from the source into the virtual
+   * import stream.
+   */
+  getStreamedRowsCount(): number {
+    return this.streamedRowsCount;
   }
 
   /**
@@ -1754,7 +1814,8 @@ export async function importDataToNetezza(
 ): Promise<ImportResult> {
   const startTime = Date.now();
   let connection: NzConnection | null = null;
-  let temporaryImportDirectory: string | null = null;
+  let importStream: Readable | undefined;
+  let unregisterImportStream: (() => void) | undefined;
 
   try {
     // Validate parameters
@@ -1806,16 +1867,12 @@ export async function importDataToNetezza(
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
 
-    // Materialize the transformed stream so the driver consumes a normal file
-    // stream. This keeps DATA and EOF ordering intact for Netezza's external
-    // table protocol.
     progressCallback?.("Preparing data stream...");
-    const dataStream = await importer.createDataStream(progressCallback);
-    const materializedImport = await materializeImportStream(dataStream);
-    temporaryImportDirectory = materializedImport.directory;
-    const virtualFileName = materializedImport.filePath.replace(/\\/g, "/");
+    importStream = await importer.createDataStream(progressCallback);
+    const virtualFileName = buildNetezzaVirtualImportName("virtual_file_import");
     importer.setVirtualFileName(virtualFileName);
-    progressCallback?.(`Prepared temporary import file: ${virtualFileName}`);
+    unregisterImportStream = registerNetezzaImportStream(virtualFileName, importStream);
+    progressCallback?.(`Registered virtual import stream: ${virtualFileName}`);
 
     // Generate SQL
     const createSql = importer.generateCreateTableSql();
@@ -1840,17 +1897,14 @@ export async function importDataToNetezza(
       // Listen for import progress events
       const totalRows = importer.getRowsCount();
       connection!.on("importProgress", (progressData: unknown) => {
-        const progress = progressData as {
-          bytesSent: number;
-          totalSize: number;
-          percentComplete: number;
-        };
-        const estimatedRows =
-          totalRows > 0
-            ? Math.round((progress.percentComplete / 100) * totalRows)
-            : 0;
+        const progress = resolveNetezzaImportProgress(
+          progressData as NetezzaImportProgressData,
+          totalRows,
+          importer.getStreamedRowsCount(),
+          fileSize,
+        );
         progressCallback?.(
-          `Importing: ${progress.percentComplete}% complete (${estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
+          `Importing: ${progress.percentComplete}% complete (${progress.estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
         );
       });
 
@@ -1890,9 +1944,6 @@ export async function importDataToNetezza(
       },
     };
   } finally {
-    if (temporaryImportDirectory) {
-      fs.rmSync(temporaryImportDirectory, { recursive: true, force: true });
-    }
     if (connection && connection._connected) {
       try {
         await connection.close();
@@ -1900,6 +1951,8 @@ export async function importDataToNetezza(
         // Ignore connection close errors during cleanup
       }
     }
+    unregisterImportStream?.();
+    destroyNetezzaImportStream(importStream);
   }
 }
 
@@ -1913,7 +1966,8 @@ export async function importDataToNetezzaAdvanced(
 ): Promise<ImportResult> {
   const startTime = Date.now();
   let connection: NzConnection | null = null;
-  let temporaryImportDirectory: string | null = null;
+  let importStream: Readable | undefined;
+  let unregisterImportStream: (() => void) | undefined;
 
   try {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -1959,12 +2013,11 @@ export async function importDataToNetezzaAdvanced(
     importer.applyColumnOptions(columnOptions);
 
     progressCallback?.("Preparing data stream...");
-    const dataStream = await importer.createDataStream(progressCallback);
-    const materializedImport = await materializeImportStream(dataStream);
-    temporaryImportDirectory = materializedImport.directory;
-    const virtualFileName = materializedImport.filePath.replace(/\\/g, "/");
+    importStream = await importer.createDataStream(progressCallback);
+    const virtualFileName = buildNetezzaVirtualImportName("virtual_file_import");
     importer.setVirtualFileName(virtualFileName);
-    progressCallback?.(`Prepared temporary import file: ${virtualFileName}`);
+    unregisterImportStream = registerNetezzaImportStream(virtualFileName, importStream);
+    progressCallback?.(`Registered virtual import stream: ${virtualFileName}`);
 
     const createSql = importer.generateStandaloneCreateTableSql();
     const loadSql = importer.generateLoadIntoExistingTableSql();
@@ -1980,17 +2033,14 @@ export async function importDataToNetezzaAdvanced(
     try {
       const totalRows = importer.getRowsCount();
       connection.on("importProgress", (progressData: unknown) => {
-        const progress = progressData as {
-          bytesSent: number;
-          totalSize: number;
-          percentComplete: number;
-        };
-        const estimatedRows =
-          totalRows > 0
-            ? Math.round((progress.percentComplete / 100) * totalRows)
-            : 0;
+        const progress = resolveNetezzaImportProgress(
+          progressData as NetezzaImportProgressData,
+          totalRows,
+          importer.getStreamedRowsCount(),
+          fileSize,
+        );
         progressCallback?.(
-          `Importing: ${progress.percentComplete}% complete (${estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
+          `Importing: ${progress.percentComplete}% complete (${progress.estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
         );
       });
 
@@ -2035,8 +2085,7 @@ export async function importDataToNetezzaAdvanced(
       message: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    if (temporaryImportDirectory) {
-      fs.rmSync(temporaryImportDirectory, { recursive: true, force: true });
-    }
+    unregisterImportStream?.();
+    destroyNetezzaImportStream(importStream);
   }
 }

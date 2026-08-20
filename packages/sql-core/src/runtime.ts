@@ -12,6 +12,7 @@ import { LspSchemaProvider } from '../../../src/server/lspSchemaProvider';
 import { DocumentParseSession } from '../../../src/sqlParser/documentParseSession';
 import { SqlValidator } from '../../../src/sqlParser/validator';
 import { QualityEngineCore } from '../../../src/sqlParser/qualityEngineCore';
+import { getQualityRuleIdForParserCode } from '../../../src/providers/qualityRuleRegistry';
 import type { MetadataRequestParams, MetadataResponse } from '../../../src/lsp/protocol';
 import type { DatabaseKind } from '../../../src/contracts/database';
 import { LspInlayHintEngine } from '../../../src/server/inlayHintEngine';
@@ -176,12 +177,13 @@ export class NetezzaWebLspCore {
     const parserDiagnostics: CoreDiagnostic[] = [...result.errors, ...result.warnings].map(issue => {
       const diagnostic = toDiagnostic(issue) as unknown as CoreDiagnostic & { data?: { suggestedFix?: string } };
       const suggestedFix = (diagnostic.data as { suggestedFix?: string } | undefined)?.suggestedFix;
+      const qualityRuleId = getQualityRuleIdForParserCode(issue.code);
       return {
         range: diagnostic.range,
         severity: diagnostic.severity,
-        code: diagnostic.code,
-        source: diagnostic.source,
-        message: diagnostic.message,
+        code: qualityRuleId ?? diagnostic.code,
+        source: qualityRuleId ? 'Netezza Quality' : diagnostic.source,
+        message: qualityRuleId ? `${qualityRuleId}: ${issue.message}` : diagnostic.message,
         data: suggestedFix ? { suggestedFix } : undefined,
       };
     });

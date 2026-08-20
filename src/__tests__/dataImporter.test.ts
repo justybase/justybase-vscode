@@ -11,7 +11,8 @@ import {
     NetezzaDataType,
     ColumnTypeChooser,
     NetezzaImporter,
-    importDataToNetezza
+    importDataToNetezza,
+    resolveNetezzaImportProgress
 } from '../import/dataImporter';
 
 interface TestXlsxWriter {
@@ -24,6 +25,35 @@ interface TestXlsxWriter {
 const XlsxWriter = require('@justybase/spreadsheet-tasks').XlsxWriter as new (filePath: string) => TestXlsxWriter;
 
 describe('import/dataImporter', () => {
+    describe('resolveNetezzaImportProgress', () => {
+        it('uses streamed rows when a virtual stream has no byte total', () => {
+            expect(resolveNetezzaImportProgress(
+                { bytesSent: 512, totalSize: 0, percentComplete: 0 },
+                4,
+                2,
+                1024,
+            )).toEqual({ percentComplete: 50, estimatedRows: 2 });
+        });
+
+        it('uses driver byte progress when a total is available', () => {
+            expect(resolveNetezzaImportProgress(
+                { bytesSent: 500, totalSize: 1000, percentComplete: 50 },
+                4,
+                1,
+                1024,
+            )).toEqual({ percentComplete: 50, estimatedRows: 2 });
+        });
+
+        it('falls back to source-file bytes when row progress is unavailable', () => {
+            expect(resolveNetezzaImportProgress(
+                { bytesSent: 256, totalSize: 0, percentComplete: 0 },
+                0,
+                0,
+                1024,
+            )).toEqual({ percentComplete: 25, estimatedRows: 0 });
+        });
+    });
+
     describe('NetezzaDataType', () => {
         describe('constructor', () => {
             it('should create with dbType only', () => {
@@ -327,6 +357,7 @@ describe('import/dataImporter', () => {
             expect(rows[0]).toContain('1,2');
             expect(rows[1]).toContain('3,4');
             expect(importer.getRowsCount()).toBe(2);
+            expect(importer.getStreamedRowsCount()).toBe(2);
         });
 
         it('applies selected columns and forced types when generating SQL', async () => {
@@ -444,6 +475,7 @@ describe('import/dataImporter', () => {
             }
 
             expect(chunks.join('')).toBe('1\ta\n2\tb\n3\tc\n4\td\n');
+            expect(importer.getStreamedRowsCount()).toBe(4);
         });
     });
 
