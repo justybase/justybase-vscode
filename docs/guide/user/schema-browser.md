@@ -14,6 +14,11 @@ The Schema view is a lazy tree: connection → database → schema → object gr
 
 ## Everyday workflow
 
+<figure class="figure-wide">
+  <img src="screenshots/schema-browser-tree.png" alt="Schema Browser tree with connection, database, schema, and table columns">
+  <figcaption>The Schema view is a lazy tree: connection → database → schema → object group → object → columns.</figcaption>
+</figure>
+
 1. Connect and expand the database you need.
 2. Expand a schema and choose Tables, Views, Procedures, External Tables, or another object group.
 3. Expand an object for columns and type/nullability metadata.

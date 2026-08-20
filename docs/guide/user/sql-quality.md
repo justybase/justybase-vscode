@@ -35,6 +35,11 @@ Set a rule to `error`, `warning`, `information`, `hint`, or `off` under `justyba
 
 ## Before and after
 
+<figure>
+  <img src="gifs/quick_fix.gif" alt="Applying a quick fix for a SQL diagnostic in JustyBase">
+  <figcaption>Quick fixes move from warning to corrected SQL in one step.</figcaption>
+</figure>
+
 ### Destructive update
 
 ```sql

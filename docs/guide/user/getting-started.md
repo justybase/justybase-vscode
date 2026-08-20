@@ -24,6 +24,11 @@ Install a companion extension only for a database that needs it. The [database s
 
 ## 2. Create a connection
 
+<figure>
+  <img src="gifs/setup.gif" alt="Connecting to a supported database and opening the JustyBase workspace">
+  <figcaption>Save a connection, expand the schema, and keep the database context in one place.</figcaption>
+</figure>
+
 1. Open the JustyBase activity-bar view.
 2. Select **Connect…** or run `JustyBase: Connect...` from the Command Palette.
 3. Choose the database kind and enter the host, port, database, user, and password.

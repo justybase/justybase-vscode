@@ -24,6 +24,21 @@ Executes **all statements** in the file sequentially.
 - Executing multiple CREATE statements
 - Running ETL scripts with multiple queries
 
+```mermaid
+flowchart LR
+    Start[Query] --> Sel{Text selected?}
+    Sel -- Yes --> SelQ[Execute selection]
+    Sel -- No --> Cur{Cursor in statement?}
+    Cur -- Yes --> CurQ[Execute that statement]
+    Cur -- No --> Batch[Execute all statements]
+    SelQ --> Cancel{User cancels?}
+    CurQ --> Cancel
+    Batch --> Cancel
+    Cancel -- No --> Stream[Progressive result streaming]
+    Cancel -- Yes --> Stop[Stop execution · recover connection]
+    Stream --> Tabs[Result-set tabs]
+```
+
 ---
 
 ## Explain Query Plan

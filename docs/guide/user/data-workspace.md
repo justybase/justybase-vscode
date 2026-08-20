@@ -14,6 +14,11 @@ Data Workspace brings local files into the same schema/result workflow as a data
 
 ## Add a file source
 
+<figure class="figure-wide">
+  <img src="screenshots/data-workspace.png" alt="Data Workspace Manager with local file sources and a materialized table">
+  <figcaption>Local files become queryable sources in the Data Workspace.</figcaption>
+</figure>
+
 1. Run **Open Data Workspace Manager**.
 2. Add a CSV/TSV, XLSX/XLSB, Parquet, Avro, MDB, or ACCDB source.
 3. Choose a stable workspace/profile name and inspect the detected tables/sheets.
@@ -39,6 +44,11 @@ DuckDB is the local analytical runtime for file-backed transformations. SQLite p
 File SQL is not Netezza SQL. Completion, functions, quoting, types, and maintenance follow the local dialect. The same editor shell is shared, but a query accepted by DuckDB may not be accepted by Netezza. The [database matrix](guide/reference/database-support/) calls out this boundary.
 
 ## Safe editing
+
+<figure>
+  <img src="screenshots/file-preview.png" alt="File preview with Add to Data Workspace action in JustyBase">
+  <figcaption>CSV and Excel files open in a preview with a direct path into the workspace.</figcaption>
+</figure>
 
 Use preview and explicit save actions. A local result grid edit writes through the file/runtime contract only when the source is marked editable. Disk-backed result sets are still read-only; spill storage is not the source file.
 

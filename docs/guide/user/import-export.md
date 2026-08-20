@@ -14,6 +14,11 @@ Always decide which data boundary you mean before choosing a command: the visibl
 
 ## Export sources
 
+<figure>
+  <img src="gifs/export_xlsb.gif" alt="Exporting a query result to an Excel workbook in JustyBase">
+  <figcaption>Stream results to Excel, CSV, JSON, XML, SQL INSERT, Markdown, or Parquet.</figcaption>
+</figure>
+
 | Source | What is exported |
 | --- | --- |
 | Active result grid | The selected result-set view; raw or formatted values can be chosen. |

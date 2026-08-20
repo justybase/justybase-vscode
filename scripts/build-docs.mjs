@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { marked } from 'marked';
+import sharp from 'sharp';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const docsRoot = path.join(root, 'docs');
@@ -237,7 +238,8 @@ function rewriteLocalLinks(html, rootRelative, sourceFile, legacyPageUrls) {
       return match;
     })
     .replace(/src="screenshots\//g, `src="${rootRelative}screenshots/`)
-    .replace(/src="gifs\//g, `src="${rootRelative}gifs/`);
+    .replace(/src="gifs\//g, `src="${rootRelative}gifs/`)
+    .replace(/<img(?![^>]*\bloading=)[^>]*>/gi, match => match.replace(/<img/i, '<img loading="lazy" decoding="async"'));
 }
 
 function renderMarkdown(markdown, rootRelative, sourceFile, legacyPageUrls) {
@@ -250,6 +252,9 @@ function renderMarkdown(markdown, rootRelative, sourceFile, legacyPageUrls) {
     return `<h${token.depth} id="${id}"><a class="heading-anchor" href="#${id}" aria-label="Link to ${escapeHtml(label)}">#</a>${marked.parseInline(text)}</h${token.depth}>\n`;
   };
   renderer.code = token => {
+    if (token.lang === 'mermaid') {
+      return `<div class="mermaid-block"><pre class="mermaid">${escapeHtml(token.text)}</pre></div>\n`;
+    }
     const language = token.lang ? ` class="language-${escapeHtml(token.lang)}"` : '';
     const encoded = escapeHtml(token.text);
     const copyValue = escapeHtml(token.text);
@@ -259,6 +264,11 @@ function renderMarkdown(markdown, rootRelative, sourceFile, legacyPageUrls) {
     const label = marked.parseInline(tokenText(token));
     const title = token.title ? ` title="${escapeHtml(token.title)}"` : '';
     return `<a href="${escapeHtml(token.href)}"${title}>${label}</a>`;
+  };
+  renderer.image = token => {
+    const alt = escapeHtml(token.text);
+    const title = token.title ? ` title="${escapeHtml(token.title)}"` : '';
+    return `<img src="${escapeHtml(token.href)}" alt="${alt}"${title} loading="lazy" decoding="async">`;
   };
   return rewriteLocalLinks(marked.parse(markdown, { renderer, gfm: true, breaks: false }), rootRelative, sourceFile, legacyPageUrls);
 }
@@ -312,6 +322,8 @@ function pageHtml(page, markdown, outputFile, pages, legacyPageUrls, buildInfo) 
   const rootRelative = rootRelativeForOutput(outputFile);
   const body = renderMarkdown(markdown, rootRelative, page.sourceFile, legacyPageUrls);
   const canonical = `https://justybase.github.io/justybase-vscode/${page.url}`;
+  const pageImage = page.image ?? 'screenshots/workspace-overview.png';
+  const pageImageUrl = /^https?:/i.test(pageImage) ? pageImage : `https://justybase.github.io/justybase-vscode/${pageImage}`;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -321,6 +333,16 @@ function pageHtml(page, markdown, outputFile, pages, legacyPageUrls, buildInfo) 
     <meta name="description" content="${escapeHtml(page.description)}">
     <meta name="justybase:product-version" content="${escapeHtml(productVersion)}">
     <meta name="justybase:source-commit" content="${escapeHtml(buildInfo.sourceCommit)}">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="JustyBase">
+    <meta property="og:title" content="${escapeHtml(page.title)} · JustyBase documentation">
+    <meta property="og:description" content="${escapeHtml(page.description)}">
+    <meta property="og:url" content="${canonical}">
+    <meta property="og:image" content="${escapeHtml(pageImageUrl)}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="${escapeHtml(page.title)} · JustyBase documentation">
+    <meta name="twitter:description" content="${escapeHtml(page.description)}">
+    <meta name="twitter:image" content="${escapeHtml(pageImageUrl)}">
     <link rel="canonical" href="${canonical}">
     <link rel="icon" type="image/svg+xml" href="${rootRelative}favicon.svg">
     <link rel="stylesheet" href="${rootRelative}guide-assets/guide.css">
@@ -349,6 +371,7 @@ function pageHtml(page, markdown, outputFile, pages, legacyPageUrls, buildInfo) 
       </main>
     </div>
     <footer class="guide-footer"><div class="guide-container"><span>JustyBase ${escapeHtml(productVersion)}</span><span>Source <a href="${buildInfo.sourceCommitUrl}" target="_blank" rel="noreferrer">${escapeHtml(buildInfo.sourceCommitShort)}</a>${buildInfo.workingTreeDirty ? ' · working tree' : ''}</span><span>Apache-2.0</span><a href="https://github.com/justybase/justybase-vscode/issues">Report an issue</a></div></footer>
+    ${body.includes('class="mermaid"') ? '<script type="module">\n      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";\n      const mermaidDark = window.matchMedia("(prefers-color-scheme: dark)").matches;\n      mermaid.initialize({ startOnLoad: true, theme: mermaidDark ? "dark" : "neutral" });\n    </script>' : ''}
     <script defer src="${rootRelative}guide-assets/guide.js"></script>
   </body>
 </html>`;
@@ -458,6 +481,27 @@ async function copyStaticAssets() {
   }
 }
 
+async function optimizeSiteImages() {
+  const screenshots = path.join(siteRoot, 'screenshots');
+  const files = (await readdir(screenshots, { withFileTypes: true })).filter(entry => entry.isFile() && /\.png$/i.test(entry.name));
+  const maxWidth = 1600;
+  let saved = 0;
+  for (const entry of files) {
+    const file = path.join(screenshots, entry.name);
+    const before = (await readFile(file)).length;
+    const image = sharp(file);
+    const metadata = await image.metadata();
+    const width = metadata.width ?? maxWidth;
+    const pipeline = width > maxWidth ? image.resize({ width: maxWidth, withoutEnlargement: true }) : image;
+    const temporary = `${file}.tmp`;
+    await pipeline.png({ palette: true, quality: 80, compressionLevel: 9 }).toFile(temporary);
+    await rename(temporary, file);
+    const after = (await readFile(file)).length;
+    saved += before - after;
+  }
+  if (files.length > 0) console.log(`Screenshots optimized: ${files.length} PNGs, ${(saved / 1024 / 1024).toFixed(2)} MiB saved.`);
+}
+
 async function build() {
   const catalog = await liveCatalogs();
   const generatedSections = catalogMarkdown(catalog);
@@ -465,6 +509,7 @@ async function build() {
   await mkdir(siteRoot, { recursive: true });
   await writeFile(path.join(siteRoot, '.nojekyll'), '', 'utf8');
   await copyStaticAssets();
+  await optimizeSiteImages();
 
   const sourceFiles = await markdownFiles(guideRoot);
   const pages = [];

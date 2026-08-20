@@ -38,6 +38,11 @@ At `r.|`, suggestions are columns visible through `r`, not every function and co
 
 ## Diagnostics with examples
 
+<figure class="figure-wide">
+  <img src="screenshots/sql-validation-and-copilot.png" alt="SQL diagnostics with quick fixes in the JustyBase editor">
+  <figcaption>Parser-backed diagnostics surface as squiggles, Problems entries, and actionable quick fixes.</figcaption>
+</figure>
+
 ### Unknown alias
 
 ```sql

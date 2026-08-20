@@ -159,13 +159,17 @@ Requirements and limits:
 
 ## Architecture
 
-```
-VS Code Secrets API ──ConnectionManager──┐
-                                         ▼
-JustyBase Settings → MCP Server ──► registerMcpServerDefinitionProvider (stdio, resolve injects env)
-                                         │
-                                         ├──► dist/mcp/mcpServer.js (stdio) ──► Copilot Chat
-                                         └──► dist/mcp/mcpServer.js --transport http ──► external clients
+```mermaid
+flowchart TD
+    Secrets[VS Code Secrets API] --> CM[ConnectionManager]
+    Settings[JustyBase Settings] --> Server[MCP Server]
+    CM --> Server
+    Server --> Provider[registerMcpServerDefinitionProvider · stdio · resolve injects env]
+    Provider --> Stdin[dist/mcp/mcpServer.js · stdio]
+    Provider --> Http[dist/mcp/mcpServer.js · --transport http]
+    Stdin --> Copilot[Copilot Chat]
+    Http --> Clients[External MCP clients]
+    Server --> Introspection[src/core/catalogIntrospection.ts · read-only]
 ```
 
 Shared read-only logic lives in `src/core/catalogIntrospection.ts` (no `vscode` imports), so it is
