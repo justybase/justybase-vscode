@@ -25,6 +25,14 @@ export async function getConnectionForDocument(
         return { connection, shouldCloseConnection: false };
     }
 
+    if (documentUri) {
+        const connection = await connManager.createTransientConnectionForDocument(
+            documentUri,
+            resolvedConnectionName,
+        );
+        return { connection, shouldCloseConnection: true };
+    }
+
     const details = await connManager.getConnection(resolvedConnectionName);
     if (!details) {
         throw new Error(`Connection '${resolvedConnectionName}' not found`);

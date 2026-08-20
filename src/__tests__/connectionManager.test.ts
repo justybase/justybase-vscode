@@ -13,6 +13,7 @@ import { MockNzConnection } from '../__mocks__/mockNzConnection';
 import { resetDatabaseDialectTestingState } from './dialectTestUtils';
 import { postgresqlDialect } from '../../extensions/postgresql/src/postgresqlDialect';
 import { oracleDialect } from '../../extensions/oracle/src/oracleDialect';
+import { SqliteConnection } from '../dialects/sqlite';
 
 const mockNzConnectionConstructor = jest.fn(() => new MockNzConnection());
 
@@ -554,6 +555,133 @@ describe('ConnectionManager', () => {
             manager.setDocumentConnection(docUri, 'DocSpecificConnection');
 
             expect(manager.getConnectionForExecution(docUri)).toBe('DocSpecificConnection');
+        });
+
+        it('should use each cell connection before the global active connection', async () => {
+            const secondConnection: ConnectionDetails = {
+                ...sampleConnection,
+                name: 'SecondConnection',
+                database: 'second_db',
+            };
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection(secondConnection);
+            await manager.saveConnection(sqliteConnection);
+            await manager.setActiveConnection(sqliteConnection.name);
+
+            const firstCellUri = 'vscode-notebook-cell:/workspace/report.sqlnb#cell-1';
+            const secondCellUri = 'vscode-notebook-cell:/workspace/report.sqlnb#cell-2';
+            const fallbackCellUri = 'vscode-notebook-cell:/workspace/report.sqlnb#cell-3';
+            manager.setDocumentConnection(firstCellUri, sampleConnection.name);
+            manager.setDocumentConnection(secondCellUri, secondConnection.name);
+
+            const first = await manager.createTransientConnectionForDocument(firstCellUri);
+            expect(mockNzConnectionConstructor).toHaveBeenLastCalledWith(
+                expect.objectContaining({ database: sampleConnection.database }),
+            );
+            await first.close();
+
+            const second = await manager.createTransientConnectionForDocument(secondCellUri);
+            expect(mockNzConnectionConstructor).toHaveBeenLastCalledWith(
+                expect.objectContaining({ database: secondConnection.database }),
+            );
+            await second.close();
+
+            const fallback = await manager.createTransientConnectionForDocument(fallbackCellUri);
+            expect((fallback as MockNzConnection)._connected).toBe(true);
+            await fallback.close();
+        });
+
+        it('should pass a cell database override to server connections', async () => {
+            await manager.saveConnection(sampleConnection);
+            const cellUri = 'vscode-notebook-cell:/workspace/report.sqlnb#cell-db';
+            manager.setDocumentConnection(cellUri, sampleConnection.name);
+            await manager.setDocumentDatabase(cellUri, 'JUST_DATA');
+
+            const connection = await manager.createTransientConnectionForDocument(cellUri);
+
+            expect(mockNzConnectionConstructor).toHaveBeenLastCalledWith(
+                expect.objectContaining({ database: 'JUST_DATA' }),
+            );
+            await connection.close();
+        });
+
+        it('should preserve a local database path while resolving its logical catalog', async () => {
+            const databasePath = path.join(os.tmpdir(), `notebook-transient-${Date.now()}.db`);
+            const localConnection: ConnectionDetails = {
+                ...sqliteConnection,
+                database: databasePath,
+                options: { mode: 'file' },
+            };
+            const cellUri = 'vscode-notebook-cell:/workspace/report.sqlnb#cell-local';
+
+            try {
+                await manager.saveConnection(localConnection);
+                manager.setDocumentConnection(cellUri, localConnection.name);
+                await manager.setDocumentDatabase(cellUri, 'main');
+
+                const connection = await manager.createTransientConnectionForDocument(cellUri);
+                expect((connection as unknown as { _databaseLocation: string })._databaseLocation).toBe(databasePath);
+
+                const reader = await connection.createCommand('SELECT CURRENT_CATALOG').executeReader();
+                try {
+                    expect(await reader.read()).toBe(true);
+                    expect(reader.getValue(0)).toBe('main');
+                } finally {
+                    await reader.close();
+                    await connection.close();
+                }
+            } finally {
+                fs.rmSync(databasePath, { force: true });
+            }
+        });
+
+        it('should close a transient connection when connecting fails', async () => {
+            const failedConnection = new MockNzConnection();
+            failedConnection.connect = jest.fn().mockRejectedValue(new Error('connect failed'));
+            failedConnection.close = jest.fn().mockResolvedValue(undefined);
+            mockNzConnectionConstructor.mockImplementationOnce(() => failedConnection);
+
+            await manager.saveConnection(sampleConnection);
+            await manager.setActiveConnection(sampleConnection.name);
+
+            await expect(
+                manager.createTransientConnectionForDocument('vscode-notebook-cell:/workspace/report.sqlnb#cell-fail'),
+            ).rejects.toThrow('connect failed');
+            expect(failedConnection.close).toHaveBeenCalledTimes(1);
+        });
+
+        it('should close a transient connection when applying a local catalog fails', async () => {
+            const databasePath = path.join(os.tmpdir(), `notebook-catalog-failure-${Date.now()}.db`);
+            const localConnection: ConnectionDetails = {
+                ...sqliteConnection,
+                database: databasePath,
+                options: { mode: 'file' },
+            };
+            const cellUri = 'vscode-notebook-cell:/workspace/report.sqlnb#cell-catalog-fail';
+            const originalCreateCommand = SqliteConnection.prototype.createCommand;
+            const createCommandSpy = jest.spyOn(SqliteConnection.prototype, 'createCommand').mockImplementation(function (this: SqliteConnection, sql) {
+                if (/^SET CATALOG\b/i.test(sql.trim())) {
+                    return {
+                        commandTimeout: 0,
+                        execute: jest.fn().mockRejectedValue(new Error('catalog failed')),
+                    } as never;
+                }
+                return originalCreateCommand.call(this, sql);
+            });
+            const closeSpy = jest.spyOn(SqliteConnection.prototype, 'close');
+
+            try {
+                await manager.saveConnection(localConnection);
+                manager.setDocumentConnection(cellUri, localConnection.name);
+                await manager.setDocumentDatabase(cellUri, 'logical_failure');
+
+                await expect(manager.createTransientConnectionForDocument(cellUri)).rejects.toThrow('catalog failed');
+                expect(closeSpy).toHaveBeenCalledTimes(1);
+            } finally {
+                createCommandSpy.mockRestore();
+                closeSpy.mockRestore();
+                fs.rmSync(databasePath, { force: true });
+            }
         });
 
         it('persists and restores saved-file connection and database context', async () => {

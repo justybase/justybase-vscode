@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from '../core/connectionManager';
-import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { getQueryConfig } from '../core/queryBatchExecutor';
-import type { DatabaseConnection } from '../contracts/database';
+import type { NzConnection } from '../types';
 import { stashResult, mapCellResult } from './fullGridPanel';
 
 const NOTEBOOK_TYPE = 'netezza-sql-notebook';
@@ -57,10 +56,11 @@ export class NetezzaSqlNotebookController {
         execution.executionOrder = ++this._executionOrder;
         execution.start(Date.now());
 
-        let connection: DatabaseConnection | undefined;
+        let connection: NzConnection | undefined;
 
         try {
-            const connectionName = this._connectionManager.getActiveConnectionName();
+            const documentUri = cell.document.uri.toString();
+            const connectionName = this._connectionManager.getConnectionForExecution(documentUri);
             if (!connectionName) {
                 return this._endWithError(execution, 'No connection selected. Use the status bar or sidebar to connect first.');
             }
@@ -79,7 +79,10 @@ export class NetezzaSqlNotebookController {
 
             const { queryTimeout, rowLimit } = getQueryConfig();
 
-            connection = await createConnectedDatabaseConnectionFromDetails(details);
+            connection = await this._connectionManager.createTransientConnectionForDocument(
+                documentUri,
+                connectionName,
+            );
 
             const cmd = connection.createCommand(sql);
             if (queryTimeout && queryTimeout > 0) {

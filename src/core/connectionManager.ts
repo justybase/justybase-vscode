@@ -762,6 +762,89 @@ export class ConnectionManager {
     }
 
     /**
+     * Create a connected, non-persistent connection for a document.
+     *
+     * The document connection and database contexts are consulted before the
+     * global active connection.  Notebook cells intentionally use this path
+     * so their ephemeral context is never stored as a persistent connection.
+     */
+    async createTransientConnectionForDocument(
+        documentUri: string,
+        connectionName?: string,
+    ): Promise<NzConnection> {
+        const targetName = connectionName || this.getConnectionForExecution(documentUri);
+        if (!targetName) {
+            throw new Error('No connection selected for this document');
+        }
+
+        return this.createConnectedConnectionForDocument(documentUri, targetName, 'transient');
+    }
+
+    /**
+     * Create and initialize a connection using a document's effective
+     * database. Local-file dialects keep the configured physical path and,
+     * when needed, switch the logical DuckDB/Access catalog afterwards.
+     */
+    private async createConnectedConnectionForDocument(
+        documentUri: string,
+        targetName: string,
+        connectionKind: 'persistent' | 'transient',
+    ): Promise<NzConnection> {
+        const details = await this.getConnection(targetName);
+        if (!details) {
+            throw new Error(`Connection '${targetName}' not found or invalid`);
+        }
+
+        const normalizedUri = normalizeUriKey(documentUri);
+        const resolvedKind = resolveStoredDatabaseKind(details) ?? resolveConnectionDatabaseKind(details.dbType);
+        const defaultLogicalDatabase = getLogicalDefaultDatabase(details) ?? details.database;
+        const databaseOverride = this._documentDatabaseOverride.get(normalizedUri);
+        const effectiveDatabase =
+            (await this.getEffectiveDatabase(documentUri, targetName))
+            ?? defaultLogicalDatabase
+            ?? details.database;
+        const connectionDatabase = isLocalFileDialect(resolvedKind) ? details.database : effectiveDatabase;
+        const shouldApplyCatalogOverride =
+            isLocalFileDialect(resolvedKind)
+            && typeof databaseOverride === 'string'
+            && databaseOverride.length > 0
+            && !isLikelySqliteDatabaseName(databaseOverride)
+            && databaseOverride !== defaultLogicalDatabase;
+
+        let conn: NzConnection | undefined;
+        try {
+            conn = createDatabaseConnectionFromDetails({
+                ...details,
+                database: connectionDatabase,
+            }) as NzConnection;
+            const connectionLabel = connectionKind === 'persistent'
+                ? `persistent Netezza tab connection for ${normalizedUri}`
+                : `transient document connection for ${normalizedUri}`;
+            logWithFallback('info', `[ConnectionManager] Connecting ${connectionLabel}`);
+            await conn.connect();
+            logWithFallback('info', `[ConnectionManager] ${connectionLabel} established`);
+
+            if (shouldApplyCatalogOverride && databaseOverride) {
+                const setCatalogCommand = conn.createCommand(
+                    `SET CATALOG ${formatCatalogTarget(databaseOverride, resolvedKind)}`
+                );
+                await setCatalogCommand.execute();
+            }
+
+            return conn;
+        } catch (error: unknown) {
+            if (conn) {
+                try {
+                    await conn.close();
+                } catch (closeError: unknown) {
+                    logWithFallback('warn', `[ConnectionManager] Failed to close ${connectionKind} document connection:`, closeError);
+                }
+            }
+            throw error;
+        }
+    }
+
+    /**
      * Get persistent connection for a specific document (tab)
      * Uses document-specific database override if set
      */
@@ -782,17 +865,11 @@ export class ConnectionManager {
             throw new Error(`Connection '${targetName}' not found or invalid`);
         }
 
-        const resolvedKind = resolveStoredDatabaseKind(details) ?? resolveConnectionDatabaseKind(details.dbType);
         const defaultLogicalDatabase = getLogicalDefaultDatabase(details) ?? details.database;
-        const databaseOverride = this._documentDatabaseOverride.get(normalizedUri);
-        const effectiveDatabase = databaseOverride || defaultLogicalDatabase;
-        const connectionDatabase = isLocalFileDialect(resolvedKind) ? details.database : effectiveDatabase;
-        const shouldApplyCatalogOverride =
-            isLocalFileDialect(resolvedKind)
-            && typeof databaseOverride === 'string'
-            && databaseOverride.length > 0
-            && !isLikelySqliteDatabaseName(databaseOverride)
-            && databaseOverride !== defaultLogicalDatabase;
+        const effectiveDatabase =
+            (await this.getEffectiveDatabase(documentUri, targetName))
+            ?? defaultLogicalDatabase
+            ?? details.database;
 
         const existing = this._documentPersistentConnections.get(normalizedUri);
         const existingMeta = this._documentPersistentConnectionMeta.get(normalizedUri);
@@ -836,19 +913,7 @@ export class ConnectionManager {
         const connectPromise = (async () => {
             let conn: NzConnection | undefined;
             try {
-                conn = createDatabaseConnectionFromDetails({
-                    ...details,
-                    database: connectionDatabase
-                }) as NzConnection;
-                logWithFallback('info', `[ConnectionManager] Connecting persistent Netezza tab connection for ${normalizedUri}`);
-                await conn.connect();
-                logWithFallback('info', `[ConnectionManager] Persistent tab connection established for ${normalizedUri}`);
-                if (shouldApplyCatalogOverride && databaseOverride) {
-                    const setCatalogCommand = conn.createCommand(
-                        `SET CATALOG ${formatCatalogTarget(databaseOverride, resolvedKind)}`
-                    );
-                    await setCatalogCommand.execute();
-                }
+                conn = await this.createConnectedConnectionForDocument(documentUri, targetName, 'persistent');
 
                 const currentGeneration = this._documentConnectionGenerations.get(normalizedUri) ?? 0;
                 const currentConnectionName = this.getConnectionForExecution(documentUri);
