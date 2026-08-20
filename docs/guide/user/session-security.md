@@ -12,6 +12,11 @@ product_version: 3.16.38
 
 ## Session Monitor
 
+<figure class="figure-wide">
+  <img src="screenshots/session_monitor.png" alt="Session Monitor dashboard with active sessions and resource usage">
+  <figcaption>The Session Monitor shows active sessions, running queries, and resource utilization.</figcaption>
+</figure>
+
 Open **Session Monitor** from the JustyBase commands or database-specific context. Review session identifiers, user/database, state, query text where exposed by the dialect, elapsed time, and cancellation/termination actions. Treat terminate as a privileged operational action and verify the selected connection before confirming.
 
 The monitor is database-specific. Netezza exposes warehouse/session concepts that do not map one-to-one to SQLite or Access. Metadata sessions created by JustyBase can be swept separately; user query sessions are not swept by the metadata setting.

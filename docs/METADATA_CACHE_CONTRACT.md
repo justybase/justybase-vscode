@@ -23,6 +23,19 @@ and `just_data` from sharing a cache entry. The encoded marker is an internal
 key representation; values exposed to the schema tree and completion retain the
 catalog spelling, case, and meaningful whitespace.
 
+```mermaid
+flowchart TD
+    Q[Catalog query] --> Set[setTables / setSchemas / setColumns]
+    Set --> Cache[(MetadataCache layers)]
+    Cache --> Lookup[Lookup indexes · objectLookup / objectsByType]
+    Cache --> Disk[Disk serializer / compressor]
+    Disk --> Cache2[(Disk cache · cross-window sync)]
+    Cache --> Bridge[Metadata bridge / LSP schema provider]
+    Bridge --> Consumers[Completion · validation · result context]
+    Consumers --> Q2[Targeted refresh / prefetch]
+    Q2 --> Cache
+```
+
 ## Table cache write policy
 
 ### `setTables` — complete replacement

@@ -6,6 +6,20 @@ JustyBase includes a built-in SQL linter that provides real-time feedback on com
 
 Bulk quick-fix policy and `Fix all` eligibility are documented in [QUICK_FIX_MATRIX.md](QUICK_FIX_MATRIX.md).
 
+```mermaid
+flowchart TD
+    Sql[SQL document] --> Parser[Chevrotain lexer / parser]
+    Parser --> Validator[Validator · CST walk · sqlVisitor]
+    Validator --> Types{Column dataType available?}
+    Types -- No --> Basic[SQL003 / 004 / 007 · scope rules]
+    Types -- Yes --> TypeCheck[Type-aware comparison · SQL025 / SQL026]
+    Basic --> Issues[ValidationError list]
+    TypeCheck --> Issues
+    Issues --> Lsp[LSP diagnostics · LspSchemaProvider / metadataBridge]
+    Issues --> Host[Extension-host linter · MetadataCacheSchemaProvider]
+    Lsp --> Panel[Problems panel]
+    Host --> Panel
+
 ## Configuration
 
 Enable/disable the linter and customize rule severity in VS Code settings:

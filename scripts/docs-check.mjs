@@ -277,6 +277,7 @@ async function checkBuiltLinks() {
   const htmlFiles = await filesUnder(siteRoot, '.html');
   for (const file of htmlFiles) {
     const html = await readFile(file, 'utf8');
+    if (/language-mermaid/.test(html)) fail(`Unconverted mermaid fence in ${path.relative(root, file)}`);
     const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
     for (const match of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
       const raw = match[1];

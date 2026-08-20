@@ -20,6 +20,7 @@
 
 # Web editor runtime state (credentials, query history, and result sessions)
 **/.justybase-web/
+**/.justybase/
 
 # Benchmark timing artifacts (regenerated locally; never published)
 Benchmark/*.results.md

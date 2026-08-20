@@ -12,11 +12,33 @@ product_version: 3.16.38
 
 ## Runtime layers
 
-```text
-VS Code extension ──┐
-                    ├─ database dialects / metadata / result webviews
-Shared contracts ───┼─ SQL core ── database runtime ── Web API ── Web Editor
-                    └─ companion extensions
+```mermaid
+flowchart LR
+    subgraph Desktop[VS Code extension · src/]
+        Core[Extension host and webviews]
+        Dialects[Database dialects / metadata / result panels]
+    end
+    subgraph Shared[Shared packages]
+        Contracts[packages/contracts]
+        SqlCore[packages/sql-core]
+        Runtime[packages/database-runtime]
+    end
+    subgraph Server[Self-hosted]
+        Api[apps/api · Fastify + WebSocket]
+        Web[apps/web · React editor]
+    end
+    subgraph Optional[Companion extensions]
+        Packs[extensions/* · dialect runtimes]
+    end
+    Contracts --> SqlCore
+    SqlCore --> Runtime
+    Core --> Dialects
+    Core --> Contracts
+    Api --> Contracts
+    Api --> SqlCore
+    Api --> Runtime
+    Web --> Api
+    Packs --> Core
 ```
 
 - `src/` is the desktop composition root and VS Code integration.

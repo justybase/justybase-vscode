@@ -21,6 +21,11 @@ The Result Panel is a data exploration workspace, not only a table widget. It vi
 5. Open **Row View** for side-by-side rows or **Value Viewer** for a long cell.
 6. Pin important result sets and let grid state (column order, filters, sorting, visibility, and pinning) persist for the file.
 
+<figure>
+  <img src="screenshots/row-view.png" alt="Row View showing a result row side by side with values">
+  <figcaption>Row View and Value Viewer open long cells without leaving the result workspace.</figcaption>
+</figure>
+
 ## Three filtering modes
 
 | Mode | Data boundary | Executes a new query? |
@@ -30,6 +35,11 @@ The Result Panel is a data exploration workspace, not only a table widget. It vi
 | **All rows + LIMIT** | The logical result before its final `LIMIT`, then the original limit is reapplied | Yes |
 
 ### All rows + LIMIT: the important distinction
+
+<figure>
+  <img src="screenshots/all-rows-limit.png" alt="All rows + LIMIT filter mode in the result panel">
+  <figcaption>Database-scope filtering applies the predicate to the logical result before the display limit.</figcaption>
+</figure>
 
 For a query such as:
 
@@ -64,6 +74,16 @@ Loaded-row filtering is immediate and local. It is the right choice for a 500-ro
 Disk-backed filtering sees every row fetched into the SQLite spill, without a second database query. It can sort, group, calculate distinct values, and aggregate over that fetched dataset. It still cannot see rows the server did not send. Inline editing is disabled for disk-backed results.
 
 ## Aggregations and profiles
+
+<figure>
+  <img src="screenshots/results-explorer.png" alt="Result exploration with profiles, distributions, and summaries in JustyBase">
+  <figcaption>The result explorer turns a grid into profiles, distributions, summaries, and pivot views.</figcaption>
+</figure>
+
+<figure>
+  <img src="screenshots/results-chart.png" alt="Interactive chart built from a JustyBase query result">
+  <figcaption>Chart views compare patterns without writing another exploratory query.</figcaption>
+</figure>
 
 Visible-scope aggregation uses the currently filtered grid/spill. Database-scope aggregation uses the unlimited subquery used by **All rows + LIMIT**. Available operations include `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`, `COUNT DISTINCT`, `STDDEV`, and `MEDIAN` where the selected database supports the operation and the column type is suitable. Pin aggregations to compare columns while changing filters.
 

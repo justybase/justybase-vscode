@@ -12,6 +12,11 @@ product_version: 3.16.38
 
 ## Query History
 
+<figure class="figure-wide">
+  <img src="screenshots/query-history.png" alt="Query History with executed SQL entries and filters">
+  <figcaption>Query History records SQL with connection context, status, duration, and result information.</figcaption>
+</figure>
+
 Open **Query History** in the JustyBase explorer. Each entry records the SQL, connection/database context, status, duration, and row/affected-row information available from the execution. Select an entry to open it in a new SQL tab or re-run it.
 
 Before rerunning a statement:
@@ -24,6 +29,11 @@ Before rerunning a statement:
 History is a convenience record, not a secret store. Do not put passwords or tokens in SQL literals. The Web Editor stores user history on the server and exposes it through its authenticated API; its retention follows the server data directory/session policy.
 
 ## Favorites
+
+<figure class="figure-wide">
+  <img src="screenshots/favorites.png" alt="Favorites tree with folders, SQL snippets, and notes in JustyBase">
+  <figcaption>Favorites keep a curated route to objects, snippets, and notes.</figcaption>
+</figure>
 
 The Schema Browser can favorite tables, views, procedures, functions, and external tables. SQL snippets and folders can also be curated with notes. A favorite can carry:
 

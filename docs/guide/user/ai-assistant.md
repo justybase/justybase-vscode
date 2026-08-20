@@ -18,6 +18,11 @@ diagnostic → schema/DDL context → Copilot explanation → suggested fix → 
 
 ## Available workflows
 
+<figure class="figure-wide">
+  <img src="screenshots/copilot-chat.png" alt="AI-assisted SQL correction in JustyBase">
+  <figcaption>Copilot explains, fixes, optimizes, or generates SQL while the final decision stays with you.</figcaption>
+</figure>
+
 - **Fix SQL** — explain diagnostics and propose a corrected query.
 - **Optimize SQL** — discuss joins, predicates, distribution, and database-specific trade-offs.
 - **Explain SQL** — summarize a statement using its actual aliases, CTEs, tables, and diagnostics.
@@ -41,6 +46,11 @@ Depending on the action and confirmation, the context builder may include:
 `justybase.ddl.maxTablesForContext` and `justybase.copilot.maxWorkspaceProfilesInContext` bound context size. Empty or unavailable metadata is reported as unavailable; it is not fabricated.
 
 ## Privacy and confirmation
+
+<figure>
+  <img src="screenshots/security-panel.png" alt="Privacy confirmation before an AI action transmits SQL or metadata">
+  <figcaption>Confirmations describe what is sent before a supported AI action transmits context.</figcaption>
+</figure>
 
 When an action would send SQL or metadata to the Copilot service, JustyBase shows a confirmation describing the operation and context. `justybase.copilot.skipPrivacyConfirmation` can skip that prompt only when the user and organization have made that policy decision. `justybase.copilot.enabled` is the broad off switch; when false, AI features are unavailable and the extension does not send their context.
 
