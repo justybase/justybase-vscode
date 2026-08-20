@@ -10,6 +10,7 @@ export const window = {
   showQuickPick: jest.fn(),
   showOpenDialog: jest.fn(),
   showSaveDialog: jest.fn(),
+  showInputBox: jest.fn(),
   createOutputChannel: jest.fn(() => ({
     appendLine: jest.fn(),
     show: jest.fn(),
@@ -93,7 +94,7 @@ export const Uri = {
 
 export const commands = {
   registerCommand: jest.fn(),
-  executeCommand: jest.fn(),
+  executeCommand: jest.fn().mockResolvedValue(undefined),
 };
 
 export const extensions = {

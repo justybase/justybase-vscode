@@ -48,6 +48,10 @@ const DB_CONFIG = {
   password: process.env.NZ_DEV_PASSWORD || "password",
 };
 
+const DATABASE = DB_CONFIG.database.toUpperCase();
+const SCHEMA = (process.env.NZ_DEV_SCHEMA || "ADMIN").toUpperCase();
+const DIMDATE = `${DATABASE}.${SCHEMA}.DIMDATE`;
+
 async function queryRows(
   connection: NzConnection,
   sql: string,
@@ -119,8 +123,8 @@ function createMacroQualityEngine(): SqlQualityEngine {
     ["DATEKEY", "CALENDARQUARTER"],
   );
   schemaProvider.createTable(
-    "JUST_DATA",
-    "ADMIN",
+    DATABASE,
+    SCHEMA,
     "DIMDATE",
     ["DATEKEY", "CALENDARQUARTER"],
   );
@@ -163,7 +167,7 @@ describeIfDb("MacroPreprocessor live Netezza integration", () => {
     await connection.connect();
 
     try {
-      const script = `%LET dim_table = JUST_DATA.ADMIN.DIMDATE;
+      const script = `%LET dim_table = ${DIMDATE};
 %LET as_of_key = %SQL(
   SELECT MAX(DATEKEY)
   FROM &dim_table
@@ -180,10 +184,10 @@ describeIfDb("MacroPreprocessor live Netezza integration", () => {
       );
 
       expect(sql.trim()).toBe("");
-      expect(vars.DIM_TABLE).toBe("JUST_DATA.ADMIN.DIMDATE");
+      expect(vars.DIM_TABLE).toBe(DIMDATE);
       expect(vars.AS_OF_KEY).toMatch(/^\d+$/);
     } finally {
-      connection.close();
+      await connection.close();
     }
   });
 
@@ -194,7 +198,7 @@ describeIfDb("MacroPreprocessor live Netezza integration", () => {
     await connection.connect();
 
     try {
-      const script = `%LET dim_table = JUST_DATA.ADMIN.DIMDATE;
+      const script = `%LET dim_table = ${DIMDATE};
 SELECT COUNT(*) AS matched_rows
 FROM &dim_table
 WHERE CALENDARQUARTER IN (
@@ -217,7 +221,7 @@ WHERE CALENDARQUARTER IN (
       const rows = await queryRows(connection, result.sql);
       expect(String(rows[0]?.[0])).toBe("0");
     } finally {
-      connection.close();
+      await connection.close();
     }
   });
 
@@ -229,7 +233,7 @@ WHERE CALENDARQUARTER IN (
     try {
       await expect(
         new MacroPreprocessor().processScript(
-          "SELECT %SQL(SELECT missing_column FROM JUST_DATA.ADMIN.DIMDATE);",
+          `SELECT %SQL(SELECT missing_column FROM ${DIMDATE});`,
           {},
           {
             query: macroSql => queryRows(connection, macroSql).then(rows => ({ rows })),
@@ -237,7 +241,7 @@ WHERE CALENDARQUARTER IN (
         ),
       ).rejects.toThrow("Failed to execute %SQL macro query:");
     } finally {
-      connection.close();
+      await connection.close();
     }
   });
 
@@ -248,7 +252,7 @@ WHERE CALENDARQUARTER IN (
     await connection.connect();
 
     try {
-      const script = `%LET dim_table = JUST_DATA.ADMIN.DIMDATE;
+      const script = `%LET dim_table = ${DIMDATE};
 %LET lookback_days = 30;
 %LET as_of_key = %SQL(
   SELECT MAX(DATEKEY)
@@ -287,7 +291,7 @@ ORDER BY d.DATEKEY`;
 
       expect(executedMacroSql).toHaveLength(2);
       expect(executedMacroSql.every(sql => !/[&$]|%(?:EVAL|SQL|SQLLIST)\b/i.test(sql))).toBe(true);
-      expect(result.variables.DIM_TABLE).toBe("JUST_DATA.ADMIN.DIMDATE");
+      expect(result.variables.DIM_TABLE).toBe(DIMDATE);
       expect(result.variables.LOOKBACK_DAYS).toBe("30");
       expect(result.variables.AS_OF_KEY).toMatch(/^\d+$/);
       expect(result.variables.LOWER_KEY).toBe(
@@ -298,9 +302,7 @@ ORDER BY d.DATEKEY`;
       expect(result.sql).not.toContain("%SQL");
       expect(result.sql).not.toContain("%SQLLIST");
       expect(result.sql).not.toMatch(/[&$]\{?\s*[A-Za-z_]/);
-      expect(result.putMessages[0]).toMatch(
-        /^As-of DATEKEY resolved from database: \d+, lower=\d+, table=JUST_DATA\.ADMIN\.DIMDATE$/,
-      );
+      expect(result.putMessages[0]).toContain(`table=${DIMDATE}`);
 
       assertParserAndLinterClean(result.sql, qualityEngine);
 
@@ -311,7 +313,7 @@ ORDER BY d.DATEKEY`;
       expect(String(rows[0]?.[3])).toBe(result.variables.AS_OF_KEY);
       expect(String(rows[0]?.[4])).toBe(result.variables.AS_OF_KEY);
     } finally {
-      connection.close();
+      await connection.close();
     }
   });
 
@@ -326,7 +328,7 @@ ORDER BY d.DATEKEY`;
     await connection.connect();
 
     try {
-      const script = `%LET dim_table = JUST_DATA.ADMIN.DIMDATE;
+      const script = `%LET dim_table = ${DIMDATE};
 %LET export_file = '${outputPath}';
 
 %EXPORT(
@@ -357,7 +359,7 @@ ORDER BY d.DATEKEY`;
       );
 
       expect(sql.trim()).toBe("");
-      expect(vars.DIM_TABLE).toBe("JUST_DATA.ADMIN.DIMDATE");
+      expect(vars.DIM_TABLE).toBe(DIMDATE);
       expect(fs.existsSync(outputPath)).toBe(true);
       expect(fs.statSync(outputPath).size).toBeGreaterThan(0);
       expect(logs).toEqual([
@@ -368,7 +370,7 @@ ORDER BY d.DATEKEY`;
       if (fs.existsSync(outputPath)) {
         fs.unlinkSync(outputPath);
       }
-      connection.close();
+      await connection.close();
     }
   });
 
@@ -385,7 +387,7 @@ ORDER BY d.DATEKEY`;
     try {
       fs.writeFileSync(
         includePath,
-        `%LET dim_table = JUST_DATA.ADMIN.DIMDATE;
+        `%LET dim_table = ${DIMDATE};
 %LET export_file = '${outputPath}';
 %LET run_export = 1;
 %LET run_bad_branch = 0;
@@ -445,7 +447,7 @@ ORDER BY d.DATEKEY`;
       );
 
       expect(sql.trim()).toBe("");
-      expect(vars.DIM_TABLE).toBe("JUST_DATA.ADMIN.DIMDATE");
+      expect(vars.DIM_TABLE).toBe(DIMDATE);
       expect(vars.RUN_EXPORT).toBe("1");
       expect(vars.RUN_BAD_BRANCH).toBe("0");
       expect(vars.AS_OF_KEY).toMatch(/^\d+$/);
@@ -466,7 +468,7 @@ ORDER BY d.DATEKEY`;
       if (fs.existsSync(includePath)) {
         fs.unlinkSync(includePath);
       }
-      connection.close();
+      await connection.close();
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });

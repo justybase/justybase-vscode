@@ -9,16 +9,20 @@ import type { NzConnection, ConnectionDetails } from '../../../types';
 export async function executeQueryHelper<T = Record<string, unknown>>(connection: NzConnection, sql: string): Promise<T[]> {
     const cmd = connection.createCommand(sql);
     const reader = await cmd.executeReader();
-    const results: Record<string, unknown>[] = [];
+    try {
+        const results: Record<string, unknown>[] = [];
 
-    while (await reader.read()) {
-        const row: Record<string, unknown> = {};
-        for (let i = 0; i < reader.fieldCount; i++) {
-            row[reader.getName(i)] = reader.getValue(i);
+        while (await reader.read()) {
+            const row: Record<string, unknown> = {};
+            for (let i = 0; i < reader.fieldCount; i++) {
+                row[reader.getName(i)] = reader.getValue(i);
+            }
+            results.push(row);
         }
-        results.push(row);
+        return results as T[];
+    } finally {
+        await reader.close();
     }
-    return results as T[];
 }
 
 /**

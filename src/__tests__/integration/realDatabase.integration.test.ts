@@ -6,7 +6,7 @@
  * - Set NZ_DEV_PASSWORD environment variable with the database password
  * - Optionally override host/port/database/user via NZ_DEV_HOST/NZ_DEV_PORT/NZ_DEV_DATABASE/NZ_DEV_USER
  *
- * Run with: NZ_DEV_PASSWORD=password npm run test:live:local
+ * Run with: NZ_DEV_PASSWORD=password npm run test:netezza:integration
  */
 
 // Skip all tests in this file if password is not provided
@@ -29,6 +29,11 @@ const DB_CONFIG = {
     user: process.env.NZ_DEV_USER || 'admin',
     password: process.env.NZ_DEV_PASSWORD || 'password'
 };
+
+const DATABASE = DB_CONFIG.database.toUpperCase();
+const SCHEMA = (process.env.NZ_DEV_SCHEMA || 'ADMIN').toUpperCase();
+const DIMDATE = `${DATABASE}.${SCHEMA}.DIMDATE`;
+const DIMACCOUNT = `${DATABASE}.${SCHEMA}.DIMACCOUNT`;
 
 
 
@@ -53,7 +58,7 @@ describeIfDb('Real Database Integration Tests', () => {
 
     afterAll(async () => {
         if (connection) {
-            connection.close();
+            await connection.close();
             console.log('Connection closed.');
         }
     });
@@ -66,7 +71,7 @@ describeIfDb('Real Database Integration Tests', () => {
 
     describe('Simple Queries', () => {
         itIfDb('should execute SELECT with calculated value', async () => {
-            const cmd = connection.createCommand('SELECT 1 AS TEST_VALUE FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1');
+            const cmd = connection.createCommand(`SELECT 1 AS TEST_VALUE FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -85,7 +90,7 @@ describeIfDb('Real Database Integration Tests', () => {
         });
 
         itIfDb('should execute arithmetic expression', async () => {
-            const cmd = connection.createCommand('SELECT 10 + 20 AS SUM_RESULT FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1');
+            const cmd = connection.createCommand(`SELECT 10 + 20 AS SUM_RESULT FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -98,7 +103,7 @@ describeIfDb('Real Database Integration Tests', () => {
         });
 
         itIfDb('should execute string concatenation', async () => {
-            const cmd = connection.createCommand("SELECT 'Hello' || ' ' || 'Netezza' AS GREETING FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1");
+            const cmd = connection.createCommand(`SELECT 'Hello' || ' ' || 'Netezza' AS GREETING FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -111,7 +116,7 @@ describeIfDb('Real Database Integration Tests', () => {
         });
 
         itIfDb('should execute CURRENT_TIMESTAMP', async () => {
-            const cmd = connection.createCommand('SELECT CURRENT_TIMESTAMP AS NOW FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1');
+            const cmd = connection.createCommand(`SELECT CURRENT_TIMESTAMP AS NOW FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -124,7 +129,7 @@ describeIfDb('Real Database Integration Tests', () => {
         });
 
         itIfDb('should accept DELETE with CTE-backed IN subquery under EXPLAIN', async () => {
-            const cmd = connection.createCommand(`EXPLAIN DELETE FROM JUST_DATA..DIMACCOUNT A
+            const cmd = connection.createCommand(`EXPLAIN DELETE FROM ${DIMACCOUNT} A
 WHERE A.ACCOUNTCODEALTERNATEKEY IN
 (
     WITH TTT AS
@@ -174,7 +179,7 @@ WHERE A.ACCOUNTCODEALTERNATEKEY IN
 
     describe('Data Types', () => {
         itIfDb('should handle INTEGER data type', async () => {
-            const cmd = connection.createCommand('SELECT 12345 AS INT_VAL FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1');
+            const cmd = connection.createCommand(`SELECT 12345 AS INT_VAL FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -186,7 +191,7 @@ WHERE A.ACCOUNTCODEALTERNATEKEY IN
         });
 
         itIfDb('should handle VARCHAR data type', async () => {
-            const cmd = connection.createCommand("SELECT 'test string' AS STR_VAL FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1");
+            const cmd = connection.createCommand(`SELECT 'test string' AS STR_VAL FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -198,7 +203,7 @@ WHERE A.ACCOUNTCODEALTERNATEKEY IN
         });
 
         itIfDb('should handle BOOLEAN data type', async () => {
-            const cmd = connection.createCommand('SELECT TRUE AS BOOL_VAL FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1');
+            const cmd = connection.createCommand(`SELECT TRUE AS BOOL_VAL FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -212,7 +217,7 @@ WHERE A.ACCOUNTCODEALTERNATEKEY IN
         });
 
         itIfDb('should handle NULL values', async () => {
-            const cmd = connection.createCommand('SELECT NULL AS NULL_VAL FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1');
+            const cmd = connection.createCommand(`SELECT NULL AS NULL_VAL FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -224,7 +229,7 @@ WHERE A.ACCOUNTCODEALTERNATEKEY IN
         });
 
         itIfDb('should handle DECIMAL data type', async () => {
-            const cmd = connection.createCommand('SELECT 123.456 AS DEC_VAL FROM JUST_DATA.ADMIN.DIMDATE LIMIT 1');
+            const cmd = connection.createCommand(`SELECT 123.456 AS DEC_VAL FROM ${DIMDATE} LIMIT 1`);
             const reader = await cmd.executeReader();
 
             try {
@@ -244,7 +249,7 @@ WHERE A.ACCOUNTCODEALTERNATEKEY IN
                     'AA'::NVARCHAR(32) AS NVARCHAR_COL,
                     'AA'::NCHAR(8) AS NCHAR_COL,
                     'AA'::NATIONAL CHARACTER VARYING(32) AS NCHAR_VARYING_COL
-                FROM JUST_DATA..DIMACCOUNT
+                FROM ${DIMACCOUNT}
                 LIMIT 1
             `);
             const reader = await cmd.executeReader();

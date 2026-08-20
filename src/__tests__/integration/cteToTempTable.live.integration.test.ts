@@ -38,8 +38,10 @@ const DB_CONFIG = {
   password: process.env.NZ_DEV_PASSWORD || "password",
 };
 
-const DIMDATE = "JUST_DATA.ADMIN.DIMDATE";
-const DIMEMPLOYEE = "JUST_DATA.ADMIN.DIMEMPLOYEE";
+const DATABASE = DB_CONFIG.database.toUpperCase();
+const SCHEMA = (process.env.NZ_DEV_SCHEMA || "ADMIN").toUpperCase();
+const DIMDATE = `${DATABASE}.${SCHEMA}.DIMDATE`;
+const DIMEMPLOYEE = `${DATABASE}.${SCHEMA}.DIMEMPLOYEE`;
 
 async function queryRows(
   connection: NzConnection,
@@ -108,11 +110,11 @@ function createQualityEngine(): SqlQualityEngine {
   });
 
   const schemaProvider = new InMemorySchemaProvider(true);
-  schemaProvider.createTable("JUST_DATA", "ADMIN", "DIMDATE", [
+  schemaProvider.createTable(DATABASE, SCHEMA, "DIMDATE", [
     "DATEKEY",
     "CALENDARQUARTER",
   ]);
-  schemaProvider.createTable("JUST_DATA", "ADMIN", "DIMEMPLOYEE", [
+  schemaProvider.createTable(DATABASE, SCHEMA, "DIMEMPLOYEE", [
     "EMPLOYEEKEY",
     "CURRENTFLAG",
   ]);

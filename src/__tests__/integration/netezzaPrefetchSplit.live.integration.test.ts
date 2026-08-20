@@ -239,11 +239,11 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
       NZ_QUERIES.listExternalTables([targetDatabase]),
     );
     for (const row of rows) {
-      expect(row.OBJTYPE).toBe("EXTERNAL TABLE");
-      expect(row).toHaveProperty("OBJID");
-      expect(row).toHaveProperty("DBNAME", targetDatabase);
+        expect(row.OBJTYPE).toBe("EXTERNAL TABLE");
+        expect(row).toHaveProperty("OBJID");
+        expect(row).toHaveProperty("DBNAME", targetDatabase);
     }
-    expect(rows.length).toBeGreaterThanOrEqual(0);
+    expect(rows.length).toBeGreaterThan(0);
   });
 
   itIfDb(
@@ -340,6 +340,7 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
       `columns-external:${targetDatabase}`,
     );
     const rows = probe.rows;
+    expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row).toHaveProperty("TABLENAME");
       expect(row).toHaveProperty("SCHEMA");
@@ -363,7 +364,7 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
       NZ_QUERIES.listExternalColumnsWithKeys(targetDatabase),
     );
 
-    const byTable = new Map<string, Set<string>>();
+    const byTable = new Map<string, Map<string, number>>();
     const addRows = (rows: Record<string, unknown>[]) => {
       for (const row of rows) {
         const schema = String(row.SCHEMA ?? "").toUpperCase();
@@ -374,33 +375,30 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
         }
         const key = `${schema}.${table}`;
         if (!byTable.has(key)) {
-          byTable.set(key, new Set());
+          byTable.set(key, new Map());
         }
-        byTable.get(key)!.add(attname);
+        const counts = byTable.get(key)!;
+        counts.set(attname, (counts.get(attname) ?? 0) + 1);
       }
     };
     addRows(mainRows);
     addRows(externalRows);
 
-    // The client-side merge must prevent the same column from appearing twice:
-    // a Set never grows, so merged column counts stay unique.
     expect(byTable.size).toBeGreaterThan(0);
     for (const attnames of byTable.values()) {
       expect(attnames.size).toBeGreaterThan(0);
+      expect([...attnames.values()].some(count => count > 1)).toBe(false);
     }
   });
 
   itIfDb("T12: per-table columns query returns rows for a known table", async () => {
-    expect(sampleTable).toBeTruthy();
-    if (!sampleTable || !sampleTable.name) {
-      return;
-    }
+    expect(sampleTable?.name).toBeTruthy();
     const rows = await queryRows(
       connection,
       NZ_QUERIES.getTableColumns(
         targetDatabase,
-        sampleTable.schema,
-        sampleTable.name,
+        sampleTable!.schema,
+        sampleTable!.name,
       ),
     );
     expect(rows.length).toBeGreaterThan(0);
@@ -412,16 +410,13 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
   });
 
   itIfDb("T12b: per-table external columns query returns rows for a live external table", async () => {
-    if (!sampleExternalTable || !sampleExternalTable.name) {
-      // No external tables on this instance — split behavior is trivially fine.
-      return;
-    }
+    expect(sampleExternalTable?.name).toBeTruthy();
     const rows = await queryRows(
       connection,
       NZ_QUERIES.getExternalTableColumns(
         targetDatabase,
-        sampleExternalTable.schema,
-        sampleExternalTable.name,
+        sampleExternalTable!.schema,
+        sampleExternalTable!.name,
       ),
     );
     expect(rows.length).toBeGreaterThan(0);

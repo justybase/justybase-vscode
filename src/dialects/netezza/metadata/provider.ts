@@ -137,7 +137,7 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                 FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
                 LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
                 WHERE ${buildDatabasePredicate(database)}
-                    AND ${buildSchemaPredicate(schema)}
+                    AND ${buildNetezzaIdentifierEquality('O.SCHEMA', schema)}
                     AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')
                 ORDER BY O.OBJNAME
             `.trim();
