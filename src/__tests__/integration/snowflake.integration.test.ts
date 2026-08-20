@@ -11,6 +11,11 @@ import {
 } from '../../../extensions/snowflake/src/snowflakeQueryProfile';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import type { DatabaseConnectionConfig } from '../../contracts/database';
+import {
+    cancelReaderExecution,
+    expectConnectionCloseIsIdempotent,
+    expectReaderCloseAndReuse,
+} from './connectionLifecycleHelpers';
 
 function readEnv(name: string): string | undefined {
     const value = process.env[name]?.trim();
@@ -253,6 +258,42 @@ describeIfConfigured('snowflake integration', () => {
     afterAll(async () => {
         await connection.close();
     });
+
+    it('closes readers and connections idempotently', async () => {
+        await expectReaderCloseAndReuse(
+            connection,
+            'SELECT 1 AS LIFECYCLE_VALUE',
+            'SELECT 1 AS CONTROL_VALUE',
+        );
+
+        await expectConnectionCloseIsIdempotent(
+            config => new SnowflakeConnection(config),
+            config!,
+        );
+    });
+
+    it('cancels a time-bounded generator query and keeps the Snowflake session usable', async () => {
+        const cancellationConnection = new SnowflakeConnection(config!);
+        await cancellationConnection.connect();
+        try {
+            const command = cancellationConnection.createCommand(
+                'SELECT SEQ4() AS LIFECYCLE_VALUE FROM TABLE(GENERATOR(TIMELIMIT => 10))',
+            );
+            const outcome = await cancelReaderExecution(command, command.executeReader(), {
+                cancelAfterMs: 250,
+                settleTimeoutMs: 15000,
+            });
+
+            expect(['reader', 'error']).toContain(outcome.kind);
+            await expectReaderCloseAndReuse(
+                cancellationConnection,
+                'SELECT 1 AS LIFECYCLE_VALUE',
+                'SELECT 1 AS CONTROL_VALUE',
+            );
+        } finally {
+            await cancellationConnection.close();
+        }
+    }, 30000);
 
     it('runs metadata discovery queries against the configured Snowflake account', async () => {
         const databasesReader = await connection

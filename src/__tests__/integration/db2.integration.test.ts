@@ -28,6 +28,10 @@ import { LspCompletionEngine, type CompletionMetadataProvider } from '../../serv
 import { InMemorySchemaProvider } from '../../sqlParser/schemaProvider';
 import { SqlValidator } from '../../sqlParser/validator';
 import type { ConnectionDetails } from '../../types';
+import {
+    cancelReaderExecution,
+    expectReaderCloseAndReuse,
+} from './connectionLifecycleHelpers';
 import { db2Harness, registerLiveIntegrationSuite } from './optionalDialectIntegrationHarness';
 
 registerLiveIntegrationSuite(db2Harness);
@@ -435,6 +439,27 @@ describeIfConfigured('db2 integration', () => {
 		showWarningMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
 		showInformationMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
 	});
+
+	it('cancels a large streaming result and keeps the Db2 session usable', async () => {
+		const qualifiedTableName = buildQualifiedName(schemaName, tableName);
+		const aliases = Array.from({ length: 20 }, (_value, index) => `t${index}`);
+		const command = connection.createCommand(`
+			SELECT t0.ID AS LIFECYCLE_VALUE
+			FROM ${aliases.map(alias => `${qualifiedTableName} ${alias}`).join(' CROSS JOIN ')}
+			FETCH FIRST 1000000 ROWS ONLY WITH UR
+		`);
+		const outcome = await cancelReaderExecution(command, command.executeReader(), {
+			cancelAfterMs: 100,
+			settleTimeoutMs: 15000,
+		});
+
+		expect(['reader', 'error']).toContain(outcome.kind);
+		await expectReaderCloseAndReuse(
+			connection,
+			'SELECT 1 AS LIFECYCLE_VALUE FROM SYSIBM.SYSDUMMY1 WITH UR',
+			'SELECT 1 AS CONTROL_VALUE FROM SYSIBM.SYSDUMMY1 WITH UR',
+		);
+	}, 30000);
 
 	afterAll(async () => {
 		await tryExecute(connection, `DROP VIEW ${buildQualifiedName(schemaName, viewName)}`);

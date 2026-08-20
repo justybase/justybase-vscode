@@ -20,6 +20,11 @@ import {
 import { duckdbTuningAdvisor } from '../../../extensions/duckdb/src/duckdbTuningAdvisor';
 import { importDataToDuckDb } from '../../import/duckdbImporter';
 import type { ConnectionDetails } from '../../types';
+import {
+    cancelReaderExecution,
+    expectConnectionCloseIsIdempotent,
+    expectReaderCloseAndReuse,
+} from './connectionLifecycleHelpers';
 
 const extensionRequire = createRequire(path.join(process.cwd(), 'extensions', 'duckdb', 'package.json'));
 
@@ -357,19 +362,12 @@ describeIfInstalled('duckdb integration', () => {
             const command = connection.createCommand(
                 'SELECT count(*) FROM range(5000000) a, range(5000000) b'
             );
-            const readerPromise = command.executeReader();
-            await new Promise(resolve => setTimeout(resolve, 500));
-            await command.cancel();
-
-            let cancelError: unknown;
-            try {
-                const reader = await readerPromise;
-                await reader.close();
-            } catch (error: unknown) {
-                cancelError = error;
-            }
-            expect(cancelError).toBeDefined();
-            expect(String(cancelError)).toMatch(/cancel|interrupt/i);
+            const outcome = await cancelReaderExecution(command, command.executeReader(), {
+                cancelAfterMs: 500,
+                settleTimeoutMs: 15000,
+            });
+            expect(outcome.kind).toBe('error');
+            expect(String(outcome.error)).toMatch(/cancel|interrupt/i);
 
             const controlRows = await readRows(
                 await connection.createCommand('SELECT COUNT(*) FROM ' + schemaName + '.orders').executeReader()
@@ -378,6 +376,40 @@ describeIfInstalled('duckdb integration', () => {
         } finally {
             await connection.close();
         }
+    }, 120000);
+
+    it('closes readers and connections idempotently', async () => {
+        const connection = new DuckDbConnection({
+            host: '',
+            database: databasePath,
+            user: '',
+            password: '',
+            options: {
+                mode: 'file'
+            }
+        });
+
+        await connection.connect();
+        try {
+            await expectReaderCloseAndReuse(
+                connection,
+                `SELECT id FROM ${schemaName}.orders ORDER BY id`,
+                `SELECT COUNT(*) FROM ${schemaName}.orders`,
+            );
+        } finally {
+            await connection.close();
+        }
+
+        await expectConnectionCloseIsIdempotent(
+            config => new DuckDbConnection(config),
+            {
+                host: '',
+                database: databasePath,
+                user: '',
+                password: '',
+                options: { mode: 'file' },
+            },
+        );
     }, 120000);
 
     it('runs VACUUM and ANALYZE through the shared maintenance provider against live objects', async () => {

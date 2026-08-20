@@ -11,6 +11,10 @@ import type {
 } from '../../contracts/database';
 import type { ConnectionManager } from '../../core/connectionManager';
 import type { ConnectionDetails } from '../../types';
+import {
+    cancelReaderExecution,
+    expectReaderCloseAndReuse,
+} from './connectionLifecycleHelpers';
 import { registerLiveIntegrationSuite, verticaHarness } from './optionalDialectIntegrationHarness';
 
 registerLiveIntegrationSuite(verticaHarness);
@@ -167,6 +171,40 @@ describeIfConfigured('vertica integration', () => {
 			FROM ${qualifiedTableName}
 		`).execute();
 	}, 120000);
+
+	it('cancels a large result and reconnects after Vertica terminates the session', async () => {
+		const cancellationConnection = new VerticaConnection(config!);
+		await cancellationConnection.connect();
+		const qualifiedTableName = buildQualifiedName(schemaName, tableName);
+		const aliases = Array.from({ length: 20 }, (_value, index) => `t${index}`);
+		try {
+			const command = cancellationConnection.createCommand(`
+				SELECT t0.id AS lifecycle_value
+				FROM ${aliases.map(alias => `${qualifiedTableName} ${alias}`).join(' CROSS JOIN ')}
+				LIMIT 1000000
+			`);
+			const outcome = await cancelReaderExecution(command, command.executeReader(), {
+				cancelAfterMs: 100,
+				settleTimeoutMs: 15000,
+			});
+
+			expect(['reader', 'error']).toContain(outcome.kind);
+		} finally {
+			await cancellationConnection.close();
+		}
+
+		const recoveredConnection = new VerticaConnection(config!);
+		await recoveredConnection.connect();
+		try {
+			await expectReaderCloseAndReuse(
+				recoveredConnection,
+				'SELECT 1 AS lifecycle_value',
+				'SELECT 1 AS control_value',
+			);
+		} finally {
+			await recoveredConnection.close();
+		}
+	}, 30000);
 
 	afterAll(async () => {
 		await tryExecute(connection, `DROP VIEW IF EXISTS ${buildQualifiedName(schemaName, viewName)}`);
