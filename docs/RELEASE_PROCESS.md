@@ -42,6 +42,7 @@ git push origin main
 #### 5. Workflow automatically
 
 - Bumps version in package.json files
+- Synchronizes tracked documentation `product_version` markers and the guide portal version narrative
 - Creates commit "chore: release X.X.X"
 - Creates tag `vX.X.X`
 - Creates GitHub Release (draft)
@@ -79,6 +80,7 @@ git push ───────────────────▶ CI checks
 The workflow:
 
 - updates synchronized versions in the root extension and any managed optional extensions that are present (Db2, Oracle, PostgreSQL)
+- updates every tracked documentation version marker under `docs/` so the portal and package version cannot drift
 - validates version consistency with `scripts/version-sync.js`
 - runs lint and type checks (tests run in CI, not in release)
 - creates a release commit on the selected branch

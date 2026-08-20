@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.16.35
+product_version: 3.16.37
 ---
 
 # Import and export
@@ -60,9 +60,17 @@ Data Workspace uses a local DuckDB/SQLite-backed profile to query files as table
 
 The simple importer is useful for a known, clean file. The advanced wizard is safer for mixed types, renamed columns, nullability, date formats, and large files because it separates inference, mapping, validation, and execution.
 
+For Netezza, CSV/TXT, XLSX, and XLSB imports use the driver's virtual external-table stream. The source rows are registered under a transient name and consumed with `FROM EXTERNAL`; they are not first copied to a local data file. This keeps the client-side stream and the driver's external-load protocol ordered and avoids failures caused by a prematurely closed or partially materialized temporary file. The Netezza driver must be version 2.4.4 or newer.
+
+Excel header handling is defensive: a row containing numeric values is treated as data rather than a header, missing headers receive `COL_1`, `COL_2`, and repeated names receive suffixes such as `COL_1`. Consequently, a workbook with a first row `1, a` retains that row in the target table.
+
+Parquet is supported by the DuckDB/File SQL connection, not by the direct Netezza file importer. To load Parquet into Netezza, open the file as a File SQL source and use Migration Studio; the live migration path reads the Parquet view and streams rows into Netezza.
+
 ## Import from the clipboard
 
 **Import Clipboard Data to Table** reads tabular clipboard content. **Smart Paste** detects file paths and tabular text, then opens the matching path or import flow. Clipboard parsing is bounded by the host and OS clipboard limits; for large data, save a file so the wizard can validate and retry deterministically.
+
+Netezza clipboard imports use the same transient virtual external-table stream as file imports. Duplicate or empty column names are normalized before the target DDL is generated, and the stream is unregistered and destroyed after success or failure.
 
 ## Reliability controls
 

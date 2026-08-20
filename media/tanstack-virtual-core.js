@@ -132,10 +132,20 @@ var VirtualCore = (() => {
   var approxEqual = (a, b) => Math.abs(a - b) < 1.01;
   var debounce = (targetWindow, fn, ms) => {
     let timeoutId;
-    return function(...args) {
-      targetWindow.clearTimeout(timeoutId);
-      timeoutId = targetWindow.setTimeout(() => fn.apply(this, args), ms);
-    };
+    return Object.assign(
+      function(...args) {
+        targetWindow.clearTimeout(timeoutId);
+        timeoutId = targetWindow.setTimeout(() => fn.apply(this, args), ms);
+      },
+      {
+        // The handle is closure-local, so a caller that has already
+        // unsubscribed has no way to stop a queued call. Teardown paths use
+        // this to drop the pending invocation instead of letting it land.
+        cancel: () => {
+          targetWindow.clearTimeout(timeoutId);
+        }
+      }
+    );
   };
 
   // node_modules/@tanstack/virtual-core/dist/esm/index.js
@@ -252,6 +262,7 @@ var VirtualCore = (() => {
       if (registerScrollendEvent) {
         element.removeEventListener("scrollend", endHandler);
       }
+      fallback == null ? void 0 : fallback.cancel();
     };
   };
   var observeElementOffset = (instance, cb) => observeOffset(instance, cb, (el) => {
@@ -355,6 +366,7 @@ var VirtualCore = (() => {
                   }
                   return;
                 }
+                if (!this.isIndexInRange(index)) return;
                 if (this.shouldMeasureDuringScroll(index)) {
                   this.resizeItem(
                     index,
@@ -515,6 +527,8 @@ var VirtualCore = (() => {
           this.rafId = null;
         }
         this.scrollState = null;
+        this.isScrolling = false;
+        this.scrollDirection = null;
         this._iosDeferredAdjustment = 0;
         this._iosTouching = false;
         this._iosJustTouchEnded = false;
@@ -707,6 +721,7 @@ var VirtualCore = (() => {
           key: false
         }
       );
+      this.isIndexInRange = (index) => index >= 0 && index < this.options.count;
       this.getMeasurements = memo(
         () => [this.getMeasurementOptions(), this.itemSizeCacheVersion],
         ({
@@ -953,6 +968,7 @@ var VirtualCore = (() => {
           return;
         }
         const index = this.indexFromElement(node);
+        if (!this.isIndexInRange(index)) return;
         const key = this.options.getItemKey(index);
         const prevNode = this.elementsCache.get(key);
         if (prevNode !== node) {
@@ -968,7 +984,7 @@ var VirtualCore = (() => {
       };
       this.resizeItem = (index, size) => {
         var _a, _b;
-        if (index < 0 || index >= this.options.count) return;
+        if (!this.isIndexInRange(index)) return;
         let cachedSize;
         let itemStart;
         let key;

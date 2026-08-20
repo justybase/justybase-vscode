@@ -188,6 +188,7 @@ jobs:
           git add package.json package-lock.json
           git add packages/contracts/package.json
           git add extensions/*/package.json extensions/*/package-lock.json
+          git add docs
 
           if git diff --cached --quiet; then
             echo 'No version changes detected to commit.' >&2

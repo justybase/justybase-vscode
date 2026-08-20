@@ -48,6 +48,108 @@ function readJsonIfExists(filePath) {
   return readJson(filePath);
 }
 
+function listMarkdownFiles(directory) {
+  if (!fs.existsSync(directory)) {
+    return [];
+  }
+
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listMarkdownFiles(filePath));
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      files.push(filePath);
+    }
+  }
+  return files;
+}
+
+function unquoteFrontMatterValue(value) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function getFrontMatterProductVersion(source) {
+  const frontMatter = source.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/);
+  if (!frontMatter) {
+    return undefined;
+  }
+
+  const line = frontMatter[1]
+    .split(/\r?\n/)
+    .find((value) => /^product_version:\s*/.test(value));
+  return line ? unquoteFrontMatterValue(line.replace(/^product_version:\s*/, "")) : undefined;
+}
+
+function getDocumentationVersionEntries() {
+  const docsRoot = path.join(repoRoot, "docs");
+  const entries = [];
+
+  for (const filePath of listMarkdownFiles(docsRoot)) {
+    const source = fs.readFileSync(filePath, "utf8");
+    const version = getFrontMatterProductVersion(source);
+    if (version !== undefined) {
+      const relativePath = path.relative(repoRoot, filePath).replace(/\\/g, "/");
+      entries.push([`${relativePath} product_version`, version]);
+    }
+  }
+
+  const indexPath = path.join(docsRoot, "guide/index.md");
+  if (fs.existsSync(indexPath)) {
+    const source = fs.readFileSync(indexPath, "utf8");
+    const narrativeVersion = source.match(
+      /This portal (?:was verified against product version|is published for product version) \*\*([^*]+)\*\*/,
+    )?.[1];
+    entries.push(["docs/guide/index.md narrative product_version", narrativeVersion]);
+  }
+
+  return entries;
+}
+
+function synchronizeDocumentationVersions(version) {
+  const docsRoot = path.join(repoRoot, "docs");
+  let updatedFiles = 0;
+
+  for (const filePath of listMarkdownFiles(docsRoot)) {
+    const source = fs.readFileSync(filePath, "utf8");
+    if (getFrontMatterProductVersion(source) === undefined) {
+      continue;
+    }
+
+    const updated = source.replace(
+      /(^---\s*\r?\n[\s\S]*?^product_version:\s*)[^\r\n]*/m,
+      `$1${version}`,
+    );
+    if (updated !== source) {
+      fs.writeFileSync(filePath, updated, "utf8");
+      updatedFiles += 1;
+    }
+  }
+
+  const indexPath = path.join(docsRoot, "guide/index.md");
+  if (fs.existsSync(indexPath)) {
+    const source = fs.readFileSync(indexPath, "utf8");
+    const updated = source.replace(
+      /(This portal (?:was verified against product version|is published for product version) \*\*)[^*]+(\*\*(?: on \*\*[^*]+\*\*)?\.)/,
+      `$1${version}$2`,
+    );
+    if (updated !== source) {
+      fs.writeFileSync(indexPath, updated, "utf8");
+    }
+  }
+
+  if (updatedFiles > 0) {
+    console.log(`Synchronized documentation product_version in ${updatedFiles} file(s).`);
+  }
+}
+
 function resolveNpmInvocation() {
   if (process.platform !== "win32") {
     return { command: "npm", prefixArgs: [] };
@@ -146,6 +248,8 @@ function getVersionEntries(options = {}) {
     );
   }
 
+  entries.push(...getDocumentationVersionEntries());
+
   return entries;
 }
 
@@ -171,7 +275,7 @@ function validateVersions(options = {}) {
 
   if (mismatches.length > 0) {
     fail(
-      `Version mismatch detected. Expected all extension manifests/lockfiles to equal ${expected}. ` +
+      `Version mismatch detected. Expected all package manifests/lockfiles and documentation markers to equal ${expected}. ` +
         `Found: ${mismatches.join(", ")}.`,
     );
   }
@@ -221,6 +325,7 @@ function setVersion(version, options = {}) {
     runNpmVersion(extension.directory, version);
   }
 
+  synchronizeDocumentationVersions(version);
   const synchronizedVersion = validateVersions(options);
   console.log(
     `Synchronized ${describeManagedTargets(options)} to version ${synchronizedVersion}.`,
@@ -248,6 +353,7 @@ function bumpVersion(releaseType, options = {}) {
     runNpmVersion(extension.directory, corePackage.version);
   }
 
+  synchronizeDocumentationVersions(corePackage.version);
   const synchronizedVersion = validateVersions(options);
   console.log(
     `Bumped ${describeManagedTargets(options)} to version ${synchronizedVersion}.`,

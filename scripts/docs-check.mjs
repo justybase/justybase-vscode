@@ -188,6 +188,34 @@ async function checkFrontMatter() {
     if (!version) fail(`Guide page has no product_version: ${relative}`);
     else if (version !== packageJson.version) fail(`Guide page product_version does not match package.json: ${relative} (${version} != ${packageJson.version})`);
   }
+
+  // The guide is required to carry complete front matter. Other Markdown
+  // documents may opt into release-version tracking by declaring
+  // product_version; when they do, it must stay aligned with the package.
+  const trackedDocumentationFiles = await filesUnder(docsRoot, '.md');
+  for (const file of trackedDocumentationFiles) {
+    if (file.startsWith(`${guideRoot}${path.sep}`)) {
+      continue;
+    }
+
+    const source = await readFile(file, 'utf8');
+    const version = frontMatterValue(source, 'product_version');
+    if (version && version !== packageJson.version) {
+      const relative = path.relative(root, file);
+      fail(`Documentation product_version does not match package.json: ${relative} (${version} != ${packageJson.version})`);
+    }
+  }
+
+  const indexFile = path.join(guideRoot, 'index.md');
+  const indexSource = await readFile(indexFile, 'utf8');
+  const narrativeVersion = indexSource.match(
+    /This portal (?:was verified against product version|is published for product version) \*\*([^*]+)\*\*/,
+  )?.[1];
+  if (!narrativeVersion) {
+    fail('Documentation guide index has no product-version narrative.');
+  } else if (narrativeVersion !== packageJson.version) {
+    fail(`Documentation guide index narrative does not match package.json: ${narrativeVersion} != ${packageJson.version}`);
+  }
 }
 
 async function checkBuildProvenance(catalog) {
