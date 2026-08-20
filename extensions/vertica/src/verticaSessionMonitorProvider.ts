@@ -1,25 +1,12 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { runQueryRaw, queryResultToRows } from '../../../src/core/queryRunner';
 import { ConnectionManager } from '../../../src/core/connectionManager';
-
-function escapeSqlLiteral(value: string): string {
-    return value.replace(/'/g, "''");
-}
-
-function toNumber(value: unknown): number {
-    if (typeof value === 'number') {
-        return Number.isFinite(value) ? value : 0;
-    }
-    if (typeof value === 'bigint') {
-        const converted = Number(value);
-        return Number.isFinite(converted) ? converted : 0;
-    }
-    if (typeof value === 'string') {
-        const parsed = Number.parseFloat(value);
-        return Number.isFinite(parsed) ? parsed : 0;
-    }
-    return 0;
-}
+import {
+    emptySessionMonitorResources,
+    escapeSqlLiteral,
+    executeSessionMonitorStatement,
+    runSessionMonitorQuery,
+    toNumber,
+} from '../../../src/core/sessionMonitorProviderUtils';
 
 function toSessionId(value: unknown): string {
     return typeof value === 'string' ? value : String(value ?? '');
@@ -46,11 +33,11 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
             WHERE USER_NAME IS NOT NULL
             ORDER BY LOGIN_TIMESTAMP DESC
         `;
-        const result = await runQueryRaw(context, sql, true, connectionManager, undefined, undefined, undefined, undefined, 1000, false);
-        if (!result?.data) {
-            return [];
-        }
-        return queryResultToRows<Record<string, unknown>>(result);
+        return runSessionMonitorQuery<Record<string, unknown>>(
+            context,
+            connectionManager,
+            sql,
+        );
     },
 
     async getQueries(context, mgr) {
@@ -80,11 +67,11 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
             ORDER BY START_TIMESTAMP DESC
             LIMIT 1000
         `;
-        const result = await runQueryRaw(context, sql, true, connectionManager, undefined, undefined, undefined, undefined, 1000, false);
-        if (!result?.data) {
-            return [];
-        }
-        return queryResultToRows<Record<string, unknown>>(result);
+        return runSessionMonitorQuery<Record<string, unknown>>(
+            context,
+            connectionManager,
+            sql,
+        );
     },
 
     async getStorage(context, mgr) {
@@ -102,11 +89,12 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
             GROUP BY TABLE_SCHEMA
             ORDER BY TABLE_COUNT DESC, TABLE_SCHEMA
         `;
-        const result = await runQueryRaw(context, sql, true, connectionManager, undefined, undefined, undefined, undefined, 1000, false);
-        if (!result?.data) {
-            return [];
-        }
-        return queryResultToRows<Record<string, unknown>>(result).map((row) => ({
+        const rows = await runSessionMonitorQuery<Record<string, unknown>>(
+            context,
+            connectionManager,
+            sql,
+        );
+        return rows.map((row) => ({
             ...row,
             ALLOC_MB: toNumber(row.ALLOC_MB),
             USED_MB: toNumber(row.USED_MB),
@@ -116,11 +104,7 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
     },
 
     async getResources() {
-        return {
-            gra: [],
-            systemUtil: [],
-            sysUtilSummary: null,
-        };
+        return emptySessionMonitorResources();
     },
 
     async killSession(context, mgr, sessionId) {
@@ -130,6 +114,6 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
             throw new Error('Invalid Vertica session ID.');
         }
         const sql = `SELECT CLOSE_SESSION('${escapeSqlLiteral(normalizedSessionId)}');`;
-        await runQueryRaw(context, sql, true, connectionManager, undefined);
+        await executeSessionMonitorStatement(context, connectionManager, sql);
     },
 };

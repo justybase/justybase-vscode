@@ -1,37 +1,14 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { runQueryRaw, queryResultToRows } from '../../../src/core/queryRunner';
 import { ConnectionManager } from '../../../src/core/connectionManager';
-
-function toNumber(value: unknown): number {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : 0;
-  }
-  if (typeof value === 'bigint') {
-    const converted = Number(value);
-    return Number.isFinite(converted) ? converted : 0;
-  }
-  if (typeof value === 'string') {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function normalizeDatabaseFilter(database: string | undefined): string | undefined {
-  if (!database) return undefined;
-  const normalized = database.trim();
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function escapeSqlLiteral(value: string): string {
-  return value.replace(/'/g, "''");
-}
-
-function validateSessionId(sessionId: number): void {
-  if (!Number.isFinite(sessionId) || sessionId < 0 || !Number.isInteger(sessionId)) {
-    throw new Error(`Invalid session ID: ${sessionId}`);
-  }
-}
+import {
+  emptySessionMonitorResources,
+  escapeSqlLiteral,
+  executeSessionMonitorStatement,
+  normalizeDatabaseFilter,
+  runSessionMonitorQuery,
+  toNumber,
+  validatePositiveIntegerSessionId,
+} from '../../../src/core/sessionMonitorProviderUtils';
 
 export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
   async getSessions(context, mgr, database) {
@@ -58,11 +35,11 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
             ${whereClause}
             ORDER BY backend_start DESC
         `;
-        const result = await runQueryRaw(context, sql, true, connectionManager, undefined, undefined, undefined, undefined, 1000, false);
-        if (!result || !result.data) {
-            return [];
-        }
-        return queryResultToRows<Record<string, unknown>>(result);
+        return runSessionMonitorQuery<Record<string, unknown>>(
+            context,
+            connectionManager,
+            sql,
+        );
     },
 
     async getQueries(context, mgr, database) {
@@ -98,11 +75,11 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
             ORDER BY query_start DESC
             LIMIT 1000
         `;
-        const result = await runQueryRaw(context, sql, true, connectionManager, undefined, undefined, undefined, undefined, 1000, false);
-        if (!result || !result.data) {
-            return [];
-        }
-        return queryResultToRows<Record<string, unknown>>(result);
+        return runSessionMonitorQuery<Record<string, unknown>>(
+            context,
+            connectionManager,
+            sql,
+        );
     },
 
     async getStorage(context, mgr) {
@@ -119,9 +96,11 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
             WHERE datistemplate = false
             ORDER BY pg_database_size(datname) DESC
         `;
-        const result = await runQueryRaw(context, sql, true, connectionManager, undefined, undefined, undefined, undefined, 1000, false);
-        if (!result || !result.data) return [];
-        const rows = queryResultToRows<Record<string, unknown>>(result);
+        const rows = await runSessionMonitorQuery<Record<string, unknown>>(
+            context,
+            connectionManager,
+            sql,
+        );
         return rows.map(r => ({
            ...r,
            ALLOC_MB: toNumber(r.ALLOC_MB),
@@ -134,17 +113,13 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
     async getResources(_context, _mgr) {
         void _context;
         void _mgr;
-        return {
-            gra: [],
-            systemUtil: [],
-            sysUtilSummary: null
-        };
+        return emptySessionMonitorResources();
     },
 
     async killSession(context, mgr, sessionId) {
-      validateSessionId(sessionId);
+      validatePositiveIntegerSessionId(sessionId, 'PostgreSQL');
       const connectionManager = mgr as ConnectionManager;
       const sql = `SELECT pg_terminate_backend(${sessionId});`;
-      await runQueryRaw(context, sql, true, connectionManager, undefined);
+      await executeSessionMonitorStatement(context, connectionManager, sql);
     }
 };

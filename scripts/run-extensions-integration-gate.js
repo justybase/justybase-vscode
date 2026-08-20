@@ -149,6 +149,11 @@ function runSuite(extensionId) {
         RUN_MYSQL_INTEGRATION: extensionId === 'mysql' ? '1' : process.env.RUN_MYSQL_INTEGRATION,
         RUN_SNOWFLAKE_INTEGRATION: extensionId === 'snowflake' ? '1' : process.env.RUN_SNOWFLAKE_INTEGRATION,
     };
+    if (extensionId === 'vertica' && environment.VERTICA_LIVE_TEST_PASSWORD === undefined) {
+        // The shared Vertica harness permits passwordless connections, but it
+        // distinguishes an explicit empty password from an absent variable.
+        environment.VERTICA_LIVE_TEST_PASSWORD = '';
+    }
 
     console.log(`\n=== ${extensionId} extension integration ===`);
     const result = spawnSync(
