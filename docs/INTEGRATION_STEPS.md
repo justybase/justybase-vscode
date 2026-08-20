@@ -25,6 +25,36 @@ npm run test -- --testPathPatterns="postgresql"
 npm run verify:postgresql
 ```
 
+## Optional Extension Release Gate
+
+For a local release check across all nine companion extensions, run the
+integration suites sequentially. The gate requires the driver modules and live
+fixtures to be present and fails when Jest would otherwise skip a test:
+
+```bash
+npm run test:extensions:integration
+```
+
+Run a subset by passing extension ids, for example
+`npm run test:extensions:integration -- duckdb access`. The gate uses
+`--no-cache` and `--runInBand` so suites cannot race on Jest's transform cache.
+Normal per-dialect commands remain soft-skipping for CI and development.
+
+The same activation contract is checked in a real VS Code Extension Host. Build
+the core and requested companion bundles first, then run for all extensions or
+for a subset:
+
+```bash
+npm run build
+npm run build:duckdb
+npm run test:extensions:vscode -- duckdb
+```
+
+`test:extensions:vscode` validates that the bundle and external driver exist,
+activates the core and companion, and verifies that the expected dialect is
+registered. Use `COMPANION_VSCODE_TEST_VERSION=1.103.2` to pin the VS Code
+runtime when checking a specific compatibility target.
+
 ## Oracle Checklist
 
 The Oracle extension has a dedicated live suite at
