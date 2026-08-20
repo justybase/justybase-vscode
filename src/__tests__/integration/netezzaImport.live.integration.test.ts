@@ -247,8 +247,7 @@ describeIfNetezza('Live Netezza virtual import and migration coverage', () => {
         label: string,
     ): Promise<void> {
         if (!fs.existsSync(filePath)) {
-            console.log(`Skipping ${label}: fixture does not exist: ${filePath}`);
-            return;
+            throw new Error(`Required ${label} fixture does not exist: ${filePath}`);
         }
 
         const table = uniqueTable('JBL_IMPORT');
@@ -279,8 +278,7 @@ describeIfNetezza('Live Netezza virtual import and migration coverage', () => {
     it('generates headers and preserves the first numeric row of data3.xlsx', async () => {
         const filePath = fixturePath('data3.xlsx');
         if (!fs.existsSync(filePath)) {
-            console.log(`Skipping data3.xlsx: fixture does not exist: ${filePath}`);
-            return;
+            throw new Error(`Required data3.xlsx fixture does not exist: ${filePath}`);
         }
 
         const table = uniqueTable('JBL_IMPORT');

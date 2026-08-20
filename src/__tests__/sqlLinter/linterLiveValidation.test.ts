@@ -54,6 +54,14 @@ interface TestResult {
   knownLinterGap: boolean;
 }
 
+interface GeneratedLiveObject {
+  kind: "VIEW" | "PROCEDURE";
+  qualifiedName: string;
+}
+
+const EXPECTED_KNOWN_LINTER_GAPS = 5;
+const generatedLiveObjects: GeneratedLiveObject[] = [];
+
 const DB_CONFIG = {
   host: process.env.NZ_DEV_HOST || "localhost",
   port: process.env.NZ_DEV_PORT ? Number(process.env.NZ_DEV_PORT) : 5480,
@@ -85,6 +93,8 @@ describeIfDb("SQL Linter - Live Database Validation", () => {
 
   beforeAll(async () => {
     if (skipTests) return;
+
+    generatedLiveObjects.length = 0;
 
     jest.setTimeout(90000);
 
@@ -142,7 +152,17 @@ describeIfDb("SQL Linter - Live Database Validation", () => {
 
   afterAll(async () => {
     if (connection) {
-      connection.close();
+      for (const object of [...generatedLiveObjects].reverse()) {
+        const dropSql = object.kind === "PROCEDURE"
+          ? `DROP PROCEDURE ${object.qualifiedName}()`
+          : `DROP VIEW ${object.qualifiedName}`;
+        try {
+          await tryExecuteOnDb(connection, dropSql);
+        } catch {
+          // Cleanup must not hide the original validation result.
+        }
+      }
+      await connection.close();
     }
   });
 
@@ -184,6 +204,7 @@ describeIfDb("SQL Linter - Live Database Validation", () => {
     );
 
     expect(total).toBeGreaterThan(0);
+    expect(knownGaps).toBe(EXPECTED_KNOWN_LINTER_GAPS);
   });
 
   itIfDb("should have no false positives (parser errors for valid SQL)", () => {
@@ -880,9 +901,11 @@ function buildTestCases(tables: DiscoveredTable[]): TestCase[] {
   });
 
   // === DDL positive ===
+  const viewName = `linter_test_view_${Date.now()}`;
+  generatedLiveObjects.push({ kind: "VIEW", qualifiedName: `${t.schema}.${viewName}` });
   cases.push({
     name: "CREATE VIEW",
-    sql: `CREATE VIEW linter_test_view_${Date.now()} AS SELECT ${col1} FROM ${fullName}`,
+    sql: `CREATE VIEW ${t.schema}.${viewName} AS SELECT ${col1} FROM ${fullName}`,
     category: "ddl",
   });
 
@@ -1089,9 +1112,11 @@ function buildTestCases(tables: DiscoveredTable[]): TestCase[] {
   });
 
   // === Simple procedure definition ===
+  const procedureName = `linter_test_proc_${Date.now()}`;
+  generatedLiveObjects.push({ kind: "PROCEDURE", qualifiedName: `${t.schema}.${procedureName}` });
   cases.push({
     name: "simple stored procedure",
-    sql: `CREATE OR REPLACE PROCEDURE linter_test_proc_${Date.now()}() RETURNS INTEGER LANGUAGE NZPLSQL AS BEGIN RETURN 1; END`,
+    sql: `CREATE OR REPLACE PROCEDURE ${t.schema}.${procedureName}() RETURNS INTEGER LANGUAGE NZPLSQL AS BEGIN RETURN 1; END`,
     category: "procedure",
   });
 
@@ -1289,7 +1314,14 @@ async function tryExecuteOnDb(
 
     if (/^\s*(SELECT|WITH|EXPLAIN|SHOW|SET)\b/i.test(sql)) {
       const reader = await command.executeReader();
-      await reader.close();
+      try {
+        while (await reader.read()) {
+          // Drain the reader before closing it so the next live case cannot
+          // inherit an active result-set on the single shared connection.
+        }
+      } finally {
+        await reader.close();
+      }
     } else {
       await command.executeNonQuery();
     }
@@ -1298,6 +1330,9 @@ async function tryExecuteOnDb(
   } catch (err: unknown) {
     const msg =
       err instanceof Error ? err.message : String(err ?? "unknown error");
+    if (/(connection|socket|econn|timed?\s*out|authentication|permission denied|not authorized|driver|busy)/i.test(msg)) {
+      throw new Error(`Netezza live infrastructure error while executing ${sql}: ${msg}`, { cause: err });
+    }
     return msg.split("\n")[0].substring(0, 300);
   }
 }

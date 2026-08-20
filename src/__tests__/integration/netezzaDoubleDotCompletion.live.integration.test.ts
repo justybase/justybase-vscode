@@ -266,6 +266,13 @@ describeIfDb("Netezza DB..TABLE completion - live", () => {
         ? String(columnRows[0].ATTNAME)
         : undefined;
     }
+
+    if (!resolvedTableSchema || !sampleColumn) {
+      throw new Error(
+        `DB..TABLE live fixture not found: ${TARGET_DATABASE}..${TARGET_TABLE}. `
+        + "Set NZ_DEV_DOUBLE_DOT_DB and NZ_DEV_DOUBLE_DOT_TABLE to a visible table.",
+      );
+    }
   }, 60000);
 
   afterAll(async () => {

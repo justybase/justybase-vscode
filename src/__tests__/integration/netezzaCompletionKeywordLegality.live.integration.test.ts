@@ -32,6 +32,8 @@ const DB_CONFIG = {
     password: process.env.NZ_DEV_PASSWORD || 'password',
 };
 
+const DATABASE = DB_CONFIG.database.toUpperCase();
+
 async function tryExecute(
     connection: NzConnection,
     sql: string,
@@ -63,7 +65,7 @@ describeIfDb('Netezza Completion Keyword Legality (live audit)', () => {
         }
     });
 
-    const FROM_TAIL = 'SELECT * FROM JUST_DATA..DIMACCOUNT A';
+    const FROM_TAIL = `SELECT * FROM ${DATABASE}..DIMACCOUNT A`;
     const JOIN_PARTNER = '_V_DATABASE';
     const SAFE = ' WHERE 1=0 LIMIT 1';
 
@@ -102,7 +104,7 @@ describeIfDb('Netezza Completion Keyword Legality (live audit)', () => {
     itIfDb('UNION after FROM alias is accepted (matching column counts)', async () => {
         const result = await tryExecute(
             connection,
-            `${FROM_TAIL.replace('SELECT *', 'SELECT 1')} UNION SELECT 1 FROM JUST_DATA..DIMDATE${SAFE}`,
+            `${FROM_TAIL.replace('SELECT *', 'SELECT 1')} UNION SELECT 1 FROM ${DATABASE}..DIMDATE${SAFE}`,
         );
         expect(result.ok).toBe(true);
     });
@@ -110,7 +112,7 @@ describeIfDb('Netezza Completion Keyword Legality (live audit)', () => {
     itIfDb('INTERSECT after FROM alias is accepted (matching column counts)', async () => {
         const result = await tryExecute(
             connection,
-            `${FROM_TAIL.replace('SELECT *', 'SELECT 1')} INTERSECT SELECT 1 FROM JUST_DATA..DIMDATE${SAFE}`,
+            `${FROM_TAIL.replace('SELECT *', 'SELECT 1')} INTERSECT SELECT 1 FROM ${DATABASE}..DIMDATE${SAFE}`,
         );
         expect(result.ok).toBe(true);
     });
@@ -118,7 +120,7 @@ describeIfDb('Netezza Completion Keyword Legality (live audit)', () => {
     itIfDb('EXCEPT after FROM alias is accepted (matching column counts)', async () => {
         const result = await tryExecute(
             connection,
-            `${FROM_TAIL.replace('SELECT *', 'SELECT 1')} EXCEPT SELECT 1 FROM JUST_DATA..DIMDATE${SAFE}`,
+            `${FROM_TAIL.replace('SELECT *', 'SELECT 1')} EXCEPT SELECT 1 FROM ${DATABASE}..DIMDATE${SAFE}`,
         );
         expect(result.ok).toBe(true);
     });
@@ -126,7 +128,7 @@ describeIfDb('Netezza Completion Keyword Legality (live audit)', () => {
     itIfDb('HAVING without GROUP BY is accepted', async () => {
         const result = await tryExecute(
             connection,
-            `SELECT COUNT(*) FROM JUST_DATA..DIMACCOUNT A WHERE 1=0 HAVING 1=1`,
+            `SELECT COUNT(*) FROM ${DATABASE}..DIMACCOUNT A WHERE 1=0 HAVING 1=1`,
         );
         expect(result.ok).toBe(true);
     });

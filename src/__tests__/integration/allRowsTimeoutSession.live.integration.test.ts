@@ -4,6 +4,7 @@
  *
  * Prerequisites:
  * - NZ_DEV_PASSWORD (optionally via .env.local when using live-test-matrix)
+ * - NZ_DEV_RUN_TIMEOUT_TESTS=1 (the scenario depends on a deliberately slow local query)
  * - Optional: NZ_DEV_HOST, NZ_DEV_PORT, NZ_DEV_DATABASE, NZ_DEV_USER
  *
  * Run:
@@ -27,7 +28,7 @@ import {
     ALL_ROWS_FILTER_VALUES_TIMEOUT_SECONDS,
 } from '../../results/allRowsOperationTimeouts';
 
-const skipTests = !process.env.NZ_DEV_PASSWORD;
+const skipTests = !process.env.NZ_DEV_PASSWORD || process.env.NZ_DEV_RUN_TIMEOUT_TESTS !== '1';
 const describeIfDb = skipTests ? describe.skip : describe;
 const itIfDb = skipTests ? it.skip : it;
 
@@ -240,7 +241,8 @@ describeIfDb('All rows timeout session isolation (live Netezza)', () => {
 });
 
 if (skipTests) {
-    console.log(
-        'All rows timeout session live tests skipped: set NZ_DEV_PASSWORD to run against Netezza.',
-    );
+    const reason = !process.env.NZ_DEV_PASSWORD
+        ? 'set NZ_DEV_PASSWORD to run against Netezza'
+        : 'set NZ_DEV_RUN_TIMEOUT_TESTS=1 because this suite depends on a deliberately slow local query';
+    console.log(`All rows timeout session live tests skipped: ${reason}.`);
 }
