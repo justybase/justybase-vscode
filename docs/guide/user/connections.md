@@ -5,7 +5,7 @@ audience: user
 category: Start here
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.16.38
+product_version: 3.16.39
 ---
 
 # Connections and tab context
