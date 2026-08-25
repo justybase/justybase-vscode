@@ -19,18 +19,22 @@ describe('columnCacheWarmup', () => {
 
     it('writes tree-ready columns for a single table', async () => {
         const cache = createCache();
-        const readRows: CatalogRowReader = async () => [
-            {
+        const readRows: CatalogRowReader = async (sql) => {
+            if (sql.includes('_V_RELATION_KEYDATA')) {
+                return [{ OBJID: 1, ATTNAME: 'ID', CONTYPE: 'p' }];
+            }
+            if (sql.includes('_V_TABLE_DIST_MAP')) {
+                return [{ OBJID: 1, ATTNAME: 'ID' }];
+            }
+            return [{
+                OBJID: 1,
                 TABLENAME: 'ORDERS',
                 SCHEMA: 'ADMIN',
                 DBNAME: 'JUST_DATA',
                 ATTNAME: 'ID',
                 FORMAT_TYPE: 'INTEGER',
-                IS_PK: 1,
-                IS_FK: 0,
-                IS_DISTRIBUTION_KEY: 1,
-            },
-        ];
+            }];
+        };
 
         await warmTableColumnsFromCatalog(
             cache,
@@ -132,9 +136,11 @@ describe('columnCacheWarmup', () => {
             readRows,
         );
 
-        expect(queries).toHaveLength(2);
+        expect(queries).toHaveLength(4);
         expect(queries[0]).not.toContain('_V_EXTERNAL');
-        expect(queries[1]).toContain('_V_EXTERNAL');
+        expect(queries[1]).toContain('_V_RELATION_KEYDATA');
+        expect(queries[2]).toContain('_V_TABLE_DIST_MAP');
+        expect(queries[3]).toContain('_V_EXTERNAL');
         expect(cache.getColumns('CONN', 'JUST_DATA.ADMIN.ET_ORDERS')).toEqual([
             expect.objectContaining({ ATTNAME: 'EXTERNAL_ID', FORMAT_TYPE: 'VARCHAR(30)' }),
         ]);

@@ -4,6 +4,16 @@ export interface DatabaseColumnQueryOptions {
     objTypes?: string[];
 }
 
+/**
+ * Optional split plan for dialects whose column/key metadata is cheaper to
+ * fetch as independent catalog scans and combine in the client.
+ */
+export interface DatabaseColumnsWithKeysQuerySet {
+    columns: string;
+    keys: string;
+    distribution: string;
+}
+
 export interface DatabaseColumnLookupParams {
     database?: string;
     schema?: string;
@@ -45,6 +55,10 @@ export interface DatabaseMetadataProvider {
     buildObjectTypeQuery(database: string, objectType: string): string;
     buildTypeGroupsQuery(database: string): string;
     buildColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string;
+    buildColumnsWithKeysQueries?(
+        database: string,
+        options?: DatabaseColumnQueryOptions,
+    ): DatabaseColumnsWithKeysQuerySet;
     /**
      * Builds a companion query for external/foreign-object columns across a
      * database (Netezza). It is executed separately and merged in code.

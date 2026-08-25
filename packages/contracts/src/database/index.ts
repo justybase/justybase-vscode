@@ -1,5 +1,5 @@
 import type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue } from './connectionForm';
-import type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions } from './metadataProvider';
+import type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColumnsWithKeysQuerySet, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions } from './metadataProvider';
 import type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides, DatabaseThreePartNamePrefix } from './dialectTraits';
 import type { DatabaseConnection, DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor, DatabaseCommand, DatabaseDataReader } from './connection';
 import type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseDdlGenerationMode, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic } from './advancedFeatures';
@@ -52,7 +52,7 @@ export const DATABASE_KIND_DISPLAY_NAMES: Readonly<Partial<Record<DatabaseKind, 
 export { DatabaseConnection, DatabaseCommand, DatabaseDataReader };
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor };
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue };
-export type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions };
+export type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColumnsWithKeysQuerySet, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions };
 export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides, DatabaseThreePartNamePrefix };
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseDdlGenerationMode, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic };
 
@@ -110,12 +110,32 @@ export interface DatabaseSqlStaticAssetProfile {
   grammarScopeName?: string;
 }
 
+/** Shared serializable shape for lint results without a VS Code dependency. */
+export interface DatabaseSqlLintIssue {
+  ruleId: string;
+  message: string;
+  severity: 0 | 1 | 2 | 3;
+  startOffset: number;
+  endOffset: number;
+  suggestedFix?: string;
+}
+
+/** A portable SQL quality rule implemented by a database dialect. */
+export interface DatabaseSqlQualityRule {
+  id: string;
+  name: string;
+  description: string;
+  defaultSeverity: 0 | 1 | 2 | 3;
+  onDemandOnly?: boolean;
+  check(sql: string): DatabaseSqlLintIssue[];
+}
+
 export interface DatabaseSqlAuthoring {
   completionKeywords: readonly string[];
   signatures: ReadonlyMap<string, readonly DatabaseSqlFunctionSignature[]>;
   formatter: DatabaseSqlFormatterProfile;
   validation: DatabaseSqlValidationProfile;
-  qualityRules: readonly any[];
+  qualityRules: readonly DatabaseSqlQualityRule[];
   parsing?: DatabaseSqlParsingProfile;
   staticAssets?: DatabaseSqlStaticAssetProfile;
 }

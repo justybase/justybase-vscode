@@ -31,6 +31,10 @@ import {
     type RunQueryRawOptions,
 } from '../../core/queryRunner';
 import { ensureBuiltInDialectsRegistered } from '../../dialects';
+import {
+    buildNetezzaColumnsWithKeysQueries,
+    loadNetezzaColumnsWithKeysRows,
+} from '../../dialects/netezza/metadata/columnsWithKeys';
 import { NZ_QUERIES } from '../../dialects/netezza/metadata/systemQueries';
 import { MetadataCache } from '../../metadata/cache/MetadataCache';
 import { createConnectionScopedMetadataQueryRunner } from '../../metadata/connectionScopedMetadataQueryRunner';
@@ -179,16 +183,18 @@ async function readCatalogSnapshot(
     connection: NzConnection,
     database: string,
 ): Promise<CatalogSnapshot> {
+    const columnQueries = buildNetezzaColumnsWithKeysQueries(database);
+    const columns = await loadNetezzaColumnsWithKeysRows(
+        columnQueries,
+        (sql) => queryRows(connection, sql),
+    );
     return {
         schemas: await queryRows(connection, NZ_QUERIES.listSchemas(database)),
         typeGroups: await queryRows(connection, NZ_QUERIES.listTypeGroups(database)),
         objects: await queryRows(connection, NZ_QUERIES.listTablesAndViews([database])),
         externalObjects: await queryRows(connection, NZ_QUERIES.listExternalTables([database])),
         procedures: await queryRows(connection, NZ_QUERIES.listProcedures(database)),
-        columns: await queryRows<RawColumnRowWithKeys>(
-            connection,
-            NZ_QUERIES.listColumnsWithKeys(database),
-        ),
+        columns: columns as RawColumnRowWithKeys[],
         externalColumns: await queryRows<RawColumnRowWithKeys>(
             connection,
             NZ_QUERIES.listExternalColumnsWithKeys(database),
@@ -505,6 +511,8 @@ function assertTargetRefreshDetails(
         'external-objects',
         'procedures',
         'columns',
+        'column-keys',
+        'column-distribution',
     ];
     for (const kind of requiredKinds) {
         expect(queries.filter(query => query.context.kind === kind && query.state === 'completed')).toHaveLength(1);
@@ -593,7 +601,7 @@ describeIfLive('Netezza schema refresh - live read-only integration', () => {
                 assertTargetRefreshDetails(details, targetDatabase, snapshot.externalObjects.length > 0);
                 assertCatalogRowsCached(cache, targetDatabase, snapshot);
                 expect(cache.isConnectionPrefetchFresh(CONNECTION_NAME)).toBe(true);
-                expect(trace.catalogCalls).toHaveLength(6 + (snapshot.externalObjects.length > 0 ? 1 : 0));
+                expect(trace.catalogCalls).toHaveLength(8 + (snapshot.externalObjects.length > 0 ? 1 : 0));
                 expect(trace.maxActiveQueries).toBe(1);
                 expect(trace.connectionRefs.size).toBe(1);
                 expect(trace.metadataSessions.size).toBe(1);
@@ -627,7 +635,7 @@ describeIfLive('Netezza schema refresh - live read-only integration', () => {
                 const repeatedTrace = createRefreshTrace();
                 const repeatedDetails = await runPublicRefresh(cache, createRefreshRunner(repeatedTrace));
                 expect(repeatedDetails.stage).toBe('complete');
-                expect(repeatedTrace.catalogCalls.length).toBeGreaterThanOrEqual(6);
+                expect(repeatedTrace.catalogCalls.length).toBeGreaterThanOrEqual(8);
                 expect(cache.isConnectionPrefetchFresh(CONNECTION_NAME)).toBe(true);
             } finally {
                 await cache.dispose();
@@ -741,7 +749,7 @@ describeIfLive('Netezza schema refresh - live read-only integration', () => {
                 expect(details.queries.filter(query =>
                     query.context.kind === 'databases' && query.state === 'completed',
                 )).toHaveLength(1);
-                expect(trace.catalogCalls).toHaveLength(1 + (6 * databaseCount) + externalDatabaseCount);
+                expect(trace.catalogCalls).toHaveLength(1 + (8 * databaseCount) + externalDatabaseCount);
                 expect(trace.maxActiveQueries).toBe(1);
                 expect(trace.connectionRefs.size).toBe(1);
                 expect(trace.metadataSessions.size).toBe(1);

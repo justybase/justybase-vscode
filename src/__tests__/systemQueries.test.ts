@@ -285,23 +285,57 @@ describe('metadata/systemQueries', () => {
     });
 
     describe('NZ_QUERIES.listColumnsWithKeys', () => {
-        it('should generate query with PK/FK info', () => {
+        it('should generate only the unsorted base column scan', () => {
             const query = NZ_QUERIES.listColumnsWithKeys('MYDB');
-            expect(query).toContain('IS_DISTRIBUTION_KEY');
-            expect(query).toContain('_V_TABLE_DIST_MAP');
+            expect(query).toContain('O.OBJID AS OBJID');
+            expect(query).toContain('C.DESCRIPTION AS DESCRIPTION');
+            expect(query).not.toContain("COALESCE(C.DESCRIPTION, '')");
             expect(query).toContain('MYDB.._V_RELATION_COLUMN');
             expect(query).toContain('MYDB.._V_OBJECT_DATA');
-            expect(query).toContain('MYDB.._V_RELATION_KEYDATA');
-            expect(query).toContain('IS_PK');
-            expect(query).toContain('IS_FK');
+            expect(query).not.toContain('_V_RELATION_KEYDATA');
+            expect(query).not.toContain('_V_TABLE_DIST_MAP');
+            expect(query).not.toContain('GROUP BY');
+            expect(query).not.toContain('ORDER BY');
+            expect(query).not.toContain('IS_PK');
         });
 
-        it('should use OBJID-based joins for KEYDATA and DIST_MAP', () => {
-            const query = NZ_QUERIES.listColumnsWithKeys('MYDB');
-            expect(query).toContain('K.OBJID = O.OBJID');
-            expect(query).toContain('D.OBJID = O.OBJID');
-            expect(query).not.toContain('UPPER(K.RELATION)');
-            expect(query).not.toContain('UPPER(D.TABLENAME)');
+        it('should build independent per-database key and distribution scans', () => {
+            const keys = NZ_QUERIES.listColumnKeyFlags('MYDB');
+            const distribution = NZ_QUERIES.listColumnDistributionFlags('MYDB');
+
+            expect(keys).toContain('MYDB.._V_RELATION_KEYDATA');
+            expect(keys).toContain("K.DATABASE = 'MYDB'");
+            expect(keys).toContain("K.CONTYPE IN ('p', 'f')");
+            expect(keys).not.toContain('_V_RELATION_COLUMN');
+            expect(keys).not.toContain('_V_OBJECT_DATA');
+            expect(keys).not.toContain('JOIN');
+            expect(keys).not.toContain('GROUP BY');
+            expect(keys).not.toContain('ORDER BY');
+
+            expect(distribution).toContain('MYDB.._V_TABLE_DIST_MAP');
+            expect(distribution).toContain("D.DATABASE = 'MYDB'");
+            expect(distribution).not.toContain('_V_RELATION_COLUMN');
+            expect(distribution).not.toContain('_V_OBJECT_DATA');
+            expect(distribution).not.toContain('JOIN');
+            expect(distribution).not.toContain('GROUP BY');
+            expect(distribution).not.toContain('ORDER BY');
+        });
+
+        it('should scope auxiliary scans when a schema or table is requested', () => {
+            const options = { schema: 'ADMIN', tableName: 'ORDERS' };
+            const keys = NZ_QUERIES.listColumnKeyFlags('MYDB', options);
+            const distribution = NZ_QUERIES.listColumnDistributionFlags('MYDB', options);
+
+            for (const query of [keys, distribution]) {
+                expect(query).toContain('MYDB.._V_OBJECT_DATA');
+                expect(query).toContain('OBJID IN');
+                expect(query).toContain("O.DBNAME = 'MYDB'");
+                expect(query).toContain("O.SCHEMA = 'ADMIN'");
+                expect(query).toContain("O.OBJNAME = 'ORDERS'");
+                expect(query).not.toContain('JOIN');
+                expect(query).not.toContain('GROUP BY');
+                expect(query).not.toContain('ORDER BY');
+            }
         });
 
         it('should filter by schema when provided', () => {

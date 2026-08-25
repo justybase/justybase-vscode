@@ -20,6 +20,8 @@ export type MetadataQueryKind =
     | 'external-objects'
     | 'procedures'
     | 'columns'
+    | 'column-keys'
+    | 'column-distribution'
     | 'external-columns'
     | 'table-columns'
     | 'external-table-columns'

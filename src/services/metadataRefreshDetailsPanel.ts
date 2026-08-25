@@ -122,13 +122,6 @@ export function getMetadataRefreshDetailsHtml(): string {
   const sortOrder = document.getElementById('sort-order');
   const slowQueryThresholdMs = 5000;
   let currentDetails = [];
-  const longestSqlByRefreshId = new Map();
-  // A running statement is sampled every second. Keep the highest sampled
-  // value for the individual query as well as for the refresh aggregate;
-  // otherwise the aggregate can correctly remain at (for example) 2.85 s
-  // while the same completed query is rendered/sorted using a later, smaller
-  // value from a stale lifecycle snapshot.
-  const longestSqlByQueryId = new Map();
   const labels = {
     running: 'Running now', queued: 'Queued', planned: 'Planned next',
     completed: 'Executed', failed: 'Failed', skipped: 'Skipped'
@@ -140,13 +133,10 @@ export function getMetadataRefreshDetailsHtml(): string {
   const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
   const formatTime = (timestamp) => timestamp ? new Date(timestamp).toLocaleTimeString() : '';
   const durationMs = (query, now) => {
-    const currentDuration = Math.max(
-      query.maxDurationMs || 0,
-      query.startedAt ? Math.max(0, (query.completedAt || now) - query.startedAt) : 0,
-    );
-    const longestDuration = Math.max(longestSqlByQueryId.get(query.id) || 0, currentDuration);
-    longestSqlByQueryId.set(query.id, longestDuration);
-    return longestDuration;
+    if (typeof query.executionDurationMs === 'number') return Math.max(0, query.executionDurationMs);
+    return query.state === 'running' && query.startedAt
+      ? Math.max(0, now - query.startedAt)
+      : 0;
   };
   const formatDuration = (milliseconds) => milliseconds >= 1000
     ? (milliseconds / 1000).toFixed(milliseconds >= 10000 ? 1 : 2) + ' s'
@@ -155,8 +145,9 @@ export function getMetadataRefreshDetailsHtml(): string {
   const isTimeout = (query) => /timeout|timed out/i.test(query.error || '');
   const formatQuery = (query) => {
     const now = Date.now();
-    const duration = query.startedAt ? ' · ' + formatDuration(durationMs(query, now)) : '';
-    const queue = query.queueWaitMs ? ' · queue ' + query.queueWaitMs + ' ms' : '';
+    const durationValue = durationMs(query, now);
+    const duration = durationValue > 0 ? ' · SQL ' + formatDuration(durationValue) : '';
+    const queue = query.queueWaitMs ? ' · queue wait ' + query.queueWaitMs + ' ms' : '';
     const rows = typeof query.rowsRead === 'number' ? ' · ' + query.rowsRead + ' rows' : '';
     const target = [query.context.database, query.context.schema, query.context.table].filter(Boolean).join('.') || 'connection scope';
     const slow = isSlow(query, now) ? ' slow' : '';
@@ -202,19 +193,18 @@ export function getMetadataRefreshDetailsHtml(): string {
   const renderStats = (refresh, queries) => {
     const now = Date.now();
     const objectQueries = queries.filter(query => query.context.kind === 'objects' || query.context.kind === 'external-objects');
-    const columnQueries = queries.filter(query => query.context.kind === 'columns' || query.context.kind === 'external-columns');
+    const columnQueries = queries.filter(query =>
+      query.context.kind === 'columns'
+      || query.context.kind === 'column-keys'
+      || query.context.kind === 'column-distribution'
+      || query.context.kind === 'external-columns');
     const objectRows = objectQueries.reduce((total, query) => total + (query.rowsRead || 0), 0);
     const columnRows = columnQueries.reduce((total, query) => total + (query.rowsRead || 0), 0);
     const objectDuration = objectQueries.reduce((total, query) => total + durationMs(query, now), 0);
     const columnDuration = columnQueries.reduce((total, query) => total + durationMs(query, now), 0);
-    const timed = queries.filter(query => query.startedAt);
+    const timed = queries.filter(query => query.startedAt || typeof query.executionDurationMs === 'number');
     const runningLongest = timed.reduce((maximum, query) => Math.max(maximum, durationMs(query, now)), 0);
-    const longestDuration = Math.max(
-      refresh.longestSqlDurationMs || 0,
-      runningLongest,
-      longestSqlByRefreshId.get(refresh.refreshId) || 0,
-    );
-    longestSqlByRefreshId.set(refresh.refreshId, longestDuration);
+    const longestDuration = Math.max(refresh.longestSqlDurationMs || 0, runningLongest);
     const slowest = (refresh.longestSqlQueryId
       ? queries.find(query => query.id === refresh.longestSqlQueryId)
       : undefined)
@@ -224,8 +214,8 @@ export function getMetadataRefreshDetailsHtml(): string {
       : '—';
     const refreshElapsedMs = Math.max(0, (refresh.completedAt || now) - refresh.startedAt);
     const values = [
-      ['Tables / views', objectRows + ' rows · ' + formatDuration(objectDuration)],
-      ['Columns', columnRows + ' rows · ' + formatDuration(columnDuration)],
+      ['Tables / views', objectRows + ' rows · SQL ' + formatDuration(objectDuration)],
+      ['Columns', columnRows + ' rows · SQL ' + formatDuration(columnDuration)],
       ['Refresh elapsed', formatDuration(refreshElapsedMs)],
       ['Longest single SQL', slowestValue],
     ];
@@ -255,6 +245,17 @@ export function getMetadataRefreshDetailsHtml(): string {
         + renderGroup(queries, 'skipped')
         + '</section>';
     }).join('');
+  };
+  const mergeRefreshDetails = (incomingDetails) => {
+    const latestByConnection = new Map(currentDetails.map(detail => [detail.connectionName, detail]));
+    for (const incoming of incomingDetails) {
+      const current = latestByConnection.get(incoming.connectionName);
+      const sameRefresh = current && current.refreshId === incoming.refreshId;
+      const olderRefresh = current && incoming.startedAt < current.startedAt;
+      const olderRevision = sameRefresh && (incoming.revision || 0) < (current.revision || 0);
+      if (!olderRefresh && !olderRevision) latestByConnection.set(incoming.connectionName, incoming);
+    }
+    return [...latestByConnection.values()];
   };
   statusFilter.addEventListener('change', () => render(currentDetails));
   sortOrder.addEventListener('change', () => render(currentDetails));
@@ -300,7 +301,7 @@ export function getMetadataRefreshDetailsHtml(): string {
   setInterval(() => render(currentDetails), 1000);
   window.addEventListener('message', event => {
     if (event.data && event.data.type === 'refresh-state') {
-      currentDetails = event.data.details || [];
+      currentDetails = mergeRefreshDetails(event.data.details || []);
       render(currentDetails);
     }
   });

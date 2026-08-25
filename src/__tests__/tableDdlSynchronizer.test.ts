@@ -31,6 +31,13 @@ function isRuntimeContextQuery(sql: string): boolean {
     return sql.includes('CURRENT_CATALOG');
 }
 
+function objectIdForColumn(row: Row, objectRows: Row[]): unknown {
+    if (row.OBJID !== undefined) {
+        return row.OBJID;
+    }
+    return objectRows.find(objectRow => objectRow.OBJNAME === row.TABLENAME)?.OBJID;
+}
+
 function isObjectCatalogQuery(sql: string): boolean {
     return sql.includes('_V_OBJECT_DATA') || sql.includes('_access_metadata.object_type');
 }
@@ -52,8 +59,30 @@ function createConnection(options: ConnectionMockOptions = {}): DatabaseConnecti
                 let rows: Row[];
                 if (isRuntimeContextQuery(sql)) {
                     rows = [{ DATABASE: 'JUST_DATA', SCHEMA: 'ADMIN' }];
+                } else if (sql.includes('_V_RELATION_KEYDATA')) {
+                    rows = columnRows.flatMap(row => {
+                        const objectId = objectIdForColumn(row, objectRows);
+                        const flags: Row[] = [];
+                        if (Number(row.IS_PK) === 1) {
+                            flags.push({ OBJID: objectId, ATTNAME: row.ATTNAME, CONTYPE: 'p' });
+                        }
+                        if (Number(row.IS_FK) === 1) {
+                            flags.push({ OBJID: objectId, ATTNAME: row.ATTNAME, CONTYPE: 'f' });
+                        }
+                        return flags;
+                    });
+                } else if (sql.includes('_V_TABLE_DIST_MAP')) {
+                    rows = columnRows
+                        .filter(row => Number(row.IS_DISTRIBUTION_KEY) === 1)
+                        .map(row => ({
+                            OBJID: objectIdForColumn(row, objectRows),
+                            ATTNAME: row.ATTNAME,
+                        }));
                 } else if (isColumnCatalogQuery(sql)) {
-                    rows = columnRows;
+                    rows = columnRows.map(row => ({
+                        ...row,
+                        OBJID: objectIdForColumn(row, objectRows),
+                    }));
                 } else if (isObjectCatalogQuery(sql)) {
                     rows = objectRows;
                 } else {

@@ -60,7 +60,7 @@ import type {
 } from '../metadata/metadataQueryDiagnostics';
 
 /**
- * Default timeout for schema queries (60 seconds)
+ * Default timeout for schema queries (300 seconds)
  */
 const SCHEMA_QUERY_TIMEOUT = METADATA_QUERY_TIMEOUT_SECONDS * 1000;
 const CTE_TREE_REFRESH_DEBOUNCE_MS = 400;

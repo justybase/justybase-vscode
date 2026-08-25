@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 import { SchemaProvider, SchemaItem } from '../providers/schemaProvider';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
+import { METADATA_QUERY_TIMEOUT_SECONDS } from '../metadata/metadataQueryLimiter';
 import { DocumentParseSession } from '../sqlParser/documentParseSession';
 
 // Mock dependencies
@@ -1052,7 +1053,7 @@ describe('SchemaProvider', () => {
                 query: expect.stringContaining('PROCEDURESIGNATURE'),
                 maxRows: 1000000,
                 isUserQuery: false,
-                timeoutSeconds: 120,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
             }));
         });
 

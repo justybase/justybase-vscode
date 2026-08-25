@@ -7,7 +7,7 @@ export const MAX_METADATA_QUERY_CONCURRENCY = 16;
 let metadataQueryConcurrencyLimit = DEFAULT_METADATA_QUERY_CONCURRENCY;
 
 /** Maximum server-side execution time for one metadata catalog query. */
-export const METADATA_QUERY_TIMEOUT_SECONDS = 120;
+export const METADATA_QUERY_TIMEOUT_SECONDS = 300;
 
 /** @internal Test / diagnostics */
 export function getMetadataQueryConcurrencyLimit(): number {

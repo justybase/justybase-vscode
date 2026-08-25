@@ -24,6 +24,7 @@ describe('MetadataRefreshDetailsPanel', () => {
             message: 'Fetching columns',
             startedAt: 1,
             updatedAt: 2,
+            revision: 1,
             longestSqlDurationMs: 0,
             queries: [
                 {
@@ -67,7 +68,7 @@ describe('MetadataRefreshDetailsPanel', () => {
         expect(repeatFullRefresh).toHaveBeenCalledWith('NZ');
     });
 
-    it('keeps the first duration-sorted SQL equal to the global longest-SQL statistic', () => {
+    it('uses driver execution timing and ignores stale refresh snapshots', () => {
         const html = getMetadataRefreshDetailsHtml();
         const scriptSource = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1];
         expect(scriptSource).toBeDefined();
@@ -78,7 +79,7 @@ describe('MetadataRefreshDetailsPanel', () => {
             ['sort-order', { value: 'duration-desc', innerHTML: '', addEventListener: jest.fn() }],
         ]);
         let messageListener: ((event: { data?: unknown }) => void) | undefined;
-        let now = 3_850;
+        let now = 36_700;
         const TestDate = class extends Date {
             static now(): number {
                 return now;
@@ -107,38 +108,45 @@ describe('MetadataRefreshDetailsPanel', () => {
         const refresh = {
             connectionName: 'NZ',
             refreshId: 'NZ:1:1',
-            stage: 'columns',
-            percent: 80,
-            message: 'Fetching columns',
+            stage: 'complete',
+            percent: 100,
+            message: 'Metadata refresh complete',
             startedAt: 1_000,
-            updatedAt: 3_850,
-            longestSqlDurationMs: 2_850,
+            completedAt: 36_700,
+            updatedAt: 36_700,
+            revision: 2,
+            longestSqlDurationMs: 10_600,
             longestSqlQueryId: 'slow',
             queries: [
                 {
-                    id: 'slow', state: 'running', sql: 'SELECT slow', startedAt: 1_000, queuedAt: 1_000,
+                    id: 'slow', state: 'completed', sql: 'SELECT slow', startedAt: 1_000, completedAt: 11_600,
+                    executionDurationMs: 10_600, queuedAt: 1_000,
                     context: { connectionName: 'NZ', source: 'connection-prefetch', kind: 'columns' },
                 },
                 {
-                    id: 'fast', state: 'completed', sql: 'SELECT fast', startedAt: 1_000, completedAt: 2_710, queuedAt: 1_000,
-                    context: { connectionName: 'NZ', source: 'connection-prefetch', kind: 'columns' },
+                    id: 'fast', state: 'completed', sql: 'SELECT fast', startedAt: 12_000, completedAt: 14_200,
+                    executionDurationMs: 2_200, queuedAt: 12_000,
+                    context: { connectionName: 'NZ', source: 'connection-prefetch', kind: 'objects' },
                 },
             ],
         };
         messageListener?.({ data: { type: 'refresh-state', details: [refresh] } });
 
-        // The next lifecycle snapshot reports a smaller terminal duration for
-        // the same query. The panel must retain the larger sampled value.
-        now = 5_000;
+        // A delayed pre-completion message must not turn a completed query into
+        // a long-running one or inflate the aggregate after the refresh froze.
+        now = 900_000;
         messageListener?.({
             data: {
                 type: 'refresh-state',
                 details: [{
                     ...refresh,
-                    updatedAt: now,
-                    longestSqlDurationMs: 2_850,
+                    stage: 'columns',
+                    percent: 80,
+                    completedAt: undefined,
+                    updatedAt: 20_000,
+                    revision: 1,
                     queries: refresh.queries.map(query => query.id === 'slow'
-                        ? { ...query, state: 'completed', completedAt: 2_710 }
+                        ? { ...query, state: 'running', executionDurationMs: undefined, completedAt: undefined }
                         : query),
                 }],
             },
@@ -150,8 +158,9 @@ describe('MetadataRefreshDetailsPanel', () => {
         expect(slowPosition).toBeGreaterThanOrEqual(0);
         expect(slowPosition).toBeLessThan(fastPosition);
         expect(rendered.slice(rendered.lastIndexOf('<article', slowPosition), rendered.indexOf('</article>', slowPosition)))
-            .toContain('2.85 s');
+            .toContain('10.6 s');
         expect(rendered).toContain('Longest single SQL');
-        expect(rendered).toContain('2.85 s');
+        expect(rendered).toContain('35.7 s');
+        expect(rendered).not.toContain('899.0 s');
     });
 });
