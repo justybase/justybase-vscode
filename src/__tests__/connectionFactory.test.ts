@@ -94,6 +94,7 @@ describe("connectionFactory", () => {
     expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
       ...config,
       connectionTimeout: 30,
+      clientType: 11,
     });
     expect(connection).toBe(mockConnection);
   });

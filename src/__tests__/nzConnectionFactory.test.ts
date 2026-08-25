@@ -29,6 +29,7 @@ describe('nzConnectionFactory', () => {
         expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
             ...config,
             connectionTimeout: 30,
+            clientType: 11,
         });
         expect(connection).toBe(mockConnection);
     });
@@ -48,6 +49,7 @@ describe('nzConnectionFactory', () => {
         expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
             ...config,
             connectionTimeout: 30,
+            clientType: 11,
         });
         expect(connection).toBe(mockConnection);
     });

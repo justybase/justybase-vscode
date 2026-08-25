@@ -112,8 +112,11 @@ export async function createConnectionFromDetails(
         password: details.password
     };
 
-    const NzConnection = require('@justybase/netezza-driver').NzConnection;
-    const connection = new NzConnection(config);
+    const { ClientTypeId, NzConnection } = require('@justybase/netezza-driver');
+    const connection = new NzConnection({
+        ...config,
+        clientType: ClientTypeId?.SqlDotnet ?? 11,
+    });
     await connection.connect();
     return connection;
 }

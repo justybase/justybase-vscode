@@ -1,4 +1,4 @@
-import { NzConnection } from '@justybase/netezza-driver';
+import { ClientTypeId, NzConnection } from '@justybase/netezza-driver';
 import type { MetadataColumn, MetadataDatabase, MetadataObject, MetadataSchema, QueryColumn } from '@justybase/contracts';
 
 export interface NetezzaConnectionDetails {
@@ -37,7 +37,11 @@ function toColumns(reader: { fieldCount: number; getName(index: number): string;
 }
 
 export async function executeNetezzaQuery(profile: NetezzaConnectionDetails, sql: string, options: QueryOptions, callbacks: QueryCallbacks): Promise<{ totalRows: number; limitReached: boolean; rowsAffected?: number }> {
-  const connection = new NzConnection(options.database ? { ...profile, database: options.database } : profile);
+  const connection = new NzConnection({
+    ...profile,
+    ...(options.database ? { database: options.database } : {}),
+    clientType: ClientTypeId?.SqlDotnet ?? 11,
+  });
   await connection.connect();
   let readOnlyTransaction = false;
   try {
