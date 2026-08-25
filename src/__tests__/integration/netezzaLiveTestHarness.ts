@@ -1,4 +1,4 @@
-import { NzConnection } from '@justybase/netezza-driver';
+import { ClientTypeId, NzConnection } from '@justybase/netezza-driver';
 import type { ConnectionDetails, DatabaseDataReader } from '../../types';
 import { SqlParser } from '../../sql/sqlParser';
 
@@ -26,7 +26,8 @@ export function createNetezzaLiveConnection(database = buildNetezzaLiveDetails()
         port: details.port,
         database,
         user: details.user,
-        password: details.password || ''
+        password: details.password || '',
+        clientType: ClientTypeId.SqlDotnet,
     });
 }
 

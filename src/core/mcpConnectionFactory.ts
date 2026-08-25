@@ -1,4 +1,4 @@
-import { NzConnection } from '@justybase/netezza-driver';
+import { ClientTypeId, NzConnection } from '@justybase/netezza-driver';
 import type { NzConnectionConfig } from '@justybase/netezza-driver';
 import type { ConnectionDetails } from '../types';
 import { getOptionNumber } from './connectionUtils';
@@ -20,6 +20,7 @@ export async function createConnectedNetezzaConnectionFromDetails(
         database: databaseOverride ?? details.database,
         user: details.user,
         password: details.password ?? '',
+        clientType: ClientTypeId?.SqlDotnet ?? 11,
         connectionTimeout: getOptionNumber({
             host: details.host,
             port: details.port,

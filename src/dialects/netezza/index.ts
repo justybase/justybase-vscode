@@ -56,6 +56,7 @@ export const netezzaDialect: DatabaseDialect = {
   },
   createConnection(config: DatabaseConnectionConfig): DatabaseConnection {
     const NzConnectionClass = netezzaDialect.getConnectionConstructor();
+    const { ClientTypeId } = require("@justybase/netezza-driver");
     const configuredTimeout = getOptionNumber(config, "connectionTimeout");
     return new NzConnectionClass({
       ...config,
@@ -65,6 +66,8 @@ export const netezzaDialect: DatabaseDialect = {
         configuredTimeout !== undefined && configuredTimeout >= 0
           ? configuredTimeout
           : DEFAULT_NETEZZA_CONNECTION_TIMEOUT_SECONDS,
+      // NPS compatibility identity required by DROP SESSION on some systems.
+      clientType: ClientTypeId?.SqlDotnet ?? 11,
     } as DatabaseConnectionConfig);
   },
 };
