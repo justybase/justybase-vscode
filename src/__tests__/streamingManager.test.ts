@@ -1358,6 +1358,21 @@ describe("StreamingManager", () => {
       expect(handle2.signal.aborted).toBe(false);
     });
 
+    it("should not unregister a newer command when an older handle finishes late", () => {
+      const docUri = "file:///test.sql";
+      const cmd1 = new MockNzCommand();
+      const handle1 = manager.registerCommand(docUri, cmd1);
+      const cmd2 = new MockNzCommand();
+      const handle2 = manager.registerCommand(docUri, cmd2);
+
+      handle1.unregister();
+
+      expect(manager.isActive(docUri)).toBe(true);
+      expect(manager.getCommand(docUri)).toBe(cmd2);
+      handle2.unregister();
+      expect(manager.isActive(docUri)).toBe(false);
+    });
+
     it("should auto-cleanup aborted entry after STALE_ABORT_CLEANUP_MS", async () => {
       jest.useFakeTimers();
       const docUri = "file:///test.sql";

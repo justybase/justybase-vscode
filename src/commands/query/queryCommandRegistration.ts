@@ -32,7 +32,11 @@ import {
 } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { runSmartSequentialQuery } from './querySmartSequentialRun';
-import { tryAcquireQueryExecution } from './queryExecutionGate';
+import {
+    markQueryExecutionCancelling,
+    tryAcquireQueryExecution,
+} from './queryExecutionGate';
+import { createQueryExecutionRecovery } from './queryExecutionRecovery';
 
 const VIEW_DATA_ROW_LIMIT = 100;
 
@@ -97,6 +101,7 @@ export function registerQueryCommands(
 
                 if (uriToCancel) {
                     console.log(`[netezza.cancelQuery] Cancelling: ${uriToCancel}`);
+                    markQueryExecutionCancelling(uriToCancel);
                     // 1. Update UI immediately (optimistic)
                     resultPanelProvider.cancelExecution(uriToCancel, currentRowCounts);
 
@@ -114,6 +119,7 @@ export function registerQueryCommands(
                             console.log(
                                 `[netezza.cancelQuery] Cancelling running source: ${executingUri}`
                             );
+                            markQueryExecutionCancelling(executingUri);
                             resultPanelProvider.cancelExecution(executingUri, currentRowCounts);
                             try {
                                 await cancelQueryByUri(executingUri);
@@ -137,6 +143,7 @@ export function registerQueryCommands(
                         console.log(
                             `[netezza.cancelQuery] No explicit URI, cancelling active editor source: ${activeEditorUri}`
                         );
+                        markQueryExecutionCancelling(activeEditorUri);
                         resultPanelProvider.cancelExecution(activeEditorUri, currentRowCounts);
                         await cancelQueryByUri(activeEditorUri);
                         return;
@@ -148,6 +155,7 @@ export function registerQueryCommands(
                         console.log(
                             `[netezza.cancelQuery] No URI provided, falling back to active source: ${activeUri}`
                         );
+                        markQueryExecutionCancelling(activeUri);
                         resultPanelProvider.cancelExecution(activeUri, currentRowCounts);
                         await cancelQueryByUri(activeUri);
                     } else {
@@ -190,12 +198,24 @@ export function registerQueryCommands(
             const resolvedObjectPath = buildQualifiedObjectPath(databaseName, schemaName, tableName, databaseKind);
             const displayObjectPath = buildDisplayObjectPath(databaseName, schemaName, tableName, databaseKind);
             const query = `SELECT * FROM ${resolvedObjectPath} LIMIT ${VIEW_DATA_ROW_LIMIT}`;
+            const sourceDocument = vscode.workspace.textDocuments?.find(
+                document => document.uri.toString() === sourceUri,
+            );
+            const executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
+                document: sourceDocument,
+                origin: 'View Data',
+                recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName),
+            });
+            if (!executionGate) {
+                return;
+            }
 
             resultPanelProvider.setActiveSource(sourceUri);
             resultPanelProvider.startExecution(sourceUri);
             const executionId = resultPanelProvider.logExecutionStart(sourceUri, query, connectionName);
 
             try {
+                executionGate.markRunning();
                 const result = await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
@@ -210,12 +230,22 @@ export function registerQueryCommands(
                             connectionManager,
                             connectionName,
                             documentUri: sourceUri,
-                            logCallback: message => resultPanelProvider.log(sourceUri, message),
+                            logCallback: message => {
+                                if (executionGate.isCurrent()) {
+                                    resultPanelProvider.log(sourceUri, message);
+                                }
+                            },
                             maxRows: VIEW_DATA_ROW_LIMIT,
-                            isUserQuery: false
+                            isUserQuery: false,
+                            isExecutionCurrent: () => executionGate.isCurrent(),
                         })
                 );
 
+                const executionStillCurrent = executionGate.isCurrent();
+                executionGate.dispose();
+                if (!executionStillCurrent) {
+                    return;
+                }
                 resultPanelProvider.updateResults(
                     [
                         {
@@ -232,6 +262,11 @@ export function registerQueryCommands(
                 resultPanelProvider.finalizeExecution(sourceUri);
                 await vscode.commands.executeCommand('netezza.results.focus');
             } catch (err: unknown) {
+                const executionStillCurrent = executionGate.isCurrent();
+                executionGate.dispose();
+                if (!executionStillCurrent) {
+                    return;
+                }
                 const message = err instanceof Error ? err.message : String(err);
                 const status: 'error' | 'cancelled' = message.includes('Query cancelled') ? 'cancelled' : 'error';
 
@@ -258,6 +293,8 @@ export function registerQueryCommands(
                 resultPanelProvider.logExecutionEnd(executionId, 0, 'error', message);
                 resultPanelProvider.finalizeExecution(sourceUri);
                 vscode.window.showErrorMessage(`View Data failed: ${message}`);
+            } finally {
+                executionGate.dispose();
             }
         }),
         // Run Query (Smart/Sequential Execution)
@@ -328,8 +365,39 @@ export function registerQueryCommands(
           
             // Create bridge with empty results map (streamToDuckDb doesn't use the results map)
             const bridge = new DuckDbResultBridge(new Map(), connectionManager);
-          
-            await bridge.streamToDuckDb(query, connectionManager, connName, targetTable, mode, documentUri);
+            const duckDbRecovery = documentUri
+                ? {
+                    ...createQueryExecutionRecovery(connectionManager, documentUri, connName),
+                    allowForcedRecovery: false,
+                    forcedRecoveryUnavailableMessage:
+                        'A local DuckDB load cannot be force-unlocked safely; cancel it or wait for it to finish.',
+                }
+                : undefined;
+            const executionGate = documentUri
+                ? await tryAcquireQueryExecution(documentUri, resultPanelProvider, {
+                    document: editor?.document,
+                    origin: 'Execute and Load to DuckDB',
+                    recovery: duckDbRecovery,
+                })
+                : undefined;
+            if (documentUri && !executionGate) {
+                return;
+            }
+
+            try {
+                executionGate?.markRunning();
+                await bridge.streamToDuckDb(
+                    query,
+                    connectionManager,
+                    connName,
+                    targetTable,
+                    mode,
+                    documentUri,
+                    () => executionGate?.isCurrent() !== false,
+                );
+            } finally {
+                executionGate?.dispose();
+            }
           }),
 
         // Run Query Batch
@@ -349,14 +417,10 @@ export function registerQueryCommands(
 
             const selection = editor.selection;
             const sourceUri = document.uri.toString();
-            const executionGate = tryAcquireQueryExecution(sourceUri, resultPanelProvider);
-            if (!executionGate) {
-                return;
-            }
-
             let text = '';
             let runBatchTimer: ReturnType<typeof createPerformanceTimer> | undefined;
             let executionStarted = false;
+            let executionGate: Awaited<ReturnType<typeof tryAcquireQueryExecution>>;
 
             try {
                 text = !selection.isEmpty
@@ -378,6 +442,18 @@ export function registerQueryCommands(
                 ) {
                     return;
                 }
+
+                const connectionName = connectionManager.getConnectionForExecution(sourceUri)
+                    || connectionManager.getActiveConnectionName()
+                    || undefined;
+                executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
+                    document,
+                    origin: 'Run Query Batch',
+                    recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName),
+                });
+                if (!executionGate) {
+                    return;
+                }
                 runBatchTimer = createPerformanceTimer('query.run_batch', {
                     payloadSize: text.length
                 });
@@ -393,6 +469,9 @@ export function registerQueryCommands(
                     sql: string,
                     connName: string
                 ): string => {
+                    if (!executionGate?.isCurrent()) {
+                        return `stale-${executionGate?.executionId ?? 'query'}`;
+                    }
                     return resultPanelProvider.logExecutionStart(
                         sourceUri,
                         sql.trim(),
@@ -407,6 +486,9 @@ export function registerQueryCommands(
                     status: 'success' | 'error' | 'cancelled' | 'retrying',
                     error?: string
                 ) => {
+                    if (!executionGate?.isCurrent()) {
+                        return;
+                    }
                     resultPanelProvider.logExecutionEnd(
                         executionId,
                         rowCount,
@@ -415,6 +497,7 @@ export function registerQueryCommands(
                     );
                 };
 
+                executionGate.markRunning();
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Window,
@@ -427,13 +510,16 @@ export function registerQueryCommands(
                             [text],
                             connectionManager,
                             sourceUri,
-                            msg => resultPanelProvider.log(sourceUri, msg),
-                            queryResults =>
-                                resultPanelProvider.updateResults(
-                                    queryResults,
-                                    sourceUri,
-                                    true
-                                ),
+                            msg => {
+                                if (executionGate?.isCurrent()) {
+                                    resultPanelProvider.log(sourceUri, msg);
+                                }
+                            },
+                            queryResults => {
+                                if (executionGate?.isCurrent()) {
+                                    resultPanelProvider.updateResults(queryResults, sourceUri, true);
+                                }
+                            },
                             undefined, // extensionUri
                             false, // _isRetry
                             undefined, // maxRows
@@ -445,6 +531,7 @@ export function registerQueryCommands(
                             [],
                             {
                                 retryOnBrokenConnection: false,
+                                isExecutionCurrent: () => executionGate?.isCurrent() === true,
                                 confirmSafeExecute: (sql, _queryIndex) =>
                                     confirmSafeExecuteForExpandedQuery([text], sql),
                                 onStatementSucceeded: event =>
@@ -460,6 +547,11 @@ export function registerQueryCommands(
                     }
                 );
 
+                const executionStillCurrent = executionGate.isCurrent();
+                executionGate.dispose();
+                if (!executionStillCurrent) {
+                    return;
+                }
                 resultPanelProvider.finalizeExecution(sourceUri);
                 await handleExecutionCompletion(sourceUri);
                 if (runBatchTimer) {
@@ -472,6 +564,11 @@ export function registerQueryCommands(
                     console.log(formatPerformanceEvent(successEvent));
                 }
             } catch (err: unknown) {
+                const executionStillCurrent = executionGate?.isCurrent() ?? true;
+                executionGate?.dispose();
+                if (!executionStillCurrent) {
+                    return;
+                }
                 const rawMsg = err instanceof Error ? err.message : String(err);
                 const connectionName = connectionManager.getConnectionForExecution(sourceUri)
                     || connectionManager.getActiveConnectionName();
@@ -536,7 +633,7 @@ export function registerQueryCommands(
                     vscode.window.showErrorMessage(`Error executing query: ${msg}`);
                 }
             } finally {
-                executionGate.dispose();
+                executionGate?.dispose();
             }
         }),
 
@@ -554,7 +651,7 @@ export function registerQueryCommands(
             ) {
                 return;
             }
-            await executeExplainQuery(context, connectionManager, false);
+            await executeExplainQuery(context, connectionManager, resultPanelProvider, false);
         }),
 
         // Explain Query Verbose
@@ -571,7 +668,7 @@ export function registerQueryCommands(
             ) {
                 return;
             }
-            await executeExplainQuery(context, connectionManager, true);
+            await executeExplainQuery(context, connectionManager, resultPanelProvider, true);
         }),
 
         // Tuning Advisor

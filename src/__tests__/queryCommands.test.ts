@@ -14,7 +14,10 @@ import {
 } from '../core/queryRunner';
 import { SqlParser } from '../sql/sqlParser';
 import { parseExplainOutput } from '../views/explainPlanView';
-import { clearQueryExecutionGateForTests } from '../commands/query/queryExecutionGate';
+import {
+    clearQueryExecutionGateForTests,
+    retireQueryExecutionForDocument,
+} from '../commands/query/queryExecutionGate';
 
 // Mock vscode module
 jest.mock('vscode', () => ({
@@ -112,6 +115,11 @@ describe('commands/queryCommands', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         clearQueryExecutionGateForTests();
+        (SqlParser.splitStatements as jest.Mock).mockReset();
+        (SqlParser.splitStatements as jest.Mock).mockImplementation(
+            (sql: string) => sql.split(';').filter(statement => statement.trim()),
+        );
+        (SqlParser.getStatementAtPosition as jest.Mock).mockReset();
         Object.keys(mockGlobalStateStore).forEach(key => delete mockGlobalStateStore[key]);
         (vscode.window.withProgress as jest.Mock).mockImplementation(async (_options, callback) => {
             return callback({ report: jest.fn() });
@@ -646,12 +654,70 @@ describe('commands/queryCommands', () => {
             await handler();
 
             expect(runQueriesWithStreaming).toHaveBeenCalledTimes(1);
-            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-                expect.stringContaining('already running')
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+                expect.stringContaining('SQL execution'),
+                'Keep Waiting',
+                'Force unlock & retry',
             );
 
             resolveRun?.();
             await firstRun;
+        });
+
+        it('should release the query lease before an unresolved completion notification', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider,
+            };
+            registerQueryCommands(deps);
+            (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({ sql: 'SELECT 1', start: 0, end: 8 });
+
+            const notificationResolvers: Array<(value: string | undefined) => void> = [];
+            (vscode.window.showInformationMessage as jest.Mock).mockImplementation(
+                () => new Promise<string | undefined>(resolve => notificationResolvers.push(resolve)),
+            );
+            (runQueriesWithStreaming as jest.Mock).mockImplementation(async () => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (vscode.window as any).activeTextEditor = {
+                    document: { uri: { toString: () => 'file:///other.sql' } },
+                };
+            });
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.runQuery',
+            )?.[1];
+            const sourceEditor = {
+                document: {
+                    uri: { toString: () => 'file:///test.sql' },
+                    getText: jest.fn(() => 'SELECT 1'),
+                    offsetAt: jest.fn(() => 1),
+                    positionAt: jest.fn(() => ({ line: 0, character: 0 })),
+                },
+                selection: { isEmpty: true, active: { line: 0, character: 1 } },
+            };
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = sourceEditor;
+            const firstRun = handler();
+            for (let i = 0; i < 10 && notificationResolvers.length === 0; i++) {
+                await Promise.resolve();
+            }
+
+            // The first handler is still waiting for the completion toast, but its SQL is done.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = sourceEditor;
+            const secondRun = handler();
+            for (let i = 0; i < 10 && (runQueriesWithStreaming as jest.Mock).mock.calls.length < 2; i++) {
+                await Promise.resolve();
+            }
+            expect(runQueriesWithStreaming).toHaveBeenCalledTimes(2);
+
+            for (let i = 0; i < 10 && notificationResolvers.length < 2; i++) {
+                await Promise.resolve();
+            }
+            notificationResolvers.forEach(resolve => resolve(undefined));
+            await Promise.all([firstRun, secondRun]);
         });
 
         it('should show completion notification and switch to source document when finished in another editor', async () => {
@@ -922,8 +988,10 @@ describe('commands/queryCommands', () => {
             await handler();
 
             expect(runQueriesSequentially).toHaveBeenCalledTimes(1);
-            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-                expect.stringContaining('already running')
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+                expect.stringContaining('already running'),
+                'Keep Waiting',
+                'Force unlock & retry',
             );
 
             resolveRun?.();
@@ -1221,6 +1289,13 @@ describe('commands/queryCommands', () => {
 
             await handler();
 
+            expect(runQueryRaw).toHaveBeenCalled();
+            for (const [options] of (runQueryRaw as jest.Mock).mock.calls) {
+                expect(options).toEqual(expect.objectContaining({
+                    documentUri: 'file:///test.sql',
+                    isExecutionCurrent: expect.any(Function),
+                }));
+            }
             expect(runExplainQuery).toHaveBeenCalledWith(
                 mockContext,
                 expect.stringContaining('EXPLAIN VERBOSE'),
@@ -1301,6 +1376,117 @@ describe('commands/queryCommands', () => {
             expect(perfLogs.some(line => line.includes('"feedback":"helpful"'))).toBe(true);
 
             logSpy.mockRestore();
+        });
+
+        it('does not collect stats or show a stale report after the tuning lease is retired', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider,
+            };
+            registerQueryCommands(deps);
+
+            let resolveExplain!: (value: string) => void;
+            (runExplainQuery as jest.Mock).mockReturnValueOnce(new Promise<string>(resolve => {
+                resolveExplain = resolve;
+            }));
+
+            const document = {
+                languageId: 'sql',
+                uri: { toString: () => 'file:///test.sql' },
+                getText: jest.fn(() => 'SELECT * FROM SALES'),
+                offsetAt: jest.fn(() => 0),
+                positionAt: jest.fn(() => ({ line: 0, character: 0 })),
+            } as unknown as vscode.TextDocument;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document,
+                selection: { isEmpty: false, active: { line: 0, character: 0 } },
+            };
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.tuningAdvisor',
+            )?.[1];
+            const execution = handler();
+            await Promise.resolve();
+            await Promise.resolve();
+            retireQueryExecutionForDocument(document);
+            resolveExplain('PLAN');
+            await execution;
+
+            expect(runQueryRaw).not.toHaveBeenCalled();
+            expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+            expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
+            expect(mockResultPanelProvider.log).not.toHaveBeenCalledWith(
+                'file:///test.sql',
+                expect.stringContaining('Tuning Advisor report generated'),
+            );
+        });
+
+        it('stops lease-bound table statistics when the tuning execution is retired', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider,
+            };
+            registerQueryCommands(deps);
+            (runExplainQuery as jest.Mock).mockResolvedValue('PLAN');
+
+            let resolveCount!: (value: { columns: { name: string }[]; data: unknown[][] }) => void;
+            let signalCountStarted!: () => void;
+            const countStarted = new Promise<void>(resolve => {
+                signalCountStarted = resolve;
+            });
+            const pendingCount = new Promise<{ columns: { name: string }[]; data: unknown[][] }>(resolve => {
+                resolveCount = resolve;
+            });
+            (runQueryRaw as jest.Mock).mockImplementation((options: { query: string }) => {
+                if (options.query.includes('_V_OBJECT_DATA') && options.query.includes('LIMIT 1')) {
+                    return Promise.resolve({ columns: [{ name: 'SCHEMA' }], data: [['ADMIN']] });
+                }
+                if (options.query.startsWith('SELECT COUNT(*) AS ROW_COUNT')) {
+                    signalCountStarted();
+                    return pendingCount;
+                }
+                return Promise.resolve({ columns: [], data: [] });
+            });
+
+            const document = {
+                languageId: 'sql',
+                uri: { toString: () => 'file:///test.sql' },
+                getText: jest.fn(() => 'SELECT * FROM SALES'),
+                offsetAt: jest.fn(() => 0),
+                positionAt: jest.fn(() => ({ line: 0, character: 0 })),
+            } as unknown as vscode.TextDocument;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document,
+                selection: { isEmpty: false, active: { line: 0, character: 0 } },
+            };
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.tuningAdvisor',
+            )?.[1];
+            const execution = handler();
+            await countStarted;
+
+            const countOptions = (runQueryRaw as jest.Mock).mock.calls.find(
+                ([options]) => options.query.startsWith('SELECT COUNT(*) AS ROW_COUNT'),
+            )?.[0];
+            expect(countOptions).toEqual(expect.objectContaining({
+                documentUri: 'file:///test.sql',
+                isExecutionCurrent: expect.any(Function),
+            }));
+            retireQueryExecutionForDocument(document);
+            expect(countOptions.isExecutionCurrent()).toBe(false);
+            resolveCount({ columns: [{ name: 'ROW_COUNT' }], data: [[1000]] });
+            await execution;
+
+            expect(runQueryRaw).toHaveBeenCalledTimes(2);
+            expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+            expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(
+                expect.stringContaining('Tuning Advisor failed:'),
+            );
         });
 
         it('should block tuning advisor when the dialect does not support it', async () => {
@@ -1430,6 +1616,61 @@ describe('commands/queryCommands', () => {
             await explainHandler();
             await explainVerboseHandler();
             expect(runExplainQuery).toHaveBeenCalled();
+        });
+
+        it('ignores Explain errors after the execution lease is retired', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: { extensionUri: { fsPath: 'D:\\ext' } } as vscode.ExtensionContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider,
+            };
+            registerQueryCommands(deps);
+
+            let rejectExplain!: (error: Error) => void;
+            let signalExplainStarted!: () => void;
+            const explainStarted = new Promise<void>(resolve => {
+                signalExplainStarted = resolve;
+            });
+            const pendingExplain = new Promise<string>((_resolve, reject) => {
+                rejectExplain = reject;
+            });
+            (runExplainQuery as jest.Mock).mockImplementationOnce(() => {
+                signalExplainStarted();
+                return pendingExplain;
+            });
+            (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({ start: 0, end: 8, sql: 'SELECT 1' });
+            const document = {
+                uri: { toString: () => 'file:///test.sql' },
+                getText: jest.fn(() => 'SELECT 1'),
+                offsetAt: jest.fn(() => 1),
+            } as unknown as vscode.TextDocument;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document,
+                selection: { isEmpty: true, active: { line: 0, character: 1 } },
+            };
+            const explainHandler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.explainQuery',
+            )?.[1];
+            const logSpy = jest.spyOn(console, 'log').mockImplementation(() => { });
+
+            try {
+                const execution = explainHandler();
+                await explainStarted;
+                retireQueryExecutionForDocument(document);
+                rejectExplain(new Error('Query cancelled'));
+                await execution;
+
+                expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(
+                    expect.stringContaining('Error generating query plan:'),
+                );
+                expect(logSpy.mock.calls.some(call => {
+                    const line = String(call[0]);
+                    return line.includes('"operation":"query.explain"') && line.includes('"result":"error"');
+                })).toBe(false);
+            } finally {
+                logSpy.mockRestore();
+            }
         });
 
         it('should normalize MySQL explain JSON into the shared explain graph text shape', async () => {

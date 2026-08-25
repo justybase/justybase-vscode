@@ -15,7 +15,10 @@ import {
 } from './queryCommandSafety';
 import { toPerfErrorCode } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
-import { tryAcquireQueryExecution } from './queryExecutionGate';
+import {
+    tryAcquireQueryExecution,
+} from './queryExecutionGate';
+import { createQueryExecutionRecovery } from './queryExecutionRecovery';
 import {
     formatAccessFailureMessage,
     presentAccessError,
@@ -104,14 +107,11 @@ export async function runSmartSequentialQuery(
     const databaseKind = connectionName
         ? connectionManager.getConnectionDatabaseKind(connectionName)
         : undefined;
-    const executionGate = tryAcquireQueryExecution(sourceUri, resultPanelProvider);
-    if (!executionGate) {
-        return;
-    }
 
     let queriesForError: string[] = [];
     let runQueryTimer: ReturnType<typeof createPerformanceTimer> | undefined;
     let executionStarted = false;
+    let executionGate: Awaited<ReturnType<typeof tryAcquireQueryExecution>>;
 
     try {
         const resolved = resolveSmartSequentialQueries(editor);
@@ -124,6 +124,15 @@ export async function runSmartSequentialQuery(
         const continueOnError = options.continueOnError === true;
 
         if (!(await confirmSafeExecute(queries))) {
+            return;
+        }
+
+        executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
+            document: editor.document,
+            origin: options.continueOnError ? 'Run Query Continue on Error' : 'Run Query',
+            recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName ?? undefined),
+        });
+        if (!executionGate) {
             return;
         }
 
@@ -148,6 +157,9 @@ export async function runSmartSequentialQuery(
             sql: string,
             connName: string,
         ): string => {
+            if (!executionGate?.isCurrent()) {
+                return `stale-${executionGate?.executionId ?? 'query'}`;
+            }
             return resultPanelProvider.logExecutionStart(sourceUri, sql.trim(), connName);
         };
 
@@ -158,12 +170,16 @@ export async function runSmartSequentialQuery(
             status: 'success' | 'error' | 'cancelled' | 'retrying',
             error?: string,
         ) => {
+            if (!executionGate?.isCurrent()) {
+                return;
+            }
             resultPanelProvider.logExecutionEnd(executionId, rowCount, status, error);
         };
 
         const confirmExpandedQuery = createExpandedQuerySafetyChecker(queries);
 
         const batchOptions: BatchQueryRunOptions = {
+            isExecutionCurrent: () => executionGate?.isCurrent() === true,
             confirmSafeExecute: confirmExpandedQuery,
             onStatementSucceeded: event => deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
             onStatementFailed: event => {
@@ -192,6 +208,7 @@ export async function runSmartSequentialQuery(
             ? `Executing SQL (continue on error) for ${sourceUri.split(/[\\/]/).pop()}...`
             : `Executing SQL for ${sourceUri.split(/[\\/]/).pop()}...`;
 
+        executionGate.markRunning();
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Window,
@@ -213,7 +230,11 @@ export async function runSmartSequentialQuery(
                             queries,
                             connectionManager,
                             sourceUri,
-                            msg => resultPanelProvider.log(sourceUri, msg),
+                            msg => {
+                                if (executionGate?.isCurrent()) {
+                                    resultPanelProvider.log(sourceUri, msg);
+                                }
+                            },
                             (queryIndex: number, chunk: StreamingChunk, sql: string) => {
                                 const currentQuery = queries[queryIndex];
                                 const queryStartIndex = allQueriesText.indexOf(currentQuery);
@@ -224,13 +245,15 @@ export async function runSmartSequentialQuery(
                                             queryStartIndex + currentQuery.length,
                                         )
                                         : sql;
-                                resultPanelProvider.appendStreamingChunk(
-                                    sourceUri,
-                                    queryIndex,
-                                    chunk,
-                                    fullSql,
-                                    sql,
-                                );
+                                if (executionGate?.isCurrent()) {
+                                    resultPanelProvider.appendStreamingChunk(
+                                        sourceUri,
+                                        queryIndex,
+                                        chunk,
+                                        fullSql,
+                                        sql,
+                                    );
+                                }
                             },
                             streamingChunkSize,
                             undefined,
@@ -249,7 +272,11 @@ export async function runSmartSequentialQuery(
                             queries,
                             connectionManager,
                             sourceUri,
-                            msg => resultPanelProvider.log(sourceUri, msg),
+                            msg => {
+                                if (executionGate?.isCurrent()) {
+                                    resultPanelProvider.log(sourceUri, msg);
+                                }
+                            },
                             queryResults => {
                                 for (const qr of queryResults) {
                                     if (qr.sql && qr.sql.trim()) {
@@ -262,7 +289,9 @@ export async function runSmartSequentialQuery(
                                         }
                                     }
                                 }
-                                resultPanelProvider.updateResults(queryResults, sourceUri, true);
+                                if (executionGate?.isCurrent()) {
+                                    resultPanelProvider.updateResults(queryResults, sourceUri, true);
+                                }
                             },
                             undefined,
                             false,
@@ -282,6 +311,11 @@ export async function runSmartSequentialQuery(
             },
         );
 
+        const executionStillCurrent = executionGate.isCurrent();
+        executionGate.dispose();
+        if (!executionStillCurrent) {
+            return;
+        }
         resultPanelProvider.finalizeExecution(sourceUri);
         await handleExecutionCompletion(sourceUri);
         if (runQueryTimer) {
@@ -296,6 +330,11 @@ export async function runSmartSequentialQuery(
             console.log(formatPerformanceEvent(successEvent));
         }
     } catch (err: unknown) {
+        const executionStillCurrent = executionGate?.isCurrent() ?? true;
+        executionGate?.dispose();
+        if (!executionStillCurrent) {
+            return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
 
         if (msg.includes('Query cancelled')) {
@@ -348,6 +387,6 @@ export async function runSmartSequentialQuery(
             vscode.window.showErrorMessage(`Error executing query: ${msg}`);
         }
     } finally {
-        executionGate.dispose();
+        executionGate?.dispose();
     }
 }

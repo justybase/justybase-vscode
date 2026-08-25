@@ -193,7 +193,7 @@ jest.mock('../metadataCache', () => ({
         onDidInvalidate: jest.fn(() => ({ dispose: jest.fn() })),
         onDidExternalRefresh: jest.fn(() => ({ dispose: jest.fn() })),
         onDidNeedColumnRecovery: jest.fn(() => ({ dispose: jest.fn() })),
-        dispose: jest.fn()
+        dispose: jest.fn().mockResolvedValue(undefined)
     }))
 }));
 
@@ -436,6 +436,15 @@ describe('extension.ts', () => {
         const { extensions } = jest.requireMock('vscode');
         extensions.all = [];
         (extensions.getExtension as jest.Mock).mockReturnValue(undefined);
+    });
+
+    afterEach(() => {
+        for (const disposable of mockContext.subscriptions) {
+            const dispose = (disposable as unknown as { dispose?: unknown } | undefined)?.dispose;
+            if (typeof dispose === 'function') {
+                dispose.call(disposable);
+            }
+        }
     });
 
     describe('activate()', () => {

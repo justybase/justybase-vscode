@@ -41,23 +41,49 @@ export async function getConnectionForDocument(
     return { connection, shouldCloseConnection: true };
 }
 
+export interface ExecuteDropSessionOptions {
+    /** Gate recovery performs its own bounded reset after DROP SESSION. */
+    reconnectDocument?: boolean;
+}
+
+const DROP_SESSION_CONNECTION_CLOSE_TIMEOUT_MS = 5_000;
+
+async function closeDropSessionConnection(connection: NzConnection): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+        connection.close().catch((error: unknown) => {
+            logWithFallback('warn', '[executeDropSession] Failed to close control connection:', error);
+        }),
+        new Promise<void>(resolve => {
+            timer = setTimeout(resolve, DROP_SESSION_CONNECTION_CLOSE_TIMEOUT_MS);
+        }),
+    ]);
+    if (timer) {
+        clearTimeout(timer);
+    }
+}
+
 export async function executeDropSession(
     sessionId: string,
     connectionManager: ConnectionManager,
-    documentUri?: string
-): Promise<void> {
+    documentUri?: string,
+    connectionName?: string,
+    options: ExecuteDropSessionOptions = {},
+): Promise<boolean> {
     try {
-        const connName = connectionManager.getActiveConnectionName();
+        const connName = connectionName
+            ?? connectionManager.getConnectionForExecution?.(documentUri)
+            ?? connectionManager.getActiveConnectionName();
         if (connName) {
             const details = await connectionManager.getConnection(connName);
             if (details) {
                 if (resolveConnectionDatabaseKind(details.dbType) === 'sqlite') {
                     vscode.window.showInformationMessage('Session cancellation is not supported for SQLite connections.');
-                    return;
+                    return false;
                 }
                 if (resolveConnectionDatabaseKind(details.dbType) === 'access') {
                     vscode.window.showInformationMessage('Session cancellation is not supported for Microsoft Access connections.');
-                    return;
+                    return false;
                 }
                 const connection = await createConnectedDatabaseConnectionFromDetails(details) as NzConnection;
                 try {
@@ -69,6 +95,8 @@ export async function executeDropSession(
                     );
 
                     if (
+                        options.reconnectDocument !== false
+                        &&
                         documentUri
                         && connectionManager.getDocumentKeepConnectionOpen(documentUri)
                     ) {
@@ -81,8 +109,9 @@ export async function executeDropSession(
                             `[executeDropSession] Re-established per-document persistent connection for ${documentUri}`
                         );
                     }
+                    return true;
                 } finally {
-                    await connection.close();
+                    await closeDropSessionConnection(connection);
                 }
             }
         }
@@ -90,7 +119,9 @@ export async function executeDropSession(
         const dropMsg = getErrorMessage(dropErr);
         logWithFallback('error', `[executeDropSession] Failed to drop session ${sessionId}:`, dropErr);
         vscode.window.showErrorMessage(`Failed to drop session: ${dropMsg}`);
+        return false;
     }
+    return false;
 }
 
 export async function logQueryToHistory(

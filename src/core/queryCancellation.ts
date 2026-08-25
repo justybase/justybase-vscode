@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { Logger } from "../utils/logger";
 import { StreamingManager } from "./streaming";
+import { cancelCommandAndCloseReader } from './cancellation';
 
 // Shared StreamingManager instance for handling query streaming
 // All query execution and cancellation goes through this manager
@@ -30,7 +31,10 @@ export async function cancelCurrentQuery(): Promise<void> {
         const cmd = streamingManager.getCommand(docUri);
         if (cmd) {
             try {
-                await cmd.cancel();
+                const cleanup = await cancelCommandAndCloseReader(cmd, undefined, { timeoutMs: 5000 });
+                if (cleanup.cancelError) {
+                    throw cleanup.cancelError;
+                }
                 vscode.window.showInformationMessage("Cancellation request sent.");
             } catch (e: unknown) {
                 const msg = e instanceof Error ? e.message : String(e);
@@ -63,7 +67,10 @@ export async function cancelQueryByUri(
                 logger.debug(
                     `[cancelQueryByUri] Calling cmd.cancel() for ${uriStr}`,
                 );
-                await cmd.cancel();
+                const cleanup = await cancelCommandAndCloseReader(cmd, undefined, { timeoutMs: 5000 });
+                if (cleanup.cancelError) {
+                    throw cleanup.cancelError;
+                }
                 logger.debug(
                     `[cancelQueryByUri] cmd.cancel() completed for ${uriStr}`,
                 );
@@ -104,7 +111,10 @@ export async function cancelAllRunningQueries(): Promise<void> {
         if (cmd) {
             try {
                 logger.debug(`[cancelAllRunningQueries] Calling cmd.cancel() for ${uriStr}`);
-                await cmd.cancel();
+                const cleanup = await cancelCommandAndCloseReader(cmd, undefined, { timeoutMs: 5000 });
+                if (cleanup.cancelError) {
+                    throw cleanup.cancelError;
+                }
             } catch (e: unknown) {
                 const msg = e instanceof Error ? e.message : String(e);
                 logger.error(`[cancelAllRunningQueries] Failed to cancel ${uriStr}: ${msg}`);

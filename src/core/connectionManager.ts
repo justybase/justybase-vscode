@@ -1014,6 +1014,42 @@ export class ConnectionManager {
     }
 
     /**
+     * Detach a stuck document connection and immediately establish a replacement.
+     *
+     * This is an explicit recovery escape hatch: the old connection may still be
+     * running server-side, so callers must warn the user before invoking it.
+     */
+    async abandonAndRecreateDocumentPersistentConnection(
+        documentUri: string,
+        connectionName?: string,
+    ): Promise<void> {
+        const normalizedUri = normalizeUriKey(documentUri);
+        this.bumpDocumentConnectionGeneration(normalizedUri);
+
+        const existing = this._documentPersistentConnections.get(normalizedUri);
+        const pendingClose = this._documentConnectionClosePromises.get(normalizedUri);
+
+        // Do not let a hung close of the abandoned connection block creation of
+        // the replacement. Completion of that close is identity-checked below.
+        this._documentPersistentConnections.delete(normalizedUri);
+        this._documentPersistentConnectionMeta.delete(normalizedUri);
+        this._documentConnectionPromises.delete(normalizedUri);
+        if (pendingClose) {
+            this._documentConnectionClosePromises.delete(normalizedUri);
+        } else if (existing) {
+            void existing.close().catch((error: unknown) => {
+                logWithFallback(
+                    'warn',
+                    `[ConnectionManager] Failed to close abandoned document connection for ${documentUri}:`,
+                    error,
+                );
+            });
+        }
+
+        await this.getDocumentPersistentConnection(documentUri, connectionName);
+    }
+
+    /**
      * Close all document persistent connections
      */
     async closeAllDocumentPersistentConnections(): Promise<void> {

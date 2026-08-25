@@ -74,6 +74,7 @@ interface ExecutingCommandEntry {
 export interface RegisteredCommandHandle {
     signal: AbortSignal;
     abort(reason?: string): void;
+    unregister(): void;
 }
 
 /**
@@ -122,6 +123,7 @@ export class StreamingManager {
         return {
             signal: controller.signal,
             abort: (reason?: string) => controller.abort(reason),
+            unregister: () => this.unregisterCommandForController(normalizedKey, controller),
         };
     }
 
@@ -132,8 +134,15 @@ export class StreamingManager {
      */
     unregisterCommand(documentUri: string): void {
         const normalizedKey = normalizeUriKey(documentUri);
+        this.unregisterCommandForController(normalizedKey);
+    }
+
+    private unregisterCommandForController(
+        normalizedKey: string,
+        expectedController?: AbortController,
+    ): void {
         const entry = this.executingCommands.get(normalizedKey);
-        if (entry) {
+        if (entry && (!expectedController || entry.controller === expectedController)) {
             entry.controller.abort('unregisterCommand');
             this.executingCommands.delete(normalizedKey);
         }
@@ -390,9 +399,10 @@ export class StreamingManager {
         }
 
         // Track command
-        const signal = documentUri
-            ? this.registerCommand(documentUri, cmd, sessionId).signal
+        const commandHandle = documentUri
+            ? this.registerCommand(documentUri, cmd, sessionId)
             : undefined;
+        const signal = commandHandle?.signal;
         const cancellationContext: CancellationCleanupContext = { timeoutMs: CANCEL_TIMEOUT_MS };
         let abortListener: (() => void) | undefined;
         if (signal) {
@@ -595,7 +605,7 @@ export class StreamingManager {
                 if (signal && abortListener) {
                     signal.removeEventListener('abort', abortListener);
                 }
-                this.unregisterCommand(documentUri);
+                commandHandle?.unregister();
             }
             // The returned timing object is mutated after the result payload is
             // built so the caller observes reader-close time and a total that
@@ -627,9 +637,10 @@ export class StreamingManager {
         }
 
         // Track command
-        const signal = documentUri
-            ? this.registerCommand(documentUri, cmd, sessionId).signal
+        const commandHandle = documentUri
+            ? this.registerCommand(documentUri, cmd, sessionId)
             : undefined;
+        const signal = commandHandle?.signal;
         const cancellationContext: CancellationCleanupContext = { timeoutMs: CANCEL_TIMEOUT_MS };
         let abortListener: (() => void) | undefined;
         if (signal) {
@@ -825,7 +836,7 @@ export class StreamingManager {
                 if (signal && abortListener) {
                     signal.removeEventListener('abort', abortListener);
                 }
-                this.unregisterCommand(documentUri);
+                commandHandle?.unregister();
             }
         }
     }

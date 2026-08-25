@@ -73,7 +73,12 @@ export async function cancelCommandAndCloseReader(
         let timedOut = false;
 
         if (command && !context.commandCancelPromise) {
-            context.commandCancelPromise = Promise.resolve().then(() => command.cancel());
+            const timeoutMs = context.timeoutMs ?? DEFAULT_READER_CLOSE_TIMEOUT_MS;
+            context.commandCancelPromise = withTimeout(
+                Promise.resolve().then(() => command.cancel()),
+                timeoutMs,
+                `command.cancel() timed out after ${timeoutMs}ms`,
+            );
         }
         if (context.commandCancelPromise) {
             try {

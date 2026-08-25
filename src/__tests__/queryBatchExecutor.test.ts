@@ -793,6 +793,32 @@ describe("queryBatchExecutor", () => {
                 ),
             ).rejects.toThrow("Error (after reconnect attempt): Still broken");
         });
+
+        it("does not reconnect a superseded execution", async () => {
+            const brokenError = new Error("Socket closed");
+            const connManager = {
+                closeDocumentPersistentConnection: jest.fn().mockResolvedValue(undefined),
+            } as any;
+            const retryFn = jest.fn();
+
+            await expect(
+                handleBatchRetry(
+                    brokenError,
+                    false,
+                    connManager,
+                    "file:///test.sql",
+                    true,
+                    undefined,
+                    jest.fn(),
+                    retryFn,
+                    undefined,
+                    () => false,
+                ),
+            ).rejects.toThrow("execution superseded");
+
+            expect(connManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(retryFn).not.toHaveBeenCalled();
+        });
     });
 
     // -----------------------------------------------------------------------

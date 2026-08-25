@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../../core/connectionManager';
 import { getDatabaseDialect, getRequiredDatabaseDdlProvider, getRequiredDatabaseTuningAdvisor } from '../../core/connectionFactory';
 import { runExplainQuery, runQueryRaw, queryResultToRows } from '../../core/queryRunner';
+import { assertExecutionCurrent, type ExecutionCurrentCheck } from '../../core/executionGuard';
 import { SqlParser } from '../../sql/sqlParser';
 import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
 import type { TuningReport, TuningRecommendation } from '../../services/tuning/types';
@@ -9,6 +10,8 @@ import { TableReferenceExtractor } from '../../services/copilot/TableReferenceEx
 import type { TableReference } from '../../services/copilot/types';
 import { ResultPanelView } from '../../views/resultPanelView';
 import { compatibilityStateKeys, getMementoValue, updateMementoValue } from '../../compatibility/state';
+import { tryAcquireQueryExecution } from './queryExecutionGate';
+import { createQueryExecutionRecovery } from './queryExecutionRecovery';
 
 interface QueryRow {
     [key: string]: unknown;
@@ -287,15 +290,21 @@ async function runInternalQueryRows(
     connectionManager: ConnectionManager,
     connectionName: string,
     sql: string,
+    documentUri: string,
+    isExecutionCurrent: ExecutionCurrentCheck,
 ): Promise<QueryRow[]> {
+    assertExecutionCurrent(isExecutionCurrent);
     const result = await runQueryRaw({
         context,
         query: sql,
         silent: true,
         connectionManager,
         connectionName,
+        documentUri,
         isUserQuery: false,
+        isExecutionCurrent,
     });
+    assertExecutionCurrent(isExecutionCurrent);
     return queryResultToRows<QueryRow>(result);
 }
 
@@ -346,7 +355,10 @@ async function resolveTuningTableTarget(
     connectionManager: ConnectionManager,
     connectionName: string,
     sql: string,
+    documentUri: string,
+    isExecutionCurrent: ExecutionCurrentCheck,
 ): Promise<{ target?: TuningTableTarget; diagnostics: string[] }> {
+    assertExecutionCurrent(isExecutionCurrent);
     const diagnostics: string[] = [];
     const tableReference = getPrimaryTableReference(sql);
     if (!tableReference) {
@@ -356,6 +368,7 @@ async function resolveTuningTableTarget(
 
     const table = tableReference.name.toUpperCase();
     const currentDatabase = await connectionManager.getCurrentDatabase(connectionName);
+    assertExecutionCurrent(isExecutionCurrent);
     const database = (tableReference.database || currentDatabase || '').toUpperCase();
     if (!database) {
         diagnostics.push(`Could not determine database for table ${table}. Skipping table statistics.`);
@@ -372,9 +385,12 @@ async function resolveTuningTableTarget(
                 connectionManager,
                 connectionName,
                 ddlProvider.buildFindTableSchemaQuery(database, escapedTable),
+                documentUri,
+                isExecutionCurrent,
             );
             schema = toUpperStringValue(getCaseInsensitiveValue(schemaRows[0] || {}, 'SCHEMA'));
         } catch {
+            assertExecutionCurrent(isExecutionCurrent);
             diagnostics.push(`Schema lookup failed for ${database}.${table}.`);
         }
     }
@@ -398,8 +414,18 @@ async function fetchPrimaryTableStatsForTuning(
     connectionManager: ConnectionManager,
     connectionName: string,
     sql: string,
+    documentUri: string,
+    isExecutionCurrent: ExecutionCurrentCheck,
 ): Promise<TuningTableStatsResult> {
-    const { target, diagnostics } = await resolveTuningTableTarget(context, connectionManager, connectionName, sql);
+    const { target, diagnostics } = await resolveTuningTableTarget(
+        context,
+        connectionManager,
+        connectionName,
+        sql,
+        documentUri,
+        isExecutionCurrent,
+    );
+    assertExecutionCurrent(isExecutionCurrent);
 
     if (!target) {
         return {
@@ -423,6 +449,8 @@ async function fetchPrimaryTableStatsForTuning(
             connectionManager,
             connectionName,
             `SELECT COUNT(*) AS ROW_COUNT FROM ${fullTableName}`,
+            documentUri,
+            isExecutionCurrent,
         );
         const rowCount = toNumberValue(getCaseInsensitiveValue(countRows[0] || {}, 'ROW_COUNT'));
         if (rowCount !== undefined) {
@@ -432,6 +460,7 @@ async function fetchPrimaryTableStatsForTuning(
             diagnostics.push(`Row count result was empty for ${fullTableName}.`);
         }
     } catch {
+        assertExecutionCurrent(isExecutionCurrent);
         lines.push('**Row Count:** Unable to retrieve');
         diagnostics.push(`Row count query failed for ${fullTableName}.`);
     }
@@ -443,6 +472,8 @@ async function fetchPrimaryTableStatsForTuning(
                 connectionManager,
                 connectionName,
                 ddlProvider.buildTableStatsQuery(target.database, target.schema, target.table),
+                documentUri,
+                isExecutionCurrent,
             );
             const owner = toStringValue(getCaseInsensitiveValue(infoRows[0] || {}, 'OWNER'));
 
@@ -454,6 +485,7 @@ async function fetchPrimaryTableStatsForTuning(
             }
             lines.push(`**Owner:** ${owner || 'N/A'}`);
         } catch {
+            assertExecutionCurrent(isExecutionCurrent);
             if (supportsDistributionMetrics) {
                 lines.push('**Distribution Key:** Unable to retrieve');
             }
@@ -483,6 +515,8 @@ async function fetchPrimaryTableStatsForTuning(
             connectionManager,
             connectionName,
             ddlProvider.buildSkewCheckQuery(fullTableName),
+            documentUri,
+            isExecutionCurrent,
         );
         const counts = skewRows
             .map((row) => toNumberValue(getCaseInsensitiveValue(row, 'ROW_COUNT')))
@@ -504,6 +538,7 @@ async function fetchPrimaryTableStatsForTuning(
             lines.push(`**Skew Ratio:** ${skewRatio.toFixed(1)}%`);
         }
     } catch {
+        assertExecutionCurrent(isExecutionCurrent);
         lines.push('Could not retrieve distribution data.');
         diagnostics.push(`Skew query failed for ${fullTableName}.`);
     }
@@ -614,6 +649,7 @@ function buildTuningReportMarkdown(
 export async function executeExplainQuery(
     context: vscode.ExtensionContext,
     connectionManager: ConnectionManager,
+    resultPanelProvider: ResultPanelView,
     verbose: boolean,
 ): Promise<void> {
     const editor = vscode.window.activeTextEditor;
@@ -654,6 +690,7 @@ export async function executeExplainQuery(
         cleanQuery = cleanQuery.replace(/^EXPLAIN\s+(?:VERBOSE\s+)?/i, '');
     }
 
+    let executionGate: Awaited<ReturnType<typeof tryAcquireQueryExecution>>;
     try {
         const documentUri = document.uri.toString();
         const connectionName = connectionManager.getConnectionForExecution(documentUri);
@@ -664,7 +701,17 @@ export async function executeExplainQuery(
             return;
         }
 
-        await vscode.window.withProgress(
+        executionGate = await tryAcquireQueryExecution(documentUri, resultPanelProvider, {
+            document,
+            origin: verbose ? 'Explain Query Verbose' : 'Explain Query',
+            recovery: createQueryExecutionRecovery(connectionManager, documentUri, connectionName),
+        });
+        if (!executionGate) {
+            return;
+        }
+
+        executionGate.markRunning();
+        const result = await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Window,
                 title: 'Generating query plan...',
@@ -674,24 +721,33 @@ export async function executeExplainQuery(
                 const explainQueryText = await buildExplainSqlForDialect(cleanQuery, databaseKind, {
                     verbose,
                 });
-                const result = await runExplainQuery(
+                return await runExplainQuery(
                     context,
                     explainQueryText,
                     connectionName,
                     connectionManager,
                     documentUri,
                 );
-
-                if (result && result.trim()) {
-                    const { parseExplainOutput, ExplainPlanView } = await import('../../views/explainPlanView');
-                    const normalizedExplainOutput = await normalizeExplainOutputForDisplay(result, databaseKind);
-                    const parsed = parseExplainOutput(normalizedExplainOutput);
-                    ExplainPlanView.createOrShow(context.extensionUri, parsed, cleanQuery);
-                } else {
-                    vscode.window.showWarningMessage('No explain output received');
-                }
             },
         );
+        if (!executionGate.isCurrent()) {
+            return;
+        }
+
+        if (result && result.trim()) {
+            const { parseExplainOutput, ExplainPlanView } = await import('../../views/explainPlanView');
+            if (!executionGate.isCurrent()) {
+                return;
+            }
+            const normalizedExplainOutput = await normalizeExplainOutputForDisplay(result, databaseKind);
+            if (!executionGate.isCurrent()) {
+                return;
+            }
+            const parsed = parseExplainOutput(normalizedExplainOutput);
+            ExplainPlanView.createOrShow(context.extensionUri, parsed, cleanQuery);
+        } else {
+            vscode.window.showWarningMessage('No explain output received');
+        }
         const successEvent = explainTimer.finish({
             result: 'ok',
             metadata: {
@@ -700,6 +756,9 @@ export async function executeExplainQuery(
         });
         console.log(formatPerformanceEvent(successEvent));
     } catch (err: unknown) {
+        if (executionGate && !executionGate.isCurrent()) {
+            return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         const errorEvent = explainTimer.finish({
             result: 'error',
@@ -710,6 +769,8 @@ export async function executeExplainQuery(
         });
         console.log(formatPerformanceEvent(errorEvent));
         vscode.window.showErrorMessage(`Error generating query plan: ${msg}`);
+    } finally {
+        executionGate?.dispose();
     }
 }
 
@@ -746,6 +807,7 @@ export async function executeTuningAdvisor(
     const tuningTimer = createPerformanceTimer('tuning_advice_generated', {
         payloadSize: sql.length,
     });
+    let executionGate: Awaited<ReturnType<typeof tryAcquireQueryExecution>>;
 
     try {
         const sourceUri = editor.document.uri.toString();
@@ -756,11 +818,21 @@ export async function executeTuningAdvisor(
         }
 
         const databaseKind = connectionManager.getConnectionDatabaseKind(connectionName);
+        executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
+            document: editor.document,
+            origin: 'Tuning Advisor',
+            recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName),
+        });
+        if (!executionGate) {
+            return;
+        }
+        const tuningExecutionGate = executionGate;
         const explainSql = await buildExplainSqlForDialect(sql, databaseKind, {
             verbose: true,
         });
 
-        const successContext = await vscode.window.withProgress<TuningAdvisorSuccessContext>(
+        tuningExecutionGate.markRunning();
+        const successContext = await vscode.window.withProgress<TuningAdvisorSuccessContext | undefined>(
             {
                 location: vscode.ProgressLocation.Window,
                 title: 'Generating tuning advice...',
@@ -774,13 +846,21 @@ export async function executeTuningAdvisor(
                     connectionManager,
                     sourceUri,
                 );
+                if (!tuningExecutionGate.isCurrent()) {
+                    return undefined;
+                }
 
                 const tableStats = await fetchPrimaryTableStatsForTuning(
                     context,
                     connectionManager,
                     connectionName,
                     sql,
+                    sourceUri,
+                    () => tuningExecutionGate.isCurrent(),
                 );
+                if (!tuningExecutionGate.isCurrent()) {
+                    return undefined;
+                }
 
                 const advisor = getRequiredDatabaseTuningAdvisor(
                     connectionManager.getConnectionDatabaseKind(connectionName),
@@ -792,13 +872,22 @@ export async function executeTuningAdvisor(
                 });
 
                 const markdown = buildTuningReportMarkdown(report, sql, connectionName, explainPlanText, tableStats);
+                if (!tuningExecutionGate.isCurrent()) {
+                    return undefined;
+                }
                 const reportDocument = await vscode.workspace.openTextDocument({
                     content: markdown,
                     language: 'markdown',
                 });
+                if (!tuningExecutionGate.isCurrent()) {
+                    return undefined;
+                }
                 await vscode.window.showTextDocument(reportDocument, {
                     preview: false,
                 });
+                if (!tuningExecutionGate.isCurrent()) {
+                    return undefined;
+                }
 
                 resultPanelProvider.log(
                     sourceUri,
@@ -820,8 +909,18 @@ export async function executeTuningAdvisor(
                 };
             },
         );
+        const executionStillCurrent = tuningExecutionGate.isCurrent();
+        tuningExecutionGate.dispose();
+        if (!executionStillCurrent || !successContext) {
+            return;
+        }
         await collectTuningAdvisorFeedback(context, successContext);
     } catch (err: unknown) {
+        const executionStillCurrent = executionGate?.isCurrent() ?? true;
+        executionGate?.dispose();
+        if (!executionStillCurrent) {
+            return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         const errorEvent = tuningTimer.finish({
             result: 'error',
