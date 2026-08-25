@@ -36,6 +36,28 @@ describe('CachePrefetcher', () => {
   let mockRunQuery: jest.MockedFunction<QueryRunnerRawFn>;
 
   const connName = 'test-conn';
+  const baseColumnResult = (rows: unknown[][]) => ({
+    columns: [
+      { name: 'OBJID' }, { name: 'TABLENAME' }, { name: 'DBNAME' }, { name: 'SCHEMA' },
+      { name: 'ATTNAME' }, { name: 'FORMAT_TYPE' }, { name: 'ATTNUM' }, { name: 'DESCRIPTION' },
+    ],
+    data: rows,
+  });
+  const keyFlagResult = (rows: unknown[][] = []) => ({
+    columns: [{ name: 'OBJID' }, { name: 'ATTNAME' }, { name: 'CONTYPE' }],
+    data: rows,
+  });
+  const distributionFlagResult = (rows: unknown[][] = []) => ({
+    columns: [{ name: 'OBJID' }, { name: 'ATTNAME' }],
+    data: rows,
+  });
+  const externalColumnResult = (rows: unknown[][]) => ({
+    columns: [
+      { name: 'TABLENAME' }, { name: 'DBNAME' }, { name: 'SCHEMA' }, { name: 'ATTNAME' },
+      { name: 'FORMAT_TYPE' }, { name: 'IS_PK' }, { name: 'IS_FK' }, { name: 'IS_DISTRIBUTION_KEY' },
+    ],
+    data: rows,
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -108,7 +130,8 @@ describe('CachePrefetcher', () => {
         event => progress.push(event),
         event => details.push(event),
       );
-      prefetcher['beginRefreshDetails'](connName);
+      const refresh = prefetcher['beginRefreshDetails'](connName);
+      const lifecycle = prefetcher['getQueryLifecycleReporter'](connName, refresh.refreshId)!;
 
       prefetcher['emitProgress']({
         connectionName: connName,
@@ -127,6 +150,7 @@ describe('CachePrefetcher', () => {
         async () => ({ columns: [], data: [] }),
         'SELECT * FROM JUST_DATA.._V_OBJECT_DATA',
         { source: 'connection-prefetch', kind: 'objects', database: 'JUST_DATA', reason: 'test' },
+        lifecycle,
       );
 
       expect(progress.map(event => event.percent)).toEqual([90, 90]);
@@ -141,15 +165,15 @@ describe('CachePrefetcher', () => {
       ]));
     });
 
-    it('keeps the longest SQL duration and freezes refresh elapsed at finalization', () => {
+    it('keeps the longest SQL duration and freezes refresh elapsed at finalization', async () => {
       const details: MetadataPrefetchRefreshDetails[] = [];
       prefetcher = new CachePrefetcher(
         mockCache,
         undefined,
         event => details.push(event),
       );
-      prefetcher['beginRefreshDetails'](connName);
-      const lifecycle = prefetcher['getQueryLifecycleReporter'](connName)!;
+      const refresh = prefetcher['beginRefreshDetails'](connName);
+      const lifecycle = prefetcher['getQueryLifecycleReporter'](connName, refresh.refreshId)!;
       const context = {
         connectionName: connName,
         source: 'connection-prefetch' as const,
@@ -158,20 +182,17 @@ describe('CachePrefetcher', () => {
 
       const firstQueryId = lifecycle.queued('SELECT first', context)!;
       lifecycle.started(firstQueryId, 0);
+      lifecycle.executionCompleted(firstQueryId, { totalMs: 2_200 });
       lifecycle.completed(firstQueryId, { columns: [], data: [] });
       const active = prefetcher['refreshDetailsByConnection'].get(connName)!;
       const firstActivity = active.queries.get(firstQueryId)!;
-      firstActivity.startedAt = 1_000;
-      firstActivity.completedAt = 3_200;
       prefetcher['publishRefreshDetails'](active);
-      expect(firstActivity.maxDurationMs).toBe(2_200);
+      expect(firstActivity.executionDurationMs).toBe(2_200);
 
       const secondQueryId = lifecycle.queued('SELECT second', context)!;
       lifecycle.started(secondQueryId, 0);
+      lifecycle.executionCompleted(secondQueryId, { totalMs: 800 });
       lifecycle.completed(secondQueryId, { columns: [], data: [] });
-      const secondActivity = active.queries.get(secondQueryId)!;
-      secondActivity.startedAt = 3_200;
-      secondActivity.completedAt = 4_000;
       prefetcher['publishRefreshDetails'](active);
 
       prefetcher['finalizeRefreshDetails'](connName);
@@ -183,6 +204,15 @@ describe('CachePrefetcher', () => {
       const completedAt = finalized.completedAt;
       expect(details[details.length - 1]!.completedAt).toBe(completedAt);
       expect(details[details.length - 1]!.longestSqlDurationMs).toBe(2_200);
+      expect(lifecycle.queued('SELECT after-finalization', context)).toBeUndefined();
+
+      await prefetcher['runPrefetchQuery'](
+        connName,
+        async () => ({ columns: [], data: [] }),
+        'SELECT background warmup',
+        context,
+      );
+      expect(details[details.length - 1]!.queries).toHaveLength(2);
     });
 
     it('clears per-connection object completion markers with the metadata cache', () => {
@@ -232,12 +262,17 @@ describe('CachePrefetcher', () => {
       mockCache.getTables.mockReturnValue([{ label: 't1' } as any]);
       mockCache.getColumns.mockReturnValue(undefined); // not cached stringably
 
-      mockRunQuery.mockResolvedValue({
-        columns: [{ name: 'TABLENAME' }, { name: 'ATTNAME' }, { name: 'FORMAT_TYPE' }, { name: 'IS_PK' }, { name: 'IS_FK' }],
-        data: [
-          ['t1', 'col1', 'INT4', 1, 0],
-          ['t1', 'col2', 'VARCHAR', 0, 1]
-        ]
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') {
+          return keyFlagResult([[1, 'col1', 'p'], [1, 'col2', 'f']]);
+        }
+        if (context?.kind === 'column-distribution') {
+          return distributionFlagResult();
+        }
+        return baseColumnResult([
+          [1, 't1', 'db1', 's1', 'col1', 'INT4', 1, ''],
+          [1, 't1', 'db1', 's1', 'col2', 'VARCHAR', 2, ''],
+        ]);
       });
 
       await prefetcher.prefetchColumnsForSchema(connName, 'db1', 's1', mockRunQuery);
@@ -456,18 +491,10 @@ describe('CachePrefetcher', () => {
         timestamp: Date.now(),
       });
 
-      mockRunQuery.mockResolvedValue({
-        columns: [
-          { name: 'TABLENAME' },
-          { name: 'DBNAME' },
-          { name: 'SCHEMA' },
-          { name: 'ATTNAME' },
-          { name: 'FORMAT_TYPE' },
-          { name: 'IS_PK' },
-          { name: 'IS_FK' },
-          { name: 'IS_DISTRIBUTION_KEY' },
-        ],
-        data: [['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]],
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult([[1, 'ID', 'p']]);
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
       });
 
       await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
@@ -485,20 +512,6 @@ describe('CachePrefetcher', () => {
   });
 
 describe('prefetchAllColumnsForConnection serial execution', () => {
-    const emptyColumnResult = {
-      columns: [
-        { name: 'TABLENAME' },
-        { name: 'DBNAME' },
-        { name: 'SCHEMA' },
-        { name: 'ATTNAME' },
-        { name: 'FORMAT_TYPE' },
-        { name: 'IS_PK' },
-        { name: 'IS_FK' },
-        { name: 'IS_DISTRIBUTION_KEY' },
-      ],
-      data: [['T1', 'DB', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]],
-    };
-
     beforeEach(() => {
       resetMetadataQueryLimiterForTests();
     });
@@ -516,7 +529,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       let maxInFlight = 0;
       const release: Array<() => void> = [];
 
-      mockRunQuery.mockImplementation(async () => {
+      mockRunQuery.mockImplementation(async (_sql, context) => {
         inFlight += 1;
         maxInFlight = Math.max(maxInFlight, inFlight);
         await new Promise<void>((resolve) => {
@@ -525,7 +538,9 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
             resolve();
           });
         });
-        return emptyColumnResult;
+        if (context?.kind === 'column-keys') return keyFlagResult([[1, 'ID', 'p']]);
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        return baseColumnResult([[1, 'T1', 'DB', 'PUBLIC', 'ID', 'INT4', 1, '']]);
       });
 
       const prefetchPromise = prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
@@ -539,8 +554,8 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       }
 
       await prefetchPromise;
-      // The external companion query is conditional on a cached EXTERNAL TABLE.
-      expect(mockRunQuery).toHaveBeenCalledTimes(dbCount);
+      // Three regular scans per database; external remains conditional.
+      expect(mockRunQuery).toHaveBeenCalledTimes(dbCount * 3);
       expect(maxInFlight).toBe(1);
       expect(inFlight).toBe(0);
     });
@@ -549,20 +564,16 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
   describe('prefetchColumnsForDatabase', () => {
     it('should deduplicate concurrent database column prefetch', async () => {
       mockRunQuery.mockImplementation(
-        () => new Promise((resolve) =>
-          setTimeout(() => resolve({
-            columns: [
-              { name: 'TABLENAME' },
-              { name: 'DBNAME' },
-              { name: 'SCHEMA' },
-              { name: 'ATTNAME' },
-              { name: 'FORMAT_TYPE' },
-              { name: 'IS_PK' },
-              { name: 'IS_FK' },
-              { name: 'IS_DISTRIBUTION_KEY' },
-            ],
-            data: [['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]],
-          }), 5),
+        (_sql, context) => new Promise((resolve) =>
+          setTimeout(() => {
+            if (context?.kind === 'column-keys') {
+              resolve(keyFlagResult([[1, 'ID', 'p']]));
+            } else if (context?.kind === 'column-distribution') {
+              resolve(distributionFlagResult());
+            } else {
+              resolve(baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]));
+            }
+          }, 5),
         ),
       );
 
@@ -571,9 +582,8 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery),
       ]);
 
-      // Concurrent calls are deduplicated: only the regular catalog query runs
-      // when the database has no cached external table.
-      expect(mockRunQuery).toHaveBeenCalledTimes(1);
+      // Concurrent calls are deduplicated to one three-query snapshot.
+      expect(mockRunQuery).toHaveBeenCalledTimes(3);
       expect(mockCache.setColumns).toHaveBeenCalledWith(
         connName,
         'DB1.PUBLIC.ORDERS',
@@ -607,18 +617,10 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         timestamp: Date.now(),
       });
 
-      mockRunQuery.mockResolvedValue({
-        columns: [
-          { name: 'TABLENAME' },
-          { name: 'DBNAME' },
-          { name: 'SCHEMA' },
-          { name: 'ATTNAME' },
-          { name: 'FORMAT_TYPE' },
-          { name: 'IS_PK' },
-          { name: 'IS_FK' },
-          { name: 'IS_DISTRIBUTION_KEY' },
-        ],
-        data: [['ORDERS', 'db1', 'public', 'ID', 'INT4', 1, 0, 0]],
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult([[1, 'ID', 'p']]);
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'public', 'ID', 'INT4', 1, '']]);
       });
 
       await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
@@ -632,7 +634,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         ]),
       );
       expect(synonymColumns).toEqual(targetColumns);
-      expect(mockRunQuery).toHaveBeenCalledTimes(1); // regular catalog query only
+      expect(mockRunQuery).toHaveBeenCalledTimes(3); // one regular three-query snapshot
     });
 
     it('skips when database is dead', async () => {
@@ -939,14 +941,6 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
     const objectColumns = [
       { name: 'OBJNAME' }, { name: 'OBJID' }, { name: 'SCHEMA' }, { name: 'DBNAME' }, { name: 'OBJTYPE' },
     ];
-    const columnResult = (rows: unknown[][]) => ({
-      columns: [
-        { name: 'TABLENAME' }, { name: 'DBNAME' }, { name: 'SCHEMA' }, { name: 'ATTNAME' },
-        { name: 'FORMAT_TYPE' }, { name: 'IS_PK' }, { name: 'IS_FK' }, { name: 'IS_DISTRIBUTION_KEY' },
-      ],
-      data: rows,
-    });
-
     it('T2: main query failure does not discard external-table rows (prefetchAllObjects)', async () => {
       mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
       mockRunQuery
@@ -1011,7 +1005,11 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
 
     it('T4: F0 — columns prefetch runs from the cached database list even when the table cache is empty', async () => {
       mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
-      mockRunQuery.mockResolvedValue(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]));
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult([[1, 'ID', 'p']]);
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
+      });
 
       await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
 
@@ -1027,7 +1025,11 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         data: [{ label: 'ORDERS' }],
         timestamp: Date.now(),
       });
-      mockRunQuery.mockResolvedValue(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]));
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult([[1, 'ID', 'p']]);
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
+      });
 
       await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
 
@@ -1044,9 +1046,14 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         data: [{ OBJNAME: 'ET1', label: 'ET1', objType: 'EXTERNAL TABLE', SCHEMA: 'PUBLIC' }],
         timestamp: Date.now(),
       });
-      mockRunQuery
-        .mockResolvedValueOnce(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]))
-        .mockResolvedValueOnce(columnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult([[1, 'ID', 'p']]);
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        if (context?.kind === 'external-columns') {
+          return externalColumnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]);
+        }
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
+      });
 
       await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
 
@@ -1067,9 +1074,12 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         data: [{ OBJNAME: 'ET1', label: 'ET1', objType: 'EXTERNAL TABLE', SCHEMA: 'PUBLIC' }],
         timestamp: Date.now(),
       });
-      mockRunQuery
-        .mockResolvedValueOnce(columnResult([['ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, 0, 0]]))
-        .mockRejectedValueOnce(new Error('external failed'));
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult([[1, 'ID', 'p']]);
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        if (context?.kind === 'external-columns') throw new Error('external failed');
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
+      });
 
       await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
 
@@ -1087,7 +1097,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       });
       mockRunQuery
         .mockRejectedValueOnce(new Error('main transient failure'))
-        .mockResolvedValueOnce(columnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
+        .mockResolvedValueOnce(externalColumnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
 
       await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
 
@@ -1099,6 +1109,32 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       );
     });
 
+    it('discards regular rows when an auxiliary key scan fails', async () => {
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') throw new Error('keys failed');
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
+      });
+
+      await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
+
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+      expect(mockCache.setColumns).not.toHaveBeenCalled();
+    });
+
+    it('rejects a row-limited auxiliary scan instead of caching false key flags', async () => {
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') {
+          return { ...keyFlagResult([[1, 'ID', 'p']]), limitReached: true };
+        }
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
+      });
+
+      await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
+
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+      expect(mockCache.setColumns).not.toHaveBeenCalled();
+    });
+
     it('T11: full connection column prefetch isolates the main and external queries', async () => {
       mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
       mockCache.tableCache.set(`${connName}|DB1.PUBLIC`, {
@@ -1107,7 +1143,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       });
       mockRunQuery
         .mockRejectedValueOnce(new Error('main transient failure'))
-        .mockResolvedValueOnce(columnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
+        .mockResolvedValueOnce(externalColumnResult([['ET1', 'db1', 'PUBLIC', 'COL1', 'VARCHAR(100)', 0, 0, 0]]));
 
       await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
 

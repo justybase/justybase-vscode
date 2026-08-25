@@ -72,11 +72,16 @@ import {
     createNetezzaCatalogIdentifier,
     createNetezzaUserIdentifier,
 } from '../dialects/netezza/metadata/identifierUtils';
+import {
+    buildNetezzaColumnsWithKeysQueries,
+    mergeNetezzaColumnsWithKeysRows,
+} from '../dialects/netezza/metadata/columnsWithKeys';
 import { Logger } from '../utils/logger';
 import type {
     MetadataQueryContext,
     MetadataQueryKind,
     MetadataRequestSource,
+    MetadataQueryTiming,
 } from './metadataQueryDiagnostics';
 
 /**
@@ -87,9 +92,15 @@ export type QueryRunnerFn = (query: string) => Promise<string | undefined>;
 /**
  * Type for raw query execution function (returns QueryResult directly - no JSON serialization)
  */
+export interface MetadataPrefetchExecutionObserver {
+    onExecutionStarted(queueWaitMs: number): void;
+    onExecutionCompleted(timing?: MetadataQueryTiming): void;
+}
+
 export type QueryRunnerRawFn = (
     query: string,
     metadataContext?: MetadataQueryContext,
+    executionObserver?: MetadataPrefetchExecutionObserver,
 ) => Promise<QueryResult | undefined>;
 
 /**
@@ -110,14 +121,24 @@ async function runPrefetchQuery(
 ): Promise<QueryResult | undefined> {
     const queryContext: MetadataQueryContext = { ...context, connectionName };
     const queryId = lifecycle?.queued(query, queryContext);
+    const executionObserver = lifecycle
+        ? {
+            onExecutionStarted: (queueWaitMs: number) => lifecycle.started(queryId, queueWaitMs),
+            onExecutionCompleted: (timing?: MetadataQueryTiming) => lifecycle.executionCompleted(queryId, timing),
+        }
+        : undefined;
     try {
         const result = await runWithMetadataQueryConcurrencyLimit(connectionName, async (queueWaitMs) => {
-            lifecycle?.started(queryId, queueWaitMs);
             return runQueryFn(query, {
                 ...queryContext,
                 queueWaitMs,
-            });
+            }, executionObserver);
         });
+        if (result?.limitReached) {
+            throw new Error(
+                `Metadata query '${queryContext.kind ?? 'unknown'}' reached the row limit; refusing to cache a partial catalog snapshot.`,
+            );
+        }
         lifecycle?.completed(queryId, result);
         return result;
     } catch (error: unknown) {
@@ -166,8 +187,8 @@ export interface MetadataPrefetchQueryActivity {
     queuedAt: number;
     startedAt?: number;
     completedAt?: number;
-    /** Monotonic maximum duration observed while this SQL was running. */
-    maxDurationMs?: number;
+    /** Driver-observed SQL execution time; excludes metadata queue waits. */
+    executionDurationMs?: number;
     queueWaitMs?: number;
     /** Rows returned by this catalog SQL, when it completed successfully. */
     rowsRead?: number;
@@ -191,9 +212,11 @@ export interface MetadataPrefetchRefreshDetails {
     message: string;
     startedAt: number;
     updatedAt: number;
+    /** Monotonic publication version used to reject stale webview updates. */
+    revision: number;
     /** Set once the metadata refresh reaches a terminal state. */
     completedAt?: number;
-    /** Monotonic maximum duration of any SQL statement in this refresh. */
+    /** Maximum driver-observed SQL execution time in this refresh. */
     longestSqlDurationMs: number;
     longestSqlQueryId?: string;
     queries: readonly MetadataPrefetchQueryActivity[];
@@ -205,6 +228,7 @@ export type PrefetchRefreshDetailsReporter = (details: MetadataPrefetchRefreshDe
 interface PrefetchQueryLifecycleReporter {
     queued(query: string, context: MetadataQueryContext): string | undefined;
     started(queryId: string | undefined, queueWaitMs: number): void;
+    executionCompleted(queryId: string | undefined, timing?: MetadataQueryTiming): void;
     completed(queryId: string | undefined, result: QueryResult | undefined): void;
     failed(queryId: string | undefined, error: unknown): void;
 }
@@ -235,6 +259,7 @@ interface ActiveRefreshDetails {
     message: string;
     startedAt: number;
     updatedAt: number;
+    revision: number;
     completedAt?: number;
     longestSqlDurationMs: number;
     longestSqlQueryId?: string;
@@ -560,6 +585,7 @@ export class CachePrefetcher {
             message: 'Starting metadata refresh...',
             startedAt: now,
             updatedAt: now,
+            revision: 0,
             longestSqlDurationMs: 0,
             nextQueryId: 0,
             queries: new Map(),
@@ -571,6 +597,7 @@ export class CachePrefetcher {
 
     private publishRefreshDetails(details: ActiveRefreshDetails): void {
         this.updateLongestSqlDuration(details);
+        details.revision += 1;
         this.reportRefreshDetails?.({
             connectionName: details.connectionName,
             refreshId: details.refreshId,
@@ -579,6 +606,7 @@ export class CachePrefetcher {
             message: details.message,
             startedAt: details.startedAt,
             updatedAt: details.updatedAt,
+            revision: details.revision,
             completedAt: details.completedAt,
             longestSqlDurationMs: details.longestSqlDurationMs,
             longestSqlQueryId: details.longestSqlQueryId,
@@ -600,15 +628,15 @@ export class CachePrefetcher {
         details: ActiveRefreshDetails,
         now = Date.now(),
     ): void {
+        details.longestSqlDurationMs = 0;
+        details.longestSqlQueryId = undefined;
         for (const activity of details.queries.values()) {
-            if (activity.startedAt === undefined) {
-                continue;
-            }
-            const end = activity.completedAt ?? now;
-            const durationMs = Math.max(0, end - activity.startedAt);
-            activity.maxDurationMs = Math.max(activity.maxDurationMs ?? 0, durationMs);
-            if (activity.maxDurationMs > details.longestSqlDurationMs) {
-                details.longestSqlDurationMs = activity.maxDurationMs;
+            const durationMs = activity.executionDurationMs
+                ?? (activity.startedAt === undefined
+                    ? 0
+                    : Math.max(0, (activity.completedAt ?? now) - activity.startedAt));
+            if (durationMs > details.longestSqlDurationMs) {
+                details.longestSqlDurationMs = durationMs;
                 details.longestSqlQueryId = activity.id;
             }
         }
@@ -618,14 +646,14 @@ export class CachePrefetcher {
         const target = [activity.context.database, activity.context.schema, activity.context.table]
             .filter((part): part is string => Boolean(part))
             .join('.') || '-';
-        const timing = activity.completedAt && activity.startedAt
-            ? ` durationMs=${activity.completedAt - activity.startedAt}`
-            : '';
+        const executionDuration = activity.executionDurationMs === undefined
+            ? ''
+            : ` executionDurationMs=${activity.executionDurationMs}`;
         const queueWait = activity.queueWaitMs === undefined ? '' : ` queueWaitMs=${activity.queueWaitMs}`;
         Logger.getInstance().debug(
             `[MetadataRefresh] connection=${activity.context.connectionName ?? '-'} `
             + `state=${activity.state} kind=${activity.context.kind ?? 'unknown'} target=${target}`
-            + `${queueWait}${timing} sql=${activity.sql}`,
+            + `${queueWait}${executionDuration} sql=${activity.sql}`,
         );
     }
 
@@ -654,9 +682,12 @@ export class CachePrefetcher {
         this.publishRefreshDetails(details);
     }
 
-    private getQueryLifecycleReporter(connectionName: string): PrefetchQueryLifecycleReporter | undefined {
+    private getQueryLifecycleReporter(
+        connectionName: string,
+        refreshId: string,
+    ): PrefetchQueryLifecycleReporter | undefined {
         const details = this.refreshDetailsByConnection.get(connectionName);
-        if (!details) {
+        if (!details || details.refreshId !== refreshId || details.completedAt !== undefined) {
             return undefined;
         }
 
@@ -664,7 +695,9 @@ export class CachePrefetcher {
             queryId: string | undefined,
             updateActivity: (activity: MetadataPrefetchQueryActivity) => void,
         ): void => {
-            if (!queryId) {
+            if (!queryId
+                || this.refreshDetailsByConnection.get(connectionName) !== details
+                || details.completedAt !== undefined) {
                 return;
             }
             const activity = details.queries.get(queryId);
@@ -679,6 +712,9 @@ export class CachePrefetcher {
 
         return {
             queued: (sql, context) => {
+                if (this.refreshDetailsByConnection.get(connectionName) !== details || details.completedAt !== undefined) {
+                    return undefined;
+                }
                 const planned = [...details.queries.values()].find(activity =>
                     activity.state === 'planned'
                     && activity.sql === sql
@@ -707,14 +743,25 @@ export class CachePrefetcher {
                 activity.startedAt = Date.now();
                 activity.queueWaitMs = queueWaitMs;
             }),
+            executionCompleted: (queryId, timing) => update(queryId, activity => {
+                if (typeof timing?.totalMs === 'number' && Number.isFinite(timing.totalMs)) {
+                    activity.executionDurationMs = Math.max(0, timing.totalMs);
+                }
+            }),
             completed: (queryId, result) => update(queryId, activity => {
                 activity.state = 'completed';
                 activity.completedAt = Date.now();
+                if (activity.startedAt === undefined) {
+                    activity.startedAt = activity.completedAt - (activity.executionDurationMs ?? 0);
+                }
                 activity.rowsRead = result?.data?.length ?? 0;
             }),
             failed: (queryId, error) => update(queryId, activity => {
                 activity.state = 'failed';
                 activity.completedAt = Date.now();
+                if (activity.startedAt === undefined) {
+                    activity.startedAt = activity.completedAt - (activity.executionDurationMs ?? 0);
+                }
                 activity.error = error instanceof Error ? error.message : String(error);
             }),
         };
@@ -725,14 +772,70 @@ export class CachePrefetcher {
         runQueryFn: QueryRunnerRawFn,
         query: string,
         context: Omit<MetadataQueryContext, 'connectionName'> & { source: MetadataRequestSource; kind: MetadataQueryKind },
+        lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<QueryResult | undefined> {
         return runPrefetchQuery(
             connectionName,
             runQueryFn,
             query,
             context,
-            this.getQueryLifecycleReporter(connectionName),
+            lifecycle,
         );
+    }
+
+    /** Run the three regular-column catalog scans serially and merge them in memory. */
+    private async runColumnsWithKeysQueries(
+        connectionName: string,
+        runQueryFn: QueryRunnerRawFn,
+        queries: ReturnType<typeof buildNetezzaColumnsWithKeysQueries>,
+        context: {
+            source: MetadataRequestSource;
+            database: string;
+            schema?: string;
+            reason: string;
+        },
+        lifecycle?: PrefetchQueryLifecycleReporter,
+    ): Promise<RawColumnRowWithKeys[] | undefined> {
+        if (!queries.keys || !queries.distribution) {
+            throw new Error('Netezza columns-with-keys query set is incomplete.');
+        }
+
+        const parts: Array<{
+            sql: string;
+            kind: 'columns' | 'column-keys' | 'column-distribution';
+            reason: string;
+        }> = [
+            { sql: queries.columns, kind: 'columns', reason: context.reason },
+            { sql: queries.keys, kind: 'column-keys', reason: 'column-key-prefetch' },
+            { sql: queries.distribution, kind: 'column-distribution', reason: 'column-distribution-prefetch' },
+        ];
+        const rowsByKind = new Map<string, Record<string, unknown>[]>();
+
+        for (const part of parts) {
+            const result = await this.runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                part.sql,
+                {
+                    source: context.source,
+                    kind: part.kind,
+                    database: context.database,
+                    schema: context.schema,
+                    reason: part.reason,
+                },
+                lifecycle,
+            );
+            if (!result) {
+                return undefined;
+            }
+            rowsByKind.set(part.kind, queryResultToRows<Record<string, unknown>>(result));
+        }
+
+        return mergeNetezzaColumnsWithKeysRows(
+            rowsByKind.get('columns') ?? [],
+            rowsByKind.get('column-keys') ?? [],
+            rowsByKind.get('column-distribution') ?? [],
+        ) as RawColumnRowWithKeys[];
     }
 
     private planConnectionRefreshQueries(connectionName: string, databases: string[]): void {
@@ -756,8 +859,15 @@ export class CachePrefetcher {
             this.planRefreshQuery(connectionName, NZ_QUERIES.listProcedures(identifier), {
                 source: 'connection-prefetch', kind: 'procedures', database, reason: 'procedure-prefetch',
             });
-            this.planRefreshQuery(connectionName, NZ_QUERIES.listColumnsWithKeys(identifier), {
+            const columnQueries = buildNetezzaColumnsWithKeysQueries(identifier);
+            this.planRefreshQuery(connectionName, columnQueries.columns, {
                 source: 'connection-prefetch', kind: 'columns', database, reason: 'full-column-prefetch',
+            });
+            this.planRefreshQuery(connectionName, columnQueries.keys, {
+                source: 'connection-prefetch', kind: 'column-keys', database, reason: 'column-key-prefetch',
+            });
+            this.planRefreshQuery(connectionName, columnQueries.distribution, {
+                source: 'connection-prefetch', kind: 'column-distribution', database, reason: 'column-distribution-prefetch',
             });
             this.planRefreshQuery(connectionName, NZ_QUERIES.listExternalColumnsWithKeys(identifier), {
                 source: 'connection-prefetch', kind: 'external-columns', database, reason: 'external-table-columns',
@@ -862,10 +972,10 @@ export class CachePrefetcher {
                 return;
             }
 
-            // Use centralized query builder for columns with PK/FK info. The
-            // external query is only needed when this schema actually contains
-            // an external table; it never runs as a completion-side fallback.
-            const query = NZ_QUERIES.listColumnsWithKeys(
+            // Fetch base columns, key markers and distribution markers as
+            // independent catalog scans. The external query remains a separate
+            // compatibility branch and only runs when this schema needs it.
+            const columnQueries = buildNetezzaColumnsWithKeysQueries(
                 preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
                 {
                     schema: preserveCatalogIdentity && schemaName !== undefined
@@ -877,20 +987,19 @@ export class CachePrefetcher {
             let mainCatalogFailure = false;
 
             try {
-                const result = await this.runPrefetchQuery(
+                const rows = await this.runColumnsWithKeysQueries(
                     connectionName,
                     runQueryFn,
-                    query,
+                    columnQueries,
                     {
                         source: 'schema-prefetch',
-                        kind: 'columns',
                         database: dbName,
                         schema: schemaName,
                         reason: 'schema-column-prefetch',
                     },
                 );
-                if (result) {
-                    mainRows = queryResultToRows<RawColumnRowWithKeys>(result);
+                if (rows) {
+                    mainRows = rows;
                 }
             } catch (e: unknown) {
                 logPrefetchError(`[CachePrefetcher] Error fetching columns:`, e);
@@ -959,6 +1068,7 @@ export class CachePrefetcher {
         skipIfCached = false,
         databases?: string[],
         forceRefresh = false,
+        lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<boolean> {
         const key = `ALL_OBJECTS|${connectionName}`;
         const primaryCatalogComplete = this.primaryObjectsPrefetchCompletedSet.has(key);
@@ -984,7 +1094,7 @@ export class CachePrefetcher {
             // Ensure we have a list of databases (required for listTablesAndViews to populate descriptions)
             let targetDatabases = databases;
             if (!targetDatabases || targetDatabases.length === 0) {
-                targetDatabases = await this.prefetchDatabases(connectionName, runQueryFn);
+                targetDatabases = await this.prefetchDatabases(connectionName, runQueryFn, false, lifecycle);
             }
 
             if (!targetDatabases || targetDatabases.length === 0) {
@@ -1048,6 +1158,7 @@ export class CachePrefetcher {
                                 database: db,
                                 reason: 'object-catalog-prefetch',
                             },
+                            lifecycle,
                         );
                         if (!result) {
                             anyQueryError = true;
@@ -1085,6 +1196,7 @@ export class CachePrefetcher {
                                 database: db,
                                 reason: 'external-object-discovery',
                             },
+                            lifecycle,
                         );
                         if (!externalResult) {
                             anyQueryError = true;
@@ -1288,9 +1400,7 @@ export class CachePrefetcher {
             });
     }
 
-    /**
-     * Batch-fetch column metadata for a single database (one listColumnsWithKeys query).
-     */
+    /** Batch-fetch column metadata for a single database using three catalog scans. */
     async prefetchColumnsForDatabase(
         connectionName: string,
         dbName: string,
@@ -1333,26 +1443,25 @@ export class CachePrefetcher {
             return;
         }
 
-        const query = NZ_QUERIES.listColumnsWithKeys(
+        const columnQueries = buildNetezzaColumnsWithKeysQueries(
             preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
         );
         let mainRows: RawColumnRowWithKeys[] = [];
         let mainCatalogFailure = false;
 
         try {
-            const result = await this.runPrefetchQuery(
+            const rows = await this.runColumnsWithKeysQueries(
                 connectionName,
                 runQueryFn,
-                query,
+                columnQueries,
                 {
                     source: 'database-prefetch',
-                    kind: 'columns',
                     database: dbName,
                     reason: 'database-column-prefetch',
                 },
             );
-            if (result) {
-                mainRows = queryResultToRows<RawColumnRowWithKeys>(result);
+            if (rows) {
+                mainRows = rows;
             }
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchColumnsForDatabase error for ${dbName}:`, e);
@@ -1609,6 +1718,10 @@ export class CachePrefetcher {
     ): Promise<boolean> {
         const prefetchStartOverall = Date.now();
         const log = Logger.getInstance();
+        const refreshId = this.refreshDetailsByConnection.get(connectionName)?.refreshId;
+        const lifecycle = refreshId
+            ? this.getQueryLifecycleReporter(connectionName, refreshId)
+            : undefined;
 
         // 1. Fetch all databases
         this.emitProgress({
@@ -1618,7 +1731,7 @@ export class CachePrefetcher {
             message: 'Fetching databases...'
         });
         const stage1Start = Date.now();
-        const databases = await this.prefetchDatabases(connectionName, runQueryFn, forceRefresh);
+        const databases = await this.prefetchDatabases(connectionName, runQueryFn, forceRefresh, lifecycle);
         const stage1Duration = Date.now() - stage1Start;
         if (!databases || databases.length === 0) {
             log.debug(`[CachePrefetcher] [TIMING] Stage 1/5 DATABASES: ${stage1Duration}ms — 0 databases, aborting`);
@@ -1652,12 +1765,14 @@ export class CachePrefetcher {
                     dbName,
                     runQueryFn,
                     forceRefresh,
+                    lifecycle,
                 );
                 const typeGroupsComplete = await this.prefetchTypeGroupsForDb(
                     connectionName,
                     dbName,
                     runQueryFn,
                     forceRefresh,
+                    lifecycle,
                 );
                 return schemasComplete && typeGroupsComplete;
             },
@@ -1691,6 +1806,7 @@ export class CachePrefetcher {
             !forceRefresh,
             databases,
             forceRefresh,
+            lifecycle,
         );
         const stage3Duration = Date.now() - stage3Start;
         log.debug(`[CachePrefetcher] [TIMING] Stage 3/5 TABLES+VIEWS: ${stage3Duration}ms`);
@@ -1708,7 +1824,13 @@ export class CachePrefetcher {
         const stage4Complete = await this.runPerDatabaseBatched(
             connectionName,
             databases,
-            (dbName) => this.prefetchProceduresForDb(connectionName, dbName, runQueryFn, forceRefresh),
+            (dbName) => this.prefetchProceduresForDb(
+                connectionName,
+                dbName,
+                runQueryFn,
+                forceRefresh,
+                lifecycle,
+            ),
             (procedureCompleted, total) => {
                 this.emitProgress({
                     connectionName,
@@ -1733,17 +1855,23 @@ export class CachePrefetcher {
             message: 'Fetching columns...'
         });
         const stage5Start = Date.now();
-        const stage5Complete = await this.prefetchAllColumnsForConnection(connectionName, runQueryFn, forceRefresh, progress => {
-            const denominator = progress.totalDatabases > 0 ? progress.totalDatabases : 1;
-            this.emitProgress({
-                connectionName,
-                stage: 'columns',
-                percent: 80 + (progress.completedDatabases / denominator) * 20,
-                message: `Fetching columns (${progress.completedDatabases}/${progress.totalDatabases || denominator})`,
-                completed: progress.completedTables,
-                total: progress.totalTables
-            });
-        });
+        const stage5Complete = await this.prefetchAllColumnsForConnection(
+            connectionName,
+            runQueryFn,
+            forceRefresh,
+            progress => {
+                const denominator = progress.totalDatabases > 0 ? progress.totalDatabases : 1;
+                this.emitProgress({
+                    connectionName,
+                    stage: 'columns',
+                    percent: 80 + (progress.completedDatabases / denominator) * 20,
+                    message: `Fetching columns (${progress.completedDatabases}/${progress.totalDatabases || denominator})`,
+                    completed: progress.completedTables,
+                    total: progress.totalTables
+                });
+            },
+            lifecycle,
+        );
         const stage5Duration = Date.now() - stage5Start;
 
         const snapshotReport = this.cache.getSnapshotCompletenessReport?.(connectionName);
@@ -1827,6 +1955,7 @@ export class CachePrefetcher {
         connectionName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
+        lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<string[]> {
         if (!forceRefresh && this.cache.getDatabases(connectionName)) {
             const cached = this.cache.getDatabases(connectionName);
@@ -1846,6 +1975,7 @@ export class CachePrefetcher {
                     kind: 'databases',
                     reason: 'database-list-prefetch',
                 },
+                lifecycle,
             );
             if (!result) return [];
 
@@ -1872,6 +2002,7 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
+        lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<boolean> {
         const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
         const cacheDatabase = preserveCatalogIdentity
@@ -1899,6 +2030,7 @@ export class CachePrefetcher {
                     database: dbName,
                     reason: 'type-group-prefetch',
                 },
+                lifecycle,
             );
             const queryDuration = Date.now() - queryStart;
             if (!result) {
@@ -1928,6 +2060,7 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
+        lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<boolean> {
         const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
         const cacheDatabase = preserveCatalogIdentity
@@ -1955,6 +2088,7 @@ export class CachePrefetcher {
                     database: dbName,
                     reason: 'schema-prefetch',
                 },
+                lifecycle,
             );
             const queryDuration = Date.now() - queryStart;
             if (!result) return false;
@@ -1989,6 +2123,7 @@ export class CachePrefetcher {
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
         forceRefresh = false,
+        lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<boolean> {
         const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
         const cacheDatabase = preserveCatalogIdentity
@@ -2027,6 +2162,7 @@ export class CachePrefetcher {
                     database: dbName,
                     reason: 'procedure-prefetch',
                 },
+                lifecycle,
             );
             const queryDuration = Date.now() - queryStart;
             if (!result) {
@@ -2108,7 +2244,8 @@ export class CachePrefetcher {
             totalDatabases: number;
             completedTables: number;
             totalTables: number;
-        }) => void
+        }) => void,
+        lifecycle?: PrefetchQueryLifecycleReporter,
     ): Promise<boolean> {
         try {
             const connPrefix = `${connectionName}|`;
@@ -2165,9 +2302,9 @@ export class CachePrefetcher {
             let allQueriesComplete = true;
             const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
 
-            // Per-database serial execution: main columns query followed by the
-            // separate external-table columns query, merged in code. Serial order
-            // avoids flooding the database with concurrent sessions.
+            // Per-database serial execution: three regular catalog scans followed
+            // by the optional external-table query. Serial order avoids flooding
+            // the database and respects the driver's single-active-reader model.
             for (const dbName of databases) {
                 const cacheDatabase = preserveCatalogIdentity
                     ? buildNetezzaCacheDatabasePart(dbName)
@@ -2183,7 +2320,7 @@ export class CachePrefetcher {
                     continue;
                 }
 
-                const query = NZ_QUERIES.listColumnsWithKeys(
+                const columnQueries = buildNetezzaColumnsWithKeysQueries(
                     preserveCatalogIdentity ? createNetezzaCatalogIdentifier(dbName) : dbName,
                 );
                 const queryStartTime = Date.now();
@@ -2192,20 +2329,20 @@ export class CachePrefetcher {
                 let mainCatalogFailure = false;
 
                 try {
-                    const result = await this.runPrefetchQuery(
+                    const rows = await this.runColumnsWithKeysQueries(
                         connectionName,
                         runQueryFn,
-                        query,
+                        columnQueries,
                         {
                             source: 'connection-prefetch',
-                            kind: 'columns',
                             database: dbName,
                             reason: 'full-column-prefetch',
                         },
+                        lifecycle,
                     );
                     queryDuration = Date.now() - queryStartTime;
-                    if (result) {
-                        mainRows = queryResultToRows<RawColumnRowWithKeys>(result);
+                    if (rows) {
+                        mainRows = rows;
                     } else {
                         allQueriesComplete = false;
                     }
@@ -2236,6 +2373,7 @@ export class CachePrefetcher {
                                 database: dbName,
                                 reason: 'external-table-columns',
                             },
+                            lifecycle,
                         );
                         if (externalResult) {
                             externalRows = queryResultToRows<RawColumnRowWithKeys>(externalResult);

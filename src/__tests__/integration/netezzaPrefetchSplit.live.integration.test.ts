@@ -19,7 +19,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "@jest/globals";
 import { NzConnection } from "@justybase/netezza-driver";
 import { ensureBuiltInDialectsRegistered } from "../../dialects";
-import { NZ_QUERIES } from "../../dialects/netezza/metadata/systemQueries";
+import {
+  buildNetezzaColumnsWithKeysQueries,
+  loadNetezzaColumnsWithKeysRows,
+} from "../../dialects/netezza/metadata/columnsWithKeys";
+import {
+  NZ_CONSTRAINT_TYPES,
+  NZ_OBJECT_TYPES,
+  NZ_QUERIES,
+  NZ_SYSTEM_VIEWS,
+  qualifySystemView,
+} from "../../dialects/netezza/metadata/systemQueries";
 import {
   buildColumnCacheKey,
   groupColumnRowsByTableKey,
@@ -39,6 +49,48 @@ const DB_CONFIG = {
 };
 
 const PREFETCH_TIMEOUT_MS = 120_000;
+
+/** Frozen pre-split SQL used only as the live compatibility oracle. */
+function buildLegacyColumnsWithKeysQuery(
+  database: string,
+  options?: { schema?: string; tableName?: string },
+): string {
+  const databaseLiteral = database.replace(/'/g, "''");
+  const schemaPredicate = options?.schema
+    ? ` AND O.SCHEMA = '${options.schema.replace(/'/g, "''")}'`
+    : "";
+  const tablePredicate = options?.tableName
+    ? ` AND O.OBJNAME = '${options.tableName.replace(/'/g, "''")}'`
+    : "";
+  return `
+    SELECT
+      O.OBJNAME AS TABLENAME,
+      O.SCHEMA,
+      O.DBNAME,
+      C.ATTNAME,
+      C.FORMAT_TYPE,
+      C.ATTNUM,
+      COALESCE(C.DESCRIPTION, '') AS DESCRIPTION,
+      MAX(CASE WHEN K.CONTYPE = '${NZ_CONSTRAINT_TYPES.PRIMARY_KEY}' THEN 1 ELSE 0 END) AS IS_PK,
+      MAX(CASE WHEN K.CONTYPE = '${NZ_CONSTRAINT_TYPES.FOREIGN_KEY}' THEN 1 ELSE 0 END) AS IS_FK,
+      MAX(CASE WHEN D.ATTNAME IS NOT NULL THEN 1 ELSE 0 END) AS IS_DISTRIBUTION_KEY
+    FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} C
+    JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O ON C.OBJID = O.OBJID
+    LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.RELATION_KEYDATA)} K
+      ON K.OBJID = O.OBJID
+      AND K.ATTNAME = C.ATTNAME
+      AND K.CONTYPE IN ('${NZ_CONSTRAINT_TYPES.PRIMARY_KEY}', '${NZ_CONSTRAINT_TYPES.FOREIGN_KEY}')
+    LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE_DIST_MAP)} D
+      ON D.OBJID = O.OBJID
+      AND D.ATTNAME = C.ATTNAME
+    WHERE O.DBNAME = '${databaseLiteral}'
+      AND O.OBJTYPE IN ('${NZ_OBJECT_TYPES.TABLE}', '${NZ_OBJECT_TYPES.VIEW}')
+      ${schemaPredicate}
+      ${tablePredicate}
+    GROUP BY O.OBJNAME, O.SCHEMA, O.DBNAME, C.ATTNAME, C.FORMAT_TYPE, C.ATTNUM, C.DESCRIPTION
+    ORDER BY SCHEMA, TABLENAME, ATTNUM
+  `.trim();
+}
 
 async function queryRows(
     connection: NzConnection,
@@ -130,10 +182,34 @@ async function queryRowsWithTiming(
   return { rows, timing };
 }
 
+async function querySplitColumnsWithTiming(
+  connection: NzConnection,
+  database: string,
+  options?: { schema?: string; tableName?: string },
+): Promise<{ rows: Record<string, unknown>[]; totalMs: number }> {
+  const queries = buildNetezzaColumnsWithKeysQueries(database, options);
+  let totalMs = 0;
+  const rows = await loadNetezzaColumnsWithKeysRows(
+    queries,
+    async (sql, role) => {
+      const probe = await queryRowsWithTiming(
+        connection,
+        sql,
+        `columns-${role}:${database}`,
+      );
+      totalMs += probe.timing.totalMs;
+      return probe.rows;
+    },
+  );
+  return { rows, totalMs };
+}
+
 describeIfDb("Netezza metadata prefetch split - live", () => {
   let connection: NzConnection;
   let targetDatabase: string;
   let bigDatabase: string;
+  let smallestDatabase: string;
+  let largestDatabase: string;
   let sampleTable: { schema: string; name: string } | undefined;
   let sampleExternalTable: { schema: string; name: string } | undefined;
 
@@ -185,6 +261,8 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
       connectionDb;
     bigDatabase =
       process.env.NZ_DEV_BIG_PREFETCH_DB || largest || targetDatabase;
+    smallestDatabase = smallest || targetDatabase;
+    largestDatabase = largest || bigDatabase;
 
     const tableRows = await queryRows(
       connection,
@@ -270,13 +348,8 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
     PREFETCH_TIMEOUT_MS + 60_000,
   );
 
-  itIfDb("T11: main columns query returns rows with PK/FK flags", async () => {
-    const probe = await queryRowsWithTiming(
-      connection,
-      NZ_QUERIES.listColumnsWithKeys(targetDatabase),
-      `columns-main:${targetDatabase}`,
-    );
-    const rows = probe.rows;
+  itIfDb("T11: split columns snapshot returns rows with PK/FK flags", async () => {
+    const { rows } = await querySplitColumnsWithTiming(connection, targetDatabase);
     expect(rows.length).toBeGreaterThan(0);
     const first = rows[0];
     expect(first).toHaveProperty("TABLENAME");
@@ -289,6 +362,53 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
   });
 
   itIfDb(
+    "T11 parity: legacy SQL and split in-memory merge are identical on the smallest and largest databases",
+    async () => {
+      const databases = [...new Set([smallestDatabase, largestDatabase])];
+      for (const database of databases) {
+        const legacy = await queryRowsWithTiming(
+          connection,
+          buildLegacyColumnsWithKeysQuery(database),
+          `columns-legacy:${database}`,
+          600,
+        );
+        const split = await querySplitColumnsWithTiming(connection, database);
+
+        console.log(
+          `PROBE PARITY ${database}: rows=${legacy.rows.length} legacy=${legacy.timing.totalMs}ms split=${split.totalMs}ms`,
+        );
+        expect(split.rows).toEqual(legacy.rows);
+      }
+    },
+    900_000,
+  );
+
+  itIfDb(
+    "T11 targeted parity: scoped auxiliary scans match the legacy query for one table",
+    async () => {
+      if (!sampleTable) {
+        throw new Error(`Database '${targetDatabase}' has no table/view for targeted parity`);
+      }
+      const options = {
+        schema: sampleTable.schema,
+        tableName: sampleTable.name,
+      };
+      const legacy = await queryRows(
+        connection,
+        buildLegacyColumnsWithKeysQuery(targetDatabase, options),
+      );
+      const split = await querySplitColumnsWithTiming(
+        connection,
+        targetDatabase,
+        options,
+      );
+
+      expect(split.rows).toEqual(legacy);
+    },
+    PREFETCH_TIMEOUT_MS + 60_000,
+  );
+
+  itIfDb(
     "T11a: every prefetched table/view layer has an exact Netezza column key",
     async () => {
       // One NzConnection permits one active reader. This matches the
@@ -297,10 +417,10 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
         connection,
         NZ_QUERIES.listTablesAndViews([targetDatabase]),
       );
-      const mainColumnRows = await queryRows(
+      const mainColumnRows = (await querySplitColumnsWithTiming(
         connection,
-        NZ_QUERIES.listColumnsWithKeys(targetDatabase),
-      );
+        targetDatabase,
+      )).rows;
       const externalColumnRows = await queryRows(
         connection,
         NZ_QUERIES.listExternalColumnsWithKeys(targetDatabase),
@@ -355,10 +475,10 @@ describeIfDb("Netezza metadata prefetch split - live", () => {
 
   itIfDb("T11c: merged main + external columns have no duplicate ATTNAME per table", async () => {
     // Sequential awaits: the Netezza driver allows one active command per connection.
-    const mainRows = await queryRows(
+    const mainRows = (await querySplitColumnsWithTiming(
       connection,
-      NZ_QUERIES.listColumnsWithKeys(targetDatabase),
-    );
+      targetDatabase,
+    )).rows;
     const externalRows = await queryRows(
       connection,
       NZ_QUERIES.listExternalColumnsWithKeys(targetDatabase),

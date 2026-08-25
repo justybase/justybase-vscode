@@ -53,6 +53,9 @@ describe('connection-scoped metadata query runner', () => {
                 releaseFirst();
                 await firstQueryGate;
             }
+            options.onMetadataExecutionComplete?.({
+                totalMs: options.query === 'SELECT one' ? 10 : 20,
+            });
             return { columns: [], data: [] };
         });
 
@@ -63,19 +66,28 @@ describe('connection-scoped metadata query runner', () => {
             queryExecutor,
         });
 
+        const firstObserver = {
+            onExecutionStarted: jest.fn(),
+            onExecutionCompleted: jest.fn(),
+        };
+        const secondObserver = {
+            onExecutionStarted: jest.fn(),
+            onExecutionCompleted: jest.fn(),
+        };
         const first = runner('SELECT one', {
             source: 'connection-prefetch',
             kind: 'databases',
             connectionName: 'NZ',
-        });
+        }, firstObserver);
         await firstQueryStarted;
         const second = runner('SELECT two', {
             source: 'connection-prefetch',
             kind: 'schemas',
             connectionName: 'NZ',
-        });
+        }, secondObserver);
 
         expect(queryExecutor).toHaveBeenCalledTimes(1);
+        expect(secondObserver.onExecutionStarted).not.toHaveBeenCalled();
         allowFirstQueryToFinish();
         await Promise.all([first, second]);
 
@@ -87,6 +99,10 @@ describe('connection-scoped metadata query runner', () => {
         expect(secondOptions.connectionOverride).toBe(connection);
         expect(firstOptions.metadataSession).toBe(secondOptions.metadataSession);
         expect(secondOptions.metadataSession?.sessionId).toBe('12345');
+        expect(firstObserver.onExecutionStarted).toHaveBeenCalledTimes(1);
+        expect(secondObserver.onExecutionStarted).toHaveBeenCalledTimes(1);
+        expect(firstObserver.onExecutionCompleted).toHaveBeenCalledWith({ totalMs: 10 });
+        expect(secondObserver.onExecutionCompleted).toHaveBeenCalledWith({ totalMs: 20 });
 
         await runner.dispose?.();
         expect(connection.close).toHaveBeenCalledTimes(1);

@@ -785,6 +785,44 @@ function buildIdentifierCondition(
     return buildNetezzaIdentifierEquality(columnExpression, identifier);
 }
 
+interface NetezzaColumnQueryOptions {
+    schema?: string | NetezzaIdentifier;
+    tableName?: string | NetezzaIdentifier;
+    objTypes?: string[];
+}
+
+function buildRegularColumnObjectPredicate(
+    database: string | NetezzaIdentifier,
+    options?: NetezzaColumnQueryOptions,
+): string {
+    const objTypes = options?.objTypes || [NZ_OBJECT_TYPES.TABLE, NZ_OBJECT_TYPES.VIEW];
+    const objTypesSql = objTypes.map(type => `'${escapeSqlLiteral(type)}'`).join(', ');
+    let predicate = `${buildIdentifierCondition('O.DBNAME', database)} AND O.OBJTYPE IN (${objTypesSql})`;
+    if (options?.schema) {
+        predicate += ` AND ${buildIdentifierCondition('O.SCHEMA', options.schema)}`;
+    }
+    if (options?.tableName) {
+        predicate += ` AND ${buildIdentifierCondition('O.OBJNAME', options.tableName)}`;
+    }
+    return predicate;
+}
+
+function buildAuxiliaryColumnObjectScope(
+    database: string | NetezzaIdentifier,
+    catalogAlias: 'K' | 'D',
+    options?: NetezzaColumnQueryOptions,
+): string {
+    if (!options?.schema && !options?.tableName) {
+        return '';
+    }
+    return `
+                AND ${catalogAlias}.OBJID IN (
+                    SELECT O.OBJID
+                    FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+                    WHERE ${buildRegularColumnObjectPredicate(database, options)}
+                )`;
+}
+
 // =============================================================================
 // COMMON QUERY TEMPLATES
 // =============================================================================
@@ -944,8 +982,10 @@ ${unionSql}
     },
 
 /**
-     * Get column metadata for tables in a database with optional PK/FK info
-     * Returns: TABLENAME, SCHEMA, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION, IS_PK, IS_FK
+     * Get the base column metadata leg for tables in a database.
+     * Key and distribution flags are fetched by separate catalog queries and
+     * merged in TypeScript by `loadColumnsWithKeysRows`.
+     * Returns: OBJID, TABLENAME, SCHEMA, DBNAME, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION
      *
      * Note: Uses DBNAME filter to ensure we only get objects from the specified database.
      * Column DESCRIPTION comes from _V_RELATION_COLUMN which doesn't have the cross-DB issue.
@@ -956,44 +996,52 @@ ${unionSql}
      * @param database - Database name
      * @param options - Optional filters: schema, tableName, objTypes
      */
-    listColumnsWithKeys: (database: string | NetezzaIdentifier, options?: { schema?: string | NetezzaIdentifier; tableName?: string | NetezzaIdentifier; objTypes?: string[] }): string => {
+    listColumnsWithKeys: (database: string | NetezzaIdentifier, options?: NetezzaColumnQueryOptions): string => {
         const db = database;
-        const objTypes = options?.objTypes || [NZ_OBJECT_TYPES.TABLE, NZ_OBJECT_TYPES.VIEW];
-        const objTypesStr = objTypes.map(t => `'${t}'`).join(', ');
-
-        // Always filter by DBNAME to ensure we get proper data from this database only
-        let whereClause = `${buildIdentifierCondition('O.DBNAME', db)} AND O.OBJTYPE IN (${objTypesStr})`;
-        if (options?.schema) {
-            whereClause += ` AND ${buildIdentifierCondition('O.SCHEMA', options.schema)}`;
-        }
-        if (options?.tableName) {
-            whereClause += ` AND ${buildIdentifierCondition('O.OBJNAME', options.tableName)}`;
-        }
+        const whereClause = buildRegularColumnObjectPredicate(db, options);
 
         return `
             SELECT
+                O.OBJID AS OBJID,
                 O.OBJNAME AS TABLENAME,
                 O.SCHEMA,
                 O.DBNAME,
                 C.ATTNAME,
                 C.FORMAT_TYPE,
                 C.ATTNUM,
-                COALESCE(C.DESCRIPTION, '') AS DESCRIPTION,
-                MAX(CASE WHEN K.CONTYPE = '${NZ_CONSTRAINT_TYPES.PRIMARY_KEY}' THEN 1 ELSE 0 END) AS IS_PK,
-                MAX(CASE WHEN K.CONTYPE = '${NZ_CONSTRAINT_TYPES.FOREIGN_KEY}' THEN 1 ELSE 0 END) AS IS_FK,
-                MAX(CASE WHEN D.ATTNAME IS NOT NULL THEN 1 ELSE 0 END) AS IS_DISTRIBUTION_KEY
+                C.DESCRIPTION AS DESCRIPTION
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} C
             JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O ON C.OBJID = O.OBJID
-            LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_KEYDATA)} K 
-                ON K.OBJID = O.OBJID
-                AND K.ATTNAME = C.ATTNAME
-                AND K.CONTYPE IN ('${NZ_CONSTRAINT_TYPES.PRIMARY_KEY}', '${NZ_CONSTRAINT_TYPES.FOREIGN_KEY}')
-            LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.TABLE_DIST_MAP)} D
-                ON D.OBJID = O.OBJID
-                AND D.ATTNAME = C.ATTNAME
             WHERE ${whereClause}
-            GROUP BY O.OBJNAME, O.SCHEMA, O.DBNAME, C.ATTNAME, C.FORMAT_TYPE, C.ATTNUM, C.DESCRIPTION
-            ORDER BY SCHEMA, TABLENAME, ATTNUM
+        `.trim();
+    },
+
+    /** Get all PK/FK column markers needed for one database column snapshot. */
+    listColumnKeyFlags: (
+        database: string | NetezzaIdentifier,
+        options?: NetezzaColumnQueryOptions,
+    ): string => {
+        const db = database;
+        const objectScope = buildAuxiliaryColumnObjectScope(db, 'K', options);
+        return `
+            SELECT K.OBJID, K.ATTNAME, K.CONTYPE
+            FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_KEYDATA)} K
+            WHERE ${buildIdentifierCondition('K.DATABASE', db)}
+                AND K.CONTYPE IN ('${NZ_CONSTRAINT_TYPES.PRIMARY_KEY}', '${NZ_CONSTRAINT_TYPES.FOREIGN_KEY}')${objectScope}
+        `.trim();
+    },
+
+    /** Get all distribution-column markers needed for one database column snapshot. */
+    listColumnDistributionFlags: (
+        database: string | NetezzaIdentifier,
+        options?: NetezzaColumnQueryOptions,
+    ): string => {
+        const db = database;
+        const objectScope = buildAuxiliaryColumnObjectScope(db, 'D', options);
+        return `
+            SELECT D.OBJID, D.ATTNAME
+            FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.TABLE_DIST_MAP)} D
+            WHERE ${buildIdentifierCondition('D.DATABASE', db)}${objectScope}
         `.trim();
     },
 

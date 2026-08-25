@@ -14,6 +14,7 @@ import { CopilotContext, TableReference } from './types';
 import { CopilotTableProfilesContextService } from './CopilotTableProfilesContextService';
 import { QueryHistoryManager } from '../../core/queryHistoryManager';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
+import { loadColumnsWithKeysRows } from '../../metadata/columnMetadataService';
 
 type SqlGenerationIntent = 'reporting' | 'aggregation' | 'quality-check' | 'etl-transform' | 'general';
 
@@ -377,14 +378,10 @@ export class CopilotContextBuilder {
                 return null;
             }
 
-            const sql = metadataProvider.buildColumnsWithKeysQuery(database, {
-                objTypes: ['TABLE', 'VIEW']
-            });
-
-            interface SchemaRow {
+            interface SchemaRow extends Record<string, unknown> {
                 SCHEMA: string;
                 TABLENAME: string;
-                DESCRIPTION: string;
+                DESCRIPTION: string | null;
                 ATTNAME: string;
                 FORMAT_TYPE: string;
                 ATTNUM: number;
@@ -392,7 +389,12 @@ export class CopilotContextBuilder {
                 IS_FK: number;
             }
 
-            const mainResult = await executeDatabaseQuery<SchemaRow>(nzConnection, sql);
+            const mainResult = await loadColumnsWithKeysRows(
+                database,
+                { objTypes: ['TABLE', 'VIEW'] },
+                connectionDetails.dbType,
+                (sql) => executeDatabaseQuery<Record<string, unknown>>(nzConnection!, sql),
+            ) as SchemaRow[];
             let externalResult: SchemaRow[] = [];
             const buildExternalQuery = metadataProvider.buildExternalColumnsWithKeysQuery;
             if (typeof buildExternalQuery === 'function') {
@@ -409,9 +411,9 @@ export class CopilotContextBuilder {
                 }
             }
 
-            // The two catalog queries intentionally stay separate. Resolve
-            // duplicate columns in process so an external compatibility row
-            // can never replace the regular catalog's richer metadata.
+            // The regular three-query snapshot and optional external query stay
+            // separate. Resolve duplicates so an external compatibility row can
+            // never replace the regular catalog's richer metadata.
             const resultByColumn = new Map<string, SchemaRow>();
             for (const row of [...(mainResult ?? []), ...externalResult]) {
                 const key = [row.SCHEMA, row.TABLENAME, row.ATTNAME]

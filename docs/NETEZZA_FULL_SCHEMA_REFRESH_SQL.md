@@ -186,44 +186,49 @@ the procedure cache.
 
 ## 7. Columns of Regular Tables and Views — Once per Live Database
 
-Source: `NZ_QUERIES.listColumnsWithKeys(TEST_DB)`.
+Sources: `NZ_QUERIES.listColumnsWithKeys(TEST_DB)`,
+`NZ_QUERIES.listColumnKeyFlags(TEST_DB)`, and
+`NZ_QUERIES.listColumnDistributionFlags(TEST_DB)`.
 
 ```sql
 SELECT
+    O.OBJID AS OBJID,
     O.OBJNAME AS TABLENAME,
     O.SCHEMA,
     O.DBNAME,
     C.ATTNAME,
     C.FORMAT_TYPE,
     C.ATTNUM,
-    COALESCE(C.DESCRIPTION, '') AS DESCRIPTION,
-    MAX(CASE WHEN K.CONTYPE = 'p' THEN 1 ELSE 0 END) AS IS_PK,
-    MAX(CASE WHEN K.CONTYPE = 'f' THEN 1 ELSE 0 END) AS IS_FK,
-    MAX(CASE WHEN D.ATTNAME IS NOT NULL THEN 1 ELSE 0 END) AS IS_DISTRIBUTION_KEY
+    C.DESCRIPTION AS DESCRIPTION
 FROM TEST_DB.._V_RELATION_COLUMN C
 JOIN TEST_DB.._V_OBJECT_DATA O ON C.OBJID = O.OBJID
-LEFT JOIN TEST_DB.._V_RELATION_KEYDATA K
-    ON K.OBJID = O.OBJID
-    AND K.ATTNAME = C.ATTNAME
-    AND K.CONTYPE IN ('p', 'f')
-LEFT JOIN TEST_DB.._V_TABLE_DIST_MAP D
-    ON D.OBJID = O.OBJID
-    AND D.ATTNAME = C.ATTNAME
 WHERE O.DBNAME = 'TEST_DB'
   AND O.OBJTYPE IN ('TABLE', 'VIEW')
-GROUP BY O.OBJNAME,
-         O.SCHEMA,
-         O.DBNAME,
-         C.ATTNAME,
-         C.FORMAT_TYPE,
-         C.ATTNUM,
-         C.DESCRIPTION
-ORDER BY SCHEMA, TABLENAME, ATTNUM
+
+SELECT K.OBJID, K.ATTNAME, K.CONTYPE
+FROM TEST_DB.._V_RELATION_KEYDATA K
+WHERE K.DATABASE = 'TEST_DB'
+  AND K.CONTYPE IN ('p', 'f')
+
+SELECT D.OBJID, D.ATTNAME
+FROM TEST_DB.._V_TABLE_DIST_MAP D
+WHERE D.DATABASE = 'TEST_DB'
 ```
 
-This is the main query responsible for bulk-fetching columns, primary and
-foreign keys, and distribution columns. Its result is grouped by table and
-stored in the cache.
+The three scans run serially on the metadata connection. TypeScript reproduces
+the former `LEFT JOIN`, `MAX`, `GROUP BY`, and `ORDER BY` semantics before the
+result is grouped by table and stored in the cache. None of these operations is
+performed by Netezza for the regular column snapshot. The base scan deliberately
+preserves a missing description as `NULL`, matching the rows returned by the
+former grouped query on live Netezza.
+
+Database-wide refreshes read the complete per-database key and distribution
+views shown above. Targeted schema/table lookups add an `OBJID IN (SELECT OBJID
+FROM ..._V_OBJECT_DATA ...)` predicate to both auxiliary scans, using the same
+object filters as the base scan. This prevents user-facing row limits from
+silently dropping key markers for the requested object; metadata refresh also
+rejects any catalog result explicitly marked as row-limited instead of caching
+a partial snapshot.
 
 ## 8. External Table Columns — Conditionally, at Most Once per Database
 
@@ -260,7 +265,7 @@ the number of those databases in which an external table was detected, then
 the number of actual catalog queries for a complete, error-free refresh is:
 
 ```text
-1 + 6N + E
+1 + 8N + E
 ```
 
 Breakdown:
@@ -269,11 +274,11 @@ Breakdown:
 - `2N` — schemas and type groups;
 - `2N` — regular and external objects;
 - `N` — procedures;
-- `N` — regular columns;
-- `E` — external table columns.
+- `3N` — regular columns, key flags, and distribution flags;
+- `E` — external-table columns, only where detected.
 
 The technical `SELECT CURRENT_SID` from section 0 is added once, for a total
-of `2 + 6N + E` generated SQL statements. Catalog or cache errors, or skipping
+of `2 + 8N + E` generated SQL statements. Catalog or cache errors, or skipping
 a dead database, may reduce the number of executions.
 
 ## Refresh Observability and Snapshot Verification

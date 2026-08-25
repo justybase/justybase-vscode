@@ -19,7 +19,10 @@ import {
 import type { NzConnection, QueryResult } from '../types';
 import { logWithFallback } from '../utils/logger';
 import type { MetadataQueryContext } from './metadataQueryDiagnostics';
-import type { DisposableQueryRunnerRawFn } from './prefetch';
+import type {
+    DisposableQueryRunnerRawFn,
+    MetadataPrefetchExecutionObserver,
+} from './prefetch';
 
 type MetadataQueryExecutor = (options: RunQueryRawOptions) => Promise<QueryResult>;
 
@@ -166,25 +169,45 @@ export function createConnectionScopedMetadataQueryRunner(
     const runner = (async (
         query: string,
         metadataContext?: MetadataQueryContext,
-    ): Promise<QueryResult> => scope.run((connection, session, sessionQueueWaitMs) => {
+        executionObserver?: MetadataPrefetchExecutionObserver,
+    ): Promise<QueryResult> => scope.run(async (connection, session, sessionQueueWaitMs) => {
         const queueWaitMs = (metadataContext?.queueWaitMs ?? 0) + sessionQueueWaitMs;
         const scopedMetadataContext = metadataContext
             ? { ...metadataContext, queueWaitMs }
             : undefined;
-        return execute({
-            context: options.context,
-            query,
-            silent: true,
-            connectionManager: options.connectionManager,
-            connectionName: options.connectionName,
-            maxRows: options.maxRows ?? 1_000_000,
-            isUserQuery: false,
-            timeoutSeconds: options.timeoutSeconds,
-            metadataContext: scopedMetadataContext,
-            metadataQueueWaitMs: queueWaitMs,
-            connectionOverride: connection,
-            metadataSession: session,
-        });
+        executionObserver?.onExecutionStarted(queueWaitMs);
+
+        let executionCompleted = false;
+        const reportExecutionCompleted = (timing?: Parameters<MetadataPrefetchExecutionObserver['onExecutionCompleted']>[0]): void => {
+            if (executionCompleted) {
+                return;
+            }
+            executionCompleted = true;
+            executionObserver?.onExecutionCompleted(timing);
+        };
+
+        try {
+            const result = await execute({
+                context: options.context,
+                query,
+                silent: true,
+                connectionManager: options.connectionManager,
+                connectionName: options.connectionName,
+                maxRows: options.maxRows ?? 1_000_000,
+                isUserQuery: false,
+                timeoutSeconds: options.timeoutSeconds,
+                metadataContext: scopedMetadataContext,
+                metadataQueueWaitMs: queueWaitMs,
+                onMetadataExecutionComplete: reportExecutionCompleted,
+                connectionOverride: connection,
+                metadataSession: session,
+            });
+            reportExecutionCompleted();
+            return result;
+        } catch (error: unknown) {
+            reportExecutionCompleted();
+            throw error;
+        }
     })) as DisposableQueryRunnerRawFn;
     runner.dispose = () => scope.dispose();
     return runner;

@@ -8,6 +8,7 @@ import {
     groupColumnRowsByTableKey,
     type RawColumnRowWithKeys,
 } from '../columnRowMapping';
+import { loadColumnsWithKeysRows } from '../columnMetadataService';
 import { buildNetezzaCacheDatabasePart } from '../helpers';
 import type { MetadataCache } from './MetadataCache';
 
@@ -17,7 +18,7 @@ export interface TableColumnWarmupTarget {
     table: string;
 }
 
-export type CatalogRowReader = (sql: string) => Promise<RawColumnRowWithKeys[]>;
+export type CatalogRowReader = (sql: string) => Promise<Record<string, unknown>[]>;
 
 async function readRowsFromConnection<T extends object>(
     connection: DatabaseConnection,
@@ -65,13 +66,16 @@ export async function warmTableColumnsFromCatalog(
     const cacheTable = isNetezza
         ? target.table
         : target.table;
-    const query = provider.buildColumnsWithKeysQuery(target.database, {
-        schema: target.schema,
-        tableName: target.table,
-    });
-
     try {
-        let rows = await readRows(query);
+        let rows = await loadColumnsWithKeysRows(
+            target.database,
+            {
+                schema: target.schema,
+                tableName: target.table,
+            },
+            isNetezza ? 'netezza' : databaseKind,
+            (sql) => readRows(sql),
+        ) as RawColumnRowWithKeys[];
         const columnKey = buildColumnCacheKey(
             cacheDatabase,
             cacheSchema,
@@ -95,7 +99,7 @@ export async function warmTableColumnsFromCatalog(
                 target.table,
             );
             if (externalQuery) {
-                rows = await readRows(externalQuery);
+                rows = await readRows(externalQuery) as RawColumnRowWithKeys[];
                 columns = groupColumnRowsByTableKey(rows, {
                     dbName: target.database,
                     schemaName: target.schema,
@@ -124,5 +128,5 @@ export async function warmTableColumnsFromCatalog(
 export function createConnectionRowReader(
     connection: DatabaseConnection,
 ): CatalogRowReader {
-    return sql => readRowsFromConnection<RawColumnRowWithKeys>(connection, sql);
+    return sql => readRowsFromConnection<Record<string, unknown>>(connection, sql);
 }

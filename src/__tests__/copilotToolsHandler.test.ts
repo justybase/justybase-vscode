@@ -246,10 +246,42 @@ describe('services/copilot/CopilotToolsHandler', () => {
             undefined,
             undefined,
             undefined,
-            undefined,
+            1_000_000,
             false
         );
         expect(result).toContain('FACT_SALES_2');
+    });
+
+    it('does not expose false key flags from a truncated auxiliary catalog scan', async () => {
+        (runQueryRaw as jest.Mock).mockImplementation(async (_context: unknown, sql: string) => {
+            if (sql.includes('_V_RELATION_KEYDATA')) {
+                return {
+                    columns: [{ name: 'OBJID' }, { name: 'ATTNAME' }, { name: 'CONTYPE' }],
+                    data: [[1, 'ID', 'p']],
+                    limitReached: true,
+                };
+            }
+            return {
+                columns: [
+                    { name: 'OBJID' },
+                    { name: 'DBNAME' },
+                    { name: 'SCHEMA' },
+                    { name: 'TABLENAME' },
+                    { name: 'ATTNAME' },
+                    { name: 'FORMAT_TYPE' },
+                    { name: 'ATTNUM' },
+                    { name: 'DESCRIPTION' },
+                ],
+                data: [[1, 'JUST_DATA_2', 'ADMIN', 'FACT_SALES_2', 'ID', 'INTEGER', 1, '']],
+            };
+        });
+
+        const result = await handler.getColumnsForTables(['JUST_DATA_2.ADMIN.FACT_SALES_2']);
+
+        expect(result).toBe('[]');
+        expect(runQueryRaw).toHaveBeenCalledTimes(2);
+        expect((runQueryRaw as jest.Mock).mock.calls[0][8]).toBe(1_000_000);
+        expect((runQueryRaw as jest.Mock).mock.calls[1][8]).toBe(1_000_000);
     });
 
     it('falls back to the external-table catalog only when the main lookup is empty', async () => {
@@ -275,9 +307,11 @@ describe('services/copilot/CopilotToolsHandler', () => {
 
         const result = await handler.getColumnsForTables(['JUST_DATA_2.ADMIN.ET_SALES']);
 
-        expect(runQueryRaw).toHaveBeenCalledTimes(2);
+        expect(runQueryRaw).toHaveBeenCalledTimes(4);
         expect((runQueryRaw as jest.Mock).mock.calls[0][1]).not.toContain('_V_EXTERNAL');
-        expect((runQueryRaw as jest.Mock).mock.calls[1][1]).toContain('_V_EXTERNAL');
+        expect((runQueryRaw as jest.Mock).mock.calls[1][1]).toContain('_V_RELATION_KEYDATA');
+        expect((runQueryRaw as jest.Mock).mock.calls[2][1]).toContain('_V_TABLE_DIST_MAP');
+        expect((runQueryRaw as jest.Mock).mock.calls[3][1]).toContain('_V_EXTERNAL');
         expect(result).toContain('ET_SALES');
         expect(result).toContain('EXT_ID');
     });
@@ -333,7 +367,7 @@ describe('services/copilot/CopilotToolsHandler', () => {
             undefined,
             undefined,
             undefined,
-            undefined,
+            1_000_000,
             false
         );
         expect(runQueryRaw).toHaveBeenCalledWith(
@@ -345,7 +379,7 @@ describe('services/copilot/CopilotToolsHandler', () => {
             undefined,
             undefined,
             undefined,
-            undefined,
+            1_000_000,
             false
         );
         expect(result).toContain('TABLE1');
@@ -379,7 +413,7 @@ describe('services/copilot/CopilotToolsHandler', () => {
             undefined,
             undefined,
             undefined,
-            undefined,
+            1_000_000,
             false
         );
         expect(result).toContain('MYTABLE');

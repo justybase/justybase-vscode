@@ -35,6 +35,7 @@ export type {
   DatabaseConnectionOptionValue,
   DatabaseMetadataProvider,
   DatabaseColumnQueryOptions,
+  DatabaseColumnsWithKeysQuerySet,
   DatabaseColumnLookupParams,
   DatabaseMirroredSystemCatalog,
   DatabaseSourceSearchQueryOptions,

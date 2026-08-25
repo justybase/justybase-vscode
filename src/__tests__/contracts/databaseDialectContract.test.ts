@@ -153,6 +153,7 @@ const DIALECT_CASES: readonly DialectContractCase[] = [
       expect(mockNzConnectionConstructor).toHaveBeenCalledWith({
         ...expectedConfig,
         connectionTimeout: 30,
+        clientType: 11,
       });
       expect(connection).toMatchObject({
         createCommand: expect.any(Function),

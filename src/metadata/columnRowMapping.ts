@@ -12,7 +12,7 @@ export interface RawColumnRowWithKeys {
     FORMAT_TYPE: string;
     SCHEMA?: string;
     DBNAME?: string;
-    DESCRIPTION?: string;
+    DESCRIPTION?: string | null;
     IS_PK?: number | string;
     IS_FK?: number | string;
     IS_DISTRIBUTION_KEY?: number | string;

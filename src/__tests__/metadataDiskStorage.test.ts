@@ -74,8 +74,9 @@ describe('MetadataDiskStorage', () => {
         );
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         jest.useRealTimers();
+        await cache.dispose();
         jest.restoreAllMocks();
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
@@ -290,6 +291,7 @@ describe('MetadataDiskStorage', () => {
     it('does not persist a debounced snapshot without a prefetch lease', async () => {
         jest.useFakeTimers();
         populateCache('conn1');
+        const acquireLease = jest.spyOn(storage, 'acquirePrefetchLease').mockResolvedValue(undefined);
 
         storage.scheduleSave(cache, 'conn1', Date.now());
         expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(false);
@@ -298,6 +300,7 @@ describe('MetadataDiskStorage', () => {
         await storage.whenWriteQueueIdle();
 
         expect(fs.existsSync(getV3IndexPath(tempDir))).toBe(false);
+        expect(acquireLease).toHaveBeenCalledWith('conn1');
     });
 
     it('re-queues a dirty connection when another flush temporarily holds its lease', async () => {

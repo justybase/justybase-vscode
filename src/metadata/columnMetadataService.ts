@@ -1,6 +1,10 @@
 import { queryResultToRows } from '../core/queryRunner';
-import { DatabaseKind } from '../contracts/database';
+import { DatabaseColumnQueryOptions, DatabaseKind } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
+import {
+    ColumnsWithKeysQueryRole,
+    loadNetezzaColumnsWithKeysRows,
+} from '../dialects/netezza/metadata/columnsWithKeys';
 import { QueryResult } from '../types';
 import { ColumnMetadata as CacheColumnMetadata } from './types';
 import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
@@ -20,6 +24,7 @@ export interface CanonicalColumnMetadata {
 }
 
 export interface RawColumnsWithKeysRow {
+    OBJID?: unknown;
     DBNAME?: string;
     DATABASE?: string;
     SCHEMA?: string;
@@ -32,9 +37,15 @@ export interface RawColumnsWithKeysRow {
     DESCRIPTION?: string | null;
     IS_PK?: boolean | number | string | null;
     IS_FK?: boolean | number | string | null;
+    IS_DISTRIBUTION_KEY?: boolean | number | string | null;
     ATTNUM?: number;
     [key: string]: unknown;
 }
+
+export type ColumnsWithKeysRowReader = (
+    sql: string,
+    role: ColumnsWithKeysQueryRole,
+) => Promise<Record<string, unknown>[]>;
 
 export interface RawTableColumnsRow {
     ATTNAME: string;
@@ -86,6 +97,21 @@ export function buildColumnsWithKeysQuery(
     kind?: string | DatabaseKind
 ): string {
     return getDatabaseMetadataProvider(kind).buildColumnsWithKeysQuery(database, options);
+}
+
+/** Execute a dialect's complete columns-with-keys operation. */
+export async function loadColumnsWithKeysRows(
+    database: string,
+    options: DatabaseColumnQueryOptions | undefined,
+    kind: string | DatabaseKind | undefined,
+    readRows: ColumnsWithKeysRowReader,
+): Promise<RawColumnsWithKeysRow[]> {
+    const provider = getDatabaseMetadataProvider(kind);
+    const querySet = provider.buildColumnsWithKeysQueries?.(database, options);
+    if (querySet) {
+        return loadNetezzaColumnsWithKeysRows(querySet, readRows) as Promise<RawColumnsWithKeysRow[]>;
+    }
+    return readRows(provider.buildColumnsWithKeysQuery(database, options), 'columns') as Promise<RawColumnsWithKeysRow[]>;
 }
 
 export function buildTableColumnsQuery(

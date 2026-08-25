@@ -6,13 +6,14 @@ import {
     getDatabaseMetadataProvider,
     getRequiredDatabaseDdlProvider
 } from '../../../core/connectionFactory';
-import { runQueryRaw } from '../../../core/queryRunner';
+import { queryResultToRows, runQueryRaw } from '../../../core/queryRunner';
 import { NzConnection } from '../../../types';
 import {
-    buildColumnsWithKeysQuery,
     buildCopilotDefaultObjectTypes,
     CanonicalColumnMetadata,
     groupCanonicalColumnsByTable,
+    loadColumnsWithKeysRows,
+    mapColumnsWithKeysRows,
     parseColumnsWithKeysResult,
     toCacheColumnMetadata
 } from '../../../metadata/columnMetadataService';
@@ -20,6 +21,8 @@ import { escapeSqlIdentifier, escapeSqlLiteral } from '../../../utils/sqlUtils';
 import { MetadataCache } from '../../../metadataCache';
 import { ColumnMetadata } from '../../../metadata/types';
 import { CopilotToolRuntime } from './copilotToolRuntime';
+
+const COPILOT_METADATA_MAX_ROWS = 1_000_000;
 
 interface CopilotSchemaIntrospectionToolsDeps {
     connectionManager: ConnectionManager;
@@ -161,14 +164,8 @@ export class CopilotSchemaIntrospectionTools {
         // tables at once, but parallel catalog connections create avoidable
         // session pressure on Netezza.
         for (const target of targetsToQuery.values()) {
-            const sql = buildColumnsWithKeysQuery(target.database, {
-                schema: target.schema,
-                tableName: target.tableName,
-                objTypes: objectTypes
-            }, databaseKind);
-
-            const matchingColumns = (result: Awaited<ReturnType<typeof runQueryRaw>>) =>
-                parseColumnsWithKeysResult(result, target.database).filter((column) => {
+            const matchingColumns = (columns: CanonicalColumnMetadata[]) =>
+                columns.filter((column) => {
                     if (column.tableName !== target.tableName.toUpperCase()) {
                         return false;
                     }
@@ -176,18 +173,36 @@ export class CopilotSchemaIntrospectionTools {
                 });
 
             try {
-                let targetColumns = matchingColumns(await runQueryRaw(
-                    this.deps.context,
-                    sql,
-                    true,
-                    this.deps.connectionManager,
-                    connectionName,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    false
-                ));
+                const rawRows = await loadColumnsWithKeysRows(
+                    target.database,
+                    {
+                        schema: target.schema,
+                        tableName: target.tableName,
+                        objTypes: objectTypes,
+                    },
+                    databaseKind,
+                    async (sql) => {
+                        const result = await runQueryRaw(
+                            this.deps.context,
+                            sql,
+                            true,
+                            this.deps.connectionManager,
+                            connectionName,
+                            undefined,
+                            undefined,
+                            undefined,
+                            COPILOT_METADATA_MAX_ROWS,
+                            false,
+                        );
+                        if (result.limitReached) {
+                            throw new Error('Column metadata exceeded the catalog row limit.');
+                        }
+                        return queryResultToRows<Record<string, unknown>>(result);
+                    },
+                );
+                let targetColumns = matchingColumns(
+                    mapColumnsWithKeysRows(rawRows, target.database),
+                );
 
                 // Regular catalog metadata intentionally excludes external
                 // tables. Probe their small companion query only after a
@@ -200,7 +215,7 @@ export class CopilotSchemaIntrospectionTools {
                         target.tableName,
                     );
                     if (externalSql) {
-                        targetColumns = matchingColumns(await runQueryRaw(
+                        targetColumns = matchingColumns(parseColumnsWithKeysResult(await runQueryRaw(
                             this.deps.context,
                             externalSql,
                             true,
@@ -209,9 +224,9 @@ export class CopilotSchemaIntrospectionTools {
                             undefined,
                             undefined,
                             undefined,
-                            undefined,
+                            COPILOT_METADATA_MAX_ROWS,
                             false
-                        ));
+                        ), target.database));
                     }
                 }
 

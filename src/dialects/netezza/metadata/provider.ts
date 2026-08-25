@@ -10,6 +10,7 @@ import {
     NZ_SYSTEM_VIEWS,
     qualifySystemView
 } from './systemQueries';
+import { buildNetezzaColumnsWithKeysQueries } from './columnsWithKeys';
 import {
     SYSTEM_CATALOG_SOURCE_DATABASE,
     isMirroredSystemCatalogObjectName
@@ -217,6 +218,9 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
     },
     buildColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string {
         return NZ_QUERIES.listColumnsWithKeys(database, options);
+    },
+    buildColumnsWithKeysQueries(database: string, options?: DatabaseColumnQueryOptions) {
+        return buildNetezzaColumnsWithKeysQueries(database, options);
     },
     buildExternalColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string {
         return NZ_QUERIES.listExternalColumnsWithKeys(database, options);
