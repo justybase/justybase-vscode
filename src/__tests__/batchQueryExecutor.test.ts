@@ -720,6 +720,49 @@ END_PROC;`;
             expect(mockConn.close).toHaveBeenCalled();
         });
 
+        it('closes a transient connection opened after the execution is retired', async () => {
+            let executionCurrent = true;
+            let resolveConnection!: (value: { connection: typeof mockConn; shouldCloseConnection: boolean }) => void;
+            let signalConnectionRequested!: () => void;
+            const connectionRequested = new Promise<void>(resolve => {
+                signalConnectionRequested = resolve;
+            });
+            const pendingConnection = new Promise<{ connection: typeof mockConn; shouldCloseConnection: boolean }>(resolve => {
+                resolveConnection = resolve;
+            });
+            mockConnManager.getDocumentKeepConnectionOpen.mockReturnValue(false);
+            mockGetConnectionForDocument.mockImplementationOnce(() => {
+                signalConnectionRequested();
+                return pendingConnection;
+            });
+
+            const execution = runQueriesSequentially(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                0,
+                undefined,
+                [],
+                { isExecutionCurrent: () => executionCurrent },
+            );
+            await connectionRequested;
+            executionCurrent = false;
+            resolveConnection({ connection: mockConn, shouldCloseConnection: true });
+
+            await expect(execution).rejects.toThrow('execution superseded');
+            expect(mockConn.close).toHaveBeenCalledTimes(1);
+            expect(mockExecuteAndFetch).not.toHaveBeenCalled();
+        });
+
         it('should not close connection when shouldCloseConnection is false', async () => {
             mockExecuteAndFetch.mockResolvedValue({
                 results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
@@ -1114,6 +1157,49 @@ END_PROC;`;
             );
 
             expect(mockConn.close).toHaveBeenCalled();
+        });
+
+        it('closes a transient streaming connection opened after the execution is retired', async () => {
+            let executionCurrent = true;
+            let resolveConnection!: (value: { connection: typeof mockConn; shouldCloseConnection: boolean }) => void;
+            let signalConnectionRequested!: () => void;
+            const connectionRequested = new Promise<void>(resolve => {
+                signalConnectionRequested = resolve;
+            });
+            const pendingConnection = new Promise<{ connection: typeof mockConn; shouldCloseConnection: boolean }>(resolve => {
+                resolveConnection = resolve;
+            });
+            mockConnManager.getDocumentKeepConnectionOpen.mockReturnValue(false);
+            mockGetConnectionForDocument.mockImplementationOnce(() => {
+                signalConnectionRequested();
+                return pendingConnection;
+            });
+
+            const execution = runQueriesWithStreaming(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                5000,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                0,
+                undefined,
+                { isExecutionCurrent: () => executionCurrent },
+            );
+            await connectionRequested;
+            executionCurrent = false;
+            resolveConnection({ connection: mockConn, shouldCloseConnection: true });
+
+            await expect(execution).rejects.toThrow('execution superseded');
+            expect(mockConn.close).toHaveBeenCalledTimes(1);
+            expect(mockExecuteWithStreaming).not.toHaveBeenCalled();
         });
 
         it('should register and remove notice handler', async () => {

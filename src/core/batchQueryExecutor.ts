@@ -28,6 +28,7 @@ import {
     SQL_CONSOLE_HISTORY_TAG,
 } from "../utils/sqlConsole";
 import { isConnectionBrokenError } from "./queryRunnerUtils";
+import { assertExecutionCurrent } from "./executionGuard";
 
 function handleBatchQueryFailure(params: {
     err: unknown;
@@ -49,6 +50,7 @@ function handleBatchQueryFailure(params: {
     connectionName: string;
     documentUri?: string;
 }): void {
+    assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
     const errorMsg = params.err instanceof Error ? params.err.message : String(params.err);
     const durationMs = Date.now() - params.startTime;
 
@@ -167,6 +169,7 @@ export async function runQueriesSequentially(
     if (documentUri) {
         streamingManager.clearAborted(documentUri);
     }
+    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
 
     if (!resolvedConnectionName) {
         logBatch(outputChannel, logCallback, "Error: No connection selected");
@@ -205,9 +208,11 @@ export async function runQueriesSequentially(
             const notification = msg as { message: string };
             logBatch(outputChannel, logCallback, notification.message);
         };
-        connection.on("notice", noticeHandler);
 
         try {
+            assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+            connection.on("notice", noticeHandler);
+
             const sessionId = await captureSessionId(
                 connection,
                 connManager,
@@ -221,6 +226,7 @@ export async function runQueriesSequentially(
                 : undefined;
 
             for (let i = _startIndex; i < queries.length; i++) {
+                assertExecutionCurrent(_batchOptions.isExecutionCurrent);
                 currentQueryIndex = i;
                 if (documentUri && streamingManager.isAborted(documentUri)) {
                     throw new Error('Query cancelled');
@@ -249,6 +255,7 @@ export async function runQueriesSequentially(
                         ),
                         createMacroFileReadContext(documentUri),
                     );
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
                     queryToExecute = preparedQuery.sql;
                     currentQueryAllowsRetry =
                         _batchOptions.retryOnBrokenConnection !== false &&
@@ -262,6 +269,7 @@ export async function runQueriesSequentially(
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
                         return allResults;
                     }
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
 
                     if (queryStartCallback && !executionId) {
                         executionId = queryStartCallback(i, queryToExecute, resolvedConnectionName);
@@ -294,6 +302,7 @@ export async function runQueriesSequentially(
                         maxRows,
                         createDropSessionCallback(connManager, documentUri),
                     );
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
 
                     const totalRows = batchResults?.reduce(
                         (sum, rs) => sum + (rs.rows?.length || 0),
@@ -416,6 +425,7 @@ export async function runQueriesSequentially(
             }
         }
     } catch (error: unknown) {
+      assertExecutionCurrent(_batchOptions.isExecutionCurrent);
       const retryExecutionId = currentExecutionId;
       const retryQueryIndex = currentQueryIndex;
       if (!currentQueryAllowsRetry) {
@@ -453,6 +463,7 @@ export async function runQueriesSequentially(
               queryEndCallback(retryExecutionId, 0, 0, 'retrying', retryMessage);
             }
           : undefined,
+        _batchOptions.isExecutionCurrent,
       );
         if (retryResult.handled) {
             return retryResult.result;
@@ -519,6 +530,7 @@ export async function runQueriesWithStreaming(
     if (documentUri) {
         streamingManager.clearAborted(documentUri);
     }
+    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
 
     if (!resolvedConnectionName) {
         logBatch(outputChannel, logCallback, "Error: No connection selected");
@@ -554,9 +566,11 @@ export async function runQueriesWithStreaming(
             const notification = msg as { message: string };
             logBatch(outputChannel, logCallback, notification.message);
         };
-        connection.on("notice", noticeHandler);
 
         try {
+            assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+            connection.on("notice", noticeHandler);
+
             const sessionId = await captureSessionId(
                 connection,
                 connManager,
@@ -570,6 +584,7 @@ export async function runQueriesWithStreaming(
                 : undefined;
 
             for (let i = _startIndex; i < queries.length; i++) {
+                assertExecutionCurrent(_batchOptions.isExecutionCurrent);
                 currentQueryIndex = i;
                 if (documentUri && streamingManager.isAborted(documentUri)) {
                     throw new Error('Query cancelled');
@@ -598,6 +613,7 @@ export async function runQueriesWithStreaming(
                         ),
                         createMacroFileReadContext(documentUri),
                     );
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
                     queryToExecute = preparedQuery.sql;
                     currentQueryAllowsRetry =
                         _batchOptions.retryOnBrokenConnection !== false &&
@@ -611,6 +627,7 @@ export async function runQueriesWithStreaming(
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
                         return;
                     }
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
 
                     if (queryStartCallback && !executionId) {
                         executionId = queryStartCallback(i, queryToExecute, resolvedConnectionName);
@@ -645,6 +662,7 @@ export async function runQueriesWithStreaming(
                             maxRows,
                             createDropSessionCallback(connManager, documentUri),
                         );
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
 
                     if (status === 'cancelled' || (documentUri && streamingManager.isAborted(documentUri))) {
                         const durationMs = Date.now() - startTime;
@@ -735,6 +753,7 @@ export async function runQueriesWithStreaming(
             }
         }
     } catch (error: unknown) {
+      assertExecutionCurrent(_batchOptions.isExecutionCurrent);
       const retryExecutionId = currentExecutionId;
       const retryQueryIndex = currentQueryIndex;
       if (!currentQueryAllowsRetry) {
@@ -772,6 +791,7 @@ export async function runQueriesWithStreaming(
               queryEndCallback(retryExecutionId, 0, 0, 'retrying', retryMessage);
             }
           : undefined,
+        _batchOptions.isExecutionCurrent,
       );
         if (retryResult.handled) {
             return retryResult.result;

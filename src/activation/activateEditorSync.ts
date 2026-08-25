@@ -6,6 +6,7 @@ import type { ResultPanelView } from '../views/resultPanelView';
 import type { MetadataPrefetchCoordinator } from './MetadataPrefetchCoordinator';
 import { setContextIfChanged } from '../services/contextKeyService';
 import { getUxPerfSession } from '../services/perf/uxPerfSession';
+import { retireQueryExecutionForDocument } from '../commands/query/queryExecutionGate';
 
 function isResultSyncSqlDocument(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
     if (!doc?.uri || typeof doc.languageId !== 'string') {
@@ -114,6 +115,7 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         vscode.workspace.onDidCloseTextDocument(doc => {
             if (isResultSyncSqlDocument(doc)) {
                 const sourceUri = doc.uri.toString();
+                retireQueryExecutionForDocument(doc);
                 if (lastSyncedSourceUri === sourceUri) {
                     lastSyncedSourceUri = undefined;
                 }

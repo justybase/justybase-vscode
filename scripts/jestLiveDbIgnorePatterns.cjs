@@ -13,6 +13,7 @@ module.exports = [
   "access.integration.test.ts",
   "allRowsTimeoutSession.live.integration.test.ts",
   "netezzaAdvancedFeatures.live.integration.test.ts",
+  "netezzaDropSession.live.integration.test.ts",
   "cteToTempTable.live.integration.test.ts",
   "macroPreprocessor.live.integration.test.ts",
   "migration.live.integration.test.ts",

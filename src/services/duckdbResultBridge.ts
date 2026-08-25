@@ -12,6 +12,11 @@ import { streamingManager } from '../core/queryCancellation';
 import { getQueryConfig, createDropSessionCallback } from '../core/queryBatchExecutor';
 import type { StreamingChunk } from '../core/streaming';
 import { escapeSqlIdentifier } from '../utils/sqlUtils';
+import {
+    assertExecutionCurrent,
+    isExecutionSuperseded,
+    type ExecutionCurrentCheck,
+} from '../core/executionGuard';
 
 const DUCKDB_BRIDGE_CONNECTION_NAME = 'DuckDB Bridge';
 const DUCKDB_BRIDGE_DATABASE_FILE = 'justybase-duckdb-bridge.duckdb';
@@ -225,8 +230,11 @@ export class DuckDbResultBridge {
         connectionName: string,
         targetTable: string,
         mode: 'overwrite' | 'append',
-        documentUri?: string
+        documentUri?: string,
+        isExecutionCurrent?: ExecutionCurrentCheck,
     ): Promise<void> {
+
+        assertExecutionCurrent(isExecutionCurrent);
 
         const { connection: tempConn, shouldCloseConnection } = await getConnectionForDocument(
             fullConnectionManager,
@@ -234,6 +242,7 @@ export class DuckDbResultBridge {
             true, // use persistent connection if available
             documentUri
         );
+        assertExecutionCurrent(isExecutionCurrent);
 
         const csvFilePath = path.join(this._tmpDir(), `justybase-duckdb-stream-${this._now()}.csv`);
         let writeStream: fs.WriteStream | undefined;
@@ -280,6 +289,10 @@ export class DuckDbResultBridge {
                     if (result.error) {
                         throw result.error;
                     }
+                    if (result.status === 'cancelled') {
+                        throw new Error('Query cancelled');
+                    }
+                    assertExecutionCurrent(isExecutionCurrent);
 
                     // Wait for flush
                     await new Promise<void>((resolve, reject) => {
@@ -293,6 +306,7 @@ export class DuckDbResultBridge {
                     progress.report({ message: `Loading ${result.totalRows} rows into DuckDB...` });
 
                     const bridgeConnection = await this._ensureBridgeConnection();
+                    assertExecutionCurrent(isExecutionCurrent);
                     const localConn = await this._createConnection(bridgeConnection);
 
                     try {
@@ -308,18 +322,35 @@ export class DuckDbResultBridge {
                       // Run the load query
                       const cmd = localConn.createCommand(loadSql);
                       cmd.commandTimeout = 0; // DuckDB load can take time
-                      await cmd.execute();
+                      const commandHandle = documentUri
+                        ? streamingManager.registerCommand(documentUri, cmd)
+                        : undefined;
+                      try {
+                        if (commandHandle?.signal.aborted) {
+                          throw new Error('Query cancelled');
+                        }
+                        await cmd.execute();
+                        // A resolved execute is the commit boundary. Cancellation
+                        // that arrived too late must not reclassify a completed
+                        // append as failed and invite a duplicate retry.
+                        assertExecutionCurrent(isExecutionCurrent);
+                      } finally {
+                        commandHandle?.unregister();
+                      }
                     } finally {
                       await localConn.close();
                     }
-                  
+
+                    assertExecutionCurrent(isExecutionCurrent);
                     const document = await this._openTextDocument({
                       content: `SELECT * FROM ${escapeSqlIdentifier(targetTable)} LIMIT 100;`,
                       language: 'sql',
                     });
 
+                    assertExecutionCurrent(isExecutionCurrent);
                     await this._showTextDocument(document, { preview: false });
 
+                    assertExecutionCurrent(isExecutionCurrent);
                     this._connectionManager.setDocumentConnection(
                         document.uri.toString(),
                         bridgeConnection.name || DUCKDB_BRIDGE_CONNECTION_NAME,
@@ -327,11 +358,14 @@ export class DuckDbResultBridge {
                 }
             );
 
+            assertExecutionCurrent(isExecutionCurrent);
             vscode.window.showInformationMessage(
                 `Successfully loaded query results into DuckDB table "${targetTable}".`,
             );
         } catch (error) {
-            vscode.window.showErrorMessage(`DuckDB stream failed: ${getErrorMessage(error)}`);
+            if (!isExecutionSuperseded(error)) {
+                vscode.window.showErrorMessage(`DuckDB stream failed: ${getErrorMessage(error)}`);
+            }
         } finally {
             if (writeStream) {
                 writeStream.end();

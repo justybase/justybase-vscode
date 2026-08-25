@@ -44,6 +44,8 @@ import {
 } from '../sqlParser/procedure/procedureCodeLens';
 import { registerSaveAccessFileAsConnectionCommand } from './saveAccessFileAsConnection';
 import { createConnectionQuickPickItems } from '../utils/connectionQuickPick';
+import { tryAcquireQueryExecution } from './query/queryExecutionGate';
+import { createQueryExecutionRecovery } from './query/queryExecutionRecovery';
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -855,12 +857,27 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
 
                 const sourceUri = uri.toString();
                 const queries = [statementSql.trim()];
+                const sourceDocument = vscode.workspace.textDocuments?.find(
+                    document => document.uri.toString() === sourceUri,
+                );
+                const connectionName = connectionManager.getConnectionForExecution(sourceUri)
+                    ?? connectionManager.getActiveConnectionName()
+                    ?? undefined;
+                const executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
+                    document: sourceDocument,
+                    origin: 'Run Statement from CodeLens',
+                    recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName),
+                });
+                if (!executionGate) {
+                    return;
+                }
 
                 const timer = createPerformanceTimer('query.run_from_lens', {
                     payloadSize: statementSql.length,
                 });
 
                 try {
+                    executionGate.markRunning();
                     resultPanelProvider.setActiveSource(sourceUri);
                     resultPanelProvider.startExecution(sourceUri);
 
@@ -869,6 +886,9 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     const streamingChunkSize = config.get<number>('streamingChunkSize', 5000);
 
                     const queryStartCallback = (_queryIndex: number, sql: string, connName: string): string => {
+                        if (!executionGate.isCurrent()) {
+                            return `stale-${executionGate.executionId}`;
+                        }
                         return resultPanelProvider.logExecutionStart(sourceUri, sql.trim(), connName);
                     };
 
@@ -879,6 +899,9 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                         status: 'success' | 'error' | 'cancelled' | 'retrying',
                         error?: string,
                     ) => {
+                        if (!executionGate.isCurrent()) {
+                            return;
+                        }
                         resultPanelProvider.logExecutionEnd(executionId, rowCount, status, error);
                     };
 
@@ -895,9 +918,15 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                     queries,
                                     connectionManager,
                                     sourceUri,
-                                    (msg) => resultPanelProvider.log(sourceUri, msg),
+                                    (msg) => {
+                                        if (executionGate.isCurrent()) {
+                                            resultPanelProvider.log(sourceUri, msg);
+                                        }
+                                    },
                                     (queryIndex, chunk, sql) => {
-                                        resultPanelProvider.appendStreamingChunk(sourceUri, queryIndex, chunk, sql);
+                                        if (executionGate.isCurrent()) {
+                                            resultPanelProvider.appendStreamingChunk(sourceUri, queryIndex, chunk, sql);
+                                        }
                                     },
                                     streamingChunkSize,
                                     undefined,
@@ -908,7 +937,10 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                     undefined,
                                     0,
                                     undefined,
-                                    ddlBatchOptions,
+                                    {
+                                        ...ddlBatchOptions,
+                                        isExecutionCurrent: () => executionGate.isCurrent(),
+                                    },
                                 );
                             } else {
                                 await runQueriesSequentially(
@@ -916,8 +948,16 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                     queries,
                                     connectionManager,
                                     sourceUri,
-                                    (msg) => resultPanelProvider.log(sourceUri, msg),
-                                    (queryResults) => resultPanelProvider.updateResults(queryResults, sourceUri, true),
+                                    (msg) => {
+                                        if (executionGate.isCurrent()) {
+                                            resultPanelProvider.log(sourceUri, msg);
+                                        }
+                                    },
+                                    (queryResults) => {
+                                        if (executionGate.isCurrent()) {
+                                            resultPanelProvider.updateResults(queryResults, sourceUri, true);
+                                        }
+                                    },
                                     undefined,
                                     false,
                                     undefined,
@@ -927,17 +967,30 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                     0,
                                     undefined,
                                     [],
-                                    ddlBatchOptions,
+                                    {
+                                        ...ddlBatchOptions,
+                                        isExecutionCurrent: () => executionGate.isCurrent(),
+                                    },
                                 );
                             }
                         },
                     );
 
+                    const executionStillCurrent = executionGate.isCurrent();
+                    executionGate.dispose();
+                    if (!executionStillCurrent) {
+                        return;
+                    }
                     resultPanelProvider.finalizeExecution(sourceUri);
                     await vscode.commands.executeCommand('netezza.results.focus');
                     const ev = timer.finish({ result: 'ok', metadata: { query_count: 1 } });
                     console.log(formatPerformanceEvent(ev));
                 } catch (err: unknown) {
+                    const executionStillCurrent = executionGate.isCurrent();
+                    executionGate.dispose();
+                    if (!executionStillCurrent) {
+                        return;
+                    }
                     const msg = err instanceof Error ? err.message : String(err);
                     if (msg.includes('Query cancelled')) {
                         resultPanelProvider.log(sourceUri, 'Query execution cancelled by user.');
@@ -953,6 +1006,8 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     const ev = timer.finish({ result: 'error', errorCode: msg.slice(0, 50) });
                     console.log(formatPerformanceEvent(ev));
                     vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+                } finally {
+                    executionGate.dispose();
                 }
             },
         ),
@@ -974,15 +1029,33 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
 
                 const sourceUri = uri.toString();
                 const sql = procedureSql.trim();
+                const sourceDocument = vscode.workspace.textDocuments?.find(
+                    document => document.uri.toString() === sourceUri,
+                );
+                const connectionName = connectionManager.getConnectionForExecution(sourceUri)
+                    ?? connectionManager.getActiveConnectionName()
+                    ?? undefined;
+                const executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
+                    document: sourceDocument,
+                    origin: 'Compile Procedure from CodeLens',
+                    recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName),
+                });
+                if (!executionGate) {
+                    return;
+                }
                 const timer = createPerformanceTimer('query.compile_procedure_from_lens', {
                     payloadSize: sql.length,
                 });
 
                 try {
+                    executionGate.markRunning();
                     resultPanelProvider.setActiveSource(sourceUri);
                     resultPanelProvider.startExecution(sourceUri);
 
                     const queryStartCallback = (_queryIndex: number, query: string, connName: string): string => {
+                        if (!executionGate.isCurrent()) {
+                            return `stale-${executionGate.executionId}`;
+                        }
                         return resultPanelProvider.logExecutionStart(sourceUri, query.trim(), connName);
                     };
 
@@ -993,6 +1066,9 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                         status: 'success' | 'error' | 'cancelled' | 'retrying',
                         error?: string,
                     ) => {
+                        if (!executionGate.isCurrent()) {
+                            return;
+                        }
                         resultPanelProvider.logExecutionEnd(executionId, rowCount, status, error);
                     };
 
@@ -1008,8 +1084,16 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                 [sql],
                                 connectionManager,
                                 sourceUri,
-                                (msg) => resultPanelProvider.log(sourceUri, msg),
-                                (queryResults) => resultPanelProvider.updateResults(queryResults, sourceUri, true),
+                                (msg) => {
+                                    if (executionGate.isCurrent()) {
+                                        resultPanelProvider.log(sourceUri, msg);
+                                    }
+                                },
+                                (queryResults) => {
+                                    if (executionGate.isCurrent()) {
+                                        resultPanelProvider.updateResults(queryResults, sourceUri, true);
+                                    }
+                                },
                                 undefined,
                                 false,
                                 undefined,
@@ -1019,16 +1103,29 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                                 0,
                                 undefined,
                                 [],
-                                ddlBatchOptions,
+                                {
+                                    ...ddlBatchOptions,
+                                    isExecutionCurrent: () => executionGate.isCurrent(),
+                                },
                             );
                         },
                     );
 
+                    const executionStillCurrent = executionGate.isCurrent();
+                    executionGate.dispose();
+                    if (!executionStillCurrent) {
+                        return;
+                    }
                     resultPanelProvider.finalizeExecution(sourceUri);
                     await vscode.commands.executeCommand('netezza.results.focus');
                     const ev = timer.finish({ result: 'ok', metadata: { query_count: 1 } });
                     console.log(formatPerformanceEvent(ev));
                 } catch (err: unknown) {
+                    const executionStillCurrent = executionGate.isCurrent();
+                    executionGate.dispose();
+                    if (!executionStillCurrent) {
+                        return;
+                    }
                     const msg = err instanceof Error ? err.message : String(err);
                     if (msg.includes('Query cancelled')) {
                         resultPanelProvider.log(sourceUri, 'Procedure compilation cancelled by user.');
@@ -1047,6 +1144,8 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     const ev = timer.finish({ result: 'error', errorCode: msg.slice(0, 50) });
                     console.log(formatPerformanceEvent(ev));
                     vscode.window.showErrorMessage(`Procedure compilation failed: ${msg}`);
+                } finally {
+                    executionGate.dispose();
                 }
             },
         ),
@@ -1066,10 +1165,22 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     vscode.window.showErrorMessage('No database connection. Please connect first.');
                     return;
                 }
+                const sourceDocument = vscode.workspace.textDocuments?.find(
+                    document => document.uri.toString() === sourceUri,
+                );
+                const executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
+                    document: sourceDocument,
+                    origin: 'Explain Statement from CodeLens',
+                    recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName),
+                });
+                if (!executionGate) {
+                    return;
+                }
 
                 try {
                     const explainSql = `EXPLAIN VERBOSE ${statementSql.trim()}`;
 
+                    executionGate.markRunning();
                     const explainResult = await vscode.window.withProgress(
                         {
                             location: vscode.ProgressLocation.Window,
@@ -1086,6 +1197,11 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                             );
                         },
                     );
+                    const executionStillCurrent = executionGate.isCurrent();
+                    executionGate.dispose();
+                    if (!executionStillCurrent) {
+                        return;
+                    }
 
                     if (explainResult && explainResult.trim()) {
                         const doc = await vscode.workspace.openTextDocument({
@@ -1097,8 +1213,15 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                         vscode.window.showInformationMessage('EXPLAIN returned no output.');
                     }
                 } catch (err: unknown) {
+                    const executionStillCurrent = executionGate.isCurrent();
+                    executionGate.dispose();
+                    if (!executionStillCurrent) {
+                        return;
+                    }
                     const msg = err instanceof Error ? err.message : String(err);
                     vscode.window.showErrorMessage(`EXPLAIN failed: ${msg}`);
+                } finally {
+                    executionGate.dispose();
                 }
             },
         ),

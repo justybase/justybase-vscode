@@ -41,6 +41,11 @@ import {
   type MetadataQueryTiming,
 } from "../metadata/metadataQueryDiagnostics";
 import type { NzConnection } from "../types";
+import {
+  assertExecutionCurrent,
+  isExecutionSuperseded,
+  type ExecutionCurrentCheck,
+} from "./executionGuard";
 
 // ---------------------------------------------------------------------------
 // Connection resolution
@@ -80,6 +85,8 @@ export interface RunQueryRawOptions {
   metadataContext?: MetadataQueryContext;
   /** Queue wait measured by the shared metadata limiter. */
   metadataQueueWaitMs?: number;
+  /** Receives driver-observed execution timing for one metadata SQL command. */
+  onMetadataExecutionComplete?: (timing: MetadataQueryTiming) => void;
   /**
    * Caller-owned, already connected session. Used by one bounded metadata
    * refresh to avoid a new TCP/login handshake for every catalog query.
@@ -87,6 +94,8 @@ export interface RunQueryRawOptions {
   connectionOverride?: NzConnection;
   /** Shared state associated with `connectionOverride`, including its SID. */
   metadataSession?: MetadataQuerySession;
+  /** Prevents a retired execution from reconnecting or reporting stale success. */
+  isExecutionCurrent?: ExecutionCurrentCheck;
 }
 
 /** State shared by sequential metadata queries on one physical connection. */
@@ -157,8 +166,10 @@ export async function runQueryRaw(
     onSessionId,
     metadataContext,
     metadataQueueWaitMs,
+    onMetadataExecutionComplete,
     connectionOverride,
     metadataSession,
+    isExecutionCurrent,
   } = options;
 
   const connManager = connectionManager || new ConnectionManager(context);
@@ -168,6 +179,7 @@ export async function runQueryRaw(
   const logger = createLogger(silent, logCallback);
 
   const queryStartTime = Date.now();
+  assertExecutionCurrent(isExecutionCurrent);
 
   logOutput(logger, "Executing query...");
   if (connectionName) {
@@ -193,6 +205,7 @@ export async function runQueryRaw(
       connectionName,
       documentUri,
     );
+    assertExecutionCurrent(isExecutionCurrent);
   } catch (resolveError: unknown) {
     const errObj = resolveError as { message?: string };
     const errorMessage = `Error: ${errObj.message || String(resolveError)}`;
@@ -234,7 +247,10 @@ export async function runQueryRaw(
       metadataQueueWaitMs,
       connectionOverride,
       metadataSession,
+      isExecutionCurrent,
+      onMetadataExecutionComplete,
     );
+    assertExecutionCurrent(isExecutionCurrent);
 
     const durationMs = Date.now() - queryStartTime;
 
@@ -253,17 +269,22 @@ export async function runQueryRaw(
 
     return result;
   } catch (error: unknown) {
+    if (isExecutionSuperseded(error) || (isExecutionCurrent && !isExecutionCurrent())) {
+      assertExecutionCurrent(isExecutionCurrent);
+    }
     let activeError: unknown = error;
     const durationMs = Date.now() - queryStartTime;
     const errObj = error as { message?: string };
     const errMsg = errObj.message || String(error);
     const isCancelled = errMsg.toLowerCase().includes('cancelled') || errMsg.toLowerCase().includes('cancel');
     if (isConnectionTimeoutError(error) && documentUri && keepConnectionOpen) {
+      assertExecutionCurrent(isExecutionCurrent);
       logOutput(
         logger,
         "Netezza connection timeout detected. Resetting the tab connection and retrying once...",
       );
       await connManager.closeDocumentPersistentConnection(documentUri);
+      assertExecutionCurrent(isExecutionCurrent);
 
       try {
         const result = await executeRawQuery(
@@ -283,7 +304,10 @@ export async function runQueryRaw(
           metadataQueueWaitMs,
           connectionOverride,
           metadataSession,
+          isExecutionCurrent,
+          onMetadataExecutionComplete,
         );
+        assertExecutionCurrent(isExecutionCurrent);
 
         const retryDurationMs = Date.now() - queryStartTime;
         await logQueryToHistory(
@@ -299,6 +323,7 @@ export async function runQueryRaw(
         );
         return result;
       } catch (retryError: unknown) {
+        assertExecutionCurrent(isExecutionCurrent);
         activeError = retryError;
         logOutput(
           logger,
@@ -324,6 +349,7 @@ export async function runQueryRaw(
           documentUri,
           resolvedConnectionName,
         );
+        assertExecutionCurrent(isExecutionCurrent);
         const result = await executeRawQuery(
           connManager,
           resolvedConnectionName,
@@ -341,7 +367,10 @@ export async function runQueryRaw(
           metadataQueueWaitMs,
           connectionOverride,
           metadataSession,
+          isExecutionCurrent,
+          onMetadataExecutionComplete,
         );
+        assertExecutionCurrent(isExecutionCurrent);
 
         const retryDurationMs = Date.now() - queryStartTime;
         await logQueryToHistory(
@@ -358,9 +387,12 @@ export async function runQueryRaw(
 
         return result;
       } catch (retryError: unknown) {
+        assertExecutionCurrent(isExecutionCurrent);
         activeError = retryError;
       }
     }
+
+    assertExecutionCurrent(isExecutionCurrent);
 
     // Check for busy connection
     if (
@@ -440,9 +472,12 @@ export async function executeRawQuery(
   metadataQueueWaitMs?: number,
   connectionOverride?: NzConnection,
   metadataSession?: MetadataQuerySession,
+  isExecutionCurrent?: ExecutionCurrentCheck,
+  onMetadataExecutionComplete?: (timing: MetadataQueryTiming) => void,
 ): Promise<QueryResult> {
+  assertExecutionCurrent(isExecutionCurrent);
   try {
-    return await executeRawQueryOnce(
+    const result = await executeRawQueryOnce(
       connManager,
       resolvedConnectionName,
       keepConnectionOpen,
@@ -458,8 +493,13 @@ export async function executeRawQuery(
       metadataQueueWaitMs,
       connectionOverride,
       metadataSession,
+      isExecutionCurrent,
+      onMetadataExecutionComplete,
     );
+    assertExecutionCurrent(isExecutionCurrent);
+    return result;
   } catch (error: unknown) {
+    assertExecutionCurrent(isExecutionCurrent);
     if (
       !isRetryAttempt
       && keepConnectionOpen
@@ -471,6 +511,7 @@ export async function executeRawQuery(
         "Connection was closed by server. Reconnecting and retrying...",
       );
       await connManager.closeDocumentPersistentConnection(documentUri);
+      assertExecutionCurrent(isExecutionCurrent);
       try {
         return await executeRawQuery(
           connManager,
@@ -489,8 +530,11 @@ export async function executeRawQuery(
           metadataQueueWaitMs,
           connectionOverride,
           metadataSession,
+          isExecutionCurrent,
+          onMetadataExecutionComplete,
         );
       } catch (retryError: unknown) {
+        assertExecutionCurrent(isExecutionCurrent);
         const retryErrObj = retryError as { message?: string };
         const retryErrorMessage = `Error (after reconnect attempt): ${retryErrObj.message || String(retryError)}`;
         logOutput(logger, retryErrorMessage);
@@ -517,7 +561,10 @@ async function executeRawQueryOnce(
   metadataQueueWaitMs?: number,
   connectionOverride?: NzConnection,
   metadataSession?: MetadataQuerySession,
+  isExecutionCurrent?: ExecutionCurrentCheck,
+  onMetadataExecutionComplete?: (timing: MetadataQueryTiming) => void,
 ): Promise<QueryResult> {
+  assertExecutionCurrent(isExecutionCurrent);
   const { connection, shouldCloseConnection } = connectionOverride
     ? { connection: connectionOverride, shouldCloseConnection: false }
     : await getConnectionForDocument(
@@ -526,53 +573,56 @@ async function executeRawQueryOnce(
       keepConnectionOpen,
       documentUri,
     );
-  logOutput(logger, "Connected.");
   const timingStartedAt = Date.now();
   let executionTiming: MetadataQueryTiming | undefined;
   let operationStatus: MetadataQueryTiming['status'] = 'success';
-
-  // Attach listener for notices
   let noticeHandler: ((msg: unknown) => void) | undefined;
-  if (logger.outputChannel) {
-    noticeHandler = (msg: unknown) => {
-      const notification = msg as { message: string };
-      logger.outputChannel!.appendLine(`NOTICE: ${notification.message}`);
-    };
-    connection.on("notice", noticeHandler);
-  }
-
-  // Capture session ID
   let sessionId = metadataSession?.sessionId;
-  if (!sessionId) {
-    try {
-      const sidCmd = connection.createCommand("SELECT CURRENT_SID");
-      const sidReader = await sidCmd.executeReader();
-      if (await sidReader.read()) {
-        sessionId = String(sidReader.getValue(0));
-        if (metadataSession) {
-          metadataSession.sessionId = sessionId;
-        }
-        if (documentUri) {
-          connManager.setDocumentLastSessionId(
-            normalizeUriKey(documentUri),
-            sessionId,
-          );
-        }
-      }
-      await sidReader.close();
-    } catch {
-      // Ignore if we can't get SID
-    }
-  }
-
-  if (sessionId) {
-    if (trackMetadataSession) {
-      metadataSessionSweeper.register(resolvedConnectionName, sessionId);
-    }
-    onSessionId?.(sessionId);
-  }
 
   try {
+    // The connection may have finished opening after this execution was
+    // retired. Enter cleanup ownership before checking the lease.
+    assertExecutionCurrent(isExecutionCurrent);
+    logOutput(logger, "Connected.");
+
+    if (logger.outputChannel) {
+      noticeHandler = (msg: unknown) => {
+        const notification = msg as { message: string };
+        logger.outputChannel!.appendLine(`NOTICE: ${notification.message}`);
+      };
+      connection.on("notice", noticeHandler);
+    }
+
+    if (!sessionId) {
+      try {
+        const sidCmd = connection.createCommand("SELECT CURRENT_SID");
+        const sidReader = await sidCmd.executeReader();
+        if (await sidReader.read()) {
+          sessionId = String(sidReader.getValue(0));
+          if (metadataSession) {
+            metadataSession.sessionId = sessionId;
+          }
+          if (documentUri) {
+            connManager.setDocumentLastSessionId(
+              normalizeUriKey(documentUri),
+              sessionId,
+            );
+          }
+        }
+        await sidReader.close();
+      } catch {
+        // Ignore if we can't get SID
+      }
+    }
+    assertExecutionCurrent(isExecutionCurrent);
+
+    if (sessionId) {
+      if (trackMetadataSession) {
+        metadataSessionSweeper.register(resolvedConnectionName, sessionId);
+      }
+      onSessionId?.(sessionId);
+    }
+
     queryToExecute = await resolveQueryVariablesWithValues(
       queryToExecute,
       macroValues,
@@ -599,6 +649,7 @@ async function executeRawQueryOnce(
         ...createMacroFileReadContext(documentUri),
       },
     );
+    assertExecutionCurrent(isExecutionCurrent);
     if (queryToExecute.trim().length === 0) {
       const message = "No SQL to execute after processing variable directives.";
       logOutput(logger, message);
@@ -627,6 +678,7 @@ async function executeRawQueryOnce(
         undefined,
         createDropSessionCallback(connManager, documentUri),
       );
+    assertExecutionCurrent(isExecutionCurrent);
     executionTiming = timing;
     if (error) {
       operationStatus = timing?.status ?? 'error';
@@ -707,19 +759,21 @@ async function executeRawQueryOnce(
     if (trackMetadataSession && sessionId) {
       metadataSessionSweeper.complete(resolvedConnectionName, sessionId);
     }
+    const metadataTiming: MetadataQueryTiming = {
+      ...executionTiming,
+      queueWaitMs: metadataQueueWaitMs ?? executionTiming?.queueWaitMs ?? metadataContext?.queueWaitMs,
+      sessionId,
+      status: executionTiming?.status ?? operationStatus ?? 'success',
+      totalMs: executionTiming?.totalMs ?? Date.now() - timingStartedAt,
+    };
+    onMetadataExecutionComplete?.(metadataTiming);
     if (metadataContext) {
       logMetadataQueryTiming(
         {
           ...metadataContext,
           connectionName: metadataContext.connectionName ?? resolvedConnectionName,
         },
-        {
-          ...executionTiming,
-          queueWaitMs: metadataQueueWaitMs ?? executionTiming?.queueWaitMs ?? metadataContext.queueWaitMs,
-          sessionId,
-          status: executionTiming?.status ?? operationStatus ?? 'success',
-          totalMs: Date.now() - timingStartedAt,
-        },
+        metadataTiming,
       );
     }
   }
@@ -971,6 +1025,9 @@ export async function runExplainQuery(
 
   const notices: string[] = [];
   const rows: string[] = [];
+  if (documentUri) {
+    streamingManager.clearAborted(documentUri);
+  }
   const resolvedConnectionName = resolveConnectionName(
     connManager,
     connectionName,
@@ -996,9 +1053,13 @@ export async function runExplainQuery(
       const cmd = connection.createCommand(query);
       cmd.commandTimeout = queryTimeout;
 
+      let commandHandle:
+        | ReturnType<typeof streamingManager.registerCommand>
+        | undefined;
       let cancelSignal: AbortSignal | undefined;
       if (documentUri) {
-        cancelSignal = streamingManager.registerCommand(documentUri, cmd).signal;
+        commandHandle = streamingManager.registerCommand(documentUri, cmd);
+        cancelSignal = commandHandle.signal;
       }
 
       try {
@@ -1032,9 +1093,7 @@ export async function runExplainQuery(
           return notices.join("\n");
         }
       } finally {
-        if (documentUri) {
-          streamingManager.unregisterCommand(documentUri);
-        }
+        commandHandle?.unregister();
       }
     } finally {
       connection.removeListener("notice", noticeHandler);

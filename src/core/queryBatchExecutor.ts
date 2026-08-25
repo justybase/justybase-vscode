@@ -38,6 +38,10 @@ import {
     executeDropSession,
 } from "./queryRunnerHelpers";
 import { logWithFallback } from "../utils/logger";
+import {
+    assertExecutionCurrent,
+    type ExecutionCurrentCheck,
+} from "./executionGuard";
 
 // Re-export for convenience
 export { executeDropSession };
@@ -76,6 +80,8 @@ export type BatchExecutionStatus =
 export interface BatchQueryRunOptions {
     continueOnError?: boolean;
     retryOnBrokenConnection?: boolean;
+    /** Execution-scoped guard that remains false after force recovery. */
+    isExecutionCurrent?: ExecutionCurrentCheck;
     /** Confirm the fully expanded SQL immediately before database execution. */
     confirmSafeExecute?: (sql: string, queryIndex: number) => Promise<boolean>;
     onQueryError?: (queryIndex: number, sql: string, errorMessage: string) => void;
@@ -604,7 +610,9 @@ export async function handleBatchRetry<T>(
     logCallback: ((msg: string) => void) | undefined,
     retryFn: () => Promise<T>,
     onRetryStructuredLog?: (message: string) => void,
+    isExecutionCurrent?: ExecutionCurrentCheck,
 ): Promise<{ handled: true; result: T } | { handled: false }> {
+    assertExecutionCurrent(isExecutionCurrent);
     if (
         !isRetry &&
         isConnectionBrokenError(error) &&
@@ -624,6 +632,7 @@ export async function handleBatchRetry<T>(
 
         // Close the broken persistent connection
         await connManager.closeDocumentPersistentConnection(documentUri);
+        assertExecutionCurrent(isExecutionCurrent);
 
         try {
             const result = await retryFn();
@@ -684,8 +693,9 @@ export function createDropSessionCallback(
     if (!documentUri) {
         return undefined;
     }
-    return async (sid: string) =>
+    return async (sid: string) => {
         await executeDropSession(sid, connManager, documentUri);
+    };
 }
 
 /**

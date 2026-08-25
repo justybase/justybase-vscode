@@ -30,6 +30,7 @@ jest.mock('../core/queryCancellation', () => ({
         registerCommand: jest.fn().mockReturnValue({
             signal: { aborted: false },
             abort: jest.fn(),
+            unregister: jest.fn(),
         }),
         unregisterCommand: jest.fn(),
         abortQuery: jest.fn().mockReturnValue(true),
@@ -257,6 +258,32 @@ describe('singleQueryExecutor', () => {
             });
 
             expect(metadataSessionSweeper.hasSession('testConn', '99999')).toBe(false);
+        });
+
+        it('reports driver execution timing separately from metadata queue wait', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'id' }], rows: [[1]], limitReached: false }],
+                error: null,
+                recordsAffected: undefined,
+                timing: { totalMs: 321, executeReaderMs: 100, rowFetchMs: 221 },
+            });
+            const onMetadataExecutionComplete = jest.fn();
+
+            await runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 1',
+                connectionManager: mockConnManager,
+                connectionName: 'testConn',
+                isUserQuery: false,
+                metadataQueueWaitMs: 900,
+                metadataContext: { source: 'connection-prefetch', kind: 'objects' },
+                onMetadataExecutionComplete,
+            });
+
+            expect(onMetadataExecutionComplete).toHaveBeenCalledWith(expect.objectContaining({
+                totalMs: 321,
+                queueWaitMs: 900,
+            }));
         });
 
         it('reuses a scoped metadata connection and its SID across catalog queries', async () => {
@@ -629,6 +656,43 @@ describe('singleQueryExecutor', () => {
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
         });
 
+        it('does not reconnect after its execution lease is superseded', async () => {
+            let executionCurrent = true;
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            mockExecuteAndFetch.mockImplementationOnce(async () => {
+                executionCurrent = false;
+                return {
+                    results: [],
+                    error: new Error('Connection is closed'),
+                };
+            });
+
+            await expect(
+                executeRawQuery(
+                    mockConnManager,
+                    'testConn',
+                    true,
+                    'file:///test.sql',
+                    'UPDATE important_table SET value = 1',
+                    undefined,
+                    logger,
+                    {},
+                    undefined,
+                    false,
+                    undefined,
+                    undefined,
+                    false,
+                    undefined,
+                    undefined,
+                    undefined,
+                    () => executionCurrent,
+                ),
+            ).rejects.toThrow('execution superseded');
+
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+        });
+
         it('should not await connection recovery before throwing executeAndFetch errors', async () => {
             let resolveWait: (() => void) | undefined;
             mockWaitForPersistentConnectionReady.mockReturnValueOnce(
@@ -673,6 +737,49 @@ describe('singleQueryExecutor', () => {
             );
 
             expect(mockConn.close).toHaveBeenCalled();
+        });
+
+        it('closes a transient connection opened after the execution is retired', async () => {
+            let executionCurrent = true;
+            let resolveConnection!: (value: { connection: typeof mockConn; shouldCloseConnection: boolean }) => void;
+            let signalConnectionRequested!: () => void;
+            const connectionRequested = new Promise<void>(resolve => {
+                signalConnectionRequested = resolve;
+            });
+            const pendingConnection = new Promise<{ connection: typeof mockConn; shouldCloseConnection: boolean }>(resolve => {
+                resolveConnection = resolve;
+            });
+            mockGetConnectionForDocument.mockImplementationOnce(() => {
+                signalConnectionRequested();
+                return pendingConnection;
+            });
+
+            const execution = executeRawQuery(
+                mockConnManager,
+                'testConn',
+                false,
+                'file:///test.sql',
+                'SELECT 1',
+                undefined,
+                logger,
+                {},
+                undefined,
+                false,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                () => executionCurrent,
+            );
+            await connectionRequested;
+            executionCurrent = false;
+            resolveConnection({ connection: mockConn, shouldCloseConnection: true });
+
+            await expect(execution).rejects.toThrow('execution superseded');
+            expect(mockConn.close).toHaveBeenCalledTimes(1);
+            expect(mockExecuteAndFetch).not.toHaveBeenCalled();
         });
 
         it('should register notice handler when logger has outputChannel', async () => {

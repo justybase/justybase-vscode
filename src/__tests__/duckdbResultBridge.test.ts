@@ -1,13 +1,41 @@
+import * as fs from 'fs';
 import * as vscode from 'vscode';
-import { DuckDbResultBridge } from '../services/duckdbResultBridge';
 import type { ExportMetadata } from '../export/exportManager';
 import type { ConnectionDetails, ResultSet } from '../types';
+
+const mockExecuteWithStreaming = jest.fn();
+const mockUnregisterCommand = jest.fn();
+const mockRegisterCommand = jest.fn().mockReturnValue({
+    signal: { aborted: false },
+    abort: jest.fn(),
+    unregister: mockUnregisterCommand,
+});
+const mockGetConnectionForDocument = jest.fn().mockResolvedValue({
+    connection: { close: jest.fn().mockResolvedValue(undefined) },
+    shouldCloseConnection: false,
+});
+
+jest.mock('../core/queryCancellation', () => ({
+    streamingManager: {
+        executeWithStreaming: mockExecuteWithStreaming,
+        registerCommand: mockRegisterCommand,
+    },
+}));
+
+jest.mock('../core/queryRunnerHelpers', () => ({
+    getConnectionForDocument: mockGetConnectionForDocument,
+}));
+
+jest.mock('../core/queryBatchExecutor', () => ({
+    getQueryConfig: jest.fn().mockReturnValue({ queryTimeout: 1800 }),
+    createDropSessionCallback: jest.fn().mockReturnValue(undefined),
+}));
 
 jest.mock(
     'vscode',
     () => ({
         window: {
-            withProgress: jest.fn((_options, task) => task()),
+            withProgress: jest.fn((_options, task) => task({ report: jest.fn() })),
             showErrorMessage: jest.fn(),
             showInformationMessage: jest.fn(),
             showTextDocument: jest.fn().mockResolvedValue(undefined),
@@ -25,6 +53,8 @@ jest.mock(
     }),
     { virtual: true },
 );
+
+import { DuckDbResultBridge } from '../services/duckdbResultBridge';
 
 describe('DuckDbResultBridge', () => {
     const metadata: ExportMetadata = {
@@ -58,6 +88,16 @@ describe('DuckDbResultBridge', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockExecuteWithStreaming.mockResolvedValue({
+            totalRows: 0,
+            limitReached: false,
+            status: 'success',
+        });
+        mockRegisterCommand.mockReturnValue({
+            signal: { aborted: false },
+            abort: jest.fn(),
+            unregister: mockUnregisterCommand,
+        });
 
         connectionManager = {
             getConnection: jest.fn().mockResolvedValue(undefined),
@@ -168,5 +208,84 @@ describe('DuckDbResultBridge', () => {
       expect(savedConnection.database).not.toContain('\\');
       // Should contain the expected filename
       expect(savedConnection.database).toContain('justybase-duckdb-bridge.duckdb');
+    });
+
+    it('registers the local DuckDB load command for cancellation under the source lease', async () => {
+      const bridge = createBridge(new Map());
+      deleteFile.mockImplementationOnce((filePath: string) => fs.promises.unlink(filePath));
+
+      await bridge.streamToDuckDb(
+        'SELECT 1',
+        connectionManager,
+        'Warehouse',
+        'target_table',
+        'overwrite',
+        'file:///source.sql',
+        () => true,
+      );
+
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      expect(mockRegisterCommand).toHaveBeenCalledWith(
+        'file:///source.sql',
+        expect.objectContaining({ execute: expect.any(Function) }),
+      );
+      expect(mockUnregisterCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not start the local DuckDB write when cancellation arrived between phases', async () => {
+      const bridge = createBridge(new Map());
+      deleteFile.mockImplementationOnce((filePath: string) => fs.promises.unlink(filePath));
+      mockRegisterCommand.mockReturnValueOnce({
+        signal: { aborted: true },
+        abort: jest.fn(),
+        unregister: mockUnregisterCommand,
+      });
+
+      await bridge.streamToDuckDb(
+        'SELECT 1',
+        connectionManager,
+        'Warehouse',
+        'target_table',
+        'overwrite',
+        'file:///source.sql',
+        () => true,
+      );
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(mockUnregisterCommand).toHaveBeenCalledTimes(1);
+      expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+        'DuckDB stream failed: Query cancelled',
+      );
+    });
+
+    it('reports success when cancellation arrives after the DuckDB load committed', async () => {
+      const bridge = createBridge(new Map());
+      const lateAbortSignal = { aborted: false };
+      mockRegisterCommand.mockReturnValueOnce({
+        signal: lateAbortSignal,
+        abort: jest.fn(),
+        unregister: mockUnregisterCommand,
+      });
+      execute.mockImplementationOnce(async () => {
+        lateAbortSignal.aborted = true;
+      });
+
+      await bridge.streamToDuckDb(
+        'SELECT 1',
+        connectionManager,
+        'Warehouse',
+        'target_table',
+        'append',
+        'file:///source.sql',
+        () => true,
+      );
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(mockUnregisterCommand).toHaveBeenCalledTimes(1);
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        'Successfully loaded query results into DuckDB table "target_table".',
+      );
     });
   });
