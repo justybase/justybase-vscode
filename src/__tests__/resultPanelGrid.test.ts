@@ -153,7 +153,10 @@ describe('grid.js exported constants (Table mode)', () => {
 
     it('renders a bounded first window when the virtualizer has no viewport measurement', () => {
         const g = require('../../media/resultPanel/grid.js');
-        const items = g.resolveRenderableVirtualItems([], 100, 30, 5);
+        const items = g.resolveRenderableVirtualItems([], 100, 30, {
+            fallbackCount: 5,
+            overscan: 0,
+        });
 
         expect(items).toEqual([
             { index: 0, start: 0, end: 30 },
@@ -169,6 +172,18 @@ describe('grid.js exported constants (Table mode)', () => {
         const measured = [{ index: 8, start: 240, end: 270 }];
 
         expect(g.resolveRenderableVirtualItems(measured, 100)).toBe(measured);
+    });
+
+    it('moves the fallback window with the real scroll offset', () => {
+        const g = require('../../media/resultPanel/grid.js');
+        const items = g.resolveRenderableVirtualItems([], 1_000, 20, {
+            scrollOffset: 10_000,
+            viewportSize: 200,
+            overscan: 2,
+        });
+
+        expect(items[0]).toEqual({ index: 498, start: 9_960, end: 9_980 });
+        expect(items[items.length - 1]).toEqual({ index: 511, start: 10_220, end: 10_240 });
     });
 });
 

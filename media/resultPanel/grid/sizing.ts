@@ -23,6 +23,13 @@ export interface RenderableVirtualItem {
     end: number;
 }
 
+export interface VirtualFallbackViewport {
+    scrollOffset?: number;
+    viewportSize?: number;
+    overscan?: number;
+    fallbackCount?: number;
+}
+
 /**
  * TanStack Virtual can initially observe a 0x0 scroll element when a retained
  * VS Code webview is revealed and hydrated in the same frame. Some webview
@@ -34,19 +41,52 @@ export function resolveRenderableVirtualItems<T extends RenderableVirtualItem>(
     measuredItems: T[],
     rowCount: number,
     estimatedRowHeight: number = RESULT_GRID_ESTIMATED_ROW_HEIGHT,
-    fallbackCount: number = RESULT_GRID_VIRTUAL_OVERSCAN * 2 + 1,
+    viewport: VirtualFallbackViewport = {},
 ): Array<T | RenderableVirtualItem> {
     if (measuredItems.length > 0 || rowCount <= 0) {
         return measuredItems;
     }
 
-    const safeEstimatedHeight = Math.max(1, estimatedRowHeight);
-    const count = Math.min(rowCount, Math.max(1, fallbackCount));
-    return Array.from({ length: count }, (_, index) => ({
-        index,
-        start: index * safeEstimatedHeight,
-        end: (index + 1) * safeEstimatedHeight,
-    }));
+    const safeEstimatedHeight = Number.isFinite(estimatedRowHeight)
+        ? Math.max(1, estimatedRowHeight)
+        : RESULT_GRID_ESTIMATED_ROW_HEIGHT;
+    const safeScrollOffset = Number.isFinite(viewport.scrollOffset)
+        ? Math.max(0, viewport.scrollOffset ?? 0)
+        : 0;
+    const safeViewportSize = Number.isFinite(viewport.viewportSize)
+        ? Math.max(0, viewport.viewportSize ?? 0)
+        : 0;
+    const overscan = Number.isFinite(viewport.overscan)
+        ? Math.max(0, Math.floor(viewport.overscan ?? 0))
+        : RESULT_GRID_VIRTUAL_OVERSCAN;
+    const fallbackCount = Number.isFinite(viewport.fallbackCount)
+        ? Math.max(1, Math.floor(viewport.fallbackCount ?? 1))
+        : RESULT_GRID_VIRTUAL_OVERSCAN * 2 + 1;
+    const firstVisibleIndex = Math.min(
+        rowCount - 1,
+        Math.floor(safeScrollOffset / safeEstimatedHeight),
+    );
+
+    let startIndex: number;
+    let endIndexExclusive: number;
+    if (safeViewportSize > 0) {
+        const visibleCount = Math.max(1, Math.ceil(safeViewportSize / safeEstimatedHeight));
+        startIndex = Math.max(0, firstVisibleIndex - overscan);
+        endIndexExclusive = Math.min(rowCount, firstVisibleIndex + visibleCount + overscan);
+    } else {
+        const count = Math.min(rowCount, fallbackCount);
+        startIndex = Math.max(0, Math.min(firstVisibleIndex, rowCount - count));
+        endIndexExclusive = startIndex + count;
+    }
+
+    return Array.from({ length: endIndexExclusive - startIndex }, (_, offset) => {
+        const index = startIndex + offset;
+        return {
+            index,
+            start: index * safeEstimatedHeight,
+            end: (index + 1) * safeEstimatedHeight,
+        };
+    });
 }
 
 /** Aborted when renderGrids() runs again or the user switches result sets. */
