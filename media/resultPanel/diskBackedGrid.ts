@@ -581,6 +581,7 @@ export function handleDiskBackedActivate(message: Record<string, unknown>): void
             diskWindowStart: 0,
             diskFilteredCount: totalRows,
             limitReached: limitReached === true,
+            isStreamingComplete: false,
             isEditable: false,
         };
         const next = [...getResultSets()];
@@ -593,6 +594,7 @@ export function handleDiskBackedActivate(message: Record<string, unknown>): void
         rs.diskWindowStart = 0;
         rs.data = rows;
         rs.diskQuerySpec = undefined;
+        rs.isStreamingComplete = false;
         rs.isEditable = false;
         if (columns && columns.length > 0) {
             rs.columns = columns;

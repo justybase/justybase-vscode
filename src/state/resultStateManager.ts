@@ -142,7 +142,7 @@ export class ResultStateManager {
     private _lastSentGlobalStateVersion: number = 0; // Tracks if global list of sources changed
     private _globalStateVersion: number = 0;
 
-    // Phase 1: Track which sources completed streaming.
+    // Track which source execution completed row streaming.
     // When all rows were sent incrementally to webview, skip full re-encode on finalize.
     private _streamingCompletedSources: Set<string> = new Set();
 
@@ -271,6 +271,11 @@ export class ResultStateManager {
     }
     public get executingSources() {
         return this._executingSources;
+    }
+
+    /** Sources whose current execution delivered all rows to the webview. */
+    public get streamingCompletedSources(): ReadonlySet<string> {
+        return this._streamingCompletedSources;
     }
 
     /** Mark a source as having completed streaming (all rows sent incrementally to webview). */
@@ -502,6 +507,11 @@ export class ResultStateManager {
      * @returns The execution log entry ID
      */
     public logExecutionStart(sourceUri: string, sql: string, connectionName: string): { id: string; incrementalUpdate?: LogAppendMessage } {
+        // A batch can execute several statements without creating a new tabular
+        // result for each one (for example SELECT followed by DML). Completion
+        // belongs to the statement that produced the rows, never to the source
+        // as a whole, so clear it before every statement starts.
+        this._streamingCompletedSources.delete(sourceUri);
         const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const truncatedSql = this.truncateSql(sql);
 
@@ -1591,6 +1601,7 @@ export class ResultStateManager {
             this._resultsMap.delete(sourceUri);
             this._pinnedSources.delete(sourceUri);
             this._executingSources.delete(sourceUri);
+            this._streamingCompletedSources.delete(sourceUri);
 
             const pinnedResultsToRemove = Array.from(this._pinnedResults.entries())
                 .filter(([_, info]) => info.sourceUri === sourceUri)

@@ -109,7 +109,7 @@ export interface ResultPanelHydrationMetricsPayload {
     activeSource: string | null;
     resultSetCount: number;
     totalRowCount: number;
-    executionState: 'idle' | 'loading' | 'success' | 'error' | 'cancelled' | 'retrying';
+    executionState: 'idle' | 'loading' | 'finalizing' | 'success' | 'error' | 'cancelled' | 'retrying';
 }
 
 // ============================================================================
@@ -127,6 +127,8 @@ export type ResultPanelOutboundMessage =
         pinnedSourcesJson: string;
         formatSettings?: ResultFormattingPayload;
         diskBackedStreamCapEnabled?: boolean;
+        /** Sources whose current execution delivered all rows but is still finalizing on the host. */
+        streamingCompletedSourcesJson?: string;
         uxTraceId?: string;
     }
     | { command: 'uxPerfSession'; active: boolean }
@@ -185,6 +187,8 @@ export interface ResultPanelViewData {
     maxDataResults: number;
     diskBackedStreamCapEnabled: boolean;
     dataVersion?: number;
+    /** Sources whose current execution delivered all rows but is still finalizing on the host. */
+    streamingCompletedSourcesJson?: string;
 }
 
 // ============================================================================

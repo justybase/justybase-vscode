@@ -90,6 +90,7 @@ export class ResultPanelPerformanceStore {
         const executionStates: ResultPanelPerformanceSnapshot['executionStates'] = {
             idle: 0,
             loading: 0,
+            finalizing: 0,
             success: 0,
             error: 0,
             cancelled: 0,

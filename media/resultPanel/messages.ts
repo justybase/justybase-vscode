@@ -112,6 +112,7 @@ interface HydrateData {
     pinnedResultsJson?: string;
     activeResultSetIndex?: number;
     executingSourcesJson?: string;
+    streamingCompletedSourcesJson?: string;
     queryRowLimit?: number;
     maxDataResults?: number;
     diskBackedStreamCapEnabled?: boolean;
@@ -154,12 +155,37 @@ function getActiveResultSets(): ResultSet[] {
     return getResultSets();
 }
 
+function parseSourceSet(value: string | undefined): Set<string> | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(value) as unknown;
+        return new Set(
+            Array.isArray(parsed)
+                ? parsed.filter((source): source is string => typeof source === 'string')
+                : [],
+        );
+    } catch {
+        return new Set<string>();
+    }
+}
+
+function resetStreamingCompletionMarkers(resultSets: ResultSet[] = getResultSets()): void {
+    for (const resultSet of resultSets) {
+        if (resultSet && !resultSet.isLog && !resultSet.isError && !resultSet.isTextContent) {
+            resultSet.isStreamingComplete = false;
+        }
+    }
+}
+
 function getTotalRowCount(resultSets: ResultSet[]): number {
     return resultSets.reduce((sum, resultSet) => {
-        if (resultSet?.storageMode === 'sqlite') {
-            return sum + (resultSet.totalRowCount ?? resultSet.data.length);
-        }
-        return sum + (Array.isArray(resultSet?.data) ? resultSet.data.length : 0);
+        return sum + (
+            typeof resultSet?.totalRowCount === 'number'
+                ? resultSet.totalRowCount
+                : (Array.isArray(resultSet?.data) ? resultSet.data.length : 0)
+        );
     }, 0);
 }
 
@@ -230,8 +256,18 @@ function acknowledgeCurrentLogRows(): void {
 export function inferExecutionState(): ResultPanelExecutionState {
     const resultSets = getActiveResultSets();
     const activeSource = getActiveSourceUri();
-    const executingSources = getResultPanelWindow().executingSources;
+    const panel = getResultPanelWindow();
+    const executingSources = panel.executingSources;
     if (executingSources && activeSource && executingSources.has(activeSource)) {
+        const latestTabularResult = [...resultSets]
+            .reverse()
+            .find(resultSet => resultSet && !resultSet.isLog && !resultSet.isError && !resultSet.isTextContent);
+        const streamingCompleted = panel.streamingCompletedSources instanceof Set
+            ? panel.streamingCompletedSources.has(activeSource)
+            : latestTabularResult?.isStreamingComplete === true;
+        if (streamingCompleted) {
+            return 'finalizing';
+        }
         return 'loading';
     }
 
@@ -273,8 +309,12 @@ export function inferExecutionState(): ResultPanelExecutionState {
 }
 
 export function cancelActiveQuery(): void {
-    const currentRowCounts = getResultSets()
-        .map((rs) => (Array.isArray(rs?.data) ? rs.data.length : 0));
+    // During finalization all rows have already been delivered. `data.length`
+    // may only contain the visible preview for disk-backed/capped results, so
+    // passing it to the host would truncate the authoritative result.
+    const currentRowCounts = inferExecutionState() === 'finalizing'
+        ? undefined
+        : getResultSets().map((rs) => (Array.isArray(rs?.data) ? rs.data.length : 0));
 
     const executingSources = Array.from(ensureExecutingSources());
 
@@ -351,6 +391,7 @@ export function updateExecutionStatusBanner(): void {
 
     const messages: Record<ResultPanelExecutionState, string> = {
         loading: `${sourceLabel}: running...`,
+        finalizing: `${sourceLabel}: ${totalRowCount.toLocaleString()} rows received; finalizing database session...`,
         retrying: `${sourceLabel}: retrying after a connection interruption...`,
         cancelled: totalRowCount > 0
             ? `${sourceLabel}: cancelled. Partial results retained: ${totalRowCount.toLocaleString()} rows in ${nonLogResultCount} result set(s).`
@@ -666,6 +707,9 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     if (typeof message.executingSourcesJson === 'string') {
         panel.executingSources = new Set(JSON.parse(message.executingSourcesJson));
     }
+    if (typeof message.streamingCompletedSourcesJson === 'string') {
+        panel.streamingCompletedSources = parseSourceSet(message.streamingCompletedSourcesJson);
+    }
     if (message.formatSettings) {
         setResultFormattingPayload(message.formatSettings as ReturnType<typeof getResultFormattingPayload>);
     }
@@ -674,6 +718,13 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     }
 
     const isExecutingSource = panel.executingSources?.has(sourceUri) ?? false;
+    if (
+        isExecutingSource
+        && panel.streamingCompletedSources instanceof Set
+        && !panel.streamingCompletedSources.has(sourceUri)
+    ) {
+        resetStreamingCompletionMarkers();
+    }
     const cached = !isExecutingSource
         ? getCachedSource(sourceUri) as { resultSets?: ResultSet[]; activeGridIndex?: number } | undefined
         : undefined;
@@ -783,6 +834,7 @@ function buildHydrateDedupKey(data: HydrateData): string {
         (data.activeResultSetIndex ?? '') + '|' +
         (data.resultSetsMsgPack instanceof Uint8Array ? data.resultSetsMsgPack.byteLength : 0) + '|' +
         (data.executingSourcesJson ?? '') + '|' +
+        (data.streamingCompletedSourcesJson ?? '') + '|' +
         (data.dataVersion ?? '')
     );
 }
@@ -925,6 +977,17 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
 
         if (typeof data.activeResultSetIndex === 'number') setActiveGridIndex(data.activeResultSetIndex);
         if (data.executingSourcesJson) panel.executingSources = new Set(JSON.parse(data.executingSourcesJson));
+        if (typeof data.streamingCompletedSourcesJson === 'string') {
+            panel.streamingCompletedSources = parseSourceSet(data.streamingCompletedSourcesJson);
+        }
+        if (
+            activeHydratedSource
+            && panel.executingSources?.has(activeHydratedSource)
+            && panel.streamingCompletedSources instanceof Set
+            && !panel.streamingCompletedSources.has(activeHydratedSource)
+        ) {
+            resetStreamingCompletionMarkers(hydratedResultSets);
+        }
         if (data.formatSettings) {
             setResultFormattingPayload(data.formatSettings as ReturnType<typeof getResultFormattingPayload>);
         }
@@ -1009,6 +1072,12 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
 
 export function handleCancelExecution(message: Record<string, unknown>): void {
     const sourceUri = message.sourceUri as string | undefined;
+    const panel = getResultPanelWindow();
+    if (sourceUri) {
+        panel.executingSources?.delete(sourceUri);
+        panel.streamingCompletedSources?.delete(sourceUri);
+    }
+
     if (getActiveSourceUri() === sourceUri) {
         getResultSets().forEach(rs => {
             if (!rs) {
@@ -1018,9 +1087,8 @@ export function handleCancelExecution(message: Record<string, unknown>): void {
             if (rs.limitReached === undefined) rs.limitReached = true;
         });
 
-        const executingSources = getResultPanelWindow().executingSources;
-        if (sourceUri && executingSources?.has(sourceUri)) {
-            executingSources.delete(sourceUri);
+        if (sourceUri) {
+            resetStreamingCompletionMarkers();
         }
 
         updateLoadingState();
@@ -1050,6 +1118,12 @@ export function handleAppendRows(message: Record<string, unknown>): void {
     }
 
     if (isFirstChunk && !isLog) {
+        const panel = getResultPanelWindow();
+        const completionSource = sourceUri ?? activeSource;
+        if (completionSource) {
+            panel.streamingCompletedSources?.delete(completionSource);
+        }
+        resetStreamingCompletionMarkers();
         clearAllSearchWorkerData();
         clearAllDiskGrouping();
         resetEditSession();
@@ -1084,6 +1158,7 @@ export function handleAppendRows(message: Record<string, unknown>): void {
             const shell: ResultSet = {
                 columns,
                 data: [],
+                isStreamingComplete: false,
                 sql: sql ?? '',
                 refreshSql: refreshSql ?? sql ?? '',
                 executionTimestamp,
@@ -1276,6 +1351,14 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
     const limitReached = message.limitReached as boolean | undefined;
     const sourceUri = message.sourceUri as string | undefined;
 
+    if (sourceUri) {
+        const panel = getResultPanelWindow();
+        if (!panel.streamingCompletedSources) {
+            panel.streamingCompletedSources = new Set<string>();
+        }
+        panel.streamingCompletedSources.add(sourceUri);
+    }
+
     const activeSource = getActiveSourceUri();
     if (sourceUri && activeSource && sourceUri !== activeSource) {
         return;
@@ -1283,6 +1366,7 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
 
     const rs = getResultSetAt(resultSetIndex);
     if (rs) {
+        rs.isStreamingComplete = true;
         applyRowLimitReachedFlag(rs, limitReached === true);
         if (typeof totalRows === 'number') {
             if (isDiskBackedResultSet(rs)) {

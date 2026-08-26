@@ -147,6 +147,8 @@ export interface ResultSet {
     isLog?: boolean;
     isError?: boolean;
     isCancelled?: boolean;
+    /** All rows for this result reached the webview; host cleanup may still be running. */
+    isStreamingComplete?: boolean;
     isTextContent?: boolean;
     isEditable?: boolean;
     editSource?: unknown;
@@ -373,6 +375,8 @@ export interface ResultPanelGlobals {
     resultSets?: ResultSet[];
     activeSource?: string;
     executingSources?: Set<string>;
+    /** Sources whose current execution delivered all rows but is still finalizing on the host. */
+    streamingCompletedSources?: Set<string>;
     columnSearchMap?: Record<number, Array<{ id: string; name: string }>>;
     clearGroupDropTargets?: () => void;
     grids?: GridHandle[];

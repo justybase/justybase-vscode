@@ -61,7 +61,13 @@ describe('ResultPanelView Scroll Preservation', () => {
     let provider: ResultPanelView;
     let providers: ResultPanelView[];
     let mockExtensionUri: vscode.Uri;
-    let postedMessages: Array<{ command: string; data?: unknown; sourceUri?: string; activeResultSetIndex?: number }>;
+    let postedMessages: Array<{
+        command: string;
+        data?: unknown;
+        sourceUri?: string;
+        activeResultSetIndex?: number;
+        streamingCompletedSourcesJson?: string;
+    }>;
     let consoleLogSpy: jest.SpiedFunction<typeof console.log>;
     let mockWebview: {
         webview: {
@@ -574,6 +580,85 @@ describe('ResultPanelView Scroll Preservation', () => {
             expect(lastComplete).toHaveProperty('limitReached', false);
         });
 
+        it('should resolve the live result index after an earlier result tab is closed', () => {
+            const sourceUri = 'file:///test.sql';
+            provider.startExecution(sourceUri);
+            provider.updateResults([{
+                columns: [{ name: 'id', type: 'int' }],
+                data: [[0]],
+                name: 'Earlier result',
+            }], sourceUri);
+
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0];
+            messageHandler({ command: 'closeResult', sourceUri, resultSetIndex: 1 });
+            postedMessages = [];
+
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[2]],
+                isFirstChunk: false,
+                isLastChunk: true,
+                totalRowsSoFar: 2,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            const completeMessages = postedMessages.filter(m => m.command === 'streamingComplete');
+            const rowCountMessages = postedMessages.filter(m => m.command === 'rowCountUpdate');
+            expect(completeMessages[completeMessages.length - 1]).toEqual(expect.objectContaining({
+                sourceUri,
+                resultSetIndex: 1,
+                totalRows: 2,
+            }));
+            expect(rowCountMessages[rowCountMessages.length - 1]).toEqual(expect.objectContaining({
+                sourceUri,
+                resultSetIndex: 1,
+                totalRows: 2,
+            }));
+        });
+
+        it('should clear completion before a following DML statement', () => {
+            const sourceUri = 'file:///test.sql';
+            provider.startExecution(sourceUri);
+
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: true,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            // A batch statement starts without creating a new tabular result.
+            postedMessages = [];
+            provider.logExecutionStart(sourceUri, 'UPDATE t SET id = 2', 'conn1');
+            const startUpdate = postedMessages.find(message => message.command === 'setActiveSource');
+            expect(startUpdate).toBeDefined();
+            expect(JSON.parse(startUpdate!.streamingCompletedSourcesJson!))
+                .not.toContain(sourceUri);
+
+            postedMessages = [];
+            provider.appendStreamingChunk(sourceUri, 1, {
+                columns: [],
+                rows: [],
+                isFirstChunk: true,
+                isLastChunk: true,
+                totalRowsSoFar: 0,
+                limitReached: false,
+            }, 'UPDATE t SET id = 2');
+
+            expect(postedMessages.some(message => message.command === 'streamingComplete')).toBe(false);
+        });
+
         it('should full-hydrate on startExecution after a previous error result', () => {
             const sourceUri = 'file:///test.sql';
             provider.startExecution(sourceUri);
@@ -1024,6 +1109,8 @@ describe('ResultPanelView Scroll Preservation', () => {
             const setActiveMessages = postedMessages.filter(m => m.command === 'setActiveSource');
             expect(hydrateMessages.length).toBe(0);
             expect(setActiveMessages.length).toBe(1);
+            expect(JSON.parse(setActiveMessages[0].streamingCompletedSourcesJson!))
+                .toContain(sourceUri);
         });
 
         it('should hydrate when execution was not streamed incrementally', () => {

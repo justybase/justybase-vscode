@@ -188,6 +188,25 @@ describe('handleSetActiveSource grid preservation', () => {
         expect(mockSyncGlobalFilterInput).toHaveBeenCalledWith(1);
     });
 
+    it('resets a previous streaming marker when the next execution is still running', () => {
+        const state = require('../../media/resultPanel/state.js');
+        state.getActiveGridIndex.mockReturnValue(1);
+        (resultSets[1] as { isStreamingComplete?: boolean }).isStreamingComplete = true;
+
+        const { handleSetActiveSource } = require('../../media/resultPanel/messages.js');
+        handleSetActiveSource({
+            command: 'setActiveSource',
+            sourceUri,
+            activeResultSetIndex: 1,
+            executingSourcesJson: JSON.stringify([sourceUri]),
+            streamingCompletedSourcesJson: JSON.stringify([]),
+            sourcesJson: JSON.stringify([sourceUri]),
+            pinnedSourcesJson: JSON.stringify([sourceUri]),
+        });
+
+        expect((resultSets[1] as { isStreamingComplete?: boolean }).isStreamingComplete).toBe(false);
+    });
+
     it('clears search, disk grouping, and edit state when grids are rebuilt', () => {
         const state = require('../../media/resultPanel/state.js');
         const searchWorkerBridge = require('../../media/resultPanel/searchWorkerBridge.js');

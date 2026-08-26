@@ -23,6 +23,7 @@ module.exports = [
   "netezzaDoubleDotCompletion.live.integration.test.ts",
   "netezzaTimestampFilterFormats.live.integration.test.ts",
   "netezzaPrefetchSplit.live.integration.test.ts",
+  "netezzaStreamingBoundary.live.integration.test.ts",
   "mcpLive.integration.test.ts",
   "sasLikeMacros.e2e.test.ts",
   "linterLiveValidation.test.ts",

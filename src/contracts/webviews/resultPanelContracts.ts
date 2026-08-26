@@ -36,6 +36,7 @@ export type ResultPanelExportRowScope = 'loaded' | 'all';
 export type ResultPanelExecutionState =
     | 'idle'
     | 'loading'
+    | 'finalizing'
     | 'success'
     | 'error'
     | 'cancelled'
@@ -99,6 +100,8 @@ export interface ResultPanelViewData {
     diskBackedStreamCapEnabled: boolean;
     /** Bumps whenever active-source result data changes; used to avoid stale hydrate dedup. */
     dataVersion?: number;
+    /** Sources whose current execution delivered all rows but is still finalizing on the host. */
+    streamingCompletedSourcesJson?: string;
 }
 
 export type ResultPanelWebviewToHostMessage =
@@ -312,6 +315,8 @@ export type ResultPanelHostToWebviewMessage =
       pinnedSourcesJson: string;
       formatSettings?: ResultFormattingPayload;
       diskBackedStreamCapEnabled?: boolean;
+      /** Sources whose current execution delivered all rows but is still finalizing on the host. */
+      streamingCompletedSourcesJson?: string;
       uxTraceId?: string;
     }
   | { command: 'uxPerfSession'; active: boolean }

@@ -442,6 +442,11 @@ body.vscode-dark {
     background: rgba(204, 167, 0, 0.08);
 }
 
+.execution-status-banner.state-finalizing {
+    color: var(--vscode-textLink-foreground);
+    background: rgba(55, 148, 255, 0.08);
+}
+
 .result-set-tab__spinner {
     flex: 0 0 auto;
     width: 12px;
