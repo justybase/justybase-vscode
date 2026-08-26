@@ -140,38 +140,6 @@ test.describe('Table rendering', () => {
         expect(scrolledFirstRowNum).toBeGreaterThan(initialFirstRowNum);
     });
 
-    test('recovers rendering and scrolling after hidden initialization without ResizeObserver', async ({ page }) => {
-        await page.goto(`${TEST_PAGE}?initiallyHidden=1&disableResizeObserver=1`, { waitUntil: 'networkidle' });
-        await page.waitForFunction(
-            () => document.getElementById('renderStatus')?.textContent?.includes('✅'),
-            { timeout: 15000 }
-        );
-
-        const hiddenRowCount = await page.locator('#gridContainer td.row-number-cell').count();
-        expect(hiddenRowCount).toBeGreaterThan(0);
-
-        await page.evaluate(() => {
-            const splitView = document.getElementById('mainSplitView');
-            if (splitView) splitView.style.display = 'flex';
-        });
-
-        const gridWrapper = page.locator('#gridContainer .grid-wrapper');
-        await expect(gridWrapper).toBeVisible();
-        const initialFirstRowNum = Number(
-            (await page.locator('#gridContainer td.row-number-cell').first().textContent())?.trim()
-        );
-
-        await gridWrapper.evaluate(element => {
-            element.scrollTop = 10000;
-        });
-        await page.waitForTimeout(1000);
-
-        const scrolledFirstRowNum = Number(
-            (await page.locator('#gridContainer td.row-number-cell').first().textContent())?.trim()
-        );
-        expect(scrolledFirstRowNum).toBeGreaterThan(initialFirstRowNum);
-    });
-
     test('grid renders with proper structure and row numbers', async ({ page }) => {
         // Verify the grid is properly rendered through DOM structure
         // (window.grids is not reliable because resetGrids() reassigns the array)

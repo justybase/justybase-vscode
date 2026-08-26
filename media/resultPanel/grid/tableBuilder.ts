@@ -888,11 +888,6 @@ export function createResultSetGrid(
             rowVirtualizer.getVirtualItems(),
             rowVirtualizer.options.count ?? 0,
             resolvedRowHeight ?? RESULT_GRID_ESTIMATED_ROW_HEIGHT,
-            {
-                scrollOffset: wrapper.scrollTop,
-                viewportSize: wrapper.clientHeight,
-                overscan: RESULT_GRID_VIRTUAL_OVERSCAN,
-            },
         );
         const totalSize = rowVirtualizer.getTotalSize();
         const rsAt = getResultSetAt(rsIndex) ?? rs;

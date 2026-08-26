@@ -704,6 +704,21 @@ describe('ResultPanelView Scroll Preservation', () => {
             expect(hydrateMessages.length).toBe(0);
         });
 
+        it('should hydrate the Logs shell for a source with no prior result sets', () => {
+            const sourceUri = 'untitled:Untitled-1';
+            postedMessages = [];
+
+            provider.startExecution(sourceUri);
+
+            const hydrateMessages = postedMessages.filter(message => message.command === 'hydrate');
+            expect(hydrateMessages.length).toBeGreaterThan(0);
+            const latestHydrate = hydrateMessages[hydrateMessages.length - 1] as {
+                data?: { resultSetsMsgPack?: Uint8Array };
+            };
+            const hydratedResults = decode(latestHydrate.data!.resultSetsMsgPack!) as Array<{ isLog?: boolean }>;
+            expect(hydratedResults.some(resultSet => resultSet.isLog)).toBe(true);
+        });
+
         it('should keep streamed in-memory results lightweight on finalize', () => {
             const sourceUri = 'file:///test.sql';
             provider.startExecution(sourceUri);

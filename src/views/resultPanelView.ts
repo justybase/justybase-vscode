@@ -476,11 +476,16 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     public startExecution(sourceUri: string) {
+        const hadResultSets = (this._stateManager.resultsMap.get(sourceUri)?.length ?? 0) > 0;
         const { clearedUnpinnedResults } = this._stateManager.startExecution(sourceUri);
         this._streamingResultSets.delete(sourceUri);
         // Full hydrate only when unpinned tabs (e.g. Error) were removed — avoids wiping
         // live/pinned state on every re-run.
-        if (clearedUnpinnedResults) {
+        // A newly-created source has no Logs shell in the webview yet. Force one
+        // authoritative hydrate in that case; otherwise a lightweight streaming
+        // update can arrive with resultSetIndex 1 while the client still has an
+        // empty result-set array, dropping the Logs tab permanently for this run.
+        if (clearedUnpinnedResults || !hadResultSets) {
             this._stateManager.markStale(sourceUri);
         }
         this._updateWebview();
