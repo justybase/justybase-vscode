@@ -66,6 +66,7 @@ import {
     scheduleDeferredColumnWidthInit,
     calculateAutoColumnWidth,
     getGridInitSignal,
+    resolveRenderableVirtualItems,
 } from './sizing.js';
 import { prepareColumns, populateColumnSearchList } from './columns.js';
 import { renderStateCard, applyRightAlignmentClass } from './alternateViews.js';
@@ -883,7 +884,11 @@ export function createResultSetGrid(
 
         const coreRows = tanTable.getCoreRowModel().rows as GroupableTanStackRow[];
         const filteredRows = tanTable.getFilteredRowModel().rows as GroupableTanStackRow[];
-        const virtualItems = rowVirtualizer.getVirtualItems();
+        const virtualItems = resolveRenderableVirtualItems(
+            rowVirtualizer.getVirtualItems(),
+            rowVirtualizer.options.count ?? 0,
+            resolvedRowHeight ?? RESULT_GRID_ESTIMATED_ROW_HEIGHT,
+        );
         const totalSize = rowVirtualizer.getTotalSize();
         const rsAt = getResultSetAt(rsIndex) ?? rs;
         const diskView = resolveDiskGridViewState(rsIndex);

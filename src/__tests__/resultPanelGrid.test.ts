@@ -150,6 +150,26 @@ describe('grid.js exported constants (Table mode)', () => {
         const g = require('../../media/resultPanel/grid.js');
         expect(g.RESULT_GRID_VIRTUAL_OVERSCAN).toBe(12);
     });
+
+    it('renders a bounded first window when the virtualizer has no viewport measurement', () => {
+        const g = require('../../media/resultPanel/grid.js');
+        const items = g.resolveRenderableVirtualItems([], 100, 30, 5);
+
+        expect(items).toEqual([
+            { index: 0, start: 0, end: 30 },
+            { index: 1, start: 30, end: 60 },
+            { index: 2, start: 60, end: 90 },
+            { index: 3, start: 90, end: 120 },
+            { index: 4, start: 120, end: 150 },
+        ]);
+    });
+
+    it('keeps measured virtual rows unchanged', () => {
+        const g = require('../../media/resultPanel/grid.js');
+        const measured = [{ index: 8, start: 240, end: 270 }];
+
+        expect(g.resolveRenderableVirtualItems(measured, 100)).toBe(measured);
+    });
 });
 
 describe('renderGrids cleanup', () => {
