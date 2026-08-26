@@ -1096,6 +1096,36 @@ export function handleCancelExecution(message: Record<string, unknown>): void {
     }
 }
 
+function createSynchronizingLogShell(): ResultSet {
+    return {
+        columns: [
+            { name: 'Time', type: 'string' },
+            { name: 'Message', type: 'string' },
+        ],
+        data: [],
+        message: 'Synchronizing logs...',
+        executionTimestamp: 0,
+        isLog: true,
+        name: 'Logs',
+    };
+}
+
+function restoreMissingLogShell(resultSets: ResultSet[]): ResultSet[] {
+    if (resultSets.some(resultSet => resultSet?.isLog)) {
+        return resultSets;
+    }
+
+    const nextResultSets = [createSynchronizingLogShell(), ...resultSets];
+    setResultSets(nextResultSets);
+    if (resultSets.length > 0) {
+        setActiveGridIndex(getActiveGridIndex() + 1);
+    }
+    renderDocIndicator(getActiveSourceUri());
+    renderResultSetTabs();
+    renderGrids();
+    return nextResultSets;
+}
+
 export function handleAppendRows(message: Record<string, unknown>): void {
     let resultSetIndex = message.resultSetIndex as number;
     let rows = message.rows as unknown[] | Uint8Array | { type?: string; data?: number[] };
@@ -1140,7 +1170,18 @@ export function handleAppendRows(message: Record<string, unknown>): void {
         }
     }
 
-    const resultSets = getResultSets();
+    let resultSets = getResultSets();
+    if ((isLog || resultSetIndex > 0) && !resultSets.some(resultSet => resultSet?.isLog)) {
+        resultSets = restoreMissingLogShell(resultSets);
+        if (!isLog && sourceUri) {
+            postHostMessage({
+                command: 'requestLogSync',
+                sourceUri,
+                executionTimestamp: undefined,
+                currentRows: 0,
+            });
+        }
+    }
     if (isLog && resultSets.length > 0) {
         const resolvedLogIndex = resultSets.findIndex(resultSet => resultSet?.isLog);
         if (resolvedLogIndex >= 0) {
