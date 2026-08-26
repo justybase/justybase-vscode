@@ -239,18 +239,6 @@
             sourceUri: 'test-source-1',
         }];
 
-        var harnessParams = new URLSearchParams(window.location.search);
-        if (harnessParams.get('initiallyHidden') === '1') {
-            document.getElementById('mainSplitView').style.display = 'none';
-        }
-        if (harnessParams.get('disableResizeObserver') === '1') {
-            Object.defineProperty(window, 'ResizeObserver', {
-                configurable: true,
-                writable: true,
-                value: undefined,
-            });
-        }
-
         // --- LOAD AND INIT ---
         var script = document.createElement('script');
         script.src = '/dist/media/resultPanel.js';
