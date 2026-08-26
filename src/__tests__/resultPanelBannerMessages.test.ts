@@ -218,6 +218,90 @@ describe('result panel execution banner messages', () => {
         expect(cancelBtn.style.display).toBe('');
     });
 
+    it('shows finalizing immediately after all streamed rows arrive', () => {
+        const { banner, textEl, cancelBtn } = installBanner();
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: {
+                activeSource: 'file:///queries/inventory.sql',
+                executingSources: new Set(['file:///queries/inventory.sql']),
+                resultSets: [
+                    {
+                        isLog: false,
+                        data: [],
+                        totalRowCount: 102000,
+                        storageMode: 'sqlite',
+                        isStreamingComplete: false,
+                    }
+                ]
+            }
+        });
+
+        const messagesModule: {
+            inferExecutionState: () => string;
+            updateExecutionStatusBanner: () => void;
+            handleStreamingComplete: (message: Record<string, unknown>) => void;
+        } = require('../../media/resultPanel/messages.js');
+
+        messagesModule.handleStreamingComplete({
+            sourceUri: 'file:///queries/inventory.sql',
+            resultSetIndex: 0,
+            totalRows: 102000,
+            limitReached: false,
+        });
+        expect(messagesModule.inferExecutionState()).toBe('finalizing');
+        messagesModule.updateExecutionStatusBanner();
+
+        expect(textEl.textContent).toContain('102,000 rows received');
+        expect(textEl.textContent).toContain('finalizing database session');
+        expect(banner.className).toContain('state-finalizing');
+        expect(cancelBtn.style.display).toBe('none');
+    });
+
+    it('does not send preview row counts when cancellation is requested during finalization', () => {
+        installBanner();
+        const postMessage = jest.fn();
+        Object.defineProperty(global, 'acquireVsCodeApi', {
+            configurable: true,
+            value: () => ({
+                postMessage,
+                getState: () => undefined,
+                setState: jest.fn(),
+            }),
+        });
+
+        const sourceUri = 'file:///queries/inventory.sql';
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: {
+                activeSource: sourceUri,
+                executingSources: new Set([sourceUri]),
+                streamingCompletedSources: new Set([sourceUri]),
+                resultSets: [{
+                    isLog: false,
+                    data: [],
+                    totalRowCount: 102000,
+                    storageMode: 'sqlite',
+                }],
+            },
+        });
+
+        const messagesModule: {
+            cancelActiveQuery: () => void;
+        } = require('../../media/resultPanel/messages.js');
+
+        messagesModule.cancelActiveQuery();
+
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'cancelQuery',
+            sourceUri,
+            currentRowCounts: undefined,
+        }));
+        delete (globalThis as Record<string, unknown>).acquireVsCodeApi;
+    });
+
     it('does not flash the running banner for queries that finish within 5 seconds', () => {
         jest.useFakeTimers();
         const { banner, textEl } = installBanner();

@@ -16,6 +16,12 @@ describe('media formatCellValue binary placeholder', () => {
         expect(formatCellValue('AQIDBAUG', 'OLE', undefined)).toBe('[OLE Object · 6 B]');
     });
 
+    it('displays a numeric scalar when its column was incorrectly reported as BLOB', () => {
+        const { formatCellValue, shouldRightAlignCell } = require('../../media/resultPanel/utils.js');
+        expect(formatCellValue(1234, 'BLOB', undefined)).toBe('1 234');
+        expect(shouldRightAlignCell('BLOB', { value: 1234 })).toBe(true);
+    });
+
     it('returns null for null binary cells', () => {
         const { formatCellValue } = require('../../media/resultPanel/utils.js');
         expect(formatCellValue(null, 'BLOB', undefined)).toBeNull();

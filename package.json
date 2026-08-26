@@ -4474,7 +4474,7 @@
     ]
   },
   "dependencies": {
-    "@justybase/netezza-driver": "^2.4.4",
+    "@justybase/netezza-driver": "^3.0.0",
     "@justybase/spreadsheet-tasks": "^2.1.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@msgpack/msgpack": "^3.1.3",

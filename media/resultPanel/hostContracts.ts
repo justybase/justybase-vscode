@@ -8,6 +8,7 @@ export type ResultPanelExportFormat = 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'x
 export type ResultPanelExecutionState =
     | 'idle'
     | 'loading'
+    | 'finalizing'
     | 'success'
     | 'error'
     | 'cancelled'

@@ -40,7 +40,12 @@ interface InternalResultSet {
     limitReached: boolean;
 }
 
-export type StreamingExecutionTiming = MetadataQueryTiming;
+export interface StreamingExecutionTiming extends MetadataQueryTiming {
+    /** Time spent in the terminal read that observes the result-set boundary. */
+    resultCompletionWaitMs?: number;
+    /** Cumulative time spent delivering chunks to the consumer. */
+    chunkDeliveryMs?: number;
+}
 
 const CANCEL_TIMEOUT_MS = 5000;
 const EXTENDED_CANCEL_TIMEOUT_MS = 15000;
@@ -630,7 +635,14 @@ export class StreamingManager {
         connectionManager?: { closeDocumentPersistentConnection(uri: string): Promise<void> },
         maxRows?: number,
         onDropSession?: (sessionId: string) => Promise<void>
-    ): Promise<{ totalRows: number; limitReached: boolean; error?: Error; recordsAffected?: number; status: OperationStatus }> {
+    ): Promise<{
+        totalRows: number;
+        limitReached: boolean;
+        error?: Error;
+        recordsAffected?: number;
+        status: OperationStatus;
+        timing?: StreamingExecutionTiming;
+    }> {
         const cmd = connection.createCommand(query);
         if (timeoutSeconds && timeoutSeconds > 0) {
             cmd.commandTimeout = timeoutSeconds;
@@ -656,17 +668,47 @@ export class StreamingManager {
         let caughtError: Error | undefined;
         let operationStatus: OperationStatus = 'success';
         let commandCleanupDone = false;
+        const timingStartedAt = Date.now();
+        const executionTiming: StreamingExecutionTiming = {
+            rowsRead: 0,
+            chunkDeliveryMs: 0,
+        };
+        let readerReadyAt: number | undefined;
+        let firstReadCompleted = false;
+        let rowFetchStartedAt: number | undefined;
+
+        const deliverChunk = async (chunk: StreamingChunk): Promise<void> => {
+            const deliveryStartedAt = Date.now();
+            try {
+                await onChunk(chunk);
+            } finally {
+                executionTiming.chunkDeliveryMs =
+                    (executionTiming.chunkDeliveryMs ?? 0) + (Date.now() - deliveryStartedAt);
+            }
+        };
 
         try {
             try {
+                const executeReaderStartedAt = Date.now();
                 reader = await cmd.executeReader();
+                executionTiming.executeReaderMs = Date.now() - executeReaderStartedAt;
+                readerReadyAt = Date.now();
             } catch (executeErr: unknown) {
                 caughtError = executeErr instanceof Error ? executeErr : new Error(String(executeErr));
                 operationStatus = signal?.aborted || isCancellationError(executeErr)
                     ? 'cancelled'
                     : isTimeoutError(executeErr) ? 'timeout' : 'error';
+                executionTiming.status = operationStatus;
+                executionTiming.totalMs = Date.now() - timingStartedAt;
                 await cancelCommandAndCloseReader(cmd, reader, cancellationContext);
-                return { totalRows: 0, limitReached: false, error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
+                return {
+                    totalRows: 0,
+                    limitReached: false,
+                    error: caughtError,
+                    recordsAffected: cmd._recordsAffected,
+                    status: operationStatus,
+                    timing: executionTiming,
+                };
             }
 
             let totalRows = 0;
@@ -679,6 +721,21 @@ export class StreamingManager {
                 let chunk: unknown[][] = [];
                 let isFirstChunk = true;
                 let rowsSinceYield = 0;
+                const readRow = async (): Promise<boolean> => {
+                    const readStartedAt = Date.now();
+                    const hasRow = await reader!.read();
+                    const readCompletedAt = Date.now();
+                    if (!firstReadCompleted) {
+                        firstReadCompleted = true;
+                        executionTiming.serverWaitToFirstRowMs =
+                            readCompletedAt - (readerReadyAt ?? timingStartedAt);
+                        rowFetchStartedAt = readCompletedAt;
+                    }
+                    if (!hasRow) {
+                        executionTiming.resultCompletionWaitMs = readCompletedAt - readStartedAt;
+                    }
+                    return hasRow;
+                };
 
                 // Read column metadata BEFORE the fetch loop (even if there are 0 rows)
                 for (let i = 0; i < reader.fieldCount; i++) {
@@ -694,7 +751,8 @@ export class StreamingManager {
                 }
 
                 let userCancelled = false;
-                while (await reader.read()) {
+                while (await readRow()) {
+                    executionTiming.rowsRead = (executionTiming.rowsRead ?? 0) + 1;
                     // Check for cancellation
                     if (signal?.aborted) {
                         userCancelled = true;
@@ -729,7 +787,7 @@ export class StreamingManager {
 
                     // Send chunk when it reaches chunk size
                     if (chunk.length >= chunkSize) {
-                        await onChunk({
+                        await deliverChunk({
                             columns: isFirstChunk ? columns : [],
                             rows: chunk,
                             isFirstChunk,
@@ -765,7 +823,7 @@ export class StreamingManager {
                 // If user cancelled, return early with an error
                 if (userCancelled) {
                     if (chunk.length > 0) {
-                        await onChunk({
+                        await deliverChunk({
                             columns: isFirstChunk ? columns : [],
                             rows: chunk,
                             isFirstChunk,
@@ -775,7 +833,14 @@ export class StreamingManager {
                             isCancelled: true,
                         });
                     }
-                    return { totalRows, limitReached, error: new Error('Query cancelled'), recordsAffected: cmd._recordsAffected, status: 'cancelled' };
+                    return {
+                        totalRows,
+                        limitReached,
+                        error: new Error('Query cancelled'),
+                        recordsAffected: cmd._recordsAffected,
+                        status: 'cancelled',
+                        timing: executionTiming,
+                    };
                 }
 
                 // Send final chunk (even if empty, to signal completion)
@@ -783,7 +848,7 @@ export class StreamingManager {
                 if (signal?.aborted) {
                     operationStatus = 'cancelled';
                     if (chunk.length > 0) {
-                        await onChunk({
+                        await deliverChunk({
                             columns: isFirstChunk ? columns : [],
                             rows: chunk,
                             isFirstChunk,
@@ -793,10 +858,17 @@ export class StreamingManager {
                             isCancelled: true,
                         });
                     }
-                    return { totalRows, limitReached, error: caughtError || new Error('Query cancelled'), recordsAffected: cmd._recordsAffected, status: 'cancelled' };
+                    return {
+                        totalRows,
+                        limitReached,
+                        error: caughtError || new Error('Query cancelled'),
+                        recordsAffected: cmd._recordsAffected,
+                        status: 'cancelled',
+                        timing: executionTiming,
+                    };
                 }
 
-                await onChunk({
+                await deliverChunk({
                     columns: isFirstChunk ? columns : [],
                     rows: chunk,
                     isFirstChunk,
@@ -811,7 +883,19 @@ export class StreamingManager {
                     : isTimeoutError(readErr) ? 'timeout' : 'error';
             }
 
-            return { totalRows, limitReached, error: caughtError, recordsAffected: cmd._recordsAffected, status: operationStatus };
+            if (rowFetchStartedAt !== undefined) {
+                executionTiming.rowFetchMs = Date.now() - rowFetchStartedAt;
+            }
+            executionTiming.status = operationStatus;
+            executionTiming.totalMs = Date.now() - timingStartedAt;
+            return {
+                totalRows,
+                limitReached,
+                error: caughtError,
+                recordsAffected: cmd._recordsAffected,
+                status: operationStatus,
+                timing: executionTiming,
+            };
         } finally {
             if (reader && !commandCleanupDone) {
                 if (caughtError && isConnectionRecoveryError(caughtError)) {
@@ -826,7 +910,9 @@ export class StreamingManager {
                         cancellationContext,
                     );
                 } else {
+                    const closeStartedAt = Date.now();
                     await closeReaderBestEffort(reader, 'executeWithStreaming');
+                    executionTiming.readerCloseMs = Date.now() - closeStartedAt;
                 }
             }
             if (alertTimeout) {
@@ -838,6 +924,11 @@ export class StreamingManager {
                 }
                 commandHandle?.unregister();
             }
+            if (rowFetchStartedAt !== undefined && executionTiming.rowFetchMs === undefined) {
+                executionTiming.rowFetchMs = Date.now() - rowFetchStartedAt;
+            }
+            executionTiming.status = operationStatus;
+            executionTiming.totalMs = Date.now() - timingStartedAt;
         }
     }
 

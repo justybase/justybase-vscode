@@ -30,6 +30,8 @@ import {
 import { isConnectionBrokenError } from "./queryRunnerUtils";
 import { assertExecutionCurrent } from "./executionGuard";
 
+const SLOW_STREAMING_PHASE_MS = 1000;
+
 function handleBatchQueryFailure(params: {
     err: unknown;
     queryIndex: number;
@@ -644,7 +646,7 @@ export async function runQueriesWithStreaming(
 
                     const { queryTimeout, rowLimit } = getQueryConfig();
 
-                    const { totalRows, limitReached, error, recordsAffected, status } =
+                    const { totalRows, limitReached, error, recordsAffected, status, timing } =
                         await streamingManager.executeWithStreaming(
                             connection,
                             queryToExecute,
@@ -663,6 +665,23 @@ export async function runQueriesWithStreaming(
                             createDropSessionCallback(connManager, documentUri),
                         );
                     assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+
+                    if (timing && [
+                        timing.resultCompletionWaitMs,
+                        timing.readerCloseMs,
+                        timing.chunkDeliveryMs,
+                    ].some(durationMs => (durationMs ?? 0) >= SLOW_STREAMING_PHASE_MS)) {
+                        logBatch(
+                            outputChannel,
+                            logCallback,
+                            `[StreamingTiming] rows=${timing.rowsRead ?? totalRows} `
+                            + `executeReaderMs=${timing.executeReaderMs ?? '-'} `
+                            + `resultCompletionWaitMs=${timing.resultCompletionWaitMs ?? '-'} `
+                            + `readerCloseMs=${timing.readerCloseMs ?? '-'} `
+                            + `chunkDeliveryMs=${timing.chunkDeliveryMs ?? '-'} `
+                            + `totalMs=${timing.totalMs ?? '-'}`,
+                        );
+                    }
 
                     if (status === 'cancelled' || (documentUri && streamingManager.isAborted(documentUri))) {
                         const durationMs = Date.now() - startTime;

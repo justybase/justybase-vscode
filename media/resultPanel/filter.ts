@@ -148,10 +148,16 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
     const totalRows = isDiskBacked
         ? (rs.totalRowCount ?? 0)
         : (typeof rs.totalRowCount === 'number' ? rs.totalRowCount : loadedRows);
+    const activeSource = getActiveSourceUri();
+    const streamingCompletionKnown = getResultPanelWindow().streamingCompletedSources instanceof Set;
+    const streamingComplete = streamingCompletionKnown
+        ? getResultPanelWindow().streamingCompletedSources?.has(activeSource ?? '') === true
+        : rs.isStreamingComplete === true;
+    const activeStreaming = isActiveSourceExecuting() && !streamingComplete;
     const isStreamingPreview = !isDiskBacked
         && typeof rs.totalRowCount === 'number'
         && rs.totalRowCount > loadedRows
-        && (isActiveSourceExecuting() || loadedRows < totalRows);
+        && (activeStreaming || loadedRows < totalRows);
 
     const globalFilter = getGlobalFilterState(
         resultSetIndex,
@@ -171,7 +177,7 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         } else {
             text = `${filteredCount.toLocaleString()} row${filteredCount !== 1 ? 's' : ''}`;
         }
-        if (isActiveSourceExecuting()) {
+        if (activeStreaming) {
             text += ' (streaming…)';
         }
         rowCountInfo.appendChild(document.createTextNode(text));

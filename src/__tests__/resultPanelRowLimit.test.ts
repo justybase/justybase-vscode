@@ -95,4 +95,56 @@ describe('result panel row limit helpers', () => {
         expect(rs.limitReached).toBe(true);
         expect(appendedChildren.some(node => node.className === 'row-limit-warning')).toBe(true);
     });
+
+    it('removes the streaming suffix once a disk-backed result is complete', () => {
+        const textNodes: string[] = [];
+        const container = {
+            innerHTML: '',
+            textContent: '',
+            style: { opacity: '' },
+            appendChild: jest.fn((node: { textContent?: string }) => {
+                if (node.textContent) textNodes.push(node.textContent);
+            })
+        };
+        Object.defineProperty(global, 'document', {
+            configurable: true,
+            writable: true,
+            value: {
+                getElementById: jest.fn((id: string) => (id === 'rowCountInfo' ? container : null)),
+                createTextNode: jest.fn((text: string) => ({ nodeType: 3, textContent: text })),
+                createElement: jest.fn(() => ({ className: '', title: '', textContent: '' }))
+            }
+        });
+
+        const sourceUri = 'file:///queries/inventory.sql';
+        const resultSet = {
+            columns: [{ name: 'id', type: 'int' }],
+            data: [],
+            storageMode: 'sqlite' as const,
+            totalRowCount: 102000,
+            diskFilteredCount: 102000,
+            limitReached: false,
+            isStreamingComplete: false,
+        };
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: {
+                queryRowLimit: 200000,
+                activeSource: sourceUri,
+                executingSources: new Set([sourceUri]),
+                resultSets: [resultSet],
+            }
+        });
+
+        const filterModule: { renderRowCountInfo: (index: number) => void } =
+            require('../../media/resultPanel/filter.js');
+
+        filterModule.renderRowCountInfo(0);
+        expect(textNodes[textNodes.length - 1]).toBe('102,000 rows (streaming…)');
+
+        resultSet.isStreamingComplete = true;
+        filterModule.renderRowCountInfo(0);
+        expect(textNodes[textNodes.length - 1]).toBe('102,000 rows');
+    });
 });

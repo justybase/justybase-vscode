@@ -256,6 +256,16 @@ describe('ResultStateManager', () => {
     });
 
     describe('structured execution logging', () => {
+        it('resets streaming completion at the start of every statement', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            manager.markStreamingCompleted(sourceUri);
+
+            manager.logExecutionStart(sourceUri, 'UPDATE t SET id = 2', 'conn1');
+
+            expect(manager.isStreamingCompleted(sourceUri)).toBe(false);
+        });
+
         it('builds an authoritative log delta for gap recovery', () => {
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);

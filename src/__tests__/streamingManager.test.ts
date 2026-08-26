@@ -764,6 +764,104 @@ describe("StreamingManager", () => {
       expect(onChunk.mock.calls.length).toBeGreaterThanOrEqual(3);
     });
 
+    it("reports separate result-boundary, chunk-delivery, and reader-close timings", async () => {
+      const cmd = new MockNzCommand();
+      const onChunk = jest.fn();
+      jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
+
+      const reader = new MockNzDataReader([[1], [2]]);
+      jest.spyOn(cmd, "executeReader").mockResolvedValue(reader);
+
+      const result = await manager.executeWithStreaming(
+        mockConnection,
+        "SELECT * FROM test",
+        100,
+        10,
+        undefined,
+        undefined,
+        onChunk,
+      );
+
+      expect(result.timing).toEqual(expect.objectContaining({
+        rowsRead: 2,
+        status: "success",
+      }));
+      expect(result.timing?.executeReaderMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.serverWaitToFirstRowMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.resultCompletionWaitMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.rowFetchMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.chunkDeliveryMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.readerCloseMs).toBeGreaterThanOrEqual(0);
+      expect(result.timing?.totalMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("delivers the final chunk before waiting for reader close", async () => {
+      const cmd = new MockNzCommand();
+      jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
+
+      let resolveClose: (() => void) | undefined;
+      const closeGate = new Promise<void>((resolve) => {
+        resolveClose = resolve;
+      });
+      let signalCloseStarted: (() => void) | undefined;
+      const closeStarted = new Promise<void>((resolve) => {
+        signalCloseStarted = resolve;
+      });
+      const lifecycle: string[] = [];
+      const reader = {
+        fieldCount: 1,
+        read: jest.fn()
+          .mockResolvedValueOnce(true)
+          .mockResolvedValueOnce(false),
+        nextResult: jest.fn().mockResolvedValue(false),
+        close: jest.fn(() => {
+          lifecycle.push("close");
+          signalCloseStarted?.();
+          return closeGate;
+        }),
+        getValue: jest.fn().mockReturnValue(1),
+        getName: jest.fn().mockReturnValue("id"),
+        getTypeName: jest.fn().mockReturnValue("INT"),
+      } as unknown as NzDataReader;
+      jest.spyOn(cmd, "executeReader").mockResolvedValue(reader);
+
+      let signalFinalChunk: (() => void) | undefined;
+      const finalChunkSeen = new Promise<void>((resolve) => {
+        signalFinalChunk = resolve;
+      });
+      const onChunk = jest.fn((chunk) => {
+        if (chunk.isLastChunk) {
+          lifecycle.push("final-chunk");
+          signalFinalChunk?.();
+        }
+      });
+
+      let executionSettled = false;
+      const execution = manager.executeWithStreaming(
+        mockConnection,
+        "SELECT 1",
+        100,
+        10,
+        undefined,
+        undefined,
+        onChunk,
+      ).then((result) => {
+        executionSettled = true;
+        return result;
+      });
+
+      await finalChunkSeen;
+      await closeStarted;
+      expect(executionSettled).toBe(false);
+      expect(reader.close).toHaveBeenCalledTimes(1);
+      expect(lifecycle).toEqual(["final-chunk", "close"]);
+
+      resolveClose?.();
+      const result = await execution;
+      expect(result.status).toBe("success");
+      expect(executionSettled).toBe(true);
+    });
+
     it("should close reader when onChunk throws during streaming", async () => {
       const cmd = new MockNzCommand();
       const onChunk = jest.fn(() => {

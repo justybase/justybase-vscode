@@ -169,6 +169,22 @@ describe('handleHydrate executingSources dedup', () => {
         expect(mockUpdateLoadingState).toHaveBeenCalled();
     });
 
+    it('hydrates the host completion marker so an executing source remains finalizing', () => {
+        const { handleHydrate, inferExecutionState } = require('../../media/resultPanel/messages.js') as {
+            handleHydrate: (data: Record<string, unknown>) => void;
+            inferExecutionState: () => string;
+        };
+        const win = window as any;
+
+        handleHydrate({
+            ...buildHydrateData([sourceUri]),
+            streamingCompletedSourcesJson: JSON.stringify([sourceUri]),
+        });
+
+        expect(win.streamingCompletedSources.has(sourceUri)).toBe(true);
+        expect(inferExecutionState()).toBe('finalizing');
+    });
+
     it('applies hydrate when dataVersion changes but payload size matches', () => {
         const { handleHydrate } = require('../../media/resultPanel/messages.js') as {
             handleHydrate: (data: Record<string, unknown>) => void;

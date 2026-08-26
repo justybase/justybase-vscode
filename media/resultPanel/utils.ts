@@ -749,6 +749,12 @@ export function shouldRightAlignCell(
         return true;
     }
 
+    // Some driver metadata for Netezza system views labels integer values as BLOB.
+    // Trust the scalar value in that case, so the grid presents it as a number.
+    if (isBinaryColumnType(type) && (typeof value === 'number' || typeof value === 'bigint')) {
+        return true;
+    }
+
     if (isNumeric) {
         return typeof value === 'string' ? sanitizeNumericString(value) !== null : true;
     }
@@ -897,7 +903,11 @@ export function formatCellValue(
     const numericScale = normalizeDeclaredScale(scale) ?? getNumericScale(type);
 
     if (isBinaryColumnType(type)) {
-        return formatBinaryPlaceholder(value, type);
+        if (typeof value !== 'number' && typeof value !== 'bigint') {
+            return formatBinaryPlaceholder(value, type);
+        }
+        // Netezza system views may expose an integer value with BLOB metadata.
+        return formatNumericValue(value, undefined, null, context);
     }
 
     if (context.inferredDateInteger) {

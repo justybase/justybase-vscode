@@ -981,6 +981,40 @@ END_PROC;`;
             expect(rowsCall).toContain('limit reached');
         });
 
+        it('logs slow streaming cleanup phases without including SQL text', async () => {
+            const logCallback = jest.fn();
+            mockExecuteWithStreaming.mockResolvedValue({
+                totalRows: 102000,
+                limitReached: false,
+                error: null,
+                status: 'success',
+                timing: {
+                    rowsRead: 102000,
+                    executeReaderMs: 80,
+                    resultCompletionWaitMs: 12000,
+                    readerCloseMs: 3,
+                    chunkDeliveryMs: 250,
+                    totalMs: 12600,
+                },
+            });
+
+            await runQueriesWithStreaming(
+                mockContext,
+                ['SELECT secret_column FROM private_table'],
+                mockConnManager,
+                'file:///test.sql',
+                logCallback,
+            );
+
+            const timingLog = logCallback.mock.calls
+                .map((call: unknown[]) => String(call[0]))
+                .find((message: string) => message.includes('[StreamingTiming]'));
+            expect(timingLog).toContain('rows=102000');
+            expect(timingLog).toContain('resultCompletionWaitMs=12000');
+            expect(timingLog).not.toContain('secret_column');
+            expect(timingLog).not.toContain('private_table');
+        });
+
         it('should call logCallback with recordsAffected when > 0', async () => {
             const logCallback = jest.fn();
             mockExecuteWithStreaming.mockResolvedValue({
