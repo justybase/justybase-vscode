@@ -17,6 +17,38 @@ export const RESULT_GRID_VIRTUAL_OVERSCAN = 12;
 export const RESULT_GRID_ESTIMATED_ROW_HEIGHT = 30;
 export const RESULT_GRID_ROW_NUMBER_MIN_DIGITS = 7;
 
+export interface RenderableVirtualItem {
+    index: number;
+    start: number;
+    end: number;
+}
+
+/**
+ * TanStack Virtual can initially observe a 0x0 scroll element when a retained
+ * VS Code webview is revealed and hydrated in the same frame. Some webview
+ * runtimes do not deliver the follow-up resize notification, leaving a valid
+ * result set with no rendered rows. Keep a small first-page fallback until the
+ * virtualizer obtains a real viewport measurement.
+ */
+export function resolveRenderableVirtualItems<T extends RenderableVirtualItem>(
+    measuredItems: T[],
+    rowCount: number,
+    estimatedRowHeight: number = RESULT_GRID_ESTIMATED_ROW_HEIGHT,
+    fallbackCount: number = RESULT_GRID_VIRTUAL_OVERSCAN * 2 + 1,
+): Array<T | RenderableVirtualItem> {
+    if (measuredItems.length > 0 || rowCount <= 0) {
+        return measuredItems;
+    }
+
+    const safeEstimatedHeight = Math.max(1, estimatedRowHeight);
+    const count = Math.min(rowCount, Math.max(1, fallbackCount));
+    return Array.from({ length: count }, (_, index) => ({
+        index,
+        start: index * safeEstimatedHeight,
+        end: (index + 1) * safeEstimatedHeight,
+    }));
+}
+
 /** Aborted when renderGrids() runs again or the user switches result sets. */
 let activeGridInitController: AbortController | null = null;
 
