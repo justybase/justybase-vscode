@@ -2,7 +2,7 @@
     "name": "justybaselite-postgresql",
     "displayName": "JustyBase SQL Editor (PostgreSQL)",
     "description": "Optional PostgreSQL companion for JustyBase SQL Editor",
-    "version": "3.17.1",
+    "version": "3.17.2",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
