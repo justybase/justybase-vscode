@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Table Rendering Test</title>
     <link rel="stylesheet" href="/media/resultPanel.css">
+    <link rel="stylesheet" href="/media/resultPanel/databaseGroupingPanel.css">
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -67,7 +68,7 @@
         <button id="cancelQueryBtn" class="secondary">Cancel</button>
     </div>
     <div class="controls">
-        <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter...">
+        <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter..." oninput="onFilterChanged()" onkeyup="onFilterChanged()">
         <div class="column-search-wrapper">
             <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column...">
             <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
@@ -115,7 +116,7 @@
             </div>
         </div>
         <div class="toolbar-separator"></div>
-        <button class="btn btn-destructive" id="clearFiltersBtn">Clear Filters</button>
+        <button class="btn btn-destructive" id="clearFiltersBtn" onclick="clearAllFilters()">Clear Filters</button>
         <button id="clearLogsBtn" style="display: none;">Clear Logs</button>
         <span id="rowCountInfo" class="row-count-info"></span>
     </div>
@@ -135,6 +136,46 @@
             <div id="rowViewContent" class="row-view-content">
                 <div class="row-view-placeholder">Select 1 to 10 rows to view details or compare</div>
             </div>
+        </div>
+        <div id="databaseGroupingPanel" class="database-grouping-panel">
+            <div id="groupingResizeHandle" class="grouping-resize-handle" role="separator" tabindex="0" aria-label="Resize grouping panel" aria-orientation="vertical"></div>
+            <div class="grouping-panel-header">
+                <span>Database Grouping</span>
+                <div class="header-actions">
+                    <button type="button" onclick="toggleDatabaseGroupingPanel()" class="close-btn" title="Close grouping panel">✕</button>
+                </div>
+            </div>
+            <div class="grouping-drop-zone" id="groupingDropZone">
+                <div class="drop-hint">Drag columns here to group</div>
+                <div class="group-chips" id="groupingChipsContainer"></div>
+            </div>
+            <div class="grouping-functions-area" id="groupingFunctionsArea">
+                <div class="functions-title">FUNCTIONS</div>
+                <div class="function-chips" id="groupingFnChipsContainer"></div>
+                <button type="button" class="add-function-btn" id="addGroupingFnBtn">＋ Add Function</button>
+            </div>
+            <div class="grouping-limit-area">
+                <label for="groupingLimitSelect">Grouped rows</label>
+                <select id="groupingLimitSelect" title="Limit rows returned by the grouped query">
+                    <option value="source">Source query limit</option>
+                    <option value="100">100</option>
+                    <option value="500">500</option>
+                    <option value="1000">1,000</option>
+                    <option value="unlimited">Unlimited</option>
+                </select>
+            </div>
+            <div class="grouping-actions">
+                <button type="button" class="secondary" onclick="clearGroupingConfig()" id="clearGroupingBtn" disabled>Clear</button>
+                <button type="button" onclick="runGroupingQuery()" id="runGroupingBtn" disabled>Run Grouping</button>
+            </div>
+            <div class="grouping-results" id="groupingResultsArea">
+                <div class="no-results">Drag columns and run grouping</div>
+            </div>
+        </div>
+        <div class="result-panel-right-bar" id="resultPanelRightBar">
+            <button type="button" class="bar-btn" onclick="toggleDatabaseGroupingPanel()" id="groupingBarBtn" title="Database Grouping">
+                <span class="tooltip">Database Grouping</span>
+            </button>
         </div>
     </div>
     <div id="valueViewerOverlay" class="value-viewer-overlay">
@@ -159,10 +200,71 @@
     <script src="/media/tanstack-virtual-core.js"></script>
 
     <script>
+        const queryParams = new URLSearchParams(window.location.search);
+        const protocolMode = queryParams.get('protocol');
+        const protocolScenario = protocolMode === '1' || protocolMode === 'missing-shell';
+        const protocolMissingShellScenario = protocolMode === 'missing-shell';
+        const initiallyHidden = queryParams.get('initiallyHidden') === '1';
+        if (queryParams.get('disableResizeObserver') === '1') {
+            try {
+                Object.defineProperty(window, 'ResizeObserver', {
+                    configurable: true,
+                    value: undefined,
+                });
+            } catch (_) {
+                window.ResizeObserver = undefined;
+            }
+        }
+        if (initiallyHidden) {
+            document.getElementById('mainSplitView').style.display = 'none';
+        }
+
         // --- MOCK VS Code API ---
+        window.__postedMessages = [];
         window.acquireVsCodeApi = function() {
             return {
-                postMessage: function(msg) { console.log('postMessage:', msg); },
+                postMessage: function(msg) {
+                    window.__postedMessages.push(msg);
+                    console.log('postMessage:', msg);
+                    if (msg && msg.command === 'requestDatabaseGrouping') {
+                        const grouping = msg.grouping || {};
+                        const groupColumns = Array.isArray(grouping.groupByColumns)
+                            ? grouping.groupByColumns
+                            : [];
+                        const indexes = groupColumns
+                            .map(column => Number(column.columnIndex))
+                            .filter(index => Number.isInteger(index) && index >= 0);
+                        const groups = new Map();
+                        for (const row of (deterministicFixtureData?.data || [])) {
+                            const key = indexes.map(index => String(row[index] ?? '∅')).join('\u0001');
+                            const current = groups.get(key) || {
+                                values: indexes.map(index => row[index] ?? null),
+                                count: 0,
+                            };
+                            current.count += 1;
+                            groups.set(key, current);
+                        }
+                        const columns = indexes
+                            .map(index => ({
+                                name: deterministicFixtureData?.columns[index]?.name || `Column ${index}`,
+                                type: deterministicFixtureData?.columns[index]?.type || 'varchar',
+                                kind: 'group',
+                            }))
+                            .concat([{ name: 'COUNT(*)', type: 'integer', kind: 'count' }]);
+                        const rows = [...groups.values()].map(group => [...group.values, group.count]);
+                        setTimeout(() => dispatchHostMessage({
+                            command: 'databaseGroupingResult',
+                            requestId: msg.requestId,
+                            sourceUri: msg.sourceUri,
+                            resultSetIndex: msg.resultSetIndex,
+                            columns,
+                            rows,
+                            totalRows: rows.length,
+                            truncated: false,
+                            sql: 'SELECT grouped fixture data',
+                        }), 10);
+                    }
+                },
                 setState: function(state) { window.__mockState = state; },
                 getState: function() { return window.__mockState || null; },
             };
@@ -199,29 +301,23 @@
             const departments = ['Engineering', 'Marketing', 'Sales', 'HR', 'Finance', 'Operations'];
             const data = [];
 
-            // Generate data with IDs in RANDOM order so sorting actually changes the view
-            const indices = Array.from({ length: rowCount }, (_, i) => i);
-            // Fisher-Yates shuffle
-            for (let s = indices.length - 1; s > 0; s--) {
-                const r = Math.floor(Math.random() * (s + 1));
-                [indices[s], indices[r]] = [indices[r], indices[s]];
-            }
-
             for (let n = 0; n < rowCount; n++) {
-                const i = indices[n];
+                // Keep the fixture deliberately repeatable. Descending IDs make the
+                // sort assertion meaningful without depending on randomness.
+                const i = rowCount - n - 1;
                 const firstName = firstNames[i % firstNames.length];
                 const lastName = lastNames[i % lastNames.length];
                 data.push([
                     i + 1,                                    // id (NOT sequential in data order)
                     firstName + ' ' + lastName,                // name
-                    (Math.random() * 200000 + 30000).toFixed(2), // salary
+                    (30000 + (i % 17) * 1250.5).toFixed(2),    // salary
                     '202' + (i % 10) + '-' +
                         String((i % 12) + 1).padStart(2, '0') + '-' +
                         String((i % 28) + 1).padStart(2, '0'),  // hire_date
                     i % 3 !== 0,                               // active
                     departments[i % departments.length],       // department
-                    Math.floor(Math.random() * 10),             // projects
-                    (Math.random() * 10).toFixed(1),            // rating
+                    (i * 3) % 10,                               // projects
+                    ((i % 10) + 1).toFixed(1),                   // rating
                 ]);
             }
 
@@ -229,6 +325,12 @@
         }
 
         var testData = generateTestData(1000, 8);
+        // Hydrate deliberately releases replaced row arrays. Keep an immutable
+        // copy for the mock host so a trace/hydrate cycle cannot erase its fixture.
+        var deterministicFixtureData = {
+            columns: testData.columns.map(column => Object.assign({}, column)),
+            data: testData.data.map(row => row.slice()),
+        };
         window.resultSets = [{
             data: testData.data,
             columns: testData.columns,
@@ -239,19 +341,173 @@
             sourceUri: 'test-source-1',
         }];
 
+        if (protocolScenario) {
+            window.sources = ['untitled:Untitled-1'];
+            window.activeSource = 'untitled:Untitled-1';
+            window.resultSets = [];
+        }
+
+        function dispatchHostMessage(data) {
+            window.dispatchEvent(new MessageEvent('message', { data: data }));
+        }
+
+        function runProtocolScenario() {
+            const sourceUri = 'untitled:Untitled-1';
+            const logResult = {
+                name: 'Logs',
+                columns: [{ name: 'Time', type: 'string' }, { name: 'Message', type: 'string' }],
+                data: [['12:00:00', 'Execution started']],
+                executionTimestamp: 100,
+                isLog: true,
+            };
+            if (protocolMissingShellScenario) {
+                dispatchHostMessage({
+                    command: 'appendRows',
+                    sourceUri,
+                    resultSetIndex: 1,
+                    rows: [[1]],
+                    totalRows: 1,
+                    isFirstChunk: true,
+                    isLastChunk: true,
+                    limitReached: false,
+                    columns: [{ name: 'id', type: 'integer' }],
+                    sql: 'SELECT 1',
+                    executionTimestamp: 101,
+                });
+                setTimeout(function() {
+                    dispatchHostMessage({
+                        command: 'hydrate',
+                        data: {
+                            activeSourceJson: JSON.stringify(sourceUri),
+                            sourcesJson: JSON.stringify([sourceUri]),
+                            pinnedSourcesJson: JSON.stringify([sourceUri]),
+                            pinnedResultsJson: JSON.stringify([]),
+                            activeResultSetIndex: 1,
+                            resultSetsJson: JSON.stringify([
+                                logResult,
+                                {
+                                    columns: [{ name: 'id', type: 'integer' }],
+                                    data: [[1]],
+                                    executionTimestamp: 101,
+                                    sql: 'SELECT 1',
+                                },
+                            ]),
+                            executingSourcesJson: JSON.stringify([sourceUri]),
+                            streamingCompletedSourcesJson: JSON.stringify([sourceUri]),
+                            resultPanelTraceEnabled: true,
+                            resultSyncVersion: 1,
+                        },
+                    });
+                    dispatchHostMessage({
+                        command: 'streamingComplete',
+                        sourceUri,
+                        resultSetIndex: 1,
+                        totalRows: 1,
+                        limitReached: false,
+                    });
+                }, 20);
+                return;
+            }
+            dispatchHostMessage({
+                command: 'hydrate',
+                data: {
+                    activeSourceJson: JSON.stringify(sourceUri),
+                    sourcesJson: JSON.stringify([sourceUri]),
+                    pinnedSourcesJson: JSON.stringify([sourceUri]),
+                    pinnedResultsJson: JSON.stringify([]),
+                    activeResultSetIndex: 0,
+                    resultSetsJson: JSON.stringify([logResult]),
+                    executingSourcesJson: JSON.stringify([sourceUri]),
+                    streamingCompletedSourcesJson: JSON.stringify([]),
+                    resultPanelTraceEnabled: true,
+                },
+            });
+            dispatchHostMessage({
+                command: 'appendRows',
+                sourceUri,
+                resultSetIndex: 1,
+                rows: [[1]],
+                totalRows: 1,
+                isFirstChunk: true,
+                isLastChunk: false,
+                limitReached: false,
+                columns: [{ name: 'id', type: 'integer' }],
+                sql: 'SELECT 1',
+                executionTimestamp: 101,
+            });
+            dispatchHostMessage({
+                command: 'appendRows',
+                sourceUri,
+                resultSetIndex: 1,
+                rows: [[2]],
+                totalRows: 2,
+                isFirstChunk: false,
+                isLastChunk: true,
+                limitReached: false,
+            });
+            dispatchHostMessage({
+                command: 'streamingComplete',
+                sourceUri,
+                resultSetIndex: 1,
+                totalRows: 2,
+                limitReached: false,
+            });
+        }
+
+        function enableStaticTraceScenario() {
+            dispatchHostMessage({
+                command: 'hydrate',
+                data: {
+                    activeSourceJson: JSON.stringify(window.activeSource),
+                    sourcesJson: JSON.stringify([window.activeSource]),
+                    pinnedSourcesJson: JSON.stringify([]),
+                    pinnedResultsJson: JSON.stringify([]),
+                    activeResultSetIndex: 0,
+                    resultSetsJson: JSON.stringify(window.resultSets),
+                    executingSourcesJson: JSON.stringify([]),
+                    streamingCompletedSourcesJson: JSON.stringify([]),
+                    resultPanelTraceEnabled: true,
+                },
+            });
+        }
+
         // --- LOAD AND INIT ---
         var script = document.createElement('script');
         script.src = '/dist/media/resultPanel.js';
         script.onload = function() {
             try {
+                function markRendered() {
+                    document.getElementById('renderStatus').textContent = '✅ Rendered';
+                    document.getElementById('renderStatus').style.color = '#4ec9b0';
+                }
+
                 // Call init() from the loaded bundle
+                window.__resultPanelInitCount = (window.__resultPanelInitCount || 0) + 1;
                 window.init();
+                if (initiallyHidden) {
+                    // Keep the first initialization at zero geometry for two full
+                    // animation frames. Revealing without a second init makes the
+                    // assertion depend on recovery performed by the original render.
+                    requestAnimationFrame(function() {
+                        requestAnimationFrame(function() {
+                            document.getElementById('mainSplitView').style.display = '';
+                            markRendered();
+                        });
+                    });
+                } else {
+                    markRendered();
+                }
+                if (protocolScenario) {
+                    // Let the initial init complete before exercising the host protocol.
+                    setTimeout(runProtocolScenario, 30);
+                }
+                if (queryParams.get('trace') === '1') {
+                    setTimeout(enableStaticTraceScenario, 30);
+                }
                 // Expose renderGrids for tests to call directly (without re-running init)
                 // The bundle has window.grids set by initializeWindowState(), but resetGrids()
                 // reassigns the module-level grids array, so window.grids becomes stale.
                 // We use the gridWrapper querySelector as the primary verification mechanism.
-                document.getElementById('renderStatus').textContent = '✅ Rendered';
-                document.getElementById('renderStatus').style.color = '#4ec9b0';
             } catch (e) {
                 document.getElementById('renderStatus').textContent = '❌ Error: ' + e.message;
                 document.getElementById('renderStatus').style.color = '#f48771';

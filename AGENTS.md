@@ -404,6 +404,61 @@ For ambiguous syntax or implicit-cast behavior, a dev Netezza instance can confi
 - Root Jest uses `maxWorkers: 50%` by default; use `npm run test:serial` or `--runInBand` to reduce memory usage.
 - Timeout: 60s
 
+### Extension Host result-panel gate
+
+The deterministic result-panel gate runs the real extension in a fresh VS Code
+Extension Host profile against a temporary SQLite database. It is a required
+pull-request check on Linux and Windows:
+
+```bash
+npm run test:extension-host
+```
+
+The runner builds the extension, creates real `file:` and `untitled:` SQL
+editors, invokes production commands through `vscode.commands.executeCommand`,
+and drives filtering, grouping, aggregation, disk-backed queries, source
+switching, refresh, pinning, DML, errors, and export through the result-panel
+webview protocol. The test-only `justybase.test.extensionHostScenario` command
+is registered only when `NODE_ENV=test`; it is not contributed in
+`package.json` or available in production. Its bridge is additionally gated by
+`JUSTYBASE_RESULT_PANEL_TRACE=1`.
+
+The runner removes the temporary database, editors, connections, profile, and
+work directory after a successful run. Set
+`JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS=1` to retain diagnostics, or use
+`JUSTYBASE_EXTENSION_HOST_REPEAT=20` for repeated source-switch/race coverage.
+Reports and traces are sanitized: they contain command names, counters, phases,
+and fingerprints only—never passwords, full SQL, or row values.
+
+The same scenario is available for a local development Netezza:
+
+```bash
+npm run test:extension-host:netezza
+```
+
+This command requires `NZ_DEV_HOST`, `NZ_DEV_PORT`, `NZ_DEV_USER`,
+`NZ_DEV_PASSWORD`, and `NZ_DEV_DATABASE`; missing variables are a configuration
+error, not a skipped test. It creates a uniquely named fixture table and drops
+it in `finally`, without modifying durable user tables. Companion activation,
+dialect registration, and declared-command smoke coverage is available through
+`npm run test:extension-host:companions`.
+
+The deterministic Playwright complement runs the bundled webview fixture and
+asserts rendered row counts/records for global and column filters, grouping,
+Logs-before-data delivery, hidden-view initialization, and missing-shell
+recovery:
+
+```bash
+npx playwright test --config=test-harness/playwright.config.ts \
+  test-harness/tests/table-rendering.spec.ts
+```
+
+Run the Extension Host command inside WSL2 for a local WSL check. Remote-WSL is
+a separate host placement and must be tested separately after opening the
+workspace through VS Code Remote-WSL when that deployment is in scope. CI and
+local diagnostics belong in temporary/artifact directories, never in the
+repository; do not commit credentials or generated reports.
+
 ### Integration Tests
 
 - Database-backed integration tests are excluded from default `npm run test`.

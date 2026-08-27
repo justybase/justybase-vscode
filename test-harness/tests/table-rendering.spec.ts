@@ -203,27 +203,139 @@ test.describe('Table rendering', () => {
         const before = await getIdValues();
         expect(before.length).toBe(5);
 
-        // Click 'id' column header (th at index 1) to toggle sort
+        // Sorting is an explicit header action; clicking the header text selects
+        // the column and intentionally does not toggle sorting.
         const idHeader = page.locator('#gridContainer table thead th').nth(1);
-        await idHeader.click();
-        await page.waitForTimeout(800);
+        await idHeader.locator('.header-btn-sort').click();
+        // TanStack starts numeric columns in descending order. The fixture is
+        // already descending, so the second click is the first visible change.
+        await page.locator('#gridContainer table thead th').nth(1).locator('.header-btn-sort').click();
 
-        // After first click, the order should have changed
-        const afterClick = await getIdValues();
-
-        // Compare: the order should be different from before
-        const changed = before.some((v, i) => v !== afterClick[i]);
-        expect(changed).toBe(true);
+        await expect.poll(async () => {
+            const afterClick = await getIdValues();
+            return before.some((value, index) => value !== afterClick[index]);
+        }).toBe(true);
     });
 
     test('global filter input is functional', async ({ page }) => {
         const filterInput = page.locator('#globalFilter');
         await expect(filterInput).toBeVisible();
 
-        await filterInput.fill('search-term');
-        await page.waitForTimeout(300);
+        await filterInput.fill('Michał');
 
-        const inputValue = await filterInput.inputValue();
-        expect(inputValue).toBe('search-term');
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toMatch(/125 rows of 1,000/);
+        await expect(page.locator('#gridContainer tbody td').filter({ hasText: 'Michał' }).first())
+            .toBeVisible();
+
+        await filterInput.fill('');
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toContain('1,000 rows');
+    });
+
+    test('column filter changes the rendered result and can be cleared', async ({ page }) => {
+        const departmentHeader = page.locator('#gridContainer table thead th').nth(6);
+        await departmentHeader.locator('.header-btn-filter').click();
+
+        const dropdown = page.locator('.column-filter-dropdown');
+        await expect(dropdown).toBeVisible();
+        await dropdown.locator('.filter-search-input').fill('Engineering');
+
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toMatch(/167 rows of 1,000/);
+        await expect(page.locator('#gridContainer tbody td').filter({ hasText: 'Engineering' }).first())
+            .toBeVisible();
+
+        await page.keyboard.press('Escape');
+        await page.locator('#clearFiltersBtn').click();
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toContain('1,000 rows');
+    });
+
+    test('opens the grouping panel and renders deterministic grouped rows', async ({ page }) => {
+        await page.goto(`${TEST_PAGE}?trace=1`, { waitUntil: 'networkidle' });
+        await page.waitForFunction(
+            () => document.getElementById('renderStatus')?.textContent?.includes('✅'),
+            { timeout: 15000 },
+        );
+
+        await page.evaluate(() => {
+            const panel = window as unknown as {
+                __toggleDatabaseGroupingPanel?: () => void;
+                __testConfigureDatabaseGrouping?: (
+                    columns: number[],
+                    functions?: Array<{ fn: string; columnIndex?: number }>,
+                ) => void;
+                __runGroupingQuery?: () => Promise<void>;
+            };
+            panel.__toggleDatabaseGroupingPanel?.();
+            panel.__testConfigureDatabaseGrouping?.([5], [{ fn: 'count' }]);
+        });
+
+        await expect(page.locator('#databaseGroupingPanel')).toHaveClass(/visible/);
+        await expect(page.locator('#groupingChipsContainer')).toContainText('department');
+
+        await page.evaluate(async () => {
+            const panel = window as unknown as { __runGroupingQuery?: () => Promise<void> };
+            await panel.__runGroupingQuery?.();
+        });
+
+        const groupingTable = page.locator('#groupingResultsArea .grouping-table');
+        await expect(groupingTable).toBeVisible({ timeout: 10000 });
+        await expect(groupingTable.locator('thead')).toContainText('department');
+        await expect(groupingTable.locator('thead')).toContainText('COUNT(*)');
+        await expect(groupingTable.locator('tbody tr')).toHaveCount(6);
+        await expect(page.locator('#groupingResultsArea .grouping-summary')).toContainText('6');
+    });
+
+    test('renders after an initially hidden view without ResizeObserver', async ({ page }) => {
+        await page.goto(`${TEST_PAGE}?initiallyHidden=1&disableResizeObserver=1`, { waitUntil: 'networkidle' });
+        await page.waitForFunction(
+            () => document.getElementById('renderStatus')?.textContent?.includes('✅'),
+            { timeout: 15000 },
+        );
+
+        await expect.poll(() => page.evaluate(() =>
+            (window as unknown as { __resultPanelInitCount?: number }).__resultPanelInitCount,
+        )).toBe(1);
+        await expect(page.locator('#gridContainer table')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('#gridContainer tbody tr').filter({ has: page.locator('td.row-number-cell') }).first())
+            .toBeVisible();
+    });
+
+    test('applies hydrate then streamed rows for an Untitled source', async ({ page }) => {
+        await page.goto(`${TEST_PAGE}?protocol=1`, { waitUntil: 'networkidle' });
+        await page.waitForFunction(
+            () => document.getElementById('renderStatus')?.textContent?.includes('✅'),
+            { timeout: 15000 },
+        );
+
+        const tabs = page.locator('#resultSetTabs .result-set-tab');
+        await expect(tabs).toHaveCount(2, { timeout: 10000 });
+        await expect(tabs.nth(0)).toContainText('Logs');
+        await expect(page.locator('#gridContainer table thead th').nth(1)).toContainText('id');
+
+        const dataRows = page.locator('#gridContainer table tbody tr').filter({ has: page.locator('td.row-number-cell') });
+        await expect(dataRows).toHaveCount(2, { timeout: 10000 });
+        await expect(page.locator('#rowCountInfo')).toContainText('2');
+    });
+
+    test('requests an authoritative hydrate when streamed Untitled rows arrive without Logs', async ({ page }) => {
+        await page.goto(`${TEST_PAGE}?protocol=missing-shell`, { waitUntil: 'networkidle' });
+        await page.waitForFunction(
+            () => document.getElementById('renderStatus')?.textContent?.includes('✅'),
+            { timeout: 15000 },
+        );
+
+        await expect.poll(() => page.evaluate(() => {
+            const messages = (window as unknown as { __postedMessages?: Array<{ command?: string; reason?: string }> })
+                .__postedMessages ?? [];
+            return messages.some(message =>
+                message.command === 'requestResultSync'
+                && message.reason === 'missing-log-shell-before-data',
+            );
+        })).toBe(true);
+
+        const tabs = page.locator('#resultSetTabs .result-set-tab');
+        await expect(tabs).toHaveCount(2, { timeout: 10000 });
+        await expect(tabs.nth(0)).toContainText('Logs');
+        await expect(page.locator('#gridContainer table thead th').nth(1)).toContainText('id');
+        await expect(page.locator('#gridContainer td.row-number-cell')).toHaveCount(1);
     });
 });
