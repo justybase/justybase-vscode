@@ -42,7 +42,6 @@ jobs:
           - windows-latest
     env:
       JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS: "1"
-      JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,9 +52,13 @@ jobs:
       - name: Run SQLite Extension Host regression (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:extension-host
+        env:
+          JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
       - name: Run SQLite Extension Host regression (Windows)
         if: runner.os == 'Windows'
         run: npm run test:extension-host
+        env:
+          JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
       - name: Upload Extension Host diagnostics
         if: always()
         uses: actions/upload-artifact@v4
