@@ -1311,19 +1311,20 @@ export class ConnectionManager {
         return Promise.all([closePromise, persistPromise]).then(() => undefined);
     }
 
-    clearDocumentConnection(documentUri: string) {
+    clearDocumentConnection(documentUri: string): Promise<void> {
         const normalizedUri = normalizeUriKey(documentUri);
         this._documentConnections.delete(normalizedUri);
         this._documentDatabaseOverride.delete(normalizedUri);
         delete this._persistedDocumentContexts[normalizedUri];
-        void this.persistDocumentContext(documentUri);
+        const persistPromise = this.persistDocumentContext(documentUri);
         this._missingDocumentConnectionWarnings.delete(normalizedUri);
         this._documentConnectionPromises.delete(normalizedUri);
         this.bumpDocumentConnectionGeneration(normalizedUri);
-        this.closeDocumentPersistentConnection(normalizedUri);
+        const closePromise = this.closeDocumentPersistentConnection(normalizedUri);
         this._documentKeepConnectionOpen.delete(normalizedUri);
         this._documentPersistentConnectionMeta.delete(normalizedUri);
         this._onDidChangeDocumentConnection.fire(documentUri);
+        return Promise.all([closePromise, persistPromise]).then(() => undefined);
     }
 
     // Per-document session ID tracking

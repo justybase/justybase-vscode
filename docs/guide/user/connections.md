@@ -20,6 +20,8 @@ Open **JustyBase: Connect…**, select the database kind, fill in the connection
 
 Use **Select Connection for SQL Tab** and **Select Database for SQL Tab** when a document needs a different scope from the global connection. The tab context is shown in the SQL editor and is used by completion, diagnostics, DDL, execution, and metadata lookup. `DB.SCHEMA.TABLE`, `DB..TABLE`, `SCHEMA.TABLE`, and quoted identifiers remain distinct object forms; do not remove qualification merely to make a suggestion appear.
 
+Use `Ctrl+N` (`Cmd+N` on macOS) from a SQL tab to create another SQL tab with the same connection and manually selected database. The new tab gets its own connection session when its first query runs; it does not share the previous tab's session.
+
 ## Keep a connection open
 
 The default lifecycle opens a connection when work needs it and releases it when possible. Use **Toggle Keep Connection Open (Global)** for a stable interactive session, or **Toggle Keep Connection for Tab** when only one editor needs a persistent session. Persistent sessions can consume server slots; turn the option off when a warehouse has strict session limits.

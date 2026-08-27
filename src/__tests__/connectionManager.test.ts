@@ -557,6 +557,20 @@ describe('ConnectionManager', () => {
             expect(manager.getConnectionForExecution(docUri)).toBe('DocSpecificConnection');
         });
 
+        it('should open separate persistent connection instances for separate document tabs', async () => {
+            await manager.saveConnection(sampleConnection);
+            const firstDocumentUri = 'untitled:first.sql';
+            const secondDocumentUri = 'untitled:second.sql';
+            await manager.setDocumentConnection(firstDocumentUri, sampleConnection.name);
+            await manager.setDocumentConnection(secondDocumentUri, sampleConnection.name);
+
+            const firstConnection = await manager.getDocumentPersistentConnection(firstDocumentUri);
+            const secondConnection = await manager.getDocumentPersistentConnection(secondDocumentUri);
+
+            expect(secondConnection).not.toBe(firstConnection);
+            expect(mockNzConnectionConstructor).toHaveBeenCalledTimes(2);
+        });
+
         it('should use each cell connection before the global active connection', async () => {
             const secondConnection: ConnectionDetails = {
                 ...sampleConnection,
@@ -712,6 +726,35 @@ describe('ConnectionManager', () => {
             expect(await restored.getEffectiveDatabase(documentUri)).toBe('analytics');
 
             await restored.dispose();
+        });
+
+        it('waits for persisted context removal when clearing a document connection', async () => {
+            await manager.saveConnection(sampleConnection);
+            const documentUri = 'file:///workspace/report.sql';
+            await manager.setDocumentConnection(documentUri, sampleConnection.name);
+
+            const workspaceUpdate = (mockContext.workspaceState as unknown as { update: jest.Mock }).update;
+            let releaseUpdate!: () => void;
+            const updateBlocked = new Promise<void>(resolve => {
+                releaseUpdate = resolve;
+            });
+            workspaceUpdate.mockImplementationOnce(async (_key: string, _value: unknown) => {
+                await updateBlocked;
+            });
+
+            const clearPromise = manager.clearDocumentConnection(documentUri);
+            let clearSettled = false;
+            void clearPromise.then(() => {
+                clearSettled = true;
+            });
+
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(clearSettled).toBe(false);
+
+            releaseUpdate();
+            await clearPromise;
+            expect(clearSettled).toBe(true);
         });
 
         it('does not persist untitled documents or notebook cells', async () => {

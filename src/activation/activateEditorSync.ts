@@ -120,7 +120,10 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
                     lastSyncedSourceUri = undefined;
                 }
                 resultPanelProvider.closeSource(sourceUri);
-                connectionManager.closeDocumentPersistentConnection(sourceUri).catch(e => {
+                const closePromise = doc.uri.scheme === 'untitled'
+                    ? connectionManager.clearDocumentConnection(sourceUri)
+                    : connectionManager.closeDocumentPersistentConnection(sourceUri);
+                closePromise.catch(e => {
                     logWithFallback('error', 'Failed to close persistent connection for document:', e);
                 });
             }

@@ -164,6 +164,7 @@ Toggle persistent connection to avoid reconnecting for each query:
 
 | Shortcut | Action |
 |----------|--------|
+| `Ctrl+N` / `Cmd+N` | Open a new SQL tab with the current tab's connection and database |
 | `Ctrl+Enter` / `F5` | Run current statement |
 | `Ctrl+Shift+Enter` | Run all statements |
 | `Ctrl+L` | Explain Query Plan |
