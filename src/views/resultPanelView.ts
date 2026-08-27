@@ -1,11 +1,14 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs';
 import { encode } from '@msgpack/msgpack';
 import type {
     ResultPanelInboundMessage,
     ResultPanelOutboundMessage,
-    ResultPanelViewData
+    ResultPanelViewData,
+    ResultPanelTraceEventPayload,
+    ResultPanelTestBridgeResult,
 } from '../contracts/webviews';
 import type { ConnectionManager } from '../core/connectionManager';
 import { ResultStateManager } from '../state/resultStateManager';
@@ -16,6 +19,7 @@ import {
     SelectionStats,
     SaveEditsRequest,
     AllRowsExportRequest,
+    TestExportRequest,
 } from './resultPanelMessageHandler';
 import { ResultsHtmlGenerator, ViewScriptUris } from './resultsHtmlGenerator';
 import { DuckDbResultBridge } from '../services/duckdbResultBridge';
@@ -54,7 +58,15 @@ import {
     resolveAllRowsOperationTimeout,
 } from '../results/allRowsOperationTimeouts';
 import { findTrailingLimitClause, removeTrailingLimitClause, replaceTrailingLimitValue } from '../results/refreshSqlLimit';
+import {
+    getResultPanelTraceSnapshot,
+    isResultPanelTraceEnabled,
+    clearResultPanelTrace,
+    traceResultPanelEvent,
+    type ResultPanelTraceRecord,
+} from './resultPanelTrace';
 import { exportQueryToStreamFile, type QueryStreamExportFormat } from '../export/queryStreamExporter';
+import { exportResultSetToFile } from '../export/resultExporter';
 import {
     buildDatabaseAggregationSql,
     DatabaseAggregationRequest,
@@ -97,12 +109,60 @@ interface HydratePayloadMetrics {
     executingSourceCount: number;
 }
 
+export interface ResultPanelRegressionResultSetSnapshot {
+    index: number;
+    name?: string;
+    isLog: boolean;
+    rowCount: number;
+    totalRowCount: number;
+    isStreamingComplete: boolean;
+}
+
+export interface ResultPanelRegressionSnapshot {
+    sourceUri: string;
+    resultSets: ResultPanelRegressionResultSetSnapshot[];
+    trace: readonly ResultPanelTraceRecord[];
+}
+
 interface LogSyncCursor {
     executionTimestamp: number;
     totalRows: number;
 }
 
+interface PendingResultPanelTestBridgeRequest {
+    action: string;
+    resolve: (result: unknown) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+}
+
 const DEFAULT_RESULTS_GRID_FONT_FAMILY = "Menlo, Monaco, Consolas, 'Courier New', monospace";
+const RESULT_PANEL_REGRESSION_TIMEOUT_MS = 15_000;
+const RESULT_PANEL_REGRESSION_POLL_MS = 25;
+
+function getTraceSourceUri(
+    message: Record<string, unknown>,
+    fallback: string | undefined,
+): string | undefined {
+    if (typeof message.sourceUri === 'string') {
+        return message.sourceUri;
+    }
+
+    const data = message.data;
+    if (typeof data === 'object' && data !== null) {
+        const activeSourceJson = (data as Record<string, unknown>).activeSourceJson;
+        if (typeof activeSourceJson === 'string') {
+            try {
+                const activeSource = JSON.parse(activeSourceJson) as unknown;
+                return typeof activeSource === 'string' ? activeSource : undefined;
+            } catch {
+                // Fall back to the current host state for malformed test doubles.
+            }
+        }
+    }
+
+    return fallback;
+}
 
 export class ResultPanelView implements vscode.WebviewViewProvider {
     public static readonly viewType = 'netezza.results';
@@ -115,6 +175,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     private _messageHandler: ResultPanelMessageHandler;
     private _htmlGenerator?: ResultsHtmlGenerator;
     private _isViewReady: boolean = false;
+    private _resultSyncVersion = 0;
+    /** Recovery requests received while another source was active. */
+    private _pendingResultSyncSources = new Set<string>();
+    private _pendingTestBridgeRequests = new Map<string, PendingResultPanelTestBridgeRequest>();
+    private _testBridgeRequestSequence = 0;
     private _encoder = new MessagePackEncoder();
     private _stateChangeDisposable?: vscode.Disposable;
     private _configurationChangeDisposable?: vscode.Disposable;
@@ -174,10 +239,17 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 this._handleLogRowsApplied(sourceUri, executionTimestamp, totalRows),
             onRequestLogSync: (sourceUri, executionTimestamp, currentRows) =>
                 this._handleLogSyncRequest(sourceUri, executionTimestamp, currentRows),
+            onRequestResultSync: (sourceUri, reason) =>
+                this._handleResultSyncRequest(sourceUri, reason),
             onSelectionStatsChanged: undefined,
             onRecordHydrationMetrics: metrics => {
                 void this._performanceStore?.recordFirstPaint(metrics);
             },
+            onRecordResultPanelTrace: event => {
+                this._recordWebviewTrace(event);
+            },
+            onTestBridgeResult: message => this._handleTestBridgeResult(message),
+            onTestExport: request => this._handleTestExport(request),
             onSaveEdits: request => this._handleSaveEdits(request, connectionManager),
             onGetWebviewUri: uri => this._view ? String(this._view.webview.asWebviewUri(uri)) : String(uri),
             onRefreshResult: (sourceUri, resultSetIndex, limitValue, removeLimit) =>
@@ -242,6 +314,35 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         });
     }
 
+    private _recordWebviewTrace(event: ResultPanelTraceEventPayload): void {
+        traceResultPanelEvent({
+            ...event,
+            phase: `webview.${event.phase}`,
+            sourceUri: event.sourceUri ?? this._stateManager.activeSourceUri,
+        }, 'webview');
+    }
+
+    private _handleResultSyncRequest(sourceUri: string, reason: string): void {
+        if (this._stateManager.activeSourceUri !== sourceUri) {
+            this._pendingResultSyncSources.add(sourceUri);
+            traceResultPanelEvent({
+                phase: 'result_sync_deferred',
+                sourceUri,
+                reason: 'inactive-source',
+            });
+            return;
+        }
+        this._pendingResultSyncSources.delete(sourceUri);
+        this._resultSyncVersion += 1;
+        this._stateManager.markStale(sourceUri);
+        traceResultPanelEvent({
+            phase: 'result_sync_requested',
+            sourceUri,
+            reason,
+        });
+        this._updateWebview();
+    }
+
     private async _openMigrationForResult(sourceUri: string, resultSetIndex: number): Promise<void> {
         if (!this._context || !this._connectionManager) {
             vscode.window.showErrorMessage('Migration Studio is not available in this result panel.');
@@ -279,6 +380,114 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         return this._stateManager.onDidCancel;
     }
 
+    /**
+     * Drive the result-panel through its real webview protocol during an
+     * Extension Host test. The method is deliberately unavailable outside a
+     * test session with trace enabled.
+     */
+    public runResultPanelTestBridge<T = unknown>(action: string, args?: unknown): Promise<T> {
+        if (process.env.NODE_ENV !== 'test' || !isResultPanelTraceEnabled()) {
+            return Promise.reject(new Error('Result-panel test bridge is available only in traced test sessions.'));
+        }
+        if (!this._view || !this._isViewReady || this._view.visible !== true) {
+            return Promise.reject(new Error('Result-panel webview is not ready or visible.'));
+        }
+
+        const requestId = `eh-${++this._testBridgeRequestSequence}`;
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                const pending = this._pendingTestBridgeRequests.get(requestId);
+                if (!pending) {
+                    return;
+                }
+                this._pendingTestBridgeRequests.delete(requestId);
+                pending.reject(new Error(`Result-panel test bridge request ${requestId} timed out during ${action}.`));
+            }, RESULT_PANEL_REGRESSION_TIMEOUT_MS);
+
+            this._pendingTestBridgeRequests.set(requestId, {
+                action,
+                resolve: result => resolve(result as T),
+                reject,
+                timer,
+            });
+            try {
+                const posted = this._postMessageToWebview({ command: 'testBridge', requestId, action, args });
+                if (!posted) {
+                    clearTimeout(timer);
+                    this._pendingTestBridgeRequests.delete(requestId);
+                    reject(new Error(`Result-panel test bridge request ${requestId} was not delivered.`));
+                } else {
+                    void posted.then(delivered => {
+                        if (delivered) {
+                            return;
+                        }
+                        const pending = this._pendingTestBridgeRequests.get(requestId);
+                        if (!pending) {
+                            return;
+                        }
+                        clearTimeout(pending.timer);
+                        this._pendingTestBridgeRequests.delete(requestId);
+                        pending.reject(new Error(`Result-panel test bridge request ${requestId} was not delivered.`));
+                    }, error => {
+                        const pending = this._pendingTestBridgeRequests.get(requestId);
+                        if (!pending) {
+                            return;
+                        }
+                        clearTimeout(pending.timer);
+                        this._pendingTestBridgeRequests.delete(requestId);
+                        pending.reject(error instanceof Error ? error : new Error(String(error)));
+                    });
+                }
+            } catch (error: unknown) {
+                clearTimeout(timer);
+                this._pendingTestBridgeRequests.delete(requestId);
+                reject(error instanceof Error ? error : new Error(String(error)));
+            }
+            traceResultPanelEvent({
+                phase: 'test_bridge_requested',
+                command: 'testBridge',
+                reason: action,
+                sourceUri: this._stateManager.activeSourceUri,
+            });
+        });
+    }
+
+    public getResultPanelTestBridgePendingRequestCount(): number {
+        return this._pendingTestBridgeRequests.size;
+    }
+
+    /** Prepare the real webview before an Extension Host scenario starts. */
+    public async ensureResultPanelTestBridgeReady(): Promise<void> {
+        if (process.env.NODE_ENV !== 'test' || !isResultPanelTraceEnabled()) {
+            throw new Error('Result-panel test bridge is available only in traced test sessions.');
+        }
+        await this._ensureResultPanelRegressionWebviewReady();
+    }
+
+    private _handleTestBridgeResult(message: ResultPanelTestBridgeResult): void {
+        const pending = this._pendingTestBridgeRequests.get(message.requestId);
+        if (!pending) {
+            traceResultPanelEvent({
+                phase: 'test_bridge_response_ignored',
+                reason: 'unknown-request',
+            });
+            return;
+        }
+
+        clearTimeout(pending.timer);
+        this._pendingTestBridgeRequests.delete(message.requestId);
+        traceResultPanelEvent({
+            phase: message.ok ? 'test_bridge_completed' : 'test_bridge_failed',
+            reason: pending.action,
+            error: message.ok ? undefined : message.error,
+        });
+        if (message.ok) {
+            pending.resolve(message.result);
+        } else {
+            pending.reject(new Error(message.error || `Result-panel test bridge action failed: ${pending.action}`));
+        }
+    }
+
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
@@ -287,6 +496,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._disposeViewDisposables();
         this._isViewReady = false;
         this._view = webviewView;
+        traceResultPanelEvent({
+            phase: 'view_resolve',
+            visible: webviewView.visible === true,
+            ready: false,
+        });
 
         webviewView.webview.options = {
             enableScripts: true,
@@ -301,6 +515,12 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
 // Force re-render when view becomes visible after being hidden
     const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
+      traceResultPanelEvent({
+        phase: 'visibility_changed',
+        visible: webviewView.visible === true,
+        ready: this._isViewReady,
+        sourceUri: this._stateManager.activeSourceUri,
+      });
       if (webviewView.visible && this._isViewReady) {
         this._stateManager.setPanelVisible(true);
         this._forceHydrate({ fromVisibility: true });
@@ -319,9 +539,28 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         // Handle messages from webview
         const receiveMessageDisposable = webviewView.webview.onDidReceiveMessage(message => {
             const inboundMessage: ResultPanelInboundMessage = message;
+            const messageRecord = message as Record<string, unknown>;
+            traceResultPanelEvent({
+                phase: 'webview_message',
+                command: typeof messageRecord.command === 'string' ? messageRecord.command : undefined,
+                sourceUri: typeof messageRecord.sourceUri === 'string'
+                    ? messageRecord.sourceUri
+                    : this._stateManager.activeSourceUri,
+                resultSetIndex: typeof messageRecord.resultSetIndex === 'number'
+                    ? messageRecord.resultSetIndex
+                    : undefined,
+                rowCount: Array.isArray(messageRecord.rows) ? messageRecord.rows.length : undefined,
+                totalRows: typeof messageRecord.totalRows === 'number' ? messageRecord.totalRows : undefined,
+            });
 
             if (inboundMessage.command === 'ready') {
                 this._isViewReady = true;
+                traceResultPanelEvent({
+                    phase: 'webview_ready',
+                    visible: webviewView.visible === true,
+                    ready: true,
+                    sourceUri: this._stateManager.activeSourceUri,
+                });
                 this._forceHydrate();
             } else if (inboundMessage.command === 'webviewFocused') {
                 this._setResultsFocusContext(true);
@@ -333,8 +572,16 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._trackViewDisposable(receiveMessageDisposable);
 
         const viewDisposeDisposable = webviewView.onDidDispose(() => {
+            traceResultPanelEvent({
+                phase: 'view_dispose',
+                sourceUri: this._stateManager.activeSourceUri,
+                visible: webviewView.visible === true,
+                ready: this._isViewReady,
+            });
             if (this._view === webviewView) {
                 this._clearAllLogSyncRetryTimers();
+                this._pendingResultSyncSources.clear();
+                this._clearPendingTestBridgeRequests('Result-panel webview disposed.');
                 this._isViewReady = false;
                 this._view = undefined;
                 this._htmlGenerator = undefined;
@@ -354,9 +601,19 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._configurationChangeDisposable = undefined;
         this._stateManager.dispose();
         this._clearAllLogSyncRetryTimers();
+        this._pendingResultSyncSources.clear();
+        this._clearPendingTestBridgeRequests('Result-panel provider disposed.');
         this._view = undefined;
         this._htmlGenerator = undefined;
         this._clearResultsFocusContexts();
+    }
+
+    private _clearPendingTestBridgeRequests(reason: string): void {
+        for (const pending of this._pendingTestBridgeRequests.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error(reason));
+        }
+        this._pendingTestBridgeRequests.clear();
     }
 
   public triggerCopySelection() {
@@ -385,7 +642,22 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         if (uxTraceId) {
             this._pendingUxTraceId = uxTraceId;
         }
-        if (!this._stateManager.setActiveSource(sourceUri)) {
+        const deferredResultSync = this._pendingResultSyncSources.has(sourceUri);
+        const activeSourceChanged = this._stateManager.setActiveSource(sourceUri);
+        if (deferredResultSync) {
+            this._pendingResultSyncSources.delete(sourceUri);
+            this._resultSyncVersion += 1;
+            this._stateManager.markStale(sourceUri);
+            traceResultPanelEvent({
+                phase: 'result_sync_resumed',
+                sourceUri,
+                reason: 'source-became-active',
+            });
+        }
+        if (!activeSourceChanged) {
+            if (deferredResultSync && this._stateManager.activeSourceUri === sourceUri) {
+                this._updateWebview();
+            }
             if (uxTraceId && getUxPerfSession().isActive()) {
                 getUxPerfSession().emit({
                     op: 'result_panel.source_switch',
@@ -470,6 +742,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     public closeSource(sourceUri: string) {
+        this._pendingResultSyncSources.delete(sourceUri);
         this._streamingResultSets.delete(sourceUri);
         this._stateManager.closeSource(sourceUri);
         this._updateWebview();
@@ -477,6 +750,12 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
     public startExecution(sourceUri: string) {
         const hadResultSets = (this._stateManager.resultsMap.get(sourceUri)?.length ?? 0) > 0;
+        traceResultPanelEvent({
+            phase: 'start_execution',
+            sourceUri,
+            resultSetCount: this._stateManager.resultsMap.get(sourceUri)?.length ?? 0,
+            reason: hadResultSets ? 'existing-results' : 'new-source',
+        });
         const { clearedUnpinnedResults } = this._stateManager.startExecution(sourceUri);
         this._streamingResultSets.delete(sourceUri);
         // Full hydrate only when unpinned tabs (e.g. Error) were removed — avoids wiping
@@ -488,6 +767,12 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         if (clearedUnpinnedResults || !hadResultSets) {
             this._stateManager.markStale(sourceUri);
         }
+        traceResultPanelEvent({
+            phase: 'start_execution_applied',
+            sourceUri,
+            resultSetCount: this._stateManager.resultsMap.get(sourceUri)?.length ?? 0,
+            reason: clearedUnpinnedResults ? 'cleared-unpinned' : hadResultSets ? 'retained-results' : 'created-logs-shell',
+        });
         this._updateWebview();
         this._revealViewForExecution();
     }
@@ -559,6 +844,258 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         return this._stateManager.resultsMap.get(sourceUri);
     }
 
+    /** Return the bounded diagnostic trace collected for a controlled regression run. */
+    public getResultPanelTraceSnapshot(): readonly ResultPanelTraceRecord[] {
+        return getResultPanelTraceSnapshot();
+    }
+
+    private async _waitForResultPanelRegressionCondition(
+        description: string,
+        predicate: () => boolean,
+    ): Promise<void> {
+        const startedAt = Date.now();
+        while (!predicate()) {
+            if (Date.now() - startedAt >= RESULT_PANEL_REGRESSION_TIMEOUT_MS) {
+                throw new Error(`Result-panel regression timed out waiting for ${description}.`);
+            }
+            await new Promise<void>(resolve => setTimeout(resolve, RESULT_PANEL_REGRESSION_POLL_MS));
+        }
+    }
+
+    private async _ensureResultPanelRegressionWebviewReady(): Promise<void> {
+        await vscode.commands.executeCommand(`${ResultPanelView.viewType}.focus`);
+        await this._waitForResultPanelRegressionCondition(
+            'a visible, ready webview',
+            () => Boolean(this._view && this._isViewReady && this._view.visible),
+        );
+
+        // Force one round trip before the scenario. A `ready` flag alone proves only
+        // that the host received a message; the webview trace proves it also consumed
+        // a host hydrate and can report back over the same protocol.
+        this._forceHydrate();
+        await this._waitForResultPanelRegressionCondition(
+            'the webview hydration handshake',
+            () => getResultPanelTraceSnapshot().some(event =>
+                event.origin === 'webview'
+                && event.phase === 'webview.hydrate_rendered',
+            ),
+        );
+    }
+
+    private _hasResultPanelRegressionWebviewDelivery(sourceUri: string): boolean {
+        const trace = getResultPanelTraceSnapshot();
+        const hydrateIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.hydrate_applied'
+            && event.sourceUri === sourceUri,
+        );
+        const appendIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.append_applied'
+            && event.sourceUri === sourceUri
+            && event.resultSetIndex === 1
+            && event.totalRows === 2,
+        );
+        const completionIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.streaming_complete_applied'
+            && event.sourceUri === sourceUri
+            && event.resultSetIndex === 1
+            && event.totalRows === 2,
+        );
+        return hydrateIndex >= 0
+            && appendIndex > hydrateIndex
+            && completionIndex > appendIndex;
+    }
+
+    private _createResultPanelRegressionSnapshot(sourceUri: string): ResultPanelRegressionSnapshot {
+        const resultSets = this._stateManager.resultsMap.get(sourceUri) ?? [];
+        const streamingComplete = this._stateManager.isStreamingCompleted(sourceUri);
+        return {
+            sourceUri,
+            resultSets: resultSets.map((resultSet, index) => ({
+                index,
+                name: resultSet.name,
+                isLog: resultSet.isLog === true,
+                rowCount: resultSet.storageMode === 'sqlite'
+                    ? resultSet.totalRowCount ?? 0
+                    : resultSet.data.length,
+                totalRowCount: resultSet.totalRowCount ?? resultSet.data.length,
+                isStreamingComplete: !resultSet.isLog && streamingComplete,
+            })),
+            trace: getResultPanelTraceSnapshot(),
+        };
+    }
+
+    private _hasResultPanelRegressionFinalWebviewState(
+        sourceUri: string,
+        expectedResultSetCount: number,
+        expectedDataRows: number,
+    ): boolean {
+        const trace = getResultPanelTraceSnapshot();
+        const hydrateIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.hydrate_applied'
+            && event.sourceUri === sourceUri
+            && (event.resultSetCount ?? 0) >= expectedResultSetCount,
+        );
+        const hydrateRenderedIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.hydrate_rendered'
+            && event.sourceUri === sourceUri
+            && (event.resultSetCount ?? 0) >= expectedResultSetCount,
+        );
+        const hydratedDataIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.hydrate_result_set_applied'
+            && event.sourceUri === sourceUri
+            && event.resultSetIndex === 1
+            && event.isLog !== true
+            && (event.totalRows ?? event.rowCount ?? 0) >= expectedDataRows,
+        );
+        const appendIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.append_applied'
+            && event.sourceUri === sourceUri
+            && event.resultSetIndex === 1
+            && (event.totalRows ?? 0) >= expectedDataRows,
+        );
+        const completionIndex = trace.findIndex(event =>
+            event.origin === 'webview'
+            && event.phase === 'webview.streaming_complete_applied'
+            && event.sourceUri === sourceUri
+            && event.resultSetIndex === 1
+            && (event.totalRows ?? 0) >= expectedDataRows,
+        );
+
+        // A host snapshot alone is insufficient here: export can work while the
+        // grid is empty. For a tabular execution require the webview to apply the
+        // data append and its completion marker. Error-only scenarios have no
+        // streamed rows, so their authoritative hydrate remains the terminal
+        // assertion.
+        if (expectedDataRows > 0) {
+            const streamedRowsApplied = appendIndex >= 0 && completionIndex > appendIndex;
+            const hydratedRowsApplied = hydratedDataIndex >= 0
+                && hydrateRenderedIndex > hydratedDataIndex;
+            return streamedRowsApplied || hydratedRowsApplied;
+        }
+        return hydrateIndex >= 0 && hydrateRenderedIndex > hydrateIndex;
+    }
+
+    /** Start tracing without resolving the view, preserving the cold-view execution race. */
+    public beginColdResultPanelRegressionScenario(): void {
+        if (!isResultPanelTraceEnabled()) {
+            throw new Error('Result-panel regression requires JUSTYBASE_RESULT_PANEL_TRACE=1.');
+        }
+        clearResultPanelTrace();
+    }
+
+    /** Wait until a real editor-command execution has reached the webview. */
+    public async captureColdResultPanelRegressionScenario(
+        sourceUri: string,
+        expectedDataRows: number,
+        allowErrorResult = false,
+    ): Promise<ResultPanelRegressionSnapshot> {
+        await this._waitForResultPanelRegressionCondition(
+            'the editor-command result in the host state',
+            () => {
+                const resultSets = this._stateManager.resultsMap.get(sourceUri) ?? [];
+                const dataResult = resultSets.find(resultSet =>
+                    !resultSet.isLog && (allowErrorResult || !resultSet.isError),
+                );
+                return resultSets.some(resultSet => resultSet.isLog)
+                    && Boolean(dataResult)
+                    && (allowErrorResult
+                        || (dataResult?.totalRowCount ?? dataResult?.data.length ?? 0) >= expectedDataRows);
+            },
+        );
+
+        const expectedResultSetCount = this._stateManager.resultsMap.get(sourceUri)?.length ?? 0;
+        await this._waitForResultPanelRegressionCondition(
+            'the cold editor-command result in the webview',
+            () => this._hasResultPanelRegressionFinalWebviewState(
+                sourceUri,
+                expectedResultSetCount,
+                expectedDataRows,
+            ),
+        );
+        return this._createResultPanelRegressionSnapshot(sourceUri);
+    }
+
+    /**
+     * Execute a deterministic, database-free result-panel scenario. It follows the same
+     * host transitions as a real untitled query: Logs shell, streamed rows, completion,
+     * and finalization. The command is registered only in test Extension Hosts.
+     */
+    public async runResultPanelRegressionScenario(
+        sourceUri = 'untitled:Untitled-1',
+    ): Promise<ResultPanelRegressionSnapshot> {
+        if (!sourceUri.startsWith('file:') && !sourceUri.startsWith('untitled:')) {
+            throw new Error('Result-panel regression source must use file: or untitled: URI.');
+        }
+        if (!isResultPanelTraceEnabled()) {
+            throw new Error('Result-panel regression requires JUSTYBASE_RESULT_PANEL_TRACE=1.');
+        }
+
+        clearResultPanelTrace();
+        await this._ensureResultPanelRegressionWebviewReady();
+        clearResultPanelTrace();
+        traceResultPanelEvent({
+            phase: 'regression_start',
+            sourceUri,
+            reason: 'deterministic-host-scenario',
+        });
+
+        this.setActiveSource(sourceUri);
+        this.startExecution(sourceUri);
+        const executionId = this.logExecutionStart(sourceUri, 'SELECT 1', 'regression');
+        this.appendStreamingChunk(
+            sourceUri,
+            0,
+            {
+                columns: [{ name: 'id', type: 'integer' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            },
+            'SELECT 1',
+        );
+        this.appendStreamingChunk(
+            sourceUri,
+            0,
+            {
+                columns: [{ name: 'id', type: 'integer' }],
+                rows: [[2]],
+                isFirstChunk: false,
+                isLastChunk: true,
+                totalRowsSoFar: 2,
+                limitReached: false,
+            },
+            'SELECT 1',
+        );
+        this.logExecutionEnd(executionId, 2, 'success');
+        this.finalizeExecution(sourceUri);
+
+        await this._waitForResultPanelRegressionCondition(
+            'source-specific hydrate and streamed rows in the webview',
+            () => this._hasResultPanelRegressionWebviewDelivery(sourceUri),
+        );
+
+        const snapshot = this._createResultPanelRegressionSnapshot(sourceUri);
+        traceResultPanelEvent({
+            phase: 'regression_complete',
+            sourceUri,
+            resultSetCount: snapshot.resultSets.length,
+            rowCount: snapshot.resultSets.reduce((sum, resultSet) => sum + resultSet.rowCount, 0),
+        });
+        return {
+            ...snapshot,
+            trace: getResultPanelTraceSnapshot(),
+        };
+    }
+
     public isCancelled(sourceUri: string): boolean {
         return this._stateManager.isCancelled(sourceUri);
     }
@@ -577,6 +1114,15 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     public finalizeExecution(sourceUri: string) {
         this._streamingResultSets.delete(sourceUri);
         this._stateManager.finalizeExecution(sourceUri);
+        traceResultPanelEvent({
+            phase: 'finalize_execution',
+            sourceUri,
+            resultSetCount: this._stateManager.resultsMap.get(sourceUri)?.length ?? 0,
+            totalRows: this._stateManager.resultsMap.get(sourceUri)?.reduce(
+                (sum, resultSet) => sum + this._getWebviewRowCount(resultSet),
+                0,
+            ),
+        });
         this._updateWebview();
     }
 
@@ -701,6 +1247,47 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             const message = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`ALL rows export failed: ${message}`);
         }
+    }
+
+    /** Write a result-panel export directly to a runner-owned path. */
+    private async _handleTestExport(request: TestExportRequest): Promise<void> {
+        if (process.env.NODE_ENV !== 'test' || !isResultPanelTraceEnabled()) {
+            throw new Error('Direct result-panel exports are available only in traced test sessions.');
+        }
+        const workDir = process.env.JUSTYBASE_EXTENSION_HOST_WORK_DIR;
+        if (!workDir || !path.isAbsolute(request.destination)) {
+            throw new Error('The test export destination must be an absolute path in the test work directory.');
+        }
+        const root = path.resolve(workDir);
+        const destination = path.resolve(request.destination);
+        const relative = path.relative(root, destination);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+            throw new Error('The test export destination is outside the test work directory.');
+        }
+
+        const resultSet = this._stateManager.resultsMap.get(request.sourceUri)?.[request.resultSetIndex];
+        if (!resultSet) {
+            throw new Error('The requested result set is not available for export.');
+        }
+
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        traceResultPanelEvent({
+            phase: 'test_export_start',
+            sourceUri: request.sourceUri,
+            resultSetIndex: request.resultSetIndex,
+            reason: request.format,
+        });
+        await exportResultSetToFile(resultSet, destination, {
+            format: request.format,
+            rowIndices: request.rowIndices,
+            columnIds: request.columnIds,
+        });
+        traceResultPanelEvent({
+            phase: 'test_export_complete',
+            sourceUri: request.sourceUri,
+            resultSetIndex: request.resultSetIndex,
+            reason: request.format,
+        });
     }
 
     private async _handleRefreshResult(
@@ -1471,6 +2058,16 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
 
         const result = this._stateManager.appendStreamingChunk(sourceUri, chunk, sql, refreshSql);
+        traceResultPanelEvent({
+            phase: 'append_streaming_chunk',
+            sourceUri,
+            resultSetIndex,
+            rowCount: chunk.rows.length,
+            totalRows: chunk.totalRowsSoFar,
+            isFirstChunk: chunk.isFirstChunk,
+            isLastChunk: chunk.isLastChunk,
+            reason: result.type,
+        });
 
         if (chunk.isFirstChunk && chunk.columns.length > 0) {
             // Keep the result object rather than its index: closing an earlier
@@ -1723,10 +2320,80 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     private _postMessageToWebview(message: ResultPanelOutboundMessage): Thenable<boolean> | undefined {
-        if (this._view) {
-            return this._view.webview.postMessage(message);
+        const messageRecord = message as unknown as Record<string, unknown>;
+        const sourceUri = getTraceSourceUri(messageRecord, this._stateManager.activeSourceUri);
+        const resultSetIndex = typeof messageRecord.resultSetIndex === 'number'
+            ? messageRecord.resultSetIndex
+            : undefined;
+        const totalRows = typeof messageRecord.totalRows === 'number'
+            ? messageRecord.totalRows
+            : undefined;
+        const rowCount = Array.isArray(messageRecord.rows)
+            ? messageRecord.rows.length
+            : undefined;
+        const command = typeof messageRecord.command === 'string'
+            ? messageRecord.command
+            : undefined;
+        traceResultPanelEvent({
+            phase: 'host_post',
+            command,
+            sourceUri,
+            resultSetIndex,
+            rowCount,
+            totalRows,
+            isLog: messageRecord.isLog === true,
+            isFirstChunk: messageRecord.isFirstChunk === true,
+            isLastChunk: messageRecord.isLastChunk === true,
+            ready: this._isViewReady,
+            visible: this._view?.visible === true,
+            delivered: Boolean(this._view),
+        });
+
+        if (!this._view) {
+            return undefined;
         }
-        return undefined;
+
+        let posted: Thenable<boolean>;
+        try {
+            posted = this._view.webview.postMessage(message);
+        } catch (error: unknown) {
+            traceResultPanelEvent({
+                phase: 'host_post_error',
+                command,
+                sourceUri,
+                resultSetIndex,
+                error: error instanceof Error ? error.message : String(error),
+                delivered: false,
+            });
+            return undefined;
+        }
+        // VS Code always returns a Thenable, but keeping this guard preserves
+        // the old no-op behavior for lightweight test doubles.
+        if (!posted || typeof posted.then !== 'function' || !isResultPanelTraceEnabled()) {
+            return posted;
+        }
+        posted.then(
+            delivered => {
+                traceResultPanelEvent({
+                    phase: 'host_post_result',
+                    command,
+                    sourceUri,
+                    resultSetIndex,
+                    delivered,
+                });
+            },
+            error => {
+                traceResultPanelEvent({
+                    phase: 'host_post_result',
+                    command,
+                    sourceUri,
+                    resultSetIndex,
+                    delivered: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            },
+        );
+        return posted;
     }
 
     private _postLogUpdate(message: Extract<ResultPanelOutboundMessage, { command: 'appendRows' }>): void {
@@ -1880,6 +2547,22 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         const globalChanged = this._stateManager.globalStateVersion !== this._stateManager.lastSentGlobalStateVersion;
         const isStale = activeSource ? this._stateManager.isStale(activeSource) : false;
         const sourceChanged = activeSource !== this._lastSentActiveSource;
+        traceResultPanelEvent({
+            phase: 'update_webview',
+            sourceUri: activeSource,
+            resultSetCount: activeSource ? this._stateManager.resultsMap.get(activeSource)?.length ?? 0 : 0,
+            ready: this._isViewReady,
+            visible: this._view.visible === true,
+            reason: isStale
+                ? 'stale'
+                : globalChanged
+                    ? 'global-change'
+                    : sourceChanged
+                        ? 'source-changed'
+                        : activeSource && currentVersion !== lastSentVersion
+                            ? 'data-version'
+                            : 'no-op',
+        });
 
         // After streaming, webview already has rows via appendRows.
         // Skip full hydrate when only the data version bumped (finalizeExecution).
@@ -1887,6 +2570,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         if (streamingCompleted && !isStale && !sourceChanged && activeSource && currentVersion !== lastSentVersion) {
             const lastStreamingVersion = this._lastStreamingFinalizeVersion.get(activeSource) ?? -1;
             if (currentVersion === lastStreamingVersion) {
+                traceResultPanelEvent({
+                    phase: 'update_skipped',
+                    sourceUri: activeSource,
+                    reason: 'streaming-finalize-version-already-sent',
+                });
                 return;
             }
 
@@ -1898,6 +2586,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 if (this._isViewReady) {
                     this._postLightweightActiveSourceUpdate(activeSource);
                 }
+                traceResultPanelEvent({
+                    phase: 'update_skipped',
+                    sourceUri: activeSource,
+                    reason: 'streaming-complete-lightweight',
+                });
                 return;
             }
             // Without SQLite, in-memory results above the stream cap need a full hydrate for scrolling.
@@ -1921,6 +2614,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 this._stateManager.lastSentGlobalStateVersion = this._stateManager.globalStateVersion;
                 this._lastSentActiveSource = activeSource;
             }
+            traceResultPanelEvent({
+                phase: 'update_skipped',
+                sourceUri: activeSource,
+                reason: 'actively-streaming-lightweight',
+            });
             return;
         }
 
@@ -1960,6 +2658,13 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                     data: viewData,
                     uxTraceId: this._pendingUxTraceId,
                 });
+                traceResultPanelEvent({
+                    phase: 'hydrate_posted',
+                    sourceUri: metrics.activeSource ?? activeSource,
+                    resultSetCount: metrics.resultSetCount,
+                    totalRows: metrics.totalRowCount,
+                    reason,
+                });
                 if (getUxPerfSession().isActive() && this._pendingUxTraceId) {
                     getUxPerfSession().emit({
                         op: 'result_panel.source_switch',
@@ -1981,6 +2686,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         console.log(
             `[ResultPanelView] Data for ${activeSource} is current (v${currentVersion}), skipping no-op update`
         );
+        traceResultPanelEvent({
+            phase: 'update_skipped',
+            sourceUri: activeSource,
+            reason: 'no-op-current-data',
+        });
     }
 
     private _forceHydrate(options?: { fromVisibility?: boolean }) {
@@ -2197,6 +2907,12 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 maxDataResults: vscode.workspace.getConfiguration('justybase.results').get<number>('maxDataResults', 50),
                 diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled(),
                 dataVersion: activeSource ? this._stateManager.getDataVersion(activeSource) : 0,
+                // The webview bridge is test-only as well as trace-gated. Do
+                // not enable it merely because a production process inherited
+                // the diagnostic environment variable.
+                resultPanelTraceEnabled: process.env.NODE_ENV === 'test'
+                    && isResultPanelTraceEnabled(),
+                resultSyncVersion: this._resultSyncVersion,
             },
             metrics: {
                 activeSource,

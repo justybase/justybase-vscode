@@ -424,6 +424,7 @@ export interface ResultPanelGlobals {
     postToHost?: (message: Record<string, unknown>) => void;
     __getHostState?: () => Record<string, unknown> | null;
     __setHostState?: (state: Record<string, unknown>) => void;
+    __getResultSyncPendingRequestCount?: () => number;
     renderSidebarSchema?: () => void;
     onFilterChanged?: () => void;
     clearFilter?: () => void;
@@ -437,6 +438,10 @@ export interface ResultPanelGlobals {
     __toggleDatabaseGroupingPanel?: () => void;
     __clearGroupingConfig?: () => void;
     __runGroupingQuery?: () => void;
+    __testConfigureDatabaseGrouping?: (
+        columnIndexes: number[],
+        functions?: Array<{ fn: string; columnIndex?: number }>,
+    ) => void;
     __exportActiveGridAsXlsb?: () => void;
     exportActiveGridAsXlsb?: () => void;
     toggleExportSplitMenu?: (event: Event) => void;

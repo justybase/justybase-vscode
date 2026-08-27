@@ -53,6 +53,11 @@ interface PendingGroupingRequest {
 let requestIdCounter = 0;
 const pendingRequests = new Map<number, PendingGroupingRequest>();
 
+/** Number of grouping requests which still expect a host response. */
+export function getDatabaseGroupingPendingRequestCount(): number {
+    return pendingRequests.size + previewPendingRequests.size;
+}
+
 /**
  * Execute a database GROUP BY query.
  * Returns a promise that resolves with the grouping results.

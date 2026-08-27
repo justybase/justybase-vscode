@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import * as vscode from 'vscode';
 import { ResultPanelView } from '../../views/resultPanelView';
+import { clearResultPanelTrace } from '../../views/resultPanelTrace';
 
 const mockResultsConfigurationValues: Record<string, unknown> = {
     gridFontFamily: "Menlo, Monaco, Consolas, 'Courier New', monospace"
@@ -32,6 +33,7 @@ type MockedVsCodeModule = {
 type WebviewMessage = {
     command: string;
     sourceUri?: string;
+    reason?: string;
 };
 
 type WebviewMessageHandler = (message: WebviewMessage) => void;
@@ -166,6 +168,34 @@ describe('ResultPanelView Integration', () => {
         expect(provider.getActiveSource()).toBe(uriB);
     });
 
+    test('uses the hydrate payload source in host trace records', () => {
+        const previousTraceFlag = process.env.JUSTYBASE_RESULT_PANEL_TRACE;
+        process.env.JUSTYBASE_RESULT_PANEL_TRACE = '1';
+        clearResultPanelTrace();
+
+        try {
+            const postMessage = (provider as unknown as {
+                _postMessageToWebview: (message: unknown) => unknown;
+            })._postMessageToWebview;
+            postMessage.call(provider, {
+                command: 'hydrate',
+                data: { activeSourceJson: JSON.stringify('file:///payload.sql') },
+            });
+
+            const hydrateTrace = provider.getResultPanelTraceSnapshot().find(event =>
+                event.phase === 'host_post' && event.command === 'hydrate',
+            );
+            expect(hydrateTrace?.sourceUri).toBe('file:///payload.sql');
+        } finally {
+            clearResultPanelTrace();
+            if (previousTraceFlag === undefined) {
+                delete process.env.JUSTYBASE_RESULT_PANEL_TRACE;
+            } else {
+                process.env.JUSTYBASE_RESULT_PANEL_TRACE = previousTraceFlag;
+            }
+        }
+    });
+
     test('should hydrate pending execution state when webview becomes ready after execution starts', () => {
         const { commands } = jest.requireMock('vscode') as MockedVsCodeModule;
         commands.executeCommand.mockClear();
@@ -219,6 +249,157 @@ describe('ResultPanelView Integration', () => {
         expect(JSON.parse(hydrateMessage!.data.executingSourcesJson)).toContain(pendingSourceUri);
 
         pendingProvider.dispose();
+    });
+
+    test.each([
+        'untitled:Untitled-1',
+        'file:///C:/Users/test/query.sql',
+    ])('should deliver Logs and streamed rows for a %s source', (sourceUri) => {
+        postedMessages.length = 0;
+        provider.startExecution(sourceUri);
+        const executionId = provider.logExecutionStart(sourceUri, 'SELECT 1', 'regression');
+
+        provider.appendStreamingChunk(
+            sourceUri,
+            0,
+            {
+                columns: [{ name: 'id', type: 'integer' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            },
+            'SELECT 1',
+        );
+        provider.appendStreamingChunk(
+            sourceUri,
+            0,
+            {
+                columns: [{ name: 'id', type: 'integer' }],
+                rows: [[2]],
+                isFirstChunk: false,
+                isLastChunk: true,
+                totalRowsSoFar: 2,
+                limitReached: false,
+            },
+            'SELECT 1',
+        );
+        provider.logExecutionEnd(executionId, 2, 'success');
+        provider.finalizeExecution(sourceUri);
+
+        const resultSets = provider.getResultsForSource(sourceUri) ?? [];
+        expect(resultSets[0]).toEqual(expect.objectContaining({ isLog: true, name: 'Logs' }));
+        expect(resultSets[1]).toEqual(expect.objectContaining({
+            columns: [{ name: 'id', type: 'integer' }],
+            data: [[1], [2]],
+        }));
+
+        const messages = postedMessages as Array<{
+            command: string;
+            sourceUri?: string;
+            resultSetIndex?: number;
+            isLog?: boolean;
+            data?: { activeSourceJson?: string };
+        }>;
+        const hydrateIndex = messages.findIndex(message =>
+            message.command === 'hydrate'
+            && message.data?.activeSourceJson === JSON.stringify(sourceUri),
+        );
+        const firstDataAppendIndex = messages.findIndex(message =>
+            message.command === 'appendRows'
+            && message.sourceUri === sourceUri
+            && message.resultSetIndex === 1
+            && message.isLog !== true,
+        );
+        expect(hydrateIndex).toBeGreaterThanOrEqual(0);
+        expect(firstDataAppendIndex).toBeGreaterThan(hydrateIndex);
+    });
+
+    test('should keep a result after a second untitled execution replaces only the old data tab', () => {
+        const sourceUri = 'untitled:Untitled-1';
+
+        provider.startExecution(sourceUri);
+        provider.appendStreamingChunk(
+            sourceUri,
+            0,
+            {
+                columns: [{ name: 'id', type: 'integer' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: true,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            },
+            'SELECT 1',
+        );
+        provider.finalizeExecution(sourceUri);
+
+        provider.startExecution(sourceUri);
+        provider.appendStreamingChunk(
+            sourceUri,
+            0,
+            {
+                columns: [{ name: 'id', type: 'integer' }],
+                rows: [[2]],
+                isFirstChunk: true,
+                isLastChunk: true,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            },
+            'SELECT 2',
+        );
+
+        const resultSets = provider.getResultsForSource(sourceUri) ?? [];
+        expect(resultSets).toHaveLength(2);
+        expect(resultSets[0]?.isLog).toBe(true);
+        expect(resultSets[1]?.data).toEqual([[2]]);
+    });
+
+    test('should answer a missing-shell recovery request with an authoritative hydrate', () => {
+        const sourceUri = 'untitled:Untitled-1';
+        provider.startExecution(sourceUri);
+        postedMessages.length = 0;
+
+        const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0] as WebviewMessageHandler;
+        messageHandler({
+            command: 'requestResultSync',
+            sourceUri,
+            reason: 'missing-log-shell-before-data',
+        });
+
+        const hydrate = (postedMessages as Array<{
+            command: string;
+            data?: { activeSourceJson?: string; resultSyncVersion?: number };
+        }>).find(message => message.command === 'hydrate');
+        expect(hydrate?.data?.activeSourceJson).toBe(JSON.stringify(sourceUri));
+        expect(hydrate?.data?.resultSyncVersion).toBe(1);
+    });
+
+    test('should defer recovery for an inactive source and resume it when reactivated', () => {
+        const sourceA = 'untitled:Untitled-1';
+        const sourceB = 'untitled:Untitled-2';
+        provider.startExecution(sourceA);
+        provider.startExecution(sourceB);
+        postedMessages.length = 0;
+
+        const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0] as WebviewMessageHandler;
+        messageHandler({
+            command: 'requestResultSync',
+            sourceUri: sourceA,
+            reason: 'missing-log-shell-before-data',
+        });
+
+        expect((postedMessages as Array<{ command: string }>).some(message => message.command === 'hydrate')).toBe(false);
+
+        provider.setActiveSource(sourceA);
+
+        const hydrate = (postedMessages as Array<{
+            command: string;
+            data?: { activeSourceJson?: string; resultSyncVersion?: number };
+        }>).find(message => message.command === 'hydrate');
+        expect(hydrate?.data?.activeSourceJson).toBe(JSON.stringify(sourceA));
+        expect(hydrate?.data?.resultSyncVersion).toBe(1);
     });
 
     test('should reload webview html when results grid font configuration changes', () => {

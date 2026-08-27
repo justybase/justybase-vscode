@@ -6,6 +6,9 @@ import type {
     ResultPanelInboundMessage,
     ResultPanelOutboundMessage,
     ResultPanelHydrationMetricsPayload,
+    ResultPanelTraceEventPayload,
+    ResultPanelTestBridgeResult,
+    ResultPanelExportFormat,
     SelectionStatsPayload,
     SelectionStatsUpdatePayload,
     ResultPanelExportRowScope,
@@ -60,6 +63,15 @@ export interface AllRowsExportRequest {
     columnIds?: string[];
 }
 
+export interface TestExportRequest {
+    sourceUri: string;
+    resultSetIndex: number;
+    format: ResultPanelExportFormat;
+    destination: string;
+    rowIndices?: number[];
+    columnIds?: string[];
+}
+
 export interface MessageHandlerCallbacks {
     onUpdateWebview: () => void;
     onPostMessage: (message: ResultPanelOutboundMessage) => void;
@@ -67,8 +79,13 @@ export interface MessageHandlerCallbacks {
     onMigrateResult?: (sourceUri: string, resultSetIndex: number) => void;
     onLogRowsApplied?: (sourceUri: string, executionTimestamp: number, totalRows: number) => void;
     onRequestLogSync?: (sourceUri: string, executionTimestamp: number | undefined, currentRows: number) => void;
+    onRequestResultSync?: (sourceUri: string, reason: string) => void;
     onSelectionStatsChanged?: (stats: SelectionStatsUpdatePayload | null) => void;
     onRecordHydrationMetrics?: (metrics: ResultPanelHydrationMetricsPayload) => void;
+    onRecordResultPanelTrace?: (event: ResultPanelTraceEventPayload) => void;
+    /** Receives a response from the test-only webview protocol bridge. */
+    onTestBridgeResult?: (message: ResultPanelTestBridgeResult) => void;
+    onTestExport?: (request: TestExportRequest) => Promise<void>;
     onSaveEdits?: (request: SaveEditsRequest) => Promise<{ success: boolean; message: string }>;
     onGetWebviewUri?: (uri: vscode.Uri) => string;
     onRefreshResult?: (
@@ -256,6 +273,10 @@ export class ResultPanelMessageHandler {
                 );
                 return;
 
+            case 'requestResultSync':
+                this._callbacks.onRequestResultSync?.(message.sourceUri, message.reason);
+                return;
+
             case 'selectAll':
                 this._callbacks.onPostMessage({ command: 'selectAll' });
                 return;
@@ -275,6 +296,14 @@ export class ResultPanelMessageHandler {
                     }
                 }));
                 this._callbacks.onRecordHydrationMetrics?.(message.metrics);
+                return;
+
+            case 'reportResultPanelTrace':
+                this._callbacks.onRecordResultPanelTrace?.(message.event);
+                return;
+
+            case 'testBridgeResult':
+                this._callbacks.onTestBridgeResult?.(message);
                 return;
 
             case 'reportUxPerf':
@@ -479,6 +508,25 @@ export class ResultPanelMessageHandler {
                 return;
 
             case 'export':
+                if (
+                    process.env.NODE_ENV === 'test'
+                    && typeof message.destination === 'string'
+                    && this._callbacks.onTestExport
+                ) {
+                    void this._callbacks.onTestExport({
+                        sourceUri: message.sourceUri,
+                        resultSetIndex: message.resultSetIndex,
+                        format: message.format,
+                        destination: message.destination,
+                        rowIndices: message.rowIndices,
+                        columnIds: message.columnIds,
+                    }).catch(error => {
+                        getLogger().error(
+                            `Test export failed: ${error instanceof Error ? error.message : String(error)}`,
+                        );
+                    });
+                    return;
+                }
                 this._runExportWithScope({
                     sourceUri: message.sourceUri,
                     resultSetIndex: message.resultSetIndex,

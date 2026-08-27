@@ -74,6 +74,7 @@ export type {
     ResultPanelExportFormat,
     ResultPanelHostToWebviewMessage,
     ResultPanelHydrationMetricsPayload,
+    ResultPanelTraceEventPayload,
     ResultPanelInboundMessage,
     ResultPanelOutboundMessage,
     ResultPanelViewData,

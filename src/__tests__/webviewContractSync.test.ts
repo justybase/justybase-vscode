@@ -44,6 +44,7 @@ const RESULT_PANEL_FRONTEND_MESSAGE_FILES = [
   "media/resultPanel/selection.ts",
   "media/resultPanel/tabs.ts",
   "media/resultPanel/utils.ts",
+  "media/resultPanel/trace.ts",
 ];
 
 const RESULT_PANEL_GRID_PROTOCOL_FILES = [
