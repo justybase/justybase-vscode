@@ -36,6 +36,7 @@ import { DeferredFeatureScheduler } from './activation/DeferredFeatureScheduler'
 import { activateExplorerViews } from './activation/activateExplorerViews';
 import { activateEditorSync } from './activation/activateEditorSync';
 import { activateNotebookRegistration } from './activation/activateNotebookRegistration';
+import { registerNewSqlTabCommand } from './commands/newSqlTabCommand';
 import { registerResultPanelRegressionCommand } from './activation/resultPanelRegression';
 import {
     checkForConflictingExtensions,
@@ -322,6 +323,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         getDatabaseList,
         tableDdlSynchronizer,
     }));
+    context.subscriptions.push(registerNewSqlTabCommand(connectionManager));
     context.subscriptions.push(...registerSqlConsoleCommands({ context, connectionManager }));
     context.subscriptions.push(...await registerCompatibilityCommandAliases());
 

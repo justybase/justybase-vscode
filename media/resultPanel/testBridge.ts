@@ -1,6 +1,5 @@
 import { applyDatabaseFilter, queryDatabaseFilterValues } from './databaseFilters.js';
 import { queryDatabaseAggregations } from './databaseAggregations.js';
-import { executeDatabaseGrouping } from './databaseGrouping.js';
 import {
     getDiskBackedPendingRequestCount,
     queryDiskAggregations,
@@ -49,6 +48,7 @@ interface TestBridgeResult {
         columnCount: number;
     }>;
     visibleRowCount: number;
+    firstCellFingerprint: string;
     rowCountText: string;
     globalFilterActive: boolean;
     columnFilterCount: number;
@@ -155,6 +155,9 @@ function snapshot(): TestBridgeResult {
             columnCount: resultSet?.columns?.length ?? 0,
         })),
         visibleRowCount: visibleRowCount(activeResultSet, activeResultSetIndex),
+        firstCellFingerprint: activeResultSet?.data?.[0]?.[0] === undefined
+            ? ''
+            : hashFingerprint(`${typeof activeResultSet.data[0][0]}:${String(activeResultSet.data[0][0])}`),
         rowCountText: rowCountElement?.textContent?.slice(0, 128) ?? '',
         globalFilterActive: Boolean(
             getGlobalFilterState(

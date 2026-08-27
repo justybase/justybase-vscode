@@ -233,6 +233,11 @@
         "icon": "$(terminal)"
       },
       {
+        "command": "netezza.newSqlTabWithContext",
+        "title": "JustyBase: New SQL Tab with Current Connection",
+        "icon": "$(new-file)"
+      },
+      {
         "command": "netezza.openGettingStarted",
         "title": "JustyBase: Open Getting Started",
         "icon": "$(book)"
@@ -4150,6 +4155,12 @@
       }
     },
     "keybindings": [
+      {
+        "command": "netezza.newSqlTabWithContext",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
+      },
       {
         "command": "netezza.runQuery",
         "key": "ctrl+enter",
