@@ -167,6 +167,7 @@ jest.mock('../core/connectionManager', () => ({
         supportsCapability: jest.fn().mockReturnValue(true),
         setMetadataCache: jest.fn(),
         setDocumentConnection: jest.fn(),
+        clearDocumentConnection: jest.fn().mockResolvedValue(undefined),
         setDocumentDatabase: jest.fn(),
         getEffectiveDatabase: jest.fn(),
         isFastLoaded: jest.fn().mockReturnValue(false),
