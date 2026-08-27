@@ -6,7 +6,7 @@ category: Start here
 status: Supported
 order: 1
 last_verified: 2026-08-19
-product_version: 3.16.41
+product_version: 3.17.0
 ---
 
 # Work from question to trusted result
@@ -50,4 +50,4 @@ The [developer guide](guide/developer/architecture/) explains the boundaries bet
 
 ## Version and evidence
 
-This portal was verified against product version **3.16.41** on **2026-08-19**. Generated command, setting, database, AI-tool, MCP, format, and Web API tables are derived from repository sources during the Pages build. The build also publishes machine-readable [build metadata](../build-info.json) with the source commit and generated counts. Narrative pages still require human review when behavior changes.
+This portal was verified against product version **3.17.0** on **2026-08-19**. Generated command, setting, database, AI-tool, MCP, format, and Web API tables are derived from repository sources during the Pages build. The build also publishes machine-readable [build metadata](../build-info.json) with the source commit and generated counts. Narrative pages still require human review when behavior changes.
