@@ -36,6 +36,7 @@ import { DeferredFeatureScheduler } from './activation/DeferredFeatureScheduler'
 import { activateExplorerViews } from './activation/activateExplorerViews';
 import { activateEditorSync } from './activation/activateEditorSync';
 import { activateNotebookRegistration } from './activation/activateNotebookRegistration';
+import { registerResultPanelRegressionCommand } from './activation/resultPanelRegression';
 import {
     checkForConflictingExtensions,
     getDatabaseList,
@@ -141,6 +142,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     );
 
     const resultPanelProvider = new ResultPanelView(context, connectionManager);
+    const resultPanelRegressionCommand = registerResultPanelRegressionCommand(resultPanelProvider, connectionManager, context);
+    if (resultPanelRegressionCommand) {
+        context.subscriptions.push(resultPanelRegressionCommand);
+    }
 
     let t = performance.now();
     const schemaTreeView = vscode.window.createTreeView('netezza.schema', {

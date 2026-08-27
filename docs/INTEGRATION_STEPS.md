@@ -46,9 +46,14 @@ for a subset:
 
 ```bash
 npm run build
-npm run build:duckdb
+npm run build:companions
 npm run test:extensions:vscode -- duckdb
 ```
+
+The full companion Extension Host alias (`npm run test:extension-host:companions`)
+builds the core and all companion bundles before starting the smoke checks. Use
+`build:companions` explicitly when running `test:extensions:vscode` for a clean
+checkout or when selecting more than one companion.
 
 `test:extensions:vscode` validates that the bundle and external driver exist,
 activates the core and companion, and verifies that the expected dialect is

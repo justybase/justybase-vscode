@@ -1,0 +1,86 @@
+name: Result panel regression
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/views/**"
+      - "src/state/resultStateManager.ts"
+      - "src/activation/resultPanelRegression.ts"
+      - "src/extension.ts"
+      - "src/commands/queryCommands.ts"
+      - "src/commands/query/**"
+      - "src/core/**"
+      - "src/activation/**"
+      - "src/core/queryRunner.ts"
+      - "src/core/queryCancellation.ts"
+      - "src/core/batchQueryExecutor.ts"
+      - "src/contracts/webview/**"
+      - "src/contracts/webviews/**"
+      - "media/resultPanel/**"
+      - "test-harness/**"
+      - "scripts/extensionHost/resultPanelRegression*"
+      - "scripts/extensionHost/**"
+      - "docs/RESULT_PANEL_EXTENSION_HOST_RUNBOOK.md"
+      - "AGENTS.md"
+      - ".github/workflows/result-panel-regression.yml"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+jobs:
+  extension-host:
+    name: Extension Host (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    env:
+      JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS: "1"
+      JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run SQLite Extension Host regression (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:extension-host
+      - name: Run SQLite Extension Host regression (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:extension-host
+      - name: Upload Extension Host diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-panel-extension-host-${{ matrix.os }}
+          path: ${{ runner.temp }}/justybase-extension-host-artifacts
+          if-no-files-found: warn
+
+  webview:
+    name: Bundled webview protocol fixture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --config=test-harness/playwright.config.ts test-harness/tests/table-rendering.spec.ts
+      - name: Upload Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-panel-playwright
+          path: test-results
+          if-no-files-found: warn

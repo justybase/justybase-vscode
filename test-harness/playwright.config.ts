@@ -2,6 +2,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
     testDir: './tests',
+    // The live web workspace owns a separate API-backed Playwright config and
+    // must not run against this static webview harness server.
+    testIgnore: /web-sql-workspace\.spec\.ts/,
     timeout: 30000,
     retries: 1,
     use: {
