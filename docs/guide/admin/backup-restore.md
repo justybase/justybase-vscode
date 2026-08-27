@@ -5,7 +5,7 @@ audience: admin
 category: Administration
 status: Web only
 last_verified: 2026-08-19
-product_version: 3.17.1
+product_version: 3.17.2
 ---
 
 # Backup and restore

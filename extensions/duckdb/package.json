@@ -2,7 +2,7 @@
     "name": "justybaselite-duckdb",
     "displayName": "JustyBase SQL Editor (DuckDB + Files)",
     "description": "Optional DuckDB companion for JustyBase SQL Editor. Query Excel (XLSX/XLSB), Access, CSV, Parquet and Avro files with SQL.",
-    "version": "3.17.1",
+    "version": "3.17.2",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
