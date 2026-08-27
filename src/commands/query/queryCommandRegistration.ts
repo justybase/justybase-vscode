@@ -435,9 +435,12 @@ export function registerQueryCommands(
                 const statementsForSafeExecute = SqlParser.splitStatements(text).filter(
                     q => q.trim().length > 0
                 );
+                const statementsForExecution = statementsForSafeExecute.length > 0
+                    ? statementsForSafeExecute
+                    : [text];
                 if (
                     !(await confirmSafeExecute(
-                        statementsForSafeExecute.length > 0 ? statementsForSafeExecute : [text]
+                        statementsForExecution
                     ))
                 ) {
                     return;
@@ -507,7 +510,7 @@ export function registerQueryCommands(
                     async () => {
                         await runQueriesSequentially(
                             context,
-                            [text],
+                            statementsForExecution,
                             connectionManager,
                             sourceUri,
                             msg => {
@@ -533,7 +536,7 @@ export function registerQueryCommands(
                                 retryOnBrokenConnection: false,
                                 isExecutionCurrent: () => executionGate?.isCurrent() === true,
                                 confirmSafeExecute: (sql, _queryIndex) =>
-                                    confirmSafeExecuteForExpandedQuery([text], sql),
+                                    confirmSafeExecuteForExpandedQuery(statementsForExecution, sql),
                                 onStatementSucceeded: event =>
                                     deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
                                 onStatementFailed: event => {
@@ -558,7 +561,7 @@ export function registerQueryCommands(
                     const successEvent = runBatchTimer.finish({
                         result: 'ok',
                         metadata: {
-                            query_count: statementsForSafeExecute.length > 0 ? statementsForSafeExecute.length : 1
+                            query_count: statementsForExecution.length
                         }
                     });
                     console.log(formatPerformanceEvent(successEvent));

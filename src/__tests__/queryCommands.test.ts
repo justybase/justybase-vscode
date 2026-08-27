@@ -957,6 +957,54 @@ describe('commands/queryCommands', () => {
             expect(mockResultPanelProvider.finalizeExecution).toHaveBeenCalled();
         });
 
+        it('should execute each parsed batch statement separately', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider,
+            };
+            registerQueryCommands(deps);
+            (SqlParser.splitStatements as jest.Mock).mockReturnValue([
+                'UPDATE fixture SET amount = 11.5 WHERE id = 1',
+                'DELETE FROM fixture WHERE id = 2',
+            ]);
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.runQueryBatch'
+            )?.[1];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    uri: { toString: () => 'file:///batch.sql' },
+                    getText: jest.fn(() => 'UPDATE fixture SET amount = 11.5 WHERE id = 1; DELETE FROM fixture WHERE id = 2;'),
+                },
+                selection: { isEmpty: true },
+            };
+
+            await handler();
+
+            expect(runQueriesSequentially).toHaveBeenCalledWith(
+                mockContext,
+                [
+                    'UPDATE fixture SET amount = 11.5 WHERE id = 1',
+                    'DELETE FROM fixture WHERE id = 2',
+                ],
+                expect.anything(),
+                'file:///batch.sql',
+                expect.any(Function),
+                expect.any(Function),
+                undefined,
+                false,
+                undefined,
+                expect.any(Function),
+                expect.any(Function),
+                undefined,
+                0,
+                undefined,
+                [],
+                expect.objectContaining({ retryOnBrokenConnection: false }),
+            );
+        });
+
         it('should ignore duplicate batch run while the same tab is already running', async () => {
             const deps: QueryCommandsDependencies = {
                 context: mockContext,
