@@ -403,6 +403,16 @@ export function retireQueryExecutionForDocument(document: vscode.TextDocument): 
     void entry.recovery?.requestCancel?.();
 }
 
+/**
+ * Restore a document identity reopened by VS Code's language-mode lifecycle.
+ * A genuinely reopened editor receives a new TextDocument identity, so deleting
+ * that new object from the WeakSet cannot revive a delayed command from the
+ * document that was actually closed.
+ */
+export function restoreQueryExecutionForReopenedDocument(document: vscode.TextDocument): void {
+    retiredDocuments.delete(document);
+}
+
 export function isQueryExecutionRunning(sourceUri: string): boolean {
     const normalizedUri = normalizeUriKey(sourceUri);
     return Array.from(runningSources.values()).some(entry =>

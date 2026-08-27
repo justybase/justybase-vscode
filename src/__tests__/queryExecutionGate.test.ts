@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import {
     clearQueryExecutionGateForTests,
     isQueryExecutionRunning,
+    restoreQueryExecutionForReopenedDocument,
     retireQueryExecutionForDocument,
     tryAcquireQueryExecution,
 } from '../commands/query/queryExecutionGate';
@@ -56,6 +57,40 @@ describe('queryExecutionGate', () => {
         expect(requestCancel).toHaveBeenCalledTimes(1);
 
         secondLease?.dispose();
+    });
+
+    it('allows execution after VS Code reopens the same document for a language-mode change', async () => {
+        const sourceUri = 'untitled:Untitled-2';
+        const document = createDocument(sourceUri);
+
+        // Changing an untitled editor from Plain Text to SQL can emit a close
+        // event even though the editor remains the document being executed.
+        retireQueryExecutionForDocument(document);
+        restoreQueryExecutionForReopenedDocument(document);
+
+        const lease = await tryAcquireQueryExecution(sourceUri, provider, { document });
+
+        expect(lease).toBeDefined();
+        expect(lease?.isCurrent()).toBe(true);
+        lease?.dispose();
+    });
+
+    it('rejects a delayed command after an idle document is genuinely closed', async () => {
+        const sourceUri = 'untitled:Untitled-2';
+        const closedDocument = createDocument(sourceUri);
+
+        retireQueryExecutionForDocument(closedDocument);
+
+        const staleLease = await tryAcquireQueryExecution(sourceUri, provider, {
+            document: closedDocument,
+        });
+        const replacementLease = await tryAcquireQueryExecution(sourceUri, provider, {
+            document: createDocument(sourceUri),
+        });
+
+        expect(staleLease).toBeUndefined();
+        expect(replacementLease).toBeDefined();
+        replacementLease?.dispose();
     });
 
     it('does not let a superseded lease release its forced retry', async () => {
