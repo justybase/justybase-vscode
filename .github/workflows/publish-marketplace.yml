@@ -112,7 +112,7 @@ jobs:
         id: version_check
         shell: bash
         run: |
-          node scripts/version-sync.js check --release-tag "$RELEASE_TAG"
+          node scripts/version-sync.js check --release-tag "$RELEASE_TAG" --include-optionals
           normalized_tag="${RELEASE_TAG#v}"
           echo "release_version=$normalized_tag" >> "$GITHUB_OUTPUT"
           echo "Validated release tag $RELEASE_TAG for core version $normalized_tag."
