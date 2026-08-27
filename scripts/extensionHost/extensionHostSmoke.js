@@ -37,6 +37,11 @@ async function run() {
     assert.ok(report.resultSetCount >= 2, 'Scenario must include Logs and tabular results.');
     assert.ok(report.rowCounts.includes(12), 'Scenario report must include the deterministic 12-row result.');
     assert.equal(report.pendingRequestCount, 0, 'Scenario must finish without host bridge requests.');
+    assert.equal(
+        report.untitledLanguageLifecyclePassed,
+        true,
+        'Two parallel Plain Text -> SQL untitled tabs must execute and render distinct scalar results.',
+    );
     assert.ok(report.hostResponses.includes('testBridge'), 'Host must send test bridge messages.');
     assert.ok(report.hostRequests.includes('requestDatabaseFilterValues'), 'Host must receive database filter requests.');
     assert.ok(report.hostRequests.includes('applyDatabaseFilter'), 'Host must receive database filter apply requests.');

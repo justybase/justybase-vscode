@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { runQueryRaw } from '../core/queryRunner';
 import type { ConnectionManager } from '../core/connectionManager';
 import type { ResultPanelView } from '../views/resultPanelView';
+import { NEW_SQL_TAB_WITH_CONTEXT_COMMAND } from '../commands/newSqlTabCommand';
 import {
     clearResultPanelTrace,
     isResultPanelTraceEnabled,
@@ -28,6 +29,7 @@ export interface ExtensionHostScenarioReport {
     hostRequests: string[];
     hostResponses: string[];
     pendingRequestCount: number;
+    untitledLanguageLifecyclePassed: boolean;
     durationMs: number;
     error?: string;
 }
@@ -225,6 +227,7 @@ function buildReport(
     sourceUri: string,
     startedAt: number,
     status: 'passed' | 'failed',
+    untitledLanguageLifecyclePassed: boolean,
 ): ExtensionHostScenarioReport {
     const trace = provider.getResultPanelTraceSnapshot();
     writeTraceArtifact(provider);
@@ -258,6 +261,7 @@ function buildReport(
         hostRequests,
         hostResponses,
         pendingRequestCount: provider.getResultPanelTestBridgePendingRequestCount(),
+        untitledLanguageLifecyclePassed,
         durationMs: Date.now() - startedAt,
         ...(status === 'failed' ? { error: 'scenario_failed' } : {}),
     };
@@ -307,11 +311,19 @@ async function executeProductionQuery(
 
 async function openUntitledSql(sql: string): Promise<vscode.TextDocument> {
     await vscode.commands.executeCommand('workbench.action.files.newUntitledFile');
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'untitled') {
+    const initialEditor = vscode.window.activeTextEditor;
+    if (!initialEditor || initialEditor.document.uri.scheme !== 'untitled') {
         throw new Error('VS Code did not create an active untitled SQL editor.');
     }
-    const document = editor.document;
+
+    // Reproduce the user path exactly: Ctrl+N creates a Plain Text document,
+    // then changing its language to SQL emits close/open for the same
+    // TextDocument identity before Ctrl+Enter executes the query.
+    const document = await vscode.languages.setTextDocumentLanguage(initialEditor.document, 'sql');
+    if (document.languageId !== 'sql') {
+        throw new Error('VS Code did not change the untitled document language to SQL.');
+    }
+    const editor = await vscode.window.showTextDocument(document, { preview: false });
     const changed = await editor.edit(editBuilder => {
         editBuilder.replace(
             new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
@@ -321,8 +333,65 @@ async function openUntitledSql(sql: string): Promise<vscode.TextDocument> {
     if (!changed) {
         throw new Error('Could not populate the untitled Extension Host fixture editor.');
     }
-    await vscode.window.showTextDocument(document, { preview: false });
     return document;
+}
+
+async function openInheritedUntitledSql(sql: string): Promise<vscode.TextDocument> {
+    await vscode.commands.executeCommand(NEW_SQL_TAB_WITH_CONTEXT_COMMAND);
+    const editor = vscode.window.activeTextEditor;
+    if (
+        !editor
+        || editor.document.uri.scheme !== 'untitled'
+        || editor.document.languageId !== 'sql'
+    ) {
+        throw new Error('Ctrl+N did not create an active untitled SQL editor.');
+    }
+
+    const document = editor.document;
+    const changed = await editor.edit(editBuilder => {
+        editBuilder.replace(
+            new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
+            sql,
+        );
+    });
+    if (!changed) {
+        throw new Error('Could not populate the inherited untitled SQL editor.');
+    }
+    return document;
+}
+
+function assertUntitledScalarResult(
+    provider: ResultPanelView,
+    document: vscode.TextDocument,
+    expectedValue: number,
+    snapshot: Record<string, unknown>,
+): string {
+    const sourceUri = document.uri.toString();
+    const resultSets = provider.getResultsForSource(sourceUri) ?? [];
+    const dataResult = resultSets.find(resultSet => !resultSet?.isLog && !resultSet?.isError);
+    if (!dataResult) {
+        throw new Error(`Untitled SELECT ${expectedValue} did not produce a tabular result.`);
+    }
+    if ((dataResult.totalRowCount ?? dataResult.data.length) !== 1 || dataResult.data.length !== 1) {
+        throw new Error(`Untitled SELECT ${expectedValue} did not produce exactly one row.`);
+    }
+    if (String(dataResult.data[0]?.[0]) !== String(expectedValue)) {
+        throw new Error(`Untitled SELECT ${expectedValue} returned an unexpected host value.`);
+    }
+    if (snapshot.sourceUri !== sourceUri || asNumber(snapshot.visibleRowCount, -1) !== 1) {
+        throw new Error(`Untitled SELECT ${expectedValue} was not visible in its active webview grid.`);
+    }
+    const webviewResultSets = Array.isArray(snapshot.resultSets) ? snapshot.resultSets : [];
+    if (webviewResultSets.some(resultSet => asRecord(resultSet).isError === true)) {
+        throw new Error(`Untitled SELECT ${expectedValue} rendered an error result in the webview.`);
+    }
+    const firstCellFingerprint = typeof snapshot.firstCellFingerprint === 'string'
+        ? snapshot.firstCellFingerprint
+        : '';
+    if (!firstCellFingerprint) {
+        throw new Error(`Untitled SELECT ${expectedValue} did not render its first cell in the webview.`);
+    }
+    return firstCellFingerprint;
 }
 
 async function openSavedSql(filePath: string, sql: string): Promise<vscode.TextDocument> {
@@ -359,6 +428,7 @@ async function runExtensionHostScenario(
     const documentUris: string[] = [];
     let netezzaFixtureCreated = false;
     let sourceUri = '';
+    let untitledLanguageLifecyclePassed = false;
 
     try {
         if (engine === 'netezza') {
@@ -402,13 +472,78 @@ async function runExtensionHostScenario(
         }
 
         const sql = buildScenarioSql(tableName, engine === 'netezza' ? schemaName : undefined);
+
+        clearResultPanelTrace();
+        await provider.ensureResultPanelTestBridgeReady();
+
+        const firstUntitled = await openUntitledSql('SELECT 10 AS RESULT_PANEL_LIFECYCLE_VALUE;');
+        documentUris.push(firstUntitled.uri.toString());
+        if (connectionManager.getConnectionForExecution(firstUntitled.uri.toString()) !== connectionName) {
+            throw new Error('The first untitled SQL tab did not inherit the active connection.');
+        }
+        const firstUntitledSnapshot = await executeProductionQuery(provider, firstUntitled);
+        const firstFingerprint = assertUntitledScalarResult(
+            provider,
+            firstUntitled,
+            10,
+            firstUntitledSnapshot,
+        );
+
+        const inheritedDatabase = await connectionManager.getEffectiveDatabase(
+            firstUntitled.uri.toString(),
+        );
+        if (!inheritedDatabase) {
+            throw new Error('The first untitled SQL tab has no effective database to inherit.');
+        }
+        await connectionManager.setDocumentDatabase(
+            firstUntitled.uri.toString(),
+            inheritedDatabase,
+        );
+
+        // Keep the first tab open while creating the second one. This is the
+        // original regression: Ctrl+N must copy the source connection/database,
+        // while Plain Text -> SQL must not retire the new document execution.
+        const secondUntitled = await openInheritedUntitledSql(
+            'SELECT 11 AS RESULT_PANEL_LIFECYCLE_VALUE;',
+        );
+        documentUris.push(secondUntitled.uri.toString());
+        if (secondUntitled.uri.toString() === firstUntitled.uri.toString()) {
+            throw new Error('The parallel untitled SQL tabs unexpectedly share one URI.');
+        }
+        if (connectionManager.getDocumentConnection(secondUntitled.uri.toString()) !== connectionName) {
+            throw new Error('Ctrl+N did not assign the source connection to the new SQL tab.');
+        }
+        if (connectionManager.getDocumentDatabase(secondUntitled.uri.toString()) !== inheritedDatabase) {
+            throw new Error('Ctrl+N did not assign the source database to the new SQL tab.');
+        }
+        const secondUntitledSnapshot = await executeProductionQuery(provider, secondUntitled);
+        const secondFingerprint = assertUntitledScalarResult(
+            provider,
+            secondUntitled,
+            11,
+            secondUntitledSnapshot,
+        );
+        if (secondFingerprint === firstFingerprint) {
+            throw new Error('The second untitled grid retained the first tab value.');
+        }
+
+        await vscode.window.showTextDocument(firstUntitled, { preview: false });
+        const restoredFirstSnapshot = asRecord(await provider.runResultPanelTestBridge('switchSource', {
+            sourceUri: firstUntitled.uri.toString(),
+        }));
+        if (
+            asNumber(restoredFirstSnapshot.visibleRowCount, -1) !== 1
+            || restoredFirstSnapshot.firstCellFingerprint !== firstFingerprint
+        ) {
+            throw new Error('Switching back to the first untitled tab did not restore SELECT 10.');
+        }
+        untitledLanguageLifecyclePassed = true;
+
         const savedDocument = await openSavedSql(sourceFilePath, `${sql.all};\n${sql.beta};\n`);
         documentUris.push(savedDocument.uri.toString());
         sourceUri = savedDocument.uri.toString();
         await connectionManager.setDocumentConnection(sourceUri, connectionName);
 
-        clearResultPanelTrace();
-        await provider.ensureResultPanelTestBridgeReady();
         await executeProductionQuery(provider, savedDocument);
         const savedResults = provider.getResultsForSource(sourceUri) ?? [];
         if (!savedResults[0]?.isLog) throw new Error('Logs must be the first result set.');
@@ -543,7 +678,14 @@ async function runExtensionHostScenario(
             throw new Error('Result-panel host left a pending bridge request.');
         }
         traceResultPanelEvent({ phase: 'extension_host_scenario_complete', sourceUri, reason: engine });
-        const report = buildReport(provider, engine, sourceUri, startedAt, 'passed');
+        const report = buildReport(
+            provider,
+            engine,
+            sourceUri,
+            startedAt,
+            'passed',
+            untitledLanguageLifecyclePassed,
+        );
         writeReport(report);
         return report;
     } catch (error: unknown) {
@@ -553,6 +695,7 @@ async function runExtensionHostScenario(
             sourceUri,
             startedAt,
             'failed',
+            untitledLanguageLifecyclePassed,
         );
         writeReport(report);
         throw error;
