@@ -251,6 +251,28 @@ describe('ResultPanelView Integration', () => {
         pendingProvider.dispose();
     });
 
+    test('should reveal an already-resolved result view when it is hidden', () => {
+        const { commands } = jest.requireMock('vscode') as MockedVsCodeModule;
+        commands.executeCommand.mockClear();
+        mockWebview.show.mockClear();
+        mockWebview.visible = false;
+
+        provider.startExecution('untitled:Untitled-1');
+
+        expect(commands.executeCommand).toHaveBeenCalledWith('netezza.results.focus');
+        expect(mockWebview.show).not.toHaveBeenCalled();
+    });
+
+    test('should not refocus an already-visible result view for execution', () => {
+        const { commands } = jest.requireMock('vscode') as MockedVsCodeModule;
+        commands.executeCommand.mockClear();
+        mockWebview.visible = true;
+
+        provider.startExecution('untitled:Untitled-1');
+
+        expect(commands.executeCommand).not.toHaveBeenCalledWith('netezza.results.focus');
+    });
+
     test.each([
         'untitled:Untitled-1',
         'file:///C:/Users/test/query.sql',

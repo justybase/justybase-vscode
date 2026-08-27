@@ -2521,11 +2521,13 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     private _revealViewForExecution() {
-        if (this._view) {
-            this._view.show?.(true);
+        if (this._view?.visible) {
             return;
         }
 
+        // WebviewView does not expose WebviewPanel.show()/reveal(). Once the
+        // results view has been resolved but its panel is hidden, the only
+        // supported way to reveal it again is the contributed focus command.
         void Promise.resolve(vscode.commands.executeCommand(`${ResultPanelView.viewType}.focus`)).catch(() => undefined);
     }
 
