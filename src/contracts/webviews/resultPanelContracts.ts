@@ -51,6 +51,50 @@ export interface ResultPanelHydrationMetricsPayload {
     executionState: ResultPanelExecutionState;
 }
 
+export interface ResultPanelTraceEventPayload {
+    phase: string;
+    sourceUri?: string;
+    command?: string;
+    resultSetIndex?: number;
+    resultSetCount?: number;
+    rowCount?: number;
+    totalRows?: number;
+    isLog?: boolean;
+    isFirstChunk?: boolean;
+    isLastChunk?: boolean;
+    visible?: boolean;
+    ready?: boolean;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    scrollTop?: number;
+    reason?: string;
+    delivered?: boolean;
+    error?: string;
+    webviewSeq?: number;
+}
+
+/**
+ * Test-only request/response messages used by the real Extension Host
+ * regression runner. They are intentionally not contributed as VS Code
+ * commands and are enabled only by the bounded result-panel trace flag.
+ */
+export interface ResultPanelTestBridgeRequest {
+    command: 'testBridge';
+    requestId: string;
+    action: string;
+    args?: unknown;
+    [key: string]: unknown;
+}
+
+export interface ResultPanelTestBridgeResult {
+    command: 'testBridgeResult';
+    requestId: string;
+    action: string;
+    ok: boolean;
+    result?: unknown;
+    error?: string;
+}
+
 export type UxPerfMetaValue = string | number | boolean | null;
 
 export interface UxPerfDocContextPayload {
@@ -102,6 +146,10 @@ export interface ResultPanelViewData {
     dataVersion?: number;
     /** Sources whose current execution delivered all rows but is still finalizing on the host. */
     streamingCompletedSourcesJson?: string;
+    /** Enables bounded result-panel diagnostics for controlled regression runs. */
+    resultPanelTraceEnabled?: boolean;
+    /** Changes only when the host answers a webview state-recovery request. */
+    resultSyncVersion?: number;
 }
 
 export type ResultPanelWebviewToHostMessage =
@@ -109,8 +157,11 @@ export type ResultPanelWebviewToHostMessage =
   | { command: 'migrateResult'; sourceUri: string; resultSetIndex: number }
   | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
   | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
+  | { command: 'requestResultSync'; sourceUri: string; reason: string }
   | { command: 'selectAll' }
   | { command: 'reportHydrationMetrics'; metrics: ResultPanelHydrationMetricsPayload }
+  | { command: 'reportResultPanelTrace'; event: ResultPanelTraceEventPayload }
+  | ResultPanelTestBridgeResult
   | { command: 'reportUxPerf'; event: UxPerfEventPayload }
     | { command: 'describeWithCopilot'; data: unknown; sql?: string }
     | { command: 'fixSqlError'; errorMessage: string; sql: string }
@@ -146,6 +197,8 @@ export type ResultPanelWebviewToHostMessage =
         resultSetIndex: number;
         rowIndices?: number[];
         columnIds?: string[];
+        /** Test-only absolute destination; normal UI continues to use the save dialog. */
+        destination?: string;
     }
     | { command: 'switchSource'; sourceUri: string }
     | { command: 'togglePin'; sourceUri: string }
@@ -306,6 +359,7 @@ export type ResultPanelWebviewToHostMessage =
 
 export type ResultPanelHostToWebviewMessage =
   | { command: 'hydrate'; data: ResultPanelViewData; uxTraceId?: string }
+  | ResultPanelTestBridgeRequest
   | {
       command: 'setActiveSource';
       sourceUri: string;
@@ -505,8 +559,11 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
   'migrateResult',
   'logRowsApplied',
   'requestLogSync',
+  'requestResultSync',
   'selectAll',
   'reportHydrationMetrics',
+  'reportResultPanelTrace',
+  'testBridgeResult',
   'reportUxPerf',
   'describeWithCopilot',
   'fixSqlError',
@@ -575,6 +632,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
 
 export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
   'hydrate',
+  'testBridge',
   'setActiveSource',
   'uxPerfSession',
   'saveScrollState',

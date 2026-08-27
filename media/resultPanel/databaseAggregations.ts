@@ -32,6 +32,11 @@ let requestIdCounter = 0;
 const pendingRequests = new Map<number, PendingDatabaseAggregation>();
 const aggregationErrorsByKey = new Map<string, string>();
 
+/** Number of database aggregation requests which still expect a host response. */
+export function getDatabaseAggregationPendingRequestCount(): number {
+    return pendingRequests.size;
+}
+
 function isStaleContext(context: RequestContext): boolean {
     const activeSource = getActiveSourceUri();
     const activeIndex = getActiveGridIndex();

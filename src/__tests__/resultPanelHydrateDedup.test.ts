@@ -97,6 +97,7 @@ jest.mock('../../media/resultPanel/grid/persistence.js', () => ({
     savePinnedState: jest.fn(),
     saveScrollStatesToResultSets: jest.fn(),
     restoreScrollFromResultSet: jest.fn(),
+    applyScrollForResultSet: jest.fn(),
     setPreserveScrollDuringHydrate: jest.fn(),
 }));
 
@@ -202,6 +203,156 @@ describe('handleHydrate executingSources dedup', () => {
         });
 
         expect(mockUpdateLoadingState).toHaveBeenCalled();
+    });
+
+    it('applies an authoritative recovery hydrate even when the ordinary fingerprint matches', () => {
+        const { handleHydrate } = require('../../media/resultPanel/messages.js') as {
+            handleHydrate: (data: Record<string, unknown>) => void;
+        };
+
+        handleHydrate({
+            ...buildHydrateData([]),
+            dataVersion: 4,
+            resultSyncVersion: 0,
+        });
+        mockUpdateLoadingState.mockClear();
+
+        handleHydrate({
+            ...buildHydrateData([]),
+            dataVersion: 4,
+            resultSyncVersion: 1,
+        });
+
+        expect(mockUpdateLoadingState).toHaveBeenCalled();
+    });
+
+    it('requests authoritative state instead of dropping data when the Logs shell is missing', () => {
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        protocol.postHostMessage.mockClear();
+        const { handleAppendRows } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+        };
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[42]],
+            totalRows: 1,
+            isFirstChunk: true,
+            isLastChunk: true,
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 42',
+            executionTimestamp: 20,
+        });
+
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestResultSync',
+            sourceUri,
+            reason: 'missing-log-shell-before-data',
+        });
+        expect((window as any).resultSets).toEqual([]);
+    });
+
+    it('also requests recovery when the first data append incorrectly targets index zero', () => {
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        const { handleAppendRows, getResultSyncPendingRequestCount } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+            getResultSyncPendingRequestCount: () => number;
+        };
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 0,
+            rows: [[42]],
+            totalRows: 1,
+            isFirstChunk: true,
+            isLastChunk: true,
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 42',
+            executionTimestamp: 20,
+        });
+
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestResultSync',
+            sourceUri,
+            reason: 'missing-log-shell-before-data',
+        });
+        expect(getResultSyncPendingRequestCount()).toBe(1);
+        expect((window as any).resultSets).toEqual([]);
+    });
+
+    it('forgets pending source recovery when the source is removed from the active list', () => {
+        const { handleAppendRows, handleSetActiveSource, getResultSyncPendingRequestCount } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+            handleSetActiveSource: (message: Record<string, unknown>) => void;
+            getResultSyncPendingRequestCount: () => number;
+        };
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[42]],
+            totalRows: 1,
+            isFirstChunk: true,
+            isLastChunk: true,
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 42',
+            executionTimestamp: 20,
+        });
+        expect(getResultSyncPendingRequestCount()).toBe(1);
+
+        handleSetActiveSource({
+            sourceUri: 'untitled:Untitled-2',
+            sourcesJson: JSON.stringify(['untitled:Untitled-2']),
+        });
+
+        expect(getResultSyncPendingRequestCount()).toBe(0);
+    });
+
+    it('allows a recovery request to be retried after the source changes', () => {
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        const { handleAppendRows, handleSetActiveSource } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+            handleSetActiveSource: (message: Record<string, unknown>) => void;
+        };
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[42]],
+            totalRows: 1,
+            isFirstChunk: true,
+            isLastChunk: true,
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 42',
+            executionTimestamp: 20,
+        });
+        protocol.postHostMessage.mockClear();
+
+        handleSetActiveSource({ sourceUri: 'untitled:Untitled-2' });
+        handleSetActiveSource({ sourceUri });
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[43]],
+            totalRows: 1,
+            isFirstChunk: true,
+            isLastChunk: true,
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 43',
+            executionTimestamp: 21,
+        });
+
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestResultSync',
+            sourceUri,
+            reason: 'missing-log-shell-before-data',
+        });
     });
 
     it('replaces stale active result rows on first streaming chunk', () => {

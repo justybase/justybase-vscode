@@ -172,6 +172,50 @@ describe('ResultPanelMessageHandler', () => {
         });
     });
 
+    describe('reportResultPanelTrace message', () => {
+        it('forwards bounded webview diagnostics to the provider callback', () => {
+            const traceCallback = jest.fn();
+            callbacks.onRecordResultPanelTrace = traceCallback;
+
+            handler.handleMessage({
+                command: 'reportResultPanelTrace',
+                event: {
+                    phase: 'append_applied',
+                    sourceUri: 'untitled:Untitled-1',
+                    resultSetIndex: 1,
+                    rowCount: 2,
+                    totalRows: 2,
+                    webviewSeq: 4,
+                },
+            });
+
+            expect(traceCallback).toHaveBeenCalledWith(expect.objectContaining({
+                phase: 'append_applied',
+                sourceUri: 'untitled:Untitled-1',
+                resultSetIndex: 1,
+                webviewSeq: 4,
+            }));
+        });
+    });
+
+    describe('requestResultSync message', () => {
+        it('forwards a webview recovery request to the provider', () => {
+            const syncCallback = jest.fn();
+            callbacks.onRequestResultSync = syncCallback;
+
+            handler.handleMessage({
+                command: 'requestResultSync',
+                sourceUri: 'untitled:Untitled-1',
+                reason: 'missing-log-shell-before-data',
+            });
+
+            expect(syncCallback).toHaveBeenCalledWith(
+                'untitled:Untitled-1',
+                'missing-log-shell-before-data',
+            );
+        });
+    });
+
     describe('copilot commands', () => {
         it('should execute describeWithCopilot command', () => {
             const data = { rows: [] };

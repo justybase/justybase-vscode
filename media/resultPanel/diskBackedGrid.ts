@@ -48,6 +48,11 @@ let requestIdCounter = 0;
 const pendingRequests = new Map<number, PendingRowRequest>();
 const pendingDiskQueries = new Map<number, PendingDiskQueryRequest>();
 
+/** Number of disk-backed row/query requests which still expect a host response. */
+export function getDiskBackedPendingRequestCount(): number {
+    return pendingRequests.size + pendingDiskQueries.size;
+}
+
 interface DiskWindowRequestState {
     visibleStart: number;
     visibleEnd: number;

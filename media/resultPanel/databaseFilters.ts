@@ -39,6 +39,11 @@ let requestIdCounter = 0;
 const pendingValuesRequests = new Map<number, PendingValuesRequest>();
 const pendingApplyRequests = new Map<number, PendingApplyRequest>();
 
+/** Number of filter requests which still expect a host response. */
+export function getDatabaseFilterPendingRequestCount(): number {
+    return pendingValuesRequests.size + pendingApplyRequests.size;
+}
+
 function isStaleContext(context: RequestContext): boolean {
     const activeSource = getActiveSourceUri();
     const activeIndex = getActiveGridIndex();

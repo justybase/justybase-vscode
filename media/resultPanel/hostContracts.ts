@@ -28,6 +28,28 @@ export interface SelectionStatsCalculatingPayload {
     state: 'calculating';
 }
 
+export interface ResultPanelTraceEventPayload {
+    phase: string;
+    sourceUri?: string;
+    command?: string;
+    resultSetIndex?: number;
+    resultSetCount?: number;
+    rowCount?: number;
+    totalRows?: number;
+    isLog?: boolean;
+    isFirstChunk?: boolean;
+    isLastChunk?: boolean;
+    visible?: boolean;
+    ready?: boolean;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    scrollTop?: number;
+    reason?: string;
+    delivered?: boolean;
+    error?: string;
+    webviewSeq?: number;
+}
+
 export type SelectionStatsUpdatePayload = SelectionStatsPayload | SelectionStatsCalculatingPayload;
 
 /** Subset of webview → host commands used by migrated TS modules. */
@@ -35,12 +57,14 @@ export type ResultPanelWebviewToHostMessage =
     | { command: 'focusView' }
     | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
     | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
+    | { command: 'requestResultSync'; sourceUri: string; reason: string }
     | { command: 'describeWithCopilot'; data: unknown[]; sql: string }
     | { command: 'closeResult'; sourceUri: string; resultSetIndex: number }
     | { command: 'closeAllResults'; sourceUri: string }
     | { command: 'switchResultSet'; sourceUri: string; resultSetIndex: number }
     | { command: 'pinResult'; sourceUri: string; resultSetIndex: number }
     | { command: 'selectionStats'; stats: SelectionStatsPayload }
+    | { command: 'reportResultPanelTrace'; event: ResultPanelTraceEventPayload }
     | {
         command: 'reportUxPerf';
         event: {

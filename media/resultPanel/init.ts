@@ -105,6 +105,7 @@ import {
 } from "./export.js";
 import { executeDatabaseGrouping } from './databaseGrouping.js';
 import { postHostMessage, getHostState, setHostState } from './protocol.js';
+import { isResultPanelTraceEnabled } from './trace.js';
 import { prepareDiskFilterWindow } from './diskBackedGrid.js';
 import { asHtml, getElementById } from './dom.js';
 import {
@@ -2233,6 +2234,71 @@ export function clearGroupingConfig(): void {
     renderDbGroupingChips();
 }
 
+/**
+ * Configure grouping without synthesising DOM drag events. This hook is only
+ * consumed by the traced Extension Host test bridge; production UI still
+ * uses the regular picker and drag/drop controls.
+ */
+export function configureDatabaseGroupingForTest(
+    columnIndexes: number[],
+    functions?: Array<{ fn: string; columnIndex?: number }>,
+): void {
+    if (!isResultPanelTraceEnabled()) {
+        throw new Error('Grouping test configuration is available only in traced test sessions.');
+    }
+
+    ensureGroupingContext();
+    const resultSet = getResultSetAt(getActiveGridIndex());
+    if (!resultSet) {
+        throw new Error('No active result set for grouping.');
+    }
+
+    const columns = resultSet.columns ?? [];
+    const validColumnIndexes = Array.from(new Set(columnIndexes.filter(index =>
+        Number.isInteger(index) && index >= 0 && index < columns.length,
+    )));
+    if (validColumnIndexes.length === 0) {
+        throw new Error('At least one valid grouping column is required.');
+    }
+
+    _dbGroupColumns = validColumnIndexes.map(columnIndex => ({
+        columnIndex,
+        columnName: columns[columnIndex]?.name || `Column ${columnIndex}`,
+    }));
+
+    const allowedFunctions = new Set<DbGroupConfigFunction['fn']>([
+        'count', 'sum', 'avg', 'min', 'max', 'countDistinct', 'median',
+    ]);
+    const configuredFunctions = (functions ?? [])
+        .filter(item => allowedFunctions.has(item.fn as DbGroupConfigFunction['fn']))
+        .map((item): DbGroupConfigFunction | undefined => {
+            const fn = item.fn as DbGroupConfigFunction['fn'];
+            if (fn === 'count') {
+                return { fn };
+            }
+            const columnIndex = Number.isInteger(item.columnIndex)
+                && (item.columnIndex as number) >= 0
+                && (item.columnIndex as number) < columns.length
+                ? item.columnIndex as number
+                : undefined;
+            if (columnIndex === undefined) {
+                return undefined;
+            }
+            return {
+                fn,
+                columnIndex,
+                columnName: columns[columnIndex]?.name || `Column ${columnIndex}`,
+            };
+        })
+        .filter((item): item is DbGroupConfigFunction => item !== undefined);
+
+    _dbGroupFunctions = configuredFunctions.length > 0
+        ? configuredFunctions
+        : [{ fn: 'count' }];
+    renderDbGroupingFunctions();
+    renderDbGroupingChips();
+}
+
 /** Build the grouping request config from current state. */
 function _buildGroupingRequest() {
     const limitControl = getElementById<HTMLSelectElement>('groupingLimitSelect');
@@ -2904,6 +2970,7 @@ function setupWindowFunctions(): void {
   // Expose grouping panel functions for inline script bridge
   panel.__toggleDatabaseGroupingPanel = toggleDatabaseGroupingPanel;
   panel.__clearGroupingConfig = clearGroupingConfig;
+  panel.__testConfigureDatabaseGrouping = configureDatabaseGroupingForTest;
   panel.__runGroupingQuery = runGroupingQuery;
   panel.__exportActiveGridAsXlsb = exportAllVisibleToExcel;
   panel.exportActiveGridAsXlsb = exportAllVisibleToExcel;

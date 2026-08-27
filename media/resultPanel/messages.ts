@@ -70,6 +70,11 @@ import {
 import { asHtml } from './dom.js';
 import { clearAllSearchWorkerData } from './searchWorkerBridge.js';
 import {
+    configureResultPanelTrace,
+    traceResultPanel,
+} from './trace.js';
+import { handleResultPanelTestBridgeMessage } from './testBridge.js';
+import {
     handleDiskBackedActivate,
     handleDiskQueryResult,
     handleRowCountUpdate,
@@ -120,6 +125,8 @@ interface HydrateData {
     resultSetsJson?: string;
     formatSettings?: unknown;
     dataVersion?: number;
+    resultPanelTraceEnabled?: boolean;
+    resultSyncVersion?: number;
 }
 
 function resolveDiskBackedStreamCapEnabled(message?: Record<string, unknown>): boolean {
@@ -168,6 +175,42 @@ function parseSourceSet(value: string | undefined): Set<string> | undefined {
         );
     } catch {
         return new Set<string>();
+    }
+}
+
+function parseSourceUri(value: string | undefined): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(value) as unknown;
+        return typeof parsed === 'string' ? parsed : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+const pendingResultSyncSources = new Set<string>();
+
+/** Number of source-specific recovery requests waiting for host hydration. */
+export function getResultSyncPendingRequestCount(): number {
+    return pendingResultSyncSources.size;
+}
+
+function requestAuthoritativeResultSync(sourceUri: string | undefined, reason: string): void {
+    if (!sourceUri || pendingResultSyncSources.has(sourceUri)) {
+        return;
+    }
+    pendingResultSyncSources.add(sourceUri);
+    postHostMessage({ command: 'requestResultSync', sourceUri, reason });
+}
+
+function clearPendingResultSyncSourcesNotInList(activeSources: readonly string[]): void {
+    const allowed = new Set(activeSources);
+    for (const sourceUri of pendingResultSyncSources) {
+        if (!allowed.has(sourceUri)) {
+            pendingResultSyncSources.delete(sourceUri);
+        }
     }
 }
 
@@ -460,10 +503,18 @@ function reportHydrationMetrics(metrics: {
 
 // Setup message handler for streaming updates
 export function setupStreamingMessageHandler(): void {
+    getResultPanelWindow().__getResultSyncPendingRequestCount = getResultSyncPendingRequestCount;
     window.addEventListener('message', event => {
         const message = asHostMessage(event.data);
 
         switch (message.command) {
+            case 'testBridge':
+                void handleResultPanelTestBridgeMessage(message as {
+                    requestId: string;
+                    action: string;
+                    args?: unknown;
+                });
+                break;
             case 'cancelExecution':
                 handleCancelExecution(message);
                 break;
@@ -663,6 +714,16 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     const resultSets = getResultSets();
     const previousGridIndex = getActiveGridIndex();
 
+    // Do not let a request for a source involved in a switch suppress a later
+    // retry. The host normally follows this message with hydrate; if that
+    // delivery races, the next append can request recovery again.
+    if (activeSource !== sourceUri) {
+        if (activeSource) {
+            pendingResultSyncSources.delete(activeSource);
+        }
+        pendingResultSyncSources.delete(sourceUri);
+    }
+
     if (activeSource && resultSets.length > 0) {
         resultSets.forEach((rs, rsIndex) => {
             if (rs && rs.executionTimestamp) {
@@ -700,7 +761,11 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     setActiveSourceUri(sourceUri);
 
     const panel = getResultPanelWindow();
-    if (typeof message.sourcesJson === 'string') panel.sources = JSON.parse(message.sourcesJson);
+    if (typeof message.sourcesJson === 'string') {
+        const sources = JSON.parse(message.sourcesJson) as string[];
+        panel.sources = sources;
+        clearPendingResultSyncSourcesNotInList(sources);
+    }
     if (typeof message.pinnedSourcesJson === 'string') {
         panel.pinnedSources = new Set(JSON.parse(message.pinnedSourcesJson));
     }
@@ -835,7 +900,8 @@ function buildHydrateDedupKey(data: HydrateData): string {
         (data.resultSetsMsgPack instanceof Uint8Array ? data.resultSetsMsgPack.byteLength : 0) + '|' +
         (data.executingSourcesJson ?? '') + '|' +
         (data.streamingCompletedSourcesJson ?? '') + '|' +
-        (data.dataVersion ?? '')
+        (data.dataVersion ?? '') + '|' +
+        (data.resultSyncVersion ?? '')
     );
 }
 
@@ -877,6 +943,11 @@ function releaseRowsForReplacedResults(previous: ResultSet[], next: ResultSet[])
 }
 
 export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
+    configureResultPanelTrace(data.resultPanelTraceEnabled === true);
+    traceResultPanel({
+        phase: 'hydrate_received',
+        sourceUri: parseSourceUri(data.activeSourceJson),
+    });
     const newKey = buildHydrateDedupKey(data);
     if (newKey && newKey === _lastHydrateKey) {
         return;
@@ -926,6 +997,7 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
         if (data.sourcesJson) {
             const sources = JSON.parse(data.sourcesJson) as string[];
             panel.sources = sources;
+            clearPendingResultSyncSourcesNotInList(sources);
             evictSourceCacheNotInList(sources);
         }
         if (data.pinnedSourcesJson) panel.pinnedSources = new Set(JSON.parse(data.pinnedSourcesJson));
@@ -970,6 +1042,28 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
 
         const hydratedResultSets = getResultSets();
         const activeHydratedSource = getActiveSourceUri();
+        if (activeHydratedSource) {
+            pendingResultSyncSources.delete(activeHydratedSource);
+        }
+        traceResultPanel({
+            phase: 'hydrate_applied',
+            sourceUri: activeHydratedSource || undefined,
+            resultSetCount: hydratedResultSets.length,
+            rowCount: getTotalRowCount(hydratedResultSets),
+        });
+        for (const [resultSetIndex, resultSet] of hydratedResultSets.entries()) {
+            const hydratedRows = typeof resultSet?.totalRowCount === 'number'
+                ? resultSet.totalRowCount
+                : (Array.isArray(resultSet?.data) ? resultSet.data.length : 0);
+            traceResultPanel({
+                phase: 'hydrate_result_set_applied',
+                sourceUri: activeHydratedSource || undefined,
+                resultSetIndex,
+                rowCount: hydratedRows,
+                totalRows: hydratedRows,
+                isLog: resultSet?.isLog === true,
+            });
+        }
         if (activeHydratedSource && hydratedResultSets.length > 0) {
             saveCurrentSourceToCache(activeHydratedSource, hydratedResultSets, getActiveGridIndex());
             pruneSourceResultsCache(activeHydratedSource);
@@ -995,6 +1089,11 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
         renderDocIndicator(getActiveSourceUri());
         renderResultSetTabs();
         renderGrids();
+        traceResultPanel({
+            phase: 'hydrate_rendered',
+            sourceUri: getActiveSourceUri() || undefined,
+            resultSetCount: hydratedResultSets.length,
+        });
         hydrateMark?.phase('grids_rendered', {
             resultSetCount: hydratedResultSets.length,
             payloadBytes,
@@ -1107,6 +1206,17 @@ export function handleAppendRows(message: Record<string, unknown>): void {
     const fromRow = message.fromRow as number | undefined;
     const logExecutionTimestamp = message.logExecutionTimestamp as number | undefined;
 
+    traceResultPanel({
+        phase: 'append_received',
+        sourceUri,
+        resultSetIndex,
+        rowCount: Array.isArray(rows) ? rows.length : undefined,
+        totalRows,
+        isLog,
+        isFirstChunk,
+        isLastChunk: message.isLastChunk === true,
+    });
+
     let rowBatch: unknown[][] = [];
     if (Array.isArray(rows)) {
         rowBatch = rows as unknown[][];
@@ -1114,6 +1224,13 @@ export function handleAppendRows(message: Record<string, unknown>): void {
 
     const activeSource = getActiveSourceUri();
     if (sourceUri && activeSource && sourceUri !== activeSource) {
+        pendingResultSyncSources.delete(sourceUri);
+        traceResultPanel({
+            phase: 'append_ignored',
+            sourceUri,
+            resultSetIndex,
+            reason: 'source-mismatch',
+        });
         return;
     }
 
@@ -1141,6 +1258,18 @@ export function handleAppendRows(message: Record<string, unknown>): void {
     }
 
     const resultSets = getResultSets();
+    const hasLogShell = resultSets.some(resultSet => resultSet?.isLog);
+    if (!hasLogShell) {
+        const reason = isLog ? 'missing-log-shell' : 'missing-log-shell-before-data';
+        requestAuthoritativeResultSync(sourceUri, reason);
+        traceResultPanel({
+            phase: 'append_ignored',
+            sourceUri,
+            resultSetIndex,
+            reason,
+        });
+        return;
+    }
     if (isLog && resultSets.length > 0) {
         const resolvedLogIndex = resultSets.findIndex(resultSet => resultSet?.isLog);
         if (resolvedLogIndex >= 0) {
@@ -1190,6 +1319,12 @@ export function handleAppendRows(message: Record<string, unknown>): void {
     const rs = getResultSets()[resultSetIndex];
     if (rs) {
         if (rs.isCancelled) {
+            traceResultPanel({
+                phase: 'append_ignored',
+                sourceUri,
+                resultSetIndex,
+                reason: 'result-cancelled',
+            });
             return;
         }
 
@@ -1268,6 +1403,14 @@ export function handleAppendRows(message: Record<string, unknown>): void {
                     totalRows: rs.data.length,
                 });
             }
+            traceResultPanel({
+                phase: 'append_applied',
+                sourceUri,
+                resultSetIndex,
+                rowCount: rowBatchRows.length,
+                totalRows: rs.data.length,
+                isLog: true,
+            });
             return;
         }
 
@@ -1294,6 +1437,14 @@ export function handleAppendRows(message: Record<string, unknown>): void {
             updateLoadingState();
             updateExecutionStatusBanner();
             updateResultLimitBanner();
+            traceResultPanel({
+                phase: 'append_applied',
+                sourceUri,
+                resultSetIndex,
+                rowCount: 0,
+                totalRows,
+                reason: 'stream-cap',
+            });
             return;
         }
 
@@ -1342,6 +1493,24 @@ export function handleAppendRows(message: Record<string, unknown>): void {
         updateExecutionStatusBanner();
         updateResultLimitBanner();
         persistActiveSourceResultCache();
+        traceResultPanel({
+            phase: 'append_applied',
+            sourceUri,
+            resultSetIndex,
+            rowCount: rowsToAppend.length,
+            totalRows: typeof totalRows === 'number' ? totalRows : rs.data.length,
+            isFirstChunk,
+            isLastChunk: message.isLastChunk === true,
+        });
+    }
+    else {
+        requestAuthoritativeResultSync(sourceUri, 'result-set-missing');
+        traceResultPanel({
+            phase: 'append_ignored',
+            sourceUri,
+            resultSetIndex,
+            reason: 'result-set-missing',
+        });
     }
 }
 
@@ -1350,6 +1519,13 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
     const totalRows = message.totalRows as number | undefined;
     const limitReached = message.limitReached as boolean | undefined;
     const sourceUri = message.sourceUri as string | undefined;
+
+    traceResultPanel({
+        phase: 'streaming_complete_received',
+        sourceUri,
+        resultSetIndex,
+        totalRows,
+    });
 
     if (sourceUri) {
         const panel = getResultPanelWindow();
@@ -1361,19 +1537,34 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
 
     const activeSource = getActiveSourceUri();
     if (sourceUri && activeSource && sourceUri !== activeSource) {
+        pendingResultSyncSources.delete(sourceUri);
+        traceResultPanel({
+            phase: 'streaming_complete_ignored',
+            sourceUri,
+            resultSetIndex,
+            reason: 'source-mismatch',
+        });
         return;
     }
 
     const rs = getResultSetAt(resultSetIndex);
-    if (rs) {
-        rs.isStreamingComplete = true;
-        applyRowLimitReachedFlag(rs, limitReached === true);
-        if (typeof totalRows === 'number') {
-            if (isDiskBackedResultSet(rs)) {
-                syncDiskStreamingRowCount(rs, totalRows);
-            } else {
-                rs.totalRowCount = totalRows;
-            }
+    if (!rs) {
+        requestAuthoritativeResultSync(sourceUri, 'streaming-complete-result-set-missing');
+        traceResultPanel({
+            phase: 'streaming_complete_ignored',
+            sourceUri,
+            resultSetIndex,
+            reason: 'result-set-missing',
+        });
+        return;
+    }
+    rs.isStreamingComplete = true;
+    applyRowLimitReachedFlag(rs, limitReached === true);
+    if (typeof totalRows === 'number') {
+        if (isDiskBackedResultSet(rs)) {
+            syncDiskStreamingRowCount(rs, totalRows);
+        } else {
+            rs.totalRowCount = totalRows;
         }
     }
 
@@ -1384,4 +1575,10 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
     updateResultLimitBanner();
     persistActiveSourceResultCache();
     callPanelMethod('updateEditButtons');
+    traceResultPanel({
+        phase: 'streaming_complete_applied',
+        sourceUri,
+        resultSetIndex,
+        totalRows: typeof totalRows === 'number' ? totalRows : rs?.data.length,
+    });
 }

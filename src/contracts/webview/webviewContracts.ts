@@ -4,6 +4,7 @@ import type { DiskDistinctValue, DiskQuerySpec } from '../../core/resultDataProv
 import type { ExcelExportMetadata, ExportMetadata } from '../../export/exportManager';
 import type { DatabaseAggregationRequest, DatabaseAggregationResult } from '../../results/databaseAggregationSql';
 import type { ResultFormattingPayload, ResultFormattingUpdateRequest } from '../../results/resultFormattingTypes';
+import type { ResultPanelTraceEventPayload } from '../webviews/resultPanelContracts';
 
 export type ResultPanelExportFormat = 'csv' | 'json' | 'xml' | 'sql' | 'markdown';
 export type ResultPanelExportRowScope = 'loaded' | 'all';
@@ -17,7 +18,9 @@ export type ResultPanelInboundMessage =
     | { command: 'migrateResult'; sourceUri: string; resultSetIndex: number }
     | { command: 'logRowsApplied'; sourceUri: string; executionTimestamp: number; totalRows: number }
     | { command: 'requestLogSync'; sourceUri: string; executionTimestamp?: number; currentRows: number }
+    | { command: 'requestResultSync'; sourceUri: string; reason: string }
     | { command: 'reportHydrationMetrics'; metrics: ResultPanelHydrationMetricsPayload }
+    | { command: 'reportResultPanelTrace'; event: ResultPanelTraceEventPayload }
     | { command: 'reportUxPerf'; event: {
         op: string;
         phase: string;
@@ -189,6 +192,10 @@ export interface ResultPanelViewData {
     dataVersion?: number;
     /** Sources whose current execution delivered all rows but is still finalizing on the host. */
     streamingCompletedSourcesJson?: string;
+    /** Enables bounded result-panel diagnostics for controlled regression runs. */
+    resultPanelTraceEnabled?: boolean;
+    /** Changes only when the host answers a webview state-recovery request. */
+    resultSyncVersion?: number;
 }
 
 // ============================================================================
@@ -322,7 +329,9 @@ export const RESULT_PANEL_INBOUND_COMMANDS = [
     'migrateResult',
     'logRowsApplied',
     'requestLogSync',
+    'requestResultSync',
     'reportHydrationMetrics',
+    'reportResultPanelTrace',
     'reportUxPerf',
     'describeWithCopilot',
     'fixSqlError',
