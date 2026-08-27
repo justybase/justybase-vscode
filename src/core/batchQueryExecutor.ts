@@ -29,8 +29,92 @@ import {
 } from "../utils/sqlConsole";
 import { isConnectionBrokenError } from "./queryRunnerUtils";
 import { assertExecutionCurrent } from "./executionGuard";
+import { findNestedBlockCommentEnd } from "../sql/sqlSourceScan";
+import { SqlParser } from "../sql/sqlParser";
 
 const SLOW_STREAMING_PHASE_MS = 1000;
+
+function isRowsAffectedStatement(sql: string): boolean {
+    let start = 0;
+    while (start < sql.length) {
+        while (start < sql.length && (sql[start] === '\uFEFF' || /\s/.test(sql[start] ?? ''))) {
+            start += 1;
+        }
+
+        if (sql.startsWith('--', start)) {
+            const relativeLineEnd = sql.slice(start + 2).search(/[\r\n]/u);
+            if (relativeLineEnd < 0) {
+                return false;
+            }
+            const lineEnd = start + 2 + relativeLineEnd;
+            start = lineEnd + (sql[lineEnd] === '\r' && sql[lineEnd + 1] === '\n' ? 2 : 1);
+            continue;
+        }
+
+        if (sql.startsWith('/*', start)) {
+            const commentEnd = findNestedBlockCommentEnd(sql, start);
+            if (commentEnd === undefined) {
+                return false;
+            }
+            start = commentEnd;
+            continue;
+        }
+
+        break;
+    }
+
+    return /^(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE)\b/i.test(sql.slice(start));
+}
+
+/**
+ * `recordsAffected` belongs to one driver command. Do not apply it to a
+ * result set when the command text contains multiple statements: the driver
+ * exposes only the command-level value and it may represent a different
+ * statement (or the last statement in the batch).
+ */
+function getSingleExecutableStatement(sql: string): string | undefined {
+    const statements = SqlParser.splitStatements(sql).filter(statement => statement.trim().length > 0);
+    return statements.length === 1 ? statements[0] : undefined;
+}
+
+function mapBatchResult(
+    resultSet: { columns: QueryResult['columns']; rows: unknown[][]; limitReached: boolean },
+    sql: string,
+    statementSql: string | undefined,
+    recordsAffected: number | undefined,
+): QueryResult {
+    const hasColumns = resultSet.columns.length > 0;
+    const hasRowsAffected = !hasColumns
+        && statementSql !== undefined
+        && isRowsAffectedStatement(statementSql)
+        && recordsAffected !== undefined
+        && recordsAffected >= 0;
+
+    return {
+        columns: hasColumns ? resultSet.columns : [],
+        data: hasColumns ? resultSet.rows : [],
+        rowsAffected: hasRowsAffected ? recordsAffected : undefined,
+        limitReached: resultSet.limitReached,
+        message: hasColumns
+            ? undefined
+            : hasRowsAffected
+                ? `Records affected: ${recordsAffected}`
+                : "Query executed successfully",
+        sql,
+        refreshSql: sql,
+    };
+}
+
+function createRowsAffectedResult(sql: string, recordsAffected: number): QueryResult {
+    return {
+        columns: [],
+        data: [],
+        rowsAffected: recordsAffected,
+        message: `Records affected: ${recordsAffected}`,
+        sql,
+        refreshSql: sql,
+    };
+}
 
 function handleBatchQueryFailure(params: {
     err: unknown;
@@ -328,30 +412,32 @@ export async function runQueriesSequentially(
                         logCallback(logMessage);
                     }
 
-                    if (batchResults && batchResults.length > 0) {
-                        for (const rs of batchResults) {
-                            allResults.push({
-                                columns: rs.columns.length > 0 ? rs.columns : [],
-                                data: rs.columns.length > 0 ? rs.rows : [],
-                                rowsAffected: undefined,
-                                limitReached: rs.limitReached,
-                                message: rs.columns.length > 0 ? undefined : "Query executed successfully",
-                                sql: queryToExecute,
-                                refreshSql: queryToExecute,
-                            });
-                        }
+                    const statementSql = getSingleExecutableStatement(queryToExecute);
+                    const mappedBatchResults = batchResults?.map(rs =>
+                        mapBatchResult(rs, queryToExecute, statementSql, batchRecordsAffected),
+                    );
+                    if (mappedBatchResults && mappedBatchResults.length > 0) {
+                        allResults.push(...mappedBatchResults);
+                    } else if (
+                        statementSql !== undefined
+                        && isRowsAffectedStatement(statementSql)
+                        && batchRecordsAffected !== undefined
+                        && batchRecordsAffected >= 0
+                    ) {
+                        allResults.push(createRowsAffectedResult(queryToExecute, batchRecordsAffected));
                     }
 
-                    if (resultCallback && batchResults && batchResults.length > 0) {
-                        resultCallback(batchResults.map((rs) => ({
-                            columns: rs.columns.length > 0 ? rs.columns : [],
-                            data: rs.columns.length > 0 ? rs.rows : [],
-                            rowsAffected: undefined,
-                            limitReached: rs.limitReached,
-                            message: rs.columns.length > 0 ? undefined : "Query executed successfully",
-                            sql: queryToExecute,
-                            refreshSql: queryToExecute,
-                        })));
+                    if (resultCallback) {
+                        if (mappedBatchResults && mappedBatchResults.length > 0) {
+                            resultCallback(mappedBatchResults);
+                        } else if (
+                            statementSql !== undefined
+                            && isRowsAffectedStatement(statementSql)
+                            && batchRecordsAffected !== undefined
+                            && batchRecordsAffected >= 0
+                        ) {
+                            resultCallback([createRowsAffectedResult(queryToExecute, batchRecordsAffected)]);
+                        }
                     }
 
                     if (batchError) {

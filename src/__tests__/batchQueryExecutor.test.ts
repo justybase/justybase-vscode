@@ -481,6 +481,105 @@ END_PROC;`;
             expect(resultCallback).not.toHaveBeenCalled();
         });
 
+        it('should preserve rowsAffected for a DML statement without result columns', async () => {
+            const resultCallback = jest.fn();
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [],
+                error: null,
+                recordsAffected: 1,
+            });
+
+            const results = await runQueriesSequentially(
+                mockContext,
+                ['UPDATE fixture SET amount = 11.5 WHERE id = 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                resultCallback,
+            );
+
+            expect(results).toEqual([
+                expect.objectContaining({
+                    columns: [],
+                    data: [],
+                    rowsAffected: 1,
+                    message: 'Records affected: 1',
+                }),
+            ]);
+            expect(resultCallback).toHaveBeenCalledWith([
+                expect.objectContaining({ rowsAffected: 1 }),
+            ]);
+        });
+
+        it.each([
+            ['-- leading comment\nUPDATE fixture SET amount = 11.5', 'UPDATE'],
+            ['/* leading comment */ DELETE FROM fixture WHERE id = 1', 'DELETE'],
+            ['\uFEFFTRUNCATE TABLE fixture', 'TRUNCATE'],
+        ])('preserves rowsAffected for %s statements', async (sql) => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [],
+                error: null,
+                recordsAffected: 3,
+            });
+
+            const results = await runQueriesSequentially(
+                mockContext,
+                [sql],
+                mockConnManager,
+                'file:///test.sql',
+            );
+
+            expect(results[0]).toEqual(expect.objectContaining({
+                rowsAffected: 3,
+                message: 'Records affected: 3',
+            }));
+        });
+
+        it('does not attach DML rowsAffected to result sets with columns', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [
+                    { columns: [{ name: 'id' }], rows: [[1]], limitReached: false },
+                    { columns: [], rows: [], limitReached: false },
+                    { columns: [{ name: 'id' }], rows: [[2]], limitReached: false },
+                ],
+                error: null,
+                recordsAffected: 2,
+            });
+
+            const results = await runQueriesSequentially(
+                mockContext,
+                ['UPDATE fixture SET amount = 11.5 RETURNING id'],
+                mockConnManager,
+                'file:///test.sql',
+            );
+
+            expect(results.map(result => result.rowsAffected)).toEqual([undefined, 2, undefined]);
+            expect(results[0].message).toBeUndefined();
+            expect(results[1].message).toBe('Records affected: 2');
+            expect(results[2].message).toBeUndefined();
+        });
+
+        it('does not reuse one command-level rowsAffected value across a multi-statement batch', async () => {
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [
+                    { columns: [], rows: [], limitReached: false },
+                    { columns: [], rows: [], limitReached: false },
+                ],
+                error: null,
+                recordsAffected: 2,
+            });
+
+            const results = await runQueriesSequentially(
+                mockContext,
+                ['UPDATE fixture SET amount = 11.5 WHERE id = 1; DELETE FROM fixture WHERE id = 2'],
+                mockConnManager,
+                'file:///test.sql',
+            );
+
+            expect(results.map(result => result.rowsAffected)).toEqual([undefined, undefined]);
+            expect(results.every(result => result.message === 'Query executed successfully')).toBe(true);
+        });
+
         it('should call queryStartCallback and queryEndCallback', async () => {
             const queryStartCallback = jest.fn().mockReturnValue('exec-001');
             const queryEndCallback = jest.fn();
