@@ -631,6 +631,83 @@ export class MetadataDiskStorage {
         if (lease?.diskLease) await this.lock.releaseLock(lease.diskLease);
     }
 
+    /**
+     * Remove one connection's persisted snapshot and all of its payload files.
+     *
+     * This is intentionally scoped to a connection: an expired snapshot must
+     * not be allowed to seed the next refresh, but other connections may still
+     * have valid metadata in the same cache directory.
+     */
+    async removeConnection(
+        connectionName: string,
+        options?: {
+            lease?: PrefetchLease;
+            /** Guard startup cleanup against a newer snapshot committed meanwhile. */
+            expectedPrefetchCompletedAt?: number;
+        },
+    ): Promise<void> {
+        this.dirtyConnections.delete(connectionName);
+        this.pendingSave?.prefetchTimestamps.delete(connectionName);
+        this.pendingSave?.completeness.delete(connectionName);
+        if (this.dirtyConnections.size === 0) {
+            this.clearDebounceTimer();
+            this.pendingSave = null;
+        }
+
+        let transientDiskLease: DiskLease | undefined;
+        if (!options?.lease) {
+            // Startup cleanup must not remove a snapshot while another VS Code
+            // window is refreshing the same connection. The refresh path passes
+            // its already-held lease to avoid trying to acquire it twice. Use a
+            // raw connection lock here so cleanup does not create a placeholder
+            // index entry before it checks the expected snapshot timestamp.
+            if (this.sessionDisabled) {
+                return;
+            }
+            // Never turn an already-owned refresh lease into a transient lease
+            // that this cleanup call would release on exit. Callers holding a
+            // lease must pass it explicitly through `options.lease`.
+            if (this.lock.hasOwnedLock(connectionName)) {
+                return;
+            }
+            const acquired = await this.lock.acquireLock(connectionName);
+            if (acquired === false || acquired === undefined) {
+                return;
+            }
+            transientDiskLease = acquired;
+            this.lock.startHeartbeat(transientDiskLease);
+        }
+
+        try {
+            await this.enqueueWrite(() => this.withSaveLock(async () => {
+                const index = await this.readCurrentIndex();
+                const current = index.connections[connectionName];
+                if (
+                    options?.expectedPrefetchCompletedAt !== undefined
+                    && current
+                    && current.prefetchCompletedAt !== options.expectedPrefetchCompletedAt
+                ) {
+                    return;
+                }
+                const hadIndexEntry = Object.prototype.hasOwnProperty.call(
+                    index.connections,
+                    connectionName,
+                );
+                delete index.connections[connectionName];
+                if (hadIndexEntry) {
+                    index.writtenAt = Date.now();
+                    index.revision!++;
+                    await this.writeGzipJson(getV3IndexPath(this.storageDir), index);
+                }
+                await this.removeConnectionDirs([connectionName]);
+            }));
+        } finally {
+            if (transientDiskLease) {
+                await this.lock.releaseLock(transientDiskLease);
+            }
+        }
+    }
+
     /** Global clear: advances generation so any in-flight lease becomes stale. */
     async resetGeneration(): Promise<void> {
         this.clearDebounceTimer(); this.dirtyConnections.clear(); this.pendingSave = null;
@@ -1046,9 +1123,14 @@ export class MetadataDiskStorage {
     filterLoadableManifestConnections(
         connections: Map<string, LoadedConnectionManifest>,
         cacheTtlMs: number,
-    ): { loadable: Map<string, LoadedConnectionManifest>; freshTimestamps: Map<string, number> } {
+    ): {
+        loadable: Map<string, LoadedConnectionManifest>;
+        freshTimestamps: Map<string, number>;
+        expiredConnectionNames: string[];
+    } {
         const loadable = new Map<string, LoadedConnectionManifest>();
         const freshTimestamps = new Map<string, number>();
+        const expiredConnectionNames: string[] = [];
         const now = Date.now();
 
         for (const [connectionName, manifest] of connections) {
@@ -1067,12 +1149,23 @@ export class MetadataDiskStorage {
                 continue;
             }
 
+            if (now - manifest.prefetchCompletedAt >= cacheTtlMs) {
+                // An expired snapshot must not be hydrated as a merge base. It
+                // can contain objects that no longer exist in _V_OBJECT_DATA;
+                // the next refresh must start from an empty connection layer.
+                expiredConnectionNames.push(connectionName);
+                Logger.getInstance().info(
+                    `[MetadataDisk] expired snapshot removed from load set: ${connectionName}`,
+                );
+                continue;
+            }
+
             loadable.set(connectionName, manifest);
-            if ((manifest.isComplete ?? true) && now - manifest.prefetchCompletedAt < cacheTtlMs) {
+            if (manifest.isComplete ?? true) {
                 freshTimestamps.set(connectionName, manifest.prefetchCompletedAt);
             }
         }
 
-        return { loadable, freshTimestamps };
+        return { loadable, freshTimestamps, expiredConnectionNames };
     }
 }

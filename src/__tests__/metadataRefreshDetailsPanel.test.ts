@@ -6,6 +6,13 @@ import type { MetadataPrefetchRefreshDetails } from '../metadata/prefetch';
 jest.mock('vscode');
 
 describe('MetadataRefreshDetailsPanel', () => {
+    it('renders degraded snapshots as complete with warnings', () => {
+        const html = getMetadataRefreshDetailsHtml();
+        expect(html).toContain('Snapshot complete with warnings');
+        expect(html).toContain('unavailableColumnCount');
+        expect(html).toContain('removedStaleObjectCount');
+    });
+
     it('opens a live panel and publishes executed, running and planned SQL state', () => {
         const postMessage = jest.fn();
         const onDidReceiveMessage = jest.fn();

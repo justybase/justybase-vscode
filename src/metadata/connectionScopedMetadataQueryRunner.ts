@@ -1,16 +1,22 @@
 /**
- * One physical connection for one full metadata refresh.
+ * One or more physical connections for one full metadata refresh.
  *
  * The normal raw-query path intentionally opens a short-lived connection when
  * there is no document URI. That is safe for individual requests, but a full
  * Netezza refresh can otherwise perform dozens of TCP/login handshakes. This
- * runner serializes work on one connection and is disposed by CachePrefetcher
- * on every completion path.
+ * runner serializes work on each connection and is disposed by CachePrefetcher
+ * on every completion path. The primary connection is used for all stages;
+ * optional additional connections are exposed only to the column stage.
  */
 
 import type * as vscode from 'vscode';
 import type { ConnectionManager } from '../core/connectionManager';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
+import { getExtensionConfiguration } from '../compatibility/configuration';
+import {
+    DEFAULT_FULL_REFRESH_COLUMN_CONNECTIONS,
+    normalizeFullRefreshColumnConnections,
+} from './metadataQueryLimiter';
 import {
     runQueryRaw,
     type MetadataQuerySession,
@@ -21,6 +27,7 @@ import { logWithFallback } from '../utils/logger';
 import type { MetadataQueryContext } from './metadataQueryDiagnostics';
 import type {
     DisposableQueryRunnerRawFn,
+    MetadataColumnQueryRunner,
     MetadataPrefetchExecutionObserver,
 } from './prefetch';
 
@@ -35,6 +42,8 @@ export interface ConnectionScopedMetadataQueryRunnerOptions {
     timeoutSeconds?: number;
     /** Injectable for activation wiring and focused tests. */
     queryExecutor?: MetadataQueryExecutor;
+    /** Number of physical sessions made available to the full-refresh column stage. */
+    columnConnectionCount?: number;
 }
 
 class ConnectionScopedMetadataSession {
@@ -76,6 +85,14 @@ class ConnectionScopedMetadataSession {
         } finally {
             releaseQueue();
         }
+    }
+
+    /** Open this slot without executing a catalog statement. */
+    async ensureConnected(): Promise<void> {
+        if (this.disposeRequested) {
+            throw new Error(`Metadata session for '${this.connectionName}' was already closed`);
+        }
+        await this.getConnection();
     }
 
     async dispose(): Promise<void> {
@@ -153,62 +170,90 @@ class ConnectionScopedMetadataSession {
 }
 
 /**
- * Creates a serial runner for a single full metadata refresh. Its optional
- * `dispose` hook is called by CachePrefetcher, including failed-start paths.
+ * Creates the primary runner for a full metadata refresh. The runner exposes
+ * configured column-stage slots; its `dispose` hook closes every slot and is
+ * called by CachePrefetcher, including failed-start paths.
  */
 export function createConnectionScopedMetadataQueryRunner(
     options: ConnectionScopedMetadataQueryRunnerOptions,
 ): DisposableQueryRunnerRawFn {
-    const scope = new ConnectionScopedMetadataSession(
-        options.connectionManager,
-        options.connectionName,
-    );
     const execute: MetadataQueryExecutor = options.queryExecutor
         ?? ((queryOptions) => runQueryRaw(queryOptions));
 
-    const runner = (async (
-        query: string,
-        metadataContext?: MetadataQueryContext,
-        executionObserver?: MetadataPrefetchExecutionObserver,
-    ): Promise<QueryResult> => scope.run(async (connection, session, sessionQueueWaitMs) => {
-        const queueWaitMs = (metadataContext?.queueWaitMs ?? 0) + sessionQueueWaitMs;
-        const scopedMetadataContext = metadataContext
-            ? { ...metadataContext, queueWaitMs }
-            : undefined;
-        executionObserver?.onExecutionStarted(queueWaitMs);
+    const configuredCount = options.columnConnectionCount
+        ?? getExtensionConfiguration('metadata').get<number>(
+            'fullRefreshColumnConnections',
+            DEFAULT_FULL_REFRESH_COLUMN_CONNECTIONS,
+        );
+    const columnConnectionCount = normalizeFullRefreshColumnConnections(configuredCount);
 
-        let executionCompleted = false;
-        const reportExecutionCompleted = (timing?: Parameters<MetadataPrefetchExecutionObserver['onExecutionCompleted']>[0]): void => {
-            if (executionCompleted) {
-                return;
+    const scopes: ConnectionScopedMetadataSession[] = [];
+    const columnRunners: MetadataColumnQueryRunner[] = [];
+
+    const createRunnerForScope = (scope: ConnectionScopedMetadataSession): MetadataColumnQueryRunner => {
+        const runner = (async (
+            query: string,
+            metadataContext?: MetadataQueryContext,
+            executionObserver?: MetadataPrefetchExecutionObserver,
+        ): Promise<QueryResult> => scope.run(async (connection, session, sessionQueueWaitMs) => {
+            const queueWaitMs = (metadataContext?.queueWaitMs ?? 0) + sessionQueueWaitMs;
+            const scopedMetadataContext = metadataContext
+                ? { ...metadataContext, queueWaitMs }
+                : undefined;
+            executionObserver?.onExecutionStarted(queueWaitMs);
+
+            let executionCompleted = false;
+            const reportExecutionCompleted = (timing?: Parameters<MetadataPrefetchExecutionObserver['onExecutionCompleted']>[0]): void => {
+                if (executionCompleted) {
+                    return;
+                }
+                executionCompleted = true;
+                executionObserver?.onExecutionCompleted(timing);
+            };
+
+            try {
+                const result = await execute({
+                    context: options.context,
+                    query,
+                    silent: true,
+                    connectionManager: options.connectionManager,
+                    connectionName: options.connectionName,
+                    maxRows: options.maxRows ?? 1_000_000,
+                    isUserQuery: false,
+                    timeoutSeconds: options.timeoutSeconds,
+                    metadataContext: scopedMetadataContext,
+                    metadataQueueWaitMs: queueWaitMs,
+                    onMetadataExecutionComplete: reportExecutionCompleted,
+                    connectionOverride: connection,
+                    metadataSession: session,
+                });
+                reportExecutionCompleted();
+                return result;
+            } catch (error: unknown) {
+                reportExecutionCompleted();
+                throw error;
             }
-            executionCompleted = true;
-            executionObserver?.onExecutionCompleted(timing);
-        };
+        })) as MetadataColumnQueryRunner;
+        runner.ensureConnected = () => scope.ensureConnected();
+        runner.dispose = () => scope.dispose();
+        return runner;
+    };
 
-        try {
-            const result = await execute({
-                context: options.context,
-                query,
-                silent: true,
-                connectionManager: options.connectionManager,
-                connectionName: options.connectionName,
-                maxRows: options.maxRows ?? 1_000_000,
-                isUserQuery: false,
-                timeoutSeconds: options.timeoutSeconds,
-                metadataContext: scopedMetadataContext,
-                metadataQueueWaitMs: queueWaitMs,
-                onMetadataExecutionComplete: reportExecutionCompleted,
-                connectionOverride: connection,
-                metadataSession: session,
-            });
-            reportExecutionCompleted();
-            return result;
-        } catch (error: unknown) {
-            reportExecutionCompleted();
-            throw error;
+    for (let index = 0; index < columnConnectionCount; index += 1) {
+        const scope = new ConnectionScopedMetadataSession(
+            options.connectionManager,
+            options.connectionName,
+        );
+        scopes.push(scope);
+        columnRunners.push(createRunnerForScope(scope));
+    }
+
+    const primaryRunner = columnRunners[0] as DisposableQueryRunnerRawFn;
+    primaryRunner.getColumnQueryRunners = () => columnRunners;
+    primaryRunner.dispose = async () => {
+        for (const scope of scopes) {
+            await scope.dispose();
         }
-    })) as DisposableQueryRunnerRawFn;
-    runner.dispose = () => scope.dispose();
-    return runner;
+    };
+    return primaryRunner;
 }

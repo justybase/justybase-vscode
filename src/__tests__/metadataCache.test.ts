@@ -23,6 +23,7 @@ import { Logger } from "../utils/logger";
 import type { QueryRunnerRawFn } from "../metadata/prefetch";
 import {
   buildDbSchemaCacheKey,
+  buildIdLookupKey,
   buildNetezzaCacheDatabasePart,
   buildNetezzaDbSchemaCacheKey,
 } from "../metadata/helpers";
@@ -197,6 +198,59 @@ describe("MetadataCache", () => {
         missingColumnKeys: [columnLayer],
         missingColumnCount: 1,
       });
+    });
+
+    it("treats an explicit empty column layer as a complete negative cache", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const databaseKey = buildNetezzaCacheDatabasePart('BAZA');
+      const schemaLayer = buildDbSchemaCacheKey(databaseKey, 'ADMIN');
+      const aggregateLayer = buildDbSchemaCacheKey(databaseKey);
+      const columnLayer = buildColumnCacheKey(databaseKey, 'ADMIN', 'NO_COLUMNS', { preserveCase: true });
+
+      netezzaCache.setDatabases('conn1', [{ DATABASE: 'BAZA', label: 'BAZA', kind: 9 }]);
+      netezzaCache.setSchemas('conn1', databaseKey, [{ SCHEMA: 'ADMIN', label: 'ADMIN', kind: 19 }]);
+      netezzaCache.setTables(
+        'conn1',
+        schemaLayer,
+        [{ OBJNAME: 'NO_COLUMNS', SCHEMA: 'ADMIN', objType: 'VIEW', label: 'NO_COLUMNS', kind: 18 }],
+        new Map(),
+      );
+      netezzaCache.setProcedures('conn1', aggregateLayer, []);
+      netezzaCache.setColumns('conn1', columnLayer, []);
+
+      expect(netezzaCache.getColumns('conn1', columnLayer)).toEqual([]);
+      expect(netezzaCache.getMissingColumnLayerKeys('conn1')).toEqual([]);
+      expect(netezzaCache.verifyCompleteSnapshot('conn1')).toBe(true);
+    });
+
+    it("removes a stale object by exact column key without removing its schema peers", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const databaseKey = buildNetezzaCacheDatabasePart('BAZA');
+      const schemaLayer = buildDbSchemaCacheKey(databaseKey, 'ADMIN');
+      const staleColumnLayer = buildColumnCacheKey(databaseKey, 'ADMIN', 'GONE', { preserveCase: true });
+      netezzaCache.setTables(
+        'conn1',
+        schemaLayer,
+        [
+          { OBJNAME: 'GONE', OBJID: 1, SCHEMA: 'ADMIN', objType: 'TABLE', label: 'GONE', kind: 6 },
+          { OBJNAME: 'KEEP', OBJID: 2, SCHEMA: 'ADMIN', objType: 'TABLE', label: 'KEEP', kind: 6 },
+        ],
+        new Map(),
+      );
+
+      expect(netezzaCache.removeTableObjectByColumnKey('conn1', staleColumnLayer)).toBe(true);
+      expect(netezzaCache.getTables('conn1', schemaLayer)).toEqual([
+        expect.objectContaining({ OBJNAME: 'KEEP' }),
+      ]);
+      expect(
+        netezzaCache.tableIdMap
+          .get(`conn1|${schemaLayer}`)
+          ?.data.get(buildIdLookupKey('BAZA', 'ADMIN', 'KEEP')),
+      ).toBe(2);
     });
 
     it("should set and get databases", () => {

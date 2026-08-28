@@ -8,6 +8,7 @@ import type { MetadataDiskStorage } from '../diskStorage';
 import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
 import { Logger } from '../../utils/logger';
 import type { MetadataStore } from './MetadataStore';
+import type { ConnectionPrefetchOptions } from './MetadataPrefetchTarget';
 
 export interface PrefetchDelegationDeps {
   prefetcher: CachePrefetcher;
@@ -115,8 +116,9 @@ export function triggerConnectionPrefetch(
   deps: PrefetchDelegationDeps,
   connectionName: string,
   runQueryFn: DisposableQueryRunnerRawFn,
+  options?: ConnectionPrefetchOptions,
 ): void {
-  deps.prefetcher.triggerConnectionPrefetch(connectionName, runQueryFn);
+  deps.prefetcher.triggerConnectionPrefetch(connectionName, runQueryFn, options);
 }
 
 export async function prefetchColumnsForDatabase(

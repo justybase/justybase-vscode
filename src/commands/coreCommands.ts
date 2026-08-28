@@ -586,6 +586,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                             maxRows: 1000000,
                             timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
                         }),
+                        { manual: true },
                     );
                     vscode.window.showInformationMessage('Schema refreshed. Metadata is rebuilding in background...');
                 } else {
@@ -616,6 +617,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                         maxRows: 1000000,
                         timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
                     }),
+                    { manual: true },
                 );
                 vscode.window.showInformationMessage('Schema refreshed. Metadata is rebuilding in background...');
             } else {

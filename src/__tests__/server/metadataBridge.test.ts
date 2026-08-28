@@ -607,6 +607,45 @@ describe("MetadataBridge list cache", () => {
       );
     });
 
+    it("H2a: treats an explicit empty column layer as cached across repeated validation", async () => {
+      sendRequest.mockImplementation(async (params: MetadataRequestParams) => {
+        if (params.kind === "context") {
+          return {
+            connectionName: "CONN",
+            effectiveDatabase: db,
+            databaseKind: "netezza",
+          };
+        }
+        if (params.kind === "cachedTableInfo") {
+          return {
+            exists: true,
+            table: "ORDERS",
+            database: db,
+            schema,
+            columns: [],
+            columnsComplete: true,
+          };
+        }
+        return null;
+      });
+
+      const sql = "SELECT * FROM PUBLIC.ORDERS";
+      await bridge.warmValidationCache(docUri, sql);
+      sendRequest.mockClear();
+      await bridge.warmValidationCache(docUri, sql);
+      await expect(bridge.getColumns(docUri, db, "ORDERS", schema)).resolves.toEqual([]);
+
+      expect(sendRequest).not.toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "warmDatabaseColumns" }),
+      );
+      expect(sendRequest).not.toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "tableInfo" }),
+      );
+      expect(sendRequest).not.toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "cachedTableInfo" }),
+      );
+    });
+
     it("H2b: refreshes empty cached table info after warm instead of reusing stale columns", async () => {
       const database = "JUST_DATA_2";
       let cachedTableInfoCalls = 0;

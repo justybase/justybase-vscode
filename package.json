@@ -3825,7 +3825,14 @@
           "default": 1,
           "minimum": 1,
           "maximum": 16,
-          "description": "Maximum number of concurrent metadata catalog queries. The safe default is one query per connection; increase only when the Netezza workload allows it. Applied to per-connection query limiting in the extension host and metadata warm-up batching in the language server; a full Netezza connection refresh remains serialized on one shared session. Default: 1."
+          "description": "Maximum number of concurrent metadata catalog queries outside the dedicated full-refresh column pool. The safe default is one query per connection; increase only when the Netezza workload allows it. Applied to per-connection query limiting in the extension host and metadata warm-up batching in the language server. Default: 1."
+        },
+        "justybase.metadata.fullRefreshColumnConnections": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Physical Netezza sessions used by the column stage of a full metadata refresh (1–8). One is safest; higher values can shorten refreshes by processing independent databases in parallel. Additional sessions are optional and fall back to the primary session if they cannot be opened."
         },
         "justybase.sqlParser.fastPathThreshold": {
           "type": "integer",

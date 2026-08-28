@@ -4,8 +4,19 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import * as vscode from 'vscode';
 import { MetadataCache } from '../metadataCache';
-import { CACHE_V3_DIR_NAME, getV3ColumnFilePath, getV3IndexPath } from '../metadata/diskStorage/metadataDiskPaths';
+import type {
+    MetadataPrefetchRefreshDetails,
+    DisposableQueryRunnerRawFn,
+} from '../metadata/prefetch';
+import type { MetadataQueryContext } from '../metadata/metadataQueryDiagnostics';
+import {
+    CACHE_V3_DIR_NAME,
+    getV3ColumnFilePath,
+    getV3ConnectionMetadataPath,
+    getV3IndexPath,
+} from '../metadata/diskStorage/metadataDiskPaths';
 import { encodeColumnLayers } from '../metadata/diskStorage/metadataColumnCodec';
+import type { QueryResult } from '../types';
 import { Logger } from '../utils/logger';
 
 jest.mock('vscode');
@@ -60,17 +71,25 @@ describe('MetadataCache disk persistence integration', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    function populateFull(connectionName: string): void {
+    function populateSnapshot(
+        connectionName: string,
+        tableName: string,
+        columnName: string,
+    ): void {
         cache.setDatabases(connectionName, [{ DATABASE: 'DB1', label: 'DB1', kind: 9 }]);
         cache.setSchemas(connectionName, 'DB1', [{ SCHEMA: 'S1', label: 'S1', kind: 19 }]);
         const idMap = new Map<string, number>();
-        idMap.set('DB1.S1.T1', 9);
+        idMap.set(`DB1.S1.${tableName}`, 9);
         cache.setTables(connectionName, 'DB1.S1', [{
-            OBJNAME: 'T1', OBJID: 9, SCHEMA: 'S1', label: 'T1', objType: 'TABLE', kind: 6,
+            OBJNAME: tableName, OBJID: 9, SCHEMA: 'S1', label: tableName, objType: 'TABLE', kind: 6,
         }], idMap);
         cache.setProcedures(connectionName, 'DB1..', [{ PROCEDURE: 'P1', SCHEMA: 'S1', label: 'P1' }]);
-        cache.setColumns(connectionName, 'DB1.S1.T1', [{ ATTNAME: 'C1', FORMAT_TYPE: 'INT', label: 'C1' }]);
+        cache.setColumns(connectionName, `DB1.S1.${tableName}`, [{ ATTNAME: columnName, FORMAT_TYPE: 'INT', label: columnName }]);
         cache.setTypeGroups(connectionName, 'DB1', ['TABLE']);
+    }
+
+    function populateFull(connectionName: string): void {
+        populateSnapshot(connectionName, 'T1', 'C1');
     }
 
     async function persistFull(connectionName: string): Promise<void> {
@@ -129,6 +148,201 @@ describe('MetadataCache disk persistence integration', () => {
         expect(cache2.getColumns('NZ', 'DB1.S1.T1')).toEqual([
             expect.objectContaining({ ATTNAME: 'C1', FORMAT_TYPE: 'INT', label: 'C1' }),
         ]);
+    });
+
+    it('discards an expired connection snapshot from memory and disk before refresh', async () => {
+        populateFull('NZ');
+        await persistFull('NZ');
+
+        expect(cache.getTables('NZ', 'DB1.S1')).toBeDefined();
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'NZ'))).toBe(true);
+
+        await cache.discardExpiredConnectionMetadata('NZ');
+
+        expect(cache.getDatabases('NZ')).toBeUndefined();
+        expect(cache.getTables('NZ', 'DB1.S1')).toBeUndefined();
+        expect(cache.getColumns('NZ', 'DB1.S1.T1')).toBeUndefined();
+        expect((await cache['_diskStorage']!.readV3Index())?.connections.NZ).toBeUndefined();
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'NZ'))).toBe(false);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'NZ', 'DB1'))).toBe(false);
+    });
+
+    it('does not hydrate an expired disk snapshot after restart', async () => {
+        populateFull('NZ');
+        const expiredAt = Date.now() - cache.getCacheTTL() - 1;
+        await cache['_diskStorage']!.saveConnection(cache, 'NZ', expiredAt);
+
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        await cache2.initialize();
+        await cache2.whenConnectionMetadataHydrated('NZ');
+
+        expect(cache2.getDatabases('NZ')).toBeUndefined();
+        expect(cache2.getTables('NZ', 'DB1.S1')).toBeUndefined();
+        expect((await cache2['_diskStorage']!.readV3Index())?.connections.NZ).toBeUndefined();
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'NZ'))).toBe(false);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'NZ', 'DB1'))).toBe(false);
+
+        await cache2.dispose();
+    });
+
+    it('removes an expired Netezza snapshot before a clean refresh and persists only current metadata', async () => {
+        populateSnapshot('NZ', 'OLD_TABLE', 'OLD_COL');
+        const expiredAt = Date.now() - cache.getCacheTTL() - 1;
+        await cache['_diskStorage']!.saveConnection(cache, 'NZ', expiredAt);
+
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        const diskStorage = cache2['_diskStorage']!;
+        const lifecycle: string[] = [];
+        const originalRemoveConnection = diskStorage.removeConnection.bind(diskStorage);
+        const removeConnectionSpy = jest.spyOn(diskStorage, 'removeConnection')
+            .mockImplementation(async (...args) => {
+                await originalRemoveConnection(...args);
+                lifecycle.push('remove-complete');
+            });
+
+        await cache2.initialize();
+        await cache2.whenConnectionMetadataHydrated('NZ');
+
+        expect(removeConnectionSpy).toHaveBeenCalledWith('NZ', {
+            expectedPrefetchCompletedAt: expiredAt,
+        });
+        expect(cache2.getDatabases('NZ')).toBeUndefined();
+        expect(cache2.getTables('NZ', 'DB1.S1')).toBeUndefined();
+        expect(cache2.getColumns('NZ', 'DB1.S1.OLD_TABLE')).toBeUndefined();
+        expect((await diskStorage.readV3Index())?.connections.NZ).toBeUndefined();
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'NZ'))).toBe(false);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'NZ', 'DB1'))).toBe(false);
+
+        const result = (columns: string[], data: unknown[][]): QueryResult => ({
+            columns: columns.map(name => ({ name })),
+            data,
+        });
+        let resolveRunnerDisposed!: () => void;
+        const runnerDisposed = new Promise<void>(resolve => {
+            resolveRunnerDisposed = resolve;
+        });
+        const runner = Object.assign(
+            jest.fn(async (_query: string, context?: MetadataQueryContext): Promise<QueryResult> => {
+                if (!lifecycle.includes('first-query')) {
+                    lifecycle.push('first-query');
+                }
+
+                switch (context?.kind) {
+                    case 'databases':
+                        return result(['DATABASE'], [['DB1']]);
+                    case 'schemas':
+                        return result(['SCHEMA'], [['S1']]);
+                    case 'type-groups':
+                        return result(['OBJTYPE'], [['TABLE'], ['PROCEDURE']]);
+                    case 'objects':
+                        return result(
+                            ['OBJNAME', 'OBJID', 'SCHEMA', 'DBNAME', 'OBJTYPE'],
+                            [['NEW_TABLE', 10, 'S1', 'DB1', 'TABLE']],
+                        );
+                    case 'external-objects':
+                        return result(
+                            ['OBJNAME', 'OBJID', 'SCHEMA', 'DBNAME', 'OBJTYPE'],
+                            [],
+                        );
+                    case 'procedures':
+                        return result(
+                            ['PROCEDURE', 'SCHEMA', 'PROCEDURESIGNATURE'],
+                            [['P_NEW', 'S1', 'P_NEW()']],
+                        );
+                    case 'columns':
+                        return result(
+                            ['OBJID', 'TABLENAME', 'DBNAME', 'SCHEMA', 'ATTNAME', 'FORMAT_TYPE', 'ATTNUM', 'DESCRIPTION'],
+                            [[10, 'NEW_TABLE', 'DB1', 'S1', 'NEW_COL', 'INTEGER', 1, 'new column']],
+                        );
+                    case 'column-keys':
+                        return result(['OBJID', 'ATTNAME', 'CONTYPE'], []);
+                    case 'column-distribution':
+                        return result(['OBJID', 'ATTNAME'], []);
+                    default:
+                        throw new Error(`Unexpected metadata query kind: ${String(context?.kind)}`);
+                }
+            }),
+            {
+                dispose: jest.fn(async () => {
+                    resolveRunnerDisposed();
+                }),
+            },
+        ) as unknown as DisposableQueryRunnerRawFn;
+
+        const terminalRefresh = new Promise<MetadataPrefetchRefreshDetails>((resolve, reject) => {
+            const subscription = cache2.onDidPrefetchRefreshDetails(details => {
+                if (
+                    details.completedAt === undefined
+                    || (details.stage !== 'complete' && details.stage !== 'error')
+                ) {
+                    return;
+                }
+                subscription.dispose();
+                resolve(details);
+            });
+
+            try {
+                cache2.triggerConnectionPrefetch('NZ', runner);
+            } catch (error: unknown) {
+                subscription.dispose();
+                reject(error);
+            }
+        });
+
+        const details = await terminalRefresh;
+        await runnerDisposed;
+
+        expect(lifecycle.indexOf('remove-complete')).toBeGreaterThanOrEqual(0);
+        expect(lifecycle.indexOf('first-query')).toBeGreaterThan(lifecycle.indexOf('remove-complete'));
+        expect(details.stage).toBe('complete');
+        expect(details.snapshot).toEqual(expect.objectContaining({
+            complete: true,
+            missingStages: [],
+            missingColumnCount: 0,
+        }));
+        const refreshedTables = cache2.getTables('NZ', 'DB1.S1');
+        expect(refreshedTables).toEqual([
+            expect.objectContaining({ OBJNAME: 'NEW_TABLE', OBJID: 10 }),
+        ]);
+        expect(refreshedTables?.some(table => table.OBJNAME === 'OLD_TABLE')).toBe(false);
+        expect(cache2.getColumns('NZ', 'DB1.S1.NEW_TABLE')).toEqual([
+            expect.objectContaining({ ATTNAME: 'NEW_COL', FORMAT_TYPE: 'INTEGER' }),
+        ]);
+        expect(cache2.getColumns('NZ', 'DB1.S1.OLD_TABLE')).toBeUndefined();
+        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(true);
+
+        const refreshedIndex = await diskStorage.readV3Index();
+        expect(refreshedIndex?.connections.NZ?.prefetchCompletedAt).toBeGreaterThan(expiredAt);
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'NZ'))).toBe(true);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'NZ', 'DB1'))).toBe(true);
+
+        await cache2.dispose();
+
+        const cache3 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        await cache3.initialize();
+        await cache3.whenConnectionMetadataHydrated('NZ');
+        await cache3.ensureColumnsLoaded('NZ', 'DB1');
+
+        const restartedTables = cache3.getTables('NZ', 'DB1.S1');
+        expect(restartedTables).toEqual([
+            expect.objectContaining({ OBJNAME: 'NEW_TABLE', OBJID: 10 }),
+        ]);
+        expect(restartedTables?.some(table => table.OBJNAME === 'OLD_TABLE')).toBe(false);
+        expect(cache3.getColumns('NZ', 'DB1.S1.NEW_TABLE')).toEqual([
+            expect.objectContaining({ ATTNAME: 'NEW_COL', FORMAT_TYPE: 'INTEGER' }),
+        ]);
+        expect(cache3.getColumns('NZ', 'DB1.S1.OLD_TABLE')).toBeUndefined();
+
+        await cache3.dispose();
     });
 
     it('should resolve initialize after manifest load while full metadata hydrates in background', async () => {

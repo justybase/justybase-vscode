@@ -103,6 +103,7 @@ export function getMetadataRefreshDetailsHtml(): string {
   .repeat-refresh:hover { background: var(--vscode-button-hoverBackground); }
   .snapshot { color: var(--vscode-descriptionForeground); font-size: .9em; margin: 8px 0; }
   .snapshot.ok { color: var(--vscode-testing-iconPassed); }
+  .snapshot.degraded { color: var(--vscode-editorWarning-foreground); }
   .snapshot.incomplete { color: var(--vscode-editorWarning-foreground); }
   .missing { margin: 6px 0 0 18px; padding: 0; font-family: var(--vscode-editor-font-family); font-size: .88em; }
 </style>
@@ -177,6 +178,14 @@ export function getMetadataRefreshDetailsHtml(): string {
   };
   const renderSnapshot = (snapshot) => {
     if (!snapshot) return '';
+    if (snapshot.complete && snapshot.degraded) {
+      const unavailableCount = snapshot.unavailableColumnCount || 0;
+      const removedCount = snapshot.removedStaleObjectCount || 0;
+      const examples = (snapshot.unavailableColumnKeys || []).map(key => '<li>' + escapeHtml(key) + '</li>').join('');
+      return '<div class="snapshot degraded">Snapshot complete with warnings — explicit empty column layers: '
+        + escapeHtml(String(unavailableCount)) + '; stale objects removed: ' + escapeHtml(String(removedCount)) + '</div>'
+        + (examples ? '<ul class="missing">' + examples + '</ul>' : '');
+    }
     if (snapshot.complete) return '<div class="snapshot ok">Snapshot complete: all prefetched object layers have columns.</div>';
     const parts = [];
     if (snapshot.missingStages && snapshot.missingStages.length) {

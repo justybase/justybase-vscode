@@ -42,4 +42,4 @@ The default lifecycle opens a connection when work needs it and releases it when
 
 ## Related settings
 
-`justybase.metadataCache.diskPersistence`, `justybase.metadataCache.crossWindowSync`, `justybase.metadata.sessionSweep.enabled`, `justybase.metadata.sessionSweep.maxAgeMinutes`, `justybase.safeExecute.enabled`, and `justybase.query.executionTimeout` are documented in the [settings reference](guide/reference/settings/).
+`justybase.metadataCache.diskPersistence`, `justybase.metadataCache.crossWindowSync`, `justybase.metadata.sessionSweep.enabled`, `justybase.metadata.sessionSweep.maxAgeMinutes`, `justybase.metadata.fullRefreshColumnConnections`, `justybase.safeExecute.enabled`, and `justybase.query.executionTimeout` are documented in the [settings reference](guide/reference/settings/). Increasing `fullRefreshColumnConnections` opens additional Netezza sessions only during the full-refresh column stage, so choose a value compatible with your warehouse's session and catalog limits.
