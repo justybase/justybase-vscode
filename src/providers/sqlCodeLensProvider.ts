@@ -198,6 +198,13 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
                 tooltip: 'Execute selected text or entire file',
             }));
         }
+        if (config.get<boolean>('codeLens.openAsXlsx', false)) {
+            lenses.push(new vscode.CodeLens(range, {
+                title: '$(file) Open as XLSX',
+                command: 'netezza.exportQueryAndOpenXlsx',
+                tooltip: 'Execute and open results as XLSX',
+            }));
+        }
         if (config.get<boolean>('codeLens.openAsXlsb', true)) {
             lenses.push(new vscode.CodeLens(range, {
                 title: '$(file-binary) Open as XLSB',

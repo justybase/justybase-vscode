@@ -86,6 +86,21 @@ describe('SqlCodeLensProvider', () => {
         expect(lenses[6].command?.command).toBe('netezza.explainQuery');
     });
 
+    it('should expose the XLSX action when enabled in settings', async () => {
+        (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string, defaultValue?: unknown) =>
+                key === 'codeLens.openAsXlsx' ? true : defaultValue,
+            ),
+        });
+        provider = createProvider();
+
+        const lenses = await getLenses(provider, createMockDocument('SELECT 1;'));
+        const xlsxLens = lenses.find(lens => lens.command?.command === 'netezza.exportQueryAndOpenXlsx');
+
+        expect(xlsxLens?.command?.title).toBe('$(file) Open as XLSX');
+        expect(xlsxLens?.command?.tooltip).toBe('Execute and open results as XLSX');
+    });
+
     it('should include statement SQL in command arguments', async () => {
         const doc = createMockDocument('SELECT 1;');
         const lenses = await getLenses(provider, doc);
