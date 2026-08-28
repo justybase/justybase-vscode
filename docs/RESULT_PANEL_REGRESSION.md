@@ -55,6 +55,30 @@ an explicit local-only variant and requires all `NZ_DEV_HOST`, `NZ_DEV_PORT`,
 `NZ_DEV_USER`, `NZ_DEV_PASSWORD`, and `NZ_DEV_DATABASE` variables; see the
 Extension Host runbook for its isolated-table cleanup contract.
 
+The separate SQL authoring smoke can be run with:
+
+```bash
+npm run test:extension-host:authoring
+```
+
+It checks the real Extension Host command registry and SQL editor providers
+for symbols, formatting, semantic tokens, navigation, rename, hover, and
+signature help.
+
+To capture renderer screenshots at controlled checkpoints, use the opt-in
+variant:
+
+```bash
+npm run test:extension-host:screenshots
+npm run test:extension-host:authoring:screenshots
+```
+
+Screenshots are stored separately under
+`artifacts/extension-host/screenshots/<suite>/<engine>/iteration-N/`. They are
+diagnostic captures, not pixel-perfect assertions. They include the Chromium
+renderer content but not the native VS Code window frame. See the runbook for
+the security warning and CI manual input.
+
 Set `JUSTYBASE_RESULT_PANEL_TRACE=1` to collect the bounded host trace. The trace
 contains protocol phases such as `start_execution`, `hydrate_posted`,
 `webview.append_received`, and `webview.append_applied`; at most 2,000 records

@@ -124,6 +124,28 @@ export function registerSqlLanguageFeatures(params: SqlLanguageRegistrationParam
         })
     );
 
+    if (process.env.NODE_ENV === 'test') {
+        context.subscriptions.push(
+            vscode.commands.registerCommand('justybase.test.semanticTokens', async (uri?: vscode.Uri) => {
+                const document = uri
+                    ? vscode.workspace.textDocuments.find(candidate => candidate.uri.toString() === uri.toString())
+                    : vscode.window.activeTextEditor?.document;
+                if (!document) {
+                    return undefined;
+                }
+                const cancellation = new vscode.CancellationTokenSource();
+                try {
+                    return await semanticTokensProvider.provideDocumentSemanticTokens(
+                        document,
+                        cancellation.token,
+                    );
+                } finally {
+                    cancellation.dispose();
+                }
+            }),
+        );
+    }
+
     if (shouldRegisterLocalHoverProvider) {
         context.subscriptions.push(
             vscode.languages.registerHoverProvider(

@@ -443,6 +443,27 @@ it in `finally`, without modifying durable user tables. Companion activation,
 dialect registration, and declared-command smoke coverage is available through
 `npm run test:extension-host:companions`.
 
+The separate authoring Extension Host smoke runs three database-free scenarios
+(`editor-lifecycle`, `navigation-refactoring`, and `command-settings`) against
+the real SQL editor command registry and extension-host providers:
+
+```bash
+npm run test:extension-host:authoring
+```
+
+Renderer screenshots are opt-in. They are captured through CDP from the VS
+Code Chromium renderer and stored outside source control below
+`artifacts/extension-host/screenshots/` (or the directory selected by
+`JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR`):
+
+```bash
+npm run test:extension-host:screenshots
+npm run test:extension-host:authoring:screenshots
+```
+
+Screenshots can contain SQL and result values. Use controlled fixtures and do
+not upload Netezza screenshots without reviewing their contents.
+
 The deterministic Playwright complement runs the bundled webview fixture and
 asserts rendered row counts/records for global and column filters, grouping,
 Logs-before-data delivery, hidden-view initialization, and missing-shell

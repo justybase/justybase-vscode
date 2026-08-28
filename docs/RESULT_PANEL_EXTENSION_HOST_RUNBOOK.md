@@ -4,7 +4,8 @@ This is the deterministic end-to-end gate for the SQL editor result panel. It
 starts a fresh VS Code Extension Host, activates the real core extension,
 executes production commands, and drives filtering, grouping, disk-backed
 queries, source switching, refresh, pinning, and export through the webview
-message protocol.
+message protocol. The same runner also has a separate SQL authoring smoke
+suite for the real editor providers.
 
 ## Local SQLite gate
 
@@ -61,6 +62,21 @@ and drops it in `finally`. It does not update or delete a durable user table.
 Credentials are read only from the process environment and never written to a
 report or trace.
 
+## SQL authoring smoke
+
+Run the provider and command checks in a fresh Extension Host without a
+database connection:
+
+```bash
+npm run test:extension-host:authoring
+```
+
+The suite activates the real extension and checks command registration,
+Plain Text-to-SQL editor creation, document symbols, formatting, semantic
+tokens, references, hover, rename, signature help, and the
+Settings webview command in three scenarios: editor lifecycle,
+navigation/refactoring, and command/settings surface.
+
 ## Scenario map
 
 The single deterministic scenario covers these protocol boundaries:
@@ -90,6 +106,33 @@ The runner writes two bounded JSON files:
   command names, sanitized phases, and duration;
 - `<engine>-result-panel-trace.json` — sequence/timestamp/origin plus bounded
   lifecycle counters and phase names.
+
+The optional screenshot mode writes renderer captures separately from JSON
+diagnostics:
+
+```bash
+npm run test:extension-host:screenshots
+npm run test:extension-host:authoring:screenshots
+```
+
+The files are written below `artifacts/extension-host/screenshots/` by default:
+
+```text
+screenshots/<suite>/<engine>/iteration-1/01-result-grid.png
+screenshots/<suite>/<engine>/iteration-1/03-settings.png
+screenshots/<suite>/<engine>/iteration-1/manifest.json
+```
+
+Use `JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR` to place the complete artifact
+tree elsewhere. Screenshots are captured from the VS Code Chromium renderer
+through CDP, so they include the workbench and webviews but not the native
+window frame or title bar. Screenshot mode is opt-in and automatically keeps
+the local artifacts after a successful run. The result-panel GitHub Actions
+workflow exposes the same option as the `capture_screenshots` manual input.
+
+Screenshots can contain visible SQL and result values. Use them only with
+controlled fixtures, especially for the Netezza variant, and review them
+before sharing or uploading outside a trusted CI artifact.
 
 The trace writer uses an explicit field allow-list and omits errors, SQL,
 records, driver payloads, and secrets. Do not add raw payloads to trace events.

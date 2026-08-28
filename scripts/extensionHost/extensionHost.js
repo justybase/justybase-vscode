@@ -6,22 +6,59 @@
  * and test configuration through its environment.
  */
 const fs = require('node:fs');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { runTests } = require('@vscode/test-electron');
+const { ExtensionHostScreenshotSession } = require('./extensionHostScreenshot');
 const {
     createSqliteFixture,
     SQLITE_TABLE_NAME,
 } = require('./extensionHostFixture');
 
 const repositoryRoot = path.resolve(__dirname, '..', '..');
-const smokeTestPath = path.join(__dirname, 'extensionHostSmoke.js');
+const resultPanelSmokeTestPath = path.join(__dirname, 'extensionHostSmoke.js');
+const authoringSmokeTestPath = path.join(__dirname, 'extensionHostAuthoringSmoke.js');
 const requestedVersion = (process.env.RESULT_PANEL_VSCODE_TEST_VERSION || 'stable').trim();
 
 function requestedEngine() {
     const argument = process.argv.find(value => value === '--engine=netezza' || value === '--engine=sqlite');
     if (argument) return argument.slice('--engine='.length);
     return process.env.JUSTYBASE_EXTENSION_HOST_ENGINE === 'netezza' ? 'netezza' : 'sqlite';
+}
+
+function requestedSuite() {
+    const argument = process.argv.find(value => value.startsWith('--suite='));
+    const suite = argument ? argument.slice('--suite='.length) : 'result-panel';
+    if (suite !== 'result-panel' && suite !== 'authoring') {
+        throw new Error('Extension Host suite must be result-panel or authoring.');
+    }
+    return suite;
+}
+
+function screenshotsEnabled() {
+    return process.argv.includes('--screenshots')
+        || process.env.JUSTYBASE_EXTENSION_HOST_SCREENSHOTS === '1';
+}
+
+function findFreePort() {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+            const address = server.address();
+            const port = address && typeof address === 'object' ? address.port : undefined;
+            server.close(error => {
+                if (error) {
+                    reject(error);
+                } else if (!port) {
+                    reject(new Error('Could not allocate a local Extension Host debugging port.'));
+                } else {
+                    resolve(port);
+                }
+            });
+        });
+    });
 }
 
 function requirePath(targetPath, description) {
@@ -49,31 +86,43 @@ function requestedRepeatCount() {
 
 async function main() {
     const engine = requestedEngine();
+    const suite = requestedSuite();
+    const captureScreenshots = screenshotsEnabled();
+    const smokeTestPath = suite === 'authoring' ? authoringSmokeTestPath : resultPanelSmokeTestPath;
     requirePath(path.join(repositoryRoot, 'package.json'), 'core manifest');
     requirePath(path.join(repositoryRoot, 'dist', 'extension.js'), 'core bundle (run npm run build first)');
     requirePath(smokeTestPath, 'Extension Host smoke test');
-    if (engine === 'netezza') validateNetezzaEnvironment();
+    if (suite === 'result-panel' && engine === 'netezza') validateNetezzaEnvironment();
     const repeatCount = requestedRepeatCount();
 
     const workDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-extension-host-'));
     const artifactDirectory = process.env.JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR
         ? path.resolve(process.env.JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR)
-        : path.join(workDirectory, 'artifacts');
+        : captureScreenshots
+            ? path.join(repositoryRoot, 'artifacts', 'extension-host')
+            : path.join(workDirectory, 'artifacts');
     fs.mkdirSync(artifactDirectory, { recursive: true });
-    const reportPath = path.join(artifactDirectory, `${engine}-result-panel-report.json`);
-    const tracePath = path.join(artifactDirectory, `${engine}-result-panel-trace.json`);
+    const reportPath = path.join(
+        artifactDirectory,
+        suite === 'result-panel' ? `${engine}-result-panel-report.json` : 'authoring-report.json',
+    );
+    const tracePath = path.join(
+        artifactDirectory,
+        suite === 'result-panel' ? `${engine}-result-panel-trace.json` : 'authoring-trace.json',
+    );
     const sourceFilePath = path.join(workDirectory, 'fixture.sql');
     const databasePath = path.join(workDirectory, 'fixture.sqlite');
     const tableName = engine === 'sqlite'
         ? SQLITE_TABLE_NAME
         : `jbl_eh_${Date.now()}_${process.pid}`;
 
-    if (engine === 'sqlite') createSqliteFixture(databasePath);
+    if (suite === 'result-panel' && engine === 'sqlite') createSqliteFixture(databasePath);
 
     const extensionTestsEnv = {
         ...process.env,
         NODE_ENV: 'test',
         JUSTYBASE_RESULT_PANEL_TRACE: '1',
+        JUSTYBASE_EXTENSION_HOST_SUITE: suite,
         JUSTYBASE_EXTENSION_HOST_ENGINE: engine,
         JUSTYBASE_EXTENSION_HOST_WORK_DIR: workDirectory,
         JUSTYBASE_EXTENSION_HOST_DATABASE_PATH: databasePath,
@@ -82,41 +131,91 @@ async function main() {
         JUSTYBASE_EXTENSION_HOST_REPORT_PATH: reportPath,
         JUSTYBASE_EXTENSION_HOST_TRACE_PATH: tracePath,
         JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: artifactDirectory,
+        JUSTYBASE_EXTENSION_HOST_SCREENSHOTS: captureScreenshots ? '1' : '0',
         ...(process.platform === 'linux' ? { ELECTRON_DISABLE_SANDBOX: '1' } : {}),
     };
 
     let passed = false;
-    console.log(`=== Extension Host result-panel scenario (${engine}, ${requestedVersion}, ${repeatCount} iteration(s)) ===`);
+    console.log(`=== Extension Host ${suite} scenario (${engine}, ${requestedVersion}, ${repeatCount} iteration(s)) ===`);
     try {
         for (let iteration = 1; iteration <= repeatCount; iteration += 1) {
             const userDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-extension-host-profile-'));
+            const screenshotRequestDirectory = path.join(
+                workDirectory,
+                'screenshot-requests',
+                suite,
+                `iteration-${iteration}`,
+            );
+            const screenshotDirectory = path.join(
+                artifactDirectory,
+                'screenshots',
+                suite,
+                engine,
+                `iteration-${iteration}`,
+            );
+            const debuggingPort = captureScreenshots ? await findFreePort() : undefined;
+            const screenshotSession = captureScreenshots
+                ? new ExtensionHostScreenshotSession({
+                    port: debuggingPort,
+                    requestDirectory: screenshotRequestDirectory,
+                    screenshotDirectory,
+                })
+                : undefined;
             const options = {
                 extensionDevelopmentPath: repositoryRoot,
                 extensionTestsPath: smokeTestPath,
                 extensionTestsEnv: {
                     ...extensionTestsEnv,
                     JUSTYBASE_EXTENSION_HOST_ITERATION: String(iteration),
+                    ...(captureScreenshots
+                        ? {
+                            JUSTYBASE_EXTENSION_HOST_SCREENSHOT_REQUEST_DIR: screenshotRequestDirectory,
+                            JUSTYBASE_EXTENSION_HOST_SCREENSHOT_DIR: screenshotDirectory,
+                        }
+                        : {}),
                 },
                 launchArgs: [
                     `--user-data-dir=${userDataDirectory}`,
                     '--disable-extensions',
                     '--disable-gpu',
+                    ...(captureScreenshots
+                        ? [
+                            `--remote-debugging-port=${debuggingPort}`,
+                            '--window-size=1600,1000',
+                            '--force-device-scale-factor=1',
+                        ]
+                        : []),
                     ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
                 ],
             };
             if (requestedVersion && requestedVersion !== 'stable') options.version = requestedVersion;
+            screenshotSession?.start();
             try {
                 const exitCode = await runTests(options);
                 if (exitCode !== 0) throw new Error(`Extension Host exited with code ${exitCode}.`);
             } finally {
+                await screenshotSession?.stop();
+                if (screenshotSession) {
+                    const manifestPath = path.join(screenshotDirectory, 'manifest.json');
+                    if (!fs.existsSync(manifestPath)) {
+                        throw new Error(`Extension Host screenshot manifest was not written: ${manifestPath}`);
+                    }
+                    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                    if (!Array.isArray(manifest) || manifest.length === 0 || manifest.some(item => item?.ok !== true)) {
+                        throw new Error(`Extension Host screenshot capture produced no complete screenshots: ${manifestPath}`);
+                    }
+                    console.log(`Extension Host screenshots: ${screenshotDirectory}`);
+                }
                 fs.rmSync(userDataDirectory, { recursive: true, force: true });
             }
         }
         passed = true;
-        console.log(`Extension Host result-panel scenario passed; report: ${reportPath}`);
+        console.log(`Extension Host ${suite} scenario passed; report: ${reportPath}`);
     } finally {
         // Each iteration owns and removes its own fresh profile.
-        const preserve = process.env.JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS === '1' || !passed;
+        const preserve = process.env.JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS === '1'
+            || captureScreenshots
+            || !passed;
         if (!preserve) fs.rmSync(workDirectory, { recursive: true, force: true });
         else console.log(`Extension Host artifacts retained at ${artifactDirectory}`);
     }

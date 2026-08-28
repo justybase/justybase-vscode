@@ -160,6 +160,66 @@ function sleep(milliseconds: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
+function screenshotFileName(value: string): string {
+    const normalized = value
+        .replace(/[^A-Za-z0-9._-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 120);
+    return normalized || 'screenshot';
+}
+
+/**
+ * Ask the parent Extension Host runner to capture the current VS Code
+ * renderer. The normal test gate never creates these files; the request/ack
+ * handshake is enabled only for an explicit screenshot run.
+ */
+async function requestExtensionHostScreenshot(name: string): Promise<void> {
+    if (process.env.JUSTYBASE_EXTENSION_HOST_SCREENSHOTS !== '1') {
+        return;
+    }
+
+    const requestDirectory = process.env.JUSTYBASE_EXTENSION_HOST_SCREENSHOT_REQUEST_DIR;
+    if (!requestDirectory) {
+        throw new Error('Screenshot mode requires JUSTYBASE_EXTENSION_HOST_SCREENSHOT_REQUEST_DIR.');
+    }
+
+    fs.mkdirSync(requestDirectory, { recursive: true });
+    const requestId = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const requestFileName = screenshotFileName(requestId);
+    const requestPath = path.join(requestDirectory, `${requestFileName}.request.json`);
+    const responsePath = path.join(requestDirectory, `${requestFileName}.response.json`);
+    const request = { id: requestId, name: screenshotFileName(name) };
+    fs.writeFileSync(requestPath, `${JSON.stringify(request)}\n`, 'utf8');
+
+    const configuredTimeout = Number.parseInt(
+        process.env.JUSTYBASE_EXTENSION_HOST_SCREENSHOT_TIMEOUT_MS || '',
+        10,
+    );
+    const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : 30_000;
+    const deadline = Date.now() + timeoutMs;
+    try {
+        while (Date.now() < deadline) {
+            if (fs.existsSync(responsePath)) {
+                const response = JSON.parse(fs.readFileSync(responsePath, 'utf8')) as {
+                    ok?: boolean;
+                    error?: string;
+                };
+                if (response.ok !== true) {
+                    throw new Error(`Screenshot '${request.name}' failed: ${response.error || 'unknown error'}`);
+                }
+                return;
+            }
+            await sleep(50);
+        }
+        throw new Error(`Timed out waiting for screenshot '${request.name}'.`);
+    } finally {
+        fs.rmSync(requestPath, { force: true });
+        fs.rmSync(responsePath, { force: true });
+    }
+}
+
 async function waitFor(description: string, predicate: () => boolean, timeoutMs = SCENARIO_TIMEOUT_MS): Promise<void> {
     const startedAt = Date.now();
     while (!predicate()) {
@@ -475,6 +535,7 @@ async function runExtensionHostScenario(
 
         clearResultPanelTrace();
         await provider.ensureResultPanelTestBridgeReady();
+        await requestExtensionHostScreenshot('01-result-panel-ready');
 
         const firstUntitled = await openUntitledSql('SELECT 10 AS RESULT_PANEL_LIFECYCLE_VALUE;');
         documentUris.push(firstUntitled.uri.toString());
@@ -556,11 +617,13 @@ async function runExtensionHostScenario(
         await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex: allResultIndex });
         await provider.runResultPanelTestBridge('diskMove');
         await provider.runResultPanelTestBridge('diskQuery');
+        await requestExtensionHostScreenshot('02-result-grid');
 
         const filteredByUnicode = asRecord(await provider.runResultPanelTestBridge('setGlobalFilter', { value: 'Łódź' }));
         if (asNumber(filteredByUnicode.visibleRowCount, -1) !== 4) {
             throw new Error(`Global filter did not reduce the deterministic result to four rows (observed ${String(filteredByUnicode.visibleRowCount)}).`);
         }
+        await requestExtensionHostScreenshot('03-global-filter');
         const clearedGlobal = asRecord(await provider.runResultPanelTestBridge('clearGlobalFilter'));
         if (asNumber(clearedGlobal.visibleRowCount, -1) !== 12) {
             throw new Error('Clearing the global filter did not restore all rows.');
@@ -610,6 +673,7 @@ async function runExtensionHostScenario(
         if (asNumber(grouping.columnCount, 0) < 3 || typeof grouping.sqlFingerprint !== 'string') {
             throw new Error('Grouping result metadata is incomplete.');
         }
+        await requestExtensionHostScreenshot('04-grouping');
 
         await provider.runResultPanelTestBridge('refresh');
         await provider.runResultPanelTestBridge('applyDatabaseFilter', { querySpec: undefined });
@@ -653,6 +717,7 @@ async function runExtensionHostScenario(
         if (!errorResultSets.some(resultSet => asRecord(resultSet).isError === true)) {
             throw new Error('SQL error was not represented in the webview result state.');
         }
+        await requestExtensionHostScreenshot('05-error-result');
 
         const secondSource = await openUntitledSql(`${sql.beta};`);
         documentUris.push(secondSource.uri.toString());
@@ -677,6 +742,7 @@ async function runExtensionHostScenario(
         if (provider.getResultPanelTestBridgePendingRequestCount() !== 0) {
             throw new Error('Result-panel host left a pending bridge request.');
         }
+        await requestExtensionHostScreenshot('06-final-result-panel');
         traceResultPanelEvent({ phase: 'extension_host_scenario_complete', sourceUri, reason: engine });
         const report = buildReport(
             provider,
