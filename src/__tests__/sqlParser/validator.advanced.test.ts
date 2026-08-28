@@ -250,6 +250,19 @@ FROM (
       );
     });
 
+    it("should validate subquery alias columns after an inner LIMIT", () => {
+      const result = validator.validate(`
+SELECT 1 AS COL1, SUB1.COL2, SUB1.COL3
+FROM
+(
+    SELECT 2 AS COL2 FROM DIMDATE LIMIT 1
+) AS SUB1`);
+
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({ code: "SQL004" });
+      expect(result.errors[0].message).toContain("COL3");
+    });
+
     it("should resolve simple SELECT * subquery alias through base table metadata", () => {
       const employeesTable = {
         name: "EMPLOYEES",

@@ -966,7 +966,8 @@ export class SqlVisitor
         this.validationProfile.databaseKind,
       );
     }
-    const relaxedNameNode = ctx.netezzaRelaxedName?.[0];
+    const relaxedNameNode =
+      ctx.netezzaRelaxedName?.[0] ?? ctx.sqliteRelaxedName?.[0];
     if (relaxedNameNode && this.isCstNode(relaxedNameNode)) {
       const token = this.getFirstTokenFromCst(relaxedNameNode);
       return stripIdentifierQuoting(
