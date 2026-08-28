@@ -23,7 +23,9 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 
-type SettingType = 'toggle' | 'select' | 'number' | 'text' | 'button' | 'textarea';
+type SettingType = 'toggle' | 'select' | 'number' | 'text' | 'button' | 'textarea' | 'json';
+
+type SettingValue = boolean | string | number | string[] | Record<string, string>;
 
 interface SettingItem {
     id: string;
@@ -32,10 +34,11 @@ interface SettingItem {
     type: SettingType;
     configKey?: string;
     options?: { label: string; value: string | number }[];
-    defaultValue?: boolean | string | number;
+    defaultValue?: SettingValue;
     action?: string;
     actionLabel?: string;
     icon?: string;
+    jsonKind?: 'array' | 'severityMap';
 }
 
 interface SettingsSection {
@@ -56,6 +59,9 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     cacheTTL: { min: 1, max: 168 },
     'metadataCache.memoryWarningBytes': { min: 0 },
     'metadata.queryConcurrency': { min: 1, max: 16 },
+    'metadata.fullRefreshColumnConnections': { min: 1, max: 8 },
+    'metadata.sessionSweep.intervalMinutes': { min: 1, max: 60 },
+    'metadata.sessionSweep.maxAgeMinutes': { min: 5, max: 240 },
     'sqlParser.fastPathThreshold': { min: 102400, max: 52428800 },
     streamingChunkSize: { min: 1000, max: 50000 },
     'query.rowLimit': { min: 1, max: 10000000 },
@@ -66,6 +72,7 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     'results.maxPinnedDataResults': { min: 1, max: 50 },
     'results.diskBackedResults.rowThreshold': { min: 10000, max: 5000000 },
     'results.diskBackedResults.memoryRowThreshold': { min: 1000, max: 5000000 },
+    'results.diskBackedResults.memoryByteThreshold': { min: 1048576, max: 4294967296 },
     'results.diskBackedResults.insertBatchSize': { min: 1000, max: 200000 },
     'results.diskBackedResults.idleSpillMinutes': { min: 0, max: 1440 },
     'results.diskBackedResults.idleSpillRowThreshold': { min: 1000, max: 5000000 },
@@ -78,6 +85,66 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     'copilot.maxWorkspaceProfilesInContext': { min: 1, max: 20 },
     'mcp.port': { min: 1024, max: 65535 }
 };
+
+const DEFAULT_LINTER_RULES: Record<string, string> = {
+    NZ001: 'warning',
+    NZ002: 'error',
+    NZ003: 'error',
+    NZ004: 'warning',
+    NZ005: 'hint',
+    NZ006: 'information',
+    NZ007: 'information',
+    NZ008: 'warning',
+    NZ009: 'hint',
+    NZ010: 'information',
+    NZ011: 'warning',
+    NZ012: 'warning',
+    NZ013: 'information',
+    NZ014: 'error',
+    NZ015: 'warning',
+    NZ016: 'warning',
+    NZ017: 'information',
+    NZ018: 'warning',
+    NZ019: 'error',
+    NZ020: 'information',
+    NZ023: 'information',
+    NZP001: 'error',
+    NZP002: 'error',
+    NZP003: 'warning',
+    NZP004: 'error',
+    NZP005: 'error',
+    NZP006: 'error',
+    NZP007: 'warning',
+    NZP008: 'information',
+    NZP009: 'information',
+    NZP010: 'information',
+    NZP011: 'warning',
+    NZP012: 'error',
+    NZP013: 'warning'
+};
+
+const LINTER_RULE_LEVELS = new Set(['error', 'warning', 'information', 'hint', 'off']);
+
+export function validateJsonSettingValue(
+    value: unknown,
+    kind: 'array' | 'severityMap'
+): void {
+    if (kind === 'array') {
+        if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+            throw new Error('Python Arguments must be a JSON array of strings.');
+        }
+        return;
+    }
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Linter Rules must be a JSON object.');
+    }
+    for (const [rule, level] of Object.entries(value)) {
+        if (!rule.trim() || typeof level !== 'string' || !LINTER_RULE_LEVELS.has(level)) {
+            throw new Error('Linter Rules values must be error, warning, information, hint, or off.');
+        }
+    }
+}
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
     {
@@ -140,6 +207,15 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 defaultValue: 'python'
             },
             {
+                id: 'python-args',
+                label: 'Python Arguments',
+                description: 'JSON array of arguments passed to the configured Python executable',
+                type: 'json',
+                configKey: 'pythonArgs',
+                defaultValue: [],
+                jsonKind: 'array'
+            },
+            {
                 id: 'metadata-cache-disk',
                 label: 'Disk Persistence',
                 description: 'Persist metadata cache to disk for faster startup across sessions',
@@ -178,6 +254,38 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'number',
                 configKey: 'metadata.queryConcurrency',
                 defaultValue: 1
+            },
+            {
+                id: 'metadata-full-refresh-column-connections',
+                label: 'Full Refresh Column Connections',
+                description: 'Physical Netezza sessions used for the full-refresh column stage (1–8)',
+                type: 'number',
+                configKey: 'metadata.fullRefreshColumnConnections',
+                defaultValue: 1
+            },
+            {
+                id: 'metadata-session-sweep-enabled',
+                label: 'Metadata Session Sweep',
+                description: 'Automatically drop stale catalog sessions created by metadata refreshes',
+                type: 'toggle',
+                configKey: 'metadata.sessionSweep.enabled',
+                defaultValue: true
+            },
+            {
+                id: 'metadata-session-sweep-interval',
+                label: 'Session Sweep Interval (minutes)',
+                description: 'How often stale metadata sessions are checked (1–60 minutes)',
+                type: 'number',
+                configKey: 'metadata.sessionSweep.intervalMinutes',
+                defaultValue: 5
+            },
+            {
+                id: 'metadata-session-sweep-max-age',
+                label: 'Metadata Session Max Age (minutes)',
+                description: 'Drop metadata sessions older than this age (5–240 minutes)',
+                type: 'number',
+                configKey: 'metadata.sessionSweep.maxAgeMinutes',
+                defaultValue: 20
             }
         ]
     },
@@ -284,10 +392,11 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
             {
                 id: 'linter-rules',
                 label: 'Linter Rules',
-                description: 'Configure individual SQL linter rule severity (edit in settings.json)',
-                type: 'button',
-                action: 'openVSCodeSettings',
-                actionLabel: 'Edit Rules'
+                description: 'JSON object mapping each SQL rule code to error, warning, information, hint, or off',
+                type: 'json',
+                configKey: 'linter.rules',
+                defaultValue: DEFAULT_LINTER_RULES,
+                jsonKind: 'severityMap'
             },
             {
                 id: 'sqlparser-fastpath',
@@ -1106,6 +1215,10 @@ export class SettingsView {
             case 'text':
             case 'textarea':
                 if (typeof value !== 'string') throw new Error(`${setting.label} must be text.`);
+                return;
+            case 'json':
+                if (!setting.jsonKind) throw new Error(`${setting.label} has no JSON validation schema.`);
+                validateJsonSettingValue(value, setting.jsonKind);
                 return;
             default:
                 throw new Error(`${setting.label} cannot be changed here.`);

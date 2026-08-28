@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="../media/settingsView.css">
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header"><div class="sidebar-brand"><div class="sidebar-brand-icon">JB</div>JustyBase Settings</div></div>
+        <div class="sidebar-search"><div class="sidebar-search-wrapper"><input id="searchInput" type="text"></div></div>
+        <div class="sidebar-nav" id="sidebarNav"></div>
+        <div class="sidebar-footer">Test fixture</div>
+    </div>
+    <div class="main" id="mainContent"><div class="content-wrapper" id="contentWrapper"></div></div>
+    <div class="toast" id="toast"></div>
+    <div id="newSnippetOverlay"></div>
+
+    <script>
+        window.acquireVsCodeApi = () => ({ postMessage: () => {} });
+    </script>
+    <script id="settingsConfig" type="application/json">{
+        "sections": [
+            {"id":"general","title":"General","description":"Core settings","settings":[{"id":"general-toggle","label":"General toggle","description":"General setting","type":"toggle","configKey":"general.toggle","defaultValue":true}]},
+            {"id":"editor","title":"Editor","description":"SQL editor behavior, tooltips, hints, and visual feedback","settings":[{"id":"editor-toggle","label":"Highlight Active Statement","description":"Highlight the active statement","type":"toggle","configKey":"highlightActiveStatement","defaultValue":true},{"id":"json-setting","label":"Python Arguments","description":"JSON array of arguments","type":"json","configKey":"pythonArgs","defaultValue":["--flag"],"jsonKind":"array"}]},
+            {"id":"sql","title":"SQL Formatting, Linting & Parsing","description":"Control how SQL is formatted, linted, and parsed","settings":[{"id":"sql-width","label":"Tab Width","description":"Indentation width","type":"number","configKey":"formatSQL.tabWidth","defaultValue":4}]},
+            {"id":"codelens","title":"CodeLens Toolbar","description":"Configure CodeLens actions","settings":[{"id":"codelens-toggle","label":"Enable CodeLens","description":"Show the toolbar","type":"toggle","configKey":"codeLens.enabled","defaultValue":false}]},
+            {"id":"query","title":"Query Execution","description":"Streaming and execution limits","settings":[{"id":"query-limit","label":"Query Row Limit","description":"Maximum rows","type":"number","configKey":"query.rowLimit","defaultValue":200000}]},
+            {"id":"ddl","title":"DDL Context","description":"DDL context settings","settings":[{"id":"ddl-limit","label":"Max Tables in DDL Context","description":"Maximum tables","type":"number","configKey":"ddl.maxTablesForContext","defaultValue":10}]},
+            {"id":"schema","title":"Schema Explorer","description":"Schema tree behavior and search scope","settings":[{"id":"schema-search","label":"Search All Databases","description":"Search every database","type":"toggle","configKey":"schemaSearch.searchAllDatabases","defaultValue":false}]}
+        ],
+        "numericLimits": {}
+    }</script>
+    <script src="../media/settingsView.js"></script>
+</body>
+</html>
