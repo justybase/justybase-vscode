@@ -2,6 +2,12 @@ name: Result panel regression
 
 on:
   workflow_dispatch:
+    inputs:
+      capture_screenshots:
+        description: "Capture Extension Host renderer screenshots"
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - "src/views/**"
@@ -42,6 +48,7 @@ jobs:
           - windows-latest
     env:
       JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS: "1"
+      JUSTYBASE_EXTENSION_HOST_SCREENSHOTS: ${{ inputs.capture_screenshots == true && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,6 +64,16 @@ jobs:
       - name: Run SQLite Extension Host regression (Windows)
         if: runner.os == 'Windows'
         run: npm run test:extension-host
+        env:
+          JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
+      - name: Run SQL authoring Extension Host smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:extension-host:authoring
+        env:
+          JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
+      - name: Run SQL authoring Extension Host smoke (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:extension-host:authoring
         env:
           JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
       - name: Upload Extension Host diagnostics
