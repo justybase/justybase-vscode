@@ -191,11 +191,13 @@ body {
 /* ── Main Content ── */
 .main {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
     padding: 0;
 }
 
 .content-wrapper {
+    width: 100%;
     max-width: 760px;
     margin: 0 auto;
     padding: 20px 28px 48px;
@@ -266,6 +268,25 @@ body {
     border-radius: 6px;
     margin-bottom: 12px;
     overflow: hidden;
+}
+
+.settings-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 96px;
+    padding: 20px;
+    color: var(--fg-dim);
+    text-align: center;
+    font-size: 12px;
+}
+
+.settings-empty strong {
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 600;
 }
 
 .mcp-status-card {
@@ -377,6 +398,10 @@ body {
     min-width: 40px;
     display: flex;
     justify-content: flex-end;
+}
+
+.setting-row-error {
+    background: rgba(244, 135, 113, 0.08);
 }
 
 /* Toggle Switch */
@@ -627,6 +652,49 @@ body {
     transition: border-color var(--transition);
     tab-size: 2;
 }
+
+.json-control {
+    width: min(420px, 45vw);
+}
+
+.json-textarea {
+    width: 100%;
+    min-height: 120px;
+    max-height: 320px;
+    padding: 8px 10px;
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family, 'JetBrains Mono', 'Fira Code', monospace);
+    line-height: 1.5;
+    outline: none;
+    resize: vertical;
+    tab-size: 2;
+}
+
+.json-textarea:focus {
+    border-color: var(--accent);
+}
+
+.json-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    min-height: 24px;
+}
+
+.json-status {
+    margin-right: auto;
+    color: var(--fg-muted);
+    font-size: 10px;
+}
+
+.json-status.valid { color: var(--vscode-testing-iconPassed, #73c991); }
+.json-status.invalid { color: var(--vscode-errorForeground, #f48771); }
+.json-status.pending { color: var(--vscode-editorWarning-foreground, #cca700); }
 
 .textarea-control:focus {
     border-color: var(--accent);

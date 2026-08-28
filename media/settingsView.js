@@ -2,7 +2,7 @@ const vscode = acquireVsCodeApi();
 const settingsConfig = JSON.parse(document.getElementById('settingsConfig').textContent || '{}');
 const SECTIONS = settingsConfig.sections || [];
 const NUMERIC_LIMITS = settingsConfig.numericLimits || {};
-let currentSection = SECTIONS[0].id;
+let currentSection = SECTIONS[0] ? SECTIONS[0].id : '';
 let settingsValues = {};
 let searchQuery = '';
 let cachedUserSnippets = [];
@@ -27,9 +27,9 @@ function renderNav() {
         'snippets': '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="8 10 12 14 16 10"/></svg>'
     };
     nav.innerHTML = SECTIONS.map(s =>
-        '<div class="nav-item' + (s.id === currentSection ? ' active' : '') + '" data-section="' + s.id + '">' +
+        '<div class="nav-item' + (s.id === currentSection ? ' active' : '') + '" data-section="' + escapeHtml(String(s.id)) + '">' +
             '<span class="nav-icon">' + (icons[s.id] || '') + '</span>' +
-            '<span>' + s.title + '</span>' +
+            '<span>' + escapeHtml(String(s.title || s.id)) + '</span>' +
         '</div>'
     ).join('');
 
@@ -47,32 +47,31 @@ function renderNav() {
 function renderContent() {
     const wrapper = document.getElementById('contentWrapper');
     const section = SECTIONS.find(s => s.id === currentSection);
-    if (!section) return;
+    if (!section) {
+        wrapper.innerHTML = '<div class="settings-empty"><strong>No settings available</strong><span>The settings registry could not be loaded.</span></div>';
+        return;
+    }
 
-    const hasResettable = section.settings.some(s => s.configKey);
+    const sectionSettings = Array.isArray(section.settings) ? section.settings : [];
+    const hasResettable = sectionSettings.some(s => s.configKey);
     let html = '<div class="section-header">' +
         '<span class="section-icon"></span>' +
-        '<span class="section-title">' + section.title + '</span>';
+        '<span class="section-title">' + escapeHtml(String(section.title || section.id)) + '</span>';
     if (hasResettable) {
-        html += '<button class="section-reset-btn" data-section-reset="' + section.id + '" title="Reset all settings in this section to defaults">↺ Reset All</button>';
+        html += '<button class="section-reset-btn" data-section-reset="' + escapeHtml(String(section.id)) + '" title="Reset all settings in this section to defaults">↺ Reset All</button>';
     }
     html += '</div>';
     if (section.description) {
-        html += '<div class="section-description">' + section.description + '</div>';
+        html += '<div class="section-description">' + escapeHtml(String(section.description)) + '</div>';
     }
 
     html += '<div class="settings-card">';
-    for (const setting of section.settings) {
+    if (sectionSettings.length === 0) {
+        html += '<div class="settings-empty"><strong>No settings in this section</strong><span>Choose another category or open the native VS Code settings.</span></div>';
+    }
+    for (const setting of sectionSettings) {
         const matchesSearch = !searchQuery || matchesFilter(setting, searchQuery);
-        const isTextarea = setting.type === 'textarea';
-        html += '<div class="setting-row' + (isTextarea ? ' textarea-row' : '') + (matchesSearch ? '' : ' search-hidden') + '" data-setting-id="' + setting.id + '" data-label="' + (setting.label + ' ' + setting.description).toLowerCase() + '">';
-        html += '<div class="setting-info">';
-        html += '<div class="setting-label">';
-        html += setting.label + '</div>';
-        html += '<div class="setting-desc">' + setting.description + '</div>';
-        html += '</div>';
-        html += '<div class="setting-control">' + renderControl(setting) + '</div>';
-        html += '</div>';
+        html += renderSettingRow(setting, matchesSearch);
     }
     html += '</div>';
 
@@ -98,6 +97,24 @@ function renderContent() {
             card.after(dynamicDiv);
         }
         vscode.postMessage({ command: 'getSnippets' });
+    }
+}
+
+function renderSettingRow(setting, visible = true) {
+    const isTextarea = setting.type === 'textarea' || setting.type === 'json';
+    const label = String(setting.label || setting.id || 'Setting');
+    const description = String(setting.description || '');
+    try {
+        return '<div class="setting-row' + (isTextarea ? ' textarea-row' : '') + (visible ? '' : ' search-hidden') + '" data-setting-id="' + escapeHtml(String(setting.id || '')) + '" data-label="' + escapeHtml((label + ' ' + description).toLowerCase()) + '">' +
+            '<div class="setting-info">' +
+            '<div class="setting-label">' + escapeHtml(label) + '</div>' +
+            '<div class="setting-desc">' + escapeHtml(description) + '</div>' +
+            '</div>' +
+            '<div class="setting-control">' + renderControl(setting) + '</div>' +
+            '</div>';
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return '<div class="setting-row setting-row-error"><div class="setting-info"><div class="setting-label">' + escapeHtml(label) + '</div><div class="setting-desc">Unable to render this setting: ' + escapeHtml(message) + '</div></div></div>';
     }
 }
 
@@ -280,13 +297,13 @@ function attachSnippetListeners() {
 
 function matchesFilter(setting, query) {
     const q = query.toLowerCase();
-    return setting.label.toLowerCase().includes(q) ||
-           setting.description.toLowerCase().includes(q) ||
-           (setting.configKey && setting.configKey.toLowerCase().includes(q));
+    return String(setting.label || '').toLowerCase().includes(q) ||
+           String(setting.description || '').toLowerCase().includes(q) ||
+           (setting.configKey && String(setting.configKey).toLowerCase().includes(q));
 }
 
 function renderControl(setting) {
-    const val = settingsValues[setting.id];
+    const val = settingsValues[setting.id] ?? setting.defaultValue;
     let controlHtml = '';
     switch (setting.type) {
         case 'toggle':
@@ -297,9 +314,9 @@ function renderControl(setting) {
                 ? (settingsValues.mcpConnectionOptions || setting.options || [])
                 : (setting.options || []);
             const valueType = options.some(opt => typeof opt.value === 'number') ? 'number' : 'string';
-            let selHtml = '<select class="select-control" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '" data-value-type="' + valueType + '">';
+            let selHtml = '<select class="select-control" data-key="' + escapeHtml(String(setting.configKey || '')) + '" data-id="' + escapeHtml(String(setting.id || '')) + '" data-value-type="' + valueType + '">';
             for (const opt of options) {
-                selHtml += '<option value="' + opt.value + '"' + (String(val) === String(opt.value) ? ' selected' : '') + '>' + opt.label + '</option>';
+                selHtml += '<option value="' + escapeHtml(String(opt.value)) + '"' + (String(val) === String(opt.value) ? ' selected' : '') + '>' + escapeHtml(String(opt.label)) + '</option>';
             }
             selHtml += '</select>';
             controlHtml = selHtml;
@@ -321,19 +338,22 @@ function renderControl(setting) {
             const min = limits.min !== undefined ? ' min="' + limits.min + '"' : '';
             const max = limits.max !== undefined ? ' max="' + limits.max + '"' : '';
             controlHtml = '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;">' +
-                '<input type="number" class="number-input" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '" value="' + numVal + '"' + min + max + '>' +
-                (showFormatted ? '<span class="number-formatted" id="fmt-' + setting.id + '">' + formatted + '</span>' : '') +
+                '<input type="number" class="number-input" data-key="' + escapeHtml(String(setting.configKey || '')) + '" data-id="' + escapeHtml(String(setting.id || '')) + '" value="' + escapeHtml(String(numVal)) + '"' + min + max + '>' +
+                (showFormatted ? '<span class="number-formatted" id="fmt-' + escapeHtml(String(setting.id || '')) + '">' + escapeHtml(formatted) + '</span>' : '') +
             '</div>';
             break;
         case 'text':
-            controlHtml = '<input type="text" class="text-input" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '" value="' + escapeHtml(String(val ?? setting.defaultValue ?? '')) + '">';
+            controlHtml = '<input type="text" class="text-input" data-key="' + escapeHtml(String(setting.configKey || '')) + '" data-id="' + escapeHtml(String(setting.id || '')) + '" value="' + escapeHtml(String(val ?? setting.defaultValue ?? '')) + '">';
             break;
         case 'button':
             const cls = setting.id === 'clear-cache' ? 'btn btn-danger' : 'btn';
-            controlHtml = '<button class="' + cls + '" data-action="' + (setting.action || '') + '">' + (setting.actionLabel || 'Action') + '</button>';
+            controlHtml = '<button class="' + cls + '" data-action="' + escapeHtml(String(setting.action || '')) + '">' + escapeHtml(String(setting.actionLabel || 'Action')) + '</button>';
             break;
         case 'textarea':
             controlHtml = renderTextareaControl(setting);
+            return controlHtml;
+        case 'json':
+            controlHtml = renderJsonControl(setting);
             return controlHtml;
         default:
             controlHtml = '';
@@ -341,8 +361,8 @@ function renderControl(setting) {
     }
     // Add reset button for settings with a configKey
     if (setting.configKey && setting.type !== 'textarea') {
-        const defaultHint = setting.defaultValue !== undefined ? 'Reset to default: ' + setting.defaultValue : 'Reset to default';
-        controlHtml += '<button class="reset-btn" data-reset-key="' + setting.configKey + '" data-reset-id="' + setting.id + '" title="' + escapeHtml(String(defaultHint)) + '">↺</button>';
+        const defaultHint = setting.defaultValue !== undefined ? 'Reset to default: ' + formatSettingValue(setting.defaultValue) : 'Reset to default';
+        controlHtml += '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey)) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(String(defaultHint)) + '">↺</button>';
     }
     return controlHtml;
 }
@@ -358,6 +378,22 @@ function renderTextareaControl(setting) {
             '<span class="textarea-status" id="status-' + setting.id + '"></span>' +
         '</div>' +
         '<div class="prompt-test-result" id="test-result-' + setting.id + '"></div>';
+}
+
+function renderJsonControl(setting) {
+    const value = settingsValues[setting.id] ?? setting.defaultValue ?? (setting.jsonKind === 'array' ? [] : {});
+    const serialized = JSON.stringify(value, null, 2);
+    const defaultHint = setting.defaultValue !== undefined ? '↺ Reset to default: ' + formatSettingValue(setting.defaultValue) : '↺ Reset to default';
+    return '<div class="json-control">' +
+        '<textarea class="json-textarea" data-key="' + escapeHtml(String(setting.configKey || '')) + '" data-id="' + escapeHtml(String(setting.id || '')) + '" data-json-kind="' + escapeHtml(String(setting.jsonKind || '')) + '" spellcheck="false">' + escapeHtml(serialized) + '</textarea>' +
+        '<div class="json-toolbar"><span class="json-status" id="json-status-' + escapeHtml(String(setting.id || '')) + '">Valid JSON</span>' +
+        '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey || '')) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(defaultHint) + '">↺</button></div>' +
+        '</div>';
+}
+
+function formatSettingValue(value) {
+    if (typeof value === 'object' && value !== null) return JSON.stringify(value);
+    return String(value);
 }
 
 function escapeHtml(text) {
@@ -476,6 +512,41 @@ function attachControlListeners() {
         });
     });
 
+    // JSON settings — validate locally before sending structured values to the host.
+    document.querySelectorAll('.json-textarea').forEach(el => {
+        const key = el.dataset.key;
+        const id = el.dataset.id;
+        const kind = el.dataset.jsonKind;
+        const statusEl = id ? document.getElementById('json-status-' + id) : null;
+        let debounce;
+        el.addEventListener('input', () => {
+            clearTimeout(debounce);
+            if (statusEl) {
+                statusEl.textContent = 'Checking JSON...';
+                statusEl.className = 'json-status pending';
+            }
+            debounce = setTimeout(() => {
+                try {
+                    const value = JSON.parse(el.value);
+                    validateJsonValue(value, kind);
+                    if (key && id) {
+                        settingsValues[id] = value;
+                        vscode.postMessage({ command: 'updateSetting', key: key, value: value });
+                    }
+                    if (statusEl) {
+                        statusEl.textContent = '✓ Valid JSON';
+                        statusEl.className = 'json-status valid';
+                    }
+                } catch (error) {
+                    if (statusEl) {
+                        statusEl.textContent = '✗ ' + (error instanceof Error ? error.message : 'Invalid JSON');
+                        statusEl.className = 'json-status invalid';
+                    }
+                }
+            }, 500);
+        });
+    });
+
     // Test Prompt buttons
     document.querySelectorAll('.btn-test-prompt[data-prompt-id]').forEach(el => {
         el.addEventListener('click', () => {
@@ -528,6 +599,24 @@ function attachControlListeners() {
 
 }
 
+function validateJsonValue(value, kind) {
+    if (kind === 'array') {
+        if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+            throw new Error('Expected a JSON array of strings');
+        }
+        return;
+    }
+    const levels = ['error', 'warning', 'information', 'hint', 'off'];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Expected a JSON object');
+    }
+    for (const [rule, level] of Object.entries(value)) {
+        if (!rule.trim() || typeof level !== 'string' || !levels.includes(level)) {
+            throw new Error('Rule values must be error, warning, information, hint, or off');
+        }
+    }
+}
+
 // ── Toast ──
 function showToast(msg) {
     const toast = document.getElementById('toast');
@@ -556,22 +645,15 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
 
         let foundAny = false;
         for (const section of SECTIONS) {
-            const matchingSettings = section.settings.filter(s => matchesFilter(s, searchQuery));
+            const sectionSettings = Array.isArray(section.settings) ? section.settings : [];
+            const matchingSettings = sectionSettings.filter(s => matchesFilter(s, searchQuery));
             if (matchingSettings.length > 0) {
                 foundAny = true;
                 html += '<div class="section-group" style="margin-bottom:20px;">';
-                html += '<div class="section-description" style="margin-bottom:6px;font-weight:600;color:var(--fg);">' + section.title + '</div>';
+                html += '<div class="section-description" style="margin-bottom:6px;font-weight:600;color:var(--fg);">' + escapeHtml(String(section.title || section.id)) + '</div>';
                 html += '<div class="settings-card">';
                 for (const setting of matchingSettings) {
-                    const isTextarea = setting.type === 'textarea';
-                    html += '<div class="setting-row' + (isTextarea ? ' textarea-row' : '') + '" data-setting-id="' + setting.id + '">';
-                    html += '<div class="setting-info">';
-                    html += '<div class="setting-label">';
-                    html += setting.label + '</div>';
-                    html += '<div class="setting-desc">' + setting.description + '</div>';
-                    html += '</div>';
-                    html += '<div class="setting-control">' + renderControl(setting) + '</div>';
-                    html += '</div>';
+                    html += renderSettingRow(setting);
                 }
                 html += '</div></div>';
             }
@@ -610,6 +692,11 @@ window.addEventListener('message', event => {
                     statusEl.textContent = '✓ Saved';
                     statusEl.className = 'textarea-status visible saved';
                     setTimeout(() => { statusEl.className = 'textarea-status'; }, 2000);
+                }
+                const jsonStatusEl = input && document.getElementById('json-status-' + input.dataset.id);
+                if (jsonStatusEl) {
+                    jsonStatusEl.textContent = '✓ Saved';
+                    jsonStatusEl.className = 'json-status valid';
                 }
             } else {
                 showToast('✗ Save failed: ' + (msg.error || 'Unknown error'));
