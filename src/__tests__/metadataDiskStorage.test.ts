@@ -149,6 +149,52 @@ describe('MetadataDiskStorage', () => {
         expect(freshTimestamps.has('conn1')).toBe(false);
     });
 
+    it('excludes expired manifests and reports them for deletion', async () => {
+        populateCache('conn1');
+        const expiredAt = Date.now() - (12 * 60 * 60 * 1000) - 1;
+        await storage.saveConnection(cache, 'conn1', expiredAt);
+
+        const manifests = await storage.loadAllConnectionManifests();
+        const { loadable, freshTimestamps, expiredConnectionNames } =
+            storage.filterLoadableManifestConnections(
+                manifests,
+                12 * 60 * 60 * 1000,
+            );
+
+        expect(loadable.has('conn1')).toBe(false);
+        expect(freshTimestamps.has('conn1')).toBe(false);
+        expect(expiredConnectionNames).toEqual(['conn1']);
+    });
+
+    it('removes one expired connection snapshot without touching the cache root', async () => {
+        populateCache('conn1');
+        await storage.saveConnection(cache, 'conn1', Date.now());
+
+        await storage.removeConnection('conn1');
+
+        expect((await storage.readV3Index())?.connections.conn1).toBeUndefined();
+        expect(fs.existsSync(getV3ConnectionManifestPath(tempDir, 'conn1'))).toBe(false);
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'conn1'))).toBe(false);
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB1'))).toBe(false);
+        expect(fs.existsSync(getCacheV3Dir(tempDir))).toBe(true);
+    });
+
+    it('does not delete a newer snapshot when expired cleanup races a refresh', async () => {
+        populateCache('conn1');
+        const expiredAt = Date.now() - (12 * 60 * 60 * 1000) - 1;
+        await storage.saveConnection(cache, 'conn1', expiredAt);
+        const refreshedAt = Date.now();
+        await storage.saveConnection(cache, 'conn1', refreshedAt);
+
+        await storage.removeConnection('conn1', {
+            expectedPrefetchCompletedAt: expiredAt,
+        });
+
+        expect((await storage.readV3Index())?.connections.conn1?.prefetchCompletedAt)
+            .toBe(refreshedAt);
+        expect(fs.existsSync(getV3ConnectionMetadataPath(tempDir, 'conn1'))).toBe(true);
+    });
+
     it('should persist column files as dictionary-encoded v3', async () => {
         populateCache('conn1');
         await storage.saveConnection(cache, 'conn1', Date.now());

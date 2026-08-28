@@ -30,6 +30,7 @@ import {
   buildDbSchemaCacheKey,
   buildNetezzaCacheDatabasePart,
   buildNetezzaDatabaseCacheKey,
+  buildIdLookupKey,
   decodeNetezzaCacheDatabasePart,
   extractLabel,
   isNetezzaExactCachePart,
@@ -45,6 +46,7 @@ import {
   supportsLegacyMetadataPrefetchForConnection,
 } from '../prefetchSupport';
 import type {
+  ConnectionPrefetchOptions,
   MetadataPrefetchTarget,
   MetadataSnapshotCompletenessReport,
 } from './MetadataPrefetchTarget';
@@ -586,6 +588,35 @@ export class MetadataCache implements MetadataPrefetchTarget {
       `[MetadataCache] Cleared in-memory metadata for connection '${connectionName}'`,
     );
     this._onDidInvalidate.fire(connectionName);
+  }
+
+  /**
+   * Drop an expired connection snapshot from memory and disk before rebuilding
+   * it. This prevents stale table layers from surviving a failed refresh and
+   * being hydrated again after the next restart.
+   */
+  async discardExpiredConnectionMetadata(
+    connectionName: string,
+    lease?: import('../diskStorage/metadataDiskStorage').PrefetchLease,
+    expectedPrefetchCompletedAt?: number,
+  ): Promise<void> {
+    this._diskLifecycleState.cacheGeneration++;
+    this._columnLoaderState.cacheGeneration = this._diskLifecycleState.cacheGeneration;
+    this.clearConnectionMetadata(connectionName);
+    if (!this.isDiskPersistenceEnabled() || !this._diskStorage) {
+      return;
+    }
+    try {
+      await this._diskStorage.removeConnection(connectionName, {
+        lease,
+        expectedPrefetchCompletedAt,
+      });
+    } catch (error: unknown) {
+      Logger.getInstance().warn(
+        `[MetadataCache] Failed to remove expired disk metadata for '${connectionName}'`,
+        error,
+      );
+    }
   }
 
   private resetLocalCacheAfterExternalGeneration(): void {
@@ -1213,10 +1244,20 @@ export class MetadataCache implements MetadataPrefetchTarget {
     connectionName: string,
   ): MetadataSnapshotCompletenessReport {
     const missingStages = this.getSnapshotMissingStages(connectionName);
-    const missingColumnKeys: string[] = [];
-    let missingColumnCount = 0;
     const maxReportedMissingColumnKeys = 100;
 
+    const allMissingColumnKeys = this.getMissingColumnLayerKeys(connectionName);
+
+    return {
+      complete: missingStages.length === 0 && allMissingColumnKeys.length === 0,
+      missingStages,
+      missingColumnKeys: allMissingColumnKeys.slice(0, maxReportedMissingColumnKeys),
+      missingColumnCount: allMissingColumnKeys.length,
+    };
+  }
+
+  getMissingColumnLayerKeys(connectionName: string): string[] {
+    const missingColumnKeys = new Set<string>();
     const prefix = `${connectionName}|`;
     for (const [fullKey, entry] of this._store.tableCache) {
       if (!fullKey.startsWith(prefix)) {
@@ -1260,20 +1301,67 @@ export class MetadataCache implements MetadataPrefetchTarget {
         // predate a newly discovered table. Require the exact persisted layer.
         const columnsAvailableOnDisk = this.hasColumnLayerOnDisk(connectionName, columnKey);
         if (!columnsLoadedInMemory && !columnsAvailableOnDisk) {
-          missingColumnCount += 1;
-          if (missingColumnKeys.length < maxReportedMissingColumnKeys) {
-            missingColumnKeys.push(columnKey);
-          }
+          missingColumnKeys.add(columnKey);
         }
       }
     }
+    return [...missingColumnKeys];
+  }
 
-    return {
-      complete: missingStages.length === 0 && missingColumnCount === 0,
-      missingStages,
-      missingColumnKeys,
-      missingColumnCount,
-    };
+  removeTableObjectByColumnKey(connectionName: string, columnKey: string): boolean {
+    const prefix = `${connectionName}|`;
+    let removed = false;
+
+    for (const [fullKey, entry] of [...this._store.tableCache.entries()]) {
+      if (!fullKey.startsWith(prefix)) {
+        continue;
+      }
+      const layerKey = fullKey.slice(prefix.length);
+      const parsedLayer = parseDbSchemaCacheKey(layerKey);
+      const dbName = layerKey.split('.')[0];
+      const schemaName = parsedLayer.schemaName;
+      const remaining = entry.data.filter((table) => {
+        const tableName = extractLabel(table);
+        if (!tableName) {
+          return true;
+        }
+        const schema = typeof table.SCHEMA === 'string' && table.SCHEMA.trim().length > 0
+          ? table.SCHEMA
+          : schemaName;
+        const candidateKey = buildColumnCacheKey(
+          dbName,
+          schema,
+          tableName,
+          this.isNetezzaConnection(connectionName) ? { preserveCase: true } : undefined,
+        );
+        if (candidateKey !== columnKey) {
+          return true;
+        }
+        removed = true;
+        return false;
+      });
+      if (remaining.length === entry.data.length) {
+        continue;
+      }
+
+      const idMap = new Map<string, number>();
+      for (const table of remaining) {
+        const tableName = extractLabel(table);
+        if (!tableName || typeof table.OBJID !== 'number') {
+          continue;
+        }
+        const schema = typeof table.SCHEMA === 'string' && table.SCHEMA.trim().length > 0
+          ? table.SCHEMA
+          : schemaName;
+        idMap.set(
+          buildIdLookupKey(parsedLayer.dbName, schema, tableName),
+          table.OBJID,
+        );
+      }
+      this.setTables(connectionName, layerKey, remaining, idMap);
+    }
+
+    return removed;
   }
 
   verifyCompleteSnapshot(connectionName: string, logMissing = true): boolean {
@@ -1353,6 +1441,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   triggerConnectionPrefetch(
     connectionName: string,
     runQueryFn: DisposableQueryRunnerRawFn,
+    options?: ConnectionPrefetchOptions,
   ): void {
     if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
       return;
@@ -1361,6 +1450,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       this.prefetchDeps,
       connectionName,
       runQueryFn,
+      options,
     );
   }
 

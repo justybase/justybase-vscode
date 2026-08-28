@@ -66,6 +66,11 @@ Skipping step 2 removes all TABLE entries for that schema key.
 - `staleTtl` — `2 × cacheTtl`; entries may still be served until stale window ends, then evicted on read.
 - **Prefetch freshness** (`isConnectionPrefetchFresh`) uses `cacheTtl` only, not `staleTtl`.
 - `currentSchema` uses the same TTL/stale window as `schema`.
+- **Full-refresh column sessions** are controlled by
+  `justybase.metadata.fullRefreshColumnConnections` (default `1`, maximum `8`).
+  Only independent database column jobs use additional sessions; the other
+  refresh stages remain on the primary session. A session-open failure falls
+  back to the primary session and never starts an unbounded retry loop.
 
 ## Invalidation
 
@@ -140,7 +145,7 @@ When disk persistence is enabled (`justybase.metadataCache.diskPersistence`, def
 
 Self-writes are skipped when this window holds the prefetch lock.
 
-The manifest is written after metadata and column payloads, and the v2 index is written last. Startup accepts a manifest as fresh only when its timestamp/fingerprint matches the index and the snapshot is complete. Stale or partial snapshots are still usable as local data while background prefetch refreshes them.
+The manifest is written after metadata and column payloads, and the v2 index is written last. Startup accepts a manifest as fresh only when its timestamp/fingerprint matches the index and the snapshot is complete. A partial snapshot that has not expired may still provide local data while background prefetch refreshes it; an expired snapshot is excluded from hydration and its connection payload is removed before the next clean refresh.
 
 ### Restart and expiry behavior
 
@@ -150,8 +155,10 @@ hydrated and remains usable without re-querying metadata; column layers may be
 hydrated lazily from the per-database column files. The database is queried
 again when the snapshot is absent, incomplete, fingerprint-incompatible, or no
 longer fresh according to the configured `cacheTTL` (default 12 hours). A
-stale-but-readable snapshot can still provide immediate local results while a
-background refresh runs; it is not treated as proof that the prefetch is fresh.
+still-readable in-memory snapshot may provide immediate local results until
+that refresh starts; the refresh then discards the connection snapshot before
+querying. An expired disk snapshot is excluded from startup hydration and its
+payload is deleted, so it cannot be used as the next refresh's merge base.
 
 ### Column load paths (restart-safe)
 

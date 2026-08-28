@@ -12,7 +12,6 @@ import { mergeAndSetTables } from '../../metadata/cache/tableLikeMerge';
 import { getTablesForScope, buildSchemaCacheKey } from '../../metadata/cache/schemaTreeDataSource';
 import { DatabaseMetadata, SchemaMetadata, TableMetadata, ProcedureMetadata, ColumnMetadata } from '../../metadata/types';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
-import { PREFETCH_RETRY_BACKOFF_MS } from '../../metadata/prefetch';
 import { createConnectionScopedMetadataQueryRunner } from '../../metadata/connectionScopedMetadataQueryRunner';
 import { formatIdentifierForSql } from '../../utils/identifierUtils';
 import {
@@ -1294,15 +1293,9 @@ export class MetadataProvider {
         setImmediate(() => {
             try {
                 if (!cache.isConnectionPrefetchFresh(connectionName)) {
-                    // Backoff: after a failed/slow prefetch, do not immediately
-                    // retrigger the full prefetch on every cache miss — that
-                    // floods the database with heavy catalog queries. Warm only
-                    // the requested database columns until the backoff elapses.
-                    const lastAttempt = cache.getLastPrefetchAttemptTime?.(connectionName);
-                    if (lastAttempt !== undefined && Date.now() - lastAttempt < PREFETCH_RETRY_BACKOFF_MS) {
-                        void cache.prefetchColumnsForDatabase(connectionName, normalizedDbName, runMetadataQuery);
-                        return;
-                    }
+                    // The central prefetch circuit owns retry timing. Do not
+                    // replace a suppressed full refresh with a database-wide
+                    // column scan on every authoring cache miss.
                     cache.triggerConnectionPrefetch(
                         connectionName,
                         createConnectionScopedMetadataQueryRunner({

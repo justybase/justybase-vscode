@@ -4,6 +4,7 @@
  */
 
 import type {
+    ConnectionPrefetchOptions,
     MetadataPrefetchTarget,
     MetadataSnapshotCompletenessReport,
 } from './cache/MetadataPrefetchTarget';
@@ -58,9 +59,11 @@ import {
     buildDbSchemaCacheKey,
     buildNetezzaDbSchemaCacheKey,
     buildNetezzaCacheDatabasePart,
+    decodeNetezzaCacheDatabasePart,
     extractLabel,
 } from './helpers';
 import {
+    MAX_FULL_REFRESH_COLUMN_CONNECTIONS,
     getMetadataQueryConcurrencyLimit,
     runWithMetadataQueryConcurrencyLimit,
 } from './metadataQueryLimiter';
@@ -104,12 +107,26 @@ export type QueryRunnerRawFn = (
 ) => Promise<QueryResult | undefined>;
 
 /**
- * A query runner may own a short-lived connection shared by one full metadata
- * refresh. The prefetcher disposes it after every terminal path, including a
- * rejected lock acquisition, so the scoped session can never leak.
+ * A runner slot used by the full-refresh column stage.  Slots are independent
+ * physical sessions, but the refresh still exposes one logical connection to
+ * diagnostics and cache bookkeeping.
+ */
+export interface MetadataColumnQueryRunner extends QueryRunnerRawFn {
+    /** Opens the physical session without issuing a catalog query, when supported. */
+    ensureConnected?: () => Promise<void>;
+    /** Closes this slot when it is not owned by the parent runner. */
+    dispose?: () => Promise<void>;
+}
+
+/**
+ * A query runner may own one or more short-lived connections shared by one full
+ * metadata refresh. The prefetcher disposes them after every terminal path,
+ * including a rejected lock acquisition, so scoped sessions can never leak.
  */
 export type DisposableQueryRunnerRawFn = QueryRunnerRawFn & {
     dispose?: () => Promise<void>;
+    /** Column-stage slots. The first slot is always the primary runner. */
+    getColumnQueryRunners?: () => readonly MetadataColumnQueryRunner[];
 };
 
 async function runPrefetchQuery(
@@ -118,6 +135,7 @@ async function runPrefetchQuery(
     query: string,
     context: Omit<MetadataQueryContext, 'connectionName'> & { source: MetadataRequestSource; kind: MetadataQueryKind },
     lifecycle?: PrefetchQueryLifecycleReporter,
+    limiterKey = connectionName,
 ): Promise<QueryResult | undefined> {
     const queryContext: MetadataQueryContext = { ...context, connectionName };
     const queryId = lifecycle?.queued(query, queryContext);
@@ -128,7 +146,7 @@ async function runPrefetchQuery(
         }
         : undefined;
     try {
-        const result = await runWithMetadataQueryConcurrencyLimit(connectionName, async (queueWaitMs) => {
+        const result = await runWithMetadataQueryConcurrencyLimit(limiterKey, async (queueWaitMs) => {
             return runQueryFn(query, {
                 ...queryContext,
                 queueWaitMs,
@@ -201,6 +219,11 @@ export interface MetadataPrefetchSnapshotStatus {
     missingStages: readonly string[];
     missingColumnKeys: readonly string[];
     missingColumnCount: number;
+    /** Successful snapshot containing explicit empty column layers. */
+    degraded?: boolean;
+    unavailableColumnKeys?: readonly string[];
+    unavailableColumnCount?: number;
+    removedStaleObjectCount?: number;
 }
 
 /** Live state for one full metadata refresh, retained until the next refresh. */
@@ -266,6 +289,18 @@ interface ActiveRefreshDetails {
     nextQueryId: number;
     queries: Map<string, MetadataPrefetchQueryActivity>;
     snapshot?: MetadataPrefetchSnapshotStatus;
+}
+
+interface MissingColumnReconciliation {
+    unavailableColumnKeys: string[];
+    removedStaleObjectCount: number;
+}
+
+interface AutomaticPrefetchFailureState {
+    failures: number;
+    lastFailureAt: number;
+    cooldownLogged: boolean;
+    circuitOpenLogged: boolean;
 }
 
 interface RawObjectRow {
@@ -535,6 +570,7 @@ export class CachePrefetcher {
     private externalObjectsPrefetchTriggeredSet: Set<string> = new Set();
     private connectionPrefetchTriggered: Map<string, number> = new Map();
     private connectionPrefetchInProgress: Set<string> = new Set();
+    private automaticPrefetchFailures = new Map<string, AutomaticPrefetchFailureState>();
     private readonly refreshDetailsByConnection = new Map<string, ActiveRefreshDetails>();
     private refreshSequence = 0;
 
@@ -773,6 +809,7 @@ export class CachePrefetcher {
         query: string,
         context: Omit<MetadataQueryContext, 'connectionName'> & { source: MetadataRequestSource; kind: MetadataQueryKind },
         lifecycle?: PrefetchQueryLifecycleReporter,
+        limiterKey = connectionName,
     ): Promise<QueryResult | undefined> {
         return runPrefetchQuery(
             connectionName,
@@ -780,6 +817,7 @@ export class CachePrefetcher {
             query,
             context,
             lifecycle,
+            limiterKey,
         );
     }
 
@@ -795,6 +833,7 @@ export class CachePrefetcher {
             reason: string;
         },
         lifecycle?: PrefetchQueryLifecycleReporter,
+        limiterKey = connectionName,
     ): Promise<RawColumnRowWithKeys[] | undefined> {
         if (!queries.keys || !queries.distribution) {
             throw new Error('Netezza columns-with-keys query set is incomplete.');
@@ -824,6 +863,7 @@ export class CachePrefetcher {
                     reason: part.reason,
                 },
                 lifecycle,
+                limiterKey,
             );
             if (!result) {
                 return undefined;
@@ -895,6 +935,7 @@ export class CachePrefetcher {
     private setRefreshSnapshotStatus(
         connectionName: string,
         report: MetadataSnapshotCompletenessReport | undefined,
+        reconciliation?: MissingColumnReconciliation,
     ): void {
         const details = this.refreshDetailsByConnection.get(connectionName);
         if (!details || !report) {
@@ -905,9 +946,168 @@ export class CachePrefetcher {
             missingStages: [...report.missingStages],
             missingColumnKeys: [...report.missingColumnKeys],
             missingColumnCount: report.missingColumnCount,
+            degraded: Boolean(
+                reconciliation
+                && (reconciliation.unavailableColumnKeys.length > 0 || reconciliation.removedStaleObjectCount > 0)
+            ),
+            unavailableColumnKeys: reconciliation?.unavailableColumnKeys.slice(0, 100),
+            unavailableColumnCount: reconciliation?.unavailableColumnKeys.length ?? 0,
+            removedStaleObjectCount: reconciliation?.removedStaleObjectCount ?? 0,
         };
         details.updatedAt = Date.now();
         this.publishRefreshDetails(details);
+    }
+
+    private getMissingColumnObjectTypes(
+        connectionName: string,
+        missingKeys: ReadonlySet<string>,
+    ): Map<string, string> {
+        const objectTypes = new Map<string, string>();
+        const prefix = `${connectionName}|`;
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        for (const [fullKey, entry] of this.cache.tableCache) {
+            if (!fullKey.startsWith(prefix)) {
+                continue;
+            }
+            const layerKey = fullKey.slice(prefix.length);
+            const layerParts = layerKey.split('.');
+            const database = layerParts[0];
+            const fallbackSchema = layerParts[1] || undefined;
+            for (const table of entry.data) {
+                const tableName = extractLabel(table);
+                if (!tableName) {
+                    continue;
+                }
+                const key = buildColumnCacheKey(
+                    database,
+                    table.SCHEMA || fallbackSchema,
+                    tableName,
+                    preserveCatalogIdentity ? { preserveCase: true } : undefined,
+                );
+                if (missingKeys.has(key)) {
+                    objectTypes.set(key, String(table.objType ?? table.TYPE ?? '').trim().toUpperCase());
+                }
+            }
+        }
+        return objectTypes;
+    }
+
+    /**
+     * Reconcile the race between the object and column catalog snapshots once.
+     * Surviving/unconfirmed objects receive an explicit empty column layer so
+     * authoring requests cannot turn the anomaly into repeated database work.
+     */
+    private async reconcileMissingColumnLayers(
+        connectionName: string,
+        runQueryFn: QueryRunnerRawFn,
+        lifecycle?: PrefetchQueryLifecycleReporter,
+    ): Promise<MissingColumnReconciliation> {
+        const missingKeys = [...new Set(
+            this.cache.getMissingColumnLayerKeys?.(connectionName)
+                ?? this.cache.getSnapshotCompletenessReport?.(connectionName)?.missingColumnKeys
+                ?? [],
+        )];
+        if (missingKeys.length === 0) {
+            return { unavailableColumnKeys: [], removedStaleObjectCount: 0 };
+        }
+
+        const missingSet = new Set(missingKeys);
+        const objectTypes = this.getMissingColumnObjectTypes(connectionName, missingSet);
+        const keysByDatabase = new Map<string, string[]>();
+        for (const key of missingKeys) {
+            const databasePart = key.split('.')[0];
+            const keys = keysByDatabase.get(databasePart) ?? [];
+            keys.push(key);
+            keysByDatabase.set(databasePart, keys);
+        }
+
+        const unavailableColumnKeys: string[] = [];
+        let removedStaleObjectCount = 0;
+        for (const [databasePart, databaseKeys] of keysByDatabase) {
+            const database = decodeNetezzaCacheDatabasePart(databasePart);
+            const needsRegular = databaseKeys.some(key => objectTypes.get(key) !== 'EXTERNAL TABLE');
+            const needsExternal = databaseKeys.some(key => objectTypes.get(key) === 'EXTERNAL TABLE');
+            const existingKeys = new Set<string>();
+            let regularVerified = !needsRegular;
+            let externalVerified = !needsExternal;
+
+            if (needsRegular) {
+                try {
+                    const result = await this.runPrefetchQuery(
+                        connectionName,
+                        runQueryFn,
+                        NZ_QUERIES.listTablesAndViews([createNetezzaCatalogIdentifier(database)]),
+                        {
+                            source: 'connection-prefetch',
+                            kind: 'objects',
+                            database,
+                            reason: 'missing-column-object-recheck',
+                        },
+                        lifecycle,
+                    );
+                    if (result) {
+                        regularVerified = true;
+                        for (const row of queryResultToRows<RawObjectRow>(result)) {
+                            existingKeys.add(buildColumnCacheKey(
+                                row.DBNAME,
+                                row.SCHEMA || undefined,
+                                row.OBJNAME,
+                                { preserveCase: true, exactNetezza: true },
+                            ));
+                        }
+                    }
+                } catch (error: unknown) {
+                    logPrefetchError(`[CachePrefetcher] Missing-column object recheck failed for ${database}:`, error);
+                }
+            }
+
+            if (needsExternal) {
+                try {
+                    const result = await this.runPrefetchQuery(
+                        connectionName,
+                        runQueryFn,
+                        NZ_QUERIES.listExternalTables([createNetezzaCatalogIdentifier(database)]),
+                        {
+                            source: 'connection-prefetch',
+                            kind: 'external-objects',
+                            database,
+                            reason: 'missing-column-object-recheck',
+                        },
+                        lifecycle,
+                    );
+                    if (result) {
+                        externalVerified = true;
+                        for (const row of queryResultToRows<RawObjectRow>(result)) {
+                            existingKeys.add(buildColumnCacheKey(
+                                row.DBNAME,
+                                row.SCHEMA || undefined,
+                                row.OBJNAME,
+                                { preserveCase: true, exactNetezza: true },
+                            ));
+                        }
+                    }
+                } catch (error: unknown) {
+                    logPrefetchError(`[CachePrefetcher] Missing-column external-object recheck failed for ${database}:`, error);
+                }
+            }
+
+            for (const key of databaseKeys) {
+                const isExternal = objectTypes.get(key) === 'EXTERNAL TABLE';
+                const verified = isExternal ? externalVerified : regularVerified;
+                if (verified && !existingKeys.has(key) && this.cache.removeTableObjectByColumnKey?.(connectionName, key)) {
+                    removedStaleObjectCount += 1;
+                    continue;
+                }
+                this.cache.setColumns(connectionName, key, []);
+                unavailableColumnKeys.push(key);
+            }
+        }
+
+        Logger.getInstance().warn(
+            `[CachePrefetcher] Reconciled ${missingKeys.length} missing column layer(s) for ${connectionName}: `
+            + `${removedStaleObjectCount} stale object(s) removed, ${unavailableColumnKeys.length} explicit empty layer(s) cached`,
+        );
+        return { unavailableColumnKeys, removedStaleObjectCount };
     }
 
     // ========== Column Prefetch for Schema ==========
@@ -1380,6 +1580,7 @@ export class CachePrefetcher {
         this.allObjectsPrefetchTriggeredSet.delete(key);
         this.primaryObjectsPrefetchCompletedSet.delete(key);
         this.externalObjectsPrefetchTriggeredSet.delete(key);
+        this.automaticPrefetchFailures.delete(connectionName);
         this.clearConnectionPrefetchTimestamp(connectionName);
     }
 
@@ -1523,13 +1724,17 @@ export class CachePrefetcher {
     triggerConnectionPrefetch(
         connectionName: string,
         runQueryFn: DisposableQueryRunnerRawFn,
+        options?: ConnectionPrefetchOptions,
     ): void {
+        if (options?.manual) {
+            this.automaticPrefetchFailures.delete(connectionName);
+        }
         void this.cache.whenDiskReady()
             .then(async () => {
                 if (this.cache.isConnectionMetadataHydrating(connectionName)) {
                     await this.cache.whenConnectionMetadataHydrated(connectionName);
                 }
-                await this.runConnectionPrefetch(connectionName, runQueryFn);
+                await this.runConnectionPrefetch(connectionName, runQueryFn, options);
             })
             .catch((error: unknown) => {
                 logPrefetchError(
@@ -1558,13 +1763,71 @@ export class CachePrefetcher {
         return this.lastPrefetchAttemptTime.get(connectionName);
     }
 
-    private async runConnectionPrefetch(connectionName: string, runQueryFn: QueryRunnerRawFn): Promise<void> {
+    private shouldStartConnectionPrefetch(
+        connectionName: string,
+        options?: ConnectionPrefetchOptions,
+    ): boolean {
+        if (options?.manual) {
+            return true;
+        }
+        const failureState = this.automaticPrefetchFailures.get(connectionName);
+        if (!failureState) {
+            return true;
+        }
+        if (failureState.failures >= 2) {
+            if (!failureState.circuitOpenLogged) {
+                failureState.circuitOpenLogged = true;
+                Logger.getInstance().warn(
+                    `[CachePrefetcher] Automatic metadata refresh suppressed for ${connectionName}: retry circuit is open`,
+                );
+            }
+            return false;
+        }
+        if (Date.now() < failureState.lastFailureAt + PREFETCH_RETRY_BACKOFF_MS) {
+            if (!failureState.cooldownLogged) {
+                failureState.cooldownLogged = true;
+                Logger.getInstance().debug(
+                    `[CachePrefetcher] Automatic metadata refresh suppressed for ${connectionName}: retry cooldown active`,
+                );
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private recordConnectionPrefetchOutcome(
+        connectionName: string,
+        succeeded: boolean,
+        options?: ConnectionPrefetchOptions,
+    ): void {
+        if (succeeded) {
+            this.automaticPrefetchFailures.delete(connectionName);
+            return;
+        }
+        const previous = this.automaticPrefetchFailures.get(connectionName);
+        this.automaticPrefetchFailures.set(connectionName, {
+            failures: options?.manual ? 2 : Math.min(2, (previous?.failures ?? 0) + 1),
+            lastFailureAt: Date.now(),
+            cooldownLogged: false,
+            circuitOpenLogged: false,
+        });
+    }
+
+    private async runConnectionPrefetch(
+        connectionName: string,
+        runQueryFn: QueryRunnerRawFn,
+        options?: ConnectionPrefetchOptions,
+    ): Promise<void> {
         const isInProgress = this.connectionPrefetchInProgress.has(connectionName);
         const lastPrefetchTime = this.connectionPrefetchTriggered.get(connectionName);
         const cacheTTL = this.cache.getCacheTTL();
         const isPrefetchStale = lastPrefetchTime !== undefined && Date.now() - lastPrefetchTime >= cacheTTL;
 
         if (isInProgress) {
+            return;
+        }
+
+        if (!this.shouldStartConnectionPrefetch(connectionName, options)) {
             return;
         }
 
@@ -1604,6 +1867,7 @@ export class CachePrefetcher {
                 percent: 100,
                 message: error instanceof Error ? error.message : String(error),
             });
+            this.recordConnectionPrefetchOutcome(connectionName, false, options);
             return;
         }
         if (!prefetchLease) {
@@ -1612,6 +1876,16 @@ export class CachePrefetcher {
         }
 
         try {
+            if (isPrefetchStale) {
+                // An expired snapshot is not a useful merge base. Drop it before
+                // any refresh stage can read or preserve stale table layers.
+                await this.cache.discardExpiredConnectionMetadata?.(
+                    connectionName,
+                    prefetchLease,
+                    lastPrefetchTime,
+                );
+            }
+
             this.beginRefreshDetails(connectionName);
             if (isPrefetchStale) {
                 Logger.getInstance().info(`[CachePrefetcher] Prefetch stale for ${connectionName}, re-triggering`);
@@ -1705,6 +1979,8 @@ export class CachePrefetcher {
                     );
                 }
             }
+
+            this.recordConnectionPrefetchOutcome(connectionName, prefetchSucceeded && !hasError, options);
 
             await this.cache.releasePrefetchLock(prefetchLease);
         }
@@ -1874,11 +2150,15 @@ export class CachePrefetcher {
         );
         const stage5Duration = Date.now() - stage5Start;
 
+        const queryStagesComplete = stage2Complete && stage3Complete && stage4Complete && stage5Complete;
+        const reconciliation = queryStagesComplete
+            ? await this.reconcileMissingColumnLayers(connectionName, runQueryFn, lifecycle)
+            : undefined;
         const snapshotReport = this.cache.getSnapshotCompletenessReport?.(connectionName);
         const snapshotComplete = snapshotReport?.complete
             ?? this.cache.verifyCompleteSnapshot?.(connectionName)
             ?? this.cache.verifyStagesComplete(connectionName);
-        const stagesComplete = stage2Complete && stage3Complete && stage4Complete && stage5Complete;
+        const stagesComplete = queryStagesComplete;
         const failedStageNames = [
             stage2Complete ? undefined : 'schemas',
             stage3Complete ? undefined : 'objects',
@@ -1892,7 +2172,7 @@ export class CachePrefetcher {
                 missingStages: [...new Set([...snapshotReport.missingStages, ...failedStageNames])],
             }
             : undefined;
-        this.setRefreshSnapshotStatus(connectionName, refreshSnapshotReport);
+        this.setRefreshSnapshotStatus(connectionName, refreshSnapshotReport, reconciliation);
 
         // ─── SUMMARY ───
         const totalDuration = Date.now() - prefetchStartOverall;
@@ -2301,37 +2581,95 @@ export class CachePrefetcher {
             let completedDatabases = 0;
             let allQueriesComplete = true;
             const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+            const disabledRunnerSlots = new Set<number>();
 
-            // Per-database serial execution: three regular catalog scans followed
-            // by the optional external-table query. Serial order avoids flooding
-            // the database and respects the driver's single-active-reader model.
-            for (const dbName of databases) {
+            const configuredRunners = (runQueryFn as QueryRunnerRawFn & {
+                getColumnQueryRunners?: () => readonly MetadataColumnQueryRunner[];
+            }).getColumnQueryRunners?.() ?? [runQueryFn];
+            const runners: MetadataColumnQueryRunner[] = configuredRunners.length > 0
+                ? [...configuredRunners].slice(0, MAX_FULL_REFRESH_COLUMN_CONNECTIONS)
+                : [runQueryFn as MetadataColumnQueryRunner];
+
+            // A second physical session is optional. Probe it before scheduling
+            // any work so a failed login cannot make an otherwise valid refresh
+            // incomplete. Custom test/legacy runners may not expose this hook.
+            const readyRunners: MetadataColumnQueryRunner[] = [runners[0]];
+            // Never open more sessions than there are independent database
+            // jobs; a one-live-database refresh remains a one-session refresh.
+            const liveDatabaseCount = databases.filter((database) => {
+                const cacheDatabase = preserveCatalogIdentity
+                    ? buildNetezzaCacheDatabasePart(database)
+                    : database;
+                return !this.cache.isDatabaseDead(connectionName, cacheDatabase);
+            }).length;
+            for (const runner of runners.slice(1, Math.min(runners.length, liveDatabaseCount))) {
+                try {
+                    await runner.ensureConnected?.();
+                    readyRunners.push(runner);
+                } catch (error: unknown) {
+                    Logger.getInstance().warn(
+                        `[CachePrefetcher] Optional column metadata session unavailable for ${connectionName}; `
+                        + 'continuing with the primary session',
+                        error,
+                    );
+                    try {
+                        await runner.dispose?.();
+                    } catch (disposeError: unknown) {
+                        Logger.getInstance().debug(
+                            `[CachePrefetcher] Failed to close unavailable optional metadata session for ${connectionName}`,
+                            disposeError,
+                        );
+                    }
+                }
+            }
+            Logger.getInstance().debug(
+                `[CachePrefetcher] Column stage using ${readyRunners.length} physical session(s) for ${connectionName}`,
+            );
+
+            /**
+             * Fetch one database. The three regular catalog scans stay serial
+             * for one database; only independent databases are parallelized.
+             * Database-level failures are returned to the caller so a secondary
+             * worker can retry once on the primary session before dead-marking.
+             */
+            const fetchDatabase = async (
+                dbName: string,
+                runner: MetadataColumnQueryRunner,
+                runnerSlot: number,
+                reportProgress: boolean,
+            ): Promise<{ complete: boolean; mainCatalogFailure: boolean }> => {
                 const cacheDatabase = preserveCatalogIdentity
                     ? buildNetezzaCacheDatabasePart(dbName)
                     : dbName;
                 if (this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
-                    completedDatabases += 1;
-                    onProgress?.({
-                        completedDatabases,
-                        totalDatabases,
-                        completedTables: fetchedCount,
-                        totalTables,
-                    });
-                    continue;
+                    if (reportProgress) {
+                        completedDatabases += 1;
+                        onProgress?.({
+                            completedDatabases,
+                            totalDatabases,
+                            completedTables: fetchedCount,
+                            totalTables,
+                        });
+                    }
+                    return { complete: true, mainCatalogFailure: false };
                 }
 
                 const columnQueries = buildNetezzaColumnsWithKeysQueries(
                     preserveCatalogIdentity ? createNetezzaCatalogIdentifier(dbName) : dbName,
                 );
                 const queryStartTime = Date.now();
-                let queryDuration = 0;
+                let queryDuration: number;
                 let mainRows: RawColumnRowWithKeys[] = [];
                 let mainCatalogFailure = false;
+                let databaseComplete = true;
+                const limiterKey = readyRunners.length > 1
+                    ? `${connectionName}::full-column-${runnerSlot}`
+                    : connectionName;
 
                 try {
                     const rows = await this.runColumnsWithKeysQueries(
                         connectionName,
-                        runQueryFn,
+                        runner,
                         columnQueries,
                         {
                             source: 'connection-prefetch',
@@ -2339,21 +2677,19 @@ export class CachePrefetcher {
                             reason: 'full-column-prefetch',
                         },
                         lifecycle,
+                        limiterKey,
                     );
                     queryDuration = Date.now() - queryStartTime;
                     if (rows) {
                         mainRows = rows;
                     } else {
-                        allQueriesComplete = false;
+                        databaseComplete = false;
                     }
                 } catch (e: unknown) {
                     queryDuration = Date.now() - queryStartTime;
-                    allQueriesComplete = false;
+                    databaseComplete = false;
                     logPrefetchError(`[CachePrefetcher] Error fetching columns for DB ${dbName}:`, e);
                     mainCatalogFailure = isDatabaseLevelCatalogError(e);
-                    if (mainCatalogFailure) {
-                        this.cache.markDatabaseDead(connectionName, cacheDatabase);
-                    }
                 }
 
                 let externalRows: RawColumnRowWithKeys[] = [];
@@ -2363,7 +2699,7 @@ export class CachePrefetcher {
                     try {
                         const externalResult = await this.runPrefetchQuery(
                             connectionName,
-                            runQueryFn,
+                            runner,
                             NZ_QUERIES.listExternalColumnsWithKeys(
                                 preserveCatalogIdentity ? createNetezzaCatalogIdentifier(dbName) : dbName,
                             ),
@@ -2374,14 +2710,15 @@ export class CachePrefetcher {
                                 reason: 'external-table-columns',
                             },
                             lifecycle,
+                            limiterKey,
                         );
                         if (externalResult) {
                             externalRows = queryResultToRows<RawColumnRowWithKeys>(externalResult);
                         } else {
-                            allQueriesComplete = false;
+                            databaseComplete = false;
                         }
                     } catch (e: unknown) {
-                        allQueriesComplete = false;
+                        databaseComplete = false;
                         logPrefetchError(`[CachePrefetcher] Error fetching external columns for DB ${dbName}:`, e);
                     }
                 }
@@ -2403,17 +2740,69 @@ export class CachePrefetcher {
                 }
 
                 Logger.getInstance().debug(
-                    `[CachePrefetcher] [TIMING]     Columns ${dbName}: ${results.length} columns | query=${queryDuration}ms`,
+                    `[CachePrefetcher] [TIMING]     Columns ${dbName}: ${results.length} columns | `
+                    + `query=${queryDuration}ms runner=${runnerSlot + 1}`,
                 );
 
-                completedDatabases += 1;
-                onProgress?.({
-                    completedDatabases,
-                    totalDatabases,
-                    completedTables: fetchedCount,
-                    totalTables,
-                });
-            }
+                if (reportProgress) {
+                    completedDatabases += 1;
+                    onProgress?.({
+                        completedDatabases,
+                        totalDatabases,
+                        completedTables: fetchedCount,
+                        totalTables,
+                    });
+                }
+                return { complete: databaseComplete, mainCatalogFailure };
+            };
+
+            let nextDatabaseIndex = 0;
+            const workers = readyRunners.map(async (runner, runnerSlot) => {
+                while (true) {
+                    const databaseIndex = nextDatabaseIndex++;
+                    if (databaseIndex >= databases.length) {
+                        return;
+                    }
+                    const dbName = databases[databaseIndex];
+                    let outcome = await fetchDatabase(dbName, runner, runnerSlot, true);
+
+                    // A secondary session is best-effort. Retry its database
+                    // once on the primary session, bounded by this refresh.
+                    if (!outcome.complete && runnerSlot > 0 && readyRunners[0] !== runner) {
+                        Logger.getInstance().warn(
+                            `[CachePrefetcher] Retrying column metadata for ${dbName} on the primary session`,
+                        );
+                        outcome = await fetchDatabase(dbName, readyRunners[0], 0, false);
+                        // A failed optional session is not reused for later
+                        // databases. The primary worker will pick up those
+                        // jobs, while this refresh remains bounded to one
+                        // fallback attempt for the failed database.
+                        disabledRunnerSlots.add(runnerSlot);
+                        try {
+                            await runner.dispose?.();
+                        } catch (error: unknown) {
+                            Logger.getInstance().debug(
+                                `[CachePrefetcher] Failed to close broken optional metadata session for ${connectionName}`,
+                                error,
+                            );
+                        }
+                    }
+
+                    if (!outcome.complete) {
+                        allQueriesComplete = false;
+                        if (outcome.mainCatalogFailure) {
+                            const cacheDatabase = preserveCatalogIdentity
+                                ? buildNetezzaCacheDatabasePart(dbName)
+                                : dbName;
+                            this.cache.markDatabaseDead(connectionName, cacheDatabase);
+                        }
+                    }
+                    if (disabledRunnerSlots.has(runnerSlot)) {
+                        return;
+                    }
+                }
+            });
+            await Promise.all(workers);
 
             const totalDuration = Date.now() - prefetchStartTime;
             Logger.getInstance().debug(`[CachePrefetcher] [TIMING]   Columns total: ${fetchedCount} tables cached in ${totalDuration}ms`);
@@ -2466,6 +2855,7 @@ export class CachePrefetcher {
         this.externalObjectsPrefetchTriggeredSet.clear();
         this.connectionPrefetchTriggered.clear();
         this.connectionPrefetchInProgress.clear();
+        this.automaticPrefetchFailures.clear();
         this.lastPrefetchAttemptTime.clear();
         this.lastCheckpointTime.clear();
         Logger.getInstance().info('[CachePrefetcher] Prefetch tracking state reset');

@@ -79,7 +79,12 @@ describe('schemaTreeDataSource', () => {
     ]);
   });
 
-  it('hasTreeReadyColumnCache accepts columns when isPk is set', () => {
+  it('hasTreeReadyColumnCache distinguishes a missing layer from an explicit empty layer', () => {
+    expect(hasTreeReadyColumnCache(undefined)).toBe(false);
+    expect(hasTreeReadyColumnCache([])).toBe(true);
+  });
+
+  it('hasTreeReadyColumnCache accepts populated columns only when isPk is set', () => {
     expect(
       hasTreeReadyColumnCache([
         {

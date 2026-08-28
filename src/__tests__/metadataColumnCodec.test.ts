@@ -90,6 +90,16 @@ describe('metadataColumnCodec', () => {
         expect(decoded['DB1..NICK_TABLE'].data[0].isDistributionKey).toBe(true);
     });
 
+    it('should persist an explicit empty column layer', () => {
+        const encoded = encodeColumnLayers('DB1', {
+            'DB1.ADMIN.NO_COLUMNS': { timestamp: 300, data: [] },
+        });
+
+        expect(encoded.layers['DB1.ADMIN.NO_COLUMNS']).toBeDefined();
+        expect(decodeColumnLayerFromFile(encoded, 'DB1.ADMIN.NO_COLUMNS')).toEqual([]);
+        expect(decodeColumnFile(encoded)['DB1.ADMIN.NO_COLUMNS'].data).toEqual([]);
+    });
+
     it('should produce smaller JSON than expanded column objects at scale', () => {
         const largeLayers: Record<string, SerializedLayerEntry<ColumnMetadata>> = {};
         for (let table = 0; table < 50; table++) {

@@ -303,6 +303,33 @@ describe('SchemaProvider.getChildren after disk restart', () => {
         expect(runQueryRawMock).not.toHaveBeenCalled();
     });
 
+    it('persists an empty negative column layer and never queries SQL on repeated expands', async () => {
+        const cache1 = createMetadataCache(tempDir);
+        populateSmallCatalog(cache1);
+        const emptyColumnKey = `${SMALL_DB}.${SCHEMA}.NO_COLUMNS`;
+        cache1.setColumns(RESTART_CONN, emptyColumnKey, []);
+
+        const restarted = await restartFromDisk(cache1, tempDir);
+        const schemaProvider = createSchemaProvider(restarted);
+        const tableItem = createTableSchemaItem(
+            'NO_COLUMNS',
+            SMALL_DB,
+            SCHEMA,
+            RESTART_CONN,
+            1024,
+        );
+
+        expect(restarted.getColumns(RESTART_CONN, emptyColumnKey)).toBeUndefined();
+        await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
+        expect(restarted.getColumns(RESTART_CONN, emptyColumnKey)).toEqual([]);
+
+        for (let expand = 0; expand < 20; expand++) {
+            await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
+        }
+
+        expect(runQueryRawMock).not.toHaveBeenCalled();
+    });
+
     it('expands one large-catalog table at a time from disk without SQL', async () => {
         const cache1 = createMetadataCache(tempDir);
         populateLargeCatalogColumnLayers(cache1);

@@ -116,13 +116,20 @@ export function refreshTableLikeTypeForSchema(
 }
 
 /**
- * Ensure column layers are loaded from disk (when enabled) and return cached columns.
+ * Column cache is usable in the schema tree when it is either an explicit
+ * negative layer or contains the PK flags required for tree badges.
+ *
+ * An empty array is different from `undefined`: it records a completed
+ * catalog lookup that found no columns. Treating it as a miss would make each
+ * tree expansion repeat the same catalog query indefinitely.
  */
-/** Column cache is usable in the schema tree (PK flags present). */
 export function hasTreeReadyColumnCache(
   columns: ColumnMetadata[] | undefined,
 ): columns is ColumnMetadata[] {
-  return Boolean(columns?.length && columns[0].isPk !== undefined);
+  return Boolean(
+    columns
+    && (columns.length === 0 || columns[0].isPk !== undefined),
+  );
 }
 
 /** Normalize column rows before writing to cache (avoids stale-cache refetch loops). */
@@ -153,6 +160,7 @@ export function normalizeColumnCacheEntry(
   };
 }
 
+/** Ensure column layers are loaded from disk (when enabled) and return cached columns. */
 export async function getColumnsForTableObject(
   cache: MetadataCache,
   connectionName: string,

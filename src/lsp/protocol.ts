@@ -98,6 +98,8 @@ export interface MetadataTableInfoResponse {
   schema?: string;
   description?: string;
   columns: MetadataColumnItem[];
+  /** True when an empty columns array is a completed negative cache layer. */
+  columnsComplete?: boolean;
 }
 
 export type MetadataResponse =

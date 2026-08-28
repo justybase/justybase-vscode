@@ -268,6 +268,39 @@ describe('handleMetadataRequest cachedTableInfo', () => {
             columns: [{ name: 'ACCOUNT_ID', type: 'INT4' }],
         })
     })
+
+    it('marks an explicit empty Netezza column layer as complete', async () => {
+        const metadataCache = {
+            getColumns: jest.fn().mockReturnValue([]),
+            getColumnsAnySchema: jest.fn(),
+            getObjectsWithSchema: jest.fn(() => []),
+            getTablesAllSchemas: jest.fn(),
+            getDatabases: jest.fn(),
+        } as unknown as MetadataCache
+
+        const response = await handleMetadataRequest(
+            {
+                documentUri: 'file:///empty-columns.sql',
+                kind: 'cachedTableInfo',
+                database: 'db1',
+                schema: 'public',
+                table: 'no_columns',
+            },
+            mockExtensionContext,
+            {} as MetadataProvider,
+            metadataCache,
+            createConnectionManager('netezza', { effectiveDatabase: 'db1' }),
+        )
+
+        expect(response).toEqual({
+            exists: true,
+            table: 'no_columns',
+            database: 'db1',
+            schema: 'public',
+            columnsComplete: true,
+            columns: [],
+        })
+    })
 })
 
 describe('handleMetadataRequest Access metadata mapping', () => {

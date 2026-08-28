@@ -5,7 +5,9 @@
 
 import {
   CachePrefetcher,
+  PREFETCH_RETRY_BACKOFF_MS,
   QueryRunnerRawFn,
+  MetadataColumnQueryRunner,
   MetadataPrefetchProgress,
   MetadataPrefetchRefreshDetails,
 } from '../metadata/prefetch';
@@ -68,6 +70,7 @@ describe('CachePrefetcher', () => {
       schemaCache: new Map(),
       columnCache: new Map(),
       getCacheTTL: jest.fn().mockReturnValue(12 * 60 * 60 * 1000),
+      discardExpiredConnectionMetadata: jest.fn().mockResolvedValue(undefined),
       getTables: jest.fn(),
       setTables: jest.fn(),
       getColumns: jest.fn(),
@@ -647,6 +650,139 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
   });
 
   describe('triggerConnectionPrefetch', () => {
+    it('allows only one automatic retry after the five-minute cooldown', () => {
+      expect(prefetcher['shouldStartConnectionPrefetch'](connName)).toBe(true);
+
+      prefetcher['recordConnectionPrefetchOutcome'](connName, false);
+      expect(prefetcher['shouldStartConnectionPrefetch'](connName)).toBe(false);
+
+      const firstFailure = prefetcher['automaticPrefetchFailures'].get(connName)!;
+      firstFailure.lastFailureAt -= PREFETCH_RETRY_BACKOFF_MS;
+      expect(prefetcher['shouldStartConnectionPrefetch'](connName)).toBe(true);
+
+      prefetcher['recordConnectionPrefetchOutcome'](connName, false);
+      expect(prefetcher['shouldStartConnectionPrefetch'](connName)).toBe(false);
+      expect(prefetcher['shouldStartConnectionPrefetch'](connName, { manual: true })).toBe(true);
+    });
+
+    it('does not issue catalog SQL for repeated automatic triggers during cooldown or after the retry circuit opens', async () => {
+      mockRunQuery.mockResolvedValue({ columns: [{ name: 'DATABASE' }], data: [] });
+
+      await prefetcher['runConnectionPrefetch'](connName, mockRunQuery);
+      expect(mockRunQuery).toHaveBeenCalledTimes(1);
+
+      for (let keypress = 0; keypress < 20; keypress++) {
+        await prefetcher['runConnectionPrefetch'](connName, mockRunQuery);
+      }
+      expect(mockRunQuery).toHaveBeenCalledTimes(1);
+
+      const firstFailure = prefetcher['automaticPrefetchFailures'].get(connName)!;
+      firstFailure.lastFailureAt -= PREFETCH_RETRY_BACKOFF_MS;
+      await prefetcher['runConnectionPrefetch'](connName, mockRunQuery);
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+
+      for (let keypress = 0; keypress < 20; keypress++) {
+        await prefetcher['runConnectionPrefetch'](connName, mockRunQuery);
+      }
+      expect(mockRunQuery).toHaveBeenCalledTimes(2);
+      expect(mockCache.tryAcquirePrefetchLock).toHaveBeenCalledTimes(2);
+    });
+
+    it('discards an expired snapshot before the first refresh query', async () => {
+      const lifecycle: string[] = [];
+      const discardExpiredConnectionMetadata = mockCache.discardExpiredConnectionMetadata as jest.Mock;
+      discardExpiredConnectionMetadata.mockImplementation(async () => {
+        lifecycle.push('discard');
+      });
+      mockRunQuery.mockImplementation(async () => {
+        lifecycle.push('query');
+        return { columns: [{ name: 'DATABASE' }], data: [] };
+      });
+      prefetcher['connectionPrefetchTriggered'].set(
+        connName,
+        Date.now() - mockCache.getCacheTTL() - 1,
+      );
+
+      await prefetcher['runConnectionPrefetch'](connName, mockRunQuery);
+
+      expect(discardExpiredConnectionMetadata).toHaveBeenCalledWith(
+        connName,
+        expect.objectContaining({ connectionName: connName }),
+        expect.any(Number),
+      );
+      expect(lifecycle[0]).toBe('discard');
+      expect(lifecycle).toContain('query');
+    });
+
+    it('reconciles twelve surviving missing column layers with one object query', async () => {
+      const databasePart = '@NZEX@BAZA';
+      const missingKeys = Array.from(
+        { length: 12 },
+        (_unused, index) => `${databasePart}.ADMIN.T${index + 1}`,
+      );
+      mockCache.isNetezzaConnection = jest.fn().mockReturnValue(true);
+      mockCache.getMissingColumnLayerKeys = jest.fn().mockReturnValue(missingKeys);
+      mockCache.removeTableObjectByColumnKey = jest.fn().mockReturnValue(false);
+      mockCache.tableCache.set(`${connName}|${databasePart}.ADMIN`, {
+        data: missingKeys.map((_key, index) => ({
+          OBJNAME: `T${index + 1}`,
+          label: `T${index + 1}`,
+          SCHEMA: 'ADMIN',
+          DBNAME: 'BAZA',
+          objType: 'TABLE',
+          kind: 6,
+        })),
+        timestamp: Date.now(),
+      });
+      mockRunQuery.mockResolvedValue({
+        columns: [
+          { name: 'OBJNAME' }, { name: 'OBJID' }, { name: 'SCHEMA' },
+          { name: 'DBNAME' }, { name: 'OBJTYPE' },
+        ],
+        data: missingKeys.map((_key, index) => [`T${index + 1}`, index + 1, 'ADMIN', 'BAZA', 'TABLE']),
+      });
+
+      const result = await prefetcher['reconcileMissingColumnLayers'](
+        connName,
+        mockRunQuery,
+      );
+
+      expect(mockRunQuery).toHaveBeenCalledTimes(1);
+      expect(mockCache.setColumns).toHaveBeenCalledTimes(12);
+      for (const key of missingKeys) {
+        expect(mockCache.setColumns).toHaveBeenCalledWith(connName, key, []);
+      }
+      expect(result).toEqual({
+        unavailableColumnKeys: missingKeys,
+        removedStaleObjectCount: 0,
+      });
+    });
+
+    it('removes an object that disappeared before the column snapshot', async () => {
+      const missingKey = '@NZEX@BAZA.ADMIN.GONE';
+      mockCache.isNetezzaConnection = jest.fn().mockReturnValue(true);
+      mockCache.getMissingColumnLayerKeys = jest.fn().mockReturnValue([missingKey]);
+      mockCache.removeTableObjectByColumnKey = jest.fn().mockReturnValue(true);
+      mockCache.tableCache.set(`${connName}|@NZEX@BAZA.ADMIN`, {
+        data: [{
+          OBJNAME: 'GONE', label: 'GONE', SCHEMA: 'ADMIN', DBNAME: 'BAZA',
+          objType: 'TABLE', kind: 6,
+        }],
+        timestamp: Date.now(),
+      });
+      mockRunQuery.mockResolvedValue({ columns: [], data: [] });
+
+      const result = await prefetcher['reconcileMissingColumnLayers'](
+        connName,
+        mockRunQuery,
+      );
+
+      expect(mockRunQuery).toHaveBeenCalledTimes(1);
+      expect(mockCache.removeTableObjectByColumnKey).toHaveBeenCalledWith(connName, missingKey);
+      expect(mockCache.setColumns).not.toHaveBeenCalled();
+      expect(result).toEqual({ unavailableColumnKeys: [], removedStaleObjectCount: 1 });
+    });
+
     it('should not run if already mapped or in progress', () => {
       prefetcher['connectionPrefetchTriggered'].set(connName, Date.now());
       prefetcher.triggerConnectionPrefetch(connName, mockRunQuery);
@@ -855,6 +991,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       await (prefetcher as any).runConnectionPrefetch(connName, mockRunQuery);
 
       expect(verifyCompleteSnapshot).toHaveBeenCalledWith(connName);
+      expect(mockCache.discardExpiredConnectionMetadata).not.toHaveBeenCalled();
       expect(mockRunQuery).toHaveBeenCalled();
     });
 
@@ -1263,6 +1400,144 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       expect(mockCache.saveConnectionToDiskAfterPrefetch).not.toHaveBeenCalled();
       expect(prefetcher.hasConnectionPrefetchInProgress(connName)).toBe(false);
     });
+  });
+
+  it('uses configured column runner slots to process independent databases in parallel', async () => {
+    const dbNames = ['DB1', 'DB2', 'DB3', 'DB4', 'DB5', 'DB6'];
+    mockCache.getDatabases.mockReturnValue(dbNames.map(label => ({ label }) as any));
+    for (const dbName of dbNames) {
+      mockCache.tableCache.set(`${connName}|${dbName}.PUBLIC`, {
+        data: [{ label: `T_${dbName}` }],
+        timestamp: Date.now(),
+      });
+    }
+
+    let activeQueries = 0;
+    let maxActiveQueries = 0;
+    const databaseKinds = new Map<string, string[]>();
+    const execute = async (_sql: string, context?: { database?: string; kind?: string }) => {
+      activeQueries += 1;
+      maxActiveQueries = Math.max(maxActiveQueries, activeQueries);
+      await new Promise(resolve => setTimeout(resolve, 3));
+      activeQueries -= 1;
+      const database = context?.database ?? 'UNKNOWN';
+      const kinds = databaseKinds.get(database) ?? [];
+      kinds.push(context?.kind ?? 'unknown');
+      databaseKinds.set(database, kinds);
+      if (context?.kind === 'column-keys') return keyFlagResult();
+      if (context?.kind === 'column-distribution') return distributionFlagResult();
+      return baseColumnResult([[1, `T_${database}`, database, 'PUBLIC', 'ID', 'INT4', 1, '']]);
+    };
+    mockRunQuery.mockImplementation(execute as QueryRunnerRawFn);
+    const secondaryRunners: MetadataColumnQueryRunner[] = [1, 2].map(() => {
+      const runner = jest.fn(execute) as unknown as MetadataColumnQueryRunner;
+      runner.ensureConnected = jest.fn().mockResolvedValue(undefined);
+      return runner;
+    });
+    (mockRunQuery as QueryRunnerRawFn & {
+      getColumnQueryRunners?: () => readonly MetadataColumnQueryRunner[];
+    }).getColumnQueryRunners = () => [mockRunQuery, ...secondaryRunners];
+
+    const result = await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
+
+    expect(result).toBe(true);
+    expect(maxActiveQueries).toBeGreaterThan(1);
+    expect(maxActiveQueries).toBeLessThanOrEqual(3);
+    expect(databaseKinds.size).toBe(dbNames.length);
+    for (const dbName of dbNames) {
+      expect(databaseKinds.get(dbName)).toEqual(['columns', 'column-keys', 'column-distribution']);
+    }
+    expect(secondaryRunners[0]!.ensureConnected).toHaveBeenCalledTimes(1);
+    expect(secondaryRunners[1]!.ensureConnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not open optional column sessions when only one database is available', async () => {
+    mockCache.getDatabases.mockReturnValue([{ label: 'DB1' } as any]);
+    mockCache.tableCache.set(`${connName}|DB1.PUBLIC`, {
+      data: [{ label: 'T1' }],
+      timestamp: Date.now(),
+    });
+    mockRunQuery.mockImplementation(async (_sql, context) => {
+      if (context?.kind === 'column-keys') return keyFlagResult();
+      if (context?.kind === 'column-distribution') return distributionFlagResult();
+      return baseColumnResult([[1, 'T1', 'DB1', 'PUBLIC', 'ID', 'INT4', 1, '']]);
+    });
+    const optional = jest.fn() as unknown as MetadataColumnQueryRunner;
+    optional.ensureConnected = jest.fn().mockResolvedValue(undefined);
+    (mockRunQuery as QueryRunnerRawFn & {
+      getColumnQueryRunners?: () => readonly MetadataColumnQueryRunner[];
+    }).getColumnQueryRunners = () => [mockRunQuery, optional];
+
+    await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
+
+    expect(optional.ensureConnected).not.toHaveBeenCalled();
+    expect(mockRunQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it('falls back to one primary worker when an optional session cannot connect', async () => {
+    const dbNames = ['DB1', 'DB2'];
+    mockCache.getDatabases.mockReturnValue(dbNames.map(label => ({ label }) as any));
+    for (const dbName of dbNames) {
+      mockCache.tableCache.set(`${connName}|${dbName}.PUBLIC`, {
+        data: [{ label: `T_${dbName}` }],
+        timestamp: Date.now(),
+      });
+    }
+    mockRunQuery.mockImplementation(async (_sql, context) => {
+      if (context?.kind === 'column-keys') return keyFlagResult();
+      if (context?.kind === 'column-distribution') return distributionFlagResult();
+      return baseColumnResult([[1, `T_${context?.database}`, context?.database, 'PUBLIC', 'ID', 'INT4', 1, '']]);
+    });
+    const optional = jest.fn() as unknown as MetadataColumnQueryRunner;
+    optional.ensureConnected = jest.fn().mockRejectedValue(new Error('login rejected'));
+    optional.dispose = jest.fn().mockResolvedValue(undefined);
+    (mockRunQuery as QueryRunnerRawFn & {
+      getColumnQueryRunners?: () => readonly MetadataColumnQueryRunner[];
+    }).getColumnQueryRunners = () => [mockRunQuery, optional];
+
+    const result = await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
+
+    expect(result).toBe(true);
+    expect(optional.ensureConnected).toHaveBeenCalledTimes(1);
+    expect(optional.dispose).toHaveBeenCalledTimes(1);
+    expect(mockRunQuery).toHaveBeenCalledTimes(dbNames.length * 3);
+    expect(mockCache.markDatabaseDead).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the primary session once when a secondary worker fails', async () => {
+    const dbNames = ['DB1', 'DB2', 'DB3'];
+    mockCache.getDatabases.mockReturnValue(dbNames.map(label => ({ label }) as any));
+    for (const dbName of dbNames) {
+      mockCache.tableCache.set(`${connName}|${dbName}.PUBLIC`, {
+        data: [{ label: `T_${dbName}` }],
+        timestamp: Date.now(),
+      });
+    }
+
+    const primary = jest.fn(async (_sql: string, context?: { database?: string; kind?: string }) => {
+      if (context?.kind === 'column-keys') return keyFlagResult();
+      if (context?.kind === 'column-distribution') return distributionFlagResult();
+      return baseColumnResult([[1, `T_${context?.database}`, context?.database, 'PUBLIC', 'ID', 'INT4', 1, '']]);
+    }) as unknown as MetadataColumnQueryRunner;
+    const secondary = jest.fn(async (_sql: string, context?: { database?: string }) => {
+      if (context?.database === 'DB2') {
+        throw new Error('secondary session dropped');
+      }
+      return baseColumnResult([]);
+    }) as unknown as MetadataColumnQueryRunner;
+    secondary.ensureConnected = jest.fn().mockResolvedValue(undefined);
+    (primary as MetadataColumnQueryRunner & {
+      getColumnQueryRunners?: () => readonly MetadataColumnQueryRunner[];
+    }).getColumnQueryRunners = () => [primary, secondary];
+
+    const result = await prefetcher['prefetchAllColumnsForConnection'](connName, primary);
+
+    expect(result).toBe(true);
+    expect(secondary).toHaveBeenCalledTimes(1);
+    expect(primary).toHaveBeenCalledTimes(9);
+    expect(Logger.getInstance().warn).toHaveBeenCalledWith(
+      expect.stringContaining('Retrying column metadata for DB2'),
+    );
   });
 });
 

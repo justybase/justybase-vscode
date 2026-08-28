@@ -4,6 +4,20 @@ const DEFAULT_METADATA_QUERY_CONCURRENCY = 1;
 /** Upper bound matching the `justybase.metadata.queryConcurrency` setting maximum. */
 export const MAX_METADATA_QUERY_CONCURRENCY = 16;
 
+/** Bounds for the opt-in physical-session pool used by full-refresh columns. */
+export const DEFAULT_FULL_REFRESH_COLUMN_CONNECTIONS = 1;
+export const MAX_FULL_REFRESH_COLUMN_CONNECTIONS = 8;
+
+export function normalizeFullRefreshColumnConnections(value: number | undefined): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return DEFAULT_FULL_REFRESH_COLUMN_CONNECTIONS;
+    }
+    return Math.min(
+        MAX_FULL_REFRESH_COLUMN_CONNECTIONS,
+        Math.max(DEFAULT_FULL_REFRESH_COLUMN_CONNECTIONS, Math.floor(value)),
+    );
+}
+
 let metadataQueryConcurrencyLimit = DEFAULT_METADATA_QUERY_CONCURRENCY;
 
 /** Maximum server-side execution time for one metadata catalog query. */

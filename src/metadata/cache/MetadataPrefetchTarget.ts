@@ -24,7 +24,18 @@ export interface MetadataSnapshotCompletenessReport {
   missingColumnCount: number;
 }
 
+export interface ConnectionPrefetchOptions {
+  /** Explicit user refreshes bypass the automatic retry circuit. */
+  manual?: boolean;
+}
+
 export interface MetadataPrefetchTarget extends MetadataStorageReader {
+  /** Discard an expired connection snapshot before starting a full refresh. */
+  discardExpiredConnectionMetadata?(
+    connectionName: string,
+    lease?: PrefetchLease,
+    expectedPrefetchCompletedAt?: number,
+  ): Promise<void>;
   /** Identifier case policy for catalog rows; only Netezza uses exact catalog identity here. */
   isNetezzaConnection?(connectionName: string): boolean;
   isDatabaseDead(connectionName: string, dbName: string | undefined): boolean;
@@ -73,6 +84,10 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   getSnapshotCompletenessReport?(
     connectionName: string,
   ): MetadataSnapshotCompletenessReport;
+  /** Uncapped exact column keys used by refresh reconciliation. */
+  getMissingColumnLayerKeys?(connectionName: string): readonly string[];
+  /** Remove one stale table-like object identified by its exact column-layer key. */
+  removeTableObjectByColumnKey?(connectionName: string, columnKey: string): boolean;
   saveConnectionToDiskAfterPrefetch(
     connectionName: string,
     hasError: boolean, lease: PrefetchLease,

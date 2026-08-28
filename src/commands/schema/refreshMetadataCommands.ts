@@ -61,6 +61,7 @@ export function registerRefreshMetadataCommands(
                                             maxRows: 1000000,
                                             timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
                                         }),
+                                        { manual: true },
                                     );
 								}
 								return;

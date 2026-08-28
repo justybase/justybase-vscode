@@ -81,10 +81,34 @@ export async function initializeDiskCache(deps: DiskLifecycleDeps): Promise<void
     return;
   }
 
-  const { loadable, freshTimestamps } = deps.diskStorage.filterLoadableManifestConnections(
+  const { loadable, freshTimestamps, expiredConnectionNames } = deps.diskStorage.filterLoadableManifestConnections(
     manifests,
     deps.store.cacheTtl,
   );
+
+  // Do not hydrate expired manifests. Remove their index entries and payloads
+  // before any connection can use them as a refresh merge base. Failures are
+  // non-fatal: the entry is still excluded from this startup and a clean live
+  // refresh will be attempted by the normal prefetch path.
+  for (const connectionName of expiredConnectionNames) {
+    if (!deps.isCacheGenerationCurrent(generation)) {
+      return;
+    }
+    try {
+      await deps.diskStorage.removeConnection(connectionName, {
+        expectedPrefetchCompletedAt: manifests.get(connectionName)?.prefetchCompletedAt,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      Logger.getInstance().warn(
+        `[MetadataCache] Failed to remove expired disk metadata for ${connectionName}: ${message}`,
+      );
+    }
+  }
+  if (!deps.isCacheGenerationCurrent(generation)) {
+    return;
+  }
+
   const legacyLoadable = new Map(
     [...loadable].filter(([connectionName]) =>
       supportsLegacyMetadataPrefetchForConnection(

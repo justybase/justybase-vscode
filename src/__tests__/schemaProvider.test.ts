@@ -1133,6 +1133,45 @@ describe('SchemaProvider', () => {
             expect(children[1].description).toBe('txt - User name');
         });
 
+        it('treats an empty negative column layer as a cache hit on repeated expands', async () => {
+            const { fetchTableColumnsWithFallback } = jest.requireMock('../providers/tableMetadataProvider') as {
+                fetchTableColumnsWithFallback: jest.Mock;
+            };
+            mockMetadataCache.getColumns.mockReturnValue([]);
+
+            await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
+            await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
+
+            expect(mockMetadataCache.ensureColumnsLoadedForTableKey).toHaveBeenCalledTimes(2);
+            expect(fetchTableColumnsWithFallback).not.toHaveBeenCalled();
+            expect(runQueryRaw).not.toHaveBeenCalled();
+        });
+
+        it('reuses an empty negative column layer for repeated favorite expands', async () => {
+            const { fetchTableColumnsWithFallback } = jest.requireMock('../providers/tableMetadataProvider') as {
+                fetchTableColumnsWithFallback: jest.Mock;
+            };
+            const favoriteItem = new SchemaItem(
+                'USERS',
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'favoritesObject:TABLE',
+                'TESTDB',
+                'TABLE',
+                'PUBLIC',
+                1,
+                'User table',
+                'TestConnection',
+            );
+            mockMetadataCache.getColumns.mockReturnValue([]);
+
+            await expect(schemaProvider.getChildren(favoriteItem)).resolves.toEqual([]);
+            await expect(schemaProvider.getChildren(favoriteItem)).resolves.toEqual([]);
+
+            expect(mockMetadataCache.ensureColumnsLoadedForTableKey).toHaveBeenCalledTimes(2);
+            expect(fetchTableColumnsWithFallback).not.toHaveBeenCalled();
+            expect(runQueryRaw).not.toHaveBeenCalled();
+        });
+
         it('should preserve catalog table identity in cache keys', async () => {
             const lowerTableItem = new SchemaItem(
                 'lower_table',

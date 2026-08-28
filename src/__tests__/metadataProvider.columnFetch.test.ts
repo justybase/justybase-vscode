@@ -228,6 +228,21 @@ describe('MetadataProvider column fetch deduplication', () => {
         );
     });
 
+    it('does not replace a suppressed full refresh with database-wide authoring warmup', async () => {
+        metadataCache.isConnectionPrefetchFresh.mockReturnValue(false);
+
+        (provider as unknown as {
+            scheduleColumnMetadataWarmup(connectionName: string, database: string): void;
+        }).scheduleColumnMetadataWarmup('CONN', 'DB1');
+        await new Promise<void>(resolve => setImmediate(resolve));
+
+        expect(metadataCache.triggerConnectionPrefetch).toHaveBeenCalledWith(
+            'CONN',
+            expect.any(Function),
+        );
+        expect(metadataCache.prefetchColumnsForDatabase).not.toHaveBeenCalled();
+    });
+
     it('resolves schema from cache and stores column descriptions', async () => {
         const { fetchTableColumnsWithFallback } = jest.requireMock('../providers/tableMetadataProvider') as {
             fetchTableColumnsWithFallback: jest.Mock;

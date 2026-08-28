@@ -16,6 +16,19 @@ import { extractTableReferences } from "./diagnosticsUtils";
 import type { MetadataColumnLookupOptions } from "../metadata/metadataQueryDiagnostics";
 import { createNetezzaUserIdentifier } from "../dialects/netezza/metadata/identifierUtils";
 
+function hasUsableTableInfo(
+  tableInfo: MetadataTableInfoResponse | undefined,
+): tableInfo is MetadataTableInfoResponse {
+  return Boolean(
+    tableInfo
+    && (
+      tableInfo.columns.length > 0
+      || tableInfo.exists === false
+      || tableInfo.columnsComplete === true
+    ),
+  );
+}
+
 export interface Logger {
   error: (message: string) => void;
 }
@@ -164,7 +177,10 @@ export class MetadataBridge {
         ? this.buildTableCacheKey(connectionName, database, schema, table)
         : undefined;
       const cached = cacheKey ? this.tableInfoCache.get(cacheKey) : undefined;
-      if (cached && cached.columns.length > 0) {
+      if (
+        cached
+        && (cached.columns.length > 0 || cached.columnsComplete === true)
+      ) {
         return cached.columns;
       }
 
@@ -195,7 +211,10 @@ export class MetadataBridge {
       table,
       schema,
     );
-    if (tableInfo && tableInfo.columns.length > 0) {
+    if (
+      tableInfo
+      && (tableInfo.columns.length > 0 || tableInfo.columnsComplete === true)
+    ) {
       return tableInfo.columns;
     }
 
@@ -205,7 +224,10 @@ export class MetadataBridge {
       table,
       schema,
     );
-    if (fetched && fetched.columns.length > 0) {
+    if (
+      fetched
+      && (fetched.columns.length > 0 || fetched.columnsComplete === true)
+    ) {
       return fetched.columns;
     }
 
@@ -243,7 +265,7 @@ export class MetadataBridge {
       table,
       schema,
     );
-    if (cached && (cached.columns.length > 0 || cached.exists === false)) {
+    if (hasUsableTableInfo(cached)) {
       return cached;
     }
 
@@ -255,7 +277,7 @@ export class MetadataBridge {
       table,
     );
     const localCached = this.tableInfoCache.get(cacheKey);
-    if (localCached && (localCached.columns.length > 0 || localCached.exists === false)) {
+    if (hasUsableTableInfo(localCached)) {
       return localCached;
     }
 
@@ -289,7 +311,7 @@ export class MetadataBridge {
       table,
     );
     const cached = this.tableInfoCache.get(cacheKey);
-    if (cached && (cached.columns.length > 0 || cached.exists === false)) {
+    if (hasUsableTableInfo(cached)) {
       return cached;
     }
 
@@ -328,7 +350,7 @@ export class MetadataBridge {
         table,
       );
       const direct = this.tableInfoCache.get(cacheKey);
-      if (direct && (direct.columns.length > 0 || direct.exists === false)) {
+      if (hasUsableTableInfo(direct)) {
         return direct;
       }
     }
@@ -367,7 +389,7 @@ export class MetadataBridge {
       ) {
         continue;
       }
-      if (info.columns.length === 0 && info.exists !== false) {
+      if (!hasUsableTableInfo(info)) {
         continue;
       }
       return info;
@@ -521,7 +543,7 @@ export class MetadataBridge {
         reference.table,
         reference.schema,
       );
-      if (!cached || (cached.columns.length === 0 && cached.exists !== false)) {
+      if (!hasUsableTableInfo(cached)) {
         databasesToWarm.add(database);
       }
     }
@@ -734,7 +756,7 @@ export class MetadataBridge {
         reference.table,
         reference.schema,
       );
-      if (!cached || (cached.columns.length === 0 && cached.exists !== false)) {
+      if (!hasUsableTableInfo(cached)) {
         return false;
       }
     }
@@ -966,6 +988,9 @@ export class MetadataBridge {
         typeof response.description === "string"
           ? response.description.trim() || undefined
           : undefined,
+      ...("columnsComplete" in response && response.columnsComplete === true
+        ? { columnsComplete: true }
+        : {}),
       columns,
     };
   }

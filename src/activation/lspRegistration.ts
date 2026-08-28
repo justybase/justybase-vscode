@@ -861,6 +861,7 @@ async function getCachedTableInfo(
     table,
     database,
     schema: resolvedSchema ?? schema,
+    ...(columns !== undefined && databaseKind !== 'file' ? { columnsComplete: true } : {}),
     columns: [],
   };
 }
