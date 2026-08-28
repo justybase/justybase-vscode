@@ -23,4 +23,35 @@ FROM
     expect(result.errors.some((error) => error.code === "SQL020")).toBe(false);
     expect(result.warnings).toHaveLength(0);
   });
+
+  it("resolves a subquery alias without AS", () => {
+    const result = new SqlValidator(
+      undefined,
+      sqliteSqlAuthoring.validation,
+    ).validate(`
+SELECT SUB1.COL2
+FROM (
+    SELECT 2 AS COL2
+) SUB1`);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("resolves aliases through nested subqueries", () => {
+    const result = new SqlValidator(
+      undefined,
+      sqliteSqlAuthoring.validation,
+    ).validate(`
+SELECT OUTER_SUB.COL2
+FROM (
+    SELECT INNER_SUB.COL2
+    FROM (
+        SELECT 2 AS COL2
+    ) INNER_SUB
+) OUTER_SUB`);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
+  });
 });
