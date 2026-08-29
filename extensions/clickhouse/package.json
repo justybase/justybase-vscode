@@ -1,0 +1,72 @@
+{
+    "name": "justybaselite-clickhouse",
+    "displayName": "JustyBase SQL Editor (ClickHouse)",
+    "description": "Optional ClickHouse companion for JustyBase SQL Editor",
+    "version": "3.17.6",
+    "publisher": "krzysztof-d",
+    "license": "Apache-2.0",
+    "icon": "icon.png",
+    "engines": {
+        "vscode": "^1.103.2",
+        "node": ">=22.12.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Data Science",
+        "Other"
+    ],
+    "homepage": "https://github.com/justybase/justybase-vscode",
+    "bugs": {
+        "url": "https://github.com/justybase/justybase-vscode/issues"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/justybase/justybase-vscode.git"
+    },
+    "keywords": [
+        "SQL",
+        "ClickHouse",
+        "database",
+        "OLAP"
+    ],
+    "main": "./dist/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "extensionDependencies": [
+        "krzysztof-d.justybaselite-netezza"
+    ],
+    "contributes": {
+        "menus": {
+            "view/item/context": [
+                {
+                    "command": "justybase.clickhouse.optimizeTable",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == clickhouse",
+                    "group": "3_maintenance"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "justybase.clickhouse.optimizeTable",
+                "title": "ClickHouse: Optimize Table",
+                "icon": "$(database)",
+                "enablement": "justybase.schemaDatabaseKind == clickhouse"
+            }
+        ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
+        "build": "node esbuild.clickhouse.js",
+        "build:minified": "node esbuild.clickhouse.js --minify",
+        "build:dev": "node esbuild.clickhouse.js",
+        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/@clickhouse/client')) { console.error('Missing @clickhouse/client. Run npm install in extensions/clickhouse before packaging.'); process.exit(1); }\"",
+        "prepackage": "npm run verify:runtime-deps",
+        "package": "node ../../scripts/package-optional-vsix.js package"
+    },
+    "dependencies": {
+        "@clickhouse/client": "^1.23.1"
+    },
+    "preview": true
+}

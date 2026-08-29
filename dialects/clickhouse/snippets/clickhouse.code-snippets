@@ -1,0 +1,44 @@
+{
+  "ClickHouse table": {
+    "prefix": "clickhouse-table",
+    "body": [
+      "CREATE TABLE ${1:table_name} (",
+      "  ${2:id} UInt64,",
+      "  ${3:event_time} DateTime,",
+      "  ${4:value} String",
+      ")",
+      "ENGINE = MergeTree",
+      "PARTITION BY toYYYYMM(${3:event_time})",
+      "ORDER BY (${2:id}, ${3:event_time});"
+    ],
+    "description": "Create a ClickHouse MergeTree table"
+  },
+  "ClickHouse select": {
+    "prefix": "clickhouse-select",
+    "body": [
+      "SELECT ${1:*}",
+      "FROM ${2:database}.${3:table}",
+      "PREWHERE ${4:condition}",
+      "ORDER BY ${5:event_time}",
+      "LIMIT ${6:1000};"
+    ],
+    "description": "Start a ClickHouse SELECT with PREWHERE"
+  },
+  "ClickHouse explain": {
+    "prefix": "clickhouse-explain",
+    "body": [
+      "EXPLAIN",
+      "SELECT ${1:*}",
+      "FROM ${2:database}.${3:table}",
+      "WHERE ${4:condition};"
+    ],
+    "description": "Inspect a ClickHouse query plan"
+  },
+  "ClickHouse optimize": {
+    "prefix": "clickhouse-optimize",
+    "body": [
+      "OPTIMIZE TABLE ${1:database}.${2:table};"
+    ],
+    "description": "Start a background ClickHouse merge"
+  }
+}

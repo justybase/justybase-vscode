@@ -33,6 +33,10 @@ The default lifecycle opens a connection when work needs it and releases it when
 - Cancellation requests the driver cancellation and stops further UI rendering. A database that cannot cancel immediately may finish server-side before the connection is reusable.
 - Metadata sessions are separate from user query sessions. On Netezza, the optional metadata session sweep needs the configured privilege; user queries are never dropped by that sweep.
 
+## ClickHouse connections
+
+Install the ClickHouse companion and choose **HTTP** or **HTTPS / TLS** in the connection form. The default port is `8123`; use the database name, user, and password accepted by the ClickHouse HTTP interface. HTTPS supports certificate verification or an explicit “encrypt, skip validation” mode for environments where trust is terminated elsewhere. Query results stream over HTTP, and the companion keeps database scope in the selected tab.
+
 ## Security checklist
 
 1. Use a read-only database account for exploration and AI context.

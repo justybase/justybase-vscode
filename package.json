@@ -2258,12 +2258,12 @@
         },
         {
           "command": "netezza.addTableComment",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.addColumnComment",
-          "when": "view == netezza.schema && viewItem == column && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "view == netezza.schema && viewItem == column && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "1_actions"
         },
         {
@@ -2273,7 +2273,7 @@
         },
         {
           "command": "netezza.vacuumTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == sqlite)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == sqlite || justybase.schemaDatabaseKind == clickhouse)",
           "group": "3_maintenance"
         },
         {
@@ -2318,22 +2318,22 @@
         },
         {
           "command": "netezza.addPrimaryKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "5_schema@1"
         },
         {
           "command": "netezza.alterTableWizard",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "5_schema@0"
         },
         {
           "command": "netezza.addForeignKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "5_schema@2"
         },
         {
           "command": "netezza.addUniqueConstraint",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "5_schema@3"
         },
         {
@@ -2378,7 +2378,7 @@
         },
         {
           "command": "netezza.recreateTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql || justybase.schemaDatabaseKind == sqlite)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql || justybase.schemaDatabaseKind == sqlite || justybase.schemaDatabaseKind == clickhouse)",
           "group": "3_maintenance"
         },
         {
@@ -2388,22 +2388,22 @@
         },
         {
           "command": "netezza.changeOwner",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.renameTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.viewEditData",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "1_copy"
         },
         {
           "command": "netezza.createTableDesigner",
-          "when": "view == netezza.schema && viewItem == typeGroup:TABLE && justybase.schemaDatabaseKind != db2",
+          "when": "view == netezza.schema && viewItem == typeGroup:TABLE && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "0_create"
         },
         {
@@ -2608,6 +2608,13 @@
       {
         "path": "./dialects/sqlite/syntaxes/sqlite.tmLanguage.json",
         "scopeName": "sqlite.injection",
+        "injectTo": [
+          "source.sql"
+        ]
+      },
+      {
+        "path": "./dialects/clickhouse/syntaxes/clickhouse.tmLanguage.json",
+        "scopeName": "clickhouse.injection",
         "injectTo": [
           "source.sql"
         ]
@@ -3523,6 +3530,10 @@
       {
         "language": "sql",
         "path": "./dialects/sqlite/snippets/sqlite.code-snippets"
+      },
+      {
+        "language": "sql",
+        "path": "./dialects/clickhouse/snippets/clickhouse.code-snippets"
       }
     ],
     "walkthroughs": [
@@ -4348,8 +4359,9 @@
     "build:snowflake": "node scripts/run-optional-extension-task.js snowflake build",
     "build:mssql": "node scripts/run-optional-extension-task.js mssql build",
     "build:mysql": "node scripts/run-optional-extension-task.js mysql build",
+    "build:clickhouse": "node scripts/run-optional-extension-task.js clickhouse build",
     "build:access": "node scripts/run-optional-extension-task.js access build",
-    "build:companions": "npm run build:db2 && npm run build:duckdb && npm run build:oracle && npm run build:postgresql && npm run build:vertica && npm run build:snowflake && npm run build:mssql && npm run build:mysql && npm run build:access",
+    "build:companions": "npm run build:db2 && npm run build:duckdb && npm run build:oracle && npm run build:postgresql && npm run build:vertica && npm run build:snowflake && npm run build:mssql && npm run build:mysql && npm run build:clickhouse && npm run build:access",
     "build:dev": "node esbuild.js",
     "build:watch": "node esbuild.js --watch",
     "clean:db2": "rimraf extensions/db2/dist",
@@ -4364,6 +4376,7 @@
     "install:snowflake": "node scripts/run-optional-extension-task.js snowflake install",
     "install:mssql": "node scripts/run-optional-extension-task.js mssql install",
     "install:mysql": "node scripts/run-optional-extension-task.js mysql install",
+    "install:clickhouse": "node scripts/run-optional-extension-task.js clickhouse install",
     "install:access": "node scripts/run-optional-extension-task.js access install",
     "lint:db2": "eslint extensions/db2/src --ext .ts",
     "lint:duckdb": "node scripts/run-optional-extension-task.js duckdb lint",
@@ -4373,6 +4386,7 @@
     "lint:snowflake": "node scripts/run-optional-extension-task.js snowflake lint",
     "lint:mssql": "node scripts/run-optional-extension-task.js mssql lint",
     "lint:mysql": "node scripts/run-optional-extension-task.js mysql lint",
+    "lint:clickhouse": "node scripts/run-optional-extension-task.js clickhouse lint",
     "lint:access": "node scripts/run-optional-extension-task.js access lint",
     "rebuild:db2": "npm run db2:runtime:electron",
     "test:db2:vscode-runtime": "node scripts/run-db2-vscode-compat.js",
@@ -4384,6 +4398,7 @@
     "verify:snowflake": "node scripts/run-optional-extension-task.js snowflake verify",
     "verify:mssql": "node scripts/run-optional-extension-task.js mssql verify",
     "verify:mysql": "node scripts/run-optional-extension-task.js mysql verify",
+    "verify:clickhouse": "node scripts/run-optional-extension-task.js clickhouse verify",
     "verify:access": "node scripts/run-optional-extension-task.js access verify",
     "test": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest",
     "test:validate": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.validate.config.js",
@@ -4428,6 +4443,7 @@
     "test:oracle:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/oracle.integration.test.ts",
     "test:mssql:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/mssql.integration.test.ts",
     "test:mysql:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/mysql.integration.test.ts",
+    "test:clickhouse:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/clickhouse.integration.test.ts",
     "test:postgres:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/postgres.integration.test.ts",
     "test:vertica:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/vertica.integration.test.ts",
     "test:snowflake:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/snowflake.integration.test.ts",
@@ -4462,6 +4478,7 @@
     "check-types:snowflake": "node scripts/run-optional-extension-task.js snowflake check-types",
     "check-types:mssql": "node scripts/run-optional-extension-task.js mssql check-types",
     "check-types:mysql": "node scripts/run-optional-extension-task.js mysql check-types",
+    "check-types:clickhouse": "node scripts/run-optional-extension-task.js clickhouse check-types",
     "check-types:access": "node scripts/run-optional-extension-task.js access check-types",
     "clean": "rimraf dist",
     "docs:build": "node scripts/build-docs.mjs",
@@ -4477,6 +4494,7 @@
     "package:snowflake": "node scripts/run-optional-extension-task.js snowflake package",
     "package:mssql": "node scripts/run-optional-extension-task.js mssql package",
     "package:mysql": "node scripts/run-optional-extension-task.js mysql package",
+    "package:clickhouse": "node scripts/run-optional-extension-task.js clickhouse package",
     "package:access": "node scripts/run-optional-extension-task.js access package",
     "package:access:full": "npm run lint:access && npm run check-types:access && npm run build:access && npm run package:access",
     "package:db2:full": "npm run rebuild:db2 && npm run clean:db2 && npm run lint:db2 && npm run check-types:db2 && npm run build:db2 && npm run package:db2",
@@ -4487,6 +4505,7 @@
     "package:snowflake:full": "npm run lint:snowflake && npm run check-types:snowflake && npm run build:snowflake && npm run package:snowflake",
     "package:mssql:full": "npm run lint:mssql && npm run check-types:mssql && npm run build:mssql && npm run package:mssql",
     "package:mysql:full": "npm run lint:mysql && npm run check-types:mysql && npm run build:mysql && npm run package:mysql",
+    "package:clickhouse:full": "npm run lint:clickhouse && npm run check-types:clickhouse && npm run build:clickhouse && npm run package:clickhouse",
     "package:pre": "npm run build && npm run package",
     "publish": "vsce publish --no-dependencies",
     "version:check": "node scripts/version-sync.js check",

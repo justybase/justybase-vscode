@@ -27,6 +27,7 @@ const DEFAULT_TYPE_OPTIONS_BY_KIND: Record<DatabaseKind, string[]> = {
     snowflake: ['INTEGER', 'BIGINT', 'NUMERIC(18,2)', 'DATE', 'TIMESTAMP_NTZ', 'BOOLEAN', 'VARCHAR(255)', 'TEXT'],
     oracle: ['NUMBER(10,0)', 'NUMBER(19,0)', 'NUMBER(18,2)', 'DATE', 'TIMESTAMP', 'NUMBER(1)', 'VARCHAR2(255 CHAR)', 'CLOB'],
     mysql: ['INTEGER', 'BIGINT', 'DECIMAL(18,2)', 'DATE', 'DATETIME', 'BOOLEAN', 'VARCHAR(255)', 'TEXT'],
+    clickhouse: ['Int64', 'UInt64', 'Decimal(18,2)', 'Date', 'DateTime64(3)', 'Bool', 'String', 'UUID'],
     sqlite: ['INTEGER', 'NUMERIC', 'REAL', 'DATE', 'TIMESTAMP', 'TEXT'],
     duckdb: ['INTEGER', 'BIGINT', 'DECIMAL(18,2)', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'VARCHAR', 'DOUBLE'],
     access: ['INTEGER', 'BIGINT', 'DECIMAL(18,2)', 'CURRENCY', 'DATETIME', 'BOOLEAN', 'TEXT(255)', 'MEMO'],

@@ -27,6 +27,8 @@ jobs:
             display_name: MS SQL Server
           - id: mysql
             display_name: MySQL
+          - id: clickhouse
+            display_name: ClickHouse
           - id: snowflake
             display_name: Snowflake
 

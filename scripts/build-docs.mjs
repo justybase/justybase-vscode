@@ -13,7 +13,7 @@ const siteRoot = path.join(root, '_site');
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const productVersion = packageJson.version;
 const lastVerified = process.env.DOCS_LAST_VERIFIED ?? '2026-08-19';
-const advertisedDatabaseKinds = new Set(['netezza', 'db2', 'mssql', 'oracle', 'postgresql', 'mysql', 'access', 'duckdb', 'sqlite']);
+const advertisedDatabaseKinds = new Set(['netezza', 'db2', 'mssql', 'oracle', 'postgresql', 'mysql', 'clickhouse', 'access', 'duckdb', 'sqlite']);
 
 function getBuildProvenance() {
   let sourceCommit = '';

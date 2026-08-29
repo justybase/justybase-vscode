@@ -104,6 +104,8 @@ const DATABASE_KIND_ALIASES: Readonly<Record<string, DatabaseKindType>> = {
   sqlserver: "mssql",
   "sql server": "mssql",
   mysql: "mysql",
+  clickhouse: "clickhouse",
+  "click-house": "clickhouse",
   access: "access",
   mdb: "access",
   accdb: "access",

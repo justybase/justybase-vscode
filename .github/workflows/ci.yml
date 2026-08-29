@@ -91,6 +91,10 @@ jobs:
         if: hashFiles('extensions/mysql/package-lock.json') != ''
         run: npm run check-types:mysql
 
+      - name: Type check ClickHouse extension
+        if: hashFiles('extensions/clickhouse/package-lock.json') != ''
+        run: npm run check-types:clickhouse
+
       - name: Type check Snowflake extension
         if: hashFiles('extensions/snowflake/package-lock.json') != ''
         run: npm run check-types:snowflake

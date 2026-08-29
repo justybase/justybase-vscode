@@ -1,0 +1,28 @@
+{
+  "scopeName": "clickhouse.injection",
+  "name": "ClickHouse SQL",
+  "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block)",
+  "patterns": [
+    {
+      "name": "comment.line.clickhouse.sql",
+      "match": "#[^\\r\\n]*"
+    },
+    {
+      "name": "keyword.other.clickhouse.sql",
+      "match": "(?i)\\b(ARRAY\\s+JOIN|PREWHERE|QUALIFY|SAMPLE|FINAL|LIMIT\\s+BY|WITH\\s+FILL|ENGINE|PARTITION\\s+BY|PRIMARY\\s+KEY|ORDER\\s+BY|SAMPLE\\s+BY|TTL|SETTINGS|OPTIMIZE|MATERIALIZED\\s+VIEW|PROJECTION|FORMAT|DICTIONARY)\\b"
+    },
+    {
+      "name": "storage.type.clickhouse.sql",
+      "match": "(?i)\\b(BOOL|BOOLEAN|DATE|DATE32|DATETIME|DATETIME64|DECIMAL(?:32|64|128|256)?|ENUM8|ENUM16|FIXEDSTRING|FLOAT32|FLOAT64|INT8|INT16|INT32|INT64|INT128|INT256|IPV4|IPV6|JSON|LOWCARDINALITY|MAP|NULLABLE|STRING|TUPLE|UINT8|UINT16|UINT32|UINT64|UINT128|UINT256|UUID)\\b"
+    },
+    {
+      "name": "support.function.clickhouse.sql",
+      "match": "(?i)\\b(ANY|ARGMAX|ARGMIN|ARRAYJOIN|ASSUME_NOT_NULL|COALESCE|COUNT|DICTGET|GROUPARRAY|GROUPUNIQARRAY|IF|IFNULL|ISNULL|JSONEXTRACT(?:FLOAT|INT|RAW|STRING)?|LENGTH|LOWER|MEDIAN|MULTIIF|NOW|QUANTILE|REPLACEALL|TODAY|TODATE|TODATE32|TODATETIME|TODATETIME64|TOFIXEDSTRING|TOSTARTOF(?:DAY|HOUR|MONTH|WEEK|YEAR)|TOPK|TOSTRING|UNIQ(?:EXACT)?)\\b(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.control.clickhouse.sql",
+      "match": "(?i)\\b(EXPLAIN(?:\\s+PLAN)?|CREATE\\s+(?:TABLE|DATABASE|VIEW|MATERIALIZED\\s+VIEW)|DROP\\s+(?:TABLE|DATABASE|VIEW)|ALTER\\s+TABLE|INSERT\\s+INTO)\\b"
+    }
+  ],
+  "repository": {}
+}

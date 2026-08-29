@@ -11,6 +11,7 @@ import { snowflakeImportWizardAdapter } from './SnowflakeImportWizardAdapter';
 import { sqliteImportWizardAdapter } from './SqliteImportWizardAdapter';
 import { verticaImportWizardAdapter } from './VerticaImportWizardAdapter';
 import { accessImportWizardAdapter } from './AccessImportWizardAdapter';
+import { clickHouseImportWizardAdapter } from './ClickHouseImportWizardAdapter';
 
 const IMPORT_WIZARD_ADAPTERS: Readonly<Record<DatabaseKind, DatabaseImportWizardAdapter>> = {
     netezza: netezzaImportWizardAdapter,
@@ -21,6 +22,7 @@ const IMPORT_WIZARD_ADAPTERS: Readonly<Record<DatabaseKind, DatabaseImportWizard
     snowflake: snowflakeImportWizardAdapter,
     oracle: oracleImportWizardAdapter,
     mysql: mySqlImportWizardAdapter,
+    clickhouse: clickHouseImportWizardAdapter,
     sqlite: sqliteImportWizardAdapter,
     duckdb: duckDbImportWizardAdapter,
     access: accessImportWizardAdapter,

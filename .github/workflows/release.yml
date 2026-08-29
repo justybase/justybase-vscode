@@ -76,6 +76,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_clickhouse:
+        description: "Publish ClickHouse extension."
+        required: true
+        default: false
+        type: boolean
       publish_snowflake:
         description: "Publish Snowflake extension."
         required: true
@@ -283,6 +288,7 @@ jobs:
           VERTICA: ${{ github.event.inputs.publish_vertica }}
           MSSQL: ${{ github.event.inputs.publish_mssql }}
           MYSQL: ${{ github.event.inputs.publish_mysql }}
+          CLICKHOUSE: ${{ github.event.inputs.publish_clickhouse }}
           SNOWFLAKE: ${{ github.event.inputs.publish_snowflake }}
           ACCESS: ${{ github.event.inputs.publish_access }}
         run: |
@@ -295,6 +301,7 @@ jobs:
           [ "$VERTICA" = "true" ] && targets+=("vertica")
           [ "$MSSQL" = "true" ] && targets+=("mssql")
           [ "$MYSQL" = "true" ] && targets+=("mysql")
+          [ "$CLICKHOUSE" = "true" ] && targets+=("clickhouse")
           [ "$SNOWFLAKE" = "true" ] && targets+=("snowflake")
           [ "$ACCESS" = "true" ] && targets+=("access")
           IFS=','; echo "targets=${targets[*]}" >> "$GITHUB_OUTPUT"

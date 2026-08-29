@@ -156,7 +156,7 @@ function main() {
 
     if (!extensionId || !action) {
         fail(
-            'Usage: node scripts/run-optional-extension-task.js <db2|duckdb|oracle|postgresql|vertica|snowflake|mssql|mysql|access> ' +
+            'Usage: node scripts/run-optional-extension-task.js <db2|duckdb|oracle|postgresql|vertica|snowflake|mssql|mysql|clickhouse|access> ' +
                 '<install|lint|check-types|build|package|verify> [extra args]'
         );
     }

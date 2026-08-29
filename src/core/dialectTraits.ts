@@ -15,6 +15,7 @@ import { snowflakeDialectTraits } from "../shared/dialect-traits/snowflake";
 import { sqliteDialectTraits } from "../dialects/sqlite/traits";
 import { verticaDialectTraits } from "../shared/dialect-traits/vertica";
 import { accessDialectTraits } from "../dialects/access/traits";
+import { clickhouseDialectTraits } from "../shared/dialect-traits/clickhouse";
 
 const DIALECT_TRAITS_BY_KIND: Readonly<
   Record<DatabaseKind, DatabaseDialectTraits>
@@ -30,6 +31,7 @@ const DIALECT_TRAITS_BY_KIND: Readonly<
   db2: db2DialectTraits,
   mssql: mssqlDialectTraits,
   mysql: mysqlDialectTraits,
+  clickhouse: clickhouseDialectTraits,
   access: accessDialectTraits,
 };
 
