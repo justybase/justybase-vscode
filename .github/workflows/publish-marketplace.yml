@@ -1,4 +1,4 @@
-name: Publish Marketplace Extensions
+name: Publish Extensions
 
 on:
   workflow_call:
@@ -12,11 +12,11 @@ on:
         required: false
         default: core
         type: string
-      publish_marketplace:
-        description: "Publish attached VSIX files to Visual Studio Code Marketplace."
-        required: false
-        default: true
-        type: boolean
+    secrets:
+      VSCE_PAT:
+        required: true
+      OVSX_TOKEN:
+        required: true
   workflow_dispatch:
     inputs:
       release_tag:
@@ -73,11 +73,6 @@ on:
         required: true
         default: false
         type: boolean
-      publish_marketplace:
-        description: "Publish attached VSIX files to Visual Studio Code Marketplace."
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -86,6 +81,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   NODE_VERSION: "22"
   DB2_NAPI_VERSION: "8"
+  OVSX_VERSION: "1.1.1"
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 
 jobs:
@@ -116,6 +112,29 @@ jobs:
           normalized_tag="${RELEASE_TAG#v}"
           echo "release_version=$normalized_tag" >> "$GITHUB_OUTPUT"
           echo "Validated release tag $RELEASE_TAG for core version $normalized_tag."
+
+      - name: Validate registry publishing secrets
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+        run: |
+          missing=()
+
+          if [ -z "$VSCE_PAT" ]; then
+            missing+=(VSCE_PAT)
+          fi
+
+          if [ -z "$OVSX_TOKEN" ]; then
+            missing+=(OVSX_TOKEN)
+          fi
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required registry secret(s): ${missing[*]}" >&2
+            exit 1
+          fi
+
+          echo "Registry publishing secrets are configured."
 
       - name: Resolve publish targets
         id: targets
@@ -771,7 +790,7 @@ jobs:
           retention-days: 1
 
   audit-vsix:
-    name: Audit Marketplace VSIX files
+    name: Audit release VSIX files
     needs:
       - validate-release
       - quality-gate
@@ -925,7 +944,6 @@ jobs:
       - attach-release-assets
     if: |
       always()
-      && inputs.publish_marketplace == true
       && needs.validate-release.result == 'success'
       && needs.quality-gate.result == 'success'
       && needs.test-gate.result == 'success'
@@ -945,16 +963,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Validate Marketplace token
-        shell: bash
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "VSCE_PAT repository secret is required to publish VSIX files to Visual Studio Code Marketplace."
-            exit 1
-          fi
 
       - name: Install VSCE
         run: npm install --global @vscode/vsce@3.9.2
@@ -982,7 +990,7 @@ jobs:
             local label="$1"
             local attempt=1
             while true; do
-              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
@@ -1011,7 +1019,7 @@ jobs:
             local package_path="$2"
             local attempt=1
             while true; do
-              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
@@ -1043,7 +1051,7 @@ jobs:
             local package_path="$2"
             local attempt=1
             while true; do
-              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
@@ -1075,7 +1083,7 @@ jobs:
             local package_path="$2"
             local attempt=1
             while true; do
-              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
@@ -1109,7 +1117,7 @@ jobs:
             local package_path="$2"
             local attempt=1
             while true; do
-              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT"; then
+              if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
@@ -1133,4 +1141,127 @@ jobs:
               exit 1
             fi
             publish_with_retry "${target} extension" "$package_path"
+          done
+
+  publish-openvsx:
+    name: Publish selected VSIX files to Open VSX
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+      - integration-gate
+      - verify-db2-vscode-runtime
+      - build-main
+      - build-db2
+      - build-duckdb
+      - build-access
+      - build-optional
+      - audit-vsix
+      - attach-release-assets
+    if: |
+      always()
+      && needs.validate-release.result == 'success'
+      && needs.quality-gate.result == 'success'
+      && needs.test-gate.result == 'success'
+      && needs.integration-gate.result == 'success'
+      && (needs.verify-db2-vscode-runtime.result == 'success' || needs.verify-db2-vscode-runtime.result == 'skipped')
+      && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
+      && (needs.build-db2.result == 'success' || needs.build-db2.result == 'skipped')
+      && (needs.build-duckdb.result == 'success' || needs.build-duckdb.result == 'skipped')
+      && (needs.build-access.result == 'success' || needs.build-access.result == 'skipped')
+      && (needs.build-optional.result == 'success' || needs.build-optional.result == 'skipped')
+      && needs.audit-vsix.result == 'success'
+      && needs.attach-release-assets.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Open VSX CLI
+        run: npm install --global ovsx@${{ env.OVSX_VERSION }}
+
+      - name: Download packaged VSIX files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Show prepared VSIX files
+        shell: bash
+        run: ls -1 artifacts
+
+      - name: Publish selected extensions to Open VSX
+        shell: bash
+        env:
+          PUBLISH_CORE: ${{ needs.validate-release.outputs.publish_core }}
+          PUBLISH_DB2: ${{ needs.validate-release.outputs.publish_db2 }}
+          PUBLISH_DUCKDB: ${{ needs.validate-release.outputs.publish_duckdb }}
+          PUBLISH_ACCESS: ${{ needs.validate-release.outputs.publish_access }}
+          OPTIONAL_TARGETS: ${{ needs.validate-release.outputs.optional_targets }}
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.release_version }}
+          OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
+        run: |
+          publish_with_retry() {
+            local label="$1"
+            local package_path="$2"
+            local attempt=1
+
+            if [ ! -f "$package_path" ]; then
+              echo "Missing package for ${label}: ${package_path}" >&2
+              return 1
+            fi
+
+            while true; do
+              if ovsx publish "$package_path" --skip-duplicate; then
+                echo "Published ${label} to Open VSX."
+                return 0
+              fi
+
+              if [ "$attempt" -ge 2 ]; then
+                echo "Publishing ${label} to Open VSX failed after ${attempt} attempts." >&2
+                return 1
+              fi
+
+              echo "Publishing ${label} to Open VSX failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              attempt=$((attempt + 1))
+              sleep 15
+            done
+          }
+
+          if [ "$PUBLISH_CORE" = "true" ]; then
+            publish_with_retry "main extension" \
+              "artifacts/justybaselite-netezza-${RELEASE_VERSION}.vsix"
+          fi
+
+          if [ "$PUBLISH_DB2" = "true" ]; then
+            for target in win32-x64 linux-x64 darwin-arm64; do
+              publish_with_retry "DB2 (${target})" \
+                "artifacts/justybaselite-db2-${RELEASE_VERSION}-${target}.vsix"
+            done
+          fi
+
+          if [ "$PUBLISH_DUCKDB" = "true" ]; then
+            for target in win32-x64 linux-x64 darwin-arm64; do
+              publish_with_retry "DuckDB (${target})" \
+                "artifacts/justybaselite-duckdb-${RELEASE_VERSION}-${target}.vsix"
+            done
+          fi
+
+          if [ "$PUBLISH_ACCESS" = "true" ]; then
+            for target in win32-x64 linux-x64 darwin-arm64; do
+              publish_with_retry "Access (${target})" \
+                "artifacts/justybaselite-access-${RELEASE_VERSION}-${target}.vsix"
+            done
+          fi
+
+          IFS=',' read -ra targets <<< "$OPTIONAL_TARGETS"
+          for target in "${targets[@]}"; do
+            if [ -n "$target" ]; then
+              publish_with_retry "${target} extension" \
+                "artifacts/justybaselite-${target}-${RELEASE_VERSION}.vsix"
+            fi
           done
