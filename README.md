@@ -154,6 +154,7 @@ The core extension is Netezza-first. Optional packs plug into the shared connect
 | Files / DuckDB / SQLite | [Files support pack](extensions/duckdb) | Local Excel, CSV, Parquet, Avro, and file SQL workflows |
 | MS SQL Server | [MS SQL support pack](extensions/mssql) | Companion runtime with T-SQL authoring and shared result workflows |
 | MySQL | [MySQL support pack](extensions/mysql) | Companion runtime with dialect-aware authoring and metadata |
+| ClickHouse | [ClickHouse support pack](extensions/clickhouse) | HTTP/HTTPS companion with streaming results, metadata, imports, EXPLAIN, and MergeTree maintenance |
 | Microsoft Access | [Access support pack](extensions/access) | Local MDB/ACCDB reader and editing workflows |
 
 See the [Editor Capability Matrix](https://justybase.github.io/justybase-vscode/guide/user/parser-lsp/) for current parity details.
@@ -164,6 +165,7 @@ See the [Editor Capability Matrix](https://justybase.github.io/justybase-vscode/
 - No external Netezza driver for the core extension.
 - The Microsoft Access pack uses the Node.js runtime supplied by VS Code; no Java runtime is required.
 - Optional database packs may require their own native or JavaScript driver package.
+- The ClickHouse pack uses the ClickHouse HTTP interface and supports self-hosted servers and ClickHouse Cloud.
 
 ## Support
 

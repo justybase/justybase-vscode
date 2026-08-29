@@ -28,6 +28,7 @@ const REPRESENTATIVE_VALID_IDENTIFIERS: Readonly<Record<DatabaseKind, readonly s
     db2: ['TABLE_NAME'],
     mssql: ['TABLE_NAME'],
     mysql: ['table_name', 'TableName'],
+    clickhouse: ['table_name', 'TableName'],
     access: ['table_name', 'TableName'],
 };
 

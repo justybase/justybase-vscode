@@ -77,6 +77,15 @@ const OPTIONAL_EXTENSIONS = Object.freeze([
         srcDir: path.join(repoRoot, 'extensions', 'mysql', 'src')
     },
     {
+        id: 'clickhouse',
+        fallbackDisplayName: 'JustyBase SQL Editor (ClickHouse)',
+        directory: path.join(repoRoot, 'extensions', 'clickhouse'),
+        packageJson: path.join(repoRoot, 'extensions', 'clickhouse', 'package.json'),
+        packageLock: path.join(repoRoot, 'extensions', 'clickhouse', 'package-lock.json'),
+        tsconfig: path.join(repoRoot, 'extensions', 'clickhouse', 'tsconfig.json'),
+        srcDir: path.join(repoRoot, 'extensions', 'clickhouse', 'src')
+    },
+    {
         id: 'access',
         fallbackDisplayName: 'JustyBase SQL Editor (Microsoft Access)',
         directory: path.join(repoRoot, 'extensions', 'access'),

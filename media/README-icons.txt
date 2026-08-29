@@ -7,6 +7,7 @@ Files include:
 - file-dialect.svg
 - mssql-dialect.svg
 - mysql-dialect.svg
+- clickhouse-dialect.svg
 - oracle-dialect.svg
 - postgresql-dialect.svg
 - snowflake-dialect.svg

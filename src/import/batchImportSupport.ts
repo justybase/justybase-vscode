@@ -45,6 +45,10 @@ export interface BatchImportDialectConfig {
     beginTransactionSql?: string;
     commitTransactionSql?: string;
     rollbackTransactionSql?: string;
+    buildCreateTableSql?(
+        target: BatchImportTargetTable,
+        columns: PreparedImportColumnDescriptor[],
+    ): string;
     buildInsertSql?(
         target: BatchImportTargetTable,
         columns: PreparedImportColumnDescriptor[],
@@ -423,7 +427,9 @@ export function buildBatchCreateTablePreview(
 ): string {
     const target = config.parseTargetTable(targetTable, connectionDetails);
     const preparedColumns = buildPreparedColumns(columns, config);
-    return buildCreateTableSql(target, preparedColumns, config.kind);
+    return config.buildCreateTableSql
+        ? config.buildCreateTableSql(target, preparedColumns)
+        : buildCreateTableSql(target, preparedColumns, config.kind);
 }
 
 export function buildBatchLoadPreview(
@@ -528,7 +534,13 @@ export async function executeBatchImport(
 
         if (!input.appendToExistingTable) {
             input.progressCallback?.(`Creating target table ${target.displayName}...`);
-            await executeStatement(connection, buildCreateTableSql(target, columns, config.kind), 3600);
+            await executeStatement(
+                connection,
+                config.buildCreateTableSql
+                    ? config.buildCreateTableSql(target, columns)
+                    : buildCreateTableSql(target, columns, config.kind),
+                3600,
+            );
             createdTargetTable = true;
         }
 

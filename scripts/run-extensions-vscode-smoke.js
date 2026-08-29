@@ -21,6 +21,7 @@ const EXTENSIONS = Object.freeze({
     duckdb: { id: 'krzysztof-d.justybaselite-duckdb', kind: 'duckdb', runtime: ['@duckdb/node-api'] },
     mssql: { id: 'krzysztof-d.justybaselite-mssql', kind: 'mssql', runtime: ['mssql'] },
     mysql: { id: 'krzysztof-d.justybaselite-mysql', kind: 'mysql', runtime: ['mysql2'] },
+    clickhouse: { id: 'krzysztof-d.justybaselite-clickhouse', kind: 'clickhouse', runtime: ['@clickhouse/client'] },
     oracle: { id: 'krzysztof-d.justybaselite-oracle', kind: 'oracle', runtime: ['oracledb'] },
     postgresql: { id: 'krzysztof-d.justybaselite-postgresql', kind: 'postgresql', runtime: ['pg'] },
     snowflake: { id: 'krzysztof-d.justybaselite-snowflake', kind: 'snowflake', runtime: ['snowflake-sdk'] },

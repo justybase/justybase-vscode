@@ -39,6 +39,12 @@ const REQUIRED_ENVIRONMENT = Object.freeze({
         ['MYSQL_LIVE_TEST_USER'],
         ['MYSQL_LIVE_TEST_PASSWORD'],
     ],
+    clickhouse: [
+        ['CLICKHOUSE_LIVE_TEST_HOST'],
+        ['CLICKHOUSE_LIVE_TEST_DATABASE'],
+        ['CLICKHOUSE_LIVE_TEST_USER'],
+        ['CLICKHOUSE_LIVE_TEST_PASSWORD'],
+    ],
     oracle: [
         ['ORACLE_LIVE_TEST_HOST'],
         ['ORACLE_LIVE_TEST_DATABASE'],
@@ -71,6 +77,7 @@ const RUNTIME_MODULES = Object.freeze({
     duckdb: ['@duckdb/node-api', '@justybase/spreadsheet-tasks', 'mdb-reader'],
     mssql: ['mssql'],
     mysql: ['mysql2'],
+    clickhouse: ['@clickhouse/client'],
     oracle: ['oracledb'],
     postgresql: ['pg'],
     snowflake: ['snowflake-sdk'],
@@ -83,6 +90,7 @@ const TEST_SCRIPTS = Object.freeze({
     duckdb: 'test:duckdb:integration',
     mssql: 'test:mssql:integration',
     mysql: 'test:mysql:integration',
+    clickhouse: 'test:clickhouse:integration',
     oracle: 'test:oracle:integration',
     postgresql: 'test:postgres:integration',
     snowflake: 'test:snowflake:integration',
@@ -147,6 +155,7 @@ function runSuite(extensionId) {
     const environment = {
         ...process.env,
         RUN_MYSQL_INTEGRATION: extensionId === 'mysql' ? '1' : process.env.RUN_MYSQL_INTEGRATION,
+        RUN_CLICKHOUSE_INTEGRATION: extensionId === 'clickhouse' ? '1' : process.env.RUN_CLICKHOUSE_INTEGRATION,
         RUN_SNOWFLAKE_INTEGRATION: extensionId === 'snowflake' ? '1' : process.env.RUN_SNOWFLAKE_INTEGRATION,
     };
     if (extensionId === 'vertica' && environment.VERTICA_LIVE_TEST_PASSWORD === undefined) {

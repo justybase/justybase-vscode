@@ -312,6 +312,13 @@ const IMPORT_TARGET_PROMPT_PROFILES: Readonly<Record<SupportedImportDialect, Imp
         supportsThreePartName: false,
         enforceActiveDatabaseMatch: false,
     },
+    clickhouse: {
+        label: 'ClickHouse',
+        formatHint: 'TABLE or DATABASE.TABLE',
+        placeholder: 'TABLE or DATABASE.TABLE',
+        supportsThreePartName: false,
+        enforceActiveDatabaseMatch: false,
+    },
     duckdb: {
         label: 'DuckDB',
         formatHint: 'TABLE, SCHEMA.TABLE, or DATABASE.SCHEMA.TABLE',

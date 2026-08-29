@@ -53,6 +53,12 @@ import {
   getSqlParserInstance as getDuckDbSqlParserInstance,
 } from "../dialects/duckdb/sql/parser";
 import { sqliteSqlAuthoring } from "../dialects/sqlite/sql/authoring";
+import { clickhouseSqlAuthoring } from "../../extensions/clickhouse/src/sql/authoring";
+import { SqlLexer as clickhouseSqlLexer } from "../dialects/clickhouse/sql/lexer";
+import {
+  createSqlParserInstance as createClickHouseSqlParserInstance,
+  getSqlParserInstance as getClickHouseSqlParserInstance,
+} from "../dialects/clickhouse/sql/parser";
 import { SqlLexer as sqliteSqlLexer } from "../dialects/sqlite/sql/lexer";
 import {
   createSqlParserInstance as createSqliteSqlParserInstance,
@@ -695,6 +701,13 @@ export const SQLITE_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
   createSqlParserInstance: createSqliteSqlParserInstance,
 };
 
+export const CLICKHOUSE_SQL_PARSING_RUNTIME: SqlParsingRuntime = {
+  id: "clickhouse",
+  SqlLexer: clickhouseSqlLexer,
+  getSqlParserInstance: getClickHouseSqlParserInstance,
+  createSqlParserInstance: createClickHouseSqlParserInstance,
+};
+
 const runtimeByKind = new Map<DatabaseKind, SqlParsingRuntime>();
 const runtimeByAuthoring = new WeakMap<object, SqlParsingRuntime>();
 const runtimeByValidationProfile = new WeakMap<object, SqlParsingRuntime>();
@@ -783,6 +796,13 @@ registerSqlParsingRuntime({
   kind: "sqlite",
   authoring: sqliteSqlAuthoring,
   validationProfile: sqliteSqlAuthoring.validation,
+});
+
+registerSqlParsingRuntime({
+  runtime: CLICKHOUSE_SQL_PARSING_RUNTIME,
+  kind: "clickhouse",
+  authoring: clickhouseSqlAuthoring,
+  validationProfile: clickhouseSqlAuthoring.validation,
 });
 
 function resolveDatabaseKind(

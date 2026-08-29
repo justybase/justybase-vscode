@@ -11,6 +11,7 @@ import { mysqlDialect } from './mysql';
 import { duckdbDialect } from './duckdb';
 import { fileDialectStub } from './file';
 import { accessDialectStub } from './access';
+import { clickhouseDialect } from './clickhouse';
 
 let builtInDialectsRegistered = false;
 
@@ -27,7 +28,8 @@ export const allAvailableDialects = [
     mysqlDialect,
     duckdbDialect,
     fileDialectStub,
-    accessDialectStub
+    accessDialectStub,
+    clickhouseDialect
 ];
 
 export function ensureBuiltInDialectsRegistered(): void {

@@ -1,0 +1,73 @@
+name: ClickHouse Integration
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  clickhouse-integration:
+    name: ClickHouse Live Integration (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: testdb
+          CLICKHOUSE_USER: justybase
+          CLICKHOUSE_PASSWORD: justybase
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd="clickhouse-client --user justybase --password justybase --database testdb --query 'SELECT 1'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-start-period=30s
+          --health-retries=18
+
+    env:
+      RUN_CLICKHOUSE_INTEGRATION: '1'
+      CLICKHOUSE_LIVE_TEST_HOST: 127.0.0.1
+      CLICKHOUSE_LIVE_TEST_PORT: '8123'
+      CLICKHOUSE_LIVE_TEST_DATABASE: testdb
+      CLICKHOUSE_LIVE_TEST_USER: justybase
+      CLICKHOUSE_LIVE_TEST_PASSWORD: justybase
+      CLICKHOUSE_LIVE_TEST_PROTOCOL: http
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/clickhouse/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install ClickHouse extension dependencies
+        working-directory: extensions/clickhouse
+        run: npm ci
+
+      - name: Run ClickHouse live integration tests
+        run: npm run test:clickhouse:integration

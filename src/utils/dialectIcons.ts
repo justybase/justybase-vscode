@@ -13,6 +13,7 @@ const DIALECT_ICON_PATHS: Readonly<Partial<Record<DatabaseKind, readonly string[
     oracle: ['media', 'oracle-dialect.svg'],
     mssql: ['media', 'mssql-dialect.svg'],
     mysql: ['media', 'mysql-dialect.svg'],
+    clickhouse: ['media', 'clickhouse-dialect.svg'],
     snowflake: ['media', 'snowflake-dialect.svg'],
     access: ['media', 'access-dialect.svg'],
 };

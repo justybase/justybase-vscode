@@ -15,6 +15,7 @@ export type DatabaseKind =
   | 'db2'
   | 'mssql'
   | 'mysql'
+  | 'clickhouse'
   | 'access'
   | (string & {});
 
@@ -31,6 +32,7 @@ export const SUPPORTED_DATABASE_KINDS = [
   'db2',
   'mssql',
   'mysql',
+  'clickhouse',
   'access',
 ] as const;
 
@@ -46,6 +48,7 @@ export const DATABASE_KIND_DISPLAY_NAMES: Readonly<Partial<Record<DatabaseKind, 
   db2: 'Db2',
   mssql: 'MS SQL Server',
   mysql: 'MySQL',
+  clickhouse: 'ClickHouse',
   access: 'Microsoft Access',
 };
 

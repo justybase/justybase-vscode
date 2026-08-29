@@ -10,6 +10,7 @@ export type SupportedImportDialect =
     | 'snowflake'
     | 'oracle'
     | 'mysql'
+    | 'clickhouse'
     | 'duckdb'
     | 'sqlite'
     | 'access'
@@ -37,6 +38,9 @@ export function resolveImportDialect(dbType?: string): SupportedImportDialect {
     }
     if (normalized === 'mysql') {
         return 'mysql';
+    }
+    if (normalized === 'clickhouse' || normalized === 'click-house' || normalized === 'ch') {
+        return 'clickhouse';
     }
     if (normalized === 'duckdb') {
         return 'duckdb';
@@ -71,6 +75,8 @@ export function getImportDialectLabel(dbType?: string): string {
             return 'Oracle';
         case 'mysql':
             return 'MySQL';
+        case 'clickhouse':
+            return 'ClickHouse';
         case 'duckdb':
             return 'DuckDB';
         case 'sqlite':
@@ -210,6 +216,17 @@ export async function importDataForConnection(
                 columnOptions
             );
         }
+        case 'clickhouse': {
+            const { importDataToClickHouse } = await import('./clickhouseImporter');
+            return importDataToClickHouse(
+                normalizedFilePath,
+                normalizedTargetTable,
+                connectionDetails,
+                progressCallback,
+                timeoutSeconds,
+                columnOptions
+            );
+        }
         case 'duckdb': {
             const { importDataToDuckDb } = await import('./duckdbImporter');
             return importDataToDuckDb(
@@ -341,6 +358,16 @@ export async function importClipboardDataForConnection(
         case 'mysql': {
             const { importClipboardDataToMySql } = await import('./mysqlImporter');
             return importClipboardDataToMySql(
+                normalizedTargetTable,
+                connectionDetails,
+                formatPreference,
+                options,
+                progressCallback
+            );
+        }
+        case 'clickhouse': {
+            const { importClipboardDataToClickHouse } = await import('./clickhouseImporter');
+            return importClipboardDataToClickHouse(
                 normalizedTargetTable,
                 connectionDetails,
                 formatPreference,

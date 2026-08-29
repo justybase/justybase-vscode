@@ -37,6 +37,7 @@ const OPTIONAL_EXTENSION_NAMES: Readonly<Partial<Record<DatabaseKind, string>>> 
   snowflake: "JustyBase SQL Editor (Snowflake)",
   mssql: "JustyBase SQL Editor (MS SQL Server)",
   mysql: "JustyBase SQL Editor (MySQL)",
+  clickhouse: "JustyBase SQL Editor (ClickHouse)",
   access: "JustyBase SQL Editor (Microsoft Access)",
 };
 

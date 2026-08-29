@@ -65,6 +65,8 @@ Data Workspace uses a local DuckDB/SQLite-backed profile to query files as table
 
 The simple importer is useful for a known, clean file. The advanced wizard is safer for mixed types, renamed columns, nullability, date formats, and large files because it separates inference, mapping, validation, and execution.
 
+For ClickHouse, the companion uses the HTTP runtime and generates a `MergeTree` target with `ORDER BY tuple()` by default. Inferred numeric, date/time, boolean, UUID, decimal, and text columns are mapped to ClickHouse types; use the generated preview to change the target mapping or provide a qualified `database.table` target. Inserts are sent in batches and are intentionally not wrapped in a relational transaction because ClickHouse mutations and MergeTree ingestion have different consistency semantics.
+
 For Netezza, CSV/TXT, XLSX, and XLSB imports use the driver's virtual external-table stream. The source rows are registered under a transient name and consumed with `FROM EXTERNAL`; they are not first copied to a local data file. This keeps the client-side stream and the driver's external-load protocol ordered and avoids failures caused by a prematurely closed or partially materialized temporary file. The Netezza driver must be version 2.4.4 or newer.
 
 Excel header handling is defensive: a row containing numeric values is treated as data rather than a header, missing headers receive `COL_1`, `COL_2`, and repeated names receive suffixes such as `COL_1`. Consequently, a workbook with a first row `1, a` retains that row in the target table.

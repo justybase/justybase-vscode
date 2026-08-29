@@ -6,6 +6,7 @@ module.exports = [
   "duckdb.integration.test.ts",
   "snowflake.integration.test.ts",
   "mysql.integration.test.ts",
+  "clickhouse.integration.test.ts",
   "mssql.integration.test.ts",
   "oracle.integration.test.ts",
   "db2.integration.test.ts",

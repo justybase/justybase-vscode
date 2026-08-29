@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       publish_targets:
-        description: "Comma-separated targets: core, all, db2, duckdb, oracle, postgresql, vertica, mssql, mysql, snowflake, access."
+        description: "Comma-separated targets: core, all, db2, duckdb, oracle, postgresql, vertica, mssql, mysql, clickhouse, snowflake, access."
         required: false
         default: core
         type: string
@@ -60,6 +60,11 @@ on:
         type: boolean
       publish_mysql:
         description: "Publish MySQL extension."
+        required: true
+        default: false
+        type: boolean
+      publish_clickhouse:
+        description: "Publish ClickHouse extension."
         required: true
         default: false
         type: boolean
@@ -149,6 +154,7 @@ jobs:
           CHECKBOX_VERTICA: ${{ inputs.publish_vertica }}
           CHECKBOX_MSSQL: ${{ inputs.publish_mssql }}
           CHECKBOX_MYSQL: ${{ inputs.publish_mysql }}
+          CHECKBOX_CLICKHOUSE: ${{ inputs.publish_clickhouse }}
           CHECKBOX_SNOWFLAKE: ${{ inputs.publish_snowflake }}
           CHECKBOX_ACCESS: ${{ inputs.publish_access }}
         run: |
@@ -175,6 +181,7 @@ jobs:
               ['vertica', process.env.CHECKBOX_VERTICA],
               ['mssql', process.env.CHECKBOX_MSSQL],
               ['mysql', process.env.CHECKBOX_MYSQL],
+              ['clickhouse', process.env.CHECKBOX_CLICKHOUSE],
               ['snowflake', process.env.CHECKBOX_SNOWFLAKE],
               ['access', process.env.CHECKBOX_ACCESS],
             ];
@@ -194,6 +201,7 @@ jobs:
             { id: 'vertica', display_name: 'Vertica' },
             { id: 'mssql', display_name: 'MS SQL Server' },
             { id: 'mysql', display_name: 'MySQL' },
+            { id: 'clickhouse', display_name: 'ClickHouse' },
             { id: 'snowflake', display_name: 'Snowflake' },
           ];
           const known = new Set(['all', 'core', 'db2', 'duckdb', 'access', ...optional.map((item) => item.id)]);

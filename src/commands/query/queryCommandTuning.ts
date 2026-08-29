@@ -145,6 +145,11 @@ async function buildExplainSqlForDialect(
         return `EXPLAIN QUERY PLAN ${strippedSql}`;
     }
 
+    if (databaseKind === 'clickhouse') {
+        const { buildClickHouseExplainQuery } = await import('../../../extensions/clickhouse/src/clickhouseExplainParser');
+        return buildClickHouseExplainQuery(strippedSql, options);
+    }
+
     return options.verbose ? `EXPLAIN VERBOSE ${strippedSql}` : `EXPLAIN ${strippedSql}`;
 }
 
@@ -188,6 +193,11 @@ async function normalizeExplainOutputForDisplay(
     if (databaseKind === 'sqlite') {
         const { normalizeSqliteExplainPlan } = await import('../../dialects/sqlite/explainParser');
         return normalizeSqliteExplainPlan(explainOutput);
+    }
+
+    if (databaseKind === 'clickhouse') {
+        const { normalizeClickHouseExplainOutput } = await import('../../../extensions/clickhouse/src/clickhouseExplainParser');
+        return normalizeClickHouseExplainOutput(explainOutput);
     }
 
     return explainOutput;

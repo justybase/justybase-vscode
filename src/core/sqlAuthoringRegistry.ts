@@ -16,6 +16,7 @@ import { snowflakeSqlAuthoring } from "../../extensions/snowflake/src/sql/author
 import { verticaSqlAuthoring } from "../../extensions/vertica/src/sql/authoring";
 import { accessSqlAuthoring } from "../dialects/access/sql/authoring";
 import { fileSqlAuthoring } from "../dialects/file/sql/authoring";
+import { clickhouseSqlAuthoring } from "../../extensions/clickhouse/src/sql/authoring";
 
 const SQL_AUTHORING_BY_KIND = new Map<DatabaseKind, DatabaseSqlAuthoring>([
   ["netezza", netezzaSqlAuthoring],
@@ -28,6 +29,7 @@ const SQL_AUTHORING_BY_KIND = new Map<DatabaseKind, DatabaseSqlAuthoring>([
   ["db2", db2SqlAuthoring],
   ["mssql", mssqlSqlAuthoring],
   ["mysql", mysqlSqlAuthoring],
+  ["clickhouse", clickhouseSqlAuthoring],
   ["oracle", oracleSqlAuthoring],
   ["snowflake", snowflakeSqlAuthoring],
   ["vertica", verticaSqlAuthoring],
@@ -97,6 +99,7 @@ export function __TEST_ONLY_resetDatabaseSqlAuthoringRegistry(): void {
   SQL_AUTHORING_BY_KIND.set("db2", db2SqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("mssql", mssqlSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("mysql", mysqlSqlAuthoring);
+  SQL_AUTHORING_BY_KIND.set("clickhouse", clickhouseSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("oracle", oracleSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("snowflake", snowflakeSqlAuthoring);
   SQL_AUTHORING_BY_KIND.set("vertica", verticaSqlAuthoring);

@@ -25,6 +25,7 @@ The Schema context menu exposes capabilities when the selected dialect advertise
 - Netezza: GROOM, statistics, skew/distribution inspection, table recreation, comments, constraints, owner changes, and selected maintenance scripts.
 - PostgreSQL/Oracle/Db2/MSSQL/SQLite: dialect-specific analyze, vacuum, reindex, indexes, partitions, or integrity operations where implemented.
 - DuckDB/MySQL: local/engine-specific analyze, vacuum, recreation, and metadata workflows.
+- ClickHouse: `OPTIMIZE TABLE`, optional `OPTIMIZE FINAL`, MergeTree partition inspection, query/session monitoring, and table recreation. ClickHouse has no relational index/foreign-key designer in this integration; sorting and primary-key expressions are treated as table-engine metadata.
 - Access: file/session operations rather than warehouse maintenance SQL.
 
 GROOM, VACUUM, REINDEX, ANALYZE, statistics, and owner/permission changes can be expensive or privileged. A successful dialog means the operation was submitted; verify catalog state and query plans afterward.
