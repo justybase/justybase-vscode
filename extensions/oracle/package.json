@@ -2,7 +2,7 @@
     "name": "justybaselite-oracle",
     "displayName": "JustyBase SQL Editor (Oracle)",
     "description": "Near-full Oracle companion for JustyBase SQL Editor: thin-mode oracledb, advanced DDL/import/export, explain/tuning, and PL/SQL-aware SQL editor (with core extension)",
-    "version": "3.17.4",
+    "version": "3.17.5",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
