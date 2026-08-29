@@ -20,6 +20,7 @@ export interface Db2DesignerExistingIndex {
     columnOrders: Db2DesignerIndexColumn[];
     isUnique: boolean;
     isPrimary: boolean;
+    isSystemRequired: boolean;
     indexType: string;
 }
 
@@ -52,7 +53,8 @@ export interface Db2IndexDesignerInitialContext {
 export type Db2IndexDesignerWebviewToHostMessage =
     | { command: 'executeDesign'; design: Db2IndexDesign }
     | { command: 'saveAsSql'; design: Db2IndexDesign }
-    | { command: 'copyDDL'; design: Db2IndexDesign };
+    | { command: 'copyDDL'; design: Db2IndexDesign }
+    | { command: 'dropIndex'; indexName: string };
 
 export type Db2IndexDesignerHostToWebviewMessage =
     | { command: 'setError'; text: string }

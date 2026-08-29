@@ -35,35 +35,35 @@ function getMessageHandler(panel: TestPanel): (message: unknown) => Promise<void
     return handler as (message: unknown) => Promise<void>;
 }
 
-function createIndexServices(): {
+function createIndexServices(columnRows: Array<Record<string, unknown>> = [
+    {
+        ATTNAME: 'ID',
+        FORMAT_TYPE: 'INTEGER',
+        IS_NOT_NULL: 1,
+        COLDEFAULT: '',
+        DESCRIPTION: 'Identifier',
+        IS_PK: 1,
+        IS_FK: 0,
+        ATTNUM: 1
+    },
+    {
+        ATTNAME: 'STATUS',
+        FORMAT_TYPE: 'VARCHAR(20)',
+        IS_NOT_NULL: 0,
+        COLDEFAULT: '',
+        DESCRIPTION: 'Current status',
+        IS_PK: 0,
+        IS_FK: 0,
+        ATTNUM: 2
+    }
+]): {
     services: Record<string, jest.Mock>;
     provider: { listIndexes: jest.Mock };
 } {
     const services = {
         executeQuery: jest.fn().mockImplementation((sql: string) => {
             if (sql.includes('SYSCAT.COLUMNS')) {
-                return Promise.resolve([
-                    {
-                        ATTNAME: 'ID',
-                        FORMAT_TYPE: 'INTEGER',
-                        IS_NOT_NULL: 1,
-                        COLDEFAULT: '',
-                        DESCRIPTION: 'Identifier',
-                        IS_PK: 1,
-                        IS_FK: 0,
-                        ATTNUM: 1
-                    },
-                    {
-                        ATTNAME: 'STATUS',
-                        FORMAT_TYPE: 'VARCHAR(20)',
-                        IS_NOT_NULL: 0,
-                        COLDEFAULT: '',
-                        DESCRIPTION: 'Current status',
-                        IS_PK: 0,
-                        IS_FK: 0,
-                        ATTNUM: 2
-                    }
-                ]);
+                return Promise.resolve(columnRows);
             }
             if (sql.includes('SYSCAT.TABLESPACES')) {
                 return Promise.resolve([{ TBSPACE: 'INDEX_TS' }]);
@@ -161,6 +161,70 @@ describe('Db2 designer webview hosts', () => {
         });
         expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
         expect(services.executeSql).not.toHaveBeenCalled();
+    });
+
+    it('keeps quoted Db2 column names distinct in host validation', async () => {
+        const panel = createPanel();
+        const { services, provider } = createIndexServices([
+            { ATTNAME: 'foo', FORMAT_TYPE: 'INTEGER', ATTNUM: 1 },
+            { ATTNAME: 'FOO', FORMAT_TYPE: 'INTEGER', ATTNUM: 2 }
+        ]);
+
+        await Db2IndexDesignerView.createOrShow({} as vscode.ExtensionContext, {
+            provider,
+            target: createTarget(),
+            services
+        } as never);
+
+        await getMessageHandler(panel)({
+            command: 'copyDDL',
+            design: {
+                indexName: 'ORDERS_FOO_IDX',
+                keyColumns: [{ name: 'foo', order: 'ASC' }],
+                includeColumns: ['FOO'],
+                unique: false,
+                clustered: false
+            }
+        });
+
+        expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(
+            'CREATE INDEX ADMIN.ORDERS_FOO_IDX ON ADMIN.ORDERS ("foo") INCLUDE (FOO);'
+        );
+    });
+
+    it('lists existing indexes and executes a host-validated drop request', async () => {
+        const panel = createPanel();
+        const { services, provider } = createIndexServices();
+        provider.listIndexes.mockResolvedValue([{
+            schema: 'ADMIN',
+            name: 'ORDERS_STATUS_IDX',
+            tableName: 'ORDERS',
+            tableSchema: 'ADMIN',
+            indexType: 'btree',
+            isUnique: false,
+            isPrimary: false,
+            columns: ['STATUS'],
+            columnOrders: [{ name: 'STATUS', order: 'DESC' }],
+            isSystemRequired: false,
+            isValid: true
+        }]);
+        services.executeWithProgress.mockImplementation(async (_title: string, operation: () => Promise<unknown>) => operation());
+        (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue('Execute DDL');
+
+        await Db2IndexDesignerView.createOrShow({} as vscode.ExtensionContext, {
+            provider,
+            target: createTarget(),
+            services
+        } as never);
+
+        expect(panel.webview.html).toContain('ORDERS_STATUS_IDX');
+        await getMessageHandler(panel)({ command: 'dropIndex', indexName: 'ORDERS_STATUS_IDX' });
+
+        expect(services.executeSql).toHaveBeenCalledWith(
+            'DROP INDEX ADMIN.ORDERS_STATUS_IDX;',
+            'db2-connection',
+            'Dropping index ORDERS_STATUS_IDX...'
+        );
     });
 
     it('renders source table suggestions and builds partition DDL from a typed operation', async () => {

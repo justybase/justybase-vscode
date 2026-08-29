@@ -78,6 +78,22 @@ export function formatDb2QualifiedName(schema: string, objectName: string): stri
     return `${formatDb2Identifier(schema)}.${formatDb2Identifier(objectName)}`;
 }
 
+/**
+ * Compare identifiers using Db2's quoted/unquoted name rules.
+ * Unquoted names are folded to upper case; quoted names remain case-sensitive.
+ */
+export function areDb2IdentifiersEqual(left: string, right: string): boolean {
+    return db2IdentifierKey(left) === db2IdentifierKey(right);
+}
+
+function db2IdentifierKey(identifier: string): string {
+    const trimmed = identifier.trim();
+    const formatted = formatDb2Identifier(trimmed);
+    return formatted.startsWith('"')
+        ? `quoted:${trimmed}`
+        : `unquoted:${trimmed.toUpperCase()}`;
+}
+
 function formatPercent(value: number | undefined, clause: string): string | undefined {
     if (value === undefined || !Number.isInteger(value) || value < 0 || value > 99) {
         return undefined;
@@ -122,6 +138,10 @@ export function buildDb2CreateIndexSql(options: Db2CreateIndexDdlOptions): strin
     ].filter((clause): clause is string => Boolean(clause));
 
     return `${clauses.join(' ')};`;
+}
+
+export function buildDb2DropIndexSql(schema: string, indexName: string): string {
+    return `DROP INDEX ${formatDb2QualifiedName(schema, requireValue(indexName, 'Index name'))};`;
 }
 
 export function buildDb2PartitionRangeSql(options: Db2PartitionRangeOptions, includeStorage = true): string {

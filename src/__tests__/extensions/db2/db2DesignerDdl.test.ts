@@ -1,7 +1,9 @@
 import {
+    areDb2IdentifiersEqual,
     buildDb2AddPartitionSql,
     buildDb2AttachPartitionSql,
     buildDb2CreateIndexSql,
+    buildDb2DropIndexSql,
     buildDb2DetachPartitionSql,
     buildDb2DropPartitionSql,
     buildDb2SetIntegritySql
@@ -49,6 +51,14 @@ describe('Db2 designer DDL', () => {
             indexName: 'EMPTY_IDX',
             keyColumns: []
         })).toThrow('Select at least one key column.');
+    });
+
+    it('compares Db2 identifiers according to quoted and unquoted rules', () => {
+        expect(areDb2IdentifiersEqual('CUSTOMER_ID', 'CUSTOMER_ID')).toBe(true);
+        expect(areDb2IdentifiersEqual('CUSTOMER_ID', 'customer_id')).toBe(false);
+        expect(areDb2IdentifiersEqual('foo', 'FOO')).toBe(false);
+        expect(areDb2IdentifiersEqual('foo', 'foo')).toBe(true);
+        expect(buildDb2DropIndexSql('ADMIN', 'foo')).toBe('DROP INDEX ADMIN."foo";');
     });
 
     it('builds add and attach partition statements with boundary and tablespace options', () => {

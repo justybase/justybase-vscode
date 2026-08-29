@@ -13,7 +13,12 @@ import type {
     Db2IndexDesignerOutboundMessage
 } from '../../../src/contracts/webviews/db2IndexDesignerContracts';
 import { buildColumnMetadataQuery, buildListTablespacesQuery } from './db2SystemQueries';
-import { buildDb2CreateIndexSql, type Db2CreateIndexDdlOptions } from './db2DesignerDdl';
+import {
+    areDb2IdentifiersEqual,
+    buildDb2CreateIndexSql,
+    buildDb2DropIndexSql,
+    type Db2CreateIndexDdlOptions
+} from './db2DesignerDdl';
 
 const CORE_EXTENSION_ID = 'krzysztof-d.justybaselite-netezza';
 
@@ -115,6 +120,7 @@ export class Db2IndexDesignerView {
             columnOrders: index.columnOrders ?? index.columns.map(column => ({ name: column, order: 'ASC' as const })),
             isUnique: index.isUnique,
             isPrimary: index.isPrimary,
+            isSystemRequired: index.isSystemRequired === true,
             indexType: index.indexType
         }));
 
@@ -155,6 +161,9 @@ export class Db2IndexDesignerView {
             case 'copyDDL':
                 await this.copyDesignDdl(message.design);
                 return;
+            case 'dropIndex':
+                await this.dropIndex(message.indexName);
+                return;
         }
     }
 
@@ -171,7 +180,12 @@ export class Db2IndexDesignerView {
             return;
         }
 
-        await this.executeDdl(ddl);
+        await this.executeDdl(ddl, {
+            confirmation: `Create this index on ${this.operation.target.qualifiedName}?`,
+            progress: `Creating index on ${this.operation.target.qualifiedName}...`,
+            success: 'Index created successfully. The schema tree has been refreshed.',
+            errorPrefix: 'Failed to create index'
+        });
     }
 
     private buildDdl(design: Db2IndexDesign): string {
@@ -179,13 +193,11 @@ export class Db2IndexDesignerView {
             throw new Error('The index design is invalid. Reopen the designer and try again.');
         }
 
-        const columnsByName = new Map(
-            this.initialContext.columns.map(column => [column.name.toUpperCase(), column.name])
-        );
+        const columnsByName = new Map(this.initialContext.columns.map(column => [column.name, column.name]));
         const rawKeyColumns = Array.isArray(design.keyColumns) ? design.keyColumns : [];
         const keyColumns = rawKeyColumns.map(column => {
             const name = typeof column?.name === 'string' ? column.name.trim() : '';
-            const canonicalName = columnsByName.get(name.toUpperCase());
+            const canonicalName = columnsByName.get(name);
             if (!canonicalName) {
                 throw new Error(`Column "${name}" does not belong to ${this.initialContext.qualifiedTable}.`);
             }
@@ -197,8 +209,7 @@ export class Db2IndexDesignerView {
 
         const keyNames = new Set<string>();
         for (const column of keyColumns) {
-            const normalizedName = column.name.toUpperCase();
-            if (!keyNames.add(normalizedName)) {
+            if (!keyNames.add(column.name)) {
                 throw new Error(`Column "${column.name}" can only be selected once.`);
             }
         }
@@ -207,11 +218,11 @@ export class Db2IndexDesignerView {
             .map(column => typeof column === 'string' ? column.trim() : '')
             .filter(column => column.length > 0)
             .map(column => {
-                const canonicalName = columnsByName.get(column.toUpperCase());
+                const canonicalName = columnsByName.get(column);
                 if (!canonicalName) {
                     throw new Error(`Included column "${column}" does not belong to ${this.initialContext.qualifiedTable}.`);
                 }
-                if (keyNames.has(canonicalName.toUpperCase())) {
+                if (keyNames.has(canonicalName)) {
                     throw new Error(`Column "${canonicalName}" cannot be both a key and an included column.`);
                 }
                 return canonicalName;
@@ -219,7 +230,7 @@ export class Db2IndexDesignerView {
 
         const includeNames = new Set<string>();
         for (const column of includeColumns) {
-            if (!includeNames.add(column.toUpperCase())) {
+            if (!includeNames.add(column)) {
                 throw new Error(`Included column "${column}" can only be selected once.`);
             }
         }
@@ -255,7 +266,7 @@ export class Db2IndexDesignerView {
         };
 
         if (this.initialContext.existingIndexes.some(index =>
-            index.name.toUpperCase() === options.indexName.toUpperCase()
+            areDb2IdentifiersEqual(index.name, options.indexName)
         )) {
             throw new Error(`An index named ${options.indexName} already exists on this table.`);
         }
@@ -263,14 +274,48 @@ export class Db2IndexDesignerView {
         return buildDb2CreateIndexSql(options);
     }
 
-    private async executeDdl(ddl: string): Promise<void> {
+    private async dropIndex(indexName: string): Promise<void> {
+        const requestedName = typeof indexName === 'string' ? indexName.trim() : '';
+        const existingIndex = this.initialContext.existingIndexes.find(index =>
+            areDb2IdentifiersEqual(index.name, requestedName)
+        );
+        if (!existingIndex) {
+            this.postToWebview({ command: 'setError', text: `Index "${requestedName}" is not present on this table. Refresh the designer and try again.` });
+            return;
+        }
+        if (existingIndex.isPrimary) {
+            this.postToWebview({ command: 'setError', text: `Primary index "${existingIndex.name}" cannot be dropped from the Index Designer.` });
+            return;
+        }
+        if (existingIndex.isSystemRequired) {
+            this.postToWebview({ command: 'setError', text: `System-required index "${existingIndex.name}" cannot be dropped from the Index Designer.` });
+            return;
+        }
+
+        await this.executeDdl(buildDb2DropIndexSql(this.initialContext.schema, existingIndex.name), {
+            confirmation: `Drop index ${existingIndex.name} from ${this.operation.target.qualifiedName}? This action cannot be undone.`,
+            progress: `Dropping index ${existingIndex.name}...`,
+            success: `Index ${existingIndex.name} dropped successfully. The schema tree has been refreshed.`,
+            errorPrefix: 'Failed to drop index'
+        });
+    }
+
+    private async executeDdl(
+        ddl: string,
+        messages: {
+            confirmation: string;
+            progress: string;
+            success: string;
+            errorPrefix: string;
+        }
+    ): Promise<void> {
         if (!ddl.trim()) {
-            this.postToWebview({ command: 'setError', text: 'DDL is empty. Select key columns and enter an index name.' });
+            this.postToWebview({ command: 'setError', text: 'DDL is empty.' });
             return;
         }
 
         const confirmation = await vscode.window.showWarningMessage(
-            `Create this index on ${this.operation.target.qualifiedName}?`,
+            messages.confirmation,
             { modal: true },
             'Execute DDL',
             'Cancel'
@@ -283,18 +328,18 @@ export class Db2IndexDesignerView {
         this.postToWebview({ command: 'setExecuting', executing: true });
         try {
             await this.operation.services.executeWithProgress(
-                `Creating index on ${this.operation.target.qualifiedName}...`,
+                messages.progress,
                 async () => this.operation.services.executeSql(
                     ddl,
                     this.operation.target.connectionName,
-                    `Creating index on ${this.operation.target.qualifiedName}...`
+                    messages.progress
                 )
             );
             await vscode.commands.executeCommand('netezza.refreshSchema', this.operation.target.connectionName);
-            this.postToWebview({ command: 'setInfo', text: 'Index created successfully. The schema tree has been refreshed.' });
+            this.postToWebview({ command: 'setInfo', text: messages.success });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            this.postToWebview({ command: 'setError', text: `Failed to create index: ${message}` });
+            this.postToWebview({ command: 'setError', text: `${messages.errorPrefix}: ${message}` });
         } finally {
             this.postToWebview({ command: 'setExecuting', executing: false });
         }
@@ -415,7 +460,8 @@ export class Db2IndexDesignerView {
                             <label>Additional Db2 clause<textarea id="additionalClause" rows="2" placeholder="Optional supported clause, without a semicolon"></textarea></label>
                         </details>
                     </section>
-                    <section class="designer-card ddl-card"><div class="card-heading"><h2>Generated DDL</h2><span id="existingIndexesHint" class="field-hint"></span></div><textarea id="ddlPreview" readonly spellcheck="false"></textarea></section>
+                    <section class="designer-card index-list-card"><div class="card-heading"><h2>Existing Indexes</h2><span id="existingIndexesHint" class="field-hint"></span></div><div class="index-table-wrap"><table><thead><tr><th>Name</th><th>Columns</th><th>Type</th><th>Properties</th><th>Actions</th></tr></thead><tbody id="existingIndexesBody"></tbody></table></div></section>
+                    <section class="designer-card ddl-card"><div class="card-heading"><h2>Generated DDL</h2><span class="field-hint">Review before execution.</span></div><textarea id="ddlPreview" readonly spellcheck="false"></textarea></section>
                 </main>
                 <script nonce="${nonce}" src="${scriptUri}"></script>
             </body>
