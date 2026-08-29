@@ -30,9 +30,10 @@ describe('ClickHouse SQL parser', () => {
 
     it.each([
         'SELECT * FROM `analytics`.`events` PREWHERE event_date >= toDate(\'2024-01-01\')',
-        'SELECT id, tag FROM events ARRAY JOIN tags',
+        'SELECT id, tag FROM events ARRAY JOIN tags WHERE id > 0',
         'SELECT id, row_number() OVER (PARTITION BY group_id ORDER BY id) AS rn FROM events QUALIFY rn = 1',
-        'SELECT toDate(event_date) AS day, count() FROM events GROUP BY day ORDER BY day LIMIT 10 BY group_id WITH FILL FROM 1 TO 10 STEP 1',
+        'SELECT toDate(event_date) AS day, count() FROM events GROUP BY day ORDER BY day WITH FILL FROM 1 TO 10 STEP 1 LIMIT 10 BY group_id',
+        'SELECT * FROM events SETTINGS max_threads = 1',
         'INSERT INTO events (id, event_date) VALUES (1, \'2024-01-01\')',
         'INSERT INTO events FORMAT JSONEachRow',
         'OPTIMIZE TABLE `analytics`.`events` FINAL',
@@ -42,6 +43,13 @@ describe('ClickHouse SQL parser', () => {
         expect(result.lexResult.errors).toHaveLength(0);
         expect(result.actionableParserErrors).toHaveLength(0);
         expect(result.cst).toBeDefined();
+    });
+
+    it.each([
+        'SELECT id FROM events WHERE id > 0 ARRAY JOIN tags',
+        'SELECT id FROM events LIMIT 10 WITH FILL',
+    ])('rejects invalid ClickHouse clause order: %s', sql => {
+        expect(parse(sql).actionableParserErrors.length).toBeGreaterThan(0);
     });
 
     it('rejects empty qualified-name segments', () => {

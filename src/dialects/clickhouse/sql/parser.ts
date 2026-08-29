@@ -25,6 +25,7 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
     clickhouseSampleByClause!: AnyRule;
     clickhouseTtlClause!: AnyRule;
     clickhouseSettingsClause!: AnyRule;
+    optionalClickhouseSettingsClause!: AnyRule;
     clickhouseSettingValueToken!: AnyRule;
     optimizeStatement!: AnyRule;
 
@@ -168,6 +169,10 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
             });
         });
 
+        this.RULE('optionalClickhouseSettingsClause', () => {
+            this.OPTION(() => this.SUBRULE(this.clickhouseSettingsClause));
+        });
+
         this.RULE('clickhouseTableOptions', () => {
             this.MANY(() => {
                 this.OR([
@@ -256,9 +261,9 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
         this.OVERRIDE_RULE('selectStatement', () => {
             this.SUBRULE(this.selectClause);
             this.OPTION(() => this.SUBRULE(this.fromClause));
-            this.OPTION1(() => this.SUBRULE(this.prewhereClause));
-            this.OPTION2(() => this.SUBRULE(this.whereClause));
-            this.OPTION3(() => this.SUBRULE(this.arrayJoinClause));
+            this.OPTION1(() => this.SUBRULE(this.arrayJoinClause));
+            this.OPTION2(() => this.SUBRULE(this.prewhereClause));
+            this.OPTION3(() => this.SUBRULE(this.whereClause));
             this.OPTION4(() => this.SUBRULE(this.groupByClause));
             this.OPTION5(() => this.SUBRULE(this.havingClause));
             this.OPTION6(() => this.SUBRULE(this.qualifyClause));
@@ -288,6 +293,18 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
                     },
                 ]);
             });
+            this.SUBRULE(this.optionalClickhouseSettingsClause);
+        });
+
+        this.OVERRIDE_RULE('orderByClause', () => {
+            this.CONSUME(netezzaLexer.OrderBy);
+            this.AT_LEAST_ONE_SEP({
+                SEP: netezzaLexer.Comma,
+                DEF: () => {
+                    this.SUBRULE(this.orderByItem);
+                    this.OPTION(() => this.SUBRULE(this.withFillClause));
+                },
+            });
         });
 
         this.OVERRIDE_RULE('limitClause', () => {
@@ -316,7 +333,6 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
                     DEF: () => this.SUBRULE(this.expression),
                 });
             });
-            this.OPTION2(() => this.SUBRULE(this.withFillClause));
         });
 
         this.OVERRIDE_RULE('insertStatement', () => {
