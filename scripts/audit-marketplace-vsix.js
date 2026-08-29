@@ -10,6 +10,7 @@ const { createHash } = require('node:crypto');
 const { mkdirSync, readdirSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const AdmZip = require('adm-zip');
+const acorn = require('acorn');
 
 const [inputDir = 'artifacts', outputDir = 'marketplace-review'] = process.argv.slice(2);
 const CORE_ID = 'krzysztof-d.justybaselite-netezza';
@@ -82,6 +83,83 @@ function isProbablyMinified(source) {
 function sourceMapReference(source) {
   const match = source.match(/[#@]\s*sourceMappingURL=([^\s*]+)/);
   return match?.[1];
+}
+
+function parseJavaScript(source, scriptName) {
+  const options = { allowHashBang: true, ecmaVersion: 'latest' };
+  try {
+    return acorn.parse(source, { ...options, sourceType: 'script' });
+  } catch (scriptError) {
+    try {
+      return acorn.parse(source, { ...options, sourceType: 'module' });
+    } catch (moduleError) {
+      throw new Error(
+        `${scriptName}: unable to parse JavaScript (${scriptError.message}; ${moduleError.message})`,
+      );
+    }
+  }
+}
+
+function unwrapChainExpression(node) {
+  return node?.type === 'ChainExpression' ? node.expression : node;
+}
+
+function isNamedCallee(node, name) {
+  const callee = unwrapChainExpression(node);
+  if (callee?.type === 'Identifier') {
+    return callee.name === name;
+  }
+  if (callee?.type !== 'MemberExpression') {
+    return false;
+  }
+  const property = callee.computed
+    ? callee.property?.type === 'Literal' && callee.property.value
+    : callee.property?.type === 'Identifier' && callee.property.name;
+  return property === name;
+}
+
+function findDynamicCode(source, scriptName) {
+  const ast = parseJavaScript(source, scriptName);
+  const pending = [ast];
+  let hasEvalCall = false;
+  let hasFunctionConstructor = false;
+
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node || typeof node !== 'object') {
+      continue;
+    }
+
+    if (node.type === 'CallExpression' && isNamedCallee(node.callee, 'eval')) {
+      hasEvalCall = true;
+    }
+    if (
+      (node.type === 'NewExpression' || node.type === 'CallExpression')
+      && isNamedCallee(node.callee, 'Function')
+    ) {
+      hasFunctionConstructor = true;
+    }
+    if (hasEvalCall && hasFunctionConstructor) {
+      break;
+    }
+
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'loc' || key === 'start' || key === 'end') {
+        continue;
+      }
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          if (child && typeof child === 'object') {
+            pending.push(child);
+          }
+        }
+      } else if (value && typeof value === 'object') {
+        pending.push(value);
+      }
+    }
+  }
+
+  return { hasEvalCall, hasFunctionConstructor };
 }
 
 function dynamicCodeOnlyInDependencies(zip, mapName) {
@@ -235,9 +313,10 @@ function inspectVsix(filePath) {
   for (const script of firstPartyScripts) {
     const source = readEntryText(zip, script);
     assert(!isProbablyMinified(source), `${filePath}: ${script} appears heavily minified`);
-    assert(!/\beval\s*\(/.test(source), `${filePath}: ${script} contains eval()`);
+    const dynamicCode = findDynamicCode(source, script);
+    assert(!dynamicCode.hasEvalCall, `${filePath}: ${script} contains eval()`);
     const mapName = validateSourceMap(zip, files, script, source);
-    if (/\bnew\s+Function\s*\(/.test(source)) {
+    if (dynamicCode.hasFunctionConstructor) {
       assert(
         dynamicCodeOnlyInDependencies(zip, mapName),
         `${filePath}: ${script} contains new Function() outside traceable dependencies`,
@@ -311,7 +390,7 @@ assert(vsixFiles.length > 0, `No VSIX files found in ${inputDir}`);
 
 const report = {
   generatedAt: new Date().toISOString(),
-  auditVersion: 2,
+  auditVersion: 3,
   artifacts: vsixFiles.map(file => inspectVsix(path.join(inputDir, file))),
 };
 
