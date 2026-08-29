@@ -104,13 +104,15 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
   it('highlights SAS-like macro directives, functions, and references', async () => {
     const sql = [
       '%LET dim_table = JUST_DATA.ADMIN.DIMDATE;',
+      '@SET run_id = 1;',
       '%PUT table=${ dim_table };',
-      "%EXPORT(format='xlsx', file='/tmp/out.xlsx', query=(SELECT * FROM &dim_table));",
+      "%EXPORT(format='xlsx', file='/tmp/out.xlsx', update=true, query=(SELECT * FROM &dim_table));",
       "%INCLUDE 'shared.sql';",
       "%IF &run = 1 %THEN %DO;",
       "%END;",
       'SELECT &as_of_key, $as_of_key, ${ as_of_key } FROM &dim_table',
       'WHERE DATEKEY >= %EVAL($as_of_key - 30)',
+      '  AND DATEKEY = %SQL(SELECT MAX(DATEKEY) FROM &dim_table)',
       '  AND CALENDARQUARTER IN (%SQLLIST(SELECT CALENDARQUARTER FROM &dim_table));',
       '-- %LET commented = 1; &commented %SQL(SELECT 1)',
       "SELECT '%PUT literal &x';",
@@ -118,6 +120,7 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
 
     const tokens = await tokenizeSql(sql);
     const letDirective = findTokenContaining(tokens, '%LET', { onlyActiveCode: true });
+    const setDirective = findTokenContaining(tokens, '@SET', { onlyActiveCode: true });
     const putDirective = findTokenContaining(tokens, '%PUT', { onlyActiveCode: true });
     const exportDirective = findTokenContaining(tokens, '%EXPORT', { onlyActiveCode: true });
     const includeDirective = findTokenContaining(tokens, '%INCLUDE', { onlyActiveCode: true });
@@ -125,6 +128,7 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     const doDirective = findTokenContaining(tokens, '%DO', { onlyActiveCode: true });
     const endDirective = findTokenContaining(tokens, '%END', { onlyActiveCode: true });
     const sqlListFunction = findTokenContaining(tokens, '%SQLLIST', { onlyActiveCode: true });
+    const sqlFunction = findTokenContaining(tokens, '%SQL', { onlyActiveCode: true });
     const evalFunction = findTokenContaining(tokens, '%EVAL', { onlyActiveCode: true });
     const ampReference = findTokenContaining(tokens, '&as_of_key', { onlyActiveCode: true });
     const dollarReference = findTokenContaining(tokens, '$as_of_key', { onlyActiveCode: true });
@@ -133,6 +137,7 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     const literalPut = findTokenContaining(tokens, '%PUT literal');
 
     expect(hasScope(letDirective, /keyword\.control\.macro\.sas\.sql/)).toBe(true);
+    expect(hasScope(setDirective, /keyword\.control\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(putDirective, /keyword\.control\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(exportDirective, /keyword\.control\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(includeDirective, /keyword\.control\.macro\.sas\.sql/)).toBe(true);
@@ -140,6 +145,7 @@ describe('Netezza TextMate injection (netezza.tmLanguage.json)', () => {
     expect(hasScope(doDirective, /keyword\.control\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(endDirective, /keyword\.control\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(sqlListFunction, /support\.function\.macro\.sas\.sql/)).toBe(true);
+    expect(hasScope(sqlFunction, /support\.function\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(evalFunction, /support\.function\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(ampReference, /variable\.other\.macro\.sas\.sql/)).toBe(true);
     expect(hasScope(dollarReference, /variable\.other\.macro\.sas\.sql/)).toBe(true);

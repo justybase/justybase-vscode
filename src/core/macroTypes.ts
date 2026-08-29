@@ -70,6 +70,8 @@ export interface MacroExportRequest {
     query: string;
     sheetName: string;
     overwrite: boolean;
+    /** Replace the data in an existing XLSX/XLSB sheet in place. */
+    updateExisting?: boolean;
 }
 
 export interface MacroExportExecutionResult {

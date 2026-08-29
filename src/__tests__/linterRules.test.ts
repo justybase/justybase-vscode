@@ -260,6 +260,7 @@ FROM DIMDATE D GROUP BY d.CALENDARQUARTER`;
             const sql = `%EXPORT(
   format='xlsx',
   file='/tmp/out.xlsx',
+  update=true,
   query=(
     SELECT DATEKEY
     FROM JUST_DATA.ADMIN.DIMDATE
@@ -273,6 +274,41 @@ FROM DIMDATE D GROUP BY d.CALENDARQUARTER`;
 
         it('should still flag inconsistent SQL after macro directives', () => {
             const sql = `%PUT As-of DATEKEY resolved from database: &as_of_key;
+SELECT * from JUST_DATA.ADMIN.DIMDATE;`;
+
+            const issues = ruleNZ007.check(sql);
+
+            expect(issues).toHaveLength(1);
+            expect(issues[0].message).toContain("'from'");
+        });
+
+        it('should accept the full SAS-like directive set without masking following SQL', () => {
+            const sql = `@SET run_report = 1;
+%IF &run_report = 1 %THEN %DO;
+  SELECT * from reporting.daily;
+%ELSE %DO;
+  SELECT * from reporting.fallback;
+%END;
+%INCLUDE 'settings.sql';
+%PYTHON build.py;
+SELECT * from JUST_DATA.ADMIN.DIMDATE;`;
+
+            const issues = ruleNZ007.check(sql);
+
+            expect(issues).toHaveLength(1);
+            expect(issues[0].message).toContain("'from'");
+        });
+
+        it('should ignore directive-looking text inside macro block strings and comments', () => {
+            const sql = `%IF 1 = 1 %THEN %DO;
+  SELECT 'first line
+%END;
+second line' AS text;
+  /* comment line
+%END;
+  */
+  SELECT * FROM reporting.daily;
+%END;
 SELECT * from JUST_DATA.ADMIN.DIMDATE;`;
 
             const issues = ruleNZ007.check(sql);

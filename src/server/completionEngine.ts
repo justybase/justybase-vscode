@@ -90,6 +90,7 @@ export class LspCompletionEngine {
       cursorOffset: requestContext.cursorOffset,
       linePrefix: requestContext.linePrefix,
       position: requestContext.position,
+      triggerKind,
     });
     if (macroVariableItems !== undefined) {
       return finalizeCompletionItems(macroVariableItems, triggerKind);

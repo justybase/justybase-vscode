@@ -115,6 +115,95 @@ import { extractVariables, parseSetVariables } from "../core/variableUtils";
 import { promptForVariableValues } from "../core/variableResolver";
 import { handleBusyConnectionError } from "../core/queryRunnerHelpers";
 
+type TestSpreadsheetFormat = "xlsx" | "xlsb";
+
+interface TestSpreadsheetWriter {
+    addSheet(sheetName: string): void;
+    writeSheet(rows: unknown[][], headers?: string[] | null): void;
+    finalize(): Promise<void>;
+}
+
+interface TestSpreadsheetReader {
+    getSheetNames(): string[];
+    open(filePath: string): Promise<void>;
+    read(): Promise<boolean>;
+    fieldCount: number;
+    getValue(index: number): unknown;
+    close(): Promise<void>;
+    _initSheet(index: number): Promise<void>;
+}
+
+function requireSpreadsheetTasksForTest(): {
+    XlsxWriter: new (filePath: string) => TestSpreadsheetWriter;
+    XlsbWriter: new (filePath: string) => TestSpreadsheetWriter;
+    ReaderFactory: { create(filePath: string): TestSpreadsheetReader };
+} {
+    return require("@justybase/spreadsheet-tasks") as {
+        XlsxWriter: new (filePath: string) => TestSpreadsheetWriter;
+        XlsbWriter: new (filePath: string) => TestSpreadsheetWriter;
+        ReaderFactory: { create(filePath: string): TestSpreadsheetReader };
+    };
+}
+
+async function createExistingWorkbook(
+    filePath: string,
+    format: TestSpreadsheetFormat,
+): Promise<void> {
+    const { XlsxWriter, XlsbWriter } = requireSpreadsheetTasksForTest();
+    const Writer = format === "xlsx" ? XlsxWriter : XlsbWriter;
+    const writer = new Writer(filePath);
+
+    writer.addSheet("Summary");
+    writer.writeSheet([["keep-me"]], ["VALUE"]);
+    writer.addSheet("Data");
+    writer.writeSheet([["old", 1]], ["NAME", "ID"]);
+    writer.addSheet("Keep");
+    writer.writeSheet([["untouched"]], ["VALUE"]);
+    await writer.finalize();
+}
+
+function copyBankDashboardFixture(fileName: string): string {
+    const sourcePath = path.resolve(__dirname, "../../fixtures/bank-dashboards", fileName);
+    const destination = path.join(
+        os.tmpdir(),
+        `justybase-macro-dashboard-${Date.now()}-${Math.random().toString(16).slice(2)}.xlsx`,
+    );
+    fs.copyFileSync(sourcePath, destination);
+    return destination;
+}
+
+async function readWorkbookSheets(
+    filePath: string,
+): Promise<Record<string, unknown[][]>> {
+    const { ReaderFactory } = requireSpreadsheetTasksForTest();
+    const reader = ReaderFactory.create(filePath);
+    await reader.open(filePath);
+
+    const sheetNames = reader.getSheetNames();
+    const sheets: Record<string, unknown[][]> = {};
+    for (let index = 0; index < sheetNames.length; index++) {
+        if (index > 0) {
+            await reader._initSheet(index);
+        }
+
+        const rows: unknown[][] = [];
+        while (await reader.read()) {
+            const row: unknown[] = [];
+            for (let columnIndex = 0; columnIndex < reader.fieldCount; columnIndex++) {
+                row.push(reader.getValue(columnIndex));
+            }
+            while (row.length > 0 && row[row.length - 1] === null) {
+                row.pop();
+            }
+            rows.push(row);
+        }
+        sheets[sheetNames[index]] = rows;
+    }
+
+    await reader.close();
+    return sheets;
+}
+
 describe("queryBatchExecutor", () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -502,6 +591,188 @@ describe("queryBatchExecutor", () => {
                     fs.unlinkSync(outputPath);
                 }
             }
+        });
+
+        it.each(["xlsx", "xlsb"] as const)(
+            "updates an existing %s workbook sheet in place and preserves other sheets",
+            async (format) => {
+                const outputPath = path.join(
+                    os.tmpdir(),
+                    `justybase_macro_export_update_${Date.now()}_${format}.${format}`,
+                );
+                const queryExecutor = jest.fn().mockResolvedValueOnce({
+                    columns: [
+                        { name: "ID", type: "INTEGER" },
+                        { name: "NAME", type: "VARCHAR" },
+                        { name: "AMOUNT", type: "NUMERIC(12,2)" },
+                    ],
+                    rows: [[1, "Alpha", "12.50"], [2, "Beta", "7.25"]],
+                });
+                const logCallback = jest.fn();
+
+                try {
+                    await createExistingWorkbook(outputPath, format);
+
+                    const result = await prepareQueryForExecution(
+                        `%EXPORT(
+  format='${format}',
+  file='${outputPath}',
+  sheet='Data',
+  query=(SELECT ID, NAME, AMOUNT FROM TEST_TABLE),
+  update=true
+);`,
+                        {},
+                        logCallback,
+                        queryExecutor,
+                    );
+
+                    expect(result).toBe("");
+                    expect(queryExecutor).toHaveBeenCalledWith(
+                        "SELECT ID, NAME, AMOUNT FROM TEST_TABLE",
+                    );
+                    expect(logCallback).toHaveBeenCalledWith(
+                        `>>> %EXPORT: Updated 2 rows in ${outputPath} (sheet "Data")`,
+                    );
+
+                    const sheets = await readWorkbookSheets(outputPath);
+                    expect(Object.keys(sheets)).toEqual(["Summary", "Data", "Keep"]);
+                    expect(sheets.Summary).toEqual([["VALUE"], ["keep-me"]]);
+                    expect(sheets.Data).toEqual([
+                        ["ID", "NAME", "AMOUNT"],
+                        [1, "Alpha", 12.5],
+                        [2, "Beta", 7.25],
+                    ]);
+                    expect(sheets.Keep).toEqual([["VALUE"], ["untouched"]]);
+                } finally {
+                    if (fs.existsSync(outputPath)) {
+                        fs.unlinkSync(outputPath);
+                    }
+                }
+            },
+        );
+
+        it("rejects a ListObject schema change before writing the workbook", async () => {
+            const outputPath = copyBankDashboardFixture("bank-sales-overview.xlsx");
+            const original = fs.readFileSync(outputPath);
+            const queryExecutor = jest.fn().mockResolvedValue({
+                columns: [
+                    { name: "Month", type: "VARCHAR" },
+                    { name: "Unexpected", type: "INTEGER" },
+                ],
+                rows: [["Jan-26", 1]],
+            });
+
+            try {
+                await expect(executeMacroExport(
+                    {
+                        format: "xlsx",
+                        filePath: outputPath,
+                        query: "SELECT month, unexpected FROM source_table",
+                        sheetName: "Raw_Monthly",
+                        overwrite: false,
+                        updateExisting: true,
+                    },
+                    queryExecutor,
+                )).rejects.toThrow(/query columns do not match the existing ListObject/);
+                expect(fs.readFileSync(outputPath)).toEqual(original);
+            } finally {
+                fs.rmSync(outputPath, { force: true });
+            }
+        });
+
+        it("rejects a multi-table worksheet before executing its query", async () => {
+            const outputPath = copyBankDashboardFixture("bank-sales-overview.xlsx");
+            const queryExecutor = jest.fn();
+
+            try {
+                await expect(executeMacroExport(
+                    {
+                        format: "xlsx",
+                        filePath: outputPath,
+                        query: "SELECT 1",
+                        sheetName: "Dashboard",
+                        overwrite: false,
+                        updateExisting: true,
+                    },
+                    queryExecutor,
+                )).rejects.toThrow(/contains 3 ListObjects/);
+                expect(queryExecutor).not.toHaveBeenCalled();
+            } finally {
+                fs.rmSync(outputPath, { force: true });
+            }
+        });
+
+        it("rejects update mode before executing the query when the target file is missing", async () => {
+            const outputPath = path.join(
+                os.tmpdir(),
+                `justybase_macro_export_missing_${Date.now()}.xlsx`,
+            );
+            const queryExecutor = jest.fn();
+
+            await expect(
+                executeMacroExport(
+                    {
+                        format: "xlsx",
+                        filePath: outputPath,
+                        query: "SELECT 1",
+                        sheetName: "Data",
+                        overwrite: false,
+                        updateExisting: true,
+                    },
+                    queryExecutor,
+                ),
+            ).rejects.toThrow("%EXPORT update target does not exist");
+            expect(queryExecutor).not.toHaveBeenCalled();
+        });
+
+        it("rejects update mode before executing the query when the target sheet is missing", async () => {
+            const outputPath = path.join(
+                os.tmpdir(),
+                `justybase_macro_export_missing_sheet_${Date.now()}.xlsx`,
+            );
+            const queryExecutor = jest.fn();
+
+            try {
+                await createExistingWorkbook(outputPath, "xlsx");
+
+                await expect(
+                    executeMacroExport(
+                        {
+                            format: "xlsx",
+                            filePath: outputPath,
+                            query: "SELECT 1",
+                            sheetName: "Missing",
+                            overwrite: false,
+                            updateExisting: true,
+                        },
+                        queryExecutor,
+                    ),
+                ).rejects.toThrow("%EXPORT update target sheet does not exist");
+                expect(queryExecutor).not.toHaveBeenCalled();
+            } finally {
+                if (fs.existsSync(outputPath)) {
+                    fs.unlinkSync(outputPath);
+                }
+            }
+        });
+
+        it("rejects update mode for non-spreadsheet export formats", async () => {
+            const queryExecutor = jest.fn();
+
+            await expect(
+                executeMacroExport(
+                    {
+                        format: "csv",
+                        filePath: path.join(os.tmpdir(), "report.csv"),
+                        query: "SELECT 1",
+                        sheetName: "Data",
+                        overwrite: false,
+                        updateExisting: true,
+                    },
+                    queryExecutor,
+                ),
+            ).rejects.toThrow("%EXPORT update=true is supported only for XLSX and XLSB");
+            expect(queryExecutor).not.toHaveBeenCalled();
         });
 
         it("reads %INCLUDE files through the macro file context", async () => {

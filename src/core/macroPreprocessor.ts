@@ -603,6 +603,7 @@ export class MacroPreprocessor {
             parsed.query,
             parsed.sheetName,
             parsed.overwrite,
+            parsed.update,
         ]) {
             if (value !== undefined) {
                 this.resolveMacroReferencesOutsideTrivia(
@@ -627,6 +628,7 @@ export class MacroPreprocessor {
             parsed.query,
             parsed.sheetName,
             parsed.overwrite,
+            parsed.update,
         ]) {
             if (value !== undefined) {
                 await this.resolveMacroTextAsync(
@@ -686,6 +688,14 @@ export class MacroPreprocessor {
                 context,
             ))
             : 'false';
+        const updateText = parsed.update
+            ? unwrapResolvedScalarExportValue(await this.resolveMacroTextAsync(
+                parsed.update,
+                environment,
+                { replaceVariables: true, unresolved },
+                context,
+            ))
+            : 'false';
 
         return {
             format: parseExportFormat(formatText),
@@ -693,6 +703,7 @@ export class MacroPreprocessor {
             query,
             sheetName,
             overwrite: parseExportBoolean(overwriteText, 'overwrite'),
+            updateExisting: parseExportBoolean(updateText, 'update'),
         };
     }
 
