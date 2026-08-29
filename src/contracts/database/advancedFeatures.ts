@@ -380,6 +380,11 @@ export interface DatabaseIndexInfo {
   isPrimary: boolean;
   /** Columns in the index */
   columns: string[];
+  /** Column order in the index */
+  columnOrders?: Array<{
+    name: string;
+    order: 'ASC' | 'DESC';
+  }>;
   /** Index definition SQL */
   definition?: string;
   /** Index size in bytes */

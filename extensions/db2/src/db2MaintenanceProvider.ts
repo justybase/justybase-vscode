@@ -395,6 +395,10 @@ vscode.window.showInformationMessage(`Partition ${partitionName} attached and va
             isUnique: row.UNIQUERULE === 'U' || row.UNIQUERULE === 'P',
             isPrimary: row.UNIQUERULE === 'P',
             columns: columnRows.map(c => c.COLNAME),
+            columnOrders: columnRows.map(c => ({
+              name: c.COLNAME,
+              order: c.COLORDER === 'D' ? 'DESC' : 'ASC'
+            })),
             // definition is not provided by catalog, we construct a dummy or leave empty
             indexSize: row.NLEAF > 0 ? row.NLEAF * 8192 : undefined, // rough estimate
             isValid: true

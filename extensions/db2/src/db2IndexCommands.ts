@@ -6,6 +6,7 @@ import {
   SchemaItemData,
   getErrorMessage
 } from './db2CommandContext';
+import { Db2IndexDesignerView } from './db2IndexDesignerView';
 
 export function registerDb2IndexCommands(
   context: vscode.ExtensionContext,
@@ -149,40 +150,7 @@ export function registerDb2IndexCommands(
         return;
       }
 
-      // Get columns from user
-      const columnsInput = await vscode.window.showInputBox({
-        prompt: 'Enter column names (comma-separated)',
-        placeHolder: 'e.g., COL1, COL2 DESC',
-      });
-
-      if (!columnsInput) {
-        return;
-      }
-
-      const columns = columnsInput.split(',').map(c => c.trim()).filter(c => c.length > 0);
-
-      const indexType = await vscode.window.showQuickPick(
-        [
-          { label: 'Regular', description: 'Standard B-tree index', value: 'btree' },
-          { label: 'Unique', description: 'Unique B-tree index', value: 'unique' },
-          { label: 'Clustering', description: 'Clustered B-tree index', value: 'cluster' },
-        ],
-        { placeHolder: 'Select index type' }
-      );
-
-      if (!indexType) {
-        return;
-      }
-
-      await resolved.provider.createIndex?.(
-        resolved.target,
-        {
-          columns,
-          indexType: indexType.value === 'cluster' ? 'hash' : 'btree',
-          isUnique: indexType.value === 'unique',
-        },
-        resolved.services
-      );
+       await Db2IndexDesignerView.createOrShow(context, resolved);
     }
   );
 

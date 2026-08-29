@@ -28,11 +28,17 @@ body { margin: 0; padding: 20px; }
 .designer-card h2, .designer-card h3 { margin: 0 0 12px; font-size: 1.06em; font-weight: 600; }
 .card-heading { justify-content: space-between; gap: 12px; }
 .card-heading h2 { margin-bottom: 0; }
+details > summary { cursor: pointer; font-weight: 600; list-style-position: inside; }
+details[open] > summary { margin-bottom: 14px; }
+details > summary .field-hint { float: right; font-weight: 400; }
+.nested-options { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--vscode-panel-border); }
+.nested-options > summary { color: var(--vscode-descriptionForeground); font-size: .95em; }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .form-grid.three-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 label { display: grid; gap: 5px; color: var(--vscode-foreground); }
 input, select, textarea { width: 100%; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); padding: 6px 8px; font: inherit; }
+input[type="checkbox"] { width: auto; }
 select[multiple] { min-height: 136px; }
 textarea { resize: vertical; }
 #ddlPreview { min-height: 175px; font-family: var(--vscode-editor-font-family); line-height: 1.45; }
@@ -41,13 +47,23 @@ textarea { resize: vertical; }
 .toggle-grid label, .checkbox-row { display: flex; align-items: center; gap: 7px; }
 .toggle-grid select { width: auto; flex: 1; }
 .repeating-rows { display: grid; gap: 7px; }
-.key-column-row { gap: 7px; }
-.key-column-row select:first-of-type { flex: 1; }
+.key-column-row { gap: 7px; min-height: 32px; }
+.selected-column-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selected-column-type { min-width: 110px; }
 .key-column-row select { width: auto; }
 .ordinal { width: 24px; color: var(--vscode-descriptionForeground); text-align: right; }
 .row-button { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 3px; padding: 4px 7px; cursor: pointer; font: inherit; }
 .row-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .row-button.danger { color: var(--vscode-errorForeground); }
+.column-picker { display: grid; gap: 2px; max-height: 270px; overflow-y: auto; margin-top: 10px; padding: 4px; border: 1px solid var(--vscode-panel-border); }
+.available-column { display: flex; align-items: center; gap: 8px; padding: 7px 8px; cursor: pointer; }
+.available-column:hover { background: var(--vscode-list-hoverBackground); }
+.column-picker-text { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1; }
+.column-picker-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.column-type { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: .9em; }
+.column-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.column-badge { padding: 1px 4px; border: 1px solid var(--vscode-panel-border); border-radius: 3px; color: var(--vscode-descriptionForeground); font-size: .75em; }
+.empty-selection { margin: 4px 0; padding: 9px; border: 1px dashed var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
 
 .status-banner { margin: 0 auto 14px; max-width: 1450px; padding: 9px 12px; border-radius: 4px; }
 .status-banner.hidden { display: none; }
@@ -76,5 +92,7 @@ code { font-family: var(--vscode-editor-font-family); }
     .designer-actions { justify-content: flex-start; }
     .designer-grid, .form-grid, .form-grid.three-columns, .toggle-grid { grid-template-columns: 1fr; }
     .key-column-row { flex-wrap: wrap; }
-    .key-column-row select:first-of-type { min-width: 180px; }
+    .selected-column-name { min-width: 180px; }
+    .selected-column-type { min-width: 0; }
+    details > summary .field-hint { float: none; display: block; margin-top: 4px; }
 }

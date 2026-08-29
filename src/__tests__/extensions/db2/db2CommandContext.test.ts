@@ -35,7 +35,7 @@ describe('Db2 command context', () => {
             databaseName: 'SAMPLE',
             schemaName: 'ADMIN',
             tableName: 'SALES',
-            qualifiedName: '"ADMIN"."SALES"'
+            qualifiedName: 'ADMIN.SALES'
         });
     });
 });

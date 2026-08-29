@@ -296,6 +296,10 @@ export interface DatabaseIndexInfo {
   isUnique: boolean;
   isPrimary: boolean;
   columns: string[];
+  columnOrders?: Array<{
+    name: string;
+    order: 'ASC' | 'DESC';
+  }>;
   definition?: string;
   indexSize?: number;
   isValid?: boolean;
