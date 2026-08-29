@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
+  Db2MaintenanceApi,
   isTableItem,
   resolveOperationContext,
   SchemaItemData,
@@ -9,7 +9,7 @@ import {
 
 export function registerDb2PartitionCommands(
   context: vscode.ExtensionContext,
-  connectionManager: ConnectionManager
+  api: Db2MaintenanceApi
 ): vscode.Disposable[] {
   const detachPartitionDirectCommand = vscode.commands.registerCommand(
     'justybase.db2.detachPartition',
@@ -19,9 +19,9 @@ export function registerDb2PartitionCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'Detach partition'
       );
@@ -75,9 +75,9 @@ export function registerDb2PartitionCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'Drop partition'
       );
@@ -131,9 +131,9 @@ export function registerDb2PartitionCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'List partitions'
       );
@@ -207,9 +207,9 @@ export function registerDb2PartitionCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'Add partition'
       );
@@ -250,9 +250,9 @@ export function registerDb2PartitionCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'Attach partition'
       );

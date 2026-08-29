@@ -100,7 +100,7 @@ export const db2MaintenanceProvider: DatabaseMaintenanceProvider = {
     },
 
     async vacuumTable(target, services): Promise<void> {
-        const commandText = `REORG TABLE ${getDb2QualifiedTableName(target)} ALLOW WRITE ACCESS`;
+        const commandText = `REORG TABLE ${getDb2QualifiedTableName(target)}`;
         const sql = `CALL SYSPROC.ADMIN_CMD(${quoteSqlLiteral(commandText)});`;
         const confirmation = await vscode.window.showWarningMessage(
             `Reorganize table "${target.qualifiedName}" to reclaim space?\n\n${commandText}`,
@@ -123,7 +123,7 @@ export const db2MaintenanceProvider: DatabaseMaintenanceProvider = {
     },
 
     async reindexTable(target, services): Promise<void> {
-        const commandText = `REORG INDEXES ALL FOR TABLE ${getDb2QualifiedTableName(target)} ALLOW WRITE ACCESS`;
+        const commandText = `REORG INDEXES ALL FOR TABLE ${getDb2QualifiedTableName(target)}`;
         const sql = `CALL SYSPROC.ADMIN_CMD(${quoteSqlLiteral(commandText)});`;
         const confirmation = await vscode.window.showWarningMessage(
             `Reorganize indexes for table "${target.qualifiedName}"?\n\n${commandText}`,
@@ -218,9 +218,7 @@ export const db2MaintenanceProvider: DatabaseMaintenanceProvider = {
         target: DatabaseMaintenanceTarget,
         partitionName: string,
         services: DatabaseMaintenanceServices,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _cascade?: boolean,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _partitionSchema?: string
     ): Promise<void> {
         const qualifiedTable = getDb2QualifiedTableName(target);
@@ -255,9 +253,7 @@ export const db2MaintenanceProvider: DatabaseMaintenanceProvider = {
         target: DatabaseMaintenanceTarget,
         partitionName: string,
         services: DatabaseMaintenanceServices,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _concurrently?: boolean,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _partitionSchema?: string
     ): Promise<void> {
         const qualifiedTable = getDb2QualifiedTableName(target);
@@ -457,9 +453,7 @@ vscode.window.showInformationMessage(`Partition ${partitionName} attached and va
         target: DatabaseMaintenanceTarget,
         indexName: string,
         services: DatabaseMaintenanceServices,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _cascade?: boolean,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _concurrently?: boolean
     ): Promise<void> {
         const qualifiedIndex = formatQualifiedObjectName(
@@ -497,14 +491,6 @@ vscode.window.showInformationMessage(`Partition ${partitionName} attached and va
 
         if (options.verbose) {
             parts.push('CLEANUP ONLY ALL');
-        } else {
-            parts.push('REBUILD');
-        }
-
-        if (options.concurrently) {
-            parts.push('ALLOW WRITE ACCESS');
-        } else {
-            parts.push('ALLOW READ ACCESS');
         }
 
         const commandText = parts.join(' ');

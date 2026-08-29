@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { registerDb2PartitionCommands } from '../../../../extensions/db2/src/db2PartitionCommands';
 import { registerDb2IndexCommands } from '../../../../extensions/db2/src/db2IndexCommands';
+import { registerDb2DesignerCommands } from '../../../../extensions/db2/src/db2DesignerCommands';
 import {
     isTableItem,
     resolveOperationContext
@@ -37,9 +38,11 @@ describe('Db2 extension command registrations', () => {
     it('registers all contributed Db2 partition and index commands', () => {
         const partitionDisposables = registerDb2PartitionCommands(mockContext, mockConnectionManager);
         const indexDisposables = registerDb2IndexCommands(mockContext, mockConnectionManager);
+        const designerDisposables = registerDb2DesignerCommands(mockContext, mockConnectionManager);
 
         expect(partitionDisposables).toHaveLength(5);
         expect(indexDisposables).toHaveLength(4);
+        expect(designerDisposables).toHaveLength(2);
         expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
             'justybase.db2.listPartitions',
             expect.any(Function)
@@ -76,6 +79,14 @@ describe('Db2 extension command registrations', () => {
             'justybase.db2.reorgIndexes',
             expect.any(Function)
         );
+        expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+            'justybase.db2.createIndexWizard',
+            expect.any(Function)
+        );
+        expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+            'justybase.db2.managePartitions',
+            expect.any(Function)
+        );
     });
 
     it('uses the direct drop-partition command to select and drop a Db2 partition', async () => {
@@ -103,7 +114,7 @@ describe('Db2 extension command registrations', () => {
             },
             services: {} as never,
         };
-        mockResolveOperationContext.mockReturnValue(resolved);
+        mockResolveOperationContext.mockResolvedValue(resolved);
 
         registerDb2PartitionCommands(mockContext, mockConnectionManager);
 
@@ -160,7 +171,7 @@ describe('Db2 extension command registrations', () => {
             },
             services: {} as never,
         };
-        mockResolveOperationContext.mockReturnValue(resolved);
+        mockResolveOperationContext.mockResolvedValue(resolved);
 
         registerDb2IndexCommands(mockContext, mockConnectionManager);
 

@@ -369,6 +369,15 @@ export function buildListTablesQuery(schema?: string): string {
     `;
 }
 
+export function buildListTablespacesQuery(): string {
+    return `
+        SELECT RTRIM(TBSPACE) AS TBSPACE
+        FROM SYSCAT.TABLESPACES
+        ORDER BY TBSPACE
+        WITH UR
+    `;
+}
+
 export function buildListViewsQuery(schema?: string): string {
     return `
         SELECT

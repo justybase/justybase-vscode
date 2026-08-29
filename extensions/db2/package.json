@@ -89,6 +89,16 @@
         "icon": "$(add)"
       },
       {
+        "command": "justybase.db2.createIndexWizard",
+        "title": "Db2: Create Index... (Wizard)",
+        "icon": "$(symbol-key)"
+      },
+      {
+        "command": "justybase.db2.managePartitions",
+        "title": "Db2: Manage Partitions...",
+        "icon": "$(layout-panel)"
+      },
+      {
         "command": "justybase.db2.dropIndex",
         "title": "Db2: Drop Index",
         "icon": "$(trash)"
@@ -102,34 +112,59 @@
     "menus": {
       "view/item/context": [
         {
+          "command": "justybase.db2.createIndexWizard",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
+          "group": "db2-wizard@1"
+        },
+        {
+          "command": "justybase.db2.managePartitions",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
+          "group": "db2-wizard@2"
+        },
+        {
           "command": "justybase.db2.listPartitions",
-          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
           "group": "partition@1"
         },
         {
           "command": "justybase.db2.addPartition",
-          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
           "group": "partition@2"
         },
         {
           "command": "justybase.db2.attachPartition",
-          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
           "group": "partition@3"
         },
         {
+          "command": "justybase.db2.detachPartition",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
+          "group": "partition@4"
+        },
+        {
+          "command": "justybase.db2.dropPartition",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
+          "group": "partition@5"
+        },
+        {
           "command": "justybase.db2.listIndexes",
-          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
           "group": "index@1"
         },
         {
           "command": "justybase.db2.createIndex",
-          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
           "group": "index@2"
         },
         {
           "command": "justybase.db2.reorgIndexes",
-          "when": "view == justybase.schemaExplorer && viewItem =~ /table.*db2/",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
           "group": "index@3"
+        },
+        {
+          "command": "justybase.db2.dropIndex",
+          "when": "view == netezza.schema && viewItem == netezza:TABLE && justybase.schemaDatabaseKind == db2",
+          "group": "index@4"
         }
       ]
     }

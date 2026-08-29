@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
+  Db2MaintenanceApi,
   isTableItem,
   resolveOperationContext,
   SchemaItemData,
@@ -9,7 +9,7 @@ import {
 
 export function registerDb2IndexCommands(
   context: vscode.ExtensionContext,
-  connectionManager: ConnectionManager
+  api: Db2MaintenanceApi
 ): vscode.Disposable[] {
   const dropIndexDirectCommand = vscode.commands.registerCommand(
     'justybase.db2.dropIndex',
@@ -19,9 +19,9 @@ export function registerDb2IndexCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'Drop index'
       );
@@ -75,9 +75,9 @@ export function registerDb2IndexCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'List indexes'
       );
@@ -139,9 +139,9 @@ export function registerDb2IndexCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'Create index'
       );
@@ -194,9 +194,9 @@ export function registerDb2IndexCommands(
         return;
       }
 
-      const resolved = resolveOperationContext(
+      const resolved = await resolveOperationContext(
         context,
-        connectionManager,
+        api,
         item,
         'Reorg indexes'
       );
@@ -206,27 +206,17 @@ export function registerDb2IndexCommands(
 
       const mode = await vscode.window.showQuickPick(
         [
-          { label: 'REBUILD', description: 'Full index rebuild (most thorough)', verbose: false },
+          { label: 'Full reorganization', description: 'Reorganize all indexes using compatible Db2 syntax', verbose: false },
           { label: 'CLEANUP ONLY', description: 'Cleanup pseudo-deleted entries (lighter)', verbose: true },
         ],
         { placeHolder: 'Select reorg mode' }
       );
       if (!mode) return;
 
-      const accessMode = await vscode.window.showQuickPick(
-        [
-          { label: 'ALLOW WRITE ACCESS', description: 'Readers and writers allowed (default)', concurrent: true },
-          { label: 'ALLOW READ ACCESS', description: 'Only readers allowed', concurrent: false },
-        ],
-        { placeHolder: 'Select access mode during reorg' }
-      );
-      if (!accessMode) return;
-
       await resolved.provider.reindexWithOptions?.(
         resolved.target,
         {
           verbose: mode.verbose,
-          concurrently: accessMode.concurrent,
         },
         resolved.services
       );

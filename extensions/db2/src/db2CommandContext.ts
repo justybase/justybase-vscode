@@ -4,9 +4,12 @@ import type {
   DatabaseMaintenanceServices,
   DatabaseMaintenanceTarget,
 } from '@justybase/contracts';
-import { getDatabaseMaintenanceProvider } from '../../../src/core/connectionFactory';
-import { runQueryRaw, queryResultToRows } from '../../../src/core/singleQueryExecutor';
-import { ConnectionManager } from '../../../src/core/connectionManager';
+import type {
+  ConnectionQueryResult,
+  ConnectionSummary,
+  JustyBaseLiteApi
+} from '../../../src/api/publicApi';
+import { db2MaintenanceProvider } from './db2MaintenanceProvider';
 
 export interface SchemaItemData {
   label: string;
@@ -32,13 +35,35 @@ export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export interface Db2MaintenanceApi {
+  getConnectionSummary(connectionName: string): Promise<ConnectionSummary | undefined>;
+  executeConnectionSql(sql: string, connectionName: string): Promise<void>;
+  executeConnectionSqlQuery(sql: string, connectionName: string): Promise<ConnectionQueryResult>;
+}
+
+export function isDb2MaintenanceApi(api: JustyBaseLiteApi): api is JustyBaseLiteApi & Db2MaintenanceApi {
+  return typeof api.getConnectionSummary === 'function'
+    && typeof api.executeConnectionSql === 'function'
+    && typeof api.executeConnectionSqlQuery === 'function';
+}
+
 function formatDuration(startTime: number): string {
   return ((Date.now() - startTime) / 1000).toFixed(1);
 }
 
+function queryResultToRows<T extends Record<string, unknown>>(result: ConnectionQueryResult): T[] {
+  return result.rows.map(row => {
+    const record: Record<string, unknown> = {};
+    result.columns.forEach((column, index) => {
+      record[column] = row[index];
+    });
+    return record as T;
+  });
+}
+
 export function createMaintenanceServices(
   context: vscode.ExtensionContext,
-  connectionManager: ConnectionManager
+  api: Db2MaintenanceApi
 ): DatabaseMaintenanceServices {
   return {
     context,
@@ -46,12 +71,14 @@ export function createMaintenanceServices(
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: progressTitle },
         async () => {
-          await runQueryRaw(context, sql, true, connectionManager, connectionName);
+          await api.executeConnectionSql(sql, connectionName);
         }
       );
     },
-    async getConnectionDetails(connectionName: string) {
-      return connectionManager.getConnection(connectionName);
+    async getConnectionDetails(_connectionName: string) {
+      // Credentials remain private to the core extension. Db2 recreate-table
+      // is available through the core maintenance command instead.
+      return undefined;
     },
     async openSqlDocument(content: string, language = 'sql'): Promise<void> {
       const document = await vscode.workspace.openTextDocument({
@@ -78,7 +105,7 @@ export function createMaintenanceServices(
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: progressTitle },
         async () => {
-          await runQueryRaw(context, sql, true, connectionManager, target.connectionName);
+          await api.executeConnectionSql(sql, target.connectionName);
         }
       );
       vscode.window.showInformationMessage(
@@ -87,53 +114,46 @@ export function createMaintenanceServices(
     } catch (error) {
       vscode.window.showErrorMessage(`${errorPrefix}: ${getErrorMessage(error)}`);
     }
-  },
-  async executeQuery<T extends Record<string, unknown>>(sql: string, connectionName: string): Promise<T[]> {
-    const result = await runQueryRaw(context, sql, true, connectionManager, connectionName);
-    return queryResultToRows<T>(result);
-  },
+    },
+    async executeQuery<T extends Record<string, unknown>>(sql: string, connectionName: string): Promise<T[]> {
+      return queryResultToRows<T>(await api.executeConnectionSqlQuery(sql, connectionName));
+   },
 };
 }
 
-export function resolveOperationContext(
+export async function resolveOperationContext(
   context: vscode.ExtensionContext,
-  connectionManager: ConnectionManager,
+  api: Db2MaintenanceApi,
   item: TableSchemaItemData,
   operationLabel: string
-): {
+): Promise<{
   provider: DatabaseMaintenanceProvider;
   target: DatabaseMaintenanceTarget;
   services: DatabaseMaintenanceServices;
-} | undefined {
-  const connectionName = connectionManager.resolveConnectionName(undefined, item.connectionName);
+} | undefined> {
+  const connectionName = item.connectionName?.trim();
   if (!connectionName) {
-    vscode.window.showErrorMessage('No database connection. Please connect first.');
+    vscode.window.showErrorMessage('The selected table is missing its database connection context. Refresh the schema tree and try again.');
     return undefined;
   }
 
-  if (!connectionManager.supportsCapability('supportsTableMaintenance', undefined, connectionName)) {
-    vscode.window.showErrorMessage(`${operationLabel} is not supported for the active database dialect.`);
+  const connection = await api.getConnectionSummary(connectionName);
+  if (!connection) {
+    vscode.window.showErrorMessage(`Connection '${connectionName}' is no longer available. Select or reconnect it, then refresh the schema tree.`);
     return undefined;
   }
 
-  const databaseKind = connectionManager.getConnectionDatabaseKind(connectionName);
-
-  if (databaseKind !== 'db2') {
+  if (connection.databaseKind.toLowerCase() !== 'db2') {
     vscode.window.showErrorMessage(`${operationLabel} is only supported for Db2 connections.`);
-    return undefined;
-  }
-
-  const provider = getDatabaseMaintenanceProvider(databaseKind);
-
-  if (!provider) {
-    vscode.window.showErrorMessage(`${operationLabel} is not supported for the active database dialect.`);
     return undefined;
   }
 
   const qualifiedName = `"${item.schema}"."${item.rawLabel || item.label}"`;
 
   return {
-    provider,
+    // Companion bundles have their own module graph, so use the concrete Db2
+    // provider instead of looking it up in the core extension's registry.
+    provider: db2MaintenanceProvider,
     target: {
       connectionName,
       databaseName: item.dbName,
@@ -141,6 +161,6 @@ export function resolveOperationContext(
       tableName: item.rawLabel || item.label,
       qualifiedName,
     },
-    services: createMaintenanceServices(context, connectionManager),
+    services: createMaintenanceServices(context, api),
   };
 }

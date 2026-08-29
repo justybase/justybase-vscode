@@ -18,6 +18,7 @@ import { db2Dialect } from '../../extensions/db2/src/db2Dialect';
 import { db2MaintenanceProvider } from '../../extensions/db2/src/db2MaintenanceProvider';
 import { postgresqlDialect } from '../../extensions/postgresql/src/postgresqlDialect';
 import { postgresqlMaintenanceProvider } from '../../extensions/postgresql/src/postgresqlMaintenanceProvider';
+import { verticaMaintenanceProvider } from '../../extensions/vertica/src/verticaMaintenanceProvider';
 import { sqliteMaintenanceProvider } from '../dialects/sqlite/maintenanceProvider';
 
 jest.mock('vscode', () => ({
@@ -300,7 +301,7 @@ describe('db2MaintenanceProvider', () => {
 
         await db2MaintenanceProvider.vacuumTable!(target, services);
 
-        expectExecutedSql(services, "CALL SYSPROC.ADMIN_CMD('REORG TABLE ADMIN.SALES ALLOW WRITE ACCESS');");
+        expectExecutedSql(services, "CALL SYSPROC.ADMIN_CMD('REORG TABLE ADMIN.SALES');");
     });
 
     it('runs REORG INDEXES through ADMIN_CMD for Db2 tables', async () => {
@@ -309,7 +310,16 @@ describe('db2MaintenanceProvider', () => {
 
         await db2MaintenanceProvider.reindexTable!(target, services);
 
-        expectExecutedSql(services, "CALL SYSPROC.ADMIN_CMD('REORG INDEXES ALL FOR TABLE ADMIN.SALES ALLOW WRITE ACCESS');");
+        expectExecutedSql(services, "CALL SYSPROC.ADMIN_CMD('REORG INDEXES ALL FOR TABLE ADMIN.SALES');");
+    });
+
+    it('uses portable Db2 reorg options without REBUILD or ALLOW WRITE ACCESS', async () => {
+        const services = createServices();
+        showWarningMessage.mockResolvedValue('Yes, reindex');
+
+        await db2MaintenanceProvider.reindexWithOptions!(target, { concurrently: true, verbose: false }, services);
+
+        expectExecutedSql(services, "CALL SYSPROC.ADMIN_CMD('REORG INDEXES ALL FOR TABLE ADMIN.SALES');");
     });
 
     it('fails recreate when connection details are unavailable', async () => {
@@ -318,6 +328,26 @@ describe('db2MaintenanceProvider', () => {
 
         await expect(db2MaintenanceProvider.recreateTable!(target, services)).rejects.toThrow(
             'Connection details not found for db2-conn.'
+        );
+    });
+});
+
+describe('verticaMaintenanceProvider', () => {
+    const target: DatabaseMaintenanceTarget = {
+        connectionName: 'vertica-conn',
+        databaseName: 'warehouse',
+        schemaName: 'analytics',
+        tableName: 'sales',
+        qualifiedName: 'analytics.sales'
+    };
+
+    it('builds its skew query from the concrete Vertica DDL provider', async () => {
+        const services = createServices();
+
+        await verticaMaintenanceProvider.checkSkew!(target, services);
+
+        expect(services.openSqlDocument).toHaveBeenCalledWith(
+            'SELECT 1 AS "DATASLICEID", COUNT(*) AS "ROW_COUNT" FROM analytics.sales;\n'
         );
     });
 });

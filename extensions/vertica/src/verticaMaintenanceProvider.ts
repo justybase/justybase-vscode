@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { DatabaseMaintenanceProvider } from '@justybase/contracts';
-import { getRequiredDatabaseDdlProvider } from '../../../src/core/connectionFactory';
+import { verticaAdvancedFeatures } from './verticaDdlGenerator';
 
 function escapeSqlLiteral(value: string): string {
     return value.replace(/'/g, "''");
@@ -8,6 +8,14 @@ function escapeSqlLiteral(value: string): string {
 
 function toVerticaQualifiedLiteral(schemaName: string, tableName: string): string {
     return `${schemaName}.${tableName}`;
+}
+
+function getVerticaDdlProvider() {
+    const provider = verticaAdvancedFeatures.ddl;
+    if (!provider) {
+        throw new Error('Vertica DDL support is unavailable.');
+    }
+    return provider;
 }
 
 async function analyzeTableInternal(target: Parameters<NonNullable<DatabaseMaintenanceProvider['analyzeTable']>>[0], services: Parameters<NonNullable<DatabaseMaintenanceProvider['analyzeTable']>>[1]): Promise<void> {
@@ -55,7 +63,7 @@ export const verticaMaintenanceProvider: DatabaseMaintenanceProvider = {
     },
 
     async checkSkew(target, services): Promise<void> {
-        const ddlProvider = getRequiredDatabaseDdlProvider('vertica');
+        const ddlProvider = getVerticaDdlProvider();
         const sql = ddlProvider.buildSkewCheckQuery(target.qualifiedName);
         await services.openSqlDocument(`${sql};\n`);
     },
@@ -66,7 +74,7 @@ export const verticaMaintenanceProvider: DatabaseMaintenanceProvider = {
             throw new Error(`Connection details not found for ${target.connectionName}.`);
         }
 
-        const ddlProvider = getRequiredDatabaseDdlProvider('vertica');
+        const ddlProvider = getVerticaDdlProvider();
         const result = await ddlProvider.generateDDL(
             connectionDetails,
             target.databaseName,
