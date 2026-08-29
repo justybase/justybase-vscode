@@ -104,6 +104,75 @@ function findMacroDirectiveEnd(sql: string, start: number): number {
   return sql.length;
 }
 
+function findMacroIfBlockEnd(sql: string, bodyStart: number): number {
+  let offset = bodyStart;
+  let atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+  let allowChainedDirective = true;
+  let depth = 0;
+
+  while (offset < sql.length) {
+    if (atLineStart || allowChainedDirective) {
+      const directiveStart = skipHorizontalWhitespace(sql, offset);
+      if (isInsideStringOrComment(sql, directiveStart)) {
+        const char = sql[offset] ?? "";
+        offset++;
+        allowChainedDirective = char === ";";
+        atLineStart = updateLineStartState(atLineStart, char);
+        continue;
+      }
+
+      const text = sql.slice(directiveStart);
+      const ifMatch = text.match(/^%if\s+/i);
+      if (ifMatch) {
+        depth++;
+        offset = findMacroDirectiveEnd(sql, directiveStart + ifMatch[0].length);
+        atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+        allowChainedDirective = true;
+        continue;
+      }
+
+      const endMatch = text.match(/^%end\b\s*;?/i);
+      if (endMatch) {
+        const end = directiveStart + endMatch[0].length;
+        if (depth === 0) {
+          return end;
+        }
+        depth--;
+        offset = end;
+        atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+        allowChainedDirective = true;
+        continue;
+      }
+
+      const doMatch = text.match(/^%do\s*;?/i);
+      if (doMatch) {
+        depth++;
+        offset = findMacroDirectiveEnd(sql, directiveStart + doMatch[0].length);
+        atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+        allowChainedDirective = true;
+        continue;
+      }
+
+      const directiveMatch = text.match(
+        /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%else\s+%do\b\s*|%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+)/i,
+      );
+      if (directiveMatch) {
+        offset = findMacroDirectiveEnd(sql, directiveStart + directiveMatch[0].length);
+        atLineStart = isAtLineStartAfterWhitespace(sql, offset);
+        allowChainedDirective = true;
+        continue;
+      }
+    }
+
+    const char = sql[offset] ?? "";
+    offset++;
+    allowChainedDirective = char === ";";
+    atLineStart = updateLineStartState(atLineStart, char);
+  }
+
+  return sql.length;
+}
+
 function readMacroDirectiveRange(
   sql: string,
   start: number,
@@ -113,8 +182,19 @@ function readMacroDirectiveRange(
     return undefined;
   }
 
+  const ifMatch = sql.slice(directiveStart).match(/^%if\s+/i);
+  if (ifMatch) {
+    return {
+      start: directiveStart,
+      end: findMacroIfBlockEnd(
+        sql,
+        findMacroDirectiveEnd(sql, directiveStart + ifMatch[0].length),
+      ),
+    };
+  }
+
   const directiveMatch = sql.slice(directiveStart).match(
-    /^(?:%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*)/i,
+    /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+|%do\s*;?|%else\s+%do\b\s*|%end\b\s*)/i,
   );
   if (!directiveMatch) {
     return undefined;

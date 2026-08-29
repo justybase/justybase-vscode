@@ -162,7 +162,7 @@
     },
     {
       "comment": "─── P3a: SAS-like macro directives ───",
-      "match": "(?i)%(LET|PUT|EXPORT|PYTHON|IF|THEN|ELSE|DO|END|INCLUDE)\\b",
+      "match": "(?i)(?:@SET|%(?:LET|PUT|EXPORT|PYTHON|IF|THEN|ELSE|DO|END|INCLUDE))\\b",
       "name": "keyword.control.macro.sas.sql"
     },
     {

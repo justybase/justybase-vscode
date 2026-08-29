@@ -176,6 +176,7 @@ SELECT 1;
   it("sanitizes multiline macro declarations before parsing and validation", () => {
     const result = parseSqlStatements({
       sql: `%LET dim_table = JUST_DATA.ADMIN.DIMDATE;
+@SET run_id = 1;
 %LET as_of_key = %SQL(
   SELECT MAX(DATEKEY)
   FROM &dim_table
@@ -197,6 +198,7 @@ SELECT &as_of_key AS as_of_key FROM &dim_table;`,
   format='xlsx',
   file='/tmp/dimdate.xlsx',
   sheet='Dim Date',
+  update=true,
   query=(
     SELECT DATEKEY, CALENDARQUARTER
     FROM &dim_table

@@ -5,6 +5,7 @@ import {
   CompletionItemKind,
   CompletionTriggerKind,
   Position,
+  Range,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { ensureBuiltInDialectsRegistered } from "../dialects";
@@ -1711,7 +1712,7 @@ SELECT \${|`,
       expect(variableItem).toBeUndefined();
     });
 
-    it("returns %let declaration snippet after percent trigger", async () => {
+    it("returns the complete SAS-like macro snippet set after percent trigger", async () => {
       const items = await complete(
         "%|",
         CompletionTriggerKind.TriggerCharacter,
@@ -1719,9 +1720,15 @@ SELECT \${|`,
       const letItem = items.find((item) => item.label === "%let variable = value;");
       const sqlItem = items.find((item) => item.label === "%sql(SELECT ...)");
       const sqlListItem = items.find((item) => item.label === "%sqllist(SELECT ...)");
-      const exportItem = items.find((item) => item.label === "%export(format, file, query);");
+      const exportItem = items.find((item) => item.label === "%export(format, file, query, update);");
       const pythonItem = items.find((item) => item.label === "%python script.py [args...]");
       const doItem = items.find((item) => item.label === "%do; ... %end;");
+      const ifItem = items.find((item) => item.label === "%if ... %then %do; ... %end;");
+      const elseItem = items.find((item) => item.label === "%else %do; ... %end;");
+      const endItem = items.find((item) => item.label === "%end;");
+      const includeItem = items.find((item) => item.label === "%include 'path.sql';");
+      const evalItem = items.find((item) => item.label === "%eval(expression)");
+      const putItem = items.find((item) => item.label === "%put message;");
 
       expect(letItem).toBeDefined();
       expect(letItem?.kind).toBe(CompletionItemKind.Snippet);
@@ -1732,10 +1739,98 @@ SELECT \${|`,
       expect(sqlListItem?.textEdit?.newText).toBe("sqllist(SELECT ${1:column} FROM ${2:table})");
       expect(exportItem?.kind).toBe(CompletionItemKind.Snippet);
       expect(exportItem?.textEdit?.newText).toContain("export(format='${1:xlsx}'");
+      expect(exportItem?.textEdit?.newText).toContain("update=${6:false}");
       expect(pythonItem?.kind).toBe(CompletionItemKind.Snippet);
       expect(pythonItem?.textEdit?.newText).toContain("python ${1:script.py}");
       expect(doItem?.kind).toBe(CompletionItemKind.Snippet);
       expect(doItem?.textEdit?.newText).toContain("do;\n");
+      expect(ifItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(ifItem?.textEdit?.newText).toContain("%then %do;");
+      expect(elseItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(endItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(includeItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(evalItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(putItem?.kind).toBe(CompletionItemKind.Snippet);
+    });
+
+    it("filters SAS-like macro directives when a percent prefix is typed", async () => {
+      const items = await complete("%E|");
+
+      expect(labels(items)).toEqual(expect.arrayContaining([
+        "%else %do; ... %end;",
+        "%end;",
+        "%eval(expression)",
+        "%export(format, file, query, update);",
+      ]));
+      expect(labels(items)).not.toContain("%let variable = value;");
+      expect(items.find((item) => item.label === "%export(format, file, query, update);")?.textEdit).toMatchObject({
+        range: Range.create(0, 1, 0, 2),
+        newText: expect.stringContaining("export(format='"),
+      });
+    });
+
+    it("returns the @SET declaration snippet after an at-sign trigger", async () => {
+      const items = await complete("@|", CompletionTriggerKind.TriggerCharacter);
+      const setItem = items.find((item) => item.label === "@SET variable = value;");
+
+      expect(setItem).toBeDefined();
+      expect(setItem?.kind).toBe(CompletionItemKind.Snippet);
+      expect(setItem?.textEdit?.newText).toBe("SET ${1:variable_name} = ${2:value};");
+    });
+
+    it("returns %EXPORT argument name completions", async () => {
+      const items = await complete("%export(|");
+      const itemLabels = labels(items);
+
+      expect(itemLabels).toEqual(expect.arrayContaining([
+        "format='xlsx'",
+        "file='/tmp/results.xlsx'",
+        "sheet='Query Results'",
+        "query=(SELECT ...)",
+        "overwrite=false",
+        "update=false",
+      ]));
+    });
+
+    it("filters already-used %EXPORT arguments and offers format values", async () => {
+      const items = await complete("%export(file='report.xlsx', format='x|)");
+
+      expect(labels(items)).toEqual(expect.arrayContaining(["xlsx", "xlsb"]));
+      expect(labels(items)).not.toContain("format='xlsx'");
+      expect(labels(items)).not.toContain("file='/tmp/results.xlsx'");
+      expect(items.find((item) => item.label === "xlsx")?.kind).toBe(CompletionItemKind.Value);
+    });
+
+    it("offers boolean values for %EXPORT update", async () => {
+      const items = await complete("%export(update=t|)");
+
+      expect(labels(items)).toEqual(["true"]);
+      expect(items[0]?.detail).toContain("Update existing workbook");
+    });
+
+    it("preserves macro variable completion inside %EXPORT values", async () => {
+      const fileItems = await complete(`%let output_path = '/tmp/report.xlsx';
+%export(file='&out|)`);
+      const fileItem = fileItems.find((item) => item.label === "&output_path");
+
+      expect(fileItem).toBeDefined();
+      expect(fileItem?.kind).toBe(CompletionItemKind.Variable);
+      expect(fileItem?.textEdit?.newText).toBe("output_path");
+      expect(fileItem?.textEdit).toMatchObject({
+        range: Range.create(1, 15, 1, 18),
+      });
+
+      const updateItems = await complete(`%let update_flag = true;
+%export(update=&up|)`);
+      const updateItem = updateItems.find((item) => item.label === "&update_flag");
+
+      expect(updateItem).toBeDefined();
+      expect(updateItem?.kind).toBe(CompletionItemKind.Variable);
+      expect(updateItem?.textEdit?.newText).toBe("update_flag");
+      expect(updateItem?.textEdit).toMatchObject({
+        range: Range.create(1, 16, 1, 18),
+      });
+      expect(labels(updateItems)).not.toContain("true");
     });
 
     it("returns inline macro variable completions after ampersand trigger", async () => {

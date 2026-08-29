@@ -42,6 +42,18 @@ import {
     assertExecutionCurrent,
     type ExecutionCurrentCheck,
 } from "./executionGuard";
+import { formatBinaryValue } from "../export/binaryValue";
+import {
+    convertToExcelNumberIfNumericString,
+    shouldConvertToExcelNumber,
+} from "../export/excelNumericUtils";
+import {
+    getSpreadsheetDataRange,
+    inspectSpreadsheetTables,
+    refreshSpreadsheetTableRangesAfterSheetUpdate,
+    removeXlsxCalcChain,
+    type SpreadsheetTableInfo,
+} from "./xlsxTableRangeUpdater";
 
 // Re-export for convenience
 export { executeDropSession };
@@ -434,7 +446,40 @@ export async function executeMacroExport(
     queryExecutor: MacroQueryExecutor,
     _logCallback?: (message: string) => void,
 ): Promise<MacroExportExecutionResult> {
-    if (fs.existsSync(request.filePath) && !request.overwrite) {
+    let updater: SpreadsheetUpdaterLike | undefined;
+    let updateTable: SpreadsheetTableInfo | undefined;
+    if (request.updateExisting === true) {
+        if (request.format !== 'xlsx' && request.format !== 'xlsb') {
+            throw new Error('%EXPORT update=true is supported only for XLSX and XLSB');
+        }
+        if (!fs.existsSync(request.filePath)) {
+            throw new Error(`%EXPORT update target does not exist: ${request.filePath}`);
+        }
+
+        const { XlsxUpdater, XlsbUpdater } = requireSpreadsheetTasks();
+        updater = request.format === 'xlsx'
+            ? new XlsxUpdater(request.filePath)
+            : new XlsbUpdater(request.filePath);
+        if (!updater.getSheetNames().includes(request.sheetName)) {
+            throw new Error(
+                `%EXPORT update target sheet does not exist: ${request.sheetName}`,
+            );
+        }
+        const tables = inspectSpreadsheetTables(request.filePath, request.sheetName);
+        if (tables.length > 1) {
+            throw new Error(
+                `Cannot update spreadsheet sheet "${request.sheetName}": it contains ` +
+                `${tables.length} ListObjects; update a sheet with exactly one table.`,
+            );
+        }
+        updateTable = tables[0];
+        if (updateTable && updateTable.headers.length === 0) {
+            throw new Error(
+                `Cannot update spreadsheet sheet "${request.sheetName}": its ListObject ` +
+                "does not expose a readable column contract.",
+            );
+        }
+    } else if (fs.existsSync(request.filePath) && !request.overwrite) {
         throw new Error(`%EXPORT target already exists: ${request.filePath}`);
     }
 
@@ -444,6 +489,40 @@ export async function executeMacroExport(
 
     if (columns.length === 0) {
         throw new Error('%EXPORT query returned no columns to export');
+    }
+
+    if (updater) {
+        const queryHeaders = columns.map((column) => column.name);
+        const exportHeaders = updateTable
+            ? validateSpreadsheetTableHeaders(request.sheetName, updateTable, queryHeaders)
+            : queryHeaders;
+        const exportRows = rows.map((row) => row.map((value, index) => normalizeMacroSpreadsheetCell(
+            value,
+            columns[index]?.type,
+        )));
+        updater.replaceSheetData(
+            request.sheetName,
+            exportRows,
+            { headers: exportHeaders },
+        );
+        updater.save();
+        if (request.format === 'xlsx') {
+            removeXlsxCalcChain(request.filePath);
+        }
+        refreshSpreadsheetTableRangesAfterSheetUpdate(
+            request.filePath,
+            request.sheetName,
+            getSpreadsheetDataRange(exportRows, exportHeaders),
+        );
+
+        const message = `>>> %EXPORT: Updated ${rows.length} rows in ${request.filePath} (sheet "${request.sheetName}")`;
+        return {
+            filePath: request.filePath,
+            format: request.format,
+            rowsExported: rows.length,
+            columns: columns.length,
+            message,
+        };
     }
 
     const item = {
@@ -499,6 +578,83 @@ export async function executeMacroExport(
         columns: columnCount,
         message,
     };
+}
+
+interface SpreadsheetUpdaterLike {
+    getSheetNames(): string[];
+    replaceSheetData(
+        sheetName: string,
+        rows: Array<Array<string | number | boolean | Date | bigint | null>>,
+        options?: { headers?: string[]; styleFallback?: 'inherit' | 'general' },
+    ): void;
+    save(outputPath?: string): void;
+}
+
+function requireSpreadsheetTasks(): {
+    XlsxUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
+    XlsbUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
+} {
+    const { XlsxUpdater, XlsbUpdater } = require('@justybase/spreadsheet-tasks') as {
+        XlsxUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
+        XlsbUpdater: new (filePath: string) => SpreadsheetUpdaterLike;
+    };
+    return { XlsxUpdater, XlsbUpdater };
+}
+
+function validateSpreadsheetTableHeaders(
+    sheetName: string,
+    table: SpreadsheetTableInfo,
+    queryHeaders: string[],
+): string[] {
+    const normalize = (header: string): string => header.trim().toUpperCase();
+    const mismatches = table.headers.flatMap((expected, index) => {
+        const actual = queryHeaders[index];
+        return actual !== undefined && normalize(expected) === normalize(actual)
+            ? []
+            : [`${expected} ≠ ${actual ?? "<missing>"}`];
+    });
+    if (table.headers.length !== queryHeaders.length || mismatches.length > 0) {
+        throw new Error(
+            `Cannot update spreadsheet sheet "${sheetName}": query columns do not match ` +
+            `the existing ListObject. Expected [${table.headers.join(", ")}], received ` +
+            `[${queryHeaders.join(", ")}]. Mismatches: ${mismatches.join("; ")}`,
+        );
+    }
+
+    // Preserve the workbook's exact casing and spelling. Pivot fields and
+    // structured references are bound to these names, not to the database's
+    // presentation of the same identifiers.
+    return table.headers;
+}
+
+function normalizeMacroSpreadsheetCell(
+    value: unknown,
+    type?: string,
+): string | number | boolean | Date | bigint | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+
+    const binaryValue = formatBinaryValue(value);
+    if (binaryValue) {
+        return binaryValue;
+    }
+
+    const excelValue = shouldConvertToExcelNumber(type)
+        ? convertToExcelNumberIfNumericString(value, type)
+        : value;
+
+    if (
+        typeof excelValue === 'string' ||
+        typeof excelValue === 'number' ||
+        typeof excelValue === 'boolean' ||
+        typeof excelValue === 'bigint' ||
+        excelValue instanceof Date
+    ) {
+        return excelValue;
+    }
+
+    return String(excelValue);
 }
 
 function normalizeMacroExportColumns(

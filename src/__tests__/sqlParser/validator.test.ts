@@ -145,6 +145,21 @@ describe("SqlValidator", () => {
       expect(result.errors.find((e) => e.code === "PAR001")).toBeUndefined();
     });
 
+    it("should accept update arguments in multiline %EXPORT directives", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(`%LET output_path = '/tmp/report.xlsx';
+%EXPORT(
+  file=&output_path,
+  sheet='Data',
+  query=(SELECT UPDATE_VALUE FROM SOURCE_TABLE),
+  update=true
+);
+SELECT 1;`);
+
+      expect(result.errors.find((e) => e.code === "LEX001")).toBeUndefined();
+      expect(result.errors.find((e) => e.code === "PAR001")).toBeUndefined();
+    });
+
     it("should not report lexer or parser errors for SAS-like macro control blocks", () => {
       const validator = new SqlValidator();
       const result = validator.validate(`%LET run_bad_sql = 0;

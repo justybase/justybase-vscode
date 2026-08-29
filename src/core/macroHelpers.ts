@@ -307,6 +307,7 @@ interface ParsedMacroExportPayload {
     query?: string;
     sheetName?: string;
     overwrite?: string;
+    update?: string;
 }
 
 export function parseMacroExportPayload(payload: string): ParsedMacroExportPayload {
@@ -331,6 +332,7 @@ export function parseMacroExportPayload(payload: string): ParsedMacroExportPaylo
         query: fields.get('query') ?? fields.get('sql'),
         sheetName: fields.get('sheet') ?? fields.get('sheetname') ?? fields.get('name'),
         overwrite: fields.get('overwrite'),
+        update: fields.get('update'),
     };
 }
 

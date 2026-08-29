@@ -216,7 +216,7 @@ function readMacroDirectiveRange(
   }
 
   const directiveMatch = sql.slice(directiveStart).match(
-    /^(?:%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+|%do\s*;?|%else\s+%do\b\s*|%end\b\s*)/i,
+    /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+|%do\s*;?|%else\s+%do\b\s*|%end\b\s*)/i,
   );
 
   if (!directiveMatch) {
@@ -270,7 +270,7 @@ function findMacroIfBlockEnd(sql: string, bodyStart: number): number {
         continue;
       }
 
-      const directiveMatch = text.match(/^%(?:else\s+%do|let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|put\s+|export\b\s*|include\s+|python\s+)/i);
+      const directiveMatch = text.match(/^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%(?:else\s+%do|let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|put\s+|export\b\s*|include\s+|python\s+))/i);
       if (directiveMatch) {
         offset = findDirectiveEnd(sql, directiveStart + directiveMatch[0].length);
         atLineStart = isAtLineStartAfterWhitespace(sql, offset);

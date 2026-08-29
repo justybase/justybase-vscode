@@ -258,6 +258,48 @@
         ],
         "description": "ORGANIZE ON clause for zone maps"
     },
+    "Macro LET": {
+        "prefix": "nzmacrolet",
+        "body": [
+            "%LET ${1:variable_name} = ${2:value};"
+        ],
+        "description": "SAS-like macro variable declaration"
+    },
+    "Macro SET": {
+        "prefix": "nzmacroset",
+        "body": [
+            "@SET ${1:variable_name} = ${2:value};"
+        ],
+        "description": "SAS-like macro variable declaration using the @SET alias"
+    },
+    "Macro SQL": {
+        "prefix": "nzmacrosql",
+        "body": [
+            "%SQL(SELECT ${1:expression} FROM ${2:table})"
+        ],
+        "description": "Inline scalar SQL macro"
+    },
+    "Macro SQLLIST": {
+        "prefix": "nzmacrosqllist",
+        "body": [
+            "%SQLLIST(SELECT ${1:column} FROM ${2:table})"
+        ],
+        "description": "Inline SQL list macro"
+    },
+    "Macro EVAL": {
+        "prefix": "nzmacroeval",
+        "body": [
+            "%EVAL(${1:expression})"
+        ],
+        "description": "Evaluate a safe macro expression"
+    },
+    "Macro PUT": {
+        "prefix": "nzmacroput",
+        "body": [
+            "%PUT ${1:message};"
+        ],
+        "description": "Write a resolved message to the macro log"
+    },
     "Macro IF THEN DO": {
         "prefix": "nzmacroif",
         "body": [
@@ -311,9 +353,208 @@
         "body": [
             "%export(format='${1:xlsx}', file='${2:/tmp/results.xlsx}', sheet='${3:Query Results}', query=(",
             "  ${4:SELECT * FROM table}",
-            "), overwrite=${5:false});"
+            "), overwrite=${5:false}, update=${6:false});"
         ],
         "description": "SAS-like macro EXPORT directive to export query results"
+    },
+    "Macro EXPORT Update XLSX": {
+        "prefix": "nzmacroexportupdatexlsx",
+        "body": [
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1:/tmp/existing-report.xlsx}',",
+            "  sheet='${2:Data}',",
+            "  query=(",
+            "    ${3:SELECT * FROM source_table}",
+            "  ),",
+            "  update=true",
+            ");"
+        ],
+        "description": "Replace a sheet in an existing XLSX workbook"
+    },
+    "Macro EXPORT Update XLSB": {
+        "prefix": "nzmacroexportupdatexlsb",
+        "body": [
+            "%EXPORT(",
+            "  format='xlsb',",
+            "  file='${1:/tmp/existing-report.xlsb}',",
+            "  sheet='${2:Data}',",
+            "  query=(",
+            "    ${3:SELECT * FROM source_table}",
+            "  ),",
+            "  update=true",
+            ");"
+        ],
+        "description": "Replace a sheet in an existing XLSB workbook"
+    },
+    "Macro Bank Sales Dashboard Update": {
+        "prefix": "nzbankdashboardupdate",
+        "body": [
+            "%LET dashboard_file = ${1:/tmp/bank-sales-overview.xlsx};",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='Raw_Monthly',",
+            "  query=(",
+            "    SELECT month,",
+            "           COUNT(*) AS new_ror_accounts,",
+            "           COUNT(*) AS credit_applications,",
+            "           COUNT(*) AS credit_sales,",
+            "           COUNT(*) * 100000 AS credit_volume_pln,",
+            "           1 AS active_campaigns,",
+            "           0.50 AS conversion_rate",
+            "    FROM ${2:DB.SCHEMA.SALES_EVENTS}",
+            "    WHERE report_date >= ${3:CURRENT_DATE - 30}",
+            "    GROUP BY month",
+            "  ),",
+            "  update=true",
+            ");",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='Raw_Products',",
+            "  query=(SELECT product, category, applications, approved, sold, volume_pln, share_of_sales FROM ${4:DB.SCHEMA.PRODUCT_SALES}),",
+            "  update=true",
+            ");"
+        ],
+        "description": "Refresh two raw tabs in the generated bank sales dashboard"
+    },
+    "Macro Bank Campaign Dashboard Update": {
+        "prefix": "nzcampaigndashboardupdate",
+        "body": [
+            "%LET dashboard_file = ${1:/tmp/campaign-performance.xlsx};",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='Raw_Campaigns',",
+            "  query=(",
+            "    SELECT campaign_id, campaign, channel, product, leads, applications, approved, sold, volume_pln, spend_pln, conversion_rate, roi",
+            "    FROM ${2:DB.SCHEMA.CAMPAIGN_PERFORMANCE}",
+            "    WHERE report_year = ${3:2025}",
+            "    ORDER BY roi DESC",
+            "  ),",
+            "  update=true",
+            ");",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='Raw_Funnel',",
+            "  query=(SELECT stage, count, conversion_from_previous FROM ${4:DB.SCHEMA.CAMPAIGN_FUNNEL} ORDER BY stage_order),",
+            "  update=true",
+            ");"
+        ],
+        "description": "Refresh campaign and funnel raw tabs while preserving the dashboard"
+    },
+    "Macro Branch Productization Dashboard Update": {
+        "prefix": "nzbranchproductizationupdate",
+        "body": [
+            "%LET dashboard_file = ${1:/tmp/branch-product-ranking.xlsx};",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='Raw_Branches',",
+            "  query=(",
+            "    SELECT branch_id, branch, region, rank, credit_volume_pln, attainment_rate, ror_per_advisor, productization_rate",
+            "    FROM ${2:DB.SCHEMA.BRANCH_RANKING}",
+            "    WHERE report_month = ${3:202512}",
+            "    ORDER BY rank",
+            "  ),",
+            "  update=true",
+            ");",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='Raw_CrossSell',",
+            "  query=(SELECT branch_id, branch, customers, multiproduct_customers, productization_rate, products_per_customer, card_rate, insurance_rate FROM ${4:DB.SCHEMA.BRANCH_CROSS_SELL}),",
+            "  update=true",
+            ");"
+        ],
+        "description": "Refresh branch ranking and productization raw tabs"
+    },
+    "Macro External Superstore Dashboard Update": {
+        "prefix": "nzexternalsalesdashboard",
+        "body": [
+            "%LET dashboard_file = ${1:/tmp/superstore-sales-dashboard.xlsx};",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='superstore',",
+            "  query=(",
+            "    SELECT order_date AS \"Order Date\", order_year AS \"Year\", order_month AS \"Month\", customer_name AS \"Customer Name\", state AS \"State\", category AS \"Category\", sub_category AS \"Sub-Category\", product_name AS \"Product Name\", sales AS \"Sales\", quantity AS \"Quantity\", profit AS \"Profit\"",
+            "    FROM ${2:DB.SCHEMA.SALES_ORDERS}",
+            "    WHERE order_date >= ${3:CURRENT_DATE - 365}",
+            "    ORDER BY order_date",
+            "  ),",
+            "  update=true",
+            ");",
+            "%PUT External PivotTable source refreshed; use Excel Data > Refresh All.;"
+        ],
+        "description": "Refresh the raw source of an MIT-licensed PivotTable dashboard"
+    },
+    "Macro External Finance Dashboard Update": {
+        "prefix": "nzexternalfinancedashboard",
+        "body": [
+            "%LET dashboard_file = ${1:/tmp/personal-finance-dashboard-2026.xlsx};",
+            "%EXPORT(",
+            "  format='xlsx',",
+            "  file='${1}',",
+            "  sheet='Dataset',",
+            "  query=(",
+            "    SELECT transaction_id AS \"Transaction ID\", transaction_date AS \"Date\", report_year AS \"Year\", account AS \"Account\", bank AS \"Bank\", transaction_type AS \"Transaction Type\", category AS \"Category\", sub_category AS \"Sub Category\", payment_method AS \"Payment Method\", merchant AS \"Merchant\", description AS \"Description\", amount AS \"Amount (₹)\", budget AS \"Budget (₹)\", savings_goal AS \"Savings Goal\", location AS \"Location\", status AS \"Status\", recurring AS \"Recurring\", tax_deductible AS \"Tax Deductible\", balance_after_transaction AS \"Balance After Transaction (₹)\", month AS \"Month\", quarter AS \"Quarter\", month_no AS \"Month No\"",
+            "    FROM ${2:DB.SCHEMA.ACCOUNT_TRANSACTIONS}",
+            "    WHERE report_year = ${3:2026}",
+            "    ORDER BY transaction_date",
+            "  ),",
+            "  update=true",
+            ");"
+        ],
+        "description": "Refresh the Dataset source of an MIT-licensed finance dashboard"
+    },
+    "Macro Full Reporting Pipeline": {
+        "prefix": "nzfullreportingpipeline",
+        "body": [
+            "%LET dim_table = ${1:JUST_DATA.ADMIN.DIMDATE};",
+            "%LET output_file = ${2:/tmp/monthly-report.xlsx};",
+            "%LET run_report = ${3:1};",
+            "%LET as_of_key = %SQL(SELECT MAX(DATEKEY) FROM &dim_table);",
+            "%LET min_key = %EVAL(&as_of_key - ${4:30});",
+            "%IF &run_report = 1 %THEN %DO;",
+            "  %PUT Running report for &dim_table, DATEKEY=&as_of_key;",
+            "  %EXPORT(",
+            "    format='xlsx',",
+            "    file='${2}',",
+            "    sheet='Daily',",
+            "    query=(",
+            "      SELECT DATEKEY, CALENDARQUARTER",
+            "      FROM &dim_table",
+            "      WHERE DATEKEY BETWEEN &min_key AND &as_of_key",
+            "      ORDER BY DATEKEY",
+            "    ),",
+            "    overwrite=true",
+            "  );",
+            "%ELSE %DO;",
+            "  %PUT Report disabled;",
+            "%END;"
+        ],
+        "description": "Complete pipeline with variables, SQL/EVAL, branching, logging and export"
+    },
+    "Macro Workflow": {
+        "prefix": "nzmacroworkflow",
+        "body": [
+            "%LET ${1:run_report} = 1;",
+            "%LET ${2:report_table} = ${3:DB.SCHEMA.TABLE};",
+            "%IF &${1:run_report} = 1 %THEN %DO;",
+            "    %PUT Exporting &${2:report_table};",
+            "    %EXPORT(",
+            "      format='${4:xlsx}',",
+            "      file='${5:/tmp/report.xlsx}',",
+            "      sheet='${6:Data}',",
+            "      query=(SELECT * FROM &${2:report_table}),",
+            "      update=${7:true}",
+            "    );",
+            "%END;"
+        ],
+        "description": "Complete SAS-like macro workflow with variables, condition and export"
     },
     "NZPLSQL Stored Procedure": {
         "prefix": ["nzprocedure", "CREATE OR REPLACE PROCEDURE"],

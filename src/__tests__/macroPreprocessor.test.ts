@@ -246,7 +246,8 @@ SELECT '&x' AS literal, &x AS value -- &x comment
     SELECT DATEKEY, CALENDARQUARTER
     FROM &dim_table
   ),
-  overwrite=true
+  overwrite=true,
+  update=false
 );
 SELECT 1;`,
             {},
@@ -260,7 +261,38 @@ SELECT 1;`,
             sheetName: 'Dim Date',
             query: 'SELECT DATEKEY, CALENDARQUARTER\n    FROM JUST_DATA.ADMIN.DIMDATE',
             overwrite: true,
+            updateExisting: false,
         });
+    });
+
+    it('resolves update=true and macro variables in %EXPORT requests', async () => {
+        const exporter = jest.fn().mockResolvedValue({
+            filePath: '/tmp/report.xlsx',
+            format: 'xlsx',
+            rowsExported: 2,
+            columns: 2,
+        });
+
+        await new MacroPreprocessor().processScript(
+            `%LET export_file = '/tmp/report.xlsx';
+%LET update_existing = true;
+%EXPORT(
+  file=&export_file,
+  sheet='Data',
+  query=(SELECT 1),
+  update=&update_existing
+);`,
+            {},
+            { exporter },
+        );
+
+        expect(exporter).toHaveBeenCalledWith(expect.objectContaining({
+            filePath: '/tmp/report.xlsx',
+            format: 'xlsx',
+            sheetName: 'Data',
+            updateExisting: true,
+            overwrite: false,
+        }));
     });
 
     it('infers %EXPORT format from the file extension', async () => {
@@ -316,12 +348,12 @@ SELECT 1;`,
 
     it('reports prompt candidates inside %EXPORT queries during scan mode', () => {
         const result = new MacroPreprocessor().processScriptSync(
-            "%EXPORT(file='/tmp/${ report_name }.xlsx', query=(SELECT * FROM &table_name));",
+            "%EXPORT(file='/tmp/${ report_name }.xlsx', update=${ update_existing }, query=(SELECT * FROM &table_name));",
             { replaceVariables: false },
         );
 
         expect(result.sql).toBe('');
-        expect(result.unresolvedVariables).toEqual(['REPORT_NAME', 'TABLE_NAME']);
+        expect(result.unresolvedVariables).toEqual(['REPORT_NAME', 'TABLE_NAME', 'UPDATE_EXISTING']);
     });
 
     it('fails before exporting %EXPORT queries that still contain unresolved variables', async () => {
