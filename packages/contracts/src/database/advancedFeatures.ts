@@ -300,6 +300,7 @@ export interface DatabaseIndexInfo {
     name: string;
     order: 'ASC' | 'DESC';
   }>;
+  isSystemRequired?: boolean;
   definition?: string;
   indexSize?: number;
   isValid?: boolean;

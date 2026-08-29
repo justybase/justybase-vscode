@@ -22,7 +22,7 @@ body { margin: 0; padding: 20px; }
 .subtitle, .field-hint { color: var(--vscode-descriptionForeground); margin: 5px 0 0; }
 .designer-actions { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .designer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.index-grid .advanced-options, .ddl-card { grid-column: 1 / -1; }
+.index-grid .advanced-options, .index-list-card, .ddl-card { grid-column: 1 / -1; }
 
 .designer-card, .partitioning-info { border: 1px solid var(--vscode-panel-border); background: var(--vscode-editorWidget-background); border-radius: 5px; padding: 15px; }
 .designer-card h2, .designer-card h3 { margin: 0 0 12px; font-size: 1.06em; font-weight: 600; }
@@ -78,6 +78,7 @@ textarea { resize: vertical; }
 .operation-tabs button:disabled { cursor: not-allowed; opacity: .55; }
 .operation-section.hidden, .manage-form.hidden { display: none; }
 .partition-table-wrap { overflow-x: auto; }
+.index-table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 8px; text-align: left; border-bottom: 1px solid var(--vscode-panel-border); white-space: nowrap; }
 th { color: var(--vscode-descriptionForeground); font-weight: 600; }

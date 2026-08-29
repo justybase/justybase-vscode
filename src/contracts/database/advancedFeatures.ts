@@ -385,6 +385,8 @@ export interface DatabaseIndexInfo {
     name: string;
     order: 'ASC' | 'DESC';
   }>;
+  /** Whether the database requires this index */
+  isSystemRequired?: boolean;
   /** Index definition SQL */
   definition?: string;
   /** Index size in bytes */

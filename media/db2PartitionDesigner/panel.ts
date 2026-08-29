@@ -136,23 +136,21 @@ function selectManageOperation(operation: Exclude<ManageOperation, undefined>, p
 }
 
 function setActiveOperation(operation: ActiveOperation): void {
-    if (!isPartitioned && operation !== 'manage') {
-        setStatus('This operation requires an existing Db2 range-partitioned table.', 'error');
-        return;
-    }
-    activeOperation = operation;
+    const resolvedOperation = !isPartitioned && operation !== 'manage' ? 'manage' : operation;
+    activeOperation = resolvedOperation;
     const sections: Record<ActiveOperation, string> = {
         add: 'addSection',
         attach: 'attachSection',
         manage: 'manageSection'
     };
     (Object.keys(sections) as ActiveOperation[]).forEach(name => {
-        byId(sections[name]).classList.toggle('hidden', name !== operation);
+        byId(sections[name]).classList.toggle('hidden', name !== resolvedOperation);
     });
     document.querySelectorAll<HTMLButtonElement>('[data-operation]').forEach(button => {
-        button.classList.toggle('active', button.dataset.operation === operation);
+        button.classList.toggle('active', button.dataset.operation === resolvedOperation);
         button.disabled = !isPartitioned && button.dataset.operation !== 'manage';
     });
+    updateActionAvailability();
     refreshDdl();
 }
 
@@ -279,10 +277,27 @@ function setExecuting(executing: boolean): void {
     const execute = byId<HTMLButtonElement>('executeDdlBtn');
     const save = byId<HTMLButtonElement>('saveAsSqlBtn');
     const copy = byId<HTMLButtonElement>('copyDdlBtn');
-    execute.disabled = executing;
-    save.disabled = executing;
-    copy.disabled = executing;
+    const unavailable = !hasAvailableOperation();
+    execute.disabled = executing || unavailable;
+    save.disabled = executing || unavailable;
+    copy.disabled = executing || unavailable;
     execute.textContent = executing ? 'Executing...' : 'Execute';
+}
+
+function hasAvailableOperation(): boolean {
+    if (!isPartitioned) {
+        return false;
+    }
+    return activeOperation === 'add'
+        || activeOperation === 'attach'
+        || Boolean(activeOperation === 'manage' && manageOperation && selectedPartition);
+}
+
+function updateActionAvailability(): void {
+    const unavailable = !hasAvailableOperation();
+    byId<HTMLButtonElement>('executeDdlBtn').disabled = unavailable;
+    byId<HTMLButtonElement>('saveAsSqlBtn').disabled = unavailable;
+    byId<HTMLButtonElement>('copyDdlBtn').disabled = unavailable;
 }
 
 function handleHostMessage(message: Db2PartitionDesignerHostToWebviewMessage): void {

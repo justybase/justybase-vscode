@@ -1,4 +1,5 @@
 import {
+    areDb2IdentifiersEqual,
     buildDb2CreateIndexSql,
     type Db2CreateIndexDdlOptions,
     type Db2IndexKeyColumn
@@ -66,10 +67,61 @@ function populateStaticLists(): void {
 
     const existingHint = byId('existingIndexesHint');
     if (context.existingIndexes.length === 0) {
-        existingHint.textContent = 'No user indexes found.';
+        existingHint.textContent = 'No indexes found.';
     } else {
-        existingHint.textContent = `Existing: ${context.existingIndexes.map(index => index.name).join(', ')}`;
+        existingHint.textContent = `${context.existingIndexes.length} index${context.existingIndexes.length === 1 ? '' : 'es'}`;
     }
+    renderExistingIndexes();
+}
+
+function renderExistingIndexes(): void {
+    const body = byId<HTMLTableSectionElement>('existingIndexesBody');
+    body.replaceChildren();
+
+    if (context.existingIndexes.length === 0) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 5;
+        cell.textContent = 'No indexes found.';
+        row.appendChild(cell);
+        body.appendChild(row);
+        return;
+    }
+
+    context.existingIndexes.forEach(index => {
+        const row = document.createElement('tr');
+        const orderedColumns = index.columnOrders.length > 0
+            ? index.columnOrders.map(column => `${column.name} ${column.order}`)
+            : index.columns;
+        const properties = [
+            index.isPrimary ? 'PRIMARY' : undefined,
+            index.isUnique ? 'UNIQUE' : undefined,
+            index.isSystemRequired ? 'SYSTEM' : undefined
+        ].filter((property): property is string => Boolean(property));
+        [index.name, orderedColumns.join(', '), index.indexType, properties.join(', ') || '-'].forEach(value => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
+
+        const actions = document.createElement('td');
+        const drop = document.createElement('button');
+        drop.type = 'button';
+        drop.className = 'row-button danger';
+        drop.textContent = 'Drop';
+        drop.disabled = index.isPrimary || index.isSystemRequired;
+        drop.title = index.isPrimary
+            ? 'Primary indexes cannot be dropped here.'
+            : index.isSystemRequired
+                ? 'System-required indexes cannot be dropped here.'
+                : `Drop ${index.name}`;
+        drop.addEventListener('click', () => {
+            vscode.postMessage({ command: 'dropIndex', indexName: index.name });
+        });
+        actions.appendChild(drop);
+        row.appendChild(actions);
+        body.appendChild(row);
+    });
 }
 
 function columnMatches(column: Db2DesignerColumn, query: string): boolean {
@@ -83,7 +135,7 @@ function columnMatches(column: Db2DesignerColumn, query: string): boolean {
 function renderAvailableColumns(): void {
     const container = byId('availableColumns');
     const query = byId<HTMLInputElement>('columnSearch').value.trim();
-    const selectedNames = new Set(keyColumns.map(column => column.name.toUpperCase()));
+    const selectedNames = new Set(keyColumns.map(column => column.name));
     const visibleColumns = columns.filter(column => columnMatches(column, query));
     container.replaceChildren();
 
@@ -102,7 +154,7 @@ function renderAvailableColumns(): void {
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = selectedNames.has(column.name.toUpperCase());
+        checkbox.checked = selectedNames.has(column.name);
         checkbox.setAttribute('aria-label', `Use ${column.name} as an index key`);
         checkbox.addEventListener('change', () => toggleKeyColumn(column.name, checkbox.checked));
 
@@ -133,11 +185,11 @@ function appendBadge(parent: HTMLElement, text: string): void {
 }
 
 function toggleKeyColumn(name: string, selected: boolean): void {
-    const existing = keyColumns.find(column => column.name.toUpperCase() === name.toUpperCase());
+    const existing = keyColumns.find(column => column.name === name);
     if (selected && !existing) {
         keyColumns.push({ id: nextKeyColumnId++, name, order: 'ASC' });
     } else if (!selected) {
-        keyColumns = keyColumns.filter(column => column.name.toUpperCase() !== name.toUpperCase());
+        keyColumns = keyColumns.filter(column => column.name !== name);
     }
     updateSuggestedIndexName();
     renderAvailableColumns();
@@ -177,7 +229,7 @@ function renderKeyColumns(): void {
     }
 
     keyColumns.forEach((keyColumn, index) => {
-        const metadata = columns.find(column => column.name.toUpperCase() === keyColumn.name.toUpperCase());
+        const metadata = columns.find(column => column.name === keyColumn.name);
         const row = document.createElement('div');
         row.className = 'key-column-row';
 
@@ -227,10 +279,10 @@ function updateSuggestedIndexName(): void {
 }
 
 function updateIncludeColumnAvailability(): void {
-    const keyColumnNames = new Set(keyColumns.map(column => column.name.toUpperCase()));
+    const keyColumnNames = new Set(keyColumns.map(column => column.name));
     const select = byId<HTMLSelectElement>('includeColumns');
     for (const option of Array.from(select.options)) {
-        option.disabled = keyColumnNames.has(option.value.toUpperCase());
+        option.disabled = keyColumnNames.has(option.value);
         if (option.disabled) {
             option.selected = false;
         }
@@ -259,11 +311,11 @@ function getDesign(): Db2IndexDesign {
     if (!indexName) {
         throw new Error('Enter an index name.');
     }
-    if (context.existingIndexes.some(index => index.name.toUpperCase() === indexName.toUpperCase())) {
+    if (context.existingIndexes.some(index => areDb2IdentifiersEqual(index.name, indexName))) {
         throw new Error(`An index named ${indexName} already exists on this table.`);
     }
     const duplicateKeys = keyColumns.some((column, index) => keyColumns.findIndex(other =>
-        other.name.toUpperCase() === column.name.toUpperCase()
+        other.name === column.name
     ) !== index);
     if (duplicateKeys) {
         throw new Error('A key column can only be selected once.');

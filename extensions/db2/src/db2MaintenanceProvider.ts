@@ -399,6 +399,7 @@ vscode.window.showInformationMessage(`Partition ${partitionName} attached and va
               name: c.COLNAME,
               order: c.COLORDER === 'D' ? 'DESC' : 'ASC'
             })),
+            isSystemRequired: row.SYSTEM_REQUIRED === 1 || String(row.SYSTEM_REQUIRED).trim() === '1',
             // definition is not provided by catalog, we construct a dummy or leave empty
             indexSize: row.NLEAF > 0 ? row.NLEAF * 8192 : undefined, // rough estimate
             isValid: true
