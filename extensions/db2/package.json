@@ -2,7 +2,7 @@
   "name": "justybaselite-db2",
   "displayName": "JustyBase SQL Editor (Db2)",
   "description": "Optional Db2 LUW support for JustyBase: connect, metadata, DDL, explain/tuning, maintenance, and DB2 SQL quality rules (near-full runtime companion).",
-  "version": "3.17.5",
+  "version": "3.17.6",
   "publisher": "krzysztof-d",
   "license": "Apache-2.0",
   "icon": "icon.png",
