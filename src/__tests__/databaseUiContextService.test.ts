@@ -124,9 +124,14 @@ describe('databaseUiContextService', () => {
     });
 
     it('sets the schema database kind before awaiting connection details', async () => {
-        let resolveConnection: ((value: undefined) => void) | undefined;
+        let resolveConnection!: (value: undefined) => void;
+        let notifyConnectionLookup!: () => void;
+        const connectionLookupStarted = new Promise<void>(resolve => {
+            notifyConnectionLookup = resolve;
+        });
         mockConnectionManager.getConnection.mockImplementation(() => new Promise<undefined>(resolve => {
             resolveConnection = resolve;
+            notifyConnectionLookup();
         }));
 
         const update = updateSchemaUiContexts(
@@ -134,14 +139,14 @@ describe('databaseUiContextService', () => {
             { connectionName: 'conn-b' }
         );
 
-        await Promise.resolve();
+        await connectionLookupStarted;
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'setContext',
             `${DATABASE_UI_CONTEXT_PREFIX}.schema.databaseKind`,
             'netezza'
         );
 
-        resolveConnection?.(undefined);
+        resolveConnection(undefined);
         await update;
     });
 
