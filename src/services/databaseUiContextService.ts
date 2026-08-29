@@ -78,14 +78,17 @@ export async function updateSchemaUiContexts(
     selectedSchemaItem?: Pick<SchemaItem, 'connectionName'>
 ): Promise<void> {
     const schemaConnectionName = selectedSchemaItem?.connectionName || connectionManager.getActiveConnectionName() || undefined;
-    const schemaDetails = schemaConnectionName
-        ? await connectionManager.getConnection(schemaConnectionName)
-        : undefined;
+    // Context-menu visibility must track the tree item immediately. Waiting for
+    // a connection lookup leaves the previous database kind visible (for
+    // example SQLite commands after expanding a Db2 connection).
     await updateCapabilityContextSet(
         connectionManager,
         `${DATABASE_UI_CONTEXT_PREFIX}.schema`,
         schemaConnectionName
     );
+    const schemaDetails = schemaConnectionName
+        ? await connectionManager.getConnection(schemaConnectionName)
+        : undefined;
     await Promise.all([
         setContext(`${DATABASE_UI_CONTEXT_PREFIX}.schemaHasConnection`, Boolean(schemaConnectionName)),
         setContext(
@@ -109,6 +112,9 @@ export function registerDatabaseUiContexts(
     };
     const refreshSchemaContexts = (): void => {
         void updateSchemaUiContexts(connectionManager, getSelectedSchemaItem());
+    };
+    const refreshSchemaContextsForItem = (item: Pick<SchemaItem, 'connectionName'>): void => {
+        void updateSchemaUiContexts(connectionManager, item);
     };
 
     refreshActiveContexts();
@@ -138,6 +144,9 @@ export function registerDatabaseUiContexts(
         })),
         toDisposable(schemaTreeView?.onDidChangeSelection?.(() => {
             refreshSchemaContexts();
+        })),
+        toDisposable(schemaTreeView?.onDidExpandElement?.(event => {
+            refreshSchemaContextsForItem(event.element);
         }))
     ].filter((disposable): disposable is vscode.Disposable => disposable !== undefined);
 }
