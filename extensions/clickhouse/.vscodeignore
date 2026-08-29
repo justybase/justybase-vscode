@@ -18,6 +18,7 @@ node_modules/**/examples/
 node_modules/**/doc/
 node_modules/**/docs/
 node_modules/**/README*
+node_modules/**/CHANGELOG*
 node_modules/**/.eslintrc*
 node_modules/**/tsconfig*.json
 node_modules/**/*.d.ts
