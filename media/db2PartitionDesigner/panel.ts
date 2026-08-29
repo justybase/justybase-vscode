@@ -10,7 +10,8 @@ import type {
     Db2DesignerPartition,
     Db2PartitionDesignerHostToWebviewMessage,
     Db2PartitionDesignerInitialContext,
-    Db2PartitionExecutionRequest
+    Db2PartitionOperationRequest,
+    Db2PartitionRangeDesign
 } from './hostContracts.js';
 import { vscode } from './protocol.js';
 
@@ -19,7 +20,7 @@ type ManageOperation = 'detach' | 'drop' | undefined;
 
 interface PartitionPlan {
     ddl: string;
-    request: Db2PartitionExecutionRequest;
+    request: Db2PartitionOperationRequest;
 }
 
 const context = (window as unknown as { initialContext: Db2PartitionDesignerInitialContext }).initialContext;
@@ -168,25 +169,44 @@ function rangeOptions(prefix: 'add' | 'attach'): Db2PartitionRangeOptions {
     };
 }
 
+function rangeDesign(prefix: 'add' | 'attach'): Db2PartitionRangeDesign {
+    return rangeOptions(prefix);
+}
+
 function buildPlan(): PartitionPlan {
     if (activeOperation === 'add') {
+        if (!isPartitioned) {
+            throw new Error('This operation requires an existing Db2 range-partitioned table.');
+        }
+        const range = rangeDesign('add');
         const sql = buildDb2AddPartitionSql({
             schema: context.schema,
             tableName: context.tableName,
-            ...rangeOptions('add')
+            ...range
         });
         return {
             ddl: sql,
-            request: { title: 'Adding Db2 partition...', successMessage: 'Partition added successfully.', statements: [sql] }
+            request: { operation: 'add', range }
         };
     }
     if (activeOperation === 'attach') {
+        if (!isPartitioned) {
+            throw new Error('This operation requires an existing Db2 range-partitioned table.');
+        }
+        const range = rangeDesign('attach');
+        const attachRange = {
+            partitionName: range.partitionName,
+            startingFrom: range.startingFrom,
+            startingInclusive: range.startingInclusive,
+            endingAt: range.endingAt,
+            endingInclusive: range.endingInclusive
+        };
         const sql = buildDb2AttachPartitionSql({
             schema: context.schema,
             tableName: context.tableName,
             sourceSchema: requireValue(inputValue('attachSourceSchema'), 'Source schema'),
             sourceTable: requireValue(inputValue('attachSourceTable'), 'Source table'),
-            ...rangeOptions('attach')
+            ...attachRange
         });
         const statements = [sql];
         if (byId<HTMLInputElement>('runSetIntegrity').checked) {
@@ -194,7 +214,13 @@ function buildPlan(): PartitionPlan {
         }
         return {
             ddl: statements.join('\n\n'),
-            request: { title: 'Attaching Db2 partition...', successMessage: 'Partition attached successfully.', statements }
+            request: {
+                operation: 'attach',
+                range: attachRange,
+                sourceSchema: inputValue('attachSourceSchema'),
+                sourceTable: inputValue('attachSourceTable'),
+                runSetIntegrity: byId<HTMLInputElement>('runSetIntegrity').checked
+            }
         };
     }
     if (!manageOperation || !selectedPartition) {
@@ -213,9 +239,10 @@ function buildPlan(): PartitionPlan {
     return {
         ddl: statements.join('\n\n'),
         request: {
-            title: manageOperation === 'detach' ? 'Detaching Db2 partition...' : 'Dropping Db2 partition...',
-            successMessage: manageOperation === 'detach' ? 'Partition detached successfully.' : 'Partition dropped successfully.',
-            statements
+            operation: manageOperation,
+            partitionName: selectedPartition.name,
+            detachedSchema: context.schema,
+            detachedTable: requireValue(inputValue('detachedTableName'), 'Detached table')
         }
     };
 }
@@ -302,19 +329,19 @@ function initialize(): void {
     byId<HTMLButtonElement>('executeDdlBtn').addEventListener('click', () => {
         const plan = getPlanOrShowError();
         if (plan) {
-            vscode.postMessage({ command: 'executeStatements', request: plan.request });
+            vscode.postMessage({ command: 'executeOperation', request: plan.request });
         }
     });
     byId<HTMLButtonElement>('saveAsSqlBtn').addEventListener('click', () => {
         const plan = getPlanOrShowError();
         if (plan) {
-            vscode.postMessage({ command: 'saveAsSql', ddl: plan.ddl });
+            vscode.postMessage({ command: 'saveAsSql', request: plan.request });
         }
     });
     byId<HTMLButtonElement>('copyDdlBtn').addEventListener('click', () => {
         const plan = getPlanOrShowError();
         if (plan) {
-            vscode.postMessage({ command: 'copyDDL', ddl: plan.ddl });
+            vscode.postMessage({ command: 'copyDDL', request: plan.request });
         }
     });
     setActiveOperation('add');

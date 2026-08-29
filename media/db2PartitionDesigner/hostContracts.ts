@@ -18,18 +18,43 @@ export interface Db2PartitionDesignerInitialContext {
     partitionExpressions: string[];
     partitions: Db2DesignerPartition[];
     tablespaces: string[];
+    sourceTables: string[];
 }
 
-export interface Db2PartitionExecutionRequest {
-    title: string;
-    successMessage: string;
-    statements: string[];
+export interface Db2PartitionRangeDesign {
+    partitionName: string;
+    startingFrom: string;
+    startingInclusive: boolean;
+    endingAt: string;
+    endingInclusive: boolean;
+    tablespace?: string;
+    indexTablespace?: string;
+    longTablespace?: string;
 }
+
+export type Db2PartitionOperationRequest =
+    | {
+        operation: 'add';
+        range: Db2PartitionRangeDesign;
+    }
+    | {
+        operation: 'attach';
+        range: Omit<Db2PartitionRangeDesign, 'tablespace' | 'indexTablespace' | 'longTablespace'>;
+        sourceSchema: string;
+        sourceTable: string;
+        runSetIntegrity: boolean;
+    }
+    | {
+        operation: 'detach' | 'drop';
+        partitionName: string;
+        detachedSchema: string;
+        detachedTable: string;
+    };
 
 export type Db2PartitionDesignerWebviewToHostMessage =
-    | { command: 'executeStatements'; request: Db2PartitionExecutionRequest }
-    | { command: 'saveAsSql'; ddl: string }
-    | { command: 'copyDDL'; ddl: string };
+    | { command: 'executeOperation'; request: Db2PartitionOperationRequest }
+    | { command: 'saveAsSql'; request: Db2PartitionOperationRequest }
+    | { command: 'copyDDL'; request: Db2PartitionOperationRequest };
 
 export type Db2PartitionDesignerHostToWebviewMessage =
     | { command: 'setError'; text: string }

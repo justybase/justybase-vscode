@@ -2,14 +2,42 @@ export interface Db2DesignerColumn {
     name: string;
     type: string;
     notNull: boolean;
+    ordinal: number;
+    defaultValue: string;
+    description: string;
+    isPrimaryKey: boolean;
+    isForeignKey: boolean;
+}
+
+export interface Db2DesignerIndexColumn {
+    name: string;
+    order: 'ASC' | 'DESC';
 }
 
 export interface Db2DesignerExistingIndex {
     name: string;
     columns: string[];
+    columnOrders: Db2DesignerIndexColumn[];
     isUnique: boolean;
     isPrimary: boolean;
     indexType: string;
+}
+
+export interface Db2IndexDesign {
+    indexName: string;
+    keyColumns: Db2DesignerIndexColumn[];
+    includeColumns: string[];
+    unique: boolean;
+    clustered: boolean;
+    reverseScans?: 'allow' | 'disallow';
+    compress?: 'yes' | 'no';
+    pctFree?: number;
+    level2PctFree?: number;
+    minPctUsed?: number;
+    pageSplit?: 'symmetric' | 'high';
+    collectStatistics?: 'sampled' | 'detailed';
+    tablespace?: string;
+    additionalClause?: string;
 }
 
 export interface Db2IndexDesignerInitialContext {
@@ -22,9 +50,9 @@ export interface Db2IndexDesignerInitialContext {
 }
 
 export type Db2IndexDesignerWebviewToHostMessage =
-    | { command: 'executeDDL'; ddl: string }
-    | { command: 'saveAsSql'; ddl: string }
-    | { command: 'copyDDL'; ddl: string };
+    | { command: 'executeDesign'; design: Db2IndexDesign }
+    | { command: 'saveAsSql'; design: Db2IndexDesign }
+    | { command: 'copyDDL'; design: Db2IndexDesign };
 
 export type Db2IndexDesignerHostToWebviewMessage =
     | { command: 'setError'; text: string }

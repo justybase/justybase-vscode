@@ -6,6 +6,7 @@ import {
   SchemaItemData,
   getErrorMessage
 } from './db2CommandContext';
+import { Db2PartitionDesignerView } from './db2PartitionDesignerView';
 
 export function registerDb2PartitionCommands(
   context: vscode.ExtensionContext,
@@ -217,28 +218,7 @@ export function registerDb2PartitionCommands(
         return;
       }
 
-      const partitionName = await vscode.window.showInputBox({
-        prompt: 'Enter partition name',
-        placeHolder: 'e.g., PART_2024_01',
-      });
-
-      if (!partitionName) {
-        return;
-      }
-
-      const boundValue = await vscode.window.showInputBox({
-        prompt: 'Enter partition bound',
-        placeHolder: "STARTING FROM ('2024-01-01') ENDING AT ('2024-02-01')",
-      });
-      if (!boundValue) {
-        return;
-      }
-
-      await resolved.provider.createPartition?.(
-        resolved.target,
-        { partitionName, partitionBound: boundValue },
-        resolved.services
-      );
+      await Db2PartitionDesignerView.createOrShow(context, resolved);
     }
   );
 
@@ -260,29 +240,7 @@ export function registerDb2PartitionCommands(
         return;
       }
 
-      const tableName = await vscode.window.showInputBox({
-        prompt: 'Enter the name of the table to attach',
-        placeHolder: 'e.g., ORDERS_ARCHIVE_2024',
-      });
-
-      if (!tableName) {
-        return;
-      }
-
-      const partitionBound = await vscode.window.showInputBox({
-        prompt: 'Enter partition bound expression',
-        placeHolder: "STARTING FROM ('2024-01-01') ENDING AT ('2024-02-01')",
-      });
-
-      if (!partitionBound) {
-        return;
-      }
-
-      await resolved.provider.attachPartition?.(
-        resolved.target,
-        { tableName, partitionBound },
-        resolved.services
-      );
+      await Db2PartitionDesignerView.createOrShow(context, resolved);
     }
   );
 

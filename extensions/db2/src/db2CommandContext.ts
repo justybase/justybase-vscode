@@ -10,6 +10,7 @@ import type {
   JustyBaseLiteApi
 } from '../../../src/api/publicApi';
 import { db2MaintenanceProvider } from './db2MaintenanceProvider';
+import { formatDb2QualifiedName } from './db2DesignerDdl';
 
 export interface SchemaItemData {
   label: string;
@@ -148,7 +149,7 @@ export async function resolveOperationContext(
     return undefined;
   }
 
-  const qualifiedName = `"${item.schema}"."${item.rawLabel || item.label}"`;
+  const qualifiedName = formatDb2QualifiedName(item.schema, item.rawLabel || item.label);
 
   return {
     // Companion bundles have their own module graph, so use the concrete Db2
