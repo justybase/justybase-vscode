@@ -2,7 +2,7 @@
     "name": "justybaselite-clickhouse",
     "displayName": "JustyBase SQL Editor (ClickHouse)",
     "description": "Optional ClickHouse companion for JustyBase SQL Editor",
-    "version": "3.17.7",
+    "version": "3.17.8",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
