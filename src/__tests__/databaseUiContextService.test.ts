@@ -123,6 +123,28 @@ describe('databaseUiContextService', () => {
         );
     });
 
+    it('sets the schema database kind before awaiting connection details', async () => {
+        let resolveConnection: ((value: undefined) => void) | undefined;
+        mockConnectionManager.getConnection.mockImplementation(() => new Promise<undefined>(resolve => {
+            resolveConnection = resolve;
+        }));
+
+        const update = updateSchemaUiContexts(
+            mockConnectionManager as unknown as ConnectionManager,
+            { connectionName: 'conn-b' }
+        );
+
+        await Promise.resolve();
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'setContext',
+            `${DATABASE_UI_CONTEXT_PREFIX}.schema.databaseKind`,
+            'netezza'
+        );
+
+        resolveConnection?.(undefined);
+        await update;
+    });
+
     it('marks only a Data Workspace connection for the workspace manager menu', async () => {
         mockConnectionManager.getConnection.mockResolvedValue({
             name: 'Reporting',
@@ -149,7 +171,8 @@ describe('databaseUiContextService', () => {
     it('registers listeners for active editor, connection changes and schema selection', () => {
         const mockSchemaTreeView = {
             selection: [{ connectionName: 'conn-b' }],
-            onDidChangeSelection: jest.fn(() => ({ dispose: jest.fn() }))
+            onDidChangeSelection: jest.fn(() => ({ dispose: jest.fn() })),
+            onDidExpandElement: jest.fn(() => ({ dispose: jest.fn() }))
         } as unknown as vscode.TreeView<unknown>;
 
         const disposables = registerDatabaseUiContexts(
@@ -163,6 +186,7 @@ describe('databaseUiContextService', () => {
         expect(mockConnectionManager.onDidChangeDocumentConnection).toHaveBeenCalledWith(expect.any(Function));
         expect(mockConnectionManager.onDidChangeDocumentDatabase).toHaveBeenCalledWith(expect.any(Function));
         expect((mockSchemaTreeView.onDidChangeSelection as jest.Mock)).toHaveBeenCalledWith(expect.any(Function));
-        expect(disposables).toHaveLength(6);
+        expect((mockSchemaTreeView.onDidExpandElement as jest.Mock)).toHaveBeenCalledWith(expect.any(Function));
+        expect(disposables).toHaveLength(7);
     });
 });
