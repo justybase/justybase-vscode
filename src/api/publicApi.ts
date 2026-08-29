@@ -6,6 +6,7 @@ import {
     listRegisteredDatabaseDialects,
     registerDatabaseDialect
 } from '../core/factories/databaseDialectRegistry';
+import { createDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import type { ConnectionManager } from '../core/connectionManager';
 import type { ConnectionDetails } from '../types';
 import { ensurePersistentConnectionReadyForQuery } from '../core/connectionReadiness';
@@ -31,6 +32,17 @@ export interface SavedConnectionSummary {
     details: Omit<ConnectionDetails, 'password'>;
 }
 
+export interface ConnectionSummary {
+    name: string;
+    database: string;
+    databaseKind: string;
+}
+
+export interface ConnectionQueryResult {
+    columns: string[];
+    rows: unknown[][];
+}
+
 export interface JustyBaseLiteApi {
     readonly version: 1;
     registerDatabaseDialect(dialect: DatabaseDialect): DatabaseDialect;
@@ -47,6 +59,8 @@ export interface JustyBaseLiteApi {
     ): Promise<void>;
     /** List saved connection profiles without exposing passwords. */
     listSavedConnections(): Promise<readonly SavedConnectionSummary[]>;
+    /** Metadata for a named profile, without credentials. */
+    getConnectionSummary?(connectionName: string): Promise<ConnectionSummary | undefined>;
     /** Details of the active connection (document-bound first, else active). */
     getActiveConnectionDetails(): Promise<{
         name: string;
@@ -65,6 +79,10 @@ export interface JustyBaseLiteApi {
         columns: string[];
         rows: unknown[][];
     }>;
+    /** Execute SQL using a named profile without exposing its credentials. */
+    executeConnectionSql?(sql: string, connectionName: string): Promise<void>;
+    /** Execute a query using a named profile without exposing its credentials. */
+    executeConnectionSqlQuery?(sql: string, connectionName: string): Promise<ConnectionQueryResult>;
 }
 
 export function createJustyBaseLiteApi(
@@ -82,11 +100,16 @@ export function createJustyBaseLiteApi(
         openFileSqlWorkspaceSession: (filePaths, options) =>
             openFileSqlWorkspaceSession(context, connectionManager, filePaths, options),
         listSavedConnections: () => listSavedConnections(connectionManager),
+        getConnectionSummary: connectionName => getConnectionSummary(connectionManager, connectionName),
         getActiveConnectionDetails: () => getActiveConnectionDetails(connectionManager),
         executeActiveConnectionSql: (sql, documentUri) =>
             executeActiveConnectionSql(connectionManager, sql, documentUri),
         executeActiveConnectionSqlQuery: (sql, documentUri) =>
             executeActiveConnectionSqlQuery(connectionManager, sql, documentUri),
+        executeConnectionSql: (sql, connectionName) =>
+            executeConnectionSql(connectionManager, sql, connectionName),
+        executeConnectionSqlQuery: (sql, connectionName) =>
+            executeConnectionSqlQuery(connectionManager, sql, connectionName),
     };
 }
 
@@ -101,6 +124,24 @@ async function listSavedConnections(
         name: connection.name,
         details: { ...connection, password: undefined },
     }));
+}
+
+async function getConnectionSummary(
+    connectionManager: ConnectionManager | undefined,
+    connectionName: string,
+): Promise<ConnectionSummary | undefined> {
+    if (!connectionManager) {
+        return undefined;
+    }
+    const details = await connectionManager.getConnection(connectionName);
+    if (!details) {
+        return undefined;
+    }
+    return {
+        name: details.name ?? connectionName,
+        database: details.database,
+        databaseKind: details.dbType ?? 'netezza'
+    };
 }
 
 async function getActiveConnectionDetails(
@@ -182,6 +223,65 @@ async function executeActiveConnectionSqlQuery(
         return { columns, rows };
     } finally {
         await reader.close();
+    }
+}
+
+async function executeConnectionSql(
+    connectionManager: ConnectionManager | undefined,
+    sql: string,
+    connectionName: string,
+): Promise<void> {
+    await withNamedConnection(connectionManager, connectionName, async connection => {
+        await connection.createCommand(sql).execute();
+    });
+}
+
+async function executeConnectionSqlQuery(
+    connectionManager: ConnectionManager | undefined,
+    sql: string,
+    connectionName: string,
+): Promise<ConnectionQueryResult> {
+    return withNamedConnection(connectionManager, connectionName, async connection => {
+        const reader = await connection.createCommand(sql).executeReader();
+        try {
+            const columns: string[] = [];
+            for (let index = 0; index < reader.fieldCount; index += 1) {
+                columns.push(reader.getName(index));
+            }
+            const rows: unknown[][] = [];
+            while (await reader.read()) {
+                const row: unknown[] = [];
+                for (let index = 0; index < reader.fieldCount; index += 1) {
+                    row.push(reader.getValue(index));
+                }
+                rows.push(row);
+            }
+            return { columns, rows };
+        } finally {
+            await reader.close();
+        }
+    });
+}
+
+async function withNamedConnection<T>(
+    connectionManager: ConnectionManager | undefined,
+    connectionName: string,
+    operation: (connection: import('../contracts/database').DatabaseConnection) => Promise<T>,
+): Promise<T> {
+    if (!connectionManager) {
+        throw new Error('SQL execution is not available in this context.');
+    }
+    const details = await connectionManager.getConnection(connectionName);
+    if (!details) {
+        throw new Error(`Connection '${connectionName}' is not available.`);
+    }
+
+    const connection = createDatabaseConnectionFromDetails(details);
+    await connection.connect();
+    try {
+        return await operation(connection);
+    } finally {
+        await connection.close();
     }
 }
 

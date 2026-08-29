@@ -79,6 +79,8 @@ async function main() {
     './media/fileConnectionPanel.ts',
     './media/visualQueryBuilder.tsx',
     './media/tableDesigner.ts',
+    './media/db2IndexDesigner.ts',
+    './media/db2PartitionDesigner.ts',
     './media/explainPlanGraph.ts',
     './media/erdDiagram.tsx',
     './media/etlDiagram.tsx',

@@ -47,6 +47,57 @@ class MockDb2Connection implements DatabaseConnection {
     removeListener(_event: string, _listener: (arg: unknown) => void): void {}
 }
 
+class NamedExecutionConnection implements DatabaseConnection {
+    _connected = false;
+    readonly execute = jest.fn().mockResolvedValue(undefined);
+    readonly closeReader = jest.fn().mockResolvedValue(undefined);
+
+    async connect(): Promise<void> {
+        this._connected = true;
+    }
+
+    async close(): Promise<void> {
+        this._connected = false;
+    }
+
+    createCommand(_sql: string): DatabaseCommand {
+        let readCount = 0;
+        const closeReader = this.closeReader;
+        return {
+            commandTimeout: 0,
+            execute: this.execute,
+            async cancel() {},
+            async executeReader() {
+                return {
+                    fieldCount: 2,
+                    async read() {
+                        readCount += 1;
+                        return readCount === 1;
+                    },
+                    getName(index: number) {
+                        return index === 0 ? 'NAME' : 'COUNT';
+                    },
+                    getTypeName(index: number) {
+                        return index === 0 ? 'VARCHAR' : 'INTEGER';
+                    },
+                    getValue(index: number) {
+                        return index === 0 ? 'SALES' : 4;
+                    },
+                    async nextResult() {
+                        return false;
+                    },
+                    close: closeReader,
+                };
+            },
+            _recordsAffected: 0
+        };
+    }
+
+    on(_event: string, _listener: (arg: unknown) => void): void {}
+
+    removeListener(_event: string, _listener: (arg: unknown) => void): void {}
+}
+
 describe('createJustyBaseLiteApi', () => {
     beforeEach(() => {
         resetDatabaseDialectTestingState();
@@ -114,6 +165,52 @@ describe('createJustyBaseLiteApi', () => {
         expect(api.registerDatabaseDialect(competingDialect)).toBe(postgresqlDialect);
         expect(getDatabaseDialect('postgresql')).toBe(postgresqlDialect);
         expect(getDatabaseCapabilities('postgresql')).toEqual(postgresqlDialect.capabilities);
+    });
+
+    it('executes named companion commands through the core profile without exposing credentials', async () => {
+        const connection = new NamedExecutionConnection();
+        const dialect: DatabaseDialect = {
+            kind: 'db2',
+            displayName: 'Db2 LUW',
+            defaultPort: 50000,
+            capabilities: createDatabaseCapabilities({ supportsTableMaintenance: true }),
+            traits: createDatabaseDialectTraits({
+                completion: { singleDotPathNamespace: 'schema' }
+            }),
+            metadataProvider: sqliteMetadataProvider,
+            sqlAuthoring: sqliteSqlAuthoring,
+            getConnectionConstructor(): DatabaseConnectionStaticConstructor {
+                return NamedExecutionConnection as unknown as DatabaseConnectionStaticConstructor;
+            },
+            createConnection(): DatabaseConnection {
+                return connection;
+            }
+        };
+        const connectionManager = {
+            getConnection: jest.fn().mockResolvedValue({
+                name: 'Db2 DNW',
+                host: 'db2.example.test',
+                port: 50000,
+                database: 'SAMPLE',
+                user: 'db2user',
+                password: 'secret',
+                dbType: 'db2'
+            })
+        } as unknown as ConnectionManager;
+        const api = createJustyBaseLiteApi({} as vscode.ExtensionContext, connectionManager);
+        api.registerDatabaseDialect(dialect);
+
+        await api.executeConnectionSql!('CREATE INDEX SALES_IDX ON SALES (ID)', 'Db2 DNW');
+        const result = await api.executeConnectionSqlQuery!('SELECT NAME, COUNT FROM SYSCAT.TABLES', 'Db2 DNW');
+
+        await expect(api.getConnectionSummary!('Db2 DNW')).resolves.toEqual({
+            name: 'Db2 DNW',
+            database: 'SAMPLE',
+            databaseKind: 'db2'
+        });
+        expect(connection.execute).toHaveBeenCalledTimes(1);
+        expect(connection.closeReader).toHaveBeenCalledTimes(1);
+        expect(result).toEqual({ columns: ['NAME', 'COUNT'], rows: [['SALES', 4]] });
     });
 
     it('does not reuse a non-file profile for a File SQL session with the same name', async () => {

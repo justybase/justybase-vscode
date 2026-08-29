@@ -13,7 +13,6 @@ import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
 import { VerticaConnection } from './verticaConnection';
 import { verticaImportTypeMapper } from './verticaImportTypeMapper';
-import { verticaMaintenanceProvider } from './verticaMaintenanceProvider';
 import { verticaCopilotReferenceProvider } from './verticaReferenceProvider';
 import { verticaSessionMonitorProvider } from './verticaSessionMonitorProvider';
 import { verticaTuningAdvisor } from './verticaTuningAdvisor';
@@ -259,7 +258,6 @@ function buildTableDdlFromCacheInternal(
 export const verticaAdvancedFeatures: DatabaseAdvancedFeatures = {
     importTypeMapper: verticaImportTypeMapper,
     tuningAdvisor: verticaTuningAdvisor,
-    maintenance: verticaMaintenanceProvider,
     copilotReferenceProvider: verticaCopilotReferenceProvider,
     sessionMonitor: verticaSessionMonitorProvider,
     ddl: {

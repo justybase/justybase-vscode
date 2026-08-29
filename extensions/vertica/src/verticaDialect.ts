@@ -9,6 +9,7 @@ import { createStandardConnectionFields } from "../../../src/core/connectionForm
 import { verticaDialectTraits } from "../../../src/shared/dialect-traits/vertica";
 import { VerticaConnection } from "./verticaConnection";
 import { verticaAdvancedFeatures } from "./verticaDdlGenerator";
+import { verticaMaintenanceProvider } from "./verticaMaintenanceProvider";
 import { verticaMetadataProvider } from "./verticaSchemaProvider";
 import { verticaSqlAuthoring } from "./verticaSqlAuthoring";
 
@@ -91,7 +92,10 @@ export const verticaDialect: DatabaseDialect = {
   traits: verticaDialectTraits,
   metadataProvider: verticaMetadataProvider,
   sqlAuthoring: verticaSqlAuthoring,
-  advancedFeatures: verticaAdvancedFeatures,
+  advancedFeatures: {
+    ...verticaAdvancedFeatures,
+    maintenance: verticaMaintenanceProvider,
+  },
   getConnectionConstructor(): DatabaseConnectionStaticConstructor {
     return verticaConnectionConstructor;
   },
