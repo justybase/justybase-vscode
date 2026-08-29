@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Partial
 last_verified: 2026-08-19
-product_version: 3.17.4
+product_version: 3.17.5
 ---
 
 # Session Monitor and Security Panel
