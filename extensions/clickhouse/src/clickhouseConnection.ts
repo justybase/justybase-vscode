@@ -347,6 +347,25 @@ function isCompatibilityQuery(sql: string, pattern: RegExp): boolean {
     return pattern.test(stripTrailingSemicolons(sql));
 }
 
+function isRowProducingStatement(sql: string): boolean {
+    const statement = sql.replace(
+        /^(?:\uFEFF|\s|--[^\r\n]*(?:\r?\n|$)|#[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)+/,
+        '',
+    );
+    const keyword = /^[A-Z]+/i.exec(statement)?.[0].toUpperCase();
+    return keyword !== undefined && [
+        'CHECK',
+        'DESC',
+        'DESCRIBE',
+        'EXISTS',
+        'EXPLAIN',
+        'SELECT',
+        'SHOW',
+        'WATCH',
+        'WITH',
+    ].includes(keyword);
+}
+
 function makeQueryId(): string {
     return `justybase_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -553,6 +572,11 @@ class ClickHouseCommand implements DatabaseCommand {
         const setCatalogMatch = sql.match(SET_CATALOG_QUERY);
         if (setCatalogMatch) {
             await this.connection.setCurrentDatabase(setCatalogMatch[1]);
+            return createBufferedReader([], []);
+        }
+
+        if (!isRowProducingStatement(sql)) {
+            await this.execute();
             return createBufferedReader([], []);
         }
 
