@@ -1,166 +1,115 @@
 # Release Process
 
-Use the GitHub Actions workflow named `Release` for every new version. Do not create release tags manually and do not use `npm version patch` directly for production releases.
+Use the GitHub Actions workflow named `Release` for every new version. Do not
+create release tags manually and do not use `npm version patch` directly for
+production releases.
 
-## Quick Start
+## Quick start
 
-### Step-by-step release process
-
-#### 1. Local preparation
+### 1. Prepare locally
 
 ```bash
-# Ensure you're on main branch
-git checkout main
-git pull origin main
+git checkout master
+git pull origin master
 
-# Make your changes, fixes, features
+# Make and commit changes, then push them to master.
 git add .
-git commit -m "feat: new feature"  # or "fix: bug fix"
-git push origin main
+git commit -m "feat: new feature"
+git push origin master
 ```
 
-#### 2. Verify CI passes
+### 2. Verify CI
 
-- Go to GitHub → Actions → CI
-- Wait for all checks to pass ✅
-- Do not proceed if CI fails
+Wait for the required CI checks to pass before starting a release.
 
-#### 3. DO NOT change version locally
+### 3. Run the Release workflow
 
-- ❌ Do NOT use `npm version patch`
-- ❌ Do NOT edit package.json manually
-- ✅ Let GitHub Actions manage versions
+Go to GitHub → Actions → `Release` → `Run workflow` and select:
 
-#### 4. Trigger Release workflow
+- `release_type`: `patch`, `minor`, `major`, a prerelease increment, `exact`,
+  or `specific` for an existing tag;
+- `version` only for `release_type=exact`;
+- `existing_release_tag` only for `release_type=specific`;
+- `prerelease` when the GitHub Release should be marked as a pre-release;
+- `target_branch`, normally `master`;
+- the extensions to publish (`core`, DB2, DuckDB, Oracle, PostgreSQL, Vertica,
+  MS SQL Server, MySQL, Snowflake, and/or Access).
 
-- Go to: GitHub → Actions → Release → "Run workflow"
-- Select parameters:
-  - `release_type`: `patch` (1.1.3 → 1.1.4) or `minor` (1.1.3 → 1.2.0)
-  - `draft`: `true` (recommended for safety)
-  - `target_branch`: `main`
-
-#### 5. Workflow automatically
-
-- Bumps version in package.json files
-- Synchronizes tracked documentation `product_version` markers and the guide portal version narrative
-- Creates commit "chore: release X.X.X"
-- Creates tag `vX.X.X`
-- Creates GitHub Release (draft)
-
-#### 6. Publish packages after a draft rehearsal
-
-- Review and, if appropriate, publish the GitHub Release
-- Run **Publish Marketplace Extensions** manually for the same tag and select the intended packages
-
-## Process diagram
-
-```
-Local:                         GitHub:
-──────                         ───────
-git push ───────────────────▶ CI checks
-                              (lint, types, tests)
-                                     │
-                                     ▼
-                           Release workflow (manual trigger)
-                                     │
-                                     ▼
-                           ┌─────────────────┐
-                           │ 1. Bump version │
-                           │ 2. Commit + tag │
-                           │ 3. GitHub Rel   │
-                           └────────┬────────┘
-                                    │
-                                    ▼
-                           Publish Marketplace
-                           (auto on release publish)
-```
+There is no draft mode. The workflow creates a published GitHub Release and
+publishes the selected extensions to both registries.
 
 ## What the workflow does
 
 The workflow:
 
-- updates synchronized versions in the root extension and any managed optional extensions that are present (Db2, Oracle, PostgreSQL)
-- updates every tracked documentation version marker under `docs/` so the portal and package version cannot drift
-- validates version consistency with `scripts/version-sync.js`
-- runs lint and type checks (tests run in CI, not in release)
-- creates a release commit on the selected branch
-- creates and pushes an annotated git tag
-- creates a GitHub Release
+- synchronizes versions in the core extension and managed companion extensions;
+- updates tracked documentation version markers;
+- validates the release tag and selected targets;
+- runs the release quality, test, and integration gates;
+- builds and audits the selected VSIX files;
+- attaches the VSIX files, checksums, review report, and combined archive to the
+  GitHub Release;
+- publishes the same VSIX files to the Visual Studio Code Marketplace and Open
+  VSX.
 
-If the workflow creates a published release (`draft=false`), it now directly runs the existing `Publish Marketplace Extensions` workflow as a reusable workflow for that tag. This avoids relying on a second GitHub Actions trigger from a release created by `github-actions[bot]`.
+Marketplace and Open VSX publication use the same target selection. A missing
+`VSCE_PAT` or `OVSX_TOKEN` stops the normal release before the version bump,
+tag, and GitHub Release are created.
+The `OVSX_TOKEN` secret is mapped to the `OVSX_PAT` variable expected by the
+Open VSX CLI.
 
-When `draft=true`, the workflow builds and attaches the selected VSIX files to the draft GitHub Release, but it does not publish to Marketplace. After reviewing the draft, run **Publish Marketplace Extensions** manually with the same release tag and the desired targets.
+## One-time Open VSX setup
 
-## Recommended usage
+Before the first publication:
 
-### Safe rehearsal
+1. Sign the Open VSX Publisher Agreement.
+2. Create the `krzysztof-d` namespace.
+3. Claim/verify the namespace when possible.
+4. Keep `OVSX_TOKEN` as a repository-level or organization-level GitHub Actions
+   secret. Do not put it in source files or workflow logs.
 
-Use this when you want to practice the process without publishing to Marketplace yet.
+The namespace must match the `publisher` field in the extension manifests.
 
-- Run workflow: `Release`
-- `release_type`: `patch` or `exact`
-- `draft`: `true`
-- `prerelease`: optional
-- `target_branch`: `main`
+## Re-publishing and recovery
 
-Result:
+Use `Publish Extensions` manually when an existing tag must be rebuilt or when
+publication needs to be retried:
 
-- the version bump commit is pushed
-- the tag is pushed
-- a draft GitHub Release is created
-- Marketplace publishing does not start until the draft release is manually published
+- provide `release_tag`, for example `v3.17.4`;
+- select the same extension targets;
+- let the workflow rebuild, audit, attach, and publish them to both registries.
 
-### Real release
+Publishing uses duplicate-safe behavior, so a retry skips versions already
+accepted by a registry and continues with missing packages. Registry uploads
+are not transactional; if one registry succeeds and the other fails, rerun the
+same tag after correcting the reported problem.
 
-- Run workflow: `Release`
-- `release_type`: `patch`, `minor`, `major`, or `exact`
-- `draft`: `false`
-- `prerelease`: set as needed
-- `target_branch`: `main`
+## Initial Open VSX backfill
 
-Result:
-
-- the release commit and tag are pushed automatically
-- a published GitHub Release is created automatically
-- Marketplace publishing starts immediately in the same release workflow
-
-## Exact version mode
-
-Use `release_type=exact` only when you must publish a specific version such as `1.2.3`. In that mode, `version` is required.
+After this workflow change is merged, run `Publish Extensions` for
+`v3.17.4` and select all currently managed extensions. This backfills the
+current release on Open VSX while duplicate versions are skipped on the
+Marketplace. Verify the core page, companion pages, and platform-specific DB2,
+DuckDB, and Access packages.
 
 ## Important rules
 
-- Do not create release tags manually in GitHub UI.
+- Do not create release tags manually in the GitHub UI.
 - Do not use `npm version patch` for official releases.
-- Do not edit the GitHub Release first and tag later.
-- Let the workflow create the commit, tag, and release in one path.
-
-## After a draft rehearsal
-
-If you created a draft release only for testing, you can:
-
-- publish the draft and then run **Publish Marketplace Extensions** manually for the same tag, or
-- delete the draft release and delete the tag if it was only a rehearsal
+- Do not publish a different VSIX manually to only one registry.
+- Use the `specific` path for retries or backfills of an existing tag.
 
 ## Troubleshooting
 
-### Version mismatch error
-
-If you see "Version mismatch detected", run locally:
+### Version mismatch
 
 ```bash
 node scripts/version-sync.js check
 ```
 
-To fix, synchronize versions:
+### CI or release gate failure
 
-```bash
-node scripts/version-sync.js set 1.1.3
-```
-
-### CI fails before release
-
-Do not trigger Release workflow until CI passes. Fix the issues first:
+Fix the failing check before retrying the release:
 
 ```bash
 npm run lint
@@ -168,3 +117,12 @@ npm run check-types
 npm run test:completion-parity
 npm run test:quickfix-regression
 ```
+
+### Open VSX authorization failure
+
+Verify that:
+
+- the Publisher Agreement was accepted;
+- namespace `krzysztof-d` exists and is owned by the token holder;
+- `OVSX_TOKEN` is available as a repository or organization secret;
+- the token has not expired or been revoked.

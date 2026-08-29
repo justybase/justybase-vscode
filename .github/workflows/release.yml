@@ -26,11 +26,6 @@ on:
         description: "Existing tag to republish when release_type=specific, for example v3.16.24"
         required: false
         type: string
-      draft:
-        description: "Create a draft GitHub Release. VSIX assets are still attached, but Marketplace publishing is skipped."
-        required: true
-        default: true
-        type: boolean
       prerelease:
         description: "Mark the GitHub Release as a pre-release."
         required: true
@@ -124,6 +119,29 @@ jobs:
             package-lock.json
             extensions/*/package-lock.json
 
+      - name: Validate registry publishing secrets
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+        run: |
+          missing=()
+
+          if [ -z "$VSCE_PAT" ]; then
+            missing+=(VSCE_PAT)
+          fi
+
+          if [ -z "$OVSX_TOKEN" ]; then
+            missing+=(OVSX_TOKEN)
+          fi
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required registry secret(s): ${missing[*]}" >&2
+            exit 1
+          fi
+
+          echo "Registry publishing secrets are configured."
+
       - name: Resolve synchronized versions
         id: version
         shell: bash
@@ -215,10 +233,6 @@ jobs:
         run: |
           flags=()
 
-          if [ '${{ github.event.inputs.draft }}' = 'true' ]; then
-            flags+=(--draft)
-          fi
-
           if [ '${{ github.event.inputs.prerelease }}' = 'true' ]; then
             flags+=(--prerelease)
           fi
@@ -237,7 +251,7 @@ jobs:
               echo '## Republishing existing tag'
               echo ''
               echo '- Tag: `${{ steps.version.outputs.tag }}` (already exists, no version bump)'
-              echo '- Rebuild and attach selected VSIX files; Marketplace publish only for newly selected targets.'
+              echo '- Rebuild and attach selected VSIX files; publish newly missing versions to both registries.'
               echo ''
             else
               echo '## Release prepared'
@@ -245,13 +259,10 @@ jobs:
               echo '- Version: `${{ steps.version.outputs.version }}`'
               echo '- Tag: `${{ steps.version.outputs.tag }}`'
               echo '- Branch: `${{ github.event.inputs.target_branch }}`'
-              echo '- Draft release: `${{ github.event.inputs.draft }}`'
               echo '- Pre-release: `${{ github.event.inputs.prerelease }}`'
               echo ''
             fi
-            echo 'Selected VSIX files are built and attached to this GitHub Release in the next job.'
-            echo 'If draft=false, they are then published to Marketplace.'
-            echo 'If draft=true, Marketplace publishing is skipped.'
+            echo 'The downstream workflow builds, audits, attaches, and publishes the selected VSIX files to both registries.'
           } >> "$GITHUB_STEP_SUMMARY"
 
   resolve-publish-targets:
@@ -298,5 +309,4 @@ jobs:
     with:
       release_tag: ${{ needs.prepare-release.outputs.release_tag }}
       publish_targets: ${{ needs.resolve-publish-targets.outputs.publish_targets }}
-      publish_marketplace: ${{ github.event.inputs.draft == 'false' }}
     secrets: inherit
