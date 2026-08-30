@@ -5,6 +5,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "license": "Apache-2.0",
+  "homepage": "https://justybase.github.io/vscode/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/justybase/justybase-vscode"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check-types": "tsc -p tsconfig.json --noEmit"

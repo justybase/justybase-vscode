@@ -1,3 +1,5 @@
+Documentation: https://justybase.github.io/justybase-vscode/guide/
+
 This folder contains per-dialect SVG icons used by the Schema view and the
 Connect to Database panel.
 

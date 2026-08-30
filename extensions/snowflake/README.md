@@ -1,5 +1,7 @@
 # JustyBase SQL Editor for Snowflake
 
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/) for the shared SQL workflows and current capability boundaries.
+
 ![JustyBase SQL Editor for Snowflake](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
 **Explore cloud data, author Snowflake SQL, review query plans, and prepare staged data workflows in VS Code.**

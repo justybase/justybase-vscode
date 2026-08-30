@@ -4,7 +4,7 @@ description: Design tables, review DDL changes, edit rows, and run database-spec
 audience: user
 category: Product guides
 status: Partial
-last_verified: 2026-08-19
+last_verified: 2026-08-30
 product_version: 3.17.9
 ---
 
@@ -23,8 +23,12 @@ Use **Visual Table Designer** to draft a new table and **Alter Table Wizard** to
 The Schema context menu exposes capabilities when the selected dialect advertises them:
 
 - Netezza: GROOM, statistics, skew/distribution inspection, table recreation, comments, constraints, owner changes, and selected maintenance scripts.
-- PostgreSQL/Oracle/Db2/MSSQL/SQLite: dialect-specific analyze, vacuum, reindex, indexes, partitions, or integrity operations where implemented.
-- DuckDB/MySQL: local/engine-specific analyze, vacuum, recreation, and metadata workflows.
+- PostgreSQL: index and partition list/create/drop/attach/detach/reindex commands implemented with Quick Picks and input dialogs; there is no dedicated index/partition webview.
+- Db2: dedicated **Index Designer** and **Partition Manager** webviews, plus `RUNSTATS`, `REORG`, and Db2-specific index/partition helpers.
+- SQLite: index view/add/drop commands, table reindexing, and integrity operations; there is no native table-partition manager.
+- Oracle/MSSQL: database-specific statistics and table-level index rebuild operations; no dedicated index/partition designer.
+- DuckDB: engine-specific analyze, vacuum, recreation, and metadata workflows; no dedicated index/partition designer.
+- MySQL 8.0+: dedicated **Index Designer** and **Partition Manager** webviews. The index panel creates standard/UNIQUE indexes and protects `PRIMARY`; the partition panel supports method-specific RANGE/LIST add/drop and HASH/KEY count add/coalesce operations. Non-partitioned, subpartitioned, `MAXVALUE`-tail, and unsupported-engine cases are deliberately limited or read-only.
 - ClickHouse: `OPTIMIZE TABLE`, optional `OPTIMIZE FINAL`, MergeTree partition inspection, query/session monitoring, and table recreation. ClickHouse has no relational index/foreign-key designer in this integration; sorting and primary-key expressions are treated as table-engine metadata.
 - Access: file/session operations rather than warehouse maintenance SQL.
 

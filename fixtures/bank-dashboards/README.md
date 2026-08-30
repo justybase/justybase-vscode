@@ -1,5 +1,7 @@
 # Banking dashboard fixtures
 
+See the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/) for the SQL, import/export, and dashboard workflows demonstrated by these fixtures.
+
 These workbooks contain synthetic, non-customer banking data. They are meant
 to demonstrate a refreshable reporting model rather than a production banking
 data dictionary.

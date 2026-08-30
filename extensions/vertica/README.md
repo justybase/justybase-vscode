@@ -1,5 +1,7 @@
 # JustyBase SQL Editor for Vertica
 
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/) for the shared SQL workflows and current capability boundaries.
+
 ![JustyBase SQL Editor for Vertica](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
 **A Vertica-aware SQL workspace for analytical queries, catalog exploration, results, and operational insight in VS Code.**

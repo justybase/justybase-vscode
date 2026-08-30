@@ -1,5 +1,7 @@
 # CI Scripts
 
+See the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/) for build, testing, release, and developer guidance.
+
 Public scripts used by GitHub Actions and npm build/version commands.
 
 ## Files

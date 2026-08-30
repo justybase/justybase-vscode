@@ -1,6 +1,6 @@
 # JustyBase SQL Editor for Microsoft Access
 
-Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) for the Access capability matrix and [Data Workspace guide](https://justybase.github.io/justybase-vscode/guide/user/data-workspace/).
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/), including the [Access capability matrix](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) and [Data Workspace guide](https://justybase.github.io/justybase-vscode/guide/user/data-workspace/).
 
 ![JustyBase SQL Editor for Microsoft Access](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 

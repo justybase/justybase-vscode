@@ -15,13 +15,13 @@
         "Data Science",
         "Other"
     ],
-    "homepage": "https://github.com/justybase/justybase-vscode",
+    "homepage": "https://justybase.github.io/vscode/",
     "bugs": {
         "url": "https://github.com/justybase/justybase-vscode/issues"
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/justybase/justybase-vscode.git"
+        "url": "https://github.com/justybase/justybase-vscode"
     },
     "keywords": [
         "SQL",

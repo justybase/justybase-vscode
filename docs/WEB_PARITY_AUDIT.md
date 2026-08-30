@@ -1,6 +1,6 @@
 # Web Editor ↔ VS Code Extension — Parity Audit & Backlog
 
-Last updated: 2026-08-09
+Last updated: 2026-08-30
 
 This document is the **feature-by-feature parity audit** between the two products shipped
 from this repository:
@@ -223,6 +223,11 @@ never re-type existing fields.
 
 ## D5 – Database Ops (import / DDL / DBA / maintenance)
 
+Desktop-only note: Db2 and MySQL now have dedicated **Index Designer** and
+**Partition Manager** webviews in the VS Code extension. PostgreSQL and SQLite
+retain their existing command-based index/partition workflows; these are not
+webviews.
+
 | Feature | Desktop | Web | Status | Effort |
 | --- | --- | --- | --- | --- |
 | Select top/1000, per object | ✅ | ❌ | – | S |
@@ -233,8 +238,8 @@ never re-type existing fields.
 | DDL templates (CREATE VIEW/PROC/SEQUENCE/EXT TABLE) | ✅ | ❌ | M | reuse `externalTableTemplates`, `procedureTemplates`. |
 | Comments (table/column) | ✅ | ❌ | S–M | needs DDL-mutating endpoint. |
 | Constraints PK/FK/Unique | ✅ | ❌ | S–M | |
-| Indexes (Netezza/PG/SQLite) | ✅ | ❌ | M | |
-| Partitions (PG/Netezza) | ✅ PG commands only | ❌ | L | |
+| Indexes (Netezza/PG/SQLite/Db2/MySQL) | ✅ | ❌ | M | Db2 and MySQL include dedicated Index Designer webviews; PostgreSQL and SQLite use command-based desktop workflows. |
+| Partitions (PG/Db2/MySQL) | ✅ PG commands + Db2/MySQL Partition Manager webviews | ❌ | L | Db2 supports range-partition operations; MySQL supports method-specific RANGE/LIST and HASH/KEY operations; PostgreSQL uses command-based desktop workflows. |
 | Rename table / TRUNCATE / DROP (confirm) | ✅ | ❌ | S–M | execution of DDL with confirmation modal. |
 | Permissions / security panel | ✅ | ❌ | XL | `openSecurityPanel`. |
 | Session monitor | ✅ | ❌ | XL | `showSessionMonitor`. |

@@ -1,6 +1,6 @@
 # JustyBase SQL Editor for DuckDB and Files
 
-Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/user/data-workspace/) for the Files/DuckDB workflow and capability boundaries.
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/), including the [Files/DuckDB workflow](https://justybase.github.io/justybase-vscode/guide/user/data-workspace/) and capability boundaries.
 
 ![JustyBase SQL Editor for DuckDB and Files](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
