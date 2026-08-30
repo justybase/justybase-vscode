@@ -333,6 +333,7 @@ function mapNativeTableDefinition(row: RawObjectRow): DatabaseTableDefinitionMet
 
     const definition: DatabaseTableDefinitionMetadata = { engine };
     const fields: Array<[keyof DatabaseTableDefinitionMetadata, string]> = [
+        ['engineClause', 'CLICKHOUSE_ENGINE_FULL'],
         ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
         ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],
         ['orderBy', 'CLICKHOUSE_ORDER_BY'],

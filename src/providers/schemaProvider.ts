@@ -65,6 +65,34 @@ import type {
 const SCHEMA_QUERY_TIMEOUT = METADATA_QUERY_TIMEOUT_SECONDS * 1000;
 const CTE_TREE_REFRESH_DEBOUNCE_MS = 400;
 
+function clickHouseTableDefinitionFromRow(
+    row: Record<string, unknown>,
+): TableMetadata['tableDefinition'] | undefined {
+    const engine = typeof row.CLICKHOUSE_ENGINE === 'string' ? row.CLICKHOUSE_ENGINE.trim() : '';
+    if (!engine) {
+        return undefined;
+    }
+
+    const definition: NonNullable<TableMetadata['tableDefinition']> = { engine };
+    const fields: Array<[keyof NonNullable<TableMetadata['tableDefinition']>, string]> = [
+        ['engineClause', 'CLICKHOUSE_ENGINE_FULL'],
+        ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
+        ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],
+        ['orderBy', 'CLICKHOUSE_ORDER_BY'],
+        ['sampleBy', 'CLICKHOUSE_SAMPLE_BY'],
+        ['ttl', 'CLICKHOUSE_TTL'],
+        ['settings', 'CLICKHOUSE_SETTINGS'],
+        ['sourceDdl', 'CLICKHOUSE_SOURCE_DDL'],
+    ];
+    for (const [target, source] of fields) {
+        const value = row[source];
+        if (typeof value === 'string' && value.trim()) {
+            definition[target] = value.trim();
+        }
+    }
+    return definition;
+}
+
 const DB2_GLOBAL_TYPE_GROUPS = new Set([
     'SERVER',
     'SERVER OPTION',
@@ -2346,7 +2374,7 @@ export class SchemaProvider
                     SCHEMA_QUERY_TIMEOUT,
                 );
                 const objects = result
-                    ? queryResultToRows<{
+                    ? queryResultToRows<Record<string, unknown> & {
                           OBJNAME: string;
                           TABLENAME?: string;
                           SCHEMA?: string;
@@ -2355,7 +2383,7 @@ export class SchemaProvider
                           detail?: string;
                           OWNER?: string;
                           label?: string | { label: string };
-                      }>(result)
+                    }>(result)
                     : [];
 
                 // Write-back to cache to warm it up
@@ -2388,6 +2416,7 @@ export class SchemaProvider
                             objType,
                             detail: obj.SCHEMA ? `${objType} (${obj.SCHEMA})` : objType,
                             sortText: obj.OBJNAME,
+                            tableDefinition: clickHouseTableDefinitionFromRow(obj),
                         });
                     }
 
@@ -2454,6 +2483,7 @@ export class SchemaProvider
                             'TABLE',
                             'GLOBAL TEMP TABLE',
                             'VIEW',
+                            'MATERIALIZED VIEW',
                             'NICKNAME',
                             'ALIAS',
                             'SYNONYM',

@@ -18,6 +18,7 @@ describe('ClickHouse system catalog queries', () => {
         expect(query).toContain("engine = 'MaterializedView'");
         expect(query).toContain("'MATERIALIZED VIEW'");
         expect(query).toContain('CLICKHOUSE_ENGINE');
+        expect(query).toContain('CLICKHOUSE_ENGINE_FULL');
         expect(query).toContain('CLICKHOUSE_PARTITION_BY');
         expect(query).toContain('CLICKHOUSE_ORDER_BY');
     });

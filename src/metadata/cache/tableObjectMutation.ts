@@ -50,6 +50,7 @@ function nativeTableDefinitionFromRow(
 
     const definition: NonNullable<TableMetadata['tableDefinition']> = { engine };
     const fields: Array<[keyof NonNullable<TableMetadata['tableDefinition']>, string]> = [
+        ['engineClause', 'CLICKHOUSE_ENGINE_FULL'],
         ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
         ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],
         ['orderBy', 'CLICKHOUSE_ORDER_BY'],
