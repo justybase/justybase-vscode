@@ -15,7 +15,7 @@
         "Data Science",
         "Other"
     ],
-    "homepage": "https://github.com/justybase/justybase-vscode",
+    "homepage": "https://justybase.github.io/vscode/",
     "bugs": {
         "url": "https://github.com/justybase/justybase-vscode/issues"
     },
@@ -36,6 +36,48 @@
     "extensionDependencies": [
         "krzysztof-d.justybaselite-netezza"
     ],
+    "contributes": {
+        "submenus": [
+            {
+                "id": "justybase.mysql.tableStructures",
+                "label": "MySQL: Table Structures",
+                "icon": "$(symbol-structure)"
+            }
+        ],
+        "commands": [
+            {
+                "command": "justybase.mysql.createIndexWizard",
+                "title": "MySQL: Index Designer...",
+                "icon": "$(symbol-key)"
+            },
+            {
+                "command": "justybase.mysql.managePartitions",
+                "title": "MySQL: Partition Manager...",
+                "icon": "$(layout-panel)"
+            }
+        ],
+        "menus": {
+            "view/item/context": [
+                {
+                    "submenu": "justybase.mysql.tableStructures",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
+                    "group": "3_maintenance@1"
+                }
+            ],
+            "justybase.mysql.tableStructures": [
+                {
+                    "command": "justybase.mysql.createIndexWizard",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
+                    "group": "1_index@1"
+                },
+                {
+                    "command": "justybase.mysql.managePartitions",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
+                    "group": "2_partition@1"
+                }
+            ]
+        }
+    },
     "scripts": {
         "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
         "build": "node esbuild.mysql.js",

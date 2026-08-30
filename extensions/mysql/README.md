@@ -1,6 +1,6 @@
 # JustyBase SQL Editor for MySQL
 
-Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) for the MySQL capability matrix and shared SQL workflows.
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/), including the [MySQL capability matrix](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) and shared SQL workflows.
 
 ![JustyBase SQL Editor for MySQL](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
@@ -24,6 +24,37 @@ Connect to a MySQL database, browse schemas and objects, write queries, and revi
 - MySQL 8 authoring profile with a strict parser, completion, signatures, types, grammar, snippets, and dialect builtins.
 - Syntax coverage for backtick identifiers, qualified names, CTEs, MySQL `LIMIT` forms, `INSERT IGNORE`, `ON DUPLICATE KEY UPDATE`, and MySQL-specific types.
 - DDL generation for tables and supported object types.
+- Dedicated MySQL 8+ Index Designer and Partition Manager webviews for table structures.
+
+### Design indexes and partitions
+
+For a MySQL table in the Schema Explorer, the table context menu provides:
+
+- **MySQL: Index Designer** — loads `information_schema.STATISTICS`, displays
+  existing indexes (including advanced index types as read-only metadata), and
+  creates standard or `UNIQUE` indexes from selected columns. Secondary indexes
+  can be dropped after confirmation; the `PRIMARY` index is protected.
+- **MySQL: Partition Manager** — loads `information_schema.PARTITIONS` and
+  displays method, expression, bounds, subpartitions, estimated rows, and
+  storage sizes. `RANGE`/`LIST` tables support named add/drop operations;
+  `HASH`/`KEY` tables support adding partitions by count and reducing them with
+  `COALESCE PARTITION`.
+
+Both panels preview DDL and support copy/open-in-editor/execute actions. Every
+write is host-validated and confirmed before execution. Non-partitioned and
+subpartitioned tables are shown as read-only in the Partition Manager. A
+`RANGE`/`LIST` table whose last partition is `MAXVALUE` cannot add a partition
+from this panel because that requires `REORGANIZE PARTITION`. `NDB` partition
+drops are disabled. Partition drops delete the rows stored in the selected
+partition; review the warning and generated SQL before executing.
+
+The current scope targets MySQL 8.0+ rather than MariaDB. Descending index keys
+are offered only for InnoDB on versions that support them; other engines and
+older servers are limited to ascending keys. Attach/detach, exchange,
+reorganize, and partition-scheme conversion remain outside this webview scope.
+
+See the [MySQL structural maintenance reference](../../docs/mysql.md) for the
+metadata sources, supported operations, and verification boundary.
 
 ### Author and validate SQL
 
@@ -50,7 +81,7 @@ Connection secrets are kept in VS Code Secret Storage. Use separate saved profil
 
 ## Runtime notes
 
-The connection form supplies authentication and connection options. Large results stream through `mysql2`; cancelling a query aborts the active request. The optional pack focuses on MySQL SQL, metadata, execution, and shared result workflows.
+The connection form supplies authentication and connection options. Large results stream through `mysql2`; cancelling a query aborts the active request. The optional pack focuses on MySQL SQL, metadata, execution, shared result workflows, and guarded table-structure operations described above.
 
 ## Development
 
