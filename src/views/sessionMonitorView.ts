@@ -61,7 +61,7 @@ export class SessionMonitorView {
                         await this._fetchAndSendData();
                         return;
                     case 'killSession':
-                        await this._killSession(message.sessionId, message.status);
+                        await this._killSession(message.sessionId, message.status, message.queryId);
                         return;
                     case 'toggleAutoRefresh':
                         this._toggleAutoRefresh(message.enabled);
@@ -162,23 +162,29 @@ export class SessionMonitorView {
         return undefined;
     }
 
-    private async _killSession(sessionId: number, status?: string): Promise<void> {
+    private async _killSession(sessionId: number, status?: string, queryId?: string): Promise<void> {
         try {
             const statusHint = status ? ` (status: ${status})` : '';
+            const targetLabel = queryId ? `query ${queryId}` : `session ${sessionId}`;
+            const confirmationLabel = queryId ? 'Yes, Kill Query' : 'Yes, Kill Session';
             const confirmation = await vscode.window.showWarningMessage(
-                `Are you sure you want to terminate session ${sessionId}${statusHint}?`,
+                `Are you sure you want to terminate ${targetLabel}${statusHint}?`,
                 { modal: true },
-                'Yes, Kill Session'
+                confirmationLabel
             );
 
-            if (confirmation !== 'Yes, Kill Session') {
+            if (confirmation !== confirmationLabel) {
                 return;
             }
 
             const provider = await this._getProvider();
             if (provider) {
-                await provider.killSession(this._context, this._connectionManager, sessionId, this._connectionName);
-                vscode.window.showInformationMessage(`Session ${sessionId} terminated successfully.`);
+                if (queryId && provider.killQuery) {
+                    await provider.killQuery(this._context, this._connectionManager, queryId, this._connectionName);
+                } else {
+                    await provider.killSession(this._context, this._connectionManager, sessionId, this._connectionName);
+                }
+                vscode.window.showInformationMessage(`${queryId ? 'Query' : 'Session'} ${queryId || sessionId} terminated successfully.`);
                 // Refresh data
                 await this._fetchAndSendData();
             } else {

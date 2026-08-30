@@ -249,7 +249,7 @@ function renderQueries() {
             <td>${formatNumber(q.QS_RESROWS)}</td>
             <td><div class="sql-preview" title="${escapeHtml(q.QS_SQL || '')}">${escapeHtml(q.QS_SQL || '')}</div></td>
             <td>
-                <button class="btn btn-danger query-kill-btn" data-session="${q.QS_SESSIONID}" data-status="${escapeHtml(q.QS_STATE || '')}">✕ Kill</button>
+                <button class="btn btn-danger query-kill-btn" data-session="${q.QS_SESSIONID}" data-query-id="${escapeHtml(q.QS_QUERY_ID || '')}" data-status="${escapeHtml(q.QS_STATE || '')}">✕ Kill</button>
             </td>
         </tr>
     `).join('');
@@ -259,7 +259,9 @@ function renderQueries() {
         btn.addEventListener('click', () => {
             const htmlBtn = btn as HTMLElement;
             const sessionId = parseInt(htmlBtn.dataset.session ?? '', 10);
-            postToHost({ command: 'killSession', sessionId });
+            const queryId = htmlBtn.dataset.queryId || undefined;
+            const status = htmlBtn.dataset.status || '';
+            postToHost({ command: 'killSession', sessionId, status, queryId });
         });
     });
 }
@@ -446,4 +448,3 @@ function renderGenericTable(data: Record<string, unknown>[]) {
         </table>
     `;
 }
-
