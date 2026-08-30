@@ -326,15 +326,21 @@ export function typeNameWord(
 
 export function typeArgument(
   host: SqlVisitorHost,
-  ctx: Record<string, IToken[]>,
+  ctx: Record<string, Array<IToken | CstNode>>,
 ): string {
-  const token =
-    ctx.NumberLiteral?.[0] ||
-    ctx.Identifier?.[0] ||
-    ctx.QuotedIdentifier?.[0] ||
-    ctx.Any?.[0];
-  const text = host.getTokenText(token);
-  return text.replace(/"/g, "");
+  const nestedType = ctx.typeName?.find((child) => host.isCstNode(child));
+  if (nestedType && host.isCstNode(nestedType)) {
+    return host.getCstText(nestedType);
+  }
+
+  const tokens = Object.values(ctx)
+    .flatMap((children) => children)
+    .filter((child): child is IToken => host.isToken(child))
+    .sort((left, right) => (left.startOffset ?? 0) - (right.startOffset ?? 0));
+  return tokens
+    .map((token) => host.getTokenText(token))
+    .join(" ")
+    .replace(/"/g, "");
 }
 
 function validateQualifiedTableCommand(

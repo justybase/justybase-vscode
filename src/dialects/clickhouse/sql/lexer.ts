@@ -25,6 +25,13 @@ export const Format = createToken({ name: 'ClickHouseFormat', pattern: /FORMAT/i
 export const Engine = createToken({ name: 'ClickHouseEngine', pattern: /ENGINE/i, longer_alt: netezzaLexer.Identifier });
 export const Ttl = createToken({ name: 'ClickHouseTtl', pattern: /TTL/i, longer_alt: netezzaLexer.Identifier });
 export const Settings = createToken({ name: 'ClickHouseSettings', pattern: /SETTINGS/i, longer_alt: netezzaLexer.Identifier });
+export const AsOf = createToken({ name: 'ClickHouseAsOf', pattern: /ASOF/i, longer_alt: netezzaLexer.Identifier });
+export const Anti = createToken({ name: 'ClickHouseAnti', pattern: /ANTI/i, longer_alt: netezzaLexer.Identifier });
+export const Semi = createToken({ name: 'ClickHouseSemi', pattern: /SEMI/i, longer_alt: netezzaLexer.Identifier });
+export const System = createToken({ name: 'ClickHouseSystem', pattern: /SYSTEM/i, longer_alt: netezzaLexer.Identifier });
+export const Kill = createToken({ name: 'ClickHouseKill', pattern: /KILL/i, longer_alt: netezzaLexer.Identifier });
+export const Query = createToken({ name: 'ClickHouseQuery', pattern: /QUERY/i, longer_alt: netezzaLexer.Identifier });
+export const Populate = createToken({ name: 'ClickHousePopulate', pattern: /POPULATE/i, longer_alt: netezzaLexer.Identifier });
 
 // ClickHouse-only tokens must appear before the shared Identifier token. The
 // shared token identities are intentionally reused so the existing CST
@@ -43,6 +50,13 @@ export const allTokens = [
     Engine,
     Ttl,
     Settings,
+    AsOf,
+    Anti,
+    Semi,
+    System,
+    Kill,
+    Query,
+    Populate,
     By,
     ...netezzaLexer.allTokens,
 ];

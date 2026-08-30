@@ -40,5 +40,33 @@
       "OPTIMIZE TABLE ${1:database}.${2:table};"
     ],
     "description": "Start a background ClickHouse merge"
+  },
+  "ClickHouse materialized view": {
+    "prefix": "clickhouse-materialized-view",
+    "body": [
+      "CREATE MATERIALIZED VIEW ${1:database}.${2:view_name}",
+      "TO ${3:database}.${4:target_table}",
+      "AS",
+      "SELECT ${5:*}",
+      "FROM ${6:database}.${7:source_table};"
+    ],
+    "description": "Create a ClickHouse materialized view"
+  },
+  "ClickHouse mutation": {
+    "prefix": "clickhouse-mutation",
+    "body": [
+      "ALTER TABLE ${1:database}.${2:table_name}",
+      "UPDATE ${3:column} = ${4:value}",
+      "WHERE ${5:condition};"
+    ],
+    "description": "Start an asynchronous ClickHouse mutation"
+  },
+  "ClickHouse with fill": {
+    "prefix": "clickhouse-with-fill",
+    "body": [
+      "ORDER BY ${1:bucket}",
+      "WITH FILL FROM ${2:start} TO ${3:end} STEP ${4:step};"
+    ],
+    "description": "Fill gaps in a ClickHouse time series"
   }
 }

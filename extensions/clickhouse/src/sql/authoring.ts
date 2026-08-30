@@ -17,19 +17,27 @@ import {
 } from '../../../../src/sql/authoring/baseProfiles';
 
 const CLICKHOUSE_KEYWORDS = mergeUniqueStrings(BASE_SQL_COMPLETION_KEYWORDS, [
-    'PREWHERE', 'ARRAY JOIN', 'FINAL', 'SAMPLE', 'LIMIT BY', 'WITH FILL',
-    'QUALIFY', 'ENGINE', 'PARTITION BY', 'PRIMARY KEY', 'ORDER BY', 'SAMPLE BY',
-    'TTL', 'SETTINGS', 'OPTIMIZE', 'MATERIALIZED VIEW', 'PROJECTION', 'FORMAT',
+    'PREWHERE', 'ARRAY JOIN', 'FINAL', 'SAMPLE', 'LIMIT BY', 'WITH FILL', 'WITH TIES',
+    'QUALIFY', 'GLOBAL', 'ANY', 'ALL', 'ASOF', 'ANTI', 'SEMI', 'ENGINE',
+    'PARTITION BY', 'PRIMARY KEY', 'ORDER BY', 'SAMPLE BY', 'TTL', 'SETTINGS',
+    'OPTIMIZE', 'SYSTEM', 'KILL QUERY', 'MATERIALIZED VIEW', 'POPULATE',
+    'PROJECTION', 'FORMAT',
 ]);
 
 const CLICKHOUSE_BUILTINS = new Set<string>([
-    'COUNT', 'UNIQ', 'UNIQEXACT', 'ARGMAX', 'ARGMIN', 'ANY', 'ANYLAST',
+    'COUNT', 'COUNTDISTINCT', 'SUM', 'SUMIF', 'SUMIFS', 'AVG', 'AVGIF', 'MIN', 'MAX',
+    'UNIQ', 'UNIQEXACT', 'UNIQCOMBINED', 'UNIQHLL12', 'ARGMAX', 'ARGMIN', 'ANY', 'ANYLAST',
     'TOSTRING', 'TOFIXEDSTRING', 'TODATE', 'TODATE32', 'TODATETIME',
     'TODATETIME64', 'TOSTARTOFYEAR', 'TOSTARTOFMONTH', 'TOSTARTOFWEEK',
-    'TOSTARTOFDAY', 'TOSTARTOFHOUR', 'IF', 'MULTIIF', 'COALESCE', 'IFNULL',
+    'TOSTARTOFDAY', 'TOSTARTOFHOUR', 'TOYYYYMM', 'TOYYYYMMDD', 'TOUNIXTIMESTAMP',
+    'IF', 'MULTIIF', 'COALESCE', 'IFNULL',
     'ISNULL', 'ASSUME_NOT_NULL', 'DICTGET', 'JSONEXTRACTSTRING',
-    'JSONEXTRACTRAW', 'JSONEXTRACTINT', 'JSONEXTRACTFLOAT', 'ARRAYJOIN',
-    'GROUPARRAY', 'GROUPUNIQARRAY', 'QUANTILE', 'MEDIAN', 'TOPK', 'LENGTH',
+    'JSONEXTRACTRAW', 'JSONEXTRACTINT', 'JSONEXTRACTFLOAT', 'JSONEXTRACTUINT',
+    'JSONEXTRACTBOOL', 'JSONEXTRACTARRAYRAW', 'JSONEXTRACTKEY', 'ARRAYJOIN',
+    'ARRAYMAP', 'ARRAYFILTER', 'ARRAYREDUCE', 'ARRAYSORT', 'ARRAYDISTINCT',
+    'HAS', 'INDEXOF', 'LENGTH', 'EMPTY', 'MAP', 'TUPLE',
+    'GROUPARRAY', 'GROUPUNIQARRAY', 'GROUPBITAND', 'GROUPBITOR', 'GROUPBITXOR',
+    'QUANTILE', 'QUANTILEEXACT', 'QUANTILETDIGEST', 'MEDIAN', 'TOPK',
     'LOWER', 'UPPER', 'REPLACEALL', 'REGEXP_REPLACE', 'NOW', 'TODAY',
 ]);
 
@@ -69,21 +77,35 @@ const CLICKHOUSE_TYPES: Readonly<Record<string, DatabaseSqlTypeSpec>> = {
     TUPLE: { canonical: 'Tuple', paramsMin: 1, paramsMax: 255 },
     NULLABLE: { canonical: 'Nullable', paramsMin: 1, paramsMax: 1 },
     LOWCARDINALITY: { canonical: 'LowCardinality', paramsMin: 1, paramsMax: 1 },
+    NESTED: { canonical: 'Nested', paramsMin: 1, paramsMax: 255 },
+    AGGREGATEFUNCTION: { canonical: 'AggregateFunction', paramsMin: 1, paramsMax: 255 },
+    SIMPLEAGGREGATEFUNCTION: { canonical: 'SimpleAggregateFunction', paramsMin: 1, paramsMax: 255 },
+    JSON: { canonical: 'JSON', paramsMin: 0, paramsMax: 0 },
+    IPV4: { canonical: 'IPv4', paramsMin: 0, paramsMax: 0 },
+    IPV6: { canonical: 'IPv6', paramsMin: 0, paramsMax: 0 },
+    BFLOAT16: { canonical: 'BFloat16', paramsMin: 0, paramsMax: 0 },
 };
 
 const CLICKHOUSE_SIGNATURES = new Map<string, readonly DatabaseSqlFunctionSignature[]>([
     ['COUNT', [{ name: 'count', parameters: ['expression'], description: 'Counts rows or non-null values.' }]],
+    ['SUM', [{ name: 'sum', parameters: ['expression'], description: 'Sums numeric values.' }]],
+    ['AVG', [{ name: 'avg', parameters: ['expression'], description: 'Calculates the arithmetic mean.' }]],
     ['UNIQ', [{ name: 'uniq', parameters: ['expression'], description: 'Approximate distinct count.' }]],
+    ['UNIQEXACT', [{ name: 'uniqExact', parameters: ['expression'], description: 'Exact distinct count.' }]],
     ['ARGMAX', [{ name: 'argMax', parameters: ['arg', 'val'], description: 'Returns arg for the maximum val.' }]],
     ['ARGMIN', [{ name: 'argMin', parameters: ['arg', 'val'], description: 'Returns arg for the minimum val.' }]],
     ['TOSTARTOFMONTH', [{ name: 'toStartOfMonth', parameters: ['date'], description: 'Rounds a date down to the first day of its month.' }]],
+    ['TOYYYYMM', [{ name: 'toYYYYMM', parameters: ['date'], description: 'Returns the YYYYMM representation of a date.' }]],
     ['JSONEXTRACTSTRING', [{ name: 'JSONExtractString', parameters: ['json', 'key'], description: 'Extracts a string from JSON.' }]],
+    ['ARRAYJOIN', [{ name: 'arrayJoin', parameters: ['array'], description: 'Expands an array into rows.' }]],
+    ['ARRAYMAP', [{ name: 'arrayMap', parameters: ['lambda', 'array'], description: 'Maps a lambda expression over arrays.' }]],
+    ['HAS', [{ name: 'has', parameters: ['array', 'element'], description: 'Checks whether an array contains an element.' }]],
 ]);
 
 const clickhouseFormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE, {
-    keywords: ['PREWHERE', 'ARRAY', 'JOIN', 'FINAL', 'SAMPLE', 'QUALIFY', 'ENGINE', 'TTL', 'SETTINGS', 'OPTIMIZE'],
-    clauseKeywords: ['PREWHERE', 'ARRAY JOIN', 'QUALIFY', 'PARTITION BY', 'PRIMARY KEY', 'ORDER BY', 'SAMPLE BY', 'TTL', 'SETTINGS'],
-    newlineBeforeKeywords: ['PREWHERE', 'ARRAY JOIN', 'QUALIFY', 'PARTITION BY', 'PRIMARY KEY', 'ORDER BY', 'SAMPLE BY', 'TTL', 'SETTINGS'],
+    keywords: ['PREWHERE', 'ARRAY', 'JOIN', 'FINAL', 'SAMPLE', 'QUALIFY', 'ENGINE', 'TTL', 'SETTINGS', 'OPTIMIZE', 'SYSTEM', 'KILL', 'ASOF'],
+    clauseKeywords: ['PREWHERE', 'ARRAY JOIN', 'QUALIFY', 'PARTITION BY', 'PRIMARY KEY', 'ORDER BY', 'SAMPLE BY', 'TTL', 'SETTINGS', 'LIMIT BY', 'WITH FILL'],
+    newlineBeforeKeywords: ['PREWHERE', 'ARRAY JOIN', 'QUALIFY', 'PARTITION BY', 'PRIMARY KEY', 'ORDER BY', 'SAMPLE BY', 'TTL', 'SETTINGS', 'LIMIT BY', 'WITH FILL'],
 });
 
 const clickhouseValidationProfile: DatabaseSqlValidationProfile = {
