@@ -8,6 +8,7 @@ import {
     serializeConnectionFromCache,
 } from '../metadata/diskStorage/metadataDiskSerializer';
 import { DOCUMENTATION_MAX_LENGTH } from '../metadata/diskStorage/metadataDiskTypes';
+import { toTableMetadata } from '../metadata/cache/tableObjectMutation';
 import { Logger } from '../utils/logger';
 
 jest.mock('vscode');
@@ -137,6 +138,34 @@ describe('metadataDiskSerializer', () => {
 
         expect(cache2.getColumns('conn1', 'DB1.ADMIN.lower_table')).toEqual(
             cache.getColumns('conn1', 'DB1.ADMIN.lower_table'),
+        );
+    });
+
+    it('should persist ClickHouse storage-definition metadata with table layers', () => {
+        populateFullConnection('conn1');
+        const table = toTableMetadata({
+            OBJNAME: 'EVENTS',
+            SCHEMA: 'ADMIN',
+            OBJTYPE: 'TABLE',
+            CLICKHOUSE_ENGINE: 'ReplacingMergeTree',
+            CLICKHOUSE_PARTITION_BY: 'toYYYYMM(event_date)',
+            CLICKHOUSE_PRIMARY_KEY: '(event_date, event_id)',
+            CLICKHOUSE_ORDER_BY: '(event_date, event_id)',
+        });
+        cache.setTables('conn1', 'DB1.ADMIN', [table], new Map());
+
+        const serialized = serializeConnectionFromCache(cache, 'conn1', 'fp', Date.now());
+        expect(serialized!.table['DB1.ADMIN'].data[0].tableDefinition).toEqual({
+            engine: 'ReplacingMergeTree',
+            partitionBy: 'toYYYYMM(event_date)',
+            primaryKey: '(event_date, event_id)',
+            orderBy: '(event_date, event_id)',
+        });
+
+        const cache2 = new MetadataCache({ globalStorageUri: vscode.Uri.file('/tmp/x3') } as vscode.ExtensionContext);
+        hydrateConnectionIntoCache(cache2, 'conn1', serialized!);
+        expect(cache2.getTables('conn1', 'DB1.ADMIN')?.[0].tableDefinition).toEqual(
+            table.tableDefinition,
         );
     });
 

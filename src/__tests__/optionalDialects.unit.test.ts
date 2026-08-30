@@ -15,6 +15,7 @@ import { postgresqlDialect } from '../../extensions/postgresql/src/postgresqlDia
 import { snowflakeDialect } from '../../extensions/snowflake/src/snowflakeDialect';
 import { verticaDialect } from '../../extensions/vertica/src/verticaDialect';
 import { accessDialect } from '../../extensions/access/src/accessDialect';
+import { clickhouseDialect } from '../../extensions/clickhouse/src/clickhouseDialect';
 
 const SOURCE_SEARCH_OPTIONS: DatabaseSourceSearchQueryOptions = {
     rawTerm: 'CUSTOMERS',
@@ -86,6 +87,20 @@ const OPTIONAL_DIALECT_CASES: readonly {
         dialect: accessDialect,
         expectedDefaultPort: undefined,
         expectedConnectionFields: ['filePath', 'password'],
+    },
+    {
+        dialect: clickhouseDialect,
+        expectedDefaultPort: 8123,
+        expectedConnectionFields: [
+            'host',
+            'port',
+            'database',
+            'user',
+            'password',
+            'protocol',
+            'tlsMode',
+            'requestTimeout',
+        ],
     },
 ];
 

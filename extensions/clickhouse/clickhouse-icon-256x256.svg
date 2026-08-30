@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64" role="img" aria-labelledby="title">
   <title>ClickHouse database</title>
-  <rect x="5" y="5" width="54" height="54" rx="13" fill="#f2c037"/>
+  <rect width="64" height="64" rx="16" fill="#f2c037"/>
   <path d="M18 18h7v28h-7zM29 18h7v28h-7zM40 18h7v28h-7z" fill="#111827"/>
   <path d="M18 14h7v7h-7zM29 14h7v7h-7zM40 14h7v7h-7z" fill="#111827" opacity=".82"/>
 </svg>

@@ -51,6 +51,7 @@ export type {
   DatabaseDdlColumnInfo,
   DatabaseDdlKeyInfo,
   DatabaseDdlResult,
+  DatabaseTableDefinitionMetadata,
   DatabaseProcedureInfo,
   DatabaseExternalTableInfo,
   DatabaseBatchDDLOptions,

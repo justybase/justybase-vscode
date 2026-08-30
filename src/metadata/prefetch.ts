@@ -8,6 +8,7 @@ import type {
     MetadataPrefetchTarget,
     MetadataSnapshotCompletenessReport,
 } from './cache/MetadataPrefetchTarget';
+import type { DatabaseTableDefinitionMetadata } from '@justybase/contracts';
 import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 
 /**
@@ -315,6 +316,39 @@ interface RawObjectRow {
     [key: string]: unknown;
 }
 
+function getRawObjectString(row: RawObjectRow, key: string): string | undefined {
+    const value = row[key];
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed || undefined;
+}
+
+function mapNativeTableDefinition(row: RawObjectRow): DatabaseTableDefinitionMetadata | undefined {
+    const engine = getRawObjectString(row, 'CLICKHOUSE_ENGINE');
+    if (!engine) {
+        return undefined;
+    }
+
+    const definition: DatabaseTableDefinitionMetadata = { engine };
+    const fields: Array<[keyof DatabaseTableDefinitionMetadata, string]> = [
+        ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
+        ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],
+        ['orderBy', 'CLICKHOUSE_ORDER_BY'],
+        ['sampleBy', 'CLICKHOUSE_SAMPLE_BY'],
+        ['ttl', 'CLICKHOUSE_TTL'],
+        ['settings', 'CLICKHOUSE_SETTINGS'],
+    ];
+    for (const [target, source] of fields) {
+        const value = getRawObjectString(row, source);
+        if (value) {
+            definition[target] = value;
+        }
+    }
+    return definition;
+}
+
 interface RawSchemaRow {
     SCHEMA: string;
     [key: string]: unknown;
@@ -360,6 +394,7 @@ function mapPrefetchObjectRow(row: RawObjectRow, preserveCatalogIdentity = false
         'EXTERNAL TABLE': 'External Table',
     };
     const typeLabel = typeLabelByObjType[normalizedObjectType] ?? normalizedObjectType;
+    const tableDefinition = mapNativeTableDefinition(row);
 
     return {
         OBJNAME: objectName,
@@ -373,6 +408,7 @@ function mapPrefetchObjectRow(row: RawObjectRow, preserveCatalogIdentity = false
         OWNER: normalizeCatalogPart(row.OWNER, identityOptions),
         DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
         REFOBJNAME: normalizeCatalogPart(row.REFOBJNAME, identityOptions),
+        ...(tableDefinition ? { tableDefinition } : {}),
     };
 }
 
