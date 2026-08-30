@@ -28,6 +28,7 @@ import { mysqlSessionMonitorProvider } from '../../extensions/mysql/src/mysqlSes
 import { mysqlDialect } from '../../extensions/mysql/src/mysqlDialect';
 import { oracleSessionMonitorProvider } from '../../extensions/oracle/src/oracleSessionMonitorProvider';
 import { oracleDialect } from '../../extensions/oracle/src/oracleDialect';
+import { clickhouseSessionMonitorProvider } from '../../extensions/clickhouse/src/clickhouseSessionMonitorProvider';
 import { netezzaSessionMonitorProvider } from '../dialects/netezza/sessionMonitor';
 
 const mockedRunQueryRaw = runQueryRaw as jest.MockedFunction<typeof runQueryRaw>;
@@ -163,6 +164,52 @@ describe('mysqlSessionMonitorProvider', () => {
         await expect(mysqlSessionMonitorProvider.killSession(context, connectionManager, 0)).rejects.toThrow(
             'Invalid MySQL session ID: 0'
         );
+    });
+});
+
+describe('clickhouseSessionMonitorProvider', () => {
+    const context = createMockContext();
+    const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('exposes query IDs from system.processes', async () => {
+        mockRows([{ QS_SESSIONID: 12, QS_QUERY_ID: 'query-12', QS_SQL: 'SELECT 1' }]);
+
+        const queries = await clickhouseSessionMonitorProvider.getQueries(
+            context,
+            connectionManager,
+            'analytics',
+            'ClickHouse',
+        );
+
+        expect(queries[0]).toMatchObject({ QS_SESSIONID: 12, QS_QUERY_ID: 'query-12' });
+        expect(lastSql()).toContain('FROM system.processes');
+        expect(lastSql()).toContain('query_id AS "QS_QUERY_ID"');
+    });
+
+    it('kills a query by escaped native query_id', async () => {
+        mockedRunQueryRaw.mockResolvedValue(undefined as never);
+
+        await clickhouseSessionMonitorProvider.killQuery!(
+            context,
+            connectionManager,
+            "query-'42",
+            'ClickHouse',
+        );
+
+        expect(lastSql()).toContain("KILL QUERY WHERE query_id = 'query-''42' SYNC");
+    });
+
+    it('rejects an empty query_id before executing SQL', async () => {
+        await expect(clickhouseSessionMonitorProvider.killQuery!(
+            context,
+            connectionManager,
+            '   ',
+        )).rejects.toThrow('query_id cannot be empty');
+        expect(mockedRunQueryRaw).not.toHaveBeenCalled();
     });
 });
 

@@ -17,11 +17,13 @@ export interface SessionMonitorSession {
     PRIORITY: number;
     CID: number;
     CLIENT_OS_USERNAME: string;
+    QUERY_ID?: string;
     [key: string]: SessionMonitorScalar | undefined;
 }
 
 export interface SessionMonitorQuery {
     QS_SESSIONID: number;
+    QS_QUERY_ID?: string;
     QS_PLANID: number;
     QS_CLIENTID: number;
     QS_CLIIPADDR: string;
@@ -115,7 +117,7 @@ export interface SessionMonitorData {
 
 export type SessionMonitorWebviewToHostMessage =
     | { command: 'refresh' }
-    | { command: 'killSession'; sessionId: number; status?: string }
+    | { command: 'killSession'; sessionId: number; status?: string; queryId?: string }
     | { command: 'toggleAutoRefresh'; enabled: boolean }
     | { command: 'updateAlertSettings'; settings: Partial<SessionMonitorAlertSettings> };
 

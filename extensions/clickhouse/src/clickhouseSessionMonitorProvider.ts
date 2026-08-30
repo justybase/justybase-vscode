@@ -15,6 +15,17 @@ function databaseFilter(database: string | undefined, column = 'database'): stri
     return normalized ? `AND ${column} = '${escapeSqlLiteral(normalized)}'` : '';
 }
 
+function queryIdLiteral(queryId: string): string {
+    const normalized = queryId.trim();
+    if (!normalized) {
+        throw new Error('ClickHouse query_id cannot be empty.');
+    }
+    if (normalized.length > 512) {
+        throw new Error('ClickHouse query_id is unexpectedly long.');
+    }
+    return `'${escapeSqlLiteral(normalized)}'`;
+}
+
 // Keep the UI-facing session ID below Number.MAX_SAFE_INTEGER. ClickHouse's
 // native UInt64 hash is commonly serialized as a string and cannot be safely
 // round-tripped through the existing numeric session-monitor contract.
@@ -36,6 +47,7 @@ export const clickhouseSessionMonitorProvider: DatabaseSessionMonitorProvider = 
                 SELECT
                     ${SESSION_ID_EXPRESSION} AS "ID",
                     ${SESSION_ID_EXPRESSION} AS "PID",
+                    query_id AS "QUERY_ID",
                     user AS "USERNAME",
                     current_database AS "DBNAME",
                     query_kind AS "TYPE",
@@ -65,6 +77,7 @@ export const clickhouseSessionMonitorProvider: DatabaseSessionMonitorProvider = 
             `
                 SELECT
                     ${SESSION_ID_EXPRESSION} AS "QS_SESSIONID",
+                    query_id AS "QS_QUERY_ID",
                     0 AS "QS_PLANID",
                     0 AS "QS_CLIENTID",
                     address AS "QS_CLIIPADDR",
@@ -135,6 +148,16 @@ export const clickhouseSessionMonitorProvider: DatabaseSessionMonitorProvider = 
             context,
             connectionManager,
             `KILL QUERY WHERE ${SESSION_ID_EXPRESSION} = toUInt64(${sessionId}) SYNC`,
+            connectionName,
+        );
+    },
+
+    async killQuery(context, mgr, queryId, connectionName) {
+        const connectionManager = mgr as ConnectionManager;
+        await executeSessionMonitorStatement(
+            context,
+            connectionManager,
+            `KILL QUERY WHERE query_id = ${queryIdLiteral(queryId)} SYNC`,
             connectionName,
         );
     },
