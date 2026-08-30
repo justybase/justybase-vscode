@@ -3,8 +3,12 @@ import type {
     DatabaseSourceSearchQueryOptions,
 } from '@justybase/contracts';
 
-export const CLICKHOUSE_DEFAULT_OBJECT_TYPES = ['TABLE', 'VIEW'] as const;
-export const CLICKHOUSE_DEFAULT_COLUMN_OBJECT_TYPES = ['TABLE', 'VIEW'] as const;
+export const CLICKHOUSE_DEFAULT_OBJECT_TYPES = ['TABLE', 'VIEW', 'MATERIALIZED VIEW'] as const;
+export const CLICKHOUSE_DEFAULT_COLUMN_OBJECT_TYPES = ['TABLE', 'VIEW', 'MATERIALIZED VIEW'] as const;
+
+type ClickHouseObjectType = 'TABLE' | 'VIEW' | 'MATERIALIZED VIEW';
+
+const CLICKHOUSE_VIEW_ENGINES = "('View', 'MaterializedView', 'LiveView', 'WindowView')";
 
 function quoteLiteral(value: string | undefined): string {
     return `'${(value ?? '').replace(/'/g, "''")}'`;
@@ -40,33 +44,46 @@ function emptyObjectQuery(): string {
 function tableObjectTypeExpression(alias = ''): string {
     const prefix = alias ? `${alias}.` : '';
     return `multiIf(
-        ${prefix}engine IN ('View', 'MaterializedView', 'LiveView', 'WindowView'), 'VIEW',
+        ${prefix}engine = 'MaterializedView', 'MATERIALIZED VIEW',
+        ${prefix}engine IN ('View', 'LiveView', 'WindowView'), 'VIEW',
         'TABLE'
     )`;
+}
+
+function tableEnginePredicate(objectType: ClickHouseObjectType): string {
+    if (objectType === 'TABLE') {
+        return `AND engine NOT IN ${CLICKHOUSE_VIEW_ENGINES}`;
+    }
+    if (objectType === 'MATERIALIZED VIEW') {
+        return "AND engine = 'MaterializedView'";
+    }
+    return `AND engine IN ${CLICKHOUSE_VIEW_ENGINES}`;
 }
 
 function tableListQuery(
     database: string,
     schema: string | undefined,
-    objectType: 'TABLE' | 'VIEW',
+    objectType: ClickHouseObjectType,
 ): string {
-    const enginePredicate = objectType === 'VIEW'
-        ? `AND engine IN ('View', 'MaterializedView', 'LiveView', 'WindowView')`
-        : `AND engine NOT IN ('View', 'MaterializedView', 'LiveView', 'WindowView')`;
     const effective = effectiveDatabase(database, schema);
     return `
         SELECT
             name AS ${quoteIdentifier('OBJNAME')},
             database AS ${quoteIdentifier('SCHEMA')},
             toUInt64(0) AS ${quoteIdentifier('OBJID')},
-            ${quoteLiteral(objectType)} AS ${quoteIdentifier('OBJTYPE')},
+            ${objectType === 'VIEW' ? tableObjectTypeExpression() : quoteLiteral(objectType)} AS ${quoteIdentifier('OBJTYPE')},
             ifNull(comment, '') AS ${quoteIdentifier('DESCRIPTION')},
             CAST('' AS String) AS ${quoteIdentifier('OWNER')},
-            database AS ${quoteIdentifier('DATABASE')}
+            database AS ${quoteIdentifier('DATABASE')},
+            engine AS ${quoteIdentifier('CLICKHOUSE_ENGINE')},
+            ifNull(partition_key, '') AS ${quoteIdentifier('CLICKHOUSE_PARTITION_BY')},
+            ifNull(primary_key, '') AS ${quoteIdentifier('CLICKHOUSE_PRIMARY_KEY')},
+            ifNull(sorting_key, '') AS ${quoteIdentifier('CLICKHOUSE_ORDER_BY')},
+            ifNull(sampling_key, '') AS ${quoteIdentifier('CLICKHOUSE_SAMPLE_BY')}
         FROM system.tables
         WHERE 1 = 1
           ${effective ? `AND database = ${quoteLiteral(effective)}` : ''}
-          ${enginePredicate}
+          ${tableEnginePredicate(objectType)}
         ORDER BY database, name
     `;
 }
@@ -109,6 +126,7 @@ function buildColumnQuery(
             c.position AS ${quoteIdentifier('ATTNUM')},
             c.default_kind AS ${quoteIdentifier('EXTRA')},
             if(c.is_in_primary_key = 1, 1, 0) AS ${quoteIdentifier('IS_PK')},
+            ifNull(t.primary_key, '') AS ${quoteIdentifier('PRIMARY_KEY_EXPRESSION')},
             toUInt8(0) AS ${quoteIdentifier('IS_FK')}
         FROM system.columns AS c
         LEFT JOIN system.tables AS t
@@ -162,6 +180,10 @@ export function buildListViewsQuery(database: string, schema?: string): string {
     return tableListQuery(database, schema, 'VIEW');
 }
 
+export function buildListMaterializedViewsQuery(database: string, schema?: string): string {
+    return tableListQuery(database, schema, 'MATERIALIZED VIEW');
+}
+
 export function buildListProceduresQuery(_database: string, _schema?: string): string {
     return routineEmptyQuery();
 }
@@ -173,6 +195,9 @@ export function buildObjectTypeQuery(database: string, objectType: string): stri
     }
     if (normalized === 'VIEW') {
         return tableListQuery(database, undefined, 'VIEW');
+    }
+    if (normalized === 'MATERIALIZED VIEW') {
+        return tableListQuery(database, undefined, 'MATERIALIZED VIEW');
     }
     if (normalized === 'DATABASE') {
         return `
@@ -195,6 +220,7 @@ export function buildTypeGroupsQuery(_database?: string): string {
     return `
         SELECT 'TABLE' AS ${quoteIdentifier('OBJTYPE')}
         UNION ALL SELECT 'VIEW' AS ${quoteIdentifier('OBJTYPE')}
+        UNION ALL SELECT 'MATERIALIZED VIEW' AS ${quoteIdentifier('OBJTYPE')}
     `;
 }
 
@@ -208,11 +234,32 @@ export function buildColumnsWithKeysQuery(
 }
 
 export function buildTableColumnsQuery(database: string, schema: string, tableName: string): string {
-    return buildColumnQuery(database, schema, tableName, ['TABLE', 'VIEW']);
+    return buildColumnQuery(database, schema, tableName, ['TABLE', 'VIEW', 'MATERIALIZED VIEW']);
 }
 
 export function buildColumnMetadataQuery(database: string, schema: string, tableName: string): string {
-    return buildColumnQuery(database, schema, tableName, ['TABLE', 'VIEW']);
+    return buildColumnQuery(database, schema, tableName, ['TABLE', 'VIEW', 'MATERIALIZED VIEW']);
+}
+
+/**
+ * Fetches storage metadata for one table-like object. The full CREATE query is
+ * read lazily so a normal catalog refresh does not copy large view bodies.
+ */
+export function buildTableDefinitionQuery(database: string, schema: string, tableName: string): string {
+    const effective = effectiveDatabase(database, schema);
+    return `
+        SELECT
+            engine AS ${quoteIdentifier('CLICKHOUSE_ENGINE')},
+            ifNull(partition_key, '') AS ${quoteIdentifier('CLICKHOUSE_PARTITION_BY')},
+            ifNull(primary_key, '') AS ${quoteIdentifier('CLICKHOUSE_PRIMARY_KEY')},
+            ifNull(sorting_key, '') AS ${quoteIdentifier('CLICKHOUSE_ORDER_BY')},
+            ifNull(sampling_key, '') AS ${quoteIdentifier('CLICKHOUSE_SAMPLE_BY')},
+            create_table_query AS ${quoteIdentifier('CLICKHOUSE_SOURCE_DDL')}
+        FROM system.tables
+        WHERE database = ${quoteLiteral(effective)}
+          AND name = ${quoteLiteral(tableName)}
+        LIMIT 1
+    `;
 }
 
 export function buildLookupColumnsQuery(params: DatabaseColumnLookupParams): string {

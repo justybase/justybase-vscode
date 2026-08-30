@@ -50,6 +50,33 @@ import type {
     MetadataRequestSource,
 } from '../../metadata/metadataQueryDiagnostics';
 
+function clickHouseTableDefinitionFromRow(
+    row: Record<string, unknown>,
+): TableMetadata['tableDefinition'] | undefined {
+    const engine = typeof row.CLICKHOUSE_ENGINE === 'string' ? row.CLICKHOUSE_ENGINE.trim() : '';
+    if (!engine) {
+        return undefined;
+    }
+
+    const definition: NonNullable<TableMetadata['tableDefinition']> = { engine };
+    const fields: Array<[keyof NonNullable<TableMetadata['tableDefinition']>, string]> = [
+        ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
+        ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],
+        ['orderBy', 'CLICKHOUSE_ORDER_BY'],
+        ['sampleBy', 'CLICKHOUSE_SAMPLE_BY'],
+        ['ttl', 'CLICKHOUSE_TTL'],
+        ['settings', 'CLICKHOUSE_SETTINGS'],
+        ['sourceDdl', 'CLICKHOUSE_SOURCE_DDL'],
+    ];
+    for (const [target, source] of fields) {
+        const value = row[source];
+        if (typeof value === 'string' && value.trim()) {
+            definition[target] = value.trim();
+        }
+    }
+    return definition;
+}
+
 export class MetadataProvider {
     private readonly columnFetchInFlight = new Map<string, Promise<ColumnMetadata[]>>();
 
@@ -401,12 +428,12 @@ export class MetadataProvider {
             });
             if (!result) return [];
 
-            const results = queryResultToRows<{ OBJNAME: string; OBJID: number; OBJTYPE: string; SCHEMA?: string; DESCRIPTION?: string; REFOBJNAME?: string }>(result);
+            const results = queryResultToRows<Record<string, unknown> & { OBJNAME: string; OBJID: number; OBJTYPE: string; SCHEMA?: string; DESCRIPTION?: string; REFOBJNAME?: string }>(result);
             const items: TableMetadata[] = results.map(row => {
                 const label = row.OBJNAME;
                 const schema = row.SCHEMA || schemaName;
                 const normalizedObjectType = row.OBJTYPE?.toUpperCase() || 'TABLE';
-                const isView = normalizedObjectType === 'VIEW';
+                const isView = normalizedObjectType === 'VIEW' || normalizedObjectType === 'MATERIALIZED VIEW';
                 const kind = isView ? vscode.CompletionItemKind.Interface : vscode.CompletionItemKind.Class;
                 const typeLabel =
                     normalizedObjectType === 'NICKNAME'
@@ -415,9 +442,11 @@ export class MetadataProvider {
                             ? 'Alias'
                             : normalizedObjectType === 'SYNONYM'
                                 ? 'Synonym'
-                            : isView
-                                ? 'View'
-                                : 'Table';
+                                : normalizedObjectType === 'MATERIALIZED VIEW'
+                                    ? 'Materialized View'
+                                    : isView
+                                        ? 'View'
+                                        : 'Table';
 
                 return {
                     OBJNAME: row.OBJNAME,
@@ -430,7 +459,8 @@ export class MetadataProvider {
                     detail: schemaName ? typeLabel : (schema ? `${typeLabel} (${schema})` : typeLabel),
                     sortText: row.OBJNAME,
                     DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
-                    REFOBJNAME: row.REFOBJNAME
+                    REFOBJNAME: row.REFOBJNAME,
+                    tableDefinition: clickHouseTableDefinitionFromRow(row),
                 };
             });
 
@@ -438,17 +468,17 @@ export class MetadataProvider {
                 ? items
                 : await this.mergeMirroredSystemCatalogObjects(connectionName, dbName, items);
 
-            this.metadataCache.setTables(
+            const mergedTableLikeItems = mergeAndSetTables(
+                this.metadataCache,
                 connectionName,
                 cacheKey,
                 itemsWithSystemCatalog,
-                this.buildTableIdMapForCacheKey(connectionName, dbName, schemaName, itemsWithSystemCatalog)
+                'TABLE',
+                (merged) =>
+                    this.buildTableIdMapForCacheKey(connectionName, dbName, schemaName, merged),
             );
 
-            return this.createTableCompletionItems(
-                itemsWithSystemCatalog,
-                this.connectionManager.getConnectionDatabaseKind(connectionName),
-            );
+            return this.createTableCompletionItems(mergedTableLikeItems, this.connectionManager.getConnectionDatabaseKind(connectionName));
         } catch (e: unknown) {
             logWithFallback('error', 'Error', e);
             return [];
@@ -489,7 +519,9 @@ export class MetadataProvider {
                     const detailText = (item.detail || '').toUpperCase();
                     return (
                         (item.objType || '').toUpperCase() === 'VIEW'
+                        || (item.objType || '').toUpperCase() === 'MATERIALIZED VIEW'
                         || detailText.startsWith('VIEW')
+                        || detailText.startsWith('MATERIALIZED VIEW')
                         || (detailText.length === 0 && (item.kind === 18 || item.kind === vscode.CompletionItemKind.Interface))
                     );
                 })
@@ -498,7 +530,9 @@ export class MetadataProvider {
                     const ci = new vscode.CompletionItem(label, vscode.CompletionItemKind.Interface);
                     ci.insertText = this.formatMetadataIdentifier(label, databaseKind);
                     const schemaSuffix = schemaName ? '' : (item.SCHEMA ? ` (${item.SCHEMA})` : '');
-                    const detail = `View${schemaSuffix}`;
+                    const detail = item.objType?.toUpperCase() === 'MATERIALIZED VIEW'
+                        ? `Materialized View${schemaSuffix}`
+                        : `View${schemaSuffix}`;
                     this.applySuggestDescription(ci, label, detail, item.DESCRIPTION);
                     ci.sortText = item.sortText || label;
                     return ci;
@@ -547,18 +581,25 @@ export class MetadataProvider {
             });
             if (!result) return [];
 
-            const results = queryResultToRows<{ OBJNAME: string; SCHEMA?: string; DESCRIPTION?: string }>(result);
-            const viewItems: TableMetadata[] = results.map(row => ({
-                OBJNAME: row.OBJNAME,
-                TABLENAME: row.OBJNAME,
-                SCHEMA: row.SCHEMA || schemaName,
-                label: row.OBJNAME,
-                kind: vscode.CompletionItemKind.Interface,
-                objType: 'VIEW',
-                detail: schemaName ? 'View' : `View${row.SCHEMA ? ` (${row.SCHEMA})` : ''}`,
-                sortText: row.OBJNAME,
-                DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION)
-            }));
+            const results = queryResultToRows<Record<string, unknown> & { OBJNAME: string; SCHEMA?: string; DESCRIPTION?: string; OBJTYPE?: string }>(result);
+            const viewItems: TableMetadata[] = results.map(row => {
+                const normalizedObjectType = row.OBJTYPE?.trim().toUpperCase() || 'VIEW';
+                const isMaterializedView = normalizedObjectType === 'MATERIALIZED VIEW';
+                return {
+                    OBJNAME: row.OBJNAME,
+                    TABLENAME: row.OBJNAME,
+                    SCHEMA: row.SCHEMA || schemaName,
+                    label: row.OBJNAME,
+                    kind: vscode.CompletionItemKind.Interface,
+                    objType: normalizedObjectType,
+                    detail: schemaName
+                        ? (isMaterializedView ? 'Materialized View' : 'View')
+                        : `${isMaterializedView ? 'Materialized View' : 'View'}${row.SCHEMA ? ` (${row.SCHEMA})` : ''}`,
+                    sortText: row.OBJNAME,
+                    DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
+                    tableDefinition: clickHouseTableDefinitionFromRow(row),
+                };
+            });
 
             const itemsWithSystemCatalog = schemaName
                 ? viewItems

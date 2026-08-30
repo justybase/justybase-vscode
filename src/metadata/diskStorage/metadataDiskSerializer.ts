@@ -37,7 +37,7 @@ const KNOWN_SCHEMA_KEYS = new Set([
 ]);
 const KNOWN_TABLE_KEYS = new Set([
     'OBJNAME', 'TABLENAME', 'OBJID', 'SCHEMA', 'OWNER', 'DESCRIPTION', 'REFOBJNAME',
-    'kind', 'objType', 'TYPE', 'label', 'detail', 'sortText',
+    'kind', 'objType', 'TYPE', 'label', 'detail', 'sortText', 'tableDefinition',
 ]);
 const KNOWN_PROCEDURE_KEYS = new Set([
     'PROCEDURE', 'PROCEDURESIGNATURE', 'SCHEMA', 'OWNER', 'DATABASE',

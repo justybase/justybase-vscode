@@ -38,6 +38,35 @@ function compareTableObjectNames(left: TableMetadata, right: TableMetadata): num
     return (getObjectName(left) || '').localeCompare(getObjectName(right) || '');
 }
 
+function nativeTableDefinitionFromRow(
+    row: Record<string, unknown>,
+): TableMetadata['tableDefinition'] | undefined {
+    const engine = typeof row.CLICKHOUSE_ENGINE === 'string'
+        ? row.CLICKHOUSE_ENGINE.trim()
+        : '';
+    if (!engine) {
+        return undefined;
+    }
+
+    const definition: NonNullable<TableMetadata['tableDefinition']> = { engine };
+    const fields: Array<[keyof NonNullable<TableMetadata['tableDefinition']>, string]> = [
+        ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
+        ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],
+        ['orderBy', 'CLICKHOUSE_ORDER_BY'],
+        ['sampleBy', 'CLICKHOUSE_SAMPLE_BY'],
+        ['ttl', 'CLICKHOUSE_TTL'],
+        ['settings', 'CLICKHOUSE_SETTINGS'],
+        ['sourceDdl', 'CLICKHOUSE_SOURCE_DDL'],
+    ];
+    for (const [target, source] of fields) {
+        const value = row[source];
+        if (typeof value === 'string' && value.trim()) {
+            definition[target] = value.trim();
+        }
+    }
+    return definition;
+}
+
 /** Insert/replace one object using the same type-group + OBJNAME order as type refresh. */
 function mergeUpsertedTableObject(
     existing: readonly TableMetadata[],
@@ -81,8 +110,13 @@ export function toTableMetadata(row: {
     OBJTYPE?: string;
     OWNER?: string;
     DESCRIPTION?: string;
+    tableDefinition?: TableMetadata['tableDefinition'];
+    [key: string]: unknown;
 }): TableMetadata {
     const objectType = row.OBJTYPE?.trim().toUpperCase() || 'TABLE';
+    const tableDefinition = row.tableDefinition ?? nativeTableDefinitionFromRow(row);
+    const isViewLike = objectType === 'VIEW' || objectType === 'MATERIALIZED VIEW';
+    const typeLabel = objectType === 'MATERIALIZED VIEW' ? 'Materialized View' : objectType;
     return {
         OBJNAME: row.OBJNAME,
         OBJID: row.OBJID,
@@ -90,10 +124,11 @@ export function toTableMetadata(row: {
         OWNER: row.OWNER,
         DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
         label: row.OBJNAME,
-        kind: vscode.CompletionItemKind.Class,
+        kind: isViewLike ? vscode.CompletionItemKind.Interface : vscode.CompletionItemKind.Class,
         objType: objectType,
-        detail: row.SCHEMA ? `${objectType} (${row.SCHEMA})` : objectType,
+        detail: row.SCHEMA ? `${typeLabel} (${row.SCHEMA})` : typeLabel,
         sortText: row.OBJNAME,
+        ...(tableDefinition ? { tableDefinition } : {}),
     };
 }
 

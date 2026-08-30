@@ -25,6 +25,25 @@ export interface DatabaseDdlKeyInfo {
   comment?: string | null;
 }
 
+/**
+ * Native storage-definition metadata for table-like objects.
+ *
+ * The fields intentionally keep ClickHouse expressions as SQL text. Parsing
+ * them into columns would lose function calls, nested arguments, or quoted
+ * literals that are significant to the storage definition.
+ */
+export interface DatabaseTableDefinitionMetadata {
+  engine: string;
+  engineClause?: string;
+  partitionBy?: string;
+  primaryKey?: string;
+  orderBy?: string;
+  sampleBy?: string;
+  ttl?: string;
+  settings?: string;
+  sourceDdl?: string;
+}
+
 export interface DatabaseDdlResult {
   success: boolean;
   ddlCode?: string;
@@ -36,6 +55,8 @@ export interface DatabaseDdlResult {
   };
   error?: string;
   note?: string;
+  warnings?: string[];
+  ddlFidelity?: 'exact' | 'reconstructed' | 'incomplete';
 }
 
 export interface DatabaseProcedureInfo {
@@ -168,8 +189,16 @@ export interface DatabaseDdlProvider {
     organizeColumns: string[],
     keysInfo: Map<string, DatabaseDdlKeyInfo>,
     tableComment?: string | null,
-    owner?: string | null
+    owner?: string | null,
+    tableDefinition?: DatabaseTableDefinitionMetadata
   ): string;
+  /** Fetches native table-engine metadata without requiring a full catalog refresh. */
+  getTableDefinitionMetadata?(
+    connection: DatabaseConnection,
+    database: string,
+    schema: string,
+    tableName: string
+  ): Promise<DatabaseTableDefinitionMetadata | null>;
   generateViewDDL(
     connection: DatabaseConnection,
     database: string,
@@ -268,7 +297,8 @@ export interface DatabasePartitionInfo {
   name: string;
   parentTable: string;
   partitionBound: string;
-  partitionStrategy: 'RANGE' | 'LIST' | 'HASH';
+  partitionStrategy: 'RANGE' | 'LIST' | 'HASH' | 'EXPRESSION';
+  partitionKey?: string;
   rowCount?: number;
   totalSize?: number;
 }
@@ -440,6 +470,13 @@ export interface DatabaseSessionMonitorProvider {
     context: unknown,
     connectionManager: unknown,
     sessionId: number,
+    connectionName?: string
+  ): Promise<void>;
+  /** Native query termination for systems whose identifier is not numeric. */
+  killQuery?(
+    context: unknown,
+    connectionManager: unknown,
+    queryId: string,
     connectionName?: string
   ): Promise<void>;
 }

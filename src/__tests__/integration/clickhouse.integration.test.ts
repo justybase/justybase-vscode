@@ -20,7 +20,10 @@ import {
 } from '../../../extensions/clickhouse/src/clickhouseExplainParser';
 import { clickhouseDialect } from '../../../extensions/clickhouse/src/clickhouseDialect';
 import { clickhouseMetadataProvider } from '../../../extensions/clickhouse/src/clickhouseSchemaProvider';
-import { buildColumnMetadataQuery } from '../../../extensions/clickhouse/src/clickhouseSystemQueries';
+import {
+    buildColumnMetadataQuery,
+    buildListMaterializedViewsQuery,
+} from '../../../extensions/clickhouse/src/clickhouseSystemQueries';
 import type { ConnectionDetails } from '../../types';
 import {
     cancelReaderExecution,
@@ -160,6 +163,8 @@ describeIfConfigured('clickhouse integration', () => {
     const database = config?.database ?? 'clickhouse_test';
     const tableName = `jbl_clickhouse_live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const viewName = `${tableName}_view`;
+    const materializedViewName = `${tableName}_mv`;
+    const materializedTargetName = `${tableName}_mv_target`;
     let connection: ClickHouseConnection;
 
     beforeAll(async () => {
@@ -183,11 +188,24 @@ describeIfConfigured('clickhouse integration', () => {
             `CREATE VIEW ${quoteIdentifier(database)}.${quoteIdentifier(viewName)} AS `
             + `SELECT id, amount FROM ${quoteIdentifier(database)}.${quoteIdentifier(tableName)}`,
         ).execute();
+        await connection.createCommand(
+            `CREATE TABLE ${quoteIdentifier(database)}.${quoteIdentifier(materializedTargetName)} (`
+            + 'event_date Date, amount Decimal(12, 2)'
+            + `) ENGINE = SummingMergeTree ORDER BY event_date`,
+        ).execute();
+        await connection.createCommand(
+            `CREATE MATERIALIZED VIEW ${quoteIdentifier(database)}.${quoteIdentifier(materializedViewName)} `
+            + `TO ${quoteIdentifier(database)}.${quoteIdentifier(materializedTargetName)} AS `
+            + `SELECT event_date, sum(amount) AS amount FROM ${quoteIdentifier(database)}.${quoteIdentifier(tableName)} GROUP BY event_date`,
+        ).execute();
     }, 60000);
 
     afterAll(async () => {
         if (connection) {
             await tryExecute(connection, `DROP VIEW IF EXISTS ${quoteIdentifier(database)}.${quoteIdentifier(viewName)}`);
+            await tryExecute(connection, `DROP VIEW IF EXISTS ${quoteIdentifier(database)}.${quoteIdentifier(materializedViewName)}`);
+            await tryExecute(connection, `DROP TABLE IF EXISTS ${quoteIdentifier(database)}.${quoteIdentifier(materializedViewName)}`);
+            await tryExecute(connection, `DROP TABLE IF EXISTS ${quoteIdentifier(database)}.${quoteIdentifier(materializedTargetName)}`);
             await tryExecute(connection, `DROP TABLE IF EXISTS ${quoteIdentifier(database)}.${quoteIdentifier(tableName)}`);
             await connection.close();
         }
@@ -268,6 +286,12 @@ describeIfConfigured('clickhouse integration', () => {
             clickhouseMetadataProvider.buildListViewsQuery(database, database),
         );
         expect(views.some(row => row.OBJNAME === viewName)).toBe(true);
+        expect(views.some(row => row.OBJNAME === materializedViewName && row.OBJTYPE === 'MATERIALIZED VIEW')).toBe(true);
+        const materializedViews = await readRows(
+            connection,
+            buildListMaterializedViewsQuery(database, database),
+        );
+        expect(materializedViews.some(row => row.OBJNAME === materializedViewName)).toBe(true);
 
         const columns = await readRows(
             connection,
@@ -331,6 +355,11 @@ describeIfConfigured('clickhouse integration', () => {
         const organizeColumns = await ddl.getOrganizeInfo(connection, database, database, tableName);
         expect(organizeColumns).toEqual(['id', 'event_date']);
 
+        const tableDefinition = await ddl.getTableDefinitionMetadata!(connection, database, database, tableName);
+        expect(tableDefinition?.engine).toMatch(/MergeTree/i);
+        expect(tableDefinition?.partitionBy).toContain('toYYYYMM');
+        expect(tableDefinition?.orderBy).toContain('id');
+
         const stats = await readRows(connection, ddl.buildTableStatsQuery(database, database, tableName));
         expect(stats).toHaveLength(1);
         expect(Number(stats[0].ROW_COUNT)).toBeGreaterThanOrEqual(2);
@@ -341,6 +370,16 @@ describeIfConfigured('clickhouse integration', () => {
 
         const viewDdl = await ddl.generateViewDDL(connection, database, database, viewName);
         expect(viewDdl).toMatch(/CREATE VIEW/i);
+        const materializedViewDdl = await ddl.generateViewDDL(connection, database, database, materializedViewName);
+        expect(materializedViewDdl).toMatch(/CREATE MATERIALIZED VIEW/i);
+        const materializedViewDefinition = await ddl.getTableDefinitionMetadata!(
+            connection,
+            database,
+            database,
+            materializedViewName,
+        );
+        expect(materializedViewDefinition?.engine).toBe('MaterializedView');
+        expect(materializedViewDefinition?.sourceDdl).toMatch(/CREATE MATERIALIZED VIEW/i);
 
         const cachedDdl = ddl.buildTableDDLFromCache(
             database,
@@ -350,8 +389,12 @@ describeIfConfigured('clickhouse integration', () => {
             [],
             organizeColumns,
             keys,
+            undefined,
+            undefined,
+            tableDefinition ?? undefined,
         );
         expect(cachedDdl).toContain('ENGINE = MergeTree');
+        expect(cachedDdl).toContain('PARTITION BY toYYYYMM');
         expect(cachedDdl).toContain('ORDER BY (id, event_date)');
     });
 

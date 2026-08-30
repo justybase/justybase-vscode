@@ -39,23 +39,27 @@ export const clickhouseMaintenanceProvider: DatabaseMaintenanceProvider = {
                         database AS "SCHEMA",
                         partition AS "NAME",
                         table AS "PARENT_TABLE",
-                        partition AS "PARTITION_BOUND",
-                        'RANGE' AS "PARTITION_STRATEGY",
+                        p.partition_id AS "PARTITION_BOUND",
+                        'EXPRESSION' AS "PARTITION_STRATEGY",
+                        ifNull(t.partition_key, '') AS "PARTITION_KEY",
                         sum(rows) AS "ROW_COUNT",
                         sum(bytes_on_disk) AS "TOTAL_SIZE"
-                    FROM system.parts
-                    WHERE active = 1
-                      AND database = '${target.databaseName.replace(/'/g, "''")}'
-                      AND table = '${target.tableName.replace(/'/g, "''")}'
-                    GROUP BY database, table, partition
-                    ORDER BY partition
+                    FROM system.parts AS p
+                    LEFT JOIN system.tables AS t
+                      ON t.database = p.database AND t.name = p.table
+                    WHERE p.active = 1
+                      AND p.database = '${target.databaseName.replace(/'/g, "''")}'
+                      AND p.table = '${target.tableName.replace(/'/g, "''")}'
+                    GROUP BY p.database, p.table, p.partition, p.partition_id, t.partition_key
+                    ORDER BY p.partition
                 `, target.connectionName);
                 return rows.map(row => ({
                     schema: String(row.SCHEMA ?? target.databaseName),
                     name: String(row.NAME ?? ''),
                     parentTable: String(row.PARENT_TABLE ?? target.tableName),
                     partitionBound: String(row.PARTITION_BOUND ?? ''),
-                    partitionStrategy: 'RANGE' as const,
+                    partitionStrategy: 'EXPRESSION' as const,
+                    partitionKey: String(row.PARTITION_KEY ?? ''),
                     rowCount: Number(row.ROW_COUNT ?? 0),
                     totalSize: Number(row.TOTAL_SIZE ?? 0),
                 }));

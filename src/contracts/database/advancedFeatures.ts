@@ -3,6 +3,19 @@ import type { ConnectionDetails } from '../../types';
 import type { TuningReport } from '../../services/tuning/types';
 import type { DatabaseConnection } from './index';
 
+/** Native storage-definition metadata retained for dialect-specific DDL. */
+export interface DatabaseTableDefinitionMetadata {
+    engine: string;
+    engineClause?: string;
+    partitionBy?: string;
+    primaryKey?: string;
+    orderBy?: string;
+    sampleBy?: string;
+    ttl?: string;
+    settings?: string;
+    sourceDdl?: string;
+}
+
 export interface DatabaseDdlColumnInfo {
     name: string;
     description: string | null;
@@ -37,6 +50,8 @@ export interface DatabaseDdlResult {
     };
     error?: string;
     note?: string;
+    warnings?: string[];
+    ddlFidelity?: 'exact' | 'reconstructed' | 'incomplete';
 }
 
 export interface DatabaseProcedureInfo {
@@ -169,8 +184,15 @@ export interface DatabaseDdlProvider {
         organizeColumns: string[],
         keysInfo: Map<string, DatabaseDdlKeyInfo>,
         tableComment?: string | null,
-        owner?: string | null
+        owner?: string | null,
+        tableDefinition?: DatabaseTableDefinitionMetadata
     ): string;
+    getTableDefinitionMetadata?(
+        connection: DatabaseConnection,
+        database: string,
+        schema: string,
+        tableName: string
+    ): Promise<DatabaseTableDefinitionMetadata | null>;
     generateViewDDL(
         connection: DatabaseConnection,
         database: string,
@@ -324,8 +346,10 @@ export interface DatabasePartitionInfo {
   parentTable: string;
   /** Partition bound expression (e.g., "FOR VALUES FROM ('2024-01-01') TO ('2024-02-01')") */
   partitionBound: string;
-  /** Partition strategy: RANGE, LIST, HASH */
-  partitionStrategy: 'RANGE' | 'LIST' | 'HASH';
+  /** Partition strategy: RANGE, LIST, HASH, or a native expression. */
+  partitionStrategy: 'RANGE' | 'LIST' | 'HASH' | 'EXPRESSION';
+  /** Native partition expression, when the dialect exposes one. */
+  partitionKey?: string;
   /** Estimated row count */
   rowCount?: number;
   /** Total size in bytes */
@@ -576,6 +600,12 @@ export interface DatabaseSessionMonitorProvider {
         context: ExtensionContext,
         connectionManager: unknown,
         sessionId: number
+    ): Promise<void>;
+    killQuery?(
+        context: ExtensionContext,
+        connectionManager: unknown,
+        queryId: string,
+        connectionName?: string
     ): Promise<void>;
 }
 

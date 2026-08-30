@@ -2,6 +2,8 @@
  * Metadata Cache - Types
  */
 
+import type { DatabaseTableDefinitionMetadata } from '@justybase/contracts';
+
 /**
  * Per-key cache entry with individual timestamps
  */
@@ -73,6 +75,8 @@ export interface TableMetadata {
     label?: string | { label: string };
     detail?: string;
     sortText?: string;
+    /** Optional native storage definition, populated by dialect catalog queries. */
+    tableDefinition?: DatabaseTableDefinitionMetadata;
     [key: string]: unknown;
 }
 
