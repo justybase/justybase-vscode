@@ -1,6 +1,6 @@
 # JustyBase SQL Editor for Microsoft SQL Server
 
-Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) for the MS SQL Server capability matrix and shared SQL workflows.
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/), including the [MS SQL Server capability matrix](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) and shared SQL workflows.
 
 ![JustyBase SQL Editor for Microsoft SQL Server](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 

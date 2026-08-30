@@ -6,7 +6,7 @@ Db2 support is delivered as the optional sibling extension in [`extensions/db2`]
 
 The Db2 pack is published with `"preview": true`. Treat it as a **near-full companion**:
 
-- **Runtime:** Advanced — connect, SYSCAT metadata (including aliases/nicknames/federated groups), DDL fallback, import/export, explain/tuning, RUNSTATS/REORG, session monitor, dedicated live suite + optional `JBL_LIVE` fixture.
+- **Runtime:** Advanced — connect, SYSCAT metadata (including aliases/nicknames/federated groups), DDL fallback, import/export, explain/tuning, RUNSTATS/REORG, session monitor, dedicated Index Designer and Partition Manager webviews, dedicated live suite + optional `JBL_LIVE` fixture.
 - **Editor:** Advanced (LUW SQL + CST linter/semantic) — **DB2001–DB2008** quality rules, strict Chevrotain runtime (`FETCH FIRST`, `OPTIMIZE FOR`, isolation, `FOR READ ONLY`, `FINAL TABLE`, DGTT, thin SQL PL units), dialect-aware semantic tokens. Deep SQL PL (SQL037–039 visitor depth) remains a follow-on.
 
 **Netezza (core)** remains the reference full experience. Db2 does **not** expose Netezza distribution/skew/GROOM UI actions.
@@ -35,6 +35,27 @@ The Db2 pack is published with `"preview": true`. Treat it as a **near-full comp
 - Explain plan JSON parse + tuning advisor (`DB2TA-*`)
 - Table maintenance: RUNSTATS, REORG, index/partition helpers
 - Session monitor storage provider
+
+### Index and partition webviews
+
+For a Db2 table in the Schema Explorer, the companion extension adds two dedicated
+VS Code webviews:
+
+- **Db2: Index Designer** — loads the table columns and existing indexes, lets you
+  choose key and included columns, order key columns, configure Db2 index options,
+  preview the generated DDL, then execute, save, or copy it. Existing indexes can
+  be reviewed and eligible non-primary, non-system-required indexes can be dropped
+  from the same view.
+- **Db2: Partition Manager** — shows the range-partition expression and current
+  partition boundaries, tablespaces, and row counts. It supports adding a range
+  partition, attaching an existing table, detaching a partition into a table, and
+  dropping a partition. Attach can optionally run `SET INTEGRITY`; every operation
+  can be previewed, executed, saved as SQL, or copied.
+
+The actions are available from the table context menu only for Db2 connections.
+Adding or attaching a partition requires an existing range-partitioned table;
+the view explains this limitation for a non-partitioned table. **Db2: Reorganize
+Indexes** remains a separate maintenance command and is not part of the webview.
 
 ## Environment variables (live)
 

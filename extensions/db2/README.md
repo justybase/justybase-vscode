@@ -1,6 +1,6 @@
 # JustyBase SQL Editor for Db2 LUW
 
-Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) for the Db2 capability matrix and [Getting started guide](https://justybase.github.io/justybase-vscode/guide/user/getting-started/).
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/), including the [Db2 capability matrix](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) and [Getting started guide](https://justybase.github.io/justybase-vscode/guide/user/getting-started/).
 
 ![JustyBase SQL Editor for Db2 LUW](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 
@@ -24,6 +24,20 @@ Connect to a Db2 LUW database, browse `SYSCAT` metadata, write SQL, execute it, 
 - Db2-aware completion, hover information, semantic highlighting, snippets, and parser-backed diagnostics.
 - Quality rules **DB2001–DB2008** for common Db2 SQL problems.
 - DDL extraction, explain-plan graph, tuning advisor, session monitor, `RUNSTATS`, `REORG`, and index/partition helpers.
+
+### Design indexes and partitions
+
+The table context menu provides dedicated Db2 webviews for structural maintenance:
+
+- **Db2: Index Designer** lists existing indexes, helps select and order key or
+  included columns, exposes Db2 index options, previews the generated DDL, and
+  supports execute/save/copy plus dropping eligible indexes.
+- **Db2: Partition Manager** displays range-partition metadata and supports adding,
+  attaching, detaching, and dropping partitions. Attach can also run `SET INTEGRITY`;
+  operations can be executed, saved as SQL, or copied after review.
+
+These webviews are shown for Db2 tables and favorites only. **Db2: Reorganize
+Indexes** is a separate maintenance action.
 
 ### Write safer Db2 SQL
 
@@ -80,7 +94,7 @@ Live database tests use `DB2_LIVE_TEST_*` variables. Optional VS Code Extension 
 | Schema browser | Tables, views, nicknames, aliases, routines, keys, partitions |
 | SQL intelligence | Db2 parser, completion, snippets, semantic tokens, DB2001–DB2008 |
 | Explain and tuning | Explain graph and tuning advisor |
-| Maintenance | `RUNSTATS`, `REORG`, indexes, partitions |
+| Maintenance | `RUNSTATS`, `REORG`, Index Designer, Partition Manager |
 | Netezza-only features | Hidden when a Db2 connection is active |
 
 ## License

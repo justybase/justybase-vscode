@@ -9,7 +9,7 @@ Connect without installing an ODBC driver, write and validate Netezza SQL, explo
 [![Release](https://github.com/justybase/justybase-vscode/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/justybase/justybase-vscode/actions/workflows/release.yml)
 [![Marketplace](https://vsmarketplacebadges.dev/version/krzysztof-d.justybaselite-netezza.svg?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza)
 
-[Website](https://justybase.github.io/) · [Documentation](https://justybase.github.io/justybase-vscode/guide/) · [Marketplace](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza) · [Open VSX](https://open-vsx.org/extension/krzysztof-d/justybaselite-netezza) · [Publisher](https://marketplace.visualstudio.com/publishers/krzysztof-d)
+[Website](https://justybase.github.io/vscode/) · [Documentation](https://justybase.github.io/justybase-vscode/guide/) · [Marketplace](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza) · [Open VSX](https://open-vsx.org/extension/krzysztof-d/justybaselite-netezza) · [Publisher](https://marketplace.visualstudio.com/publishers/krzysztof-d)
 
 **[Open the complete JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/)** — user workflows, reference tables, Web Editor administration, and developer guidance.
 
@@ -150,10 +150,10 @@ The core extension is Netezza-first. Optional packs plug into the shared connect
 | --- | --- | --- |
 | Oracle | [Oracle support pack](extensions/oracle) | Dedicated SQL/PL/SQL parser and advanced workflows |
 | PostgreSQL | [PostgreSQL support pack](extensions/postgresql) | Dedicated parser, metadata, DDL, COPY, and explain tooling |
-| Db2 LUW | [Db2 support pack](extensions/db2) | Dedicated parser, maintenance, and quality rules |
+| Db2 LUW | [Db2 support pack](extensions/db2) | Dedicated parser, maintenance, quality rules, Index Designer, and Partition Manager |
 | Files / DuckDB / SQLite | [Files support pack](extensions/duckdb) | Local Excel, CSV, Parquet, Avro, and file SQL workflows |
 | MS SQL Server | [MS SQL support pack](extensions/mssql) | Companion runtime with T-SQL authoring and shared result workflows |
-| MySQL | [MySQL support pack](extensions/mysql) | Companion runtime with dialect-aware authoring and metadata |
+| MySQL | [MySQL support pack](extensions/mysql) | Companion runtime with dialect-aware authoring, metadata, Index Designer, and Partition Manager |
 | ClickHouse | [ClickHouse support pack](extensions/clickhouse) | HTTP/HTTPS companion with streaming results, metadata, imports, EXPLAIN, and MergeTree maintenance |
 | Microsoft Access | [Access support pack](extensions/access) | Local MDB/ACCDB reader and editing workflows |
 

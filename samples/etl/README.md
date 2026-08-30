@@ -1,5 +1,7 @@
 # ETL Designer Sample Projects
 
+See the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/) for ETL Designer, SQL execution, and import/export guidance.
+
 This folder contains sample ETL projects that demonstrate the capabilities of the Netezza ETL Designer.
 
 ## Available Samples

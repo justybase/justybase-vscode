@@ -1,6 +1,6 @@
 # JustyBase SQL Editor for Oracle
 
-Read the [canonical documentation portal](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) for the Oracle capability matrix and shared SQL workflows.
+Read the [JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/), including the [Oracle capability matrix](https://justybase.github.io/justybase-vscode/guide/reference/database-support/) and shared SQL workflows.
 
 ![JustyBase SQL Editor for Oracle](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/marketplace-hero.png)
 

@@ -4,7 +4,7 @@ description: Compare the advertised JustyBase dialects by runtime, authoring dep
 audience: reference
 category: Reference
 status: Supported
-last_verified: 2026-08-19
+last_verified: 2026-08-30
 product_version: 3.17.9
 ---
 
@@ -15,11 +15,11 @@ JustyBase presents one workspace shell, but a capability is only available when 
 | Database | Runtime / authentication | Parser, completion, LSP | Metadata / search | DDL / explain | Import, export, maintenance | Boundary |
 | --- | --- | --- | --- | --- | --- | --- |
 | Netezza | Bundled JavaScript driver; host/port/database/user/password; VS Code Secrets | First-class parser, CST semantics, NZPLSQL, LSP, quality, semantic tokens | Full lazy catalog/cache, source search, DDL, profiles, dependencies | DDL, EXPLAIN, plan analysis, query flow, tuning paths | XLSB/XLSX/CSV/compressed CSV/JSON/XML/SQL/Markdown/Parquet; GROOM, stats, skew, sessions, security | Production/core |
-| Db2 | Preview companion runtime; platform-specific driver package | Dialect authoring, completion, metadata-aware LSP; depth varies by statement | Catalog browsing, columns, DDL, compare | DDL and database-specific explain/maintenance where implemented | Spreadsheet/text import-export and Db2 maintenance paths | Preview; runtime setup required |
+| Db2 | Preview companion runtime; platform-specific driver package | Dialect authoring, completion, metadata-aware LSP; depth varies by statement | Catalog browsing, columns, DDL, compare | DDL, explain graph, and Db2-specific structural tooling | Spreadsheet/text import-export; `RUNSTATS`, `REORG`, dedicated Index Designer and Partition Manager | Preview; runtime setup required |
 | MS SQL Server | Preview companion runtime and `mssql` driver | Dialect parser profile, completion, formatting, diagnostics | Metadata, object/column browsing, DDL | Explain/parser support depends on provider surface | Provider-specific import/export and maintenance operations | Preview; partial by feature |
 | Oracle | Preview companion runtime | Oracle parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain and tuning provider paths where available | Provider-specific import/export and maintenance operations | Preview; partial by feature |
 | PostgreSQL | Preview companion runtime | PostgreSQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain, partitions, indexes, and maintenance paths where implemented | Provider-specific import/export and maintenance operations | Preview; partial by feature |
-| MySQL | Preview companion runtime | MySQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain and maintenance paths where implemented | Provider-specific import/export and maintenance operations | Preview; partial by feature |
+| MySQL | Preview companion runtime (`8.0+` scope) | MySQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search, index/partition catalog views | Explain, Index Designer, and method-specific Partition Manager | Provider-specific import/export and guarded table-structure operations | Preview; MariaDB and advanced partition restructuring outside scope |
 | ClickHouse | Preview companion runtime over HTTP/HTTPS; user/password authentication | ClickHouse parser profile with PREWHERE, ARRAY JOIN, QUALIFY, LIMIT BY, WITH FILL, DDL options, completion, formatting, diagnostics | `system.databases`, `system.tables`, `system.columns`, object/source search | `SHOW CREATE TABLE`, cache DDL, textual EXPLAIN, MergeTree sorting/partition metadata | Shared CSV/clipboard import, streaming results, query cancellation, sessions/query kill, OPTIMIZE TABLE, partition inspection | Preview; self-hosted and ClickHouse Cloud; no relational indexes/procedures |
 | Access | Preview Access reader/session plus local embedded runtime | File SQL authoring and local completion; not a warehouse dialect | MDB/ACCDB tables, columns, DDL boundary | File/session operations; no warehouse session model | Access file import/edit/export plus local result workflows | Preview; file/runtime boundary |
 | Files / DuckDB / SQLite | Preview local DuckDB or SQLite runtime; no server credential required | File SQL dialects, local completion and formatting | Lazy local catalogs and source profiles | Local DDL, explain, integrity/maintenance varies by runtime | CSV/TSV, XLSX/XLSB, Parquet, Avro, Access; result export | Preview desktop/local; file sources can be read-only |
