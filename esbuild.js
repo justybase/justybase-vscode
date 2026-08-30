@@ -81,6 +81,8 @@ async function main() {
     './media/tableDesigner.ts',
     './media/db2IndexDesigner.ts',
     './media/db2PartitionDesigner.ts',
+    './media/mysqlIndexDesigner.ts',
+    './media/mysqlPartitionDesigner.ts',
     './media/explainPlanGraph.ts',
     './media/erdDiagram.tsx',
     './media/etlDiagram.tsx',

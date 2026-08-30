@@ -323,6 +323,69 @@ export function buildTableCommentQuery(database: string, schema: string, tableNa
     `;
 }
 
+export function buildTablePropertiesQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            t.ENGINE AS ENGINE,
+            VERSION() AS SERVER_VERSION
+        FROM information_schema.tables t
+        WHERE t.TABLE_SCHEMA = ${quoteLiteral(schema)}
+          AND t.TABLE_NAME = ${quoteLiteral(tableName)}
+          AND t.TABLE_TYPE = 'BASE TABLE'
+    `;
+}
+
+export function buildListIndexesQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            s.TABLE_SCHEMA AS TABLE_SCHEMA,
+            s.TABLE_NAME AS TABLE_NAME,
+            s.INDEX_SCHEMA AS INDEX_SCHEMA,
+            s.INDEX_NAME AS INDEX_NAME,
+            s.SEQ_IN_INDEX AS SEQ_IN_INDEX,
+            s.COLUMN_NAME AS COLUMN_NAME,
+            s.COLLATION AS COLLATION,
+            s.SUB_PART AS SUB_PART,
+            s.NON_UNIQUE AS NON_UNIQUE,
+            s.INDEX_TYPE AS INDEX_TYPE,
+            s.COMMENT AS INDEX_COMMENT,
+            s.INDEX_COMMENT AS INDEX_DEFINITION_COMMENT,
+            s.CARDINALITY AS CARDINALITY,
+            s.IS_VISIBLE AS IS_VISIBLE,
+            s.EXPRESSION AS EXPRESSION
+        FROM information_schema.statistics s
+        WHERE s.TABLE_SCHEMA = ${quoteLiteral(schema)}
+          AND s.TABLE_NAME = ${quoteLiteral(tableName)}
+        ORDER BY s.INDEX_NAME, s.SEQ_IN_INDEX
+    `;
+}
+
+export function buildListPartitionsQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            p.TABLE_SCHEMA AS TABLE_SCHEMA,
+            p.TABLE_NAME AS TABLE_NAME,
+            p.PARTITION_NAME AS PARTITION_NAME,
+            p.SUBPARTITION_NAME AS SUBPARTITION_NAME,
+            p.PARTITION_ORDINAL_POSITION AS PARTITION_ORDINAL_POSITION,
+            p.SUBPARTITION_ORDINAL_POSITION AS SUBPARTITION_ORDINAL_POSITION,
+            p.PARTITION_METHOD AS PARTITION_METHOD,
+            p.SUBPARTITION_METHOD AS SUBPARTITION_METHOD,
+            p.PARTITION_EXPRESSION AS PARTITION_EXPRESSION,
+            p.SUBPARTITION_EXPRESSION AS SUBPARTITION_EXPRESSION,
+            p.PARTITION_DESCRIPTION AS PARTITION_DESCRIPTION,
+            p.TABLE_ROWS AS TABLE_ROWS,
+            p.DATA_LENGTH AS DATA_LENGTH,
+            p.INDEX_LENGTH AS INDEX_LENGTH,
+            p.TABLESPACE_NAME AS TABLESPACE_NAME,
+            p.PARTITION_COMMENT AS PARTITION_COMMENT
+        FROM information_schema.partitions p
+        WHERE p.TABLE_SCHEMA = ${quoteLiteral(schema)}
+          AND p.TABLE_NAME = ${quoteLiteral(tableName)}
+        ORDER BY p.PARTITION_ORDINAL_POSITION, p.SUBPARTITION_ORDINAL_POSITION
+    `;
+}
+
 export function buildObjectSearchQuery(database: string, likePattern: string): string {
     const databaseLiteral = quoteLiteral(database);
     return `
