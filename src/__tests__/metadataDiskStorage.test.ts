@@ -150,11 +150,16 @@ describe('MetadataDiskStorage', () => {
     });
 
     it('excludes expired manifests and reports them for deletion', async () => {
+        const now = Date.now();
         populateCache('conn1');
-        const expiredAt = Date.now() - (12 * 60 * 60 * 1000) - 1;
+        const expiredAt = now - (12 * 60 * 60 * 1000) - 1;
         await storage.saveConnection(cache, 'conn1', expiredAt);
 
         const manifests = await storage.loadAllConnectionManifests();
+        // Keep the expiry assertion independent of wall-clock adjustments made
+        // while the asynchronous snapshot is being written.
+        jest.useFakeTimers();
+        jest.setSystemTime(now);
         const { loadable, freshTimestamps, expiredConnectionNames } =
             storage.filterLoadableManifestConnections(
                 manifests,
