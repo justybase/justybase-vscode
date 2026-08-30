@@ -76,10 +76,12 @@ function tableListQuery(
             CAST('' AS String) AS ${quoteIdentifier('OWNER')},
             database AS ${quoteIdentifier('DATABASE')},
             engine AS ${quoteIdentifier('CLICKHOUSE_ENGINE')},
+            engine_full AS ${quoteIdentifier('CLICKHOUSE_ENGINE_FULL')},
             ifNull(partition_key, '') AS ${quoteIdentifier('CLICKHOUSE_PARTITION_BY')},
             ifNull(primary_key, '') AS ${quoteIdentifier('CLICKHOUSE_PRIMARY_KEY')},
             ifNull(sorting_key, '') AS ${quoteIdentifier('CLICKHOUSE_ORDER_BY')},
-            ifNull(sampling_key, '') AS ${quoteIdentifier('CLICKHOUSE_SAMPLE_BY')}
+            ifNull(sampling_key, '') AS ${quoteIdentifier('CLICKHOUSE_SAMPLE_BY')},
+            ifNull(create_table_query, '') AS ${quoteIdentifier('CLICKHOUSE_SOURCE_DDL')}
         FROM system.tables
         WHERE 1 = 1
           ${effective ? `AND database = ${quoteLiteral(effective)}` : ''}
@@ -250,6 +252,7 @@ export function buildTableDefinitionQuery(database: string, schema: string, tabl
     return `
         SELECT
             engine AS ${quoteIdentifier('CLICKHOUSE_ENGINE')},
+            engine_full AS ${quoteIdentifier('CLICKHOUSE_ENGINE_FULL')},
             ifNull(partition_key, '') AS ${quoteIdentifier('CLICKHOUSE_PARTITION_BY')},
             ifNull(primary_key, '') AS ${quoteIdentifier('CLICKHOUSE_PRIMARY_KEY')},
             ifNull(sorting_key, '') AS ${quoteIdentifier('CLICKHOUSE_ORDER_BY')},

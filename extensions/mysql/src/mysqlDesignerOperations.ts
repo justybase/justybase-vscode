@@ -108,7 +108,11 @@ function normalizeMethod(value: unknown): MysqlPartitionMethod {
     const method = text(value).toUpperCase();
     switch (method) {
         case 'RANGE':
+        case 'RANGE COLUMNS':
+            return 'RANGE';
         case 'LIST':
+        case 'LIST COLUMNS':
+            return 'LIST';
         case 'HASH':
         case 'LINEAR HASH':
         case 'KEY':

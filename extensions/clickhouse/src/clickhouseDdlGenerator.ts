@@ -475,7 +475,7 @@ async function generateObjectDdl(
 
 async function generateBatchDdl(options: DatabaseBatchDDLOptions): Promise<DatabaseBatchDDLResult> {
     return withConnection(options.connectionDetails, async connection => {
-        const objectTypes = (options.objectTypes?.length ? options.objectTypes : ['TABLE', 'VIEW'])
+        const objectTypes = (options.objectTypes?.length ? options.objectTypes : ['TABLE', 'VIEW', 'MATERIALIZED VIEW'])
             .map(type => type.trim().toUpperCase());
         const ddlParts: string[] = [];
         const errors: string[] = [];

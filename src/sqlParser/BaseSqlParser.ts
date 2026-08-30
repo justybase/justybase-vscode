@@ -217,6 +217,9 @@ export class BaseSqlParser extends CstParser {
 
   protected registerCreateTableDialectClauses(): void {}
 
+  /** Hook for dialect-specific clauses between a table name and its body. */
+  protected registerCreateTableNameDialectClauses(): void {}
+
   protected supportsTableTypeClause(): boolean {
     return true;
   }
@@ -692,6 +695,7 @@ export class BaseSqlParser extends CstParser {
         this.CONSUME(Exists);
       });
       this.SUBRULE(this.qualifiedName); // table name (can be database.schema.table)
+      this.registerCreateTableNameDialectClauses();
 
       // CREATE TABLE can be either CTAS or DDL with column definitions.
       this.OR([

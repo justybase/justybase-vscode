@@ -28,6 +28,7 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
     optionalClickhouseSettingsClause!: AnyRule;
     clickhouseSettingValueToken!: AnyRule;
     clickhouseStorageExpressionToken!: AnyRule;
+    clickhouseOnClusterClause!: AnyRule;
     optimizeStatement!: AnyRule;
     systemStatement!: AnyRule;
     killQueryStatement!: AnyRule;
@@ -144,10 +145,26 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
         this.RULE('clickhouseStorageExpressionToken', () => {
             this.OR([
                 { ALT: () => this.SUBRULE(this.netezzaRelaxedName) },
+                { ALT: () => this.CONSUME(netezzaLexer.Join) },
+                { ALT: () => this.CONSUME(netezzaLexer.Null) },
+                { ALT: () => this.CONSUME(netezzaLexer.Delete) },
+                { ALT: () => this.CONSUME(netezzaLexer.Where) },
+                { ALT: () => this.CONSUME(netezzaLexer.And) },
+                { ALT: () => this.CONSUME(netezzaLexer.Or) },
+                { ALT: () => this.CONSUME(netezzaLexer.Any) },
+                { ALT: () => this.CONSUME(netezzaLexer.All) },
+                { ALT: () => this.CONSUME(netezzaLexer.Left) },
+                { ALT: () => this.CONSUME(netezzaLexer.Right) },
+                { ALT: () => this.CONSUME(netezzaLexer.Inner) },
+                { ALT: () => this.CONSUME(netezzaLexer.Outer) },
                 { ALT: () => this.CONSUME(netezzaLexer.To) },
                 { ALT: () => this.CONSUME(netezzaLexer.NumberLiteral) },
                 { ALT: () => this.CONSUME(netezzaLexer.StringLiteral) },
                 { ALT: () => this.CONSUME(netezzaLexer.Equals) },
+                { ALT: () => this.CONSUME(netezzaLexer.LessThan) },
+                { ALT: () => this.CONSUME(netezzaLexer.LessThanEquals) },
+                { ALT: () => this.CONSUME(netezzaLexer.GreaterThan) },
+                { ALT: () => this.CONSUME(netezzaLexer.GreaterThanEquals) },
                 { ALT: () => this.CONSUME(netezzaLexer.Plus) },
                 { ALT: () => this.CONSUME(netezzaLexer.Minus) },
                 { ALT: () => this.CONSUME(netezzaLexer.Multiply) },
@@ -159,6 +176,12 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
                 { ALT: () => this.CONSUME(netezzaLexer.LBracket) },
                 { ALT: () => this.CONSUME(netezzaLexer.RBracket) },
             ]);
+        });
+
+        this.RULE('clickhouseOnClusterClause', () => {
+            this.CONSUME(netezzaLexer.On);
+            this.SUBRULE1(this.identifier);
+            this.SUBRULE2(this.identifier);
         });
 
         this.RULE('clickhouseEngineClause', () => {
@@ -322,11 +345,31 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
                 ]);
             });
             this.OPTION3(() => this.CONSUME(netezzaLexer.Outer));
+            this.OPTION4(() => {
+                this.OR2([
+                    { ALT: () => this.CONSUME1(netezzaLexer.Global) },
+                    { ALT: () => this.CONSUME1(netezzaLexer.Any) },
+                    { ALT: () => this.CONSUME1(netezzaLexer.All) },
+                    { ALT: () => this.CONSUME1(clickhouseLexer.Anti) },
+                    { ALT: () => this.CONSUME1(clickhouseLexer.Semi) },
+                    { ALT: () => this.CONSUME1(clickhouseLexer.AsOf) },
+                ]);
+            });
+            this.OPTION5(() => {
+                this.OR3([
+                    { ALT: () => this.CONSUME2(netezzaLexer.Global) },
+                    { ALT: () => this.CONSUME2(netezzaLexer.Any) },
+                    { ALT: () => this.CONSUME2(netezzaLexer.All) },
+                    { ALT: () => this.CONSUME2(clickhouseLexer.Anti) },
+                    { ALT: () => this.CONSUME2(clickhouseLexer.Semi) },
+                    { ALT: () => this.CONSUME2(clickhouseLexer.AsOf) },
+                ]);
+            });
             this.CONSUME(netezzaLexer.Join);
             this.SUBRULE(this.tableSource);
-            this.OPTION4({
+            this.OPTION6({
                 GATE: () => !isNaturalJoin,
-                DEF: () => this.OR2([
+                DEF: () => this.OR4([
                     {
                         ALT: () => {
                             this.CONSUME(netezzaLexer.On);
@@ -409,16 +452,18 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
                 this.CONSUME(netezzaLexer.Exists);
             });
             this.SUBRULE(this.qualifiedName);
+            this.OPTION8(() => this.SUBRULE(this.clickhouseOnClusterClause));
             this.OPTION3(() => this.SUBRULE(this.viewColumnAliasList));
             this.OPTION4({
                 GATE: () => isMaterializedView && this.LA(1).tokenType === netezzaLexer.To,
                 DEF: () => {
                     this.CONSUME(netezzaLexer.To);
                     this.SUBRULE1(this.qualifiedName);
+                    this.OPTION5(() => this.SUBRULE1(this.viewColumnAliasList));
                 },
             });
-            this.OPTION5(() => this.SUBRULE(this.clickhouseTableOptions));
-            this.OPTION6({
+            this.OPTION6(() => this.SUBRULE(this.clickhouseTableOptions));
+            this.OPTION7({
                 GATE: () => isMaterializedView && this.LA(1).tokenType === clickhouseLexer.Populate,
                 DEF: () => this.CONSUME(clickhouseLexer.Populate),
             });
@@ -561,6 +606,10 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
 
     protected registerCreateTableDialectClauses(): void {
         this.OPTION7(() => this.SUBRULE(this.clickhouseTableOptions));
+    }
+
+    protected registerCreateTableNameDialectClauses(): void {
+        this.OPTION5(() => this.SUBRULE(this.clickhouseOnClusterClause));
     }
 }
 

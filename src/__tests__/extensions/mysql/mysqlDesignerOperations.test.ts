@@ -122,6 +122,21 @@ describe('MySQL designer metadata operations', () => {
         expect(context.partitions).toHaveLength(2);
     });
 
+    it('normalizes RANGE/LIST COLUMNS methods from information_schema', async () => {
+        const context = await loadMysqlPartitionDesignerContext(target, createServices({
+            properties: { ENGINE: 'InnoDB', SERVER_VERSION: '8.0.36' },
+            columns,
+            partitions: [{
+                PARTITION_NAME: 'p0', PARTITION_ORDINAL_POSITION: 1,
+                PARTITION_METHOD: 'RANGE COLUMNS', PARTITION_EXPRESSION: '`created_at`',
+                PARTITION_DESCRIPTION: "'2027-01-01'",
+            }],
+        }));
+
+        expect(context.capabilities.partitionMethod).toBe('RANGE');
+        expect(context.capabilities.canAddPartition).toBe(true);
+    });
+
     it('exposes HASH/KEY count operations and disables partition drops for NDB', async () => {
         const hashRows = [
             { PARTITION_NAME: 'p0', PARTITION_ORDINAL_POSITION: 1, PARTITION_METHOD: 'HASH', PARTITION_EXPRESSION: 'id', PARTITION_DESCRIPTION: '0' },

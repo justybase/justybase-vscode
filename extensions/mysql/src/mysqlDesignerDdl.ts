@@ -77,10 +77,46 @@ function validateValuesClause(valuesClause: string, method: 'RANGE' | 'LIST'): s
     }
 
     const keyword = method === 'RANGE' ? 'VALUES LESS THAN' : 'VALUES IN';
-    const pattern = method === 'RANGE'
-        ? /^(?:VALUES LESS THAN MAXVALUE|VALUES LESS THAN\s*\([\s\S]+\))$/i
-        : /^VALUES IN\s*\([\s\S]+\)$/i;
-    if (!pattern.test(value)) {
+    if (method === 'RANGE' && /^VALUES LESS THAN MAXVALUE$/i.test(value)) {
+        return value;
+    }
+
+    const prefix = method === 'RANGE' ? /^VALUES LESS THAN\s*\(/i : /^VALUES IN\s*\(/i;
+    const match = prefix.exec(value);
+    const openingParenthesis = match ? value.indexOf('(', match.index) : -1;
+    let depth = 0;
+    let quote: string | undefined;
+    let closesAtEnd = false;
+    if (openingParenthesis >= 0) {
+        for (let index = openingParenthesis; index < value.length; index += 1) {
+            const character = value[index];
+            if (quote) {
+                if (character === quote) {
+                    if (value[index + 1] === quote) {
+                        index += 1;
+                    } else {
+                        quote = undefined;
+                    }
+                }
+                continue;
+            }
+            if (character === "'" || character === '"' || character === '`') {
+                quote = character;
+            } else if (character === '(') {
+                depth += 1;
+            } else if (character === ')') {
+                depth -= 1;
+                if (depth === 0) {
+                    closesAtEnd = index === value.length - 1;
+                    break;
+                }
+                if (depth < 0) {
+                    break;
+                }
+            }
+        }
+    }
+    if (!match || quote || depth !== 0 || !closesAtEnd || openingParenthesis === value.length - 1) {
         throw new Error(`Use ${keyword} (... ) for a ${method} partition.`);
     }
     return value;

@@ -113,6 +113,13 @@ describe('MySQL designer DDL', () => {
             valuesClause: 'VALUES IN (1)',
             method: 'RANGE',
         })).toThrow('VALUES LESS THAN');
+        expect(() => buildMysqlAddRangeListPartitionSql({
+            schema: 'sales',
+            tableName: 'orders',
+            partitionName: 'p_bad',
+            valuesClause: 'VALUES LESS THAN (1), PARTITION p2 VALUES LESS THAN (2)',
+            method: 'RANGE',
+        })).toThrow('VALUES LESS THAN');
         expect(() => buildMysqlCoalescePartitionSql({
             schema: 'sales',
             tableName: 'orders',

@@ -35,6 +35,8 @@ describe('ClickHouse SQL parser', () => {
         'SELECT toDate(event_date) AS day, count() FROM events GROUP BY day ORDER BY day WITH FILL FROM 1 TO 10 STEP 1 LIMIT 10 BY group_id',
         'SELECT * FROM events SETTINGS max_threads = 1',
         'SELECT * FROM left_table ANY LEFT JOIN right_table USING (id)',
+        'SELECT * FROM left_table LEFT ANY JOIN right_table USING (id)',
+        'SELECT * FROM left_table LEFT ANTI JOIN right_table USING (id)',
         'SELECT * FROM left_table ASOF LEFT JOIN right_table ON left_table.ts >= right_table.ts',
         'SELECT * FROM events LIMIT 10 WITH TIES',
         'INSERT INTO events (id, event_date) VALUES (1, \'2024-01-01\')',
@@ -45,7 +47,10 @@ describe('ClickHouse SQL parser', () => {
         'CREATE TABLE `analytics`.`events_copy` (id UInt64, event_date Date) ENGINE = MergeTree PARTITION BY toYYYYMM(event_date) ORDER BY (id, event_date) SETTINGS index_granularity = 8192',
         'CREATE TABLE nested_types (attrs Map(String, Array(Nullable(UInt64))), point Tuple(x Float64, y Float64), state AggregateFunction(uniq, UInt64), status Enum8(\'ok\' = 1, \'error\' = 2)) ENGINE = MergeTree ORDER BY tuple()',
         'CREATE TABLE ttl_table (id UInt64, event_time DateTime) ENGINE = MergeTree ORDER BY id TTL event_time + INTERVAL 1 DAY TO DISK \'slow\' SETTINGS index_granularity = 8192',
+        'CREATE TABLE analytics.events ON CLUSTER production (id UInt64) ENGINE = Null',
         'CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.events_mv TO analytics.events_daily AS SELECT event_date, count() AS events FROM analytics.events GROUP BY event_date',
+        'CREATE MATERIALIZED VIEW analytics.events_mv (event_date, events) TO analytics.events_daily (event_date, events) AS SELECT event_date, count() AS events FROM analytics.events GROUP BY event_date',
+        'CREATE MATERIALIZED VIEW analytics.events_mv ON CLUSTER production ENGINE = Null AS SELECT 1',
         'CREATE MATERIALIZED VIEW analytics.events_mv ENGINE = SummingMergeTree() ORDER BY event_date POPULATE AS SELECT event_date, count() AS events FROM analytics.events GROUP BY event_date',
     ])('accepts supported syntax: %s', sql => {
         const result = parse(sql);
