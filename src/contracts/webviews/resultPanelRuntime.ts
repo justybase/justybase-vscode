@@ -6,6 +6,7 @@ import {
 } from './resultPanelContracts';
 
 type MessageRecord = { command: string; [key: string]: unknown };
+type FieldRule = (message: MessageRecord) => boolean;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -15,7 +16,7 @@ function isFiniteNumber(value: unknown): value is number {
     return typeof value === 'number' && Number.isFinite(value);
 }
 
-function isNonNegativeInteger(value: unknown): value is number {
+function isIndex(value: unknown): value is number {
     return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
 }
 
@@ -23,316 +24,186 @@ function hasString(message: MessageRecord, key: string): boolean {
     return typeof message[key] === 'string' && (message[key] as string).length > 0;
 }
 
-function hasNumber(message: MessageRecord, key: string): boolean {
-    return isFiniteNumber(message[key]);
-}
-
-function hasBoolean(message: MessageRecord, key: string): boolean {
-    return typeof message[key] === 'boolean';
-}
-
-function hasArray(message: MessageRecord, key: string): boolean {
-    return Array.isArray(message[key]);
-}
-
 function hasRows(message: MessageRecord): boolean {
     return message.rows instanceof Uint8Array || Array.isArray(message.rows);
 }
 
-function hasCommand(
-    message: MessageRecord,
-    commands: readonly string[],
-): boolean {
-    return commands.includes(message.command);
+function all(...rules: FieldRule[]): FieldRule {
+    return message => rules.every(rule => rule(message));
 }
 
-function validateWebviewMessage(message: MessageRecord): boolean {
-    switch (message.command) {
-        case 'ready':
-        case 'selectAll':
-        case 'addFileToDataWorkspace':
-        case 'focusView':
-        case 'webviewFocused':
-        case 'webviewBlurred':
-            return true;
-        case 'migrateResult':
-        case 'closeResult':
-        case 'switchResultSet':
-        case 'toggleResultPin':
-            return hasString(message, 'sourceUri') && isNonNegativeInteger(message.resultSetIndex);
-        case 'requestDatabaseGrouping':
-        case 'previewDatabaseGrouping':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && message.grouping !== undefined;
-        case 'requestExplorePivot':
-        case 'previewExplorePivot':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && message.pivot !== undefined
-                && (message.command === 'requestExplorePivot' || Array.isArray(message.pivotValues));
-        case 'requestExploreComposer':
-        case 'previewExploreComposer':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && message.composer !== undefined;
-        case 'previewExploreFilteredSql':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && message.filters !== undefined;
-        case 'logRowsApplied':
-            return hasString(message, 'sourceUri')
-                && hasNumber(message, 'executionTimestamp')
-                && hasNumber(message, 'totalRows');
-        case 'requestLogSync':
-            return hasString(message, 'sourceUri') && hasNumber(message, 'currentRows')
-                && (message.executionTimestamp === undefined || hasNumber(message, 'executionTimestamp'));
-        case 'requestResultSync':
-            return hasString(message, 'sourceUri') && hasString(message, 'reason');
-        case 'reportHydrationMetrics':
-            return isRecord(message.metrics)
-                && hasNumber(message.metrics as MessageRecord, 'durationMs')
-                && (message.metrics as MessageRecord).activeSource !== undefined
-                && hasNumber(message.metrics as MessageRecord, 'resultSetCount')
-                && hasNumber(message.metrics as MessageRecord, 'totalRowCount')
-                && hasString(message.metrics as MessageRecord, 'executionState');
-        case 'reportResultPanelTrace':
-            return isRecord(message.event) && hasString(message.event as MessageRecord, 'phase');
-        case 'testBridgeResult':
-            return hasString(message, 'requestId') && hasString(message, 'action') && hasBoolean(message, 'ok');
-        case 'reportUxPerf':
-            return isRecord(message.event)
-                && hasString(message.event as MessageRecord, 'op')
-                && hasString(message.event as MessageRecord, 'phase');
-        case 'fixSqlError':
-            return hasString(message, 'errorMessage') && hasString(message, 'sql');
-        case 'describeWithCopilot':
-        case 'initiateExport':
-        case 'queryLocallyDuckDB':
-        case 'exportCsv':
-        case 'openInExcel':
-        case 'openInFilePreview':
-        case 'copyAsExcel':
-        case 'openInExcelXlsx':
-        case 'exportAllResultSetsToExcel':
-        case 'exportJson':
-        case 'exportXml':
-        case 'exportSqlInsert':
-        case 'exportMarkdown':
-        case 'exportParquet':
-            return message.data !== undefined;
-        case 'initiateExportWithSelection':
-            return message.data !== undefined
-                && hasString(message, 'format')
-                && hasString(message, 'destination');
-        case 'exportToMdFile':
-            return isRecord(message.data)
-                && hasString(message.data as MessageRecord, 'sourceUri')
-                && hasString(message.data as MessageRecord, 'mdDocument');
-        case 'export':
-            return hasString(message, 'format')
-                && hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex);
-        case 'switchSource':
-        case 'togglePin':
-        case 'closeSource':
-        case 'closeAllResults':
-        case 'clearLogs':
-        case 'moveAllToDisk':
-            return hasString(message, 'sourceUri');
-        case 'switchToPinnedResult':
-        case 'unpinResult':
-            return hasString(message, 'resultId');
-        case 'refreshResult':
-        case 'clearRefreshFailure':
-            return hasString(message, 'sourceUri') && isNonNegativeInteger(message.resultSetIndex);
-        case 'requestDatabaseAggregations':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && hasArray(message, 'aggregations');
-        case 'requestDatabaseFilterValues':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.columnIndex)
-                && isNonNegativeInteger(message.requestId);
-        case 'applyDatabaseFilter':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId);
-        case 'cancelQuery':
-            return hasString(message, 'sourceUri')
-                && (message.currentRowCounts === undefined || hasArray(message, 'currentRowCounts'));
-        case 'copyToClipboard':
-        case 'info':
-        case 'error':
-            return hasString(message, 'text');
-        case 'setContext':
-            return hasString(message, 'key') && message.value !== undefined;
-        case 'selectionStatsChanged':
-            return message.stats === null || isRecord(message.stats);
-        case 'insertCellContent':
-            return hasString(message, 'text');
-        case 'updateResultFormatting':
-            return hasString(message, 'sourceUri')
-                && ['global', 'connection', 'result', 'column'].includes(String(message.scope))
-                && message.settings !== undefined;
-        case 'saveEdits':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isRecord(message.editSource)
-                && hasString(message.editSource as MessageRecord, 'table')
-                && hasArray(message, 'edits');
-        case 'updateGridFontFamily':
-            return hasString(message, 'fontFamily');
-        case 'updateGridFontSize':
-            return isFiniteNumber(message.fontSize) && message.fontSize > 0;
-        case 'saveChartImage':
-            return hasString(message, 'dataUrl');
-        case 'requestRows':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.offset)
-                && isNonNegativeInteger(message.limit)
-                && isNonNegativeInteger(message.requestId);
-        case 'diskQuery':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && ['window', 'count', 'distinct', 'aggregate', 'group'].includes(String(message.action));
-        case 'moveToDisk':
-            return hasString(message, 'sourceUri') && isNonNegativeInteger(message.resultSetIndex);
-        case 'cancelDatabaseGrouping':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId);
-        case 'requestExploreFullStats':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && isNonNegativeInteger(message.columnIndex);
-        case 'openExploreSqlInEditor':
-            return hasString(message, 'sql');
-        default:
-            return false;
-    }
+function stringField(key: string): FieldRule {
+    return message => hasString(message, key);
 }
 
-function validateHostMessage(message: MessageRecord): boolean {
-    switch (message.command) {
-        case 'saveScrollState':
-        case 'refreshView':
-        case 'selectAll':
-            return true;
-        case 'hydrate':
-            return isRecord(message.data);
-        case 'testBridge':
-            return hasString(message, 'requestId') && hasString(message, 'action');
-        case 'setActiveSource':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.activeResultSetIndex)
-                && hasString(message, 'executingSourcesJson')
-                && hasString(message, 'sourcesJson')
-                && hasString(message, 'pinnedSourcesJson');
-        case 'uxPerfSession':
-            return hasBoolean(message, 'active');
-        case 'copySelection':
-            return message.copyFormat === undefined
-                || ['tabbed', 'markdown', 'csv', 'csv-semicolon'].includes(String(message.copyFormat));
-        case 'updateCopyFormat':
-            return ['tabbed', 'markdown', 'csv', 'csv-semicolon'].includes(String(message.copyFormat));
-        case 'cancelExecution':
-            return hasString(message, 'sourceUri');
-        case 'streamingComplete':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.totalRows)
-                && hasBoolean(message, 'limitReached');
-        case 'rowCountUpdate':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.totalRows)
-                && hasBoolean(message, 'limitReached');
-        case 'diskBackedActivate':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.totalRows)
-                && hasRows(message)
-                && hasArray(message, 'columns')
-                && hasBoolean(message, 'limitReached');
-        case 'rowWindow':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.offset)
-                && hasRows(message)
-                && isNonNegativeInteger(message.requestId);
-        case 'diskQueryResult':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId)
-                && ['window', 'count', 'distinct', 'aggregate', 'group'].includes(String(message.action));
-        case 'databaseAggregationResult':
-        case 'databaseFilterValuesResult':
-        case 'databaseFilterApplyResult':
-        case 'databaseGroupingResult':
-            return hasString(message, 'sourceUri')
-                && isNonNegativeInteger(message.resultSetIndex)
-                && isNonNegativeInteger(message.requestId);
-        case 'switchToResultSet':
-            return isNonNegativeInteger(message.resultSetIndex);
-        case 'resultFormattingState':
-            return message.data !== undefined;
-        case 'appendRows':
-            return isNonNegativeInteger(message.resultSetIndex)
-                && hasRows(message)
-                && isNonNegativeInteger(message.totalRows)
-                && hasBoolean(message, 'isLastChunk')
-                && hasBoolean(message, 'limitReached');
-        case 'exploreFullStatsResult':
-            return isNonNegativeInteger(message.requestId) && isNonNegativeInteger(message.columnIndex);
-        case 'explorePivotResult':
-        case 'explorePivotPreviewResult':
-        case 'exploreComposerResult':
-        case 'exploreComposerPreviewResult':
-        case 'exploreFilteredSqlPreviewResult':
-            return isNonNegativeInteger(message.requestId);
-        case 'saveEdits':
-            return hasString(message, 'sourceUri') && isNonNegativeInteger(message.resultSetIndex);
-        case 'databaseGroupingPreviewResult':
-            return isNonNegativeInteger(message.requestId);
-        default:
-            return false;
-    }
+function indexField(key: string): FieldRule {
+    return message => isIndex(message[key]);
 }
 
-export function parseResultPanelWebviewMessage(
-    value: unknown,
-): ResultPanelWebviewToHostMessage | undefined {
-    if (!isRecord(value) || typeof value.command !== 'string') {
-        return undefined;
-    }
-    if (!hasCommand(value as MessageRecord, RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS)) {
-        return undefined;
-    }
-    return validateWebviewMessage(value as MessageRecord)
-        ? value as ResultPanelWebviewToHostMessage
-        : undefined;
+function numberField(key: string): FieldRule {
+    return message => isFiniteNumber(message[key]);
 }
 
-export function parseResultPanelHostMessage(
-    value: unknown,
-): ResultPanelHostToWebviewMessage | undefined {
-    if (!isRecord(value) || typeof value.command !== 'string') {
+function booleanField(key: string): FieldRule {
+    return message => typeof message[key] === 'boolean';
+}
+
+function arrayField(key: string): FieldRule {
+    return message => Array.isArray(message[key]);
+}
+
+function optional(key: string, rule: FieldRule): FieldRule {
+    return message => message[key] === undefined || rule(message);
+}
+
+function objectField(key: string): FieldRule {
+    return message => isRecord(message[key]);
+}
+
+function oneOfField(key: string, values: readonly string[]): FieldRule {
+    return message => typeof message[key] === 'string' && values.includes(message[key] as string);
+}
+
+const noPayload = all();
+const stringSource = stringField('sourceUri');
+const resultIndex = indexField('resultSetIndex');
+const requestIndex = indexField('requestId');
+const rowsPayload = all(indexField('resultSetIndex'), message => hasRows(message));
+
+const webviewRules: Record<string, FieldRule> = {
+    ready: noPayload,
+    migrateResult: all(stringSource, resultIndex),
+    logRowsApplied: all(stringSource, numberField('executionTimestamp'), indexField('totalRows')),
+    requestLogSync: all(stringSource, indexField('currentRows'), optional('executionTimestamp', numberField('executionTimestamp'))),
+    requestResultSync: all(stringSource, stringField('reason')),
+    selectAll: noPayload,
+    reportHydrationMetrics: all(
+        objectField('metrics'),
+        message => {
+            const metrics = message.metrics as MessageRecord;
+            return numberField('durationMs')(metrics)
+                && (metrics.activeSource === null || typeof metrics.activeSource === 'string')
+                && indexField('resultSetCount')(metrics)
+                && indexField('totalRowCount')(metrics)
+                && oneOfField('executionState', ['idle', 'loading', 'finalizing', 'success', 'error', 'cancelled', 'retrying'])(metrics);
+        },
+    ),
+    reportResultPanelTrace: all(objectField('event'), message => hasString(message.event as MessageRecord, 'phase')),
+    testBridgeResult: all(stringField('requestId'), stringField('action'), booleanField('ok')),
+    reportUxPerf: all(objectField('event'), message => all(stringField('op'), stringField('phase'))(message.event as MessageRecord)),
+    describeWithCopilot: message => message.data !== undefined,
+    fixSqlError: all(stringField('errorMessage'), stringField('sql')),
+    initiateExport: message => message.data !== undefined,
+    initiateExportWithSelection: all(message => message.data !== undefined, stringField('format'), stringField('destination')),
+    queryLocallyDuckDB: message => message.data !== undefined,
+    exportCsv: message => message.data !== undefined,
+    openInExcel: message => message.data !== undefined,
+    openInFilePreview: message => message.data !== undefined,
+    addFileToDataWorkspace: noPayload,
+    copyAsExcel: message => message.data !== undefined,
+    openInExcelXlsx: message => message.data !== undefined,
+    exportAllResultSetsToExcel: message => message.data !== undefined,
+    exportJson: message => message.data !== undefined,
+    exportXml: message => message.data !== undefined,
+    exportSqlInsert: message => message.data !== undefined,
+    exportMarkdown: message => message.data !== undefined,
+    exportParquet: message => message.data !== undefined,
+    exportToMdFile: all(objectField('data'), message => {
+        const data = message.data as MessageRecord;
+        return hasString(data, 'sourceUri') && hasString(data, 'mdDocument');
+    }),
+    export: all(oneOfField('format', ['csv', 'csv.gz', 'csv.zst', 'json', 'xml', 'sql', 'markdown', 'parquet']), stringSource, resultIndex),
+    switchSource: stringSource,
+    togglePin: stringSource,
+    toggleResultPin: all(stringSource, resultIndex),
+    switchToPinnedResult: stringField('resultId'),
+    unpinResult: stringField('resultId'),
+    closeSource: stringSource,
+    closeResult: all(stringSource, resultIndex),
+    refreshResult: all(stringSource, resultIndex),
+    clearRefreshFailure: all(stringSource, resultIndex),
+    requestDatabaseAggregations: all(stringSource, resultIndex, requestIndex, arrayField('aggregations')),
+    requestDatabaseFilterValues: all(stringSource, resultIndex, indexField('columnIndex'), requestIndex),
+    applyDatabaseFilter: all(stringSource, resultIndex, requestIndex),
+    closeAllResults: stringSource,
+    cancelQuery: all(stringSource, optional('currentRowCounts', arrayField('currentRowCounts'))),
+    copyToClipboard: stringField('text'),
+    info: stringField('text'),
+    error: stringField('text'),
+    focusView: noPayload,
+    setContext: all(stringField('key'), message => message.value !== undefined),
+    clearLogs: stringSource,
+    switchResultSet: all(stringSource, resultIndex),
+    selectionStatsChanged: message => message.stats === null || isRecord(message.stats),
+    insertCellContent: stringField('text'),
+    updateResultFormatting: all(stringSource, oneOfField('scope', ['global', 'connection', 'result', 'column']), message => message.settings !== undefined),
+    saveEdits: all(stringSource, resultIndex, objectField('editSource'), arrayField('edits'), message => hasString(message.editSource as MessageRecord, 'table')),
+    webviewFocused: noPayload,
+    webviewBlurred: noPayload,
+    updateGridFontFamily: stringField('fontFamily'),
+    updateGridFontSize: all(numberField('fontSize'), message => (message.fontSize as number) > 0),
+    saveChartImage: stringField('dataUrl'),
+    requestRows: all(stringSource, resultIndex, indexField('offset'), indexField('limit'), requestIndex),
+    diskQuery: all(stringSource, resultIndex, requestIndex, oneOfField('action', ['window', 'count', 'distinct', 'aggregate', 'group'])),
+    moveToDisk: all(stringSource, resultIndex),
+    moveAllToDisk: stringSource,
+    requestDatabaseGrouping: all(stringSource, resultIndex, requestIndex, message => message.grouping !== undefined),
+    cancelDatabaseGrouping: all(stringSource, resultIndex, requestIndex),
+    previewDatabaseGrouping: all(stringSource, resultIndex, requestIndex, message => message.grouping !== undefined),
+    requestExploreFullStats: all(stringSource, resultIndex, requestIndex, indexField('columnIndex')),
+    requestExplorePivot: all(stringSource, resultIndex, requestIndex, message => message.pivot !== undefined),
+    previewExplorePivot: all(stringSource, resultIndex, requestIndex, message => message.pivot !== undefined, arrayField('pivotValues')),
+    requestExploreComposer: all(stringSource, resultIndex, requestIndex, message => message.composer !== undefined),
+    previewExploreComposer: all(stringSource, resultIndex, requestIndex, message => message.composer !== undefined),
+    previewExploreFilteredSql: all(stringSource, resultIndex, requestIndex, message => message.filters !== undefined),
+    openExploreSqlInEditor: stringField('sql'),
+};
+
+const hostRules: Record<string, FieldRule> = {
+    hydrate: objectField('data'),
+    testBridge: all(stringField('requestId'), stringField('action')),
+    setActiveSource: all(stringSource, indexField('activeResultSetIndex'), stringField('executingSourcesJson'), stringField('sourcesJson'), stringField('pinnedSourcesJson')),
+    uxPerfSession: booleanField('active'),
+    saveScrollState: noPayload,
+    refreshView: noPayload,
+    copySelection: optional('copyFormat', oneOfField('copyFormat', ['tabbed', 'markdown', 'csv', 'csv-semicolon'])),
+    updateCopyFormat: oneOfField('copyFormat', ['tabbed', 'markdown', 'csv', 'csv-semicolon']),
+    selectAll: noPayload,
+    cancelExecution: stringSource,
+    appendRows: all(rowsPayload, indexField('totalRows'), booleanField('isLastChunk'), booleanField('limitReached')),
+    streamingComplete: all(stringSource, resultIndex, indexField('totalRows'), booleanField('limitReached')),
+    switchToResultSet: resultIndex,
+    resultFormattingState: message => message.data !== undefined,
+    saveEdits: all(stringSource, resultIndex),
+    diskBackedActivate: all(stringSource, resultIndex, indexField('totalRows'), message => hasRows(message), arrayField('columns'), booleanField('limitReached')),
+    rowCountUpdate: all(stringSource, resultIndex, indexField('totalRows'), booleanField('limitReached')),
+    rowWindow: all(stringSource, resultIndex, indexField('offset'), message => hasRows(message), requestIndex),
+    diskQueryResult: all(stringSource, resultIndex, requestIndex, oneOfField('action', ['window', 'count', 'distinct', 'aggregate', 'group'])),
+    databaseAggregationResult: all(stringSource, resultIndex, requestIndex),
+    databaseFilterValuesResult: all(stringSource, resultIndex, requestIndex),
+    databaseFilterApplyResult: all(stringSource, resultIndex, requestIndex),
+    databaseGroupingResult: all(stringSource, resultIndex, requestIndex),
+    databaseGroupingPreviewResult: requestIndex,
+    exploreFullStatsResult: all(requestIndex, indexField('columnIndex')),
+    explorePivotResult: requestIndex,
+    explorePivotPreviewResult: requestIndex,
+    exploreComposerResult: requestIndex,
+    exploreComposerPreviewResult: requestIndex,
+    exploreFilteredSqlPreviewResult: requestIndex,
+};
+
+function parseMessage<T>(value: unknown, commands: readonly string[], rules: Record<string, FieldRule>): T | undefined {
+    if (!isRecord(value) || typeof value.command !== 'string' || !commands.includes(value.command)) {
         return undefined;
     }
-    if (!hasCommand(value as MessageRecord, RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS)) {
-        return undefined;
-    }
-    return validateHostMessage(value as MessageRecord)
-        ? value as ResultPanelHostToWebviewMessage
-        : undefined;
+    const rule = rules[value.command];
+    return rule && rule(value as MessageRecord) ? value as T : undefined;
+}
+
+export function parseResultPanelWebviewMessage(value: unknown): ResultPanelWebviewToHostMessage | undefined {
+    return parseMessage<ResultPanelWebviewToHostMessage>(value, RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS, webviewRules);
+}
+
+export function parseResultPanelHostMessage(value: unknown): ResultPanelHostToWebviewMessage | undefined {
+    return parseMessage<ResultPanelHostToWebviewMessage>(value, RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS, hostRules);
 }

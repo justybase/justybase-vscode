@@ -32,10 +32,6 @@ export {
     RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS
 } from './resultPanelContracts';
 
-export {
-    parseResultPanelHostMessage,
-    parseResultPanelWebviewMessage,
-} from './resultPanelRuntime';
 
 export {
     QUERY_HISTORY_HOST_TO_WEBVIEW_TYPES,
