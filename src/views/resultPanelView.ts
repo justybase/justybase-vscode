@@ -9,7 +9,7 @@ import type {
     ResultPanelTraceEventPayload,
     ResultPanelTestBridgeResult,
 } from '../contracts/webviews';
-import { parseResultPanelWebviewMessage } from '../contracts/webviews';
+import { parseResultPanelWebviewMessage } from '../contracts/webviews/resultPanelRuntime';
 import type { ConnectionManager } from '../core/connectionManager';
 import { ResultStateManager } from '../state/resultStateManager';
 import { ensureResultSetId } from '../state/resultSetIdentity';
