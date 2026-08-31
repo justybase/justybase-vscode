@@ -17,6 +17,7 @@ import {
     type DiskBackedActivateProps,
     type RowCountUpdateProps,
 } from '../core/resultDataProvider/types';
+import { ensureResultSetId } from './resultSetIdentity';
 
 /** SQL truncation length for log entries */
 const SQL_TRUNCATION_LENGTH = 200;
@@ -76,6 +77,7 @@ interface AppendRowsMessage {
     sql?: string;
     refreshSql?: string;
     executionTimestamp?: number;
+    resultSetId?: string;
 }
 
 interface LogAppendMessage {
@@ -411,6 +413,7 @@ export class ResultStateManager {
         const existingLogIndex = existingResults.findIndex(r => r.isLog);
         if (existingLogIndex !== -1) {
             logResultSet = existingResults[existingLogIndex];
+            ensureResultSetId(logResultSet);
             const timestamp = new Date().toLocaleTimeString();
             logResultSet.data.push(['', '']);
             logResultSet.data.push([timestamp, '--- New Execution Started ---']);
@@ -437,6 +440,7 @@ export class ResultStateManager {
                 isLog: true,
                 name: 'Logs'
             } as ResultSet;
+            ensureResultSetId(logResultSet);
             existingResults.unshift(logResultSet);
             this._updatePinsOnReorder(sourceUri);
         }
@@ -854,6 +858,11 @@ export class ResultStateManager {
             resultSet.executionTimestamp = Date.now();
         }
 
+        // A refresh is a new result identity even when it replaces the same
+        // tab. This prevents restoring the previous query's scroll position.
+        resultSet.resultSetId = undefined;
+        ensureResultSetId(resultSet);
+
         if (!resultSet.refreshSql && existing.refreshSql) {
             resultSet.refreshSql = existing.refreshSql;
         }
@@ -901,6 +910,7 @@ export class ResultStateManager {
         const newResultSets = Array.isArray(results) ? results : [results];
         newResultSets.forEach(rs => {
             if (!rs.executionTimestamp) rs.executionTimestamp = Date.now();
+            ensureResultSetId(rs);
         });
 
         const currentResults = this._resultsMap.get(sourceUri) || [];
@@ -1368,6 +1378,7 @@ export class ResultStateManager {
                 isEditable,
                 editSource: editSource ?? undefined,
             };
+            ensureResultSetId(newResultSet);
 
             existingResults.push(newResultSet);
             this._resultsMap.set(sourceUri, existingResults);
@@ -1419,6 +1430,7 @@ export class ResultStateManager {
                     sql,
                     refreshSql: refreshSql ?? sql,
                     executionTimestamp: newResultSet.executionTimestamp,
+                    resultSetId: newResultSet.resultSetId,
                 },
             };
         } else if (chunk.rows.length > 0) {
@@ -1567,6 +1579,7 @@ export class ResultStateManager {
             name: name || 'MD Export',
             isTextContent: true
         };
+        ensureResultSetId(newResult);
         existingResults.push(newResult);
         this._resultsMap.set(sourceUri, existingResults);
 

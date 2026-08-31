@@ -694,7 +694,8 @@ export function handleSaveScrollState(): void {
                 saveScrollStateToCache(activeSource, rsIndex, {
                     scrollTop: scrollTop,
                     scrollLeft: scrollLeft,
-                    timestamp: rs.executionTimestamp
+                    timestamp: rs.executionTimestamp,
+                    resultSetId: rs.resultSetId,
                 });
             }
         });
@@ -751,7 +752,8 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
                 saveScrollStateToCache(activeSource, rsIndex, {
                     scrollTop,
                     scrollLeft,
-                    timestamp: rs.executionTimestamp
+                    timestamp: rs.executionTimestamp,
+                    resultSetId: rs.resultSetId,
                 });
             }
         });
@@ -1291,6 +1293,7 @@ export function handleAppendRows(message: Record<string, unknown>): void {
                 sql: sql ?? '',
                 refreshSql: refreshSql ?? sql ?? '',
                 executionTimestamp,
+                resultSetId: typeof message.resultSetId === 'string' ? message.resultSetId : undefined,
                 limitReached: limitReached === true,
                 isEditable: message.isEditable === true,
                 editSource: message.editSource as ResultSet['editSource'],

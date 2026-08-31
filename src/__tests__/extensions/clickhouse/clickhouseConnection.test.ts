@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { ClickHouseConnection } from '../../../../extensions/clickhouse/src/clickhouseConnection';
+import {
+    ClickHouseConnection,
+    type ClickHouseClientFactory,
+} from '../../../../extensions/clickhouse/src/clickhouseConnection';
 
 jest.mock('@clickhouse/client', () => ({
     createClient: jest.fn(),
@@ -25,11 +28,12 @@ describe('ClickHouseConnection', () => {
     });
 
     it('routes non-row executeReader statements through the command API', async () => {
+        const client = mockedCreateClient() as ReturnType<ClickHouseClientFactory>;
         const connection = new ClickHouseConnection({
             host: 'localhost',
             database: 'default',
             user: 'default',
-        });
+        }, () => client);
         await connection.connect();
 
         const databaseCommand = connection.createCommand('/* editor */ CREATE TABLE events (id UInt64);');

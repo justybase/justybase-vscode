@@ -253,6 +253,25 @@ describe('messages.js scroll functions', () => {
             expect(result).toEqual({ scrollTop: 150, scrollLeft: 10 });
         });
 
+        it('prefers stable result-set identity and still reads legacy timestamp keys', () => {
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({
+                [`${testSource}:0:stable-result-id`]: { scrollTop: 780, scrollLeft: 42, resultSetId: 'stable-result-id' },
+                [`${testSource}:0:1000`]: { scrollTop: 120, scrollLeft: 4 },
+            });
+
+            const { getSavedStateFor } = require('../../media/resultPanel/messages.js');
+            expect(getSavedStateFor(0, 1000, testSource, 'stable-result-id')).toEqual({
+                scrollTop: 780,
+                scrollLeft: 42,
+                resultSetId: 'stable-result-id',
+            });
+            expect(getSavedStateFor(0, 1000, testSource, 'missing-result-id')).toEqual({
+                scrollTop: 120,
+                scrollLeft: 4,
+            });
+        });
+
         it('returns null when no matching key exists', () => {
             const protocol = require('../../media/resultPanel/protocol.js');
             (protocol.getHostState as jest.Mock).mockReturnValue({});
@@ -260,6 +279,16 @@ describe('messages.js scroll functions', () => {
             const { getSavedStateFor } = require('../../media/resultPanel/messages.js');
             const result = getSavedStateFor(0, 1000, testSource);
             expect(result).toBeNull();
+        });
+
+        it('does not use a legacy timestamp state tagged for another result identity', () => {
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({
+                [`${testSource}:0:1000`]: { scrollTop: 9_999, resultSetId: 'old-result-id' },
+            });
+
+            const { getSavedStateFor } = require('../../media/resultPanel/messages.js');
+            expect(getSavedStateFor(0, 1000, testSource, 'new-result-id')).toBeNull();
         });
 
         it('returns null when host state is null', () => {
@@ -318,6 +347,24 @@ describe('messages.js scroll functions', () => {
             const { resolveScrollStateForResultSet } = require('../../media/resultPanel/grid/persistence.js');
             expect(resolveScrollStateForResultSet(0, testSource)).toBeNull();
         });
+
+        it('rejects a cached scroll state belonging to another stable result identity', () => {
+            const state = require('../../media/resultPanel/state.js');
+            state.getScrollStateFromGlobalCache.mockReturnValue({
+                scrollTop: 9_999,
+                scrollLeft: 0,
+                resultSetId: 'old-result-id',
+            });
+
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({});
+            (global.window as unknown as {
+                resultSets: Array<{ executionTimestamp: number; resultSetId: string; data: unknown[][] }>;
+            }).resultSets[0].resultSetId = 'new-result-id';
+
+            const { resolveScrollStateForResultSet } = require('../../media/resultPanel/grid/persistence.js');
+            expect(resolveScrollStateForResultSet(0, testSource)).toBeNull();
+        });
     });
 
     // ── findScrollStateBySource ───────────────────────────────────
@@ -356,6 +403,22 @@ describe('messages.js scroll functions', () => {
             const { findScrollStateBySource } = require('../../media/resultPanel/messages.js');
             const result = findScrollStateBySource(testSource, 0);
             expect(result).toEqual({ scrollTop: 500, scrollLeft: 5 });
+        });
+
+        it('finds horizontal-only scroll and respects a requested result identity', () => {
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({
+                [`${testSource}:0:old`]: { scrollTop: 0, scrollLeft: 320, resultSetId: 'old-result-id' },
+                [`${testSource}:0:current`]: { scrollTop: 0, scrollLeft: 240, resultSetId: 'current-result-id' },
+            });
+
+            const { findScrollStateBySource } = require('../../media/resultPanel/messages.js');
+            expect(findScrollStateBySource(testSource, 0, 'current-result-id')).toEqual({
+                scrollTop: 0,
+                scrollLeft: 240,
+                resultSetId: 'current-result-id',
+            });
+            expect(findScrollStateBySource(testSource, 0, 'missing-result-id')).toBeNull();
         });
     });
 

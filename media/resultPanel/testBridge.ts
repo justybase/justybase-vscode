@@ -25,6 +25,7 @@ import {
 } from './types.js';
 import { renderRowCountInfo } from './filter.js';
 import { switchToResultSet } from './tabs.js';
+import { getGridWrapperForResultSet, getScrollTarget } from './grid/persistence.js';
 import { isResultPanelTraceEnabled, traceResultPanel } from './trace.js';
 
 interface TestBridgeRequest {
@@ -36,8 +37,10 @@ interface TestBridgeRequest {
 interface TestBridgeResult {
     sourceUri: string | undefined;
     activeResultSetIndex: number;
+    activeResultSetId?: string;
     resultSetCount: number;
     resultSets: Array<{
+        resultSetId: string;
         isLog: boolean;
         isError: boolean;
         rowCount: number;
@@ -56,6 +59,17 @@ interface TestBridgeResult {
     groupingPanelVisible: boolean;
     groupingResultRows: number;
     pendingRequestCount: number;
+    viewport: {
+        scrollTop: number;
+        scrollLeft: number;
+        scrollHeight: number;
+        clientHeight: number;
+        scrollWidth: number;
+        clientWidth: number;
+        scrollAnchorIndex?: number;
+        firstVisibleRowIndex?: number;
+        firstVisibleRowFingerprint: string;
+    };
 }
 
 const ACTION_TIMEOUT_MS = 15_000;
@@ -133,6 +147,49 @@ function pendingRequestCount(): number {
         + syncCount;
 }
 
+function viewportSnapshot(resultSetIndex: number, resultSet: ReturnType<typeof getResultSetAt>, grid: ReturnType<typeof getGrid>): TestBridgeResult['viewport'] {
+    const wrapper = getGridWrapperForResultSet(resultSetIndex);
+    const target = getScrollTarget(wrapper);
+    const visibleRow = wrapper?.querySelector('tbody tr[data-index]:not(.virtual-pad-top):not(.virtual-pad-bottom)') as HTMLElement | null;
+    const parsedVisibleRowIndex = visibleRow?.dataset.index === undefined
+        ? Number.NaN
+        : Number(visibleRow.dataset.index);
+    const firstVisibleRowIndex = Number.isInteger(parsedVisibleRowIndex)
+        ? parsedVisibleRowIndex
+        : undefined;
+    const firstVisibleRowFingerprint = visibleRow
+        ? hashFingerprint((visibleRow.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 256))
+        : '';
+    return {
+        scrollTop: target?.scrollTop ?? 0,
+        scrollLeft: target?.scrollLeft ?? 0,
+        scrollHeight: target?.scrollHeight ?? 0,
+        clientHeight: target?.clientHeight ?? 0,
+        scrollWidth: target?.scrollWidth ?? 0,
+        clientWidth: target?.clientWidth ?? 0,
+        scrollAnchorIndex: grid?.getScrollAnchorIndex?.(),
+        firstVisibleRowIndex,
+        firstVisibleRowFingerprint,
+    };
+}
+
+function traceViewportSnapshot(
+    action: string,
+    resultSetIndex: number,
+    result: TestBridgeResult,
+): void {
+    traceResultPanel({
+        phase: 'test_bridge_viewport',
+        command: 'testBridge',
+        reason: action,
+        resultSetIndex,
+        scrollTop: result.viewport.scrollTop,
+        scrollLeft: result.viewport.scrollLeft,
+        scrollAnchorIndex: result.viewport.scrollAnchorIndex,
+        firstVisibleRowIndex: result.viewport.firstVisibleRowIndex,
+    });
+}
+
 function snapshot(): TestBridgeResult {
     const resultSets = getResultSets();
     const activeResultSetIndex = getActiveGridIndex();
@@ -143,8 +200,10 @@ function snapshot(): TestBridgeResult {
     return {
         sourceUri: getActiveSourceUri(),
         activeResultSetIndex,
+        activeResultSetId: activeResultSet?.resultSetId,
         resultSetCount: resultSets.length,
         resultSets: resultSets.map(resultSet => ({
+            resultSetId: resultSet?.resultSetId ?? '',
             isLog: resultSet?.isLog === true,
             isError: resultSet?.isError === true,
             rowCount: Array.isArray(resultSet?.data) ? resultSet.data.length : 0,
@@ -171,6 +230,7 @@ function snapshot(): TestBridgeResult {
         groupingPanelVisible: getGroupingPanelOpen(),
         groupingResultRows: document.querySelectorAll('#groupingResultsArea .grouping-table tbody tr').length,
         pendingRequestCount: pendingRequestCount(),
+        viewport: viewportSnapshot(activeResultSetIndex, activeResultSet, grid),
     };
 }
 
@@ -203,6 +263,27 @@ async function setColumnFilter(args: Record<string, unknown>): Promise<TestBridg
     getGrid(resultSetIndex)?.render?.();
     renderRowCountInfo(resultSetIndex);
     await sleep(50);
+    return snapshot();
+}
+
+async function scrollResultAction(args: Record<string, unknown>): Promise<TestBridgeResult> {
+    const resultSetIndex = getActiveGridIndex();
+    const grid = getGrid(resultSetIndex);
+    const wrapper = getGridWrapperForResultSet(resultSetIndex);
+    const target = getScrollTarget(wrapper);
+    if (!target) throw new Error('The active result has no scroll target.');
+
+    const rowIndex = args.rowIndex === undefined ? undefined : asNumber(args.rowIndex, -1);
+    if (rowIndex !== undefined && rowIndex >= 0 && grid?.scrollToIndex) {
+        grid.scrollToIndex(rowIndex, asString(args.align, 'start'));
+    }
+    if (rowIndex === undefined || rowIndex < 0 || !grid?.scrollToIndex) {
+        if (args.scrollTop !== undefined) target.scrollTop = Math.max(0, asNumber(args.scrollTop));
+    }
+    if (args.scrollLeft !== undefined) target.scrollLeft = Math.max(0, asNumber(args.scrollLeft));
+    target.dispatchEvent(new Event('scroll'));
+    // Virtual rows and the debounced persistence listener settle asynchronously.
+    await sleep(250);
     return snapshot();
 }
 
@@ -323,6 +404,8 @@ async function dispatchAction(action: string, argsValue: unknown): Promise<unkno
             return setGlobalFilter('');
         case 'setColumnFilter':
             return setColumnFilter(args);
+        case 'scrollResult':
+            return scrollResultAction(args);
         case 'databaseFilterValues':
             return databaseFilterValues(args);
         case 'applyDatabaseFilter':
@@ -360,7 +443,9 @@ async function dispatchAction(action: string, argsValue: unknown): Promise<unkno
             if (!sourceUri) throw new Error('A source URI is required.');
             postHostMessage({ command: 'switchSource', sourceUri });
             await waitFor('source switch', () => getActiveSourceUri() === sourceUri);
-            return snapshot();
+            const result = snapshot();
+            traceViewportSnapshot(action, getActiveGridIndex(), result);
+            return result;
         }
         case 'switchResultSet': {
             const sourceUri = getActiveSourceUri();
@@ -371,7 +456,14 @@ async function dispatchAction(action: string, argsValue: unknown): Promise<unkno
             // sides of the protocol.
             switchToResultSet(resultSetIndex);
             await waitFor('result-set switch', () => getActiveGridIndex() === resultSetIndex);
-            return snapshot();
+            // The production handler schedules a second restore after layout
+            // settles. Let that pass run before sampling the viewport so the
+            // bridge asserts the user-visible state rather than the transient
+            // pre-layout position.
+            await sleep(75);
+            const result = snapshot();
+            traceViewportSnapshot(action, resultSetIndex, result);
+            return result;
         }
         case 'togglePin': {
             const sourceUri = getActiveSourceUri();

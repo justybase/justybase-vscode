@@ -44,6 +44,9 @@ export interface ResultPanelTraceEventPayload {
     viewportWidth?: number;
     viewportHeight?: number;
     scrollTop?: number;
+    scrollLeft?: number;
+    scrollAnchorIndex?: number;
+    firstVisibleRowIndex?: number;
     reason?: string;
     delivered?: boolean;
     error?: string;

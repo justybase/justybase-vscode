@@ -74,9 +74,25 @@ function buildFixtureSelect(tableName: string, schemaName?: string, where?: stri
     return `SELECT ${columns} FROM ${table}${where ? ` WHERE ${where}` : ''} ORDER BY ${quoteIdentifier('id')} LIMIT 1000`;
 }
 
+/**
+ * Deliberately wide and long deterministic result used by the Extension Host
+ * viewport contract. A cross join keeps the fixture small while producing
+ * enough rows to exercise virtualization and scroll restoration.
+ */
+function buildFixtureScrollSelect(tableName: string, schemaName?: string): string {
+    const table = buildFixtureTableReference(tableName, schemaName);
+    return `SELECT a.${quoteIdentifier('id')} * 100 + b.${quoteIdentifier('id')} AS ${quoteIdentifier('scroll_id')}, `
+        + `a.${quoteIdentifier('group_a')}, a.${quoteIdentifier('group_b')}, a.${quoteIdentifier('amount')}, `
+        + `a.${quoteIdentifier('status')}, a.${quoteIdentifier('created_at')}, a.${quoteIdentifier('unicode_text')}, `
+        + `a.${quoteIdentifier('quoted_text')}, a.${quoteIdentifier('empty_text')}, a.${quoteIdentifier('binary_text')} `
+        + `FROM ${table} a CROSS JOIN ${table} b `
+        + `ORDER BY a.${quoteIdentifier('id')}, b.${quoteIdentifier('id')} LIMIT 1000`;
+}
+
 function buildScenarioSql(tableName: string, schemaName?: string): {
     all: string;
     beta: string;
+    scroll: string;
     empty: string;
     update: string;
     retry: string;
@@ -85,6 +101,7 @@ function buildScenarioSql(tableName: string, schemaName?: string): {
     return {
         all: buildFixtureSelect(tableName, schemaName),
         beta: buildFixtureSelect(tableName, schemaName, `${quoteIdentifier('group_a')} = 'Beta'`),
+        scroll: buildFixtureScrollSelect(tableName, schemaName),
         empty: buildFixtureSelect(tableName, schemaName, '1 = 0'),
         update: `UPDATE ${table} SET ${quoteIdentifier('amount')} = 11.5 WHERE ${quoteIdentifier('id')} = 1`,
         retry: `SELECT ${quoteIdentifier('id')} FROM ${table} WHERE ${quoteIdentifier('id')} = 1`,
@@ -273,6 +290,9 @@ function writeTraceArtifact(provider: ResultPanelView): void {
         ...(event.viewportWidth !== undefined ? { viewportWidth: event.viewportWidth } : {}),
         ...(event.viewportHeight !== undefined ? { viewportHeight: event.viewportHeight } : {}),
         ...(event.scrollTop !== undefined ? { scrollTop: event.scrollTop } : {}),
+        ...(event.scrollLeft !== undefined ? { scrollLeft: event.scrollLeft } : {}),
+        ...(event.scrollAnchorIndex !== undefined ? { scrollAnchorIndex: event.scrollAnchorIndex } : {}),
+        ...(event.firstVisibleRowIndex !== undefined ? { firstVisibleRowIndex: event.firstVisibleRowIndex } : {}),
         ...(event.reason ? { reason: event.reason } : {}),
         ...(event.delivered !== undefined ? { delivered: event.delivered } : {}),
         ...(event.webviewSeq !== undefined ? { webviewSeq: event.webviewSeq } : {}),
@@ -724,6 +744,83 @@ async function runExtensionHostScenario(
         await connectionManager.setDocumentConnection(secondSource.uri.toString(), connectionName);
         const secondSnapshot = await executeProductionQuery(provider, secondSource);
         if (asNumber(secondSnapshot.visibleRowCount, -1) !== 4) throw new Error('Second source did not return the Beta fixture rows.');
+
+        // Real viewport contract: exercise a virtualized, wide result and
+        // verify that both axes survive a Logs tab switch and a source switch.
+        const scrollSource = await openUntitledSql(`${sql.scroll};`);
+        documentUris.push(scrollSource.uri.toString());
+        await connectionManager.setDocumentConnection(scrollSource.uri.toString(), connectionName);
+        const scrollInitialSnapshot = await executeProductionQuery(provider, scrollSource);
+        const scrollResultSets = provider.getResultsForSource(scrollSource.uri.toString()) ?? [];
+        const scrollResultIndex = scrollResultSets.findIndex(resultSet => !resultSet.isLog && !resultSet.isError);
+        if (scrollResultIndex < 0) throw new Error('Viewport fixture did not produce a tabular result.');
+        const scrollRowCount = scrollResultSets[scrollResultIndex].totalRowCount
+            ?? scrollResultSets[scrollResultIndex].data.length;
+        if (scrollRowCount !== 144) throw new Error(`Viewport fixture returned ${scrollRowCount} rows instead of 144.`);
+        if (asNumber(scrollInitialSnapshot.visibleRowCount, -1) !== 144) {
+            throw new Error('Viewport fixture was not fully rendered in the active webview.');
+        }
+
+        await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex: scrollResultIndex });
+        const scrolledSnapshot = asRecord(await provider.runResultPanelTestBridge('scrollResult', {
+            rowIndex: 75,
+            scrollLeft: 320,
+        }));
+        const scrolledViewport = asRecord(scrolledSnapshot.viewport);
+        const scrolledAnchor = asNumber(scrolledViewport.scrollAnchorIndex, -1);
+        const scrolledTop = asNumber(scrolledViewport.scrollTop, 0);
+        const scrolledLeft = asNumber(scrolledViewport.scrollLeft, 0);
+        if (scrolledAnchor < 65 && scrolledTop <= 0) {
+            throw new Error('Viewport fixture did not move to a non-zero virtualized row position.');
+        }
+        if (scrolledLeft <= 0) {
+            throw new Error('Viewport fixture did not move to a non-zero horizontal position.');
+        }
+
+        await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex: 0 });
+        const restoredFromLogs = asRecord(await provider.runResultPanelTestBridge('switchResultSet', {
+            resultSetIndex: scrollResultIndex,
+        }));
+        const restoredFromLogsViewport = asRecord(restoredFromLogs.viewport);
+        const restoredFromLogsAnchor = asNumber(restoredFromLogsViewport.scrollAnchorIndex, -1);
+        const restoredFromLogsTop = asNumber(restoredFromLogsViewport.scrollTop, 0);
+        const restoredFromLogsLeft = asNumber(restoredFromLogsViewport.scrollLeft, 0);
+        const anchorRestoredFromLogs = scrolledAnchor >= 0
+            && restoredFromLogsAnchor >= scrolledAnchor - 5
+            && restoredFromLogsAnchor <= scrolledAnchor + 5;
+        if (!anchorRestoredFromLogs && Math.abs(restoredFromLogsTop - scrolledTop) > 120) {
+            throw new Error('Switching through Logs did not restore the vertical viewport.');
+        }
+        if (Math.abs(restoredFromLogsLeft - scrolledLeft) > 80) {
+            throw new Error('Switching through Logs did not restore the horizontal viewport.');
+        }
+
+        // ResultPanelView keeps the active result source aligned with the
+        // focused SQL editor. Reproduce the production source-switch path by
+        // focusing the destination editor before asking the webview to switch.
+        await vscode.window.showTextDocument(secondSource, { preview: false });
+        await provider.runResultPanelTestBridge('switchSource', { sourceUri: secondSource.uri.toString() });
+        await vscode.window.showTextDocument(scrollSource, { preview: false });
+        await provider.runResultPanelTestBridge('switchSource', {
+            sourceUri: scrollSource.uri.toString(),
+        });
+        const restoredFromSourceAfterTab = asRecord(await provider.runResultPanelTestBridge('switchResultSet', {
+            resultSetIndex: scrollResultIndex,
+        }));
+        const restoredFromSourceViewport = asRecord(restoredFromSourceAfterTab.viewport);
+        const restoredFromSourceAnchor = asNumber(restoredFromSourceViewport.scrollAnchorIndex, -1);
+        const restoredFromSourceTop = asNumber(restoredFromSourceViewport.scrollTop, 0);
+        const restoredFromSourceLeft = asNumber(restoredFromSourceViewport.scrollLeft, 0);
+        const anchorRestoredFromSource = scrolledAnchor >= 0
+            && restoredFromSourceAnchor >= scrolledAnchor - 5
+            && restoredFromSourceAnchor <= scrolledAnchor + 5;
+        if (!anchorRestoredFromSource && Math.abs(restoredFromSourceTop - scrolledTop) > 120) {
+            throw new Error('Switching result sources did not restore the vertical viewport.');
+        }
+        if (Math.abs(restoredFromSourceLeft - scrolledLeft) > 80) {
+            throw new Error('Switching result sources did not restore the horizontal viewport.');
+        }
+
         await provider.runResultPanelTestBridge('togglePin');
         await provider.runResultPanelTestBridge('toggleResultPin');
         await vscode.window.showTextDocument(savedDocument, { preview: false });

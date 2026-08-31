@@ -1,6 +1,6 @@
 # Web Editor ↔ VS Code Extension — Parity Audit & Backlog
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 This document is the **feature-by-feature parity audit** between the two products shipped
 from this repository:
@@ -259,7 +259,8 @@ webviews.
 | DB | Desktop | Web | Status |
 | --- | --- | --- | --- |
 | Netezza | ✅ | ✅ | ✅ |
-| SQLite / DuckDB / Oracle / PostgreSQL / Vertica / Snowflake / Db2 / MSSQL / MySQL / Access | ✅ (extensions) | ❌ | ❌ |
+| SQLite / DuckDB | ✅ (extensions) | 🟡 local profiles, metadata and query sessions | 🟡 |
+| Oracle / PostgreSQL / Vertica / Snowflake / Db2 / MSSQL / MySQL / Access | ✅ (extensions) | ❌ | ❌ |
 
 Web constraints that must change:
 
@@ -273,9 +274,12 @@ Web constraints that must change:
   `executeQueryForDialect(profile, sql)` gate in `apps/api/src/dialects.ts` (**planned — file does
   not exist yet**, mirror `connectionFactory`).
 
-Start with **SQLite** (Node 22 built-in `node:sqlite`, dialect already in `src/dialects/sqlite/runtime.ts`)
-and **DuckDB** (`@duckdb/node-api` already used by the DuckDB extension), then file-SQL
-(spreadsheet/parquet via spreadsheet-tasks). Add the remaining dialects afterwards.
+SQLite and DuckDB are already available in the web API for local profiles,
+metadata, query sessions, paging, aggregation and grouping. The remaining work
+is parity polish (connection UX, file-SQL workflows, and capability-specific
+metadata) before adding remote dialect drivers. Add Oracle, PostgreSQL, Vertica,
+Snowflake, Db2, MSSQL, MySQL and Access only with explicit runtime isolation and
+integration coverage.
 
 ---
 
@@ -307,7 +311,7 @@ connection sharing, audit log.)
 | Test data generator | ✅ | ❌ | XL |
 | ERD | ✅ `showERD` | ❌ | L (react-flow / mermaid) |
 | Favorites | ✅ | ❌ | M |
-| Semantic tokens/TextMate in Monaco | ✅ grammar (`netezza.tmLanguage.json`) | ❌ | S (load grammar as Monarch or inject semantic) |
+| Semantic tokens/TextMate in Monaco | ✅ grammar (`netezza.tmLanguage.json`) | ✅ semantic-token provider | – |
 
 ---
 
@@ -373,9 +377,9 @@ So risk is not "web runs against desktop", it is **"desktop source changed to se
 
 | Area | Touches desktop `src/`? | Risk | Why / mitigation |
 | --- | --- | --- | --- |
-| **D1 wiring** (hover, definition, references, rename, inlay, signature, symbols, format) | **No** | 🟢 Low | All engines are LSP-pure (`hoverEngine.ts`, `metadataBridge`, `inlayHintEngine`) — no `vscode` import. Work happened in `packages/sql-core/src/runtime.ts` + `index.d.ts` + `lspProtocol.ts` + `sqlLanguage.ts`, **additive** to the desktop build. **Shipped 2026-08-09** — desktop regression green (`check-types`, `lint`, `build`, `test:validate` 8398 tests). Guard: `npm run build:sql-core && npm run test:api`. |
+| **D1 wiring** (hover, definition, references, rename, inlay, signature, symbols, format) | **No** | 🟢 Low | All engines are LSP-pure (`hoverEngine.ts`, `metadataBridge`, `inlayHintEngine`) — no `vscode` import. Work happened in `packages/sql-core/src/runtime.ts` + `index.d.ts` + `lspProtocol.ts` + `sqlLanguage.ts`, **additive** to the desktop build. **Shipped 2026-08-09** — desktop regression green (`check-types`, `lint`, `build`, `test:validate`; current gate: 9247 tests). Guard: `npm run build:sql-core && npm run test:api`. |
 | **D1 leftovers** (semantic tokens, snippets, statement window) | **No** (one pure-extraction) | 🟢 Low | Semantic tokens reuse the existing lexer + `parseSemanticScopeWithParser` + `identifierRoleCollector`; the token-name sets were **moved** (not copied) to vscode-free `src/sql/semanticTokenNames.ts`, and the desktop provider now imports from there — behavior-identical, verified by `semanticTokensProvider.test.ts` (43 tests). Snippets reuse the committed `.code-snippets` JSON; statement window reuses `SqlParser.getAdjacentStatementAtPosition`. **Shipped 2026-08-09.** |
-| **NZ/NZP linter & NZ quick-fixes** | **Yes** (done for diag) | 🟢 Low–Med | `sqlQualityEngine` refactored into vscode-free `QualityEngineCore` (`src/sqlParser/qualityEngineCore.ts`) with `SqlQualityEngine` as a thin wrapper — desktop behavior identical, verified by `test:validate` (8416 tests). NZ/NZP diagnostics now flow through `core.diagnostics()` with `suggestedFix` in `data`. Remaining: code-action providers (`linterCodeActions.ts`, `sqlRefactorCodeActions.ts` call `vscode`) — a future isolated port; keep vscode wrappers thin. |
+| **NZ/NZP linter & NZ quick-fixes** | **Yes** (done for diag) | 🟢 Low–Med | `sqlQualityEngine` refactored into vscode-free `QualityEngineCore` (`src/sqlParser/qualityEngineCore.ts`) with `SqlQualityEngine` as a thin wrapper — desktop behavior identical, verified by `test:validate` (current gate: 9247 tests). NZ/NZP diagnostics now flow through `core.diagnostics()` with `suggestedFix` in `data`. Remaining: code-action providers (`linterCodeActions.ts`, `sqlRefactorCodeActions.ts` call `vscode`) — a future isolated port; keep vscode wrappers thin. |
 | **Formatting** | One-line import | 🟢 Low | `formatSql()` in `src/services/sqlFormatter.ts` was already vscode-free but imported `connectionFactory` (→ dialects index → vscode). To expose it via `sql-core`, the import was swapped to `getDatabaseSqlAuthoring` from `core/sqlAuthoringRegistry` (a passthrough re-export — behavior identical). Desktop verified: `sqlFormatter.test.ts` 17/17, production `npm run build` green. |
 | **DDL/import / generic run endpoint** | **No** | 🟢 Low | Reuses `@justybase/database-runtime`; web-side only. |
 | **Multi-dialect (contracts)** | Shared package | 🟡 Low-Med | Adding to `DatabaseKind` / `DatabaseDialect` in `@justybase/contracts` **must stay purely additive** (union extension, no removal/re-type of existing fields). Desktop extensions consume the published package. Run `npm run test:api` + contracts tests + `scripts/version-sync` check. |

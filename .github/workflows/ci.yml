@@ -62,11 +62,23 @@ jobs:
         working-directory: extensions/clickhouse
         run: npm ci
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Validate synchronized versions
         run: npm run version:check
 
       - name: Type check core
         run: npm run check-types
+
+      - name: Check shared package boundaries
+        run: npm run check:architecture
+
+      - name: Type check shared packages and API
+        run: npm run check-types:api
+
+      - name: Type check web application
+        run: npm run check-types:web
 
       - name: Type check DB2 extension
         if: hashFiles('extensions/db2/package-lock.json') != ''
@@ -106,6 +118,15 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Lint extended workspaces (baseline warnings are reported)
+        run: npm run lint:extended
+
+      - name: Build desktop bundle
+        run: npm run build
+
+      - name: Build workspace products
+        run: npm run build:all
 
   completion-parity:
     name: Completion Parity Gate
@@ -177,8 +198,35 @@ jobs:
         working-directory: extensions/access
         run: npm ci
 
-      - name: Run fast unit test suite
-        run: npm run test:fast
+      - name: Run complete root unit test suite
+        run: npm run test:validate
+
+      - name: Run API workspace tests
+        run: npm run test:api
+
+      - name: Run web workspace tests
+        run: npm run test:web
+
+  extension-host-result-panel:
+    name: Extension Host Result Panel Gate
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run real VS Code result-panel scenario
+        run: npm run test:extension-host
 
   local-integration:
     name: Local Runtime Integration (DuckDB / File SQL / Access)

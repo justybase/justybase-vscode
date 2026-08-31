@@ -67,6 +67,9 @@ export interface ResultPanelTraceEventPayload {
     viewportWidth?: number;
     viewportHeight?: number;
     scrollTop?: number;
+    scrollLeft?: number;
+    scrollAnchorIndex?: number;
+    firstVisibleRowIndex?: number;
     reason?: string;
     delivered?: boolean;
     error?: string;
@@ -398,6 +401,8 @@ export type ResultPanelHostToWebviewMessage =
         sql?: string;
         refreshSql?: string;
         executionTimestamp?: number;
+        /** Stable host-issued identity for the result being streamed. */
+        resultSetId?: string;
         /** Mirrors host isDiskBackedResultsAvailable — webview caps rows only when true. */
         diskBackedStreamCapEnabled?: boolean;
     }

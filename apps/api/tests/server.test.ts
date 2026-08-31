@@ -49,6 +49,26 @@ describe('web API authentication and connection profiles', () => {
     expect(connections.json()).toEqual([]);
   });
 
+  it('preserves Fastify client-error status codes', async () => {
+    const malformedJson = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: '{"username":',
+    });
+    expect(malformedJson.statusCode).toBe(400);
+    expect(malformedJson.json()).toEqual(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+
+    const oversizedJson = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ username: 'x'.repeat(1_048_576), password: 'test' }),
+    });
+    expect(oversizedJson.statusCode).toBe(413);
+    expect(oversizedJson.json()).toEqual(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+  });
+
   it('stores only a profile summary and defaults it to read-only', async () => {
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
     const rawCookie = login.headers['set-cookie'];
@@ -157,6 +177,32 @@ describe('web API authentication and connection profiles', () => {
     } finally {
       app.querySessions.delete(userId, sessionId);
     }
+  });
+
+  it('returns structured validation errors for malformed query requests', async () => {
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
+    const rawCookie = login.headers['set-cookie'];
+    const cookies = Array.isArray(rawCookie) ? rawCookie.map(value => value.split(';')[0]) : [String(rawCookie).split(';')[0]];
+    const cookie = cookies.join('; ');
+    const csrf = cookies.find(value => value.startsWith('justybase_csrf='))?.split('=')[1] ?? '';
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/query',
+      headers: { cookie, 'x-justybase-csrf': csrf },
+      payload: { connectionId: 42, sql: 'SELECT 1' },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toEqual({ code: 'INVALID_REQUEST', message: 'connectionId is required.' });
+
+    const malformed = await app.inject({
+      method: 'POST',
+      url: '/api/query',
+      headers: { cookie, 'x-justybase-csrf': csrf },
+      payload: [],
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json()).toEqual({ code: 'INVALID_REQUEST', message: 'request body must be a JSON object.' });
   });
 
   it('requires explicit confirmation before DML on a writable profile', async () => {

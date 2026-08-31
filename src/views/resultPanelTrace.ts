@@ -16,6 +16,9 @@ export interface ResultPanelTraceEventPayload {
     viewportWidth?: number;
     viewportHeight?: number;
     scrollTop?: number;
+    scrollLeft?: number;
+    scrollAnchorIndex?: number;
+    firstVisibleRowIndex?: number;
     reason?: string;
     delivered?: boolean;
     error?: string;
@@ -78,6 +81,9 @@ export function sanitizeResultPanelTraceEvent(value: unknown): ResultPanelTraceE
         'viewportWidth',
         'viewportHeight',
         'scrollTop',
+        'scrollLeft',
+        'scrollAnchorIndex',
+        'firstVisibleRowIndex',
         'webviewSeq',
     ] as const;
     for (const field of numberFields) {

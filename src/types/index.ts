@@ -66,6 +66,8 @@ export interface ResultSetRefreshFailure {
 export type { DiskQuerySpec } from '../core/resultDataProvider/types';
 
 export type ResultSet = QueryResult & {
+  /** Stable identity used for state/scroll persistence across tab reordering. */
+  resultSetId?: string;
   /** Present when rows live in SqliteResultStore instead of data[][]. */
   diskStoreId?: string;
   /** Authoritative count when disk-backed; data.length may be 0 or window-only in webview. */
