@@ -216,6 +216,9 @@ jobs:
       - name: Run complete root unit test suite with coverage
         run: npm run test:coverage
 
+      - name: Verify semantic token latency without coverage instrumentation
+        run: npm run test:validate -- --runInBand --testPathPatterns=semanticTokensProvider.test.ts --testNamePattern="tokenizes large scripts"
+
       - name: Enforce changed high-risk coverage
         if: github.event_name == 'pull_request'
         env:
