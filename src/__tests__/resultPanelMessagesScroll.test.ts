@@ -167,8 +167,11 @@ describe('messages.js scroll functions', () => {
             expect(setHostState).toHaveBeenCalledTimes(1);
 
             const savedState = (setHostState as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-            expect(savedState[`${testSource}:0:1000`]).toBeDefined();
-            expect(savedState[`${testSource}:1:1001`]).toBeDefined();
+            const envelope = savedState._gridState as { kind: string; schemaVersion: number; entries: Record<string, unknown> };
+            expect(envelope.kind).toBe('justybase.result-panel.grid-state');
+            expect(envelope.schemaVersion).toBe(1);
+            expect(envelope.entries[`${testSource}:0:1000`]).toBeDefined();
+            expect(envelope.entries[`${testSource}:1:1001`]).toBeDefined();
         });
 
         it('includes sorting/grouping/filter state from Tabulator', () => {
@@ -194,7 +197,7 @@ describe('messages.js scroll functions', () => {
 
             const { setHostState } = require('../../media/resultPanel/protocol.js');
             const savedState = (setHostState as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-            const entry = savedState[`${testSource}:0:1000`] as Record<string, unknown>;
+            const entry = (savedState._gridState as { entries: Record<string, unknown> }).entries[`${testSource}:0:1000`] as Record<string, unknown>;
             expect(entry.sorting).toEqual([{ column: 'id', dir: 'asc' }]);
             expect(entry.grouping).toEqual(['category']);
             expect(entry.columnFilters).toEqual({ name: 'test' });
@@ -215,7 +218,7 @@ describe('messages.js scroll functions', () => {
             expect(setHostState).toHaveBeenCalled();
 
             const savedState = (setHostState as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-            const entry = savedState[`${testSource}:0:1000`] as Record<string, unknown>;
+            const entry = (savedState._gridState as { entries: Record<string, unknown> }).entries[`${testSource}:0:1000`] as Record<string, unknown>;
             expect(entry.scrollTop).toBe(200);
             expect(entry.scrollLeft).toBe(10);
             expect(state.saveScrollStateToCache).toHaveBeenCalledWith(testSource, 0,
@@ -237,6 +240,57 @@ describe('messages.js scroll functions', () => {
                 expect.objectContaining({ scrollTop: 200, scrollLeft: 10 })
             );
         });
+
+        it('migrates legacy flat entries into the versioned envelope', () => {
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({
+                [`${testSource}:0:1000`]: { scrollTop: 420, scrollLeft: 18 },
+                _layoutMode: 'table',
+                _viewModes: { [`${testSource}:0:1000`]: 'table' },
+            });
+
+            const { saveAllGridStates } = require('../../media/resultPanel/messages.js');
+            saveAllGridStates();
+
+            const savedState = (protocol.setHostState as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+            const envelope = savedState._gridState as {
+                kind: string;
+                schemaVersion: number;
+                entries: Record<string, { scrollTop?: number; scrollLeft?: number }>;
+            };
+            expect(envelope).toMatchObject({
+                kind: 'justybase.result-panel.grid-state',
+                schemaVersion: 1,
+            });
+            expect(envelope.entries[`${testSource}:0:1000`]).toEqual({ scrollTop: 420, scrollLeft: 18 });
+            expect(savedState[`${testSource}:0:1000`]).toBeUndefined();
+            expect(savedState._layoutMode).toBe('table');
+            expect(savedState._viewModes).toEqual({ [`${testSource}:0:1000`]: 'table' });
+        });
+
+        it('resets a future envelope without discarding unrelated panel state', () => {
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({
+                _gridState: {
+                    kind: 'justybase.result-panel.grid-state',
+                    schemaVersion: 99,
+                    entries: { [`${testSource}:0:1000`]: { scrollTop: 999 } },
+                },
+                _exploreStates: { keep: true },
+            });
+
+            const { saveAllGridStates, getSavedStateFor } = require('../../media/resultPanel/messages.js');
+            expect(getSavedStateFor(0, 1000, testSource)).toBeNull();
+            saveAllGridStates();
+
+            const savedState = (protocol.setHostState as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+            expect(savedState._exploreStates).toEqual({ keep: true });
+            expect(savedState._gridState).toEqual({
+                kind: 'justybase.result-panel.grid-state',
+                schemaVersion: 1,
+                entries: {},
+            });
+        });
     });
 
     // ── getSavedStateFor ──────────────────────────────────────────
@@ -251,6 +305,27 @@ describe('messages.js scroll functions', () => {
             const { getSavedStateFor } = require('../../media/resultPanel/messages.js');
             const result = getSavedStateFor(0, 1000, testSource);
             expect(result).toEqual({ scrollTop: 150, scrollLeft: 10 });
+        });
+
+        it('prefers stable result identity and falls back to a legacy timestamp entry', () => {
+            const protocol = require('../../media/resultPanel/protocol.js');
+            (protocol.getHostState as jest.Mock).mockReturnValue({
+                _gridState: {
+                    kind: 'justybase.result-panel.grid-state',
+                    schemaVersion: 1,
+                    entries: {
+                        [`${testSource}:0:stable-id`]: { scrollTop: 800, resultSetId: 'stable-id' },
+                        [`${testSource}:0:1000`]: { scrollTop: 400 },
+                    },
+                },
+            });
+
+            const { getSavedStateFor } = require('../../media/resultPanel/messages.js');
+            expect(getSavedStateFor(0, 1000, testSource, 'stable-id')).toEqual({
+                scrollTop: 800,
+                resultSetId: 'stable-id',
+            });
+            expect(getSavedStateFor(0, 1000, testSource, 'missing-id')).toEqual({ scrollTop: 400 });
         });
 
         it('prefers stable result-set identity and still reads legacy timestamp keys', () => {

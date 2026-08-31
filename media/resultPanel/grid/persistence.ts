@@ -16,6 +16,10 @@ import { asHtml } from '../dom.js';
 import { getDiskGroupingExpandedKeys } from '../diskGrouping.js';
 
 export interface SavedGridState {
+    /** Stable identity copied from the result set when available. */
+    resultSetId?: string;
+    /** Legacy execution identity retained for migration/debugging. */
+    executionTimestamp?: number;
     sorting?: unknown;
     grouping?: unknown;
     expanded?: unknown;
@@ -35,6 +39,105 @@ export interface SavedGridState {
     resultFormatting?: Record<string, unknown>;
     diskGroupingExpandedKeys?: string[];
     [key: string]: unknown;
+}
+
+export const GRID_STATE_STORAGE_KEY = '_gridState';
+export const GRID_STATE_SCHEMA_KIND = 'justybase.result-panel.grid-state';
+export const GRID_STATE_SCHEMA_VERSION = 1 as const;
+
+export interface PersistedGridStateEnvelopeV1 {
+    kind: typeof GRID_STATE_SCHEMA_KIND;
+    schemaVersion: typeof GRID_STATE_SCHEMA_VERSION;
+    entries: Record<string, SavedGridState>;
+}
+
+interface GridStateReadResult {
+    entries: Record<string, SavedGridState>;
+    legacyKeys: string[];
+    invalid: boolean;
+}
+
+const NON_GRID_STATE_KEYS = new Set([
+    GRID_STATE_STORAGE_KEY,
+    '_layoutMode',
+    '_viewModes',
+    '_exploreStates',
+    'loadingOverlayDismissedSources',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSavedGridState(value: unknown): value is SavedGridState {
+    return isRecord(value);
+}
+
+function isLegacyGridStateKey(key: string, value: unknown): value is SavedGridState {
+    // Source URIs contain colons, so identify the final `index:identity`
+    // suffix rather than splitting the complete key on every colon.
+    return !NON_GRID_STATE_KEYS.has(key)
+        && /:\d+:[^:]+$/.test(key)
+        && isSavedGridState(value);
+}
+
+function readGridState(): GridStateReadResult {
+    const hostState = getHostState();
+    if (!isRecord(hostState)) {
+        return { entries: {}, legacyKeys: [], invalid: false };
+    }
+
+    const rawEnvelope = hostState[GRID_STATE_STORAGE_KEY];
+    if (rawEnvelope !== undefined) {
+        if (!isRecord(rawEnvelope)
+            || rawEnvelope.kind !== GRID_STATE_SCHEMA_KIND
+            || rawEnvelope.schemaVersion !== GRID_STATE_SCHEMA_VERSION
+            || !isRecord(rawEnvelope.entries)) {
+            return { entries: {}, legacyKeys: [], invalid: true };
+        }
+        const entries: Record<string, SavedGridState> = {};
+        for (const [key, value] of Object.entries(rawEnvelope.entries)) {
+            if (!isSavedGridState(value)) {
+                return { entries: {}, legacyKeys: [], invalid: true };
+            }
+            entries[key] = value;
+        }
+        return { entries, legacyKeys: [], invalid: false };
+    }
+
+    const entries: Record<string, SavedGridState> = {};
+    const legacyKeys: string[] = [];
+    for (const [key, value] of Object.entries(hostState)) {
+        if (isLegacyGridStateKey(key, value)) {
+            entries[key] = value;
+            legacyKeys.push(key);
+        }
+    }
+    return { entries, legacyKeys, invalid: false };
+}
+
+function createGridStateEnvelope(entries: Record<string, SavedGridState>): PersistedGridStateEnvelopeV1 {
+    return {
+        kind: GRID_STATE_SCHEMA_KIND,
+        schemaVersion: GRID_STATE_SCHEMA_VERSION,
+        entries,
+    };
+}
+
+export function buildGridStateKey(
+    sourceUri: string | null | undefined,
+    rsIndex: number,
+    resultSetId?: string,
+    executionTimestamp?: number,
+): string | undefined {
+    if (!sourceUri || !Number.isInteger(rsIndex) || rsIndex < 0) {
+        return undefined;
+    }
+    const identity = resultSetId?.trim()
+        || (executionTimestamp !== undefined && Number.isFinite(executionTimestamp)
+            ? String(executionTimestamp)
+            : undefined);
+    return identity ? `${sourceUri}:${rsIndex}:${identity}` : undefined;
 }
 
 // True during handleHydrate (after Terminal switch) so saveAllGridStates preserves
@@ -199,24 +302,31 @@ export function applyScrollForResultSet(
 }
 
 export function saveAllGridStates(): void {
-    const stateToSave: Record<string, SavedGridState | string> = (
-        getHostState() as Record<string, SavedGridState | string> | null
-    ) || {};
+    const hostState = isRecord(getHostState()) ? { ...getHostState() as Record<string, unknown> } : {};
+    const gridState = readGridState();
+    const stateToSave: Record<string, unknown> = hostState;
+    const entries = { ...gridState.entries };
+    // Remove flat legacy entries once a new envelope is written. Unrelated
+    // webview state remains untouched in the outer host-state object.
+    for (const key of gridState.legacyKeys) {
+        delete stateToSave[key];
+    }
     const activeSource = getActiveSourceUri();
 
     getAllGrids().forEach((grid, rsIndex) => {
         if (!grid) return;
 
         const rs = getResultSetAt(rsIndex);
-        const timestamp = grid.executionTimestamp || rs?.executionTimestamp || '';
+        const timestamp = grid.executionTimestamp ?? rs?.executionTimestamp;
         const resultSetId = rs?.resultSetId;
-        const key = `${activeSource ?? ''}:${rsIndex}:${resultSetId || timestamp}`;
+        const key = buildGridStateKey(activeSource, rsIndex, resultSetId, timestamp);
+        if (!key) return;
         const tableState = grid.tanTable?.getState();
         const wrapper = getGridWrapperForResultSet(rsIndex);
         const htmlWrapper = asHtml(wrapper);
         const isVisible = htmlWrapper && htmlWrapper.style.display !== 'none';
 
-        const existingState = stateToSave[key] as SavedGridState | undefined;
+        const existingState = entries[key];
 
         let scrollTop = 0;
         let scrollLeft = 0;
@@ -272,6 +382,8 @@ export function saveAllGridStates(): void {
         }
 
         const state: SavedGridState = {
+            resultSetId,
+            executionTimestamp: timestamp,
             sorting: tableState?.sorting,
             grouping: tableState?.grouping,
             expanded: tableState?.expanded,
@@ -292,7 +404,7 @@ export function saveAllGridStates(): void {
             diskGroupingExpandedKeys: getDiskGroupingExpandedKeys(rsIndex),
         };
 
-        stateToSave[key] = state;
+        entries[key] = state;
 
         if (activeSource && rs) {
             saveScrollStateToCache(activeSource, rsIndex, {
@@ -305,6 +417,7 @@ export function saveAllGridStates(): void {
         }
     });
 
+    stateToSave[GRID_STATE_STORAGE_KEY] = createGridStateEnvelope(entries);
     stateToSave._layoutMode = getLayoutMode();
 
     setHostState(stateToSave);
@@ -316,13 +429,12 @@ export function getSavedStateFor(
     sourceUri?: string | null,
     resultSetId?: string,
 ): SavedGridState | null {
-    const savedState = getHostState() as Record<string, SavedGridState> | null;
-    if (!savedState) return null;
+    const savedState = readGridState().entries;
 
-    const timestamp = executionTimestamp || '';
+    const timestamp = executionTimestamp;
     const source = sourceUri || getActiveSourceUri() || '';
-    const stableKey = `${source}:${rsIndex}:${resultSetId || timestamp}`;
-    const stableState = savedState[stableKey];
+    const stableKey = buildGridStateKey(source, rsIndex, resultSetId, timestamp);
+    const stableState = stableKey ? savedState[stableKey] : undefined;
     if (
         stableState
         && (!resultSetId || !stableState.resultSetId || stableState.resultSetId === resultSetId)
@@ -330,8 +442,9 @@ export function getSavedStateFor(
         return stableState;
     }
     // Read states written by versions before stable result identities existed.
-    if (resultSetId) {
-        const legacyState = savedState[`${source}:${rsIndex}:${timestamp}`];
+    if (resultSetId && timestamp !== undefined) {
+        const legacyKey = buildGridStateKey(source, rsIndex, undefined, timestamp);
+        const legacyState = legacyKey ? savedState[legacyKey] : undefined;
         if (legacyState && (!legacyState.resultSetId || legacyState.resultSetId === resultSetId)) {
             return legacyState;
         }
@@ -344,8 +457,7 @@ export function findScrollStateBySource(
     rsIndex: number,
     resultSetId?: string,
 ): SavedGridState | null {
-    const savedState = getHostState() as Record<string, SavedGridState> | null;
-    if (!savedState) return null;
+    const savedState = readGridState().entries;
 
     const prefix = `${sourceUri}:${rsIndex}:`;
     for (const key of Object.keys(savedState)) {
