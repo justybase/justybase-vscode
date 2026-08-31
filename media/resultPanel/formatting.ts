@@ -408,7 +408,7 @@ function applyFormatting(options: ResultFormattingPanelOptions = {}) {
 }
 
 function getCurrentGridFont(): string {
-    var v = document.documentElement.style.getPropertyValue('--justybase-results-grid-font-family').trim();
+    let v = document.documentElement.style.getPropertyValue('--justybase-results-grid-font-family').trim();
     if (!v) {
         v = getComputedStyle(document.documentElement).getPropertyValue('--justybase-results-grid-font-family').trim();
     }
@@ -473,7 +473,7 @@ export function openResultFormattingPanel(options: ResultFormattingPanelOptions 
     bindPreviewListeners();
 
     // Font dropdown: select current font
-    var currentFont = getCurrentGridFont();
+    const currentFont = getCurrentGridFont();
     selectFontInDropdown(currentFont);
 
     // Font auto-save on change
@@ -483,7 +483,7 @@ export function openResultFormattingPanel(options: ResultFormattingPanelOptions 
             const newFont = fontSelect.value;
         if (newFont === 'editor') {
             // Use editor font - read from CSS or fallback to default
-            var editorFont = getComputedStyle(document.body).getPropertyValue('--vscode-editor-font-family').trim();
+            const editorFont = getComputedStyle(document.body).getPropertyValue('--vscode-editor-font-family').trim();
             if (editorFont) {
                 setGridFont(editorFont);
             } else {
