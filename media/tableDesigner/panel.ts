@@ -2,6 +2,7 @@ import type {
     TableDesignerColumn,
     TableDesignerHostToWebviewMessage,
     TableDesignerInitialContext,
+    TableDesignerWebviewToHostMessage,
 } from './hostContracts.js';
 import { eventTargetAsHtmlElement, eventTargetAsInput, getElementById } from './dom.js';
 import { postToHost } from './protocol.js';
@@ -228,7 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const ddl = getElementById<HTMLTextAreaElement>('ddlPreview')?.value ?? '';
-        postToHost({ command: 'executeDDL', ddl });
+        postToHost({ command: 'executeDDL', ddl } satisfies TableDesignerWebviewToHostMessage);
     });
 
     getElementById('saveAsSqlBtn')?.addEventListener('click', () => {

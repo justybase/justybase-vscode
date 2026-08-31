@@ -1,7 +1,9 @@
 import type {
     BackgroundValidationProgress,
+    ImportWizardHostToWebviewMessage,
     ImportWizardPreviewKind,
     ImportWizardState,
+    ImportWizardWebviewToHostMessage,
 } from './hostContracts.js';
 import {
     eventTargetAsInput,
@@ -488,7 +490,7 @@ function render(): void {
     attachListeners();
 }
 
-window.addEventListener('message', event => {
+window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebviewMessage>) => {
     const message = asHostMessage(event.data || {});
     switch (message.type) {
         case 'sessionInitialized':
@@ -546,4 +548,4 @@ window.addEventListener('message', event => {
 });
 
 render();
-postToHost({ type: 'ready' });
+postToHost({ type: 'ready' } satisfies ImportWizardWebviewToHostMessage);

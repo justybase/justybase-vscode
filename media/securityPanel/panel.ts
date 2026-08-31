@@ -1,5 +1,7 @@
 import type {
     PermissionPayload,
+    SecurityPanelHostToWebviewMessage,
+    SecurityPanelWebviewToHostMessage,
     SecurityPrincipal,
 } from './hostContracts.js';
 import { getElementById } from './dom.js';
@@ -42,7 +44,7 @@ let principals: SecurityPrincipal[] = [];
 
 if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
-        postToHost({ command: 'loadData' });
+        postToHost({ command: 'loadData' } satisfies SecurityPanelWebviewToHostMessage);
     });
 }
 
@@ -90,7 +92,7 @@ if (executeBtn) {
     });
 }
 
-window.addEventListener('message', event => {
+window.addEventListener('message', (event: MessageEvent<SecurityPanelHostToWebviewMessage>) => {
     const message = asHostMessage(event.data);
 
     switch (message.command) {

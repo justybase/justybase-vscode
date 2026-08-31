@@ -2,11 +2,13 @@ import type {
     SessionMonitorAlert,
     SessionMonitorAlertSettings,
     SessionMonitorData,
+    SessionMonitorHostToWebviewMessage,
     SessionMonitorOverview,
     SessionMonitorResources,
     SessionMonitorStorageInfo,
     SessionMonitorViewState,
     SessionMonitorScalar,
+    SessionMonitorWebviewToHostMessage,
 } from './hostContracts.js';
 import { postToHost, asHostMessage } from './protocol.js';
 import { getElementById, queryHtml, eventTargetAsInput } from './dom.js';
@@ -76,7 +78,7 @@ const queryUserFilter = getElementById<HTMLInputElement>('queryUserFilter');
 // Event Listeners
 if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
-        postToHost({ command: 'refresh' });
+        postToHost({ command: 'refresh' } satisfies SessionMonitorWebviewToHostMessage);
     });
 }
 
@@ -124,7 +126,7 @@ tabButtons.forEach(btn => {
 });
 
 // Message handling from extension
-window.addEventListener('message', event => {
+window.addEventListener('message', (event: MessageEvent<SessionMonitorHostToWebviewMessage>) => {
     const message = asHostMessage(event.data);
 
     switch (message.command) {

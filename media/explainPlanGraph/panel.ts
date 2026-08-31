@@ -2,6 +2,7 @@ import type {
     CanvasPoint,
     ExplainPlanGraphNode,
     ExplainPlanGraphPayload,
+    ExplainPlanGraphWebviewToHostMessage,
     NodeDragState,
     PanDragState,
     TransformState,
@@ -70,7 +71,7 @@ function renderEmptyPlanState(): void {
 
 function registerEvents(): void {
     copyBtn?.addEventListener('click', () => {
-        postToHost({ command: 'copyPlan' });
+        postToHost({ command: 'copyPlan' } satisfies ExplainPlanGraphWebviewToHostMessage);
     });
 
     zoomInBtn?.addEventListener('click', () => {
