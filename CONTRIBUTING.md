@@ -27,6 +27,22 @@ npx playwright test --config=test-harness/playwright.config.ts \
   test-harness/tests/table-rendering.spec.ts
 ```
 
+The quality ratchet can be run independently while iterating:
+
+```bash
+npm run test:quality-tools
+npm run lint:extended:check
+npm run test:coverage
+npm run quality:report
+```
+
+`test:coverage` enforces the repository floors recorded in
+`quality/quality-baseline.json`. For changes under its high-risk `src/` roots,
+run `npm run test:coverage:changed` after fetching the base branch; the gate
+requires 80% changed-line and 70% changed-branch coverage. `quality:report`
+writes the ignored, schema-versioned evidence bundle under
+`artifacts/quality/` and never belongs in a commit.
+
 The Extension Host gate uses temporary SQLite data. It also verifies a real
 virtualized grid: a 144-row, wide result is scrolled vertically and
 horizontally, switched through Logs and another source, and checked using the
@@ -60,3 +76,12 @@ Use Conventional Commits (`feat(scope): ...`, `fix(scope): ...`,
 describe the behavior change, compatibility impact, security/data risk, and
 the validation commands that were run. Include screenshots only for controlled
 fixtures; review them for SQL and row values before sharing.
+
+Classify the change as low, medium, or high risk. Medium- and high-risk PRs
+must include the affected state/contract boundary, a state and failure matrix,
+nearest real integration/browser/Extension Host evidence, and cleanup details
+for timers, listeners, workers, requests, temporary files, connections, and
+database sessions. A mocked happy path is not sufficient for persisted state,
+streaming, cancellation, execution, migrations, authentication, writes, or
+shared contracts. The full Jest suite must terminate naturally; do not use
+forced-exit flags to hide a teardown failure.

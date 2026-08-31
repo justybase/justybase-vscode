@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { lintSummary, sha256 } from './quality-gate.mjs';
+import { assertLintRatchet, lintSummary, sha256 } from './quality-gate.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const artifactRoot = path.join(root, 'artifacts', 'quality');
@@ -30,7 +30,7 @@ function sourceFiles(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
     if (entry.isDirectory()) output.push(...sourceFiles(file));
-    else if (/\.tsx?$/u.test(entry.name) && !/(?:\.d\.ts|\.test\.|/__tests__\/)/u.test(file)) output.push(file);
+    else if (/\.tsx?$/u.test(entry.name) && !/(?:\.d\.ts|\.test\.|\/__tests__\/)/u.test(file)) output.push(file);
   }
   return output;
 }
@@ -46,13 +46,21 @@ function filesWithSuffix(directory, suffix) {
   return output;
 }
 
-function documentationSummary() {
+function documentationSummary(log = '') {
   const roadmap = readTextIfPresent(path.join(root, 'docs', 'PROJECT_QUALITY_ROADMAP.md'));
   const audited = roadmap.match(/^Last audited:\s*(\d{4}-\d{2}-\d{2})\s*$/mu)?.[1] ?? null;
   const age = audited ? Math.max(0, Math.floor((Date.now() - Date.parse(`${audited}T00:00:00Z`)) / 86_400_000)) : null;
-  let pages = 0;
-  if (fs.existsSync(path.join(root, '_site'))) pages = filesWithSuffix(path.join(root, '_site'), '.html').length;
-  return { checkStatus: fs.existsSync(path.join(root, '_site')) ? 'pass' : 'missing', generatedPages: pages, roadmapLastAudited: audited, roadmapAgeDays: age };
+  const builtPages = log.match(/Documentation site built:\s*(\d+) pages?/iu)?.[1];
+  let pages = builtPages === undefined ? 0 : Number(builtPages);
+  if (builtPages === undefined && fs.existsSync(path.join(root, '_site'))) {
+    pages = filesWithSuffix(path.join(root, '_site'), '.html').length;
+  }
+  const checkStatus = /docs:check passed/iu.test(log)
+    ? 'pass'
+    : log.trim().length > 0
+      ? 'fail'
+      : fs.existsSync(path.join(root, '_site')) ? 'pass' : 'missing';
+  return { checkStatus, generatedPages: pages, roadmapLastAudited: audited, roadmapAgeDays: age };
 }
 
 export function buildReport({ commit = 'unknown', base = null, dirty = false, jest, coverage, lint, audit, docs, log = '' } = {}) {
@@ -60,6 +68,12 @@ export function buildReport({ commit = 'unknown', base = null, dirty = false, je
   const lintData = lint ?? { results: [] };
   const lintResult = lintData.results ? lintSummary(lintData.results) : lintData;
   const auditMetadata = audit?.metadata?.vulnerabilities;
+  const vulnerabilities = auditMetadata ?? { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 };
+  const auditStatus = audit === undefined
+    ? 'missing'
+    : auditMetadata && (Number(vulnerabilities.high) > 0 || Number(vulnerabilities.critical) > 0)
+      ? 'fail'
+      : auditMetadata ? 'pass' : 'missing';
   const report = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -83,8 +97,8 @@ export function buildReport({ commit = 'unknown', base = null, dirty = false, je
       overLimit: sourceFiles(path.join(root, 'src')).map(file => ({ path: relative(file), lines: countLines(file) })).filter(item => item.lines > baseline.largeModuleLineLimit).sort((a, b) => b.lines - a.lines),
     },
     dependencies: {
-      auditStatus: auditMetadata ? 'pass' : (audit ? 'fail' : 'missing'),
-      vulnerabilities: auditMetadata ?? { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 },
+      auditStatus,
+      vulnerabilities,
     },
     documentation: docs ?? documentationSummary(),
     ci: {
@@ -128,14 +142,29 @@ function main() {
     coverage: readJsonIfPresent(path.join(root, 'coverage', 'coverage-summary.json')),
     lint: { results: readJsonIfPresent(path.join(artifactRoot, 'lint.json')) ?? [] },
     audit: readJsonIfPresent(path.join(artifactRoot, 'audit.json')),
-    docs: documentationSummary(),
+    docs: documentationSummary(readTextIfPresent(path.join(artifactRoot, 'docs.log'))),
     log: readTextIfPresent(path.join(artifactRoot, 'jest.log')),
   });
   fs.mkdirSync(artifactRoot, { recursive: true });
   fs.writeFileSync(path.join(artifactRoot, 'quality-report.v1.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   fs.writeFileSync(path.join(artifactRoot, 'quality-report.v1.md'), markdown(report), 'utf8');
   console.log(markdown(report));
-  if (!report.tests.naturalExit) process.exitCode = 1;
+  const coverageFailures = Object.entries(baseline.coverage)
+    .filter(([metric, floor]) => report.coverage[metric] < floor)
+    .map(([metric, floor]) => `${metric} coverage ${report.coverage[metric]}% < ${floor}%.`);
+  const lintFailures = assertLintRatchet(report.lint, baseline);
+  const failures = [
+    ...coverageFailures,
+    ...lintFailures,
+    ...(report.tests.naturalExit ? [] : ['Jest did not terminate naturally.']),
+    ...(report.tests.suites.failed > 0 || report.tests.tests.failed > 0 ? ['Jest reported failed tests.'] : []),
+    ...(report.dependencies.auditStatus === 'fail' ? ['Dependency audit reported high/critical vulnerabilities or failed.'] : []),
+    ...(report.documentation.checkStatus !== 'pass' ? ['Documentation check did not pass.'] : []),
+  ];
+  if (failures.length > 0) {
+    for (const failure of failures) console.error(failure);
+    process.exitCode = 1;
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

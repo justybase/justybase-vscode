@@ -667,7 +667,10 @@ END_PROC;`;
     expect(positionAtSpy).not.toHaveBeenCalled();
     expect(result.data.length).toBeGreaterThan(0);
     // Lex-only path on large scripts should stay responsive on EH.
-    expect(elapsedMs).toBeLessThan(150);
+    // Istanbul instrumentation changes this synchronous hot path substantially;
+    // the CI unit job runs the same assertion separately without coverage.
+    const coverageInstrumented = Object.prototype.hasOwnProperty.call(globalThis, '__coverage__');
+    if (!coverageInstrumented) expect(elapsedMs).toBeLessThan(150);
   });
 
   it('returns sync lex-only tokens immediately when debounce is active', () => {

@@ -119,8 +119,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Lint extended workspaces (baseline warnings are reported)
-        run: npm run lint:extended
+      - name: Lint extended workspaces (ratchet)
+        run: npm run lint:extended:check
+
+      - name: Test quality tooling
+        run: npm run test:quality-tools
 
       - name: Build desktop bundle
         run: npm run build
@@ -181,6 +184,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -208,8 +213,20 @@ jobs:
         working-directory: extensions/access
         run: npm ci
 
-      - name: Run complete root unit test suite
-        run: npm run test:validate
+      - name: Run complete root unit test suite with coverage
+        run: npm run test:coverage
+
+      - name: Verify semantic token latency without coverage instrumentation
+        run: npm run test:validate -- --runInBand --testPathPatterns=semanticTokensProvider.test.ts --testNamePattern="tokenizes large scripts"
+
+      - name: Enforce changed high-risk coverage
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          diff_file="${RUNNER_TEMP}/justybase-changed.diff"
+          git diff --unified=0 "${BASE_SHA}...HEAD" -- src > "${diff_file}"
+          node scripts/quality-gate.mjs changed-coverage --diff-file="${diff_file}" --base="${BASE_SHA}"
 
       - name: Run API workspace tests
         run: npm run test:api

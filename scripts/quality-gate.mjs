@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDirectory, '..');
 const baselinePath = path.join(root, 'quality', 'quality-baseline.json');
+const workspaceAreas = new Set(['src', 'media', 'apps', 'packages', 'extensions', 'Benchmark', 'scripts']);
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -19,6 +20,17 @@ function normalizePath(value) {
 }
 
 function relativePath(file) {
+  const normalizedFile = normalizePath(file);
+  const normalizedRoot = normalizePath(root).replace(/\/$/u, '');
+  if (normalizedFile === normalizedRoot || normalizedFile.startsWith(`${normalizedRoot}/`)) {
+    return normalizedFile.slice(normalizedRoot.length + 1);
+  }
+  // ESLint fixtures and some CI reporters can provide an absolute path rooted
+  // outside this checkout. Recover the workspace-relative portion so area
+  // aggregation remains stable across machines and runner directories.
+  const segments = normalizedFile.split('/');
+  const areaIndex = segments.findIndex(segment => workspaceAreas.has(segment));
+  if (areaIndex >= 0) return segments.slice(areaIndex).join('/');
   return normalizePath(path.relative(root, file));
 }
 
