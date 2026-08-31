@@ -3,7 +3,7 @@
  * until the user runs global filter search (Ctrl+F / filter box).
  */
 import { clearAllSearchMatches, getSearchWorker } from './state.js';
-import { getActiveSourceUri, getResultSetAt } from './types.js';
+import { getResultSetAt } from './types.js';
 
 /** Row count at which global filter uses the background worker instead of TanStack inline scan. */
 export const GLOBAL_FILTER_WORKER_ROW_THRESHOLD = 20000;

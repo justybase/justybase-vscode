@@ -229,7 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const ddl = getElementById<HTMLTextAreaElement>('ddlPreview')?.value ?? '';
-        postToHost({ command: 'executeDDL', ddl });
+        postToHost({ command: 'executeDDL', ddl } satisfies TableDesignerWebviewToHostMessage);
     });
 
     getElementById('saveAsSqlBtn')?.addEventListener('click', () => {

@@ -169,7 +169,7 @@ export function buildColumnsWithKeysQuery(
   database: string,
   schema?: string,
   tableName?: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   _objTypes?: string[],
 ): string {
   const catalogPrefix = buildCatalogPrefix(database);
