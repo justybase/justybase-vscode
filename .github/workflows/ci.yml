@@ -199,6 +199,11 @@ jobs:
         working-directory: extensions/clickhouse
         run: npm ci
 
+      - name: Install DuckDB extension dependencies
+        if: hashFiles('extensions/duckdb/package-lock.json') != ''
+        working-directory: extensions/duckdb
+        run: npm ci
+
       - name: Install Access DuckDB runtime
         working-directory: extensions/access
         run: npm ci

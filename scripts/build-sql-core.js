@@ -13,7 +13,7 @@ esbuild.buildSync({
   format: 'cjs',
   target: 'node22',
   outfile: output,
-  external: ['@justybase/contracts', 'chevrotain', 'vscode', 'vscode-languageserver', 'vscode-languageserver-textdocument'],
+  external: ['@justybase/contracts', 'vscode', 'vscode-languageserver', 'vscode-languageserver-textdocument'],
   sourcemap: true,
 });
 fs.copyFileSync(path.join(root, 'packages/sql-core/src/index.d.ts'), path.join(root, 'packages/sql-core/dist/index.d.ts'));
