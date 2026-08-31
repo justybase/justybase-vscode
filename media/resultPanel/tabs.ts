@@ -293,7 +293,7 @@ function showContextMenu(e: MouseEvent, index: number): void {
     const closeAllItem = createMenuItem('Close All Results', () => {
         vscode.postMessage({
             command: 'closeAllResults',
-            sourceUri: getActiveSourceUri()
+            sourceUri: requireActiveSourceUri()
         });
     });
     menu.appendChild(closeAllItem);
