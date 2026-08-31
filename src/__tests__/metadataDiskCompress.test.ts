@@ -38,14 +38,19 @@ describe('metadataDiskCompress', () => {
 
         worker.emit('exit', 1);
 
-        const buffer = await Promise.race([
-            pending,
-            new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('compression hung')), 500);
-            }),
-        ]);
+        let timeout: NodeJS.Timeout | undefined;
+        try {
+            const buffer = await Promise.race([
+                pending,
+                new Promise<never>((_, reject) => {
+                    timeout = setTimeout(() => reject(new Error('compression hung')), 500);
+                }),
+            ]);
 
-        expect(buffer[0]).toBe(0x1f);
-        expect(buffer[1]).toBe(0x8b);
+            expect(buffer[0]).toBe(0x1f);
+            expect(buffer[1]).toBe(0x8b);
+        } finally {
+            if (timeout) clearTimeout(timeout);
+        }
     });
 });

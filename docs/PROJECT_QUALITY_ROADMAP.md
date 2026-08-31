@@ -77,10 +77,10 @@ backward compatibility at the closest production boundary.
 
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
-| QG01 | P0 | M | Build/CI maintainer | planned | Add a reproducible ignored quality report covering tests, coverage, lint warnings, large modules, skipped tests, dependency audit, documentation freshness, and CI inputs. Use a versioned JSON schema plus a short Markdown summary. |
-| QG02 | P0 | S | Repository maintainer | planned | Apply the risk-based definition of done in the PR template and developer guide. High-risk changes must identify their state/failure matrix and verification layers. |
-| QG03 | P0 | M | Test maintainer | planned | Ratchet root coverage without lowering the baseline: initial global floors of 71% statements, 58% branches, 76% functions, and 72% lines. Changed high-risk code must reach 80% lines and 70% branches. Exclude generated files explicitly. |
-| QG04 | P0 | M | Frontend maintainer | planned | Snapshot the 452-warning extended-lint baseline, fail on increases, and reduce it to at most 300, then 100, then zero. Result Panel warnings are the first burn-down target. |
+| QG01 | P0 | M | Build/CI maintainer | done | Added the ignored, schema-versioned quality report (`quality/quality-report.v1.schema.json`) and reproducible artifact command (`npm run quality:report`). Evidence: `scripts/quality-report.mjs`, `scripts/quality-tools.test.mjs`. Verified 2026-08-31. |
+| QG02 | P0 | S | Repository maintainer | done | Applied the risk-based definition of done, state/failure matrix, and cleanup evidence to the PR template and contributor guide. Evidence: `.github/pull_request_template.md`, `CONTRIBUTING.md`. Verified 2026-08-31. |
+| QG03 | P0 | M | Test maintainer | done | Enforced global floors of 71% statements, 58% branches, 76% functions, and 72% lines, plus 80% changed-line/70% changed-branch coverage for high-risk `src/` roots. Evidence: `jest.config.js`, `scripts/quality-gate.mjs`, CI unit job. Verified 2026-08-31. |
+| QG04 | P0 | M | Frontend maintainer | in-progress | Frozen the extended-lint baseline at 162 warnings (146 `media`, 7 `apps`, 7 `packages`, 2 `extensions`), made increases blocking, and reduced the first Result Panel target below the 300-warning milestone. Next target: 100 warnings. Evidence: `quality/quality-baseline.json`, `npm run lint:extended:check`. Verified 2026-08-31. |
 | QG05 | P1 | S recurring | Repository maintainer | planned | Review this scorecard monthly. A `done` item must include evidence links, verification date, and any follow-up risk; stale or contradicted status returns to `planned`. |
 
 Long-term exit criteria are at least 80% global line coverage, 70% branch
@@ -107,7 +107,7 @@ silently applies data belonging to another result identity.
 
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
-| TQ01 | P0 | M | Test infrastructure owner | planned | Find the leaked Jest handle with focused `--detectOpenHandles` runs. The complete suite must terminate naturally. An explicitly selected live command must fail on missing configuration; optional CI jobs may remain conditional before selection. |
+| TQ01 | P0 | M | Test infrastructure owner | done | Fixed the unit network guard so blocked sockets emit an asynchronous error and database-driver timeout cleanup runs. The complete suite now terminates naturally without forced exit. Evidence: `src/__tests__/unitNetworkGuard.setup.ts`, `src/__tests__/metadataDiskCompress.test.ts`, `npm run test:validate`. Verified 2026-08-31. |
 | TQ02 | P0 | L | Test maintainer | planned | Raise coverage first in migration, activation, views, commands, editors, imports, and exports. Reach the changed-code gate before increasing global thresholds toward 80% lines/70% branches. |
 | TQ03 | P0 | XL | UI owners | planned | Define and automate a state contract for every stateful panel: identity, stored fields, transitions, invalidation, restoration, failure, disposal, and backward compatibility. Result Panel is the reference implementation. |
 | TQ04 | P0 | L | Web owner | planned | Add jsdom and Testing Library coverage for React tabs, editor preferences, connection dialogs, schema navigation, result-grid state, errors, cancellation, and reload restoration. The current three reducer tests are insufficient for the shipped surface. |
@@ -186,7 +186,7 @@ Assertions and layers:
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | DQ01 | P0 | M | Documentation owner | in-progress | Reconcile the web parity audit with executable evidence. Implemented aggregation, grouping, pivot, virtualization, and related grid capabilities must not remain listed as missing. |
-| DQ02 | P0 | M | Test/documentation owners | in-progress | Make the testing strategy own risk tiers, stateful-test contracts, live-suite selection, coverage ratchets, flake policy, and required CI layers. |
+| DQ02 | P0 | M | Test/documentation owners | done | Testing strategy now owns risk tiers, stateful-test contracts, live-suite selection, coverage ratchets, flake policy, and quality-tooling gates. Evidence: `docs/TESTING_STRATEGY.md`, CI quality/unit jobs. Verified 2026-08-31. |
 | DQ03 | P1 | L | Documentation tooling owner | planned | Validate roadmap IDs, statuses, review dates, evidence links, and machine-verifiable feature claims in `docs:check`. |
 | DQ04 | P1 | XL | Product/architecture owners | planned | Move capability status toward a generated registry consumed by tests and documentation so implementation and parity claims cannot drift independently. |
 | DQ05 | P1 | M | Documentation owner | planned | Clearly label canonical guides, implementation contracts, runbooks, historical notes, and active backlogs; archive or redirect duplicate sources. |
@@ -232,6 +232,23 @@ and every P0 item has an owner role and measurable acceptance criteria.
 
 Exit: full tests terminate naturally, quality cannot regress silently, and
 high-risk UI/transport changes have enforceable contracts.
+
+### Phase 1A — Quality ratchet (delivered 2026-08-31)
+
+- Add a versioned quality baseline/report and machine-readable lint/coverage
+  gates.
+- Enforce the initial root coverage floors and changed high-risk coverage in CI.
+- Replace the obsolete branch-only PR checklist with risk, state/failure, and
+  cleanup evidence requirements.
+- Reduce the first Result Panel lint-warning target to 162 warnings and make
+  increases blocking.
+- Remove the known unit-test timeout leak; the complete Jest suite exits
+  naturally.
+
+Exit evidence: `npm run test:quality-tools`, `npm run lint:extended:check`,
+`npm run test:validate`, `npm run docs:check`, and `npm run check-types:media`.
+The next quality-ratchet target is 100 extended-lint warnings while Phase 1
+continues with state-contract and protocol work.
 
 ### Phase 2 — Reliability and decomposition
 
