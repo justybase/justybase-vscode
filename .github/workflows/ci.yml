@@ -194,6 +194,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install ClickHouse extension dependencies
+        if: hashFiles('extensions/clickhouse/package-lock.json') != ''
+        working-directory: extensions/clickhouse
+        run: npm ci
+
       - name: Install Access DuckDB runtime
         working-directory: extensions/access
         run: npm ci
@@ -226,7 +231,7 @@ jobs:
         run: npm ci
 
       - name: Run real VS Code result-panel scenario
-        run: npm run test:extension-host
+        run: xvfb-run -a npm run test:extension-host
 
   local-integration:
     name: Local Runtime Integration (DuckDB / File SQL / Access)
