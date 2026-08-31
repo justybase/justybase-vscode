@@ -89,11 +89,15 @@ export function parseLcov(source) {
 
 function findLcovRecord(records, file) {
   const wanted = relativePath(file);
+  const basenameMatches = [];
+
   for (const [source, record] of records) {
     const normalized = normalizePath(source);
-    if (normalized === wanted || normalized.endsWith(`/${wanted}`) || path.basename(normalized) === path.basename(wanted)) return record;
+    if (normalized === wanted || normalized.endsWith(`/${wanted}`)) return record;
+    if (path.basename(normalized) === path.basename(wanted)) basenameMatches.push(record);
   }
-  return undefined;
+
+  return basenameMatches.length === 1 ? basenameMatches[0] : undefined;
 }
 
 export function parseChangedLines(diff) {

@@ -36,6 +36,10 @@ function stringField(key: string): FieldRule {
     return message => hasString(message, key);
 }
 
+function stringValueField(key: string): FieldRule {
+    return message => typeof message[key] === 'string';
+}
+
 function indexField(key: string): FieldRule {
     return message => isIndex(message[key]);
 }
@@ -135,7 +139,11 @@ const webviewRules: Record<string, FieldRule> = {
     clearLogs: stringSource,
     switchResultSet: all(stringSource, resultIndex),
     selectionStatsChanged: message => message.stats === null || isRecord(message.stats),
-    insertCellContent: stringField('text'),
+    insertCellContent: all(
+        stringValueField('text'),
+        optional('dataType', stringValueField('dataType')),
+        optional('sqlText', stringValueField('sqlText')),
+    ),
     updateResultFormatting: all(stringSource, oneOfField('scope', ['global', 'connection', 'result', 'column']), message => message.settings !== undefined),
     saveEdits: all(stringSource, resultIndex, objectField('editSource'), arrayField('edits'), message => hasString(message.editSource as MessageRecord, 'table')),
     webviewFocused: noPayload,

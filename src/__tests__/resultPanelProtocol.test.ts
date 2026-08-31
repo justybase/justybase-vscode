@@ -52,6 +52,29 @@ describe('result panel protocol', () => {
         });
     });
 
+    it('accepts empty display text when inserting an empty SQL string literal', () => {
+        const runtime: {
+            parseResultPanelWebviewMessage: (message: unknown) => unknown;
+        } = require('../contracts/webviews/resultPanelRuntime');
+
+        expect(runtime.parseResultPanelWebviewMessage({
+            command: 'insertCellContent',
+            text: '',
+            dataType: 'text',
+            sqlText: "''",
+        })).toEqual({
+            command: 'insertCellContent',
+            text: '',
+            dataType: 'text',
+            sqlText: "''",
+        });
+        expect(runtime.parseResultPanelWebviewMessage({
+            command: 'insertCellContent',
+            text: null,
+            sqlText: "''",
+        })).toBeUndefined();
+    });
+
     it('accepts every declared command when its required payload is present', () => {
         const runtime: {
             parseResultPanelWebviewMessage: (message: unknown) => unknown;
