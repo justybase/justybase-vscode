@@ -5,7 +5,7 @@ Last updated: 2026-08-31
 This document is the **feature-by-feature parity audit** between the two products shipped
 from this repository:
 
-- **Desktop** — the VS Code extension (`src/`, `media/`, `extensions/`, 152 palette commands).
+- **Desktop** — the VS Code extension (`src/`, `media/`, `extensions/`, 158 core palette commands).
 - **Web** — `apps/web` (React + Monaco + TanStack) + `apps/api` (Fastify server) running the
   shared SQL core.
 
@@ -15,6 +15,9 @@ from this repository:
 > Companion implementation references: `docs/LSP_FEATURE_MATRIX.md` (LSP transport),
 > `docs/EDITOR_CAPABILITY_MATRIX.md` (desktop editor capability status),
 > `docs/WEB_EDITOR.md` (how to run the web editor).
+> Cross-cutting readiness and quality gates are owned by
+> `docs/PROJECT_QUALITY_ROADMAP.md`; parity status alone does not make a feature
+> production-ready.
 
 ---
 
@@ -65,18 +68,20 @@ P0 = safety/regression risk, P1 = high value for cost, P2 = nice-to-have.
 
 | Domain | Full parity | Value | Effort to reach parity |
 | --- | --- | --- | --- |
-| D1 – SQL language / editor intelligence | ✅ base, ❌ most surface | High | **M** (mostly wiring) |
-| D2 – Query execution pipeline | 🟡 | High | M–L |
-| D3 – Results grid | 🟡 | High | M–L |
+| D1 – SQL language / editor intelligence | ✅ broad, 🟡 code actions | High | **M** |
+| D2 – Query execution pipeline | ✅ broad, 🟡 desktop-specific depth | High | S–M |
+| D3 – Results grid | ✅ core depth, 🟡 advanced analysis | High | M |
 | D4 – Schema explorer / metadata | 🟡 | Medium | S–M |
 | D5 – Database Ops (import/DDL/DBA) | ❌ large | Medium-High | L–XL |
 | D6 – Multi-dialect support | ❌ | Medium | L–XL |
 | D7 – Platform (auth/security/multi-user) | ✅ + web-native | High | S |
 | D8 – AI / MCP / notebooks / ETL / ERD | ❌ | Medium | XL |
 
-Fast summary: web currently covers **SQL authoring + running + results + schema browsing**
-well. The gaps are **editor intelligence feathers** (cheap), **grid depth** (medium),
-**database operations** and **multi-dialect** (large).
+Fast summary: web covers **SQL authoring, single/smart/script execution, result
+exploration, guarded writes, and schema browsing** well. The principal gaps are
+remaining code actions, desktop-only database administration, advanced result
+analysis, and remote multi-dialect runtimes. Test depth for the React surface is
+materially behind its implemented functionality; see the quality roadmap.
 
 ---
 
@@ -126,15 +131,15 @@ well. The gaps are **editor intelligence feathers** (cheap), **grid depth** (med
 | Feature | Desktop | Web | Status | Notes |
 | --- | --- | --- | --- | --- |
 | Single query run | ✅ | ✅ | ✅ | `startQuery` + WS events. |
-| Multiple / batch run | ✅ `runQueryBatch` / continue-on-error | ❌ | M | Web runs one statement per tab; reuse `queryBatchExecutor` semantics for "run all". |
-| Statement select / run-all | ✅ `runStatement`, lens | ❌ | S | Take 1 selected statement from Monaco selection before `startQuery`. |
+| Multiple / batch run | ✅ `runQueryBatch` / continue-on-error | ✅ script execution and per-statement results | 🟡 | Web has smart/script modes, statement states, cancellation, and failed-statement retry; desktop's explicit continue-on-error command remains distinct. |
+| Statement selection / cursor statement | ✅ `runStatement`, lens | ✅ | ✅ | Monaco selection runs directly; otherwise `cursorOffset` selects the statement under the cursor. |
 | Query cancellation | ✅ | ✅ | ✅ | Esc + Ctrl-Enter, WS/Cancel route. |
 | Result session (disk spool) | ✅ | ✅ | ✅ | API spool per user; paging server-side. |
 | Server-side sort / filter / global search | ✅ | ✅ | ✅ | `QueryPageRequest` with `QuerySortSpec`, `columnFilters`, `globalFilter`. |
 | Row limit banner | ✅ `updateResultLimitBanner` | ✅ status shows row-limit note | 🟡 | polish only. |
-| Serial/smart query | ✅ | ❌ | S | Just a run-mode flag in web. |
+| Serial/smart query | ✅ | ✅ | ✅ | Web exposes run, smart, and batch/script modes. |
 | History | ✅ | ✅ (panel + tab) | ✅ | web `HistoryPanel`. |
-| Explain Plan | ✅ `explainQuery` + webview | ❌ | M | Add EXPLAIN renderer (tree/timeline). |
+| Explain Plan | ✅ `explainQuery` + webview | ✅ `ExplainPanel` | ✅ | Uses provider-specific EXPLAIN SQL and renders output for the active statement. |
 | Explain Plan (graph) | ✅ | ❌ | L | separate visualizer (graphviz) — lower priority. |
 | Tuning advisor | ✅ `tuningAdvisor` | ❌ | L | optional; part of D5-adjacent. |
 
@@ -151,40 +156,37 @@ well. The gaps are **editor intelligence feathers** (cheap), **grid depth** (med
 | Column resize / pin / reorder | ✅ | ✅ | ✅ | |
 | Row selection + Copy as TSV | ✅ | ✅ copy current page | 🟡 | desktop copies *all* rows (spool); web copies loaded page (current view). |
 | Cell formatting (type-aware) | ✅ | ✅ | ✅ | numbers/dates/bools aligned; precision kept. |
-| Aggregations (SUM/AVG/MIN/MAX) | ✅ `grid/aggregation.ts` | ❌ | M | TanStack ‑ new `category` group or per-column footer in web. |
-| Grouping / **alternate views** (cards / pivot) | ✅ `grid/alternateViews.ts` | ❌ | M–L | Pivot is a big one; cards/row-grouping is M. |
+| Aggregations (COUNT/SUM/AVG/MIN/MAX) | ✅ `grid/aggregation.ts` | ✅ full-spool API | ✅ | `/api/query/:id/aggregate` applies current server filters without reducing to the loaded page. |
+| Grouping | ✅ `diskGrouping.ts` | ✅ full-spool API | ✅ | `/api/query/:id/group` supports grouped aggregates and limits. |
+| Alternate views / pivot | ✅ `grid/alternateViews.ts` | ✅ basic pivot | 🟡 | Web pivot is a prompt-driven two-dimension SUM view; desktop has deeper cards/pivot UX. |
 | Column charts / range | ✅ `rangeChart.ts`, mini-chart cards (`analysis.ts`) | ❌ | L | |
-| Context menu (copy value/row as INSERT, column sum, GoTo, filter) | ✅ `selection/contextMenu.ts` | ❌ only placeholder Copy | M | |
-| Row detail / full row viewer | ✅ `rowView.ts` | ❌ | S–M | Monaco-based detail panel; field-level gallery. |
-| Large-data virtualization | ✅ `diskBackedGrid` (200k+) | ❌ | L | currently loads up to page size; fine under `MAX_ROWS`. Add `@tanstack/react-virtual` (already in deps). |
-| Result tabs / multi-query panel | ✅ tabs + container | ✅ single-tab results | 🟡 | web shows results of current tab only. |
-| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ sidebar/prefs only | 🟡 | persist columns order/filter/sort per session. |
+| Context menu | ✅ deep desktop menu | ✅ value/row formats, filter, sort, detail/edit | 🟡 | Desktop additionally exposes database- and analysis-specific actions. |
+| Row detail / full row viewer | ✅ `rowView.ts` | ✅ | ✅ | Web renders all fields for the loaded row. |
+| Large-data virtualization | ✅ disk-backed 200k+ | ✅ virtualized current page + server spool | 🟡 | Web virtualizes the selected server page rather than a continuous 200k-row window. |
+| Result tabs / multi-query panel | ✅ tabs + container | ✅ editor and statement result tabs | ✅ | Results and statement status are retained per editor tab. |
+| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ | 🟡 | Web persists page size, sort, filters, visibility, pinning, and order; state is not yet schema-versioned. |
 
-### D3 deep-dive — what desktop grid does, and the web backlog
+### D3 deep-dive — current web grid and remaining backlog
 
-Key architecture fact: **desktop is a DOM grid with a Node host**; web is a React/TanStack
-grid with a Fastify API. Everything below is **100% web-side work** (no desktop `media/`
-touch, no `src/` touch) except where noted. The desktop computes some aggregations and the
-pivot through **generated SQL** (`media/resultPanel/explore/pivotTab.ts`) and all-rows
-host messages (`media/resultPanel/databaseAggregations.ts`); the web should do the same
-*semantics* but through its own API.
+Key architecture fact: **desktop is a DOM grid with a Node host**; web is a
+React/TanStack grid with a Fastify API. Full-result aggregation and grouping
+already execute against the API SQLite spool; client features operate on the
+loaded page. The renderers remain intentionally separate, while shared public
+request/response types stay additive.
 
 | # | Feature (desktop ref) | Web approach | Effort |
 | --- | --- | --- | --- |
-| G1 | **Full-result aggregations** (SUM/AVG/MIN/MAX/COUNT over the whole spool, not just page) `databaseAggregations.ts`, `grid/aggregation.ts` | New `POST /api/query/:id/aggregate` — compute over the sqlite spool (`querySessions`); render column-footer. TanStack side is trivial. | M |
-| G2 | **Pivot** (generate GROUP BY SQL + grid) `explore/pivotTab.ts` | `POST /api/query/:id/pivot` returns a pivot spec + runs the generated SELECT via existing `startQuery`. Web renders group-row header grid. | M–L |
-| G3 | **Grouping by column** `diskGrouping.ts` | Same generated-SQL machinery as G2 (GROUP BY); reuse. | M (after G2) |
-| G4 | **Context menu** (copy value / copy row as TSV·JSON·SQL INSERT / copy column / filter on value / sort by value) `selection/contextMenu.ts` | Pure client in `ResultGrid.tsx`; clipboard formats generated locally. | S–M |
-| G5 | **Copy formats** beyond TSV (markdown, SQL INSERT, JSON) `selection/clipboard.ts` | Local generators in web (`queryState`/new util). | S |
-| G6 | **Row detail / field gallery** `rowView.ts` | Modal component fed by loaded row. | S |
-| G7 | **Edit-in-place & write-back** (edit cell → UPDATE) `interaction.ts`, `messages.ts saveEdits` | Needs **write path** on API: `POST /api/query/:id/edit` builds `UPDATE table SET … WHERE pk` and runs DML (respects `readOnly` + ownership). Needs PK from metadata. Largest risk-adjacent item (writes to DB) — do last, with confirm + read-only guard. | M–L |
-| G8 | **Large-set virtualization** (smooth scroll of current page, 200k+) `diskBackedGrid` | `@tanstack/react-virtual` already in deps; wrap body rows. Server page limit stays. | S–M |
-| G9 | **Result tabs / multiple query panels** `tabs.ts` | Keep result per editor tab (already 1:1) — polish: preserve result when switching tabs. | S |
-| G10 | **Grid state persistence** (sort/filter/pin/order per result) `persistence.ts` | localStorage keyed by `sessionId` in `ResultGrid`. | S |
-| G11 | **Column trends / range chart** `rangeChart.ts` | SVG chart of current column page — nice-to-have, defer. | L |
+| G1 | Full-result aggregations | ✅ Implemented through `/aggregate`; precision/filter behavior has API tests. | Done |
+| G2 | Grouping and basic pivot | ✅ Grouping and a client pivot are implemented; richer pivot configuration remains. | M polish |
+| G3 | Context and copy formats | ✅ Value, TSV, JSON, Markdown, SQL INSERT, filter, and sort actions are implemented. | Done |
+| G4 | Row detail and guarded edit | ✅ Row detail and preview-token-confirmed update flow are implemented for eligible table results. | M hardening |
+| G5 | Virtualization and server paging | ✅ Implemented; continuous virtual navigation across server pages remains optional. | L |
+| G6 | Result/grid state | ✅ Persisted per query/statement; add versioning, migrations, and deep reload tests. | M quality |
+| G7 | Advanced cards/charts/range analysis | ❌ Desktop-only. | L |
 
-**Suggested order:** G5+G6+G8 (S, immediate polish) → G1+G4 (M, biggest perceived value) →
-G2+G3 (M–L) → G7 (write-back, last, with guardrails) → G11 (defer).
+**Suggested order:** version and deeply test grid state → harden guarded edit and
+copy semantics → improve pivot UX → consider advanced cards/charts only after
+the React coverage gate in the quality roadmap.
 
 **Regression risk:** 🟢 **none to desktop** — this is `apps/web` + `apps/api` only. The one
 rule that applies is the shared-contracts additive rule: any new request/response types
@@ -215,8 +217,8 @@ never re-type existing fields.
 | Insert object/column name into editor | ✅ | ✅ | ✅ | `SchemaTree.insertNode`. |
 | Drag & drop into editor | ✅ | ✅ (basic) | 🟡 | |
 | Inspector (columns, PK/FK, comments) | ✅ | ✅ `InspectorPanel` | ✅ | |
-| Nice-to-have: copy name / Top 1000 / DDL | ✅ | ❌ | S each | actions belong to D5 but deserve real estate. |
-| Favorites / recent objects | ✅ `favoritesManager`, `schemaRecentObjects` | ❌ | M | server-side favorites or localStorage. |
+| Top 1000 / Copy DDL | ✅ | ✅ context menu | 🟡 | Web DDL generation is simpler than provider-specific desktop generators; a dedicated Copy Name action remains absent. |
+| Favorites / recent objects | ✅ `favoritesManager`, `schemaRecentObjects` | ✅ local favorites | 🟡 | Favorites exist; desktop has deeper recent-object integration. |
 | Refresh/invalidate metadata | ✅ | 🟡 | — | Web object/column cache (`lsp.ts`) auto-expires after 5 min TTL; no on-demand invalidation hook (e.g. after DDL) yet. |
 
 ---
@@ -228,29 +230,30 @@ Desktop-only note: Db2 and MySQL now have dedicated **Index Designer** and
 retain their existing command-based index/partition workflows; these are not
 webviews.
 
-| Feature | Desktop | Web | Status | Effort |
-| --- | --- | --- | --- | --- |
-| Select top/1000, per object | ✅ | ❌ | – | S |
-| Generate DDL ($`createDDL`, `goToCatalogDdl`) | ✅ | ❌ | S | desktop uses `generateTableDDL` (`src/dialects/netezza/ddl/tableDDL.ts`) — port the pure generator to an API endpoint. |
-| Copy DDL | ✅ | ❌ | S | |
-| View/Edit data (50k editor) | ✅ | ❌ | M | edits need write-mode path in web (read-only guard exists). |
-| Import CSV/XLSX (smart paste, wizard) | ✅ | ❌ | L | reuse `spreadsheet-tasks`; wizard bigger. |
-| DDL templates (CREATE VIEW/PROC/SEQUENCE/EXT TABLE) | ✅ | ❌ | M | reuse `externalTableTemplates`, `procedureTemplates`. |
-| Comments (table/column) | ✅ | ❌ | S–M | needs DDL-mutating endpoint. |
-| Constraints PK/FK/Unique | ✅ | ❌ | S–M | |
-| Indexes (Netezza/PG/SQLite/Db2/MySQL) | ✅ | ❌ | M | Db2 and MySQL include dedicated Index Designer webviews; PostgreSQL and SQLite use command-based desktop workflows. |
-| Partitions (PG/Db2/MySQL) | ✅ PG commands + Db2/MySQL Partition Manager webviews | ❌ | L | Db2 supports range-partition operations; MySQL supports method-specific RANGE/LIST and HASH/KEY operations; PostgreSQL uses command-based desktop workflows. |
-| Rename table / TRUNCATE / DROP (confirm) | ✅ | ❌ | S–M | execution of DDL with confirmation modal. |
-| Permissions / security panel | ✅ | ❌ | XL | `openSecurityPanel`. |
-| Session monitor | ✅ | ❌ | XL | `showSessionMonitor`. |
-| Tuning advisor | ✅ | ❌ | L | part of explain/tuning tooling. |
-| `changeOwner` (`tableCommands.ts`), `recreateTable`; data-skew check (inside tuning `queryCommandTuning.ts`) | ✅ | ❌ | M | |
-| XLSB/Excel open on export | ✅ (open in Excel) | ❌ | n/a | web just downloads. |
+| Feature | Desktop | Web | Status | Effort | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Select top/1000, per object | ✅ | ✅ | ✅ | – | Schema context menu opens a source-backed query tab. |
+| Generate DDL (`createDDL`, `goToCatalogDdl`) | ✅ provider-specific | 🟡 basic table/view DDL | 🟡 | M | Web Copy DDL does not yet match all provider-specific detail. |
+| Copy DDL | ✅ | ✅ | ✅ | – | Available from the schema object menu. |
+| View/Edit data (50k editor) | ✅ | ✅ guarded row edit | 🟡 | M | Web edit requires eligible source metadata, preview token, explicit confirmation, ownership, and non-read-only profile. |
+| Import CSV/XLSX (smart paste, wizard) | ✅ | ✅ basic file import | 🟡 | L | Web supports preview-token-confirmed CSV/XLSX import; desktop wizard and format depth remain broader. |
+| DDL templates (CREATE VIEW/PROC/SEQUENCE/EXT TABLE) | ✅ | ❌ | ❌ | M | Reuse `externalTableTemplates` and `procedureTemplates`. |
+| Comments (table/column) | ✅ | ❌ | ❌ | S–M | Use the existing guarded write boundary. |
+| Constraints PK/FK/Unique | ✅ | ❌ | ❌ | S–M | Requires provider-specific DDL and metadata refresh. |
+| Indexes (Netezza/PG/SQLite/Db2/MySQL) | ✅ | ❌ | ❌ | M | Db2 and MySQL include dedicated Index Designer webviews; PostgreSQL and SQLite use command-based desktop workflows. |
+| Partitions (PG/Db2/MySQL) | ✅ PG commands + Db2/MySQL managers | ❌ | ❌ | L | Provider syntax and restructuring safety differ materially. |
+| Generic DML/DDL execution with confirmation | ✅ | ✅ | ✅ | – | Web previews exact statements, signs a short-lived token, requires confirmation, and records an audit entry. |
+| Rename table / TRUNCATE / DROP guided actions | ✅ | ❌ | ❌ | S–M | SQL can run through the guarded generic path, but dedicated schema actions are missing. |
+| Permissions / security panel | ✅ | ❌ | ❌ | XL | Desktop command: `openSecurityPanel`. |
+| Session monitor | ✅ | ❌ | ❌ | XL | Desktop command: `showSessionMonitor`. |
+| Tuning advisor | ✅ | ❌ | ❌ | L | Part of explain/tuning tooling. |
+| Owner/recreate/skew workflows | ✅ | ❌ | ❌ | M | Includes change owner, table recreation, and data-skew checks. |
+| XLSB/Excel open on export | ✅ (open in Excel) | ❌ | n/a | – | Browser downloads replace desktop application launch. |
 
-> D5 is the **biggest product-value lever** after D1–D3, but also the biggest *effort*:
-> most mutating commands need a safe **"run DDL script"** endpoint (read-only enforced)
-> — a single generic `POST /api/sql/run` that reuses `database-runtime.executeQuery` + a
-> confirm dialog on the web. That unblocks almost every row in this table at once.
+> The generic write boundary is implemented: read-only profiles reject writes,
+> mutable operations require an exact short-lived preview token and explicit
+> confirmation, and execution is audited. Remaining D5 work is guided workflow
+> depth and provider-specific SQL, not creation of an unguarded generic endpoint.
 
 ---
 
@@ -259,20 +262,14 @@ webviews.
 | DB | Desktop | Web | Status |
 | --- | --- | --- | --- |
 | Netezza | ✅ | ✅ | ✅ |
-| SQLite / DuckDB | ✅ (extensions) | 🟡 local profiles, metadata and query sessions | 🟡 |
+| SQLite / DuckDB | ✅ (extensions) | ✅ local profiles, metadata, query sessions, paging, analysis, and guarded writes | 🟡 product-depth parity |
 | Oracle / PostgreSQL / Vertica / Snowflake / Db2 / MSSQL / MySQL / Access | ✅ (extensions) | ❌ | ❌ |
 
-Web constraints that must change:
-
-- 🛑 `apps/web/src/App.tsx` connection form hard-codes `dbType: 'netezza'`.
-- 🟧 `apps/api/src/store.ts` — `dbType` field type is literal `'netezza'`; `dbType ?? 'netezza'` on insert.
-- 🟧 `apps/api/src/server.ts:156` forces `dbType === 'netezza'`.
-- ✅ `@justybase/contracts` already defines a rich `DatabaseKind` union and
-  `DatabaseDialect` contract; connection traits / translator modules are all **shared**, so a
-  Node-based web backend validates everything except browser-only bits (native drivers).
-- 0️⃣ `apps/api/src/netezza.ts` — the whole metadata layer is Netezza-driver-specific. Need a generic
-  `executeQueryForDialect(profile, sql)` gate in `apps/api/src/dialects.ts` (**planned — file does
-  not exist yet**, mirror `connectionFactory`).
+The web connection contract and form support Netezza, SQLite, and DuckDB.
+Profiles retain a shared `DatabaseKind`; the API selects local database handling
+and provider-specific EXPLAIN/write quoting without hard-coding every profile to
+Netezza. Remote companion runtimes still require explicit server-side runtime
+isolation, metadata providers, capability declarations, and live contracts.
 
 SQLite and DuckDB are already available in the web API for local profiles,
 metadata, query sessions, paging, aggregation and grouping. The remaining work
@@ -292,10 +289,11 @@ integration coverage.
 | Read-only enforcement | toolbar toggle | ✅ `isReadOnlySql` on `startQuery` | ✅ |
 | Transport security | n/a | ✅ cookies+samesite + CSRF + masterKey | ✅ — better than desktop |
 | Self-hosting / container | – | ✅ documented in `WEB_EDITOR.md` | ✅ |
-| User roles (admin/user) | – | ✅ admin bootstrap | 🟡 only admin-ish |
+| User roles (admin/user) | – | ✅ admin and user management | ✅ web-native |
+| Execution audit | limited local history | ✅ per-user audit log | ✅ web-native |
 
-(No backlog here for parity; everything is web-native already. Only polish: role-based
-connection sharing, audit log.)
+(No desktop-parity backlog applies to web-native controls. Follow-up work is
+role-based connection sharing and deeper adversarial/security coverage.)
 
 ---
 
@@ -325,43 +323,34 @@ connection sharing, audit log.)
 | 3 | Linter (NZ/NZP) + code actions into web | 🟡 NZ/NZP diag done | core | M — code actions still ❌ |
 | 4 | Format SQL (real formatter) | ✅ | core | ✅ done (2026-08-09) |
 | 5 | Snippets + semantic tokens | ✅ | core | ✅ done (2026-08-09) |
-| 6 | Statement-select run-mode | ❌ | core | S |
-| 7 | Aggregations + row virtualization | ❌ | grid | M–L |
-| 8 | Grid context menu | ❌ | grid | M |
-| 9 | Alternate views (cards) | ❌ | grid | M |
-| 10 | DDL-ops generic run endpoint + confirm | ❌ | grid+api | M (fast unlock) |
-| 11 | Import (smart paste + basic wizard) | ❌ | api | L |
-| 12 | Multi-dialect start (SQLite/DuckDB) | ❌ | api | L |
+| 6 | Selected/cursor/smart/script run modes | ✅ | core+api+web | done |
+| 7 | Aggregations + grouping + row virtualization | ✅ | grid+api | done |
+| 8 | Grid context menu + row detail | ✅ broad | grid | 🟡 desktop-only actions remain |
+| 9 | Alternate views | 🟡 basic pivot | grid | M for richer UX/cards |
+| 10 | Guarded DML/DDL execution + confirm/audit | ✅ | api+web | done; guided DBA actions remain |
+| 11 | Import | 🟡 CSV/XLSX file flow | api+web | L for desktop wizard/format depth |
+| 12 | Multi-dialect start (SQLite/DuckDB) | ✅ | api+web | done; remote dialects remain |
 
 ---
 
-## Roadmap suggestion (order)
+## Recommended backlog order
 
-**Commit 0 — LSP core sharing (DONE 2026-08-09)** (D1: hover, definition, references,
-rename + prepare, inlay hints, signature help, document symbols, formatting).
+1. **Quality foundation:** add React component coverage, version and test
+   persisted tab/grid state, and enforce the high-risk gates in the project
+   quality roadmap.
+2. **Editor completion:** expose NZ/NZP quick fixes and parser-backed refactors
+   through the web LSP/code-action surface.
+3. **Grid hardening:** deepen reload/race/accessibility tests, improve pivot UX,
+   and close copy/edit semantics before considering charts and cards.
+4. **Database workflows:** deepen DDL generation and import UX on top of the
+   existing preview-token/read-only/audit boundary; add dedicated destructive
+   actions only with provider contracts and confirmation tests.
+5. **Dialect expansion:** polish SQLite/DuckDB capability parity, then add remote
+   runtimes one at a time behind the common dialect contract and live coverage.
 
-**Commit 1 — "NZ/NZP linter diagnostics" (DONE 2026-08-09, part 1 of D1:3)** —
-`SqlQualityEngine` slimmed to a vscode wrapper around the new vscode-free
-`QualityEngineCore` (`src/sqlParser/qualityEngineCore.ts`); desktop behavior unchanged.
-`core.diagnostics()` runs NZ/NZP quality rules and transports parser `suggestedFix` via
-`data`. **Remaining in D1:3:** code actions (NZ/NZP fixes + refactors) = next commit.
-
-**Commit 2 — "surface leftovers" (DONE 2026-08-09)** (D1: semantic tokens, snippets,
-statement window). Semantic tokens: vscode-free lexer/CST tokenizer in `sql-core` +
-Monaco `registerDocumentSemanticTokensProvider`; token name sets single-sourced from
-`src/sql/semanticTokenNames.ts`. Snippets: REST `GET /api/lsp/snippets` reads the committed
-`.code-snippets` JSON → Monaco snippet completions. Statement window: reused `SqlParser`
-`getAdjacentStatementAtPosition` + Ctrl/Cmd+Up/Down Monaco commands.
-
-**Commit 3 — "grid depth"** (D3: aggregation, context menu, virtualization, rowView).
-
-**Commit 4 — "DDL ops"** (D5: run-script endpoint, confirm modal, Top-1000 / Get-column /
-DDL generation, import).
-
-**Commit 5 — "dialects"** (D6: SQLite, DuckDB, then rest).
-
-**Out of scope for v1:** Copilot; visual ETL; test-data generator; ERD/visualizer;
-notebooks — those are large product scoping decisions, not parity reminders.
+Copilot, visual ETL, the test-data generator, ERD/visualizers, and notebooks are
+P2 product decisions. They are not prerequisites for web editor quality or core
+database workflow parity.
 
 ---
 

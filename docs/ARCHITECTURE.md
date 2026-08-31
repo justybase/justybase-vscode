@@ -3,6 +3,12 @@
 JustyBase is a layered monorepo with two runtime products and a shared contract
 surface.
 
+Cross-cutting architecture debt, enforcement work, and measurable exit criteria
+are tracked in the
+[Project Quality Improvement Roadmap](PROJECT_QUALITY_ROADMAP.md). This document
+describes the intended structure; the automated architecture check determines
+which parts are currently enforced.
+
 ```text
 VS Code extension ──┐
                      ├─ packages/contracts ─ packages/sql-core ─ database-runtime
@@ -49,3 +55,15 @@ API or desktop adapters → UI. Avoid cycles between result-panel facades,
 messages, tabs, and grid persistence. New cross-platform behavior belongs in a
 shared package only when it is free of VS Code APIs and has contract tests in
 both consumers.
+
+The current `check:architecture` gate protects `contracts`, `sql-core`, and
+`database-runtime` from direct `vscode` imports. It does not yet prove the full
+dependency direction or detect repository-wide cycles. Until CQ03 in the
+quality roadmap is complete, reviewers must inspect new cross-layer imports and
+Result Panel dependencies explicitly.
+
+Persisted UI state and webview messages are architecture boundaries as well as
+implementation details. New persisted formats require a schema version,
+migration/reset behavior, and stable ownership identity. High-traffic webview
+protocols require exhaustive discriminated unions plus runtime validation at
+untrusted boundaries.

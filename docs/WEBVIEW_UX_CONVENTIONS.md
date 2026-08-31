@@ -1,8 +1,11 @@
 # Webview UX Conventions
 
-Last updated: 2026-06-12
+Last updated: 2026-08-31
 
-This document defines the baseline UX contract for extension webviews. Phase 5 adds typed extension-host message contracts and sync tests for high-traffic panels, but the frontend implementation remains plain JavaScript for now.
+This document defines the baseline UX contract for extension webviews. High-traffic
+panels use TypeScript entry points and typed host-side contracts to different
+depths; incomplete catch-all contracts are tracked in the
+[Project Quality Improvement Roadmap](PROJECT_QUALITY_ROADMAP.md).
 
 ## Purpose
 
@@ -62,6 +65,37 @@ Required behavior:
 3. `Enter` should submit search or filter inputs where that matches the panel model.
 4. `Cmd+C` or `Ctrl+C` should copy current selection when the panel supports grid or text selection.
 
+### Focus and accessibility
+
+1. Dialogs must receive focus when opened, contain focus while modal, close on
+   `Escape`, and return focus to the invoking control.
+2. Controls need stable accessible names; icon-only controls require an
+   `aria-label` or equivalent visible label.
+3. Status changes that do not move focus should use an appropriate live region
+   without repeatedly announcing streaming updates.
+4. Panels must remain usable with keyboard only, VS Code high-contrast themes,
+   200% zoom, and reduced motion.
+5. Serious or critical automated accessibility findings block completion. An
+   automated scan does not replace the keyboard/focus scenario.
+
+### Stateful behavior
+
+State preservation is a user-facing contract. A stateful panel must define:
+
+1. stable identity for each stored state entry;
+2. fields preserved across tab/source switches, hide/reveal, and revival;
+3. events that reset or migrate stored state;
+4. loading or streaming transitions during which transient DOM geometry must
+   not overwrite valid state;
+5. behavior for corrupt, legacy, or future-version state;
+6. disposal of timers, listeners, workers, and pending requests.
+
+Result Panel scroll persistence is the reference depth: test vertical and
+horizontal offsets, a virtualizer anchor where available, stable result
+identity, source/result switching, hidden/revived views, new execution,
+streaming/cancellation, and disk-backed results. Apply the same transition-based
+method to filters, editors, designers, monitors, and wizards.
+
 ## Message contract rule
 
 For panels with typed host-side message contracts:
@@ -69,6 +103,11 @@ For panels with typed host-side message contracts:
 1. Update the shared contract in `src/contracts/webviews/` when a message command or payload changes.
 2. Keep the webview sync test passing for the changed panel.
 3. Review the affected panel against the conventions in this document if the change alters loading, empty, error, or cancellation behavior.
+4. Validate messages received from outside the module. A catch-all
+   `{ command: string }` or `Record<string, unknown>` is a migration state, not
+   the completed contract for a high-traffic panel.
+5. Add a negative test for malformed or stale messages when they could mutate
+   state, execute SQL, access files, or expose data.
 
 ## Shared patterns already in use
 
@@ -109,13 +148,19 @@ Status values:
 | Analysis Panel | missing | present | partial | missing | present | Empty instructional states are clear, but loading/cancel/error behavior is still ad hoc. |
 | Copilot Profiles | partial | partial | present | n/a | n/a | Async profile load and error reporting exist, but empty/loading behavior is not yet standardized. |
 
-## Phase 5 focus
+## Completed contract focus and remaining work
 
-Phase 5 standardizes typed host-side contracts for the highest-traffic and lowest-cost webview panels completed so far:
+The initial typed-contract effort covered these high-traffic panels:
 
 1. Result Panel
 2. Query History
 3. Session Monitor
 4. Login Panel
 
-The remaining panels should adopt the same message-contract pattern incrementally instead of waiting for a full frontend rewrite.
+The remaining panels should adopt the same message-contract pattern incrementally
+instead of waiting for a frontend rewrite. Result Panel still has permissive
+host-message types and therefore remains a P0 contract-hardening target.
+
+For every panel changed, update the baseline audit row and add tests for the
+affected loading/empty/error/cancel/focus/state transitions. Browser coverage
+must exercise behavior, not only assert that a root element exists.
