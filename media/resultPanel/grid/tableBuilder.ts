@@ -219,7 +219,7 @@ export function createResultSetGrid(
     const columns = prepareColumns(rs, rsIndex);
 
     // Get saved state
-    const savedState = getSavedStateFor(rsIndex, rs.executionTimestamp);
+    const savedState = getSavedStateFor(rsIndex, rs.executionTimestamp, undefined, rs.resultSetId);
     const measureText = createGridTextMeasurer();
     const manualColumnWidths = new Set(savedState?.manualColumnWidths || []);
 
@@ -2205,6 +2205,7 @@ export function createResultSetGrid(
                 scrollLeft: wrapper.scrollLeft,
                 scrollAnchorIndex: gridObj.getScrollAnchorIndex?.(),
                 timestamp: rsAtIndex.executionTimestamp,
+                resultSetId: rsAtIndex.resultSetId,
             });
         }
     }, 200);
@@ -2226,6 +2227,7 @@ export function createResultSetGrid(
                         scrollLeft: wrapper.scrollLeft,
                         scrollAnchorIndex: gridObj.getScrollAnchorIndex?.(),
                         timestamp: rsAtIndex.executionTimestamp,
+                        resultSetId: rsAtIndex.resultSetId,
                     });
                     wrapper._scrollSaveTimeout = undefined;
                 }, 50);

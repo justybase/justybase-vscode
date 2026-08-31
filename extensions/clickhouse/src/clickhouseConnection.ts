@@ -343,6 +343,12 @@ function createClickHouseClient(config: DatabaseConnectionConfig, database: stri
     return createClient(clientConfig);
 }
 
+/** Factory seam used by unit tests to keep the connection adapter offline. */
+export type ClickHouseClientFactory = (
+    config: DatabaseConnectionConfig,
+    database: string,
+) => ClickHouseClient;
+
 function isCompatibilityQuery(sql: string, pattern: RegExp): boolean {
     return pattern.test(stripTrailingSemicolons(sql));
 }
@@ -377,9 +383,14 @@ export class ClickHouseConnection extends EventEmitter implements DatabaseConnec
     private activeController?: AbortController;
     private currentDatabase = '';
     private readonly currentSid: number;
+    private readonly clientFactory: ClickHouseClientFactory;
 
-    public constructor(public readonly config: DatabaseConnectionConfig) {
+    public constructor(
+        public readonly config: DatabaseConnectionConfig,
+        clientFactory: ClickHouseClientFactory = createClickHouseClient,
+    ) {
         super();
+        this.clientFactory = clientFactory;
         this.currentSid = Math.abs(hashConnectionIdentity(config)) || 1;
     }
 
@@ -389,7 +400,7 @@ export class ClickHouseConnection extends EventEmitter implements DatabaseConnec
         }
 
         const database = this.config.database?.trim() || 'default';
-        const client = createClickHouseClient(this.config, database);
+        const client = this.clientFactory(this.config, database);
         try {
             const ping = await client.ping({ select: true });
             if (!ping.success) {
@@ -448,7 +459,7 @@ export class ClickHouseConnection extends EventEmitter implements DatabaseConnec
             return;
         }
 
-        const nextClient = createClickHouseClient(this.config, normalized);
+        const nextClient = this.clientFactory(this.config, normalized);
         try {
             const ping = await nextClient.ping({ select: true });
             if (!ping.success) {

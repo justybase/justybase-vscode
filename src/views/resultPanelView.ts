@@ -12,6 +12,7 @@ import type {
 } from '../contracts/webviews';
 import type { ConnectionManager } from '../core/connectionManager';
 import { ResultStateManager } from '../state/resultStateManager';
+import { ensureResultSetId } from '../state/resultSetIdentity';
 import { ExportManager } from '../export/exportManager';
 import {
     ResultPanelMessageHandler,
@@ -111,6 +112,7 @@ interface HydratePayloadMetrics {
 
 export interface ResultPanelRegressionResultSetSnapshot {
     index: number;
+    resultSetId?: string;
     name?: string;
     isLog: boolean;
     rowCount: number;
@@ -915,6 +917,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             sourceUri,
             resultSets: resultSets.map((resultSet, index) => ({
                 index,
+                resultSetId: resultSet.resultSetId,
                 name: resultSet.name,
                 isLog: resultSet.isLog === true,
                 rowCount: resultSet.storageMode === 'sqlite'
@@ -2845,6 +2848,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 isLog: true,
                 name: 'Logs'
             } as ResultSet;
+            ensureResultSetId(emptyLog);
             this._stateManager.resultsMap.set(activeSource, [emptyLog]);
             activeResultSets.push(emptyLog);
         }
@@ -3000,6 +3004,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             if (!resultSet) {
                 return resultSet;
             }
+            ensureResultSetId(resultSet);
             if (resultSet.storageMode !== 'sqlite' || !resultSet.diskStoreId || resultSet.isLog) {
                 return resultSet;
             }

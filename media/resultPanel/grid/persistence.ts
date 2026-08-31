@@ -70,7 +70,11 @@ function hasNonZeroScroll(scrollState: GridScrollState | null | undefined): bool
 function scrollStateMatchesResult(
     scrollState: GridScrollState | null | undefined,
     executionTimestamp: number | undefined,
+    resultSetId?: string,
 ): boolean {
+    if (scrollState?.resultSetId && resultSetId) {
+        return scrollState.resultSetId === resultSetId;
+    }
     if (!scrollState || scrollState.timestamp === undefined || executionTimestamp === undefined) {
         return true;
     }
@@ -84,13 +88,13 @@ export function resolveScrollStateForResultSet(
     const source = sourceUri ?? getActiveSourceUri() ?? '';
     const rs = getResultSetAt(rsIndex);
     const exactState = rs
-        ? asScrollState(getSavedStateFor(rsIndex, rs.executionTimestamp, source))
+        ? asScrollState(getSavedStateFor(rsIndex, rs.executionTimestamp, source, rs.resultSetId))
         : undefined;
 
     const globalState = asScrollState(getScrollStateFromGlobalCache(source, rsIndex));
     if (
         globalState
-        && scrollStateMatchesResult(globalState, rs?.executionTimestamp)
+        && scrollStateMatchesResult(globalState, rs?.executionTimestamp, rs?.resultSetId)
         && (hasNonZeroScroll(globalState) || !hasNonZeroScroll(exactState))
     ) {
         return globalState;
@@ -104,8 +108,8 @@ export function resolveScrollStateForResultSet(
     // Do not reuse a scroll position found under the same source/index but a
     // different timestamp: that can place a newly executed query at the end
     // of the previous result set.
-    if (source && rs?.executionTimestamp === undefined) {
-        const found = findScrollStateBySource(source, rsIndex);
+    if (source && rs && rs.executionTimestamp === undefined) {
+        const found = findScrollStateBySource(source, rsIndex, rs.resultSetId);
         if (found) {
             return asScrollState(found) ?? null;
         }
@@ -205,7 +209,8 @@ export function saveAllGridStates(): void {
 
         const rs = getResultSetAt(rsIndex);
         const timestamp = grid.executionTimestamp || rs?.executionTimestamp || '';
-        const key = `${activeSource ?? ''}:${rsIndex}:${timestamp}`;
+        const resultSetId = rs?.resultSetId;
+        const key = `${activeSource ?? ''}:${rsIndex}:${resultSetId || timestamp}`;
         const tableState = grid.tanTable?.getState();
         const wrapper = getGridWrapperForResultSet(rsIndex);
         const htmlWrapper = asHtml(wrapper);
@@ -242,6 +247,30 @@ export function saveAllGridStates(): void {
             scrollAnchorIndex = existingState.scrollAnchorIndex as number | undefined ?? scrollAnchorIndex;
         }
 
+        // Hydration/source switches can rebuild a virtualized grid before its
+        // row measurements and column widths settle. During that window the
+        // DOM may report a clamped pixel position (or a zero horizontal
+        // offset) even though the previous source cache still has the user's
+        // latest viewport. Preserve the cached axes while the hydrate guard is
+        // active so the transient layout cannot overwrite a stable position.
+        if (preserveScrollDuringHydrate && activeSource && rs) {
+            const cachedScroll = asScrollState(getScrollStateFromGlobalCache(activeSource, rsIndex));
+            if (cachedScroll && scrollStateMatchesResult(cachedScroll, rs.executionTimestamp, rs.resultSetId)) {
+                if ((cachedScroll.scrollTop ?? 0) > scrollTop) {
+                    scrollTop = cachedScroll.scrollTop ?? scrollTop;
+                }
+                if ((cachedScroll.scrollLeft ?? 0) > scrollLeft) {
+                    scrollLeft = cachedScroll.scrollLeft ?? scrollLeft;
+                }
+                if (
+                    cachedScroll.scrollAnchorIndex !== undefined
+                    && (scrollAnchorIndex === undefined || cachedScroll.scrollAnchorIndex > scrollAnchorIndex)
+                ) {
+                    scrollAnchorIndex = cachedScroll.scrollAnchorIndex;
+                }
+            }
+        }
+
         const state: SavedGridState = {
             sorting: tableState?.sorting,
             grouping: tableState?.grouping,
@@ -270,7 +299,8 @@ export function saveAllGridStates(): void {
                 scrollTop: scrollTop,
                 scrollLeft: scrollLeft,
                 scrollAnchorIndex,
-                timestamp: rs.executionTimestamp
+                timestamp: rs.executionTimestamp,
+                resultSetId: rs.resultSetId,
             });
         }
     });
@@ -284,19 +314,35 @@ export function getSavedStateFor(
     rsIndex: number,
     executionTimestamp: number | undefined,
     sourceUri?: string | null,
+    resultSetId?: string,
 ): SavedGridState | null {
     const savedState = getHostState() as Record<string, SavedGridState> | null;
     if (!savedState) return null;
 
     const timestamp = executionTimestamp || '';
     const source = sourceUri || getActiveSourceUri() || '';
-    const key = `${source}:${rsIndex}:${timestamp}`;
-    return savedState[key] ?? null;
+    const stableKey = `${source}:${rsIndex}:${resultSetId || timestamp}`;
+    const stableState = savedState[stableKey];
+    if (
+        stableState
+        && (!resultSetId || !stableState.resultSetId || stableState.resultSetId === resultSetId)
+    ) {
+        return stableState;
+    }
+    // Read states written by versions before stable result identities existed.
+    if (resultSetId) {
+        const legacyState = savedState[`${source}:${rsIndex}:${timestamp}`];
+        if (legacyState && (!legacyState.resultSetId || legacyState.resultSetId === resultSetId)) {
+            return legacyState;
+        }
+    }
+    return null;
 }
 
 export function findScrollStateBySource(
     sourceUri: string,
     rsIndex: number,
+    resultSetId?: string,
 ): SavedGridState | null {
     const savedState = getHostState() as Record<string, SavedGridState> | null;
     if (!savedState) return null;
@@ -305,7 +351,11 @@ export function findScrollStateBySource(
     for (const key of Object.keys(savedState)) {
         if (key.startsWith(prefix)) {
             const state = savedState[key];
-            if (state && (state.scrollTop ?? 0) > 0) {
+            if (
+                state
+                && (!resultSetId || !state.resultSetId || state.resultSetId === resultSetId)
+                && hasNonZeroScroll(state)
+            ) {
                 return state;
             }
         }
@@ -330,6 +380,7 @@ export function saveScrollStatesToResultSets(): void {
             const scrollTarget = isVisible ? getScrollTarget(htmlWrapper) : null;
             rs._savedState.scrollTop = scrollTarget?.scrollTop || 0;
             rs._savedState.scrollLeft = scrollTarget?.scrollLeft || 0;
+            rs._savedState.resultSetId = rs.resultSetId;
         }
     });
 }

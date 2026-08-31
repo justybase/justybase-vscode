@@ -46,8 +46,11 @@ async function run() {
     const logs = snapshot.resultSets.find(resultSet => resultSet.isLog === true);
     const data = snapshot.resultSets.find(resultSet => resultSet.isLog !== true);
     assert.ok(logs, 'Untitled scenario must create a Logs result set.');
+    assert.ok(logs.resultSetId, 'Logs must expose a stable result-set identity.');
     assert.equal(logs.index, 0, 'Logs must remain the first result set.');
     assert.ok(data, 'Untitled scenario must create a tabular result set.');
+    assert.ok(data.resultSetId, 'Tabular results must expose a stable result-set identity.');
+    assert.notEqual(data.resultSetId, logs.resultSetId, 'Logs and data must not share a result-set identity.');
     assert.equal(data.rowCount, 2, 'The deterministic result must contain two rows.');
     assert.equal(data.totalRowCount, 2);
     assert.equal(data.isStreamingComplete, true);

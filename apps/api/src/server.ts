@@ -7,7 +7,7 @@ import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import type { AdminRestoreRequest, AdminUserCreateRequest, AdminUserUpdateRequest, ConnectionProfileInput, ConnectionProfileUpdate, QueryAggregateRequest, QueryAuditStatus, QueryEditPreviewRequest, QueryEditRequest, QueryEvent, QueryExportRequest, QueryFileImportPreviewRequest, QueryFileImportRequest, QueryGroupRequest, QueryImportPreviewRequest, QueryImportRequest, QueryPageRequest, QueryPreviewResponse, QueryPreviewStatement, QueryStartRequest, QueryExecutionMode, QueryWriteResponse, WriteOperationPreviewResponse } from '@justybase/contracts';
+import type { AdminRestoreRequest, AdminUserCreateRequest, AdminUserUpdateRequest, ConnectionProfileInput, ConnectionProfileUpdate, QueryAuditStatus, QueryEditPreviewRequest, QueryEditRequest, QueryEvent, QueryFileImportPreviewRequest, QueryFileImportRequest, QueryImportPreviewRequest, QueryImportRequest, QueryPreviewResponse, QueryPreviewStatement, QueryStartRequest, QueryExecutionMode, QueryWriteResponse, WriteOperationPreviewResponse } from '@justybase/contracts';
 import { getSqlStatementAtPosition, splitSqlStatements } from '@justybase/sql-core';
 import { type ApiConfig } from './config';
 import { encryptSecret, verifyPassword } from './security';
@@ -19,6 +19,14 @@ import { getSchemaTree, invalidateSchemaCache, searchSchema } from './schemaServ
 import { attachLspSocket, type LspSession } from './lspProtocol';
 import { createQueryExportStream } from './queryExport';
 import { loadNetezzaSnippets } from './snippets';
+import {
+  parseQueryAggregateRequest,
+  parseQueryExportRequest,
+  parseQueryGroupRequest,
+  parseQueryPageRequest,
+  parseQueryStartRequest,
+  RequestValidationError,
+} from './requestValidation';
 
 const SESSION_COOKIE = 'justybase_session';
 const CSRF_COOKIE = 'justybase_csrf';
@@ -64,7 +72,21 @@ export interface PlannedStatement {
 interface LoginBody { username?: string; password?: string; }
 
 function bodyObject(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new RequestValidationError('request body must be a JSON object.');
+  }
+  return value as Record<string, unknown>;
+}
+
+function clientErrorStatusCode(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null || !('statusCode' in error)) return undefined;
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return typeof statusCode === 'number'
+    && Number.isInteger(statusCode)
+    && statusCode >= 400
+    && statusCode < 500
+    ? statusCode
+    : undefined;
 }
 
 function requiredString(value: unknown, field: string): string {
@@ -768,6 +790,29 @@ function startQuery(app: FastifyInstance, userId: string, input: QueryStartReque
 
 export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance> {
   const app = fastify({ logger: true });
+  app.setErrorHandler((error, request, reply) => {
+    const hasValidation = typeof error === 'object'
+      && error !== null
+      && 'validation' in error
+      && Boolean((error as { validation?: unknown }).validation);
+    if (error instanceof RequestValidationError || hasValidation) {
+      void reply.code(400).send({
+        code: error instanceof RequestValidationError ? error.code : 'INVALID_REQUEST',
+        message: error instanceof Error ? error.message : 'Invalid request.',
+      });
+      return;
+    }
+    const statusCode = clientErrorStatusCode(error);
+    if (statusCode !== undefined) {
+      void reply.code(statusCode).send({
+        code: 'INVALID_REQUEST',
+        message: error instanceof Error ? error.message : 'Invalid request.',
+      });
+      return;
+    }
+    request.log.error(error);
+    void reply.code(500).send({ code: 'INTERNAL_ERROR', message: 'Internal server error.' });
+  });
   const localDbRoot = apiConfig.localDbRoot ?? path.join(apiConfig.dataDir, 'local-databases');
   const store = new AppStore(apiConfig.dataDir, localDbRoot);
   app.decorate('store', store);
@@ -991,7 +1036,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   app.get('/api/lsp/snippets', { preHandler: authenticate }, async () => ({ snippets: loadNetezzaSnippets() }));
   app.post<{ Params: { id: string } }>('/api/query/:id/page', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     const job = app.queryJobs.get(request.params.id);
-    const input = request.body as QueryPageRequest;
+    const input = parseQueryPageRequest(request.body);
     const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
     const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
     if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
@@ -1000,7 +1045,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post<{ Params: { id: string } }>('/api/query/:id/aggregate', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     const job = app.queryJobs.get(request.params.id);
-    const input = request.body as QueryAggregateRequest;
+    const input = parseQueryAggregateRequest(request.body);
     const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
     const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
     if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
@@ -1009,7 +1054,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post<{ Params: { id: string } }>('/api/query/:id/group', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     const job = app.queryJobs.get(request.params.id);
-    const input = request.body as QueryGroupRequest;
+    const input = parseQueryGroupRequest(request.body);
     const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
     const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
     if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
@@ -1018,7 +1063,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post<{ Params: { id: string } }>('/api/query/:id/export', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     const job = app.queryJobs.get(request.params.id);
-    const input = request.body as QueryExportRequest;
+    const input = parseQueryExportRequest(request.body);
     const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
     const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
     if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
@@ -1034,9 +1079,12 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post('/api/query/preview', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     try {
-      return reply.code(200).send(previewQuery(app, request.user!.id, request.body as QueryStartRequest));
+      return reply.code(200).send(previewQuery(app, request.user!.id, parseQueryStartRequest(request.body)));
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'QUERY_PREVIEW_REJECTED', message: error instanceof Error ? error.message : 'Query preview rejected.' });
+      return reply.code(400).send({
+        code: error instanceof RequestValidationError ? error.code : 'QUERY_PREVIEW_REJECTED',
+        message: error instanceof Error ? error.message : 'Query preview rejected.',
+      });
     }
   });
   app.post('/api/query/edit/preview', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
@@ -1175,10 +1223,13 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post('/api/query', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     try {
-      const started = startQuery(app, request.user!.id, request.body as QueryStartRequest);
+      const started = startQuery(app, request.user!.id, parseQueryStartRequest(request.body));
       return reply.code(202).send(started);
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'QUERY_REJECTED', message: error instanceof Error ? error.message : 'Query rejected.' });
+      return reply.code(400).send({
+        code: error instanceof RequestValidationError ? error.code : 'QUERY_REJECTED',
+        message: error instanceof Error ? error.message : 'Query rejected.',
+      });
     }
   });
   app.post<{ Params: { id: string } }>('/api/query/:id/cancel', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {

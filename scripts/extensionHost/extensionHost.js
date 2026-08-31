@@ -185,7 +185,9 @@ async function main() {
                             '--force-device-scale-factor=1',
                         ]
                         : []),
-                    ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+                    ...(process.platform === 'linux'
+                        ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu-sandbox']
+                        : []),
                 ],
             };
             if (requestedVersion && requestedVersion !== 'stable') options.version = requestedVersion;

@@ -41,7 +41,9 @@ async function main() {
             `--user-data-dir=${userDataDirectory}`,
             '--disable-extensions',
             '--disable-gpu',
-            ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+            ...(process.platform === 'linux'
+                ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu-sandbox']
+                : []),
         ],
     };
 

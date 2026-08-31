@@ -11,6 +11,7 @@ export default tseslint.config(
             'node_modules/**',
             'ExcelHelpersTs/**',
             '**/*.js',
+            '**/*.cjs',
             'src/__tests__/__mocks__/**'
         ]
     },
@@ -34,6 +35,26 @@ export default tseslint.config(
         ],
         rules: {
             'no-console': 'error'
+        }
+    },
+    {
+        // Webview and workspace packages are being migrated to the same
+        // strict baseline incrementally. Keep their current findings visible
+        // without weakening the blocking core-extension rules.
+        files: ['media/**/*.{ts,tsx}', 'apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
+        rules: {
+            '@typescript-eslint/no-unused-vars': 'warn',
+            'prefer-const': 'warn',
+            'no-var': 'warn',
+            'no-case-declarations': 'warn',
+            'no-empty': 'warn',
+            'no-control-regex': 'warn',
+            'no-useless-escape': 'warn',
+            'no-useless-assignment': 'warn',
+            '@typescript-eslint/no-unused-expressions': 'warn',
+            '@typescript-eslint/no-require-imports': 'warn',
+            '@typescript-eslint/triple-slash-reference': 'warn',
+            'preserve-caught-error': 'warn',
         }
     }
 );

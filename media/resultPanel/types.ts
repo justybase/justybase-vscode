@@ -20,6 +20,8 @@ export interface GridScrollState {
     scrollLeft?: number;
     scrollAnchorIndex?: number;
     timestamp?: number;
+    /** Stable host-issued result identity; timestamp/index remain legacy fallbacks. */
+    resultSetId?: string;
 }
 
 /** Common scope for per-result-set persisted state keys. */
@@ -139,6 +141,8 @@ export interface ResultSetColumn {
 }
 
 export interface ResultSet {
+    /** Stable identity supplied by the host for persistence across rehydration. */
+    resultSetId?: string;
     name?: string;
     columns: ResultSetColumn[];
     data: unknown[][];
