@@ -13,7 +13,8 @@ test behavior.
 | Layer | Scope | Command |
 | --- | --- | --- |
 | Static | TypeScript, contracts, API, web | `npm run check-types`, `npm run check-types:api`, `npm run check-types:web` |
-| Lint | Blocking desktop rules plus reported workspace baseline | `npm run lint`, `npm run lint:extended` |
+| Lint | Blocking desktop rules plus ratcheted workspace baseline | `npm run lint`, `npm run lint:extended:check` |
+| Quality tooling | Versioned baseline/report and changed-code gate helpers | `npm run test:quality-tools`, `npm run quality:report` |
 | Unit | Parsers, state machines, providers, utilities | `npm run test:validate` |
 | API/web | Fastify routes and React behavior | `npm run test:api`, `npm run test:web` |
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
@@ -22,6 +23,10 @@ test behavior.
 
 The PR baseline is `npm run verify:pr`. Live proprietary databases are nightly
 or manual because they require credentials and controlled infrastructure.
+`npm run test:coverage` enforces the global floors from
+`quality/quality-baseline.json`; on a pull request, the CI unit job also runs
+the changed high-risk gate against the pull request base commit. Locally, the
+equivalent is `npm run test:coverage:changed` after fetching `origin/master`.
 
 ## Change risk and required layers
 
@@ -51,8 +56,10 @@ Coverage is a risk indicator, not a substitute for behavioral assertions.
 - Review uncovered conditions in touched code. Do not add trivial assertions
   only to improve a percentage.
 
-Extended lint follows the same ratchet: the recorded 452-warning baseline may
-not increase, and each cleanup phase lowers the allowed value.
+Extended lint follows the same ratchet: the recorded baseline may not increase,
+and each cleanup phase lowers the allowed value. The current frozen baseline is
+162 warnings (146 `media`, 7 `apps`, 7 `packages`, and 2 `extensions`), with
+the next target at 100.
 
 ## Stateful UI contract
 
@@ -150,7 +157,9 @@ benchmark output outside source control; inspect screenshots before sharing.
 - Track skipped tests and require an owner/reason for every non-configuration
   skip.
 - The full Jest suite must exit naturally. A forced worker exit is a failure of
-  the test infrastructure even when assertions pass.
+  the test infrastructure even when assertions pass. The unit network guard
+  rejects sockets asynchronously so driver timeout cleanup can run; tests must
+  still inject a client/transport seam instead of attempting a real connection.
 - Run the Result Panel Extension Host scenario repeatedly on a schedule; 20
   iterations is the standard race-stress value.
 - Benchmark on stable runners using multiple samples. Investigate sustained
