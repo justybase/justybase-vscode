@@ -1,0 +1,38 @@
+{
+  "$schema": "./quality-baseline.schema.json",
+  "schemaVersion": 1,
+  "coverage": {
+    "statements": 71,
+    "branches": 58,
+    "functions": 76,
+    "lines": 72
+  },
+  "lint": {
+    "total": 300,
+    "areas": {
+      "media": 284,
+      "apps": 7,
+      "packages": 7,
+      "extensions": 2
+    }
+  },
+  "largeModuleLineLimit": 800,
+  "changedHighRiskCoverage": {
+    "lines": 80,
+    "branches": 70,
+    "roots": [
+      "src/activation/",
+      "src/commands/importCommands.ts",
+      "src/contracts/",
+      "src/core/queryCancellation.ts",
+      "src/core/queryRunner.ts",
+      "src/core/streaming/",
+      "src/export/",
+      "src/import/",
+      "src/migration/",
+      "src/state/",
+      "src/views/"
+    ]
+  },
+  "documentationFreshnessDays": 31
+}
