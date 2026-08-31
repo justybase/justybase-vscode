@@ -114,6 +114,7 @@ import {
   getResultPanelWindow,
   getResultSetAt,
   getResultSets,
+  requireActiveSourceUri,
   setActiveSourceUri,
   setResultSets,
 } from './types.js';
@@ -3034,7 +3035,7 @@ function setupWindowFunctions(): void {
   panel.clearLogs = function () {
     vscode.postMessage({
       command: "clearLogs",
-      sourceUri: getActiveSourceUri(),
+      sourceUri: requireActiveSourceUri(),
     });
   };
   panel.refreshActiveResult = function () {
@@ -3126,9 +3127,9 @@ function setupWindowFunctions(): void {
     }
     vscode.postMessage({
       command: 'saveEdits',
-      sourceUri: getActiveSourceUri(),
+      sourceUri: requireActiveSourceUri(),
       resultSetIndex: getActiveGridIndex(),
-      editSource: rs.editSource,
+      editSource: rs.editSource as { db?: string; schema?: string; table: string },
       edits: edits,
       deleteRowIndices: deletes
     });

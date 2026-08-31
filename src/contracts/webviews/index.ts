@@ -32,6 +32,7 @@ export {
     RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS
 } from './resultPanelContracts';
 
+
 export {
     QUERY_HISTORY_HOST_TO_WEBVIEW_TYPES,
     QUERY_HISTORY_INBOUND_TYPES,

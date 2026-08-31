@@ -506,6 +506,10 @@ export function setupStreamingMessageHandler(): void {
     getResultPanelWindow().__getResultSyncPendingRequestCount = getResultSyncPendingRequestCount;
     window.addEventListener('message', event => {
         const message = asHostMessage(event.data);
+        if (!message) {
+            traceResultPanel({ phase: 'webview_message_rejected', command: 'unknown', reason: 'invalid_result_panel_message' });
+            return;
+        }
 
         switch (message.command) {
             case 'testBridge':
