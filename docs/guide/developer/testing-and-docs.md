@@ -4,11 +4,18 @@ description: Keep parser, runtime, capability, and public documentation changes 
 audience: developer
 category: Developers
 status: Supported
-last_verified: 2026-08-19
+last_verified: 2026-08-31
 product_version: 3.17.10
 ---
 
 # Testing and documentation workflow
+
+The active cross-project priorities, audited metrics, and phased exit criteria
+are maintained in the
+[Project Quality Improvement Roadmap](guide/legacy/project_quality_roadmap/).
+Use the roadmap together with the risk-based test policy in the
+[Testing Strategy](guide/legacy/testing_strategy/) when planning high-risk
+execution, state, security, or data-movement work.
 
 ## Baseline checks
 
