@@ -46,17 +46,17 @@ export const sourceResultsCache: Record<string, SourceCacheEntry> = {};
 export const scrollStatesCache: Record<string, Record<number, unknown>> = {};
 
 // Column filter states per grid
-export let columnFilterStates: Record<number, Record<string, ColumnFilterValue>> = {};
+export const columnFilterStates: Record<number, Record<string, ColumnFilterValue>> = {};
 
 // Global filter input state per result set
-export let globalFilterStates: Record<string, string> = {};
+export const globalFilterStates: Record<string, string> = {};
 
 // Aggregation selection per grid
-export let aggregationStates: Record<string, Record<string, ColumnAggregationState>> = {};
+export const aggregationStates: Record<string, Record<string, ColumnAggregationState>> = {};
 
 // Search worker and search state
 export let searchWorker: Worker | null = null;
-export let searchMatches: Record<number, Set<number>> = {};
+export const searchMatches: Record<number, Set<number>> = {};
 const searchMatchSortedIndices: Record<number, number[]> = {};
 export let isSearching = false;
 
@@ -78,7 +78,7 @@ export let isRowViewOpen = false;
 // Edit mode state
 export let isEditMode = false;
 export let pendingEdits: PendingEdit[] = []; // { rowIndex, columnIndex, oldValue, newValue }
-export let pendingDeletes = new Set<number>(); // Set<rowIndex>
+export const pendingDeletes = new Set<number>(); // Set<rowIndex>
 export function getIsEditMode(): boolean {
     return isEditMode;
 }
@@ -136,15 +136,15 @@ export function addPendingEdit(
     newValue: unknown,
 ): void {
     // Replace existing edit for same cell, or add new
-    var existingIndex = -1;
-    for (var i = 0; i < pendingEdits.length; i++) {
-        var e = pendingEdits[i];
+    let existingIndex = -1;
+    for (let i = 0; i < pendingEdits.length; i++) {
+        const e = pendingEdits[i];
         if (e.rowIndex === rowIndex && e.columnIndex === columnIndex) {
             existingIndex = i;
             break;
         }
     }
-    var edit = { rowIndex: rowIndex, columnIndex: columnIndex, oldValue: oldValue, newValue: newValue };
+    const edit = { rowIndex: rowIndex, columnIndex: columnIndex, oldValue: oldValue, newValue: newValue };
     if (existingIndex >= 0) {
         pendingEdits[existingIndex] = edit;
     } else {
@@ -153,7 +153,7 @@ export function addPendingEdit(
 }
 
 // Pinned columns state per grid
-export let pinnedColumnsState: Record<string, string[]> = {};
+export const pinnedColumnsState: Record<string, string[]> = {};
 
 // Result formatting state
 export let resultFormattingPayload = {
@@ -171,7 +171,7 @@ export let resultFormattingPayload = {
     },
     columnOverrides: {}
 };
-export let resultFormattingStates: Record<string, Record<string, unknown>> = {};
+export const resultFormattingStates: Record<string, Record<string, unknown>> = {};
 
 // Window state variables
 export function initializeWindowState(): void {

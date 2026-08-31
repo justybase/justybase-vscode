@@ -1013,7 +1013,7 @@ function updateRowView(): void {
 
   function fmtType(dt: string | undefined): string {
     if (!dt) return '';
-    var lower = dt.toLowerCase();
+    const lower = dt.toLowerCase();
     if (lower.indexOf('int') >= 0 || lower.indexOf('dec') >= 0 || lower.indexOf('float') >= 0 || lower.indexOf('num') >= 0) return 'num';
     if (lower.indexOf('char') >= 0 || lower.indexOf('text') >= 0 || lower.indexOf('varchar') >= 0) return 'txt';
     if (lower.indexOf('date') >= 0 || lower.indexOf('time') >= 0) return 'dt';
@@ -1023,7 +1023,7 @@ function updateRowView(): void {
 
   function fmtVal(val: unknown, dt: string | undefined): string {
     if (val === null || val === undefined) return '<span class="row-view-val null">NULL</span>';
-    var lower = (dt || '').toLowerCase();
+    const lower = (dt || '').toLowerCase();
     if (lower.indexOf('bool') >= 0) {
       return val ? '<span class="row-view-val boolean-t">✓ true</span>' : '<span class="row-view-val boolean-f">✕ false</span>';
     }
@@ -1037,16 +1037,16 @@ function updateRowView(): void {
     return '<span class="row-view-val">' + String(val).replace(/</g, '&lt;') + '</span>';
   }
 
-  var html = '<div class="row-view-table">';
+  let html = '<div class="row-view-table">';
 
   columns.forEach(function (col) {
-    var values = rowIndices.map(function (rowIndex) {
+    const values = rowIndices.map(function (rowIndex) {
       return rows[rowIndex].getValue(col.id);
     });
 
-    var isDiff = false;
+    let isDiff = false;
     if (rowIndices.length > 1) {
-      var firstVal = String(values[0] ?? '');
+      const firstVal = String(values[0] ?? '');
       isDiff = values.some(function (v) { return String(v ?? '') !== firstVal; });
     }
 
@@ -1071,19 +1071,19 @@ function updateRowView(): void {
 
 // Row view export functions
 function getSelectedRowIndices() {
-  var selectedRows = new Set<number>();
+  const selectedRows = new Set<number>();
   document.querySelectorAll(".selected-cell").forEach(function (cell) {
-    var htmlCell = asHtml(cell);
-    var cellId = htmlCell?.dataset.cellId;
+    const htmlCell = asHtml(cell);
+    const cellId = htmlCell?.dataset.cellId;
     if (!cellId) return;
-    var parts = cellId.split("-");
+    const parts = cellId.split("-");
     selectedRows.add(parseInt(parts[0], 10));
   });
   return Array.from(selectedRows).sort(function (a, b) { return a - b; });
 }
 
 function hasRowViewData() {
-  var content = getElementById("rowViewContent");
+  const content = getElementById("rowViewContent");
   return content
     && !content.querySelector(".row-view-placeholder")
     && content.querySelector(".row-view-table");
@@ -1091,24 +1091,24 @@ function hasRowViewData() {
 
 async function copyRowViewAsMarkdown() {
   if (!hasRowViewData()) return;
-  var activeIndex = getActiveGridIndex();
-  var table = getGrid(activeIndex)?.tanTable;
+  const activeIndex = getActiveGridIndex();
+  const table = getGrid(activeIndex)?.tanTable;
   if (!table) return;
 
-  var rowIndices = getSelectedRowIndices();
+  const rowIndices = getSelectedRowIndices();
   if (rowIndices.length === 0 || rowIndices.length > 10) return;
 
-  var columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
-  var rows = table.getRowModel().rows;
+  const columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
+  const rows = table.getRowModel().rows;
 
-  var md = "| " + columns.map(function (col) { return col.columnDef.header; }).join(" | ") + " |\n";
+  let md = "| " + columns.map(function (col) { return col.columnDef.header; }).join(" | ") + " |\n";
   md += "| " + columns.map(function () { return "---"; }).join(" | ") + " |\n";
 
   rowIndices.forEach(function (ri) {
-    var row = rows[ri];
+    const row = rows[ri];
     if (!row) return;
     md += "| " + columns.map(function (col) {
-      var val = row.getValue(col.id);
+      const val = row.getValue(col.id);
       if (val === null || val === undefined) return "NULL";
       return String(val).replace(/\|/g, "\\|");
     }).join(" | ") + " |\n";
@@ -1124,57 +1124,57 @@ async function copyRowViewAsMarkdown() {
 
 async function copyRowViewAsImage() {
   if (!hasRowViewData()) return;
-  var activeIndex = getActiveGridIndex();
-  var table = getGrid(activeIndex)?.tanTable;
+  const activeIndex = getActiveGridIndex();
+  const table = getGrid(activeIndex)?.tanTable;
   if (!table) return;
 
-  var rowIndices = getSelectedRowIndices();
+  const rowIndices = getSelectedRowIndices();
   if (rowIndices.length === 0 || rowIndices.length > 10) return;
 
-  var columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
-  var rows = table.getRowModel().rows;
+  const columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
+  const rows = table.getRowModel().rows;
 
   // Read theme colors from computed styles
-  var bodyStyle = getComputedStyle(document.body);
-  var readCSS = function (prop: string, fallback: string): string {
-    var v = bodyStyle.getPropertyValue(prop).trim();
+  const bodyStyle = getComputedStyle(document.body);
+  const readCSS = function (prop: string, fallback: string): string {
+    const v = bodyStyle.getPropertyValue(prop).trim();
     return v || fallback;
   };
-  var bg = readCSS("--vscode-editor-background", "#1e1e1e");
-  var fg = readCSS("--vscode-editor-foreground", "#cccccc");
-  var border = readCSS("--vscode-panel-border", "#333333");
-  var badgeBg = readCSS("--vscode-badge-background", "#4a4a4a");
-  var badgeFg = readCSS("--vscode-badge-foreground", "#ffffff");
-  var blue = readCSS("--vscode-charts-blue", "#519aba");
-  var green = readCSS("--vscode-charts-green", "#89d185");
-  var dim = readCSS("--vscode-descriptionForeground", "#888888");
-  var purple = "#d8b4fe";
+  const bg = readCSS("--vscode-editor-background", "#1e1e1e");
+  const fg = readCSS("--vscode-editor-foreground", "#cccccc");
+  const border = readCSS("--vscode-panel-border", "#333333");
+  const badgeBg = readCSS("--vscode-badge-background", "#4a4a4a");
+  const badgeFg = readCSS("--vscode-badge-foreground", "#ffffff");
+  const blue = readCSS("--vscode-charts-blue", "#519aba");
+  const green = readCSS("--vscode-charts-green", "#89d185");
+  const dim = readCSS("--vscode-descriptionForeground", "#888888");
+  const purple = "#d8b4fe";
 
   // Layout constants
-  var pad = 14;
-  var cellH = 34;
-  var keyW = 140;
-  var badgeW = 32;
-  var gap = 6;
-  var font = "12px " + (getComputedStyle(getElementById("rowViewContent") ?? document.body).fontFamily || "monospace");
-  var fontBold = "600 12px " + (getComputedStyle(getElementById("rowViewContent") ?? document.body).fontFamily || "monospace");
+  const pad = 14;
+  const cellH = 34;
+  const keyW = 140;
+  const badgeW = 32;
+  const gap = 6;
+  const font = "12px " + (getComputedStyle(getElementById("rowViewContent") ?? document.body).fontFamily || "monospace");
+  const fontBold = "600 12px " + (getComputedStyle(getElementById("rowViewContent") ?? document.body).fontFamily || "monospace");
 
   // Calculate width and height
-  var totalW = 460;
-  var totalH = pad * 2 + columns.length * cellH;
+  const totalW = 460;
+  const totalH = pad * 2 + columns.length * cellH;
 
   // Create canvas with 2x scale
-  var dpr = window.devicePixelRatio || 2;
-  var canvas = document.createElement("canvas");
+  const dpr = window.devicePixelRatio || 2;
+  const canvas = document.createElement("canvas");
   canvas.width = totalW * dpr;
   canvas.height = totalH * dpr;
-  var ctx = getCanvasContext(canvas);
+  const ctx = getCanvasContext(canvas);
   ctx.scale(dpr, dpr);
 
   // Helpers
   function getValColor(val: unknown, dt: string | undefined): string {
     if (val === null || val === undefined) return dim;
-    var t = (dt || "").toLowerCase();
+    const t = (dt || "").toLowerCase();
     if (t.indexOf("bool") >= 0) return val ? green : dim;
     if (t.indexOf("int") >= 0 || t.indexOf("dec") >= 0 || t.indexOf("float") >= 0 || t.indexOf("num") >= 0) return blue;
     if (t.indexOf("date") >= 0 || t.indexOf("time") >= 0) return purple;
@@ -1183,7 +1183,7 @@ async function copyRowViewAsImage() {
 
   function fmtVal(val: unknown, dt: string | undefined): string {
     if (val === null || val === undefined) return "NULL";
-    var t = (dt || "").toLowerCase();
+    const t = (dt || "").toLowerCase();
     if (t.indexOf("bool") >= 0) return val ? "true" : "false";
     if (t.indexOf("int") >= 0 || t.indexOf("dec") >= 0 || t.indexOf("float") >= 0 || t.indexOf("num") >= 0) {
       if (typeof val === "number") return val.toLocaleString();
@@ -1194,7 +1194,7 @@ async function copyRowViewAsImage() {
 
   function fmtType(dt: string | undefined): string {
     if (!dt) return "";
-    var lower = dt.toLowerCase();
+    const lower = dt.toLowerCase();
     if (lower.indexOf("int") >= 0 || lower.indexOf("dec") >= 0 || lower.indexOf("float") >= 0 || lower.indexOf("num") >= 0) return "num";
     if (lower.indexOf("char") >= 0 || lower.indexOf("text") >= 0 || lower.indexOf("varchar") >= 0) return "txt";
     if (lower.indexOf("date") >= 0 || lower.indexOf("time") >= 0) return "dt";
@@ -1229,7 +1229,7 @@ async function copyRowViewAsImage() {
 
   // Draw each column section
   columns.forEach(function (col, i) {
-    var y = pad + i * cellH;
+    const y = pad + i * cellH;
 
     // Alternating row tint
     if (i % 2 === 1) {
@@ -1246,7 +1246,7 @@ async function copyRowViewAsImage() {
     ctx.stroke();
 
     // Column name
-    var name = col.columnDef.header || col.id;
+    const name = col.columnDef.header || col.id;
     ctx.fillStyle = fg;
     ctx.font = fontBold;
     ctx.textBaseline = "middle";
@@ -1254,13 +1254,13 @@ async function copyRowViewAsImage() {
     ctx.fillText(name, pad, y + cellH / 2);
 
     // Type badge
-    var typeLabel = fmtType(col.columnDef.dataType);
+    const typeLabel = fmtType(col.columnDef.dataType);
     if (typeLabel) {
       ctx.font = "9px " + (getComputedStyle(getElementById("rowViewContent") ?? document.body).fontFamily || "monospace");
-      var nameW = ctx.measureText(name).width;
-      var badgeX = pad + Math.min(nameW + 8, keyW - badgeW - 4);
-      var badgeH = 16;
-      var badgeY = y + (cellH - badgeH) / 2;
+      const nameW = ctx.measureText(name).width;
+      const badgeX = pad + Math.min(nameW + 8, keyW - badgeW - 4);
+      const badgeH = 16;
+      const badgeY = y + (cellH - badgeH) / 2;
       ctx.fillStyle = badgeBg;
       roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 3);
       ctx.fill();
@@ -1272,39 +1272,39 @@ async function copyRowViewAsImage() {
     }
 
     // Values
-    var values = rowIndices.map(function (ri) {
+    const values = rowIndices.map(function (ri) {
       return rows[ri] ? rows[ri].getValue(col.id) : null;
     });
 
-    var valueX = pad + keyW + gap;
+    const valueX = pad + keyW + gap;
 
     if (rowIndices.length === 1) {
       // Single row - draw value directly
-      var val = values[0];
+      const val = values[0];
       ctx.fillStyle = getValColor(val, col.columnDef.dataType);
       ctx.font = font;
       ctx.textBaseline = "middle";
-      var display = fmtVal(val, col.columnDef.dataType);
+      const display = fmtVal(val, col.columnDef.dataType);
       if (val === null || val === undefined) {
         ctx.font = "italic 12px " + (getComputedStyle(getElementById("rowViewContent") ?? document.body).fontFamily || "monospace");
       }
       ctx.fillText(display, valueX, y + cellH / 2, totalW - valueX - pad);
     } else {
       // Multiple rows - stack vertically
-      var lineH = 16;
-      var startY = y + (cellH - (values.length * lineH)) / 2 + lineH / 2;
+      const lineH = 16;
+      const startY = y + (cellH - (values.length * lineH)) / 2 + lineH / 2;
       values.forEach(function (val, vi) {
-        var vy = startY + vi * lineH;
+        const vy = startY + vi * lineH;
         // Row label
         ctx.fillStyle = dim;
         ctx.font = "10px " + (getComputedStyle(getElementById("rowViewContent") ?? document.body).fontFamily || "monospace");
         ctx.textBaseline = "middle";
         ctx.fillText("Row " + (vi + 1) + ":", valueX, vy);
         // Value
-        var labelW = ctx.measureText("Row " + (vi + 1) + ":").width + 4;
+        const labelW = ctx.measureText("Row " + (vi + 1) + ":").width + 4;
         ctx.fillStyle = getValColor(val, col.columnDef.dataType);
         ctx.font = font;
-        var display = fmtVal(val, col.columnDef.dataType);
+        const display = fmtVal(val, col.columnDef.dataType);
         ctx.fillText(display, valueX + labelW, vy, totalW - valueX - labelW - pad);
       });
     }
@@ -1312,7 +1312,7 @@ async function copyRowViewAsImage() {
 
   // Convert to blob and copy to clipboard
   try {
-    var blob = await new Promise<Blob | null>((resolve) => { canvas.toBlob(resolve, "image/png"); });
+    const blob = await new Promise<Blob | null>((resolve) => { canvas.toBlob(resolve, "image/png"); });
     if (!blob) throw new Error("Failed to create image");
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
     vscode.postMessage({ command: "info", text: "Row view copied as image" });
@@ -1322,45 +1322,45 @@ async function copyRowViewAsImage() {
 }
 
 function copyGridAsImage() {
-  var activeIndex = getActiveGridIndex();
-  var table = getGrid(activeIndex)?.tanTable;
+  const activeIndex = getActiveGridIndex();
+  const table = getGrid(activeIndex)?.tanTable;
   if (!table) return;
 
-  var columns = table.getVisibleLeafColumns().filter(function (col) { return col.getIsVisible(); });
+  const columns = table.getVisibleLeafColumns().filter(function (col) { return col.getIsVisible(); });
   if (columns.length === 0) return;
-  var filteredRows = table.getFilteredRowModel().rows;
+  const filteredRows = table.getFilteredRowModel().rows;
   if (filteredRows.length === 0) return;
-  var MAX_ROWS = 500;
-  var rows = filteredRows.slice(0, MAX_ROWS);
+  const MAX_ROWS = 500;
+  const rows = filteredRows.slice(0, MAX_ROWS);
 
   // Theme colors
-  var bodyStyle = getComputedStyle(document.body);
+  const bodyStyle = getComputedStyle(document.body);
   function readCSS(prop: string, fallback: string): string {
-    var v = bodyStyle.getPropertyValue(prop).trim();
+    const v = bodyStyle.getPropertyValue(prop).trim();
     return v || fallback;
   }
-  var bg = readCSS("--vscode-editor-background", "#1e1e1e");
-  var fg = readCSS("--vscode-editor-foreground", "#cccccc");
-  var border = readCSS("--vscode-panel-border", "#333333");
-  var headerBg = readCSS("--vscode-sideBar-background", "#252526");
-  var badgeBg = readCSS("--vscode-badge-background", "#4a4a4a");
-  var badgeFg = readCSS("--vscode-badge-foreground", "#ffffff");
-  var blue = readCSS("--vscode-charts-blue", "#519aba");
-  var green = readCSS("--vscode-charts-green", "#89d185");
-  var dim = readCSS("--vscode-descriptionForeground", "#888888");
-  var purple = "#d8b4fe";
+  const bg = readCSS("--vscode-editor-background", "#1e1e1e");
+  const fg = readCSS("--vscode-editor-foreground", "#cccccc");
+  const border = readCSS("--vscode-panel-border", "#333333");
+  const headerBg = readCSS("--vscode-sideBar-background", "#252526");
+  const badgeBg = readCSS("--vscode-badge-background", "#4a4a4a");
+  const badgeFg = readCSS("--vscode-badge-foreground", "#ffffff");
+  const blue = readCSS("--vscode-charts-blue", "#519aba");
+  const green = readCSS("--vscode-charts-green", "#89d185");
+  const dim = readCSS("--vscode-descriptionForeground", "#888888");
+  const purple = "#d8b4fe";
 
-  var fontFam = getComputedStyle(getElementById("gridContainer") ?? document.body).fontFamily || "monospace";
-  var pad = 8;
-  var headerH = 36;
-  var rowH = 30;
-  var font = "12px " + fontFam;
-  var fontBold = "600 12px " + fontFam;
-  var altColor = "rgba(255,255,255,0.04)";
+  const fontFam = getComputedStyle(getElementById("gridContainer") ?? document.body).fontFamily || "monospace";
+  const pad = 8;
+  const headerH = 36;
+  const rowH = 30;
+  const font = "12px " + fontFam;
+  const fontBold = "600 12px " + fontFam;
+  const altColor = "rgba(255,255,255,0.04)";
 
   function getValColor(val: unknown, dt: string | undefined): string {
     if (val === null || val === undefined) return dim;
-    var t = (dt || "").toLowerCase();
+    const t = (dt || "").toLowerCase();
     if (t.indexOf("bool") >= 0) return val ? green : dim;
     if (t.indexOf("int") >= 0 || t.indexOf("dec") >= 0 || t.indexOf("float") >= 0 || t.indexOf("num") >= 0) return blue;
     if (t.indexOf("date") >= 0 || t.indexOf("time") >= 0) return purple;
@@ -1369,7 +1369,7 @@ function copyGridAsImage() {
 
   function fmtVal(val: unknown, dt: string | undefined): string {
     if (val === null || val === undefined) return "NULL";
-    var t = (dt || "").toLowerCase();
+    const t = (dt || "").toLowerCase();
     if (t.indexOf("bool") >= 0) return val ? "true" : "false";
     if (t.indexOf("int") >= 0 || t.indexOf("dec") >= 0 || t.indexOf("float") >= 0 || t.indexOf("num") >= 0) {
       if (typeof val === "number") return val.toLocaleString();
@@ -1380,7 +1380,7 @@ function copyGridAsImage() {
 
   function fmtType(dt: string | undefined): string {
     if (!dt) return "";
-    var lower = dt.toLowerCase();
+    const lower = dt.toLowerCase();
     if (lower.indexOf("int") >= 0 || lower.indexOf("dec") >= 0 || lower.indexOf("float") >= 0 || lower.indexOf("num") >= 0) return "num";
     if (lower.indexOf("char") >= 0 || lower.indexOf("text") >= 0 || lower.indexOf("varchar") >= 0) return "txt";
     if (lower.indexOf("date") >= 0 || lower.indexOf("time") >= 0) return "dt";
@@ -1389,21 +1389,21 @@ function copyGridAsImage() {
   }
 
   // Measure column widths
-  var colWidths: number[] = [];
-  var totalW = 0;
-  var tmpCanvas = document.createElement("canvas");
-  var tmpCtx = getCanvasContext(tmpCanvas);
-  var maxTotalW = 800;
+  let colWidths: number[] = [];
+  let totalW = 0;
+  const tmpCanvas = document.createElement("canvas");
+  const tmpCtx = getCanvasContext(tmpCanvas);
+  const maxTotalW = 800;
 
   columns.forEach(function (col, ci) {
     tmpCtx.font = fontBold;
-    var headerW = tmpCtx.measureText(col.columnDef.header || col.id).width + 30 + pad * 3;
-    var maxW = headerW;
+    const headerW = tmpCtx.measureText(col.columnDef.header || col.id).width + 30 + pad * 3;
+    let maxW = headerW;
     tmpCtx.font = font;
     rows.forEach(function (row) {
-      var val = row.getValue(col.id);
-      var display = fmtVal(val, col.columnDef.dataType);
-      var w = tmpCtx.measureText(display).width + pad * 2;
+      const val = row.getValue(col.id);
+      const display = fmtVal(val, col.columnDef.dataType);
+      const w = tmpCtx.measureText(display).width + pad * 2;
       if (w > maxW) maxW = w;
     });
     maxW = Math.max(maxW, 60);
@@ -1415,20 +1415,20 @@ function copyGridAsImage() {
 
   // If too wide, scale down
   if (totalW > maxTotalW) {
-    var scale = maxTotalW / totalW;
+    const scale = maxTotalW / totalW;
     colWidths = colWidths.map(function (w) { return Math.max(Math.floor(w * scale), 50); });
     totalW = colWidths.reduce(function (a, b) { return a + b; }, 0);
   }
 
-  var visRows = rows.length;
-  var totalH = headerH + visRows * rowH;
+  const visRows = rows.length;
+  const totalH = headerH + visRows * rowH;
 
   // Canvas
-  var dpr = window.devicePixelRatio || 2;
-  var canvas = document.createElement("canvas");
+  const dpr = window.devicePixelRatio || 2;
+  const canvas = document.createElement("canvas");
   canvas.width = totalW * dpr;
   canvas.height = totalH * dpr;
-  var ctx = getCanvasContext(canvas);
+  const ctx = getCanvasContext(canvas);
   ctx.scale(dpr, dpr);
 
   function roundRect(x: number, y: number, w: number, h: number, r: number): void {
@@ -1459,9 +1459,9 @@ function copyGridAsImage() {
   ctx.lineTo(totalW, headerH);
   ctx.stroke();
 
-  var cx = 0;
+  let cx = 0;
   columns.forEach(function (col, ci) {
-    var cw = colWidths[ci];
+    const cw = colWidths[ci];
     // Vertical separator
     if (ci > 0) {
       ctx.strokeStyle = border;
@@ -1476,17 +1476,17 @@ function copyGridAsImage() {
     ctx.font = fontBold;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
-    var name = col.columnDef.header || col.id;
+    const name = col.columnDef.header || col.id;
     ctx.fillText(name, cx + pad, headerH / 2);
 
     // Type badge
-    var typeLabel = fmtType(col.columnDef.dataType);
+    const typeLabel = fmtType(col.columnDef.dataType);
     if (typeLabel) {
-      var nameW = ctx.measureText(name).width;
-      var badgeX = cx + pad + nameW + 6;
-      var badgeW2 = 28;
-      var badgeH = 16;
-      var badgeY = (headerH - badgeH) / 2;
+      const nameW = ctx.measureText(name).width;
+      const badgeX = cx + pad + nameW + 6;
+      const badgeW2 = 28;
+      const badgeH = 16;
+      const badgeY = (headerH - badgeH) / 2;
       ctx.fillStyle = badgeBg;
       roundRect(badgeX, badgeY, badgeW2, badgeH, 3);
       ctx.fill();
@@ -1503,7 +1503,7 @@ function copyGridAsImage() {
 
   // Data rows
   rows.forEach(function (row, ri) {
-    var y = headerH + ri * rowH;
+    const y = headerH + ri * rowH;
     // Alternating row bg
     if (ri % 2 === 1) {
       ctx.fillStyle = altColor;
@@ -1517,15 +1517,15 @@ function copyGridAsImage() {
     ctx.lineTo(totalW, y + rowH);
     ctx.stroke();
 
-    var cx2 = 0;
+    let cx2 = 0;
     columns.forEach(function (col, ci) {
-      var cw = colWidths[ci];
-      var val = row.getValue(col.id);
-      var display = fmtVal(val, col.columnDef.dataType);
+      const cw = colWidths[ci];
+      const val = row.getValue(col.id);
+      const display = fmtVal(val, col.columnDef.dataType);
       ctx.fillStyle = getValColor(val, col.columnDef.dataType);
       ctx.font = val === null || val === undefined ? ("italic " + font) : font;
       ctx.textBaseline = "middle";
-      var align = col.columnDef.align === "right" || (col.columnDef.dataType && col.columnDef.dataType.toLowerCase().indexOf("int") >= 0);
+      const align = col.columnDef.align === "right" || (col.columnDef.dataType && col.columnDef.dataType.toLowerCase().indexOf("int") >= 0);
       if (align) {
         ctx.textAlign = "right";
         ctx.fillText(display, cx2 + cw - pad, y + rowH / 2);
@@ -1555,18 +1555,18 @@ function copyGridAsImage() {
 
 function exportRowViewAsXlsb() {
   if (!hasRowViewData()) return;
-  var activeIndex = getActiveGridIndex();
-  var table = getGrid(activeIndex)?.tanTable;
+  const activeIndex = getActiveGridIndex();
+  const table = getGrid(activeIndex)?.tanTable;
   if (!table) return;
 
-  var rowIndices = getSelectedRowIndices();
+  const rowIndices = getSelectedRowIndices();
   if (rowIndices.length === 0 || rowIndices.length > 10) return;
 
-  var columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
-  var columnIds = columns.map(function (col) { return col.id; });
-  var rs = getResultSetAt(activeIndex) ?? null;
+  const columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
+  const columnIds = columns.map(function (col) { return col.id; });
+  const rs = getResultSetAt(activeIndex) ?? null;
 
-  var data = {
+  const data = {
     sourceUri: getActiveSourceUri(),
     results: [{
       resultSetIndex: activeIndex,
@@ -2679,31 +2679,31 @@ document.addEventListener("mousedown", (e) => {
     }
   }
   // Close export menus when clicking outside
-  var splitBtn = getElementById("exportSplitBtn");
+  const splitBtn = getElementById("exportSplitBtn");
   if (splitBtn && target && !splitBtn.contains(target)) {
-    var sm = getElementById("exportSplitMenu");
+    const sm = getElementById("exportSplitMenu");
     if (sm) sm.style.display = "none";
-    var primaryMenu = getElementById("exportPrimaryMenu");
+    const primaryMenu = getElementById("exportPrimaryMenu");
     if (primaryMenu) primaryMenu.style.display = "none";
-    var exportBtn = document.querySelector("#exportSplitBtn .split-btn__primary");
+    const exportBtn = document.querySelector("#exportSplitBtn .split-btn__primary");
     if (exportBtn) exportBtn.setAttribute("aria-expanded", "false");
   }
   // Close view split menu when clicking outside
-  var viewBtn = getElementById("viewSplitBtn");
+  const viewBtn = getElementById("viewSplitBtn");
   if (viewBtn && target && !viewBtn.contains(target)) {
-    var vm = getElementById("viewSplitMenu");
+    const vm = getElementById("viewSplitMenu");
     if (vm) vm.style.display = "none";
   }
   // Close toolbar more menu when clicking outside
-  var moreBtn = getElementById("toolbarMoreBtn");
+  const moreBtn = getElementById("toolbarMoreBtn");
   if (moreBtn && target && !moreBtn.contains(target)) {
-    var moreMenu = getElementById("toolbarMoreMenu");
+    const moreMenu = getElementById("toolbarMoreMenu");
     if (moreMenu) moreMenu.style.display = "none";
   }
   // Close row view export menu when clicking outside
-  var rvExport = getElementById("rowViewExportMenu");
+  const rvExport = getElementById("rowViewExportMenu");
   if (rvExport && rvExport.style.display !== "none") {
-    var rvExportBtn = document.querySelector(".row-view-export-wrapper");
+    const rvExportBtn = document.querySelector(".row-view-export-wrapper");
     if (rvExportBtn && target && !rvExportBtn.contains(target)) {
       rvExport.style.display = "none";
     }
@@ -2712,11 +2712,11 @@ document.addEventListener("mousedown", (e) => {
 
 getResultPanelWindow().toggleExportSplitMenu = function (event: Event) {
   event.stopPropagation();
-  var primaryMenu = getElementById("exportPrimaryMenu");
+  const primaryMenu = getElementById("exportPrimaryMenu");
   if (primaryMenu) primaryMenu.style.display = "none";
-  var exportBtn = document.querySelector("#exportSplitBtn .split-btn__primary");
+  const exportBtn = document.querySelector("#exportSplitBtn .split-btn__primary");
   if (exportBtn) exportBtn.setAttribute("aria-expanded", "false");
-  var m = getElementById("exportSplitMenu");
+  const m = getElementById("exportSplitMenu");
   if (!m) return;
   m.style.display = m.style.display === "none" ? "block" : "none";
 };
@@ -2725,7 +2725,7 @@ getResultPanelWindow().toggleExportPrimaryMenu = toggleExportPrimaryMenu;
 
 getResultPanelWindow().toggleToolbarMoreMenu = function (event) {
   event.stopPropagation();
-  var menu = getElementById("toolbarMoreMenu");
+  const menu = getElementById("toolbarMoreMenu");
   if (!menu) return;
   menu.style.display = menu.style.display === "none" ? "block" : "none";
 };
@@ -3107,7 +3107,7 @@ function setupWindowFunctions(): void {
   panel.toggleEditMode = function () {
     const rs = getResultSetAt(getActiveGridIndex());
     if (!rs || !rs.isEditable) return;
-    var newMode = !getIsEditMode();
+    const newMode = !getIsEditMode();
     setIsEditMode(newMode);
     clearPendingEdits();
     updateEditButtonsState();
@@ -3118,8 +3118,8 @@ function setupWindowFunctions(): void {
   panel.saveEdits = function () {
     const rs = getResultSetAt(getActiveGridIndex());
     if (!rs || !rs.isEditable) return;
-    var edits = getPendingEdits();
-    var deletes = Array.from(getPendingDeletes());
+    const edits = getPendingEdits();
+    const deletes = Array.from(getPendingDeletes());
     if (edits.length === 0 && deletes.length === 0) {
       vscode.postMessage({ command: 'info', text: 'No pending changes to save.' });
       return;
@@ -3134,15 +3134,15 @@ function setupWindowFunctions(): void {
     });
   };
   panel.toggleColumnVisibilityDropdown = function () {
-    var existing = document.querySelector('.column-visibility-dropdown');
+    const existing = document.querySelector('.column-visibility-dropdown');
     if (existing) { existing.remove(); return; }
 
-    var activeIndex = getActiveGridIndex();
-    var grid = getGrid(activeIndex);
+    const activeIndex = getActiveGridIndex();
+    const grid = getGrid(activeIndex);
     if (!grid || !grid.tanTable) return;
 
-    var allColumns = grid.tanTable.getAllLeafColumns?.() ?? grid.tanTable.getVisibleLeafColumns();
-    var dropdown = document.createElement('div');
+    const allColumns = grid.tanTable.getAllLeafColumns?.() ?? grid.tanTable.getVisibleLeafColumns();
+    const dropdown = document.createElement('div');
     dropdown.className = 'column-visibility-dropdown';
     dropdown.style.position = 'fixed';
     dropdown.style.zIndex = '10000';
@@ -3156,7 +3156,7 @@ function setupWindowFunctions(): void {
     dropdown.style.padding = '4px 0';
 
     // Header
-    var headerDiv = document.createElement('div');
+    const headerDiv = document.createElement('div');
     headerDiv.style.padding = '6px 12px';
     headerDiv.style.fontWeight = '600';
     headerDiv.style.fontSize = '12px';
@@ -3165,13 +3165,13 @@ function setupWindowFunctions(): void {
     dropdown.appendChild(headerDiv);
 
     // Show All / Hide All
-    var actionsDiv = document.createElement('div');
+    const actionsDiv = document.createElement('div');
     actionsDiv.style.display = 'flex';
     actionsDiv.style.gap = '4px';
     actionsDiv.style.padding = '4px 12px';
     actionsDiv.style.borderBottom = '1px solid var(--vscode-panel-border)';
 
-    var showAllBtn = document.createElement('button');
+    const showAllBtn = document.createElement('button');
     showAllBtn.textContent = 'Show All';
     showAllBtn.style.fontSize = '11px';
     showAllBtn.style.cursor = 'pointer';
@@ -3181,7 +3181,7 @@ function setupWindowFunctions(): void {
     showAllBtn.style.color = 'var(--vscode-foreground)';
     showAllBtn.style.padding = '2px 6px';
 
-    var hideAllBtn = document.createElement('button');
+    const hideAllBtn = document.createElement('button');
     hideAllBtn.textContent = 'Hide All';
     hideAllBtn.style.fontSize = '11px';
     hideAllBtn.style.cursor = 'pointer';
@@ -3196,15 +3196,15 @@ function setupWindowFunctions(): void {
     dropdown.appendChild(actionsDiv);
 
     // Column list
-    var listDiv = document.createElement('div');
+    const listDiv = document.createElement('div');
     listDiv.style.padding = '2px 0';
 
     allColumns.forEach(function (col) {
-        var colId = col.id;
-        var colDef = col.columnDef;
-        var isVisible = col.getIsVisible();
+        const colId = col.id;
+        const colDef = col.columnDef;
+        const isVisible = col.getIsVisible();
 
-        var item = document.createElement('div');
+        const item = document.createElement('div');
         item.style.display = 'flex';
         item.style.alignItems = 'center';
         item.style.padding = '4px 12px';
@@ -3215,18 +3215,18 @@ function setupWindowFunctions(): void {
         item.onmouseenter = function () { item.style.backgroundColor = 'var(--vscode-list-hoverBackground)'; };
         item.onmouseleave = function () { item.style.backgroundColor = ''; };
 
-        var cb = document.createElement('input');
+        const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = isVisible;
         cb.style.margin = '0';
         cb.style.cursor = 'pointer';
         cb.style.accentColor = 'var(--vscode-focusBorder)';
 
-        var label = document.createElement('span');
+        const label = document.createElement('span');
         label.textContent = colDef && colDef.header ? colDef.header : colId;
         label.style.flex = '1';
 
-        var typeSpan = document.createElement('span');
+        const typeSpan = document.createElement('span');
         typeSpan.textContent = colDef && colDef.dataType ? colDef.dataType : '';
         typeSpan.style.fontSize = '10px';
         typeSpan.style.opacity = '0.5';
@@ -3255,22 +3255,22 @@ function setupWindowFunctions(): void {
     // Show All / Hide All handlers
     showAllBtn.onclick = function () {
         allColumns.forEach(function (c) { c.toggleVisibility(true); });
-        var cbs = dropdown.querySelectorAll('input[type="checkbox"]');
+        const cbs = dropdown.querySelectorAll('input[type="checkbox"]');
         cbs.forEach(function (cb2) { (cb2 as HTMLInputElement).checked = true; });
         grid?.render?.();
     };
 
     hideAllBtn.onclick = function () {
         allColumns.forEach(function (c) { c.toggleVisibility(false); });
-        var cbs = dropdown.querySelectorAll('input[type="checkbox"]');
+        const cbs = dropdown.querySelectorAll('input[type="checkbox"]');
         cbs.forEach(function (cb2) { (cb2 as HTMLInputElement).checked = false; });
         grid?.render?.();
     };
 
     // Position dropdown below the button
-    var btn = getElementById('columnVisibilityBtn');
+    const btn = getElementById('columnVisibilityBtn');
     if (btn) {
-        var rect = btn.getBoundingClientRect();
+        const rect = btn.getBoundingClientRect();
         dropdown.style.top = (rect.bottom + 4) + 'px';
         dropdown.style.left = Math.max(4, Math.min(rect.left, panel.innerWidth - 200)) + 'px';
     } else {
