@@ -4,7 +4,7 @@ This file provides guidance to agents when working with code in this repository.
 
 ## Project Overview
 
-Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / PureData System for Analytics, optional database companion extensions, and a self-hosted web editor/API. Database support includes Netezza, SQLite, Db2, Oracle, PostgreSQL, Snowflake, MSSQL, MySQL, DuckDB/File SQL, Microsoft Access, and Vertica.
+Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / PureData System for Analytics, optional database companion extensions, and a self-hosted web editor/API. Database support includes Netezza, SQLite, Db2, Oracle, PostgreSQL, Snowflake, MSSQL, MySQL, ClickHouse, DuckDB/File SQL, Microsoft Access, and Vertica.
 
 **External dependencies:**
 
@@ -27,6 +27,13 @@ Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / Pur
 - `test-harness/` — Playwright and browser harnesses for webviews and the web SQL workspace.
 
 The root `package.json` uses npm workspaces for `packages/*` and `apps/*`. The root API build handles the `contracts -> sql-core -> database-runtime -> api` dependency chain; build `@justybase/access-file` separately when working on that package. Use the root scripts rather than committing generated `dist/` output.
+
+### Quality and Documentation Sources of Truth
+
+- `docs/TESTING_STRATEGY.md` is the canonical policy for test-layer selection, risk tiers, stateful UI contracts, live-test hygiene, coverage, teardown, and flake handling.
+- `docs/PROJECT_QUALITY_ROADMAP.md` is the canonical cross-project quality backlog and contains the latest audited baselines and acceptance criteria. Do not copy volatile counts or roadmap status into this file.
+- `docs/guide/reference/database-support.md` is the user-facing database capability matrix; update it when support status or limitations change.
+- `docs/ARCHITECTURE.md` and subsystem contract/runbook documents describe current boundaries. Keep this file focused on operational rules for agents and update it when commands, layout, or required gates change.
 
 ### Toolchain and Local Setup
 
@@ -57,9 +64,13 @@ The root build emits `dist/extension.js`, `dist/media/*`, `dist/server/main.js`,
 
 ```bash
 npm run lint               # ESLint check
+npm run lint:extended      # Report lint baseline across media/apps/packages/extensions
 npm run lint:fix           # ESLint with auto-fix
 npm run check-types        # TypeScript type check (no emit)
+npm run check:architecture # Enforce current shared-package import boundaries
 ```
+
+`lint:extended` currently reports an accepted warning baseline; do not introduce new warnings. The ratchet and cleanup targets are tracked in `docs/PROJECT_QUALITY_ROADMAP.md`.
 
 ### Test Commands
 
@@ -102,8 +113,12 @@ npm run test:access:integration
 npm run test:db2:integration
 npm run test:oracle:integration
 npm run test:mssql:integration
+npm run test:mysql:integration
+npm run test:clickhouse:integration
 npm run test:postgres:integration
+npm run test:vertica:integration
 npm run test:snowflake:integration
+npm run test:netezza:integration
 
 npm run verify:access
 npm run verify:db2
@@ -114,6 +129,7 @@ npm run verify:vertica
 npm run verify:snowflake
 npm run verify:mssql
 npm run verify:mysql
+npm run verify:clickhouse
 ```
 
 The database-backed suites require the corresponding environment variables and/or a running database. Do not add credentials to the repository. Optional extension tasks are dispatched through `scripts/run-optional-extension-task.js`.
@@ -146,11 +162,11 @@ npm run check-types && npm run lint && npm run build
 ### Full Validation (before commits)
 
 ```bash
-npm run check-types && npm run lint && npm run build && npm run test:validate
-npm run build:all && npm run check-types:api && npm run check-types:web && npm run test:api && npm run test:web
+npm run verify:pr
+npm run lint:extended && npm run docs:check && npm run version:check
 ```
 
-`check-types` includes webview media TypeScript (`tsconfig.media.json` with `strictNullChecks` and `noImplicitAny`). New code under `media/` must pass `npm run check-types:media` (alias: `check-types:media:strict`).
+`verify:pr` covers architecture boundaries, desktop/media/shared/API/web type checks, blocking lint, unit/API/web tests, and desktop/API/web builds. It does not replace scope-specific browser, Extension Host, companion, live-database, packaging, or benchmark gates; run the nearest applicable command for changed high-risk behavior. `check-types` includes webview media TypeScript (`tsconfig.media.json` with `strictNullChecks` and `noImplicitAny`). New code under `media/` must pass `npm run check-types:media` (alias: `check-types:media:strict`).
 
 ### Result Panel webview layout
 
@@ -177,6 +193,7 @@ npm run verify:postgresql   # PostgreSQL
 npm run verify:snowflake    # Snowflake
 npm run verify:mssql        # Microsoft SQL Server
 npm run verify:mysql        # MySQL
+npm run verify:clickhouse   # ClickHouse
 npm run verify:vertica      # Vertica
 ```
 
@@ -188,6 +205,7 @@ npm run package            # Build VSIX
 npm run package:pre        # Build + package
 npm run package:access     # Package one optional extension
 npm run package:db2        # Package Db2 (runtime-specific)
+npm run package:clickhouse # Package ClickHouse
 ```
 
 Optional extensions expose corresponding `package:<dialect>` and `package:<dialect>:full` scripts. Use `npm run version:check` / `version:set` / `version:bump` for repository version synchronization; never use `npm version`.
@@ -404,6 +422,12 @@ For ambiguous syntax or implicit-cast behavior, a dev Netezza instance can confi
 - Root Jest uses `maxWorkers: 50%` by default; use `npm run test:serial` or `--runInBand` to reduce memory usage.
 - Timeout: 60s
 
+### Stateful and Asynchronous Behavior
+
+For every persisted or asynchronous UI change, define the state owner and stable identity, preserved transitions, invalidation/migration rules, recovery behavior, and cleanup obligations before choosing tests. Cover the pure state transition first, bundled DOM/component behavior next, and a real browser or Extension Host boundary for high-risk lifecycle behavior. Do not rely on fixed sleeps; wait for observable readiness, layout, persistence, or protocol acknowledgements.
+
+Result-panel changes must exercise state across result/Logs switching, result-set and source switching, hide/reveal, webview revival, refresh/new execution, pin/close index changes, streaming, cancellation, disk-backed data, empty results, and initially zero-sized layouts as applicable. Scroll tests must set and assert both a non-zero vertical anchor and horizontal offset after restoration, using stable result identity and an exact virtualizer anchor when available. The complete required matrix lives in `docs/TESTING_STRATEGY.md`.
+
 ### Extension Host result-panel gate
 
 The deterministic result-panel gate runs the real extension in a fresh VS Code
@@ -483,7 +507,7 @@ repository; do not commit credentials or generated reports.
 ### Integration Tests
 
 - Database-backed integration tests are excluded from default `npm run test`.
-- Run with `npm run test:duckdb:integration`, `npm run test:file:integration`, `npm run test:access:integration`, `npm run test:db2:integration`, `npm run test:oracle:integration`, `npm run test:mssql:integration`, `npm run test:postgres:integration`, or `npm run test:snowflake:integration` as appropriate.
+- Run the matching `test:*:integration` script for Netezza, DuckDB, File SQL, Access, Db2, Oracle, MSSQL, MySQL, ClickHouse, PostgreSQL, Vertica, or Snowflake as appropriate.
 - `npm run test:metadata-cache:integration` is a local disk-restart/cache contract test and does not require a live database.
 - Playwright requires browser dependencies; install them with `npm run test:playwright:install` when needed.
 
