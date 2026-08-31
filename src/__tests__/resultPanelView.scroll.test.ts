@@ -163,6 +163,16 @@ describe('ResultPanelView Scroll Preservation', () => {
         expect(syncMessage?.logExecutionTimestamp).toBeGreaterThan(0);
     });
 
+    it('ignores malformed webview messages before dispatching them', () => {
+        const setActiveSourceSpy = jest.spyOn(provider, 'setActiveSource');
+        const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0];
+
+        messageHandler({ command: 'switchSource' });
+        messageHandler({ command: 'unknownResultPanelCommand', sourceUri: 'untitled:bad' });
+
+        expect(setActiveSourceSpy).not.toHaveBeenCalled();
+    });
+
     describe('source switching and scroll preservation', () => {
         it('should send hydrate (not setActiveSource) when switching to different source', () => {
             const uriA = 'file:///path/to/A.sql';
