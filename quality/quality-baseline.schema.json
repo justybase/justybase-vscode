@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://justybase.github.io/justybase-vscode/schemas/quality-baseline.v1.json",
+  "title": "JustyBase quality baseline",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "coverage",
+    "lint",
+    "largeModuleLineLimit",
+    "changedHighRiskCoverage",
+    "documentationFreshnessDays"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "coverage": {
+      "type": "object",
+      "required": ["statements", "branches", "functions", "lines"],
+      "additionalProperties": false,
+      "properties": {
+        "statements": { "type": "number", "minimum": 0, "maximum": 100 },
+        "branches": { "type": "number", "minimum": 0, "maximum": 100 },
+        "functions": { "type": "number", "minimum": 0, "maximum": 100 },
+        "lines": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "lint": {
+      "type": "object",
+      "required": ["total", "areas"],
+      "additionalProperties": false,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "areas": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "largeModuleLineLimit": { "type": "integer", "minimum": 1 },
+    "changedHighRiskCoverage": {
+      "type": "object",
+      "required": ["lines", "branches", "roots"],
+      "additionalProperties": false,
+      "properties": {
+        "lines": { "type": "number", "minimum": 0, "maximum": 100 },
+        "branches": { "type": "number", "minimum": 0, "maximum": 100 },
+        "roots": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "documentationFreshnessDays": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}
