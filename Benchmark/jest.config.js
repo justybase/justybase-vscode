@@ -25,6 +25,8 @@ module.exports = {
     },
     moduleNameMapper: {
         '^vscode$': path.join(projectRoot, 'src/__tests__/__mocks__/vscode.ts'),
+        '^@justybase/contracts$': path.join(projectRoot, 'packages/contracts/src/index.ts'),
+        '^@justybase/contracts/(.*)$': path.join(projectRoot, 'packages/contracts/src/$1'),
         '^@chevrotain/(.+)$': path.join(projectRoot, 'node_modules/@chevrotain/$1/lib/src/api.js')
     },
     transformIgnorePatterns: [
