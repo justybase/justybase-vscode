@@ -9,6 +9,7 @@ import { assertLintRatchet, lintSummary, sha256 } from './quality-gate.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const artifactRoot = path.join(root, 'artifacts', 'quality');
 const baseline = JSON.parse(fs.readFileSync(path.join(root, 'quality', 'quality-baseline.json'), 'utf8'));
+const requiredCollectors = ['testCoverage', 'lint', 'audit', 'docs', 'commit', 'gitStatus'];
 
 function readJsonIfPresent(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return undefined; }
@@ -59,8 +60,53 @@ function documentationSummary(log = '') {
     ? 'pass'
     : log.trim().length > 0
       ? 'fail'
-      : fs.existsSync(path.join(root, '_site')) ? 'pass' : 'missing';
+      : 'missing';
   return { checkStatus, generatedPages: pages, roadmapLastAudited: audited, roadmapAgeDays: age };
+}
+
+function hasCoverageSummary(coverage) {
+  return ['statements', 'branches', 'functions', 'lines'].every(
+    metric => Number.isFinite(coverage?.total?.[metric]?.pct),
+  );
+}
+
+export function qualityInputFailures({
+  commandStatuses,
+  jest,
+  coverage,
+  lintResults,
+  audit,
+  documentation,
+  commit,
+} = {}) {
+  const failures = [];
+
+  for (const name of requiredCollectors) {
+    const status = commandStatuses?.[name];
+    if (!status) {
+      failures.push(`Missing ${name} collector status.`);
+    } else if (status.error) {
+      failures.push(`${name} collector failed to start: ${status.error}.`);
+    } else if (status.signal) {
+      failures.push(`${name} collector terminated with signal ${status.signal}.`);
+    } else if (status.exitCode !== 0) {
+      failures.push(`${name} collector exited with code ${String(status.exitCode)}.`);
+    }
+  }
+
+  if (!Number.isInteger(jest?.numTotalTestSuites) || jest.numTotalTestSuites <= 0
+    || !Number.isInteger(jest?.numTotalTests) || jest.numTotalTests <= 0) {
+    failures.push('Missing or invalid Jest results artifact.');
+  }
+  if (!hasCoverageSummary(coverage)) failures.push('Missing or invalid coverage summary artifact.');
+  if (!Array.isArray(lintResults)) failures.push('Missing or invalid lint artifact.');
+  if (!audit?.metadata?.vulnerabilities || typeof audit.metadata.vulnerabilities !== 'object') {
+    failures.push('Missing or invalid dependency audit artifact.');
+  }
+  if (documentation?.checkStatus !== 'pass') failures.push('Documentation check artifact does not report success.');
+  if (!commit || commit === 'unknown') failures.push('Missing repository commit artifact.');
+
+  return failures;
 }
 
 export function buildReport({ commit = 'unknown', base = null, dirty = false, jest, coverage, lint, audit, docs, log = '' } = {}) {
@@ -134,15 +180,22 @@ function markdown(report) {
 }
 
 function main() {
+  const commandStatuses = readJsonIfPresent(path.join(artifactRoot, 'command-status.json'));
+  const jest = readJsonIfPresent(path.join(artifactRoot, 'jest-results.json'));
+  const coverage = readJsonIfPresent(path.join(root, 'coverage', 'coverage-summary.json'));
+  const lintResults = readJsonIfPresent(path.join(artifactRoot, 'lint.json'));
+  const audit = readJsonIfPresent(path.join(artifactRoot, 'audit.json'));
+  const docs = documentationSummary(readTextIfPresent(path.join(artifactRoot, 'docs.log')));
+  const commit = readTextIfPresent(path.join(artifactRoot, 'commit.txt')).trim() || 'unknown';
   const report = buildReport({
-    commit: readTextIfPresent(path.join(artifactRoot, 'commit.txt')).trim() || 'unknown',
+    commit,
     base: process.env.QUALITY_BASE_SHA ?? null,
     dirty: readTextIfPresent(path.join(artifactRoot, 'git-status.txt')).trim().length > 0,
-    jest: readJsonIfPresent(path.join(artifactRoot, 'jest-results.json')),
-    coverage: readJsonIfPresent(path.join(root, 'coverage', 'coverage-summary.json')),
-    lint: { results: readJsonIfPresent(path.join(artifactRoot, 'lint.json')) ?? [] },
-    audit: readJsonIfPresent(path.join(artifactRoot, 'audit.json')),
-    docs: documentationSummary(readTextIfPresent(path.join(artifactRoot, 'docs.log'))),
+    jest,
+    coverage,
+    lint: { results: lintResults ?? [] },
+    audit,
+    docs,
     log: readTextIfPresent(path.join(artifactRoot, 'jest.log')),
   });
   fs.mkdirSync(artifactRoot, { recursive: true });
@@ -154,11 +207,12 @@ function main() {
     .map(([metric, floor]) => `${metric} coverage ${report.coverage[metric]}% < ${floor}%.`);
   const lintFailures = assertLintRatchet(report.lint, baseline);
   const failures = [
+    ...qualityInputFailures({ commandStatuses, jest, coverage, lintResults, audit, documentation: docs, commit }),
     ...coverageFailures,
     ...lintFailures,
     ...(report.tests.naturalExit ? [] : ['Jest did not terminate naturally.']),
     ...(report.tests.suites.failed > 0 || report.tests.tests.failed > 0 ? ['Jest reported failed tests.'] : []),
-    ...(report.dependencies.auditStatus === 'fail' ? ['Dependency audit reported high/critical vulnerabilities or failed.'] : []),
+    ...(report.dependencies.auditStatus !== 'pass' ? ['Dependency audit did not pass.'] : []),
     ...(report.documentation.checkStatus !== 'pass' ? ['Documentation check did not pass.'] : []),
   ];
   if (failures.length > 0) {
