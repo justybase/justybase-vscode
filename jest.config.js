@@ -65,13 +65,13 @@ module.exports = {
   ],
   collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts", "!src/__tests__/**"],
   coverageDirectory: "coverage",
-  coverageReporters: ["text-summary", "lcov"],
+  coverageReporters: ["text-summary", "json-summary", "lcov"],
   coverageThreshold: {
     global: {
-      branches: 35,
-      functions: 35,
-      lines: 60,
-      statements: 40,
+      branches: 58,
+      functions: 76,
+      lines: 72,
+      statements: 71,
     },
   },
   verbose: jestVerbose,

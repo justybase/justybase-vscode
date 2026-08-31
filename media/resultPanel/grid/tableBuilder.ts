@@ -224,7 +224,7 @@ export function createResultSetGrid(
     const manualColumnWidths = new Set(savedState?.manualColumnWidths || []);
 
     // Initialize column widths
-    let columnWidths = initializeColumnWidths(columns, rs, savedState, measureText);
+    const columnWidths = initializeColumnWidths(columns, rs, savedState, measureText);
     let autoWidthMeasuredRowCount = savedState?.columnWidths ? RESULT_GRID_MAX_AUTO_SIZE_ROWS : Math.min(
         rs.data.length,
         RESULT_GRID_MAX_AUTO_SIZE_ROWS
@@ -1450,9 +1450,9 @@ export function createResultSetGrid(
 
     renderAggregations = function () {
         try {
-            var existingTopAggs = thead && thead.querySelectorAll('.top-agg-row');
+            const existingTopAggs = thead && thead.querySelectorAll('.top-agg-row');
             if (existingTopAggs) {
-                for (var e = existingTopAggs.length - 1; e >= 0; e--) {
+                for (let e = existingTopAggs.length - 1; e >= 0; e--) {
                     existingTopAggs[e].parentNode?.removeChild(existingTopAggs[e]);
                 }
             }
@@ -1460,22 +1460,22 @@ export function createResultSetGrid(
             if (!tfoot) return;
             tfoot.innerHTML = '';
 
-            var rows = (tanTable.getFilteredRowModel().rows || []) as GroupableTanStackRow[];
-            var visibleColumns = tanTable.getVisibleLeafColumns();
-            var currentAggs = getAggregationState(rsIndex, rs.executionTimestamp, getActiveSourceUri()) || {};
-            var pinnedColumns = getPinnedColumnsState(rsIndex, rs.executionTimestamp, getActiveSourceUri());
+            const rows = (tanTable.getFilteredRowModel().rows || []) as GroupableTanStackRow[];
+            const visibleColumns = tanTable.getVisibleLeafColumns();
+            const currentAggs = getAggregationState(rsIndex, rs.executionTimestamp, getActiveSourceUri()) || {};
+            const pinnedColumns = getPinnedColumnsState(rsIndex, rs.executionTimestamp, getActiveSourceUri());
             const directSql = rs.refreshSql || rs.sql || '';
 
             function isDatabaseAgg(aggItem: ColumnAggregationValue): boolean {
                 return typeof aggItem !== 'string' && aggItem.scope === 'database';
             }
 
-            var bottomAggs: Record<string, ColumnAggregationValue[]> = {};
-            var topAggs: Record<string, ColumnAggregationValue[]> = {};
-            var hasAnyAggregations = false;
-            for (var ci = 0; ci < visibleColumns.length; ci++) {
-                var col = visibleColumns[ci];
-                var aggs = currentAggs[col.id];
+            const bottomAggs: Record<string, ColumnAggregationValue[]> = {};
+            const topAggs: Record<string, ColumnAggregationValue[]> = {};
+            let hasAnyAggregations = false;
+            for (let ci = 0; ci < visibleColumns.length; ci++) {
+                const col = visibleColumns[ci];
+                const aggs = currentAggs[col.id];
                 if (aggs && Array.isArray(aggs) && aggs.length > 0) {
                     bottomAggs[col.id] = aggs.filter(function (a) {
                         return typeof a === 'string' ? true : (a.position !== 'top');
@@ -1698,7 +1698,7 @@ export function createResultSetGrid(
                 return;
             }
 
-            var nextCacheKey = buildInMemoryAggregationCacheKey({
+            const nextCacheKey = buildInMemoryAggregationCacheKey({
                 filteredRowCount: rows.length,
                 dataRowCount: rs.data.length,
                 sorting: tableState.sorting,
@@ -1710,21 +1710,21 @@ export function createResultSetGrid(
                 databaseAggregationErrorKey,
             });
 
-            var cachedBottomResults: Record<string, string[]> | null = null;
-            var cachedTopResults: Record<string, string[]> | null = null;
+            let cachedBottomResults: Record<string, string[]> | null = null;
+            let cachedTopResults: Record<string, string[]> | null = null;
             if (nextCacheKey === aggregationCacheKey && aggregationCacheBottom) {
                 cachedBottomResults = aggregationCacheBottom;
                 cachedTopResults = aggregationCacheTop;
             } else {
                 function buildAggResultCache(aggMap: Record<string, unknown>): Record<string, string[]> {
-                    var resultMap: Record<string, string[]> = {};
-                    for (var cacheColIdx = 0; cacheColIdx < visibleColumns.length; cacheColIdx++) {
-                        var cacheCol = visibleColumns[cacheColIdx];
-                        var cacheColAggs = aggMap[cacheCol.id];
+                    const resultMap: Record<string, string[]> = {};
+                    for (let cacheColIdx = 0; cacheColIdx < visibleColumns.length; cacheColIdx++) {
+                        const cacheCol = visibleColumns[cacheColIdx];
+                        const cacheColAggs = aggMap[cacheCol.id];
                         if (!Array.isArray(cacheColAggs) || cacheColAggs.length === 0) {
                             continue;
                         }
-                        var typeInfo = getAggregationColumnTypeInfo(cacheCol);
+                        const typeInfo = getAggregationColumnTypeInfo(cacheCol);
                         resultMap[cacheCol.id] = cacheColAggs.map(function (aggItem) {
                             const databaseValue = formatDatabaseAggregation(aggItem, cacheCol);
                             if (databaseValue !== undefined) {
@@ -1749,21 +1749,21 @@ export function createResultSetGrid(
                 isTop: boolean,
                 cachedResults: Record<string, string[]>,
             ): void {
-                var maxAggCount = 0;
-                for (var cj = 0; cj < visibleColumns.length; cj++) {
-                    var colJ = visibleColumns[cj];
-                    var aggsJ = aggMap[colJ.id];
+                let maxAggCount = 0;
+                for (let cj = 0; cj < visibleColumns.length; cj++) {
+                    const colJ = visibleColumns[cj];
+                    const aggsJ = aggMap[colJ.id];
                     if (aggsJ && Array.isArray(aggsJ) && aggsJ.length > maxAggCount) {
                         maxAggCount = aggsJ.length;
                     }
                 }
                 if (maxAggCount === 0) return;
 
-                for (var ri = 0; ri < maxAggCount; ri++) {
-                    var aggRow = document.createElement('tr');
+                for (let ri = 0; ri < maxAggCount; ri++) {
+                    const aggRow = document.createElement('tr');
                     aggRow.className = 'aggregation-row' + (isTop ? ' top-agg-row' : '');
 
-                    var rowNumTd = document.createElement('td');
+                    const rowNumTd = document.createElement('td');
                     rowNumTd.className = 'row-number-cell';
                     applyRowNumberColumnStyles(rowNumTd, {
                         zIndex: 1600,
@@ -1771,9 +1771,9 @@ export function createResultSetGrid(
                     });
                     aggRow.appendChild(rowNumTd);
 
-                    for (var ck = 0; ck < visibleColumns.length; ck++) {
-                        var colK = visibleColumns[ck];
-                        var td = document.createElement('td');
+                    for (let ck = 0; ck < visibleColumns.length; ck++) {
+                        const colK = visibleColumns[ck];
+                        const td = document.createElement('td');
                         td.style.padding = '4px 8px';
                         td.style.borderTop = 'none';
                         td.style.fontWeight = '500';
@@ -1790,39 +1790,39 @@ export function createResultSetGrid(
 
                         if (pinnedColumns.indexOf(colK.id) !== -1) {
                             td.classList.add('pinned-cell');
-                            var leftOff = calculatePinnedColumnLeft(colK.id, pinnedColumns, columnWidths) + rowNumberColumnWidth;
+                            const leftOff = calculatePinnedColumnLeft(colK.id, pinnedColumns, columnWidths) + rowNumberColumnWidth;
                             td.style.left = leftOff + 'px';
                         }
 
-                        var colAggs = aggMap[colK.id];
+                        const colAggs = aggMap[colK.id];
                         if (!colAggs || !Array.isArray(colAggs) || ri >= colAggs.length) {
                             td.textContent = '';
                             aggRow.appendChild(td);
                             continue;
                         }
 
-                        var aggItem = colAggs[ri];
-                        var typeInfo = getAggregationColumnTypeInfo(colK);
-                        var colCache = cachedResults[colK.id];
-                        var result = colCache && colCache[ri] !== undefined
+                        const aggItem = colAggs[ri];
+                        const typeInfo = getAggregationColumnTypeInfo(colK);
+                        const colCache = cachedResults[colK.id];
+                        const result = colCache && colCache[ri] !== undefined
                             ? colCache[ri]
                             : calculateAggregation(aggItem, rows, colK, typeInfo);
-                        var alignRight = applyRightAlignmentClass(td, colK.columnDef && colK.columnDef.dataType, colK.columnDef && colK.columnDef.inferredNumericKind);
+                        const alignRight = applyRightAlignmentClass(td, colK.columnDef && colK.columnDef.dataType, colK.columnDef && colK.columnDef.inferredNumericKind);
 
-                        var cellContent = document.createElement('div');
+                        const cellContent = document.createElement('div');
                         cellContent.className = 'agg-cell-content';
                         cellContent.style.display = 'flex';
                         cellContent.style.alignItems = 'center';
                         cellContent.style.gap = '6px';
 
-                        var labelSpan = document.createElement('span');
+                        const labelSpan = document.createElement('span');
                         labelSpan.className = 'agg-label';
                         labelSpan.textContent = getAggregationSymbol(aggItem);
                         labelSpan.style.opacity = '0.6';
                         labelSpan.style.fontSize = '11px';
                         labelSpan.style.minWidth = '16px';
 
-                        var valueSpan = document.createElement('span');
+                        const valueSpan = document.createElement('span');
                         valueSpan.className = 'agg-value';
                         valueSpan.style.flex = '1';
                         const isDatabaseAggTimedOut = isDatabaseAgg(aggItem)
