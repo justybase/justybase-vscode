@@ -1257,7 +1257,7 @@ export function parseQueryDefSql(sql: string): QueryRowSpec[] {
         throw new AccessFileError('CREATE VIEW requires a SELECT query.');
     }
     const rows: QueryRowSpec[] = [{ attribute: QUERY_ATTRIBUTE_START, order: null, name1: null, name2: null, expression: null, flag: 0 }];
-    let statement = input;
+    const statement = input;
     if (statement.toUpperCase().startsWith('PARAMETERS')) {
         throw new AccessFileError('CREATE VIEW does not support PARAMETERS clauses.');
     }

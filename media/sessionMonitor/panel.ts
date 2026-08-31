@@ -4,9 +4,7 @@ import type {
     SessionMonitorData,
     SessionMonitorHostToWebviewMessage,
     SessionMonitorOverview,
-    SessionMonitorQuery,
     SessionMonitorResources,
-    SessionMonitorSession,
     SessionMonitorStorageInfo,
     SessionMonitorViewState,
     SessionMonitorScalar,
@@ -80,7 +78,7 @@ const queryUserFilter = getElementById<HTMLInputElement>('queryUserFilter');
 // Event Listeners
 if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
-        postToHost({ command: 'refresh' });
+        postToHost({ command: 'refresh' } satisfies SessionMonitorWebviewToHostMessage);
     });
 }
 
@@ -128,7 +126,7 @@ tabButtons.forEach(btn => {
 });
 
 // Message handling from extension
-window.addEventListener('message', event => {
+window.addEventListener('message', (event: MessageEvent<SessionMonitorHostToWebviewMessage>) => {
     const message = asHostMessage(event.data);
 
     switch (message.command) {

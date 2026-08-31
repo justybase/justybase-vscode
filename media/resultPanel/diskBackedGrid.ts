@@ -3,7 +3,7 @@ import { postHostMessage } from './protocol.js';
 import { clearAllSearchWorkerData } from './searchWorkerBridge.js';
 import { renderGrids } from './grid.js';
 import { updateRowCountInfo } from './filter.js';
-import { getGrid, getSortedSearchMatchIndices, resetEditSession } from './state.js';
+import { getGrid, resetEditSession } from './state.js';
 import { getGridWrapperForResultSet, getScrollTarget } from './grid/persistence.js';
 import {
     diskQueryChangesRowCount,

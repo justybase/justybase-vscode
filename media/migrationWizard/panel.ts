@@ -1,6 +1,5 @@
 import type {
     MigrationWizardAnalysisState,
-    MigrationWizardCatalog,
     MigrationWizardCatalogTable,
     MigrationWizardHostToWebviewMessage,
     MigrationWizardProgressState,

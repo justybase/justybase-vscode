@@ -58,8 +58,9 @@ Coverage is a risk indicator, not a substitute for behavioral assertions.
 
 Extended lint follows the same ratchet: the recorded baseline may not increase,
 and each cleanup phase lowers the allowed value. The current frozen baseline is
-162 warnings (146 `media`, 7 `apps`, 7 `packages`, and 2 `extensions`), with
-the next target at 100.
+70 warnings (57 `media`, 7 `apps`, 6 `packages`, and 0 `extensions`). The next
+cleanup target is zero warnings; the Phase 1B milestone of 100 warnings has
+been met.
 
 ## Stateful UI contract
 

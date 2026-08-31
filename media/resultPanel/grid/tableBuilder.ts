@@ -4,12 +4,9 @@ import {
     setColumnFilterState,
     getAggregationState,
     setAggregationState,
-    setGlobalDragState,
-    getGlobalDragState,
     getSearchMatches,
     getPinnedColumnsState,
     setPinnedColumnsState,
-    getGlobalFilterState,
     setGlobalFilterState,
     setResultFormattingState,
     saveScrollStateToCache,
@@ -19,13 +16,11 @@ import { GLOBAL_FILTER_WORKER_ROW_THRESHOLD } from '../searchWorkerBridge.js';
 import {
     formatCellValue,
     debounce,
-    getNumericTypeInfo,
     isBinaryColumnType,
 } from '../utils.js';
 import { getSavedStateFor, saveAllGridStates, resolveScrollStateForResultSet } from './persistence.js';
 import { createHeaderCellWithFilter, reorderColumnsForPinning, renderRowCountInfo } from '../filter.js';
 import { setupCellSelectionEvents } from '../selection.js';
-import { postHostMessage } from '../protocol.js';
 import {
     clearDatabaseAggregationError,
     getDatabaseAggregationError,
@@ -38,22 +33,16 @@ import {
     GridHandle,
     ResultSet,
     CellSelectionHandlers,
-    TanStackRow,
     TanStackColumn,
-    TanStackTable,
     TanStackHeader,
-    ColumnFilterValue,
-    ColumnAggregationState,
     ColumnAggregationValue,
-    AggregationSelection,
     getActiveSourceUri,
     requireActiveSourceUri,
     getResultPanelWindow,
     getResultSetAt,
-    asScrollState,
     callPanelMethod,
 } from '../types.js';
-import { asHtml, getElementById, queryHtml, eventTargetAsHtml } from '../dom.js';
+import { asHtml } from '../dom.js';
 import {
     RESULT_GRID_MAX_AUTO_SIZE_ROWS,
     RESULT_GRID_ESTIMATED_ROW_HEIGHT,
@@ -74,7 +63,6 @@ import {
     createGroupChip,
     createGroupFooterRow,
     calculateAggregation,
-    calculateAggregationForRows,
     formatDiskAggregationResult,
     getAggregationColumnTypeInfo,
     countLeafRows,
@@ -110,7 +98,7 @@ import type {
     CreateTableFn,
     RowModelFactoryFn,
 } from './types.js';
-import { ensureDiskWindow, fetchRowsFromHost, isDiskBackedResultSet, queryDiskAggregations, refreshDiskQueryWindow, resolveDiskGridViewState, scheduleEnsureDiskWindow } from '../diskBackedGrid.js';
+import { fetchRowsFromHost, isDiskBackedResultSet, queryDiskAggregations, refreshDiskQueryWindow, resolveDiskGridViewState, scheduleEnsureDiskWindow } from '../diskBackedGrid.js';
 import { getDiskFilteredCount, syncDiskQuerySpecFromGrid } from '../diskQuerySpec.js';
 import {
     clearDiskGrouping,
@@ -126,8 +114,6 @@ import {
 } from '../diskGrouping.js';
 import type { DiskGroupingDisplayRow } from '../diskGrouping.js';
 import type { ClipboardRowResolver } from '../selection/clipboard.js';
-
-const vscode = { postMessage: postHostMessage };
 
 type GridRowVirtualizer = InstanceType<typeof VirtualCore.Virtualizer>;
 
@@ -883,7 +869,6 @@ export function createResultSetGrid(
         rowVirtualizer._willUpdate();
 
         const coreRows = tanTable.getCoreRowModel().rows as GroupableTanStackRow[];
-        const filteredRows = tanTable.getFilteredRowModel().rows as GroupableTanStackRow[];
         const virtualItems = resolveRenderableVirtualItems(
             rowVirtualizer.getVirtualItems(),
             rowVirtualizer.options.count ?? 0,
@@ -1204,7 +1189,7 @@ export function createResultSetGrid(
 
         tbody.addEventListener('dblclick', (e) => {
             let isEdit = false;
-            try { isEdit = typeof getResultPanelWindow().getIsEditMode === 'function' ? getResultPanelWindow().getIsEditMode!() : false; } catch (_) {}
+            try { isEdit = typeof getResultPanelWindow().getIsEditMode === 'function' ? getResultPanelWindow().getIsEditMode!() : false; } catch { /* best effort during teardown */ }
             if (!isEdit) return;
 
             const cellTd = asHtml(e.target)?.closest('td');
@@ -1253,7 +1238,7 @@ export function createResultSetGrid(
                 if (newVal !== (isNull ? '' : currentText)) {
                     try {
                         callPanelMethod('addPendingEdit', rowIdx, cellIdx2, oldVal, newVal);
-                    } catch (_) {}
+                    } catch { /* best effort during teardown */ }
                     editCellTd.classList.add('cell-modified');
                 } else {
                     editCellTd.classList.remove('cell-modified');
@@ -1359,7 +1344,7 @@ export function createResultSetGrid(
             if (typeof isRowMarkedForDelete === 'function' && row.index !== undefined && isRowMarkedForDelete(row.index)) {
                 tr.classList.add('row-deleted');
             }
-        } catch (_) {}
+        } catch { /* best effort during teardown */ }
     };
 
     createGroupHeaderRow = function (
@@ -1368,6 +1353,7 @@ export function createResultSetGrid(
         resultSet: ResultSet,
         _pinnedColumns: string[],
     ): void {
+        void _pinnedColumns;
         tr.className = 'group-header';
 
         const rowNumTd = getCellFromPool();

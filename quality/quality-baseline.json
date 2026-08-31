@@ -8,12 +8,12 @@
     "lines": 72
   },
   "lint": {
-    "total": 162,
+    "total": 70,
     "areas": {
-      "media": 146,
+      "media": 57,
       "apps": 7,
-      "packages": 7,
-      "extensions": 2
+      "packages": 6,
+      "extensions": 0
     }
   },
   "largeModuleLineLimit": 800,

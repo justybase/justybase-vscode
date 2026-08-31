@@ -23,7 +23,8 @@ export function traceResultPanel(event: ResultPanelTraceEventPayload): void {
     // Errors from provider/driver messages can contain SQL or returned values.
     // The trace contract is intentionally metadata-only, even in console
     // diagnostics; the host-side artifact writer applies a second allow-list.
-    const { error: _error, ...safeEvent } = event;
+    const safeEvent = { ...event };
+    delete safeEvent.error;
     const payload = {
         ...safeEvent,
         webviewSeq: ++traceSequence,

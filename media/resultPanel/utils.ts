@@ -941,7 +941,7 @@ export function formatCellValue(
         // Fallback for other Date objects - use ISO string (timezone-agnostic)
         try {
             return value.toISOString().replace('T', ' ').substring(0, 19);
-        } catch (e) {
+        } catch {
             return String(value);
         }
     }

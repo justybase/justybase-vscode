@@ -1,6 +1,5 @@
 // Selection module - Cell selection and copy functionality for result panel
 import {
-    escapeCsvValue,
     formatCellValue,
     formatCellValueForSql,
     getNumericTypeInfo,
@@ -8,38 +7,29 @@ import {
 } from './utils.js';
 import { postHostMessage } from './protocol.js';
 import { getGrid } from './state.js';
-import { getResultPanelWindow, getActiveSourceUri, requireActiveSourceUri, callPanelMethod } from './types.js';
+import { getResultPanelWindow, callPanelMethod } from './types.js';
 import type {
     CellDescriptor,
     CellSelectionHandlers,
-    ResultColumnDef,
     SelectionStats,
     TanStackColumn,
-    TanStackRow,
     TanStackTable,
 } from './types.js';
-import { asHtml, getElementById } from './dom.js';
+import { asHtml } from './dom.js';
 import {
     buildSelectedClipboardPayload,
     buildSelectedClipboardPayloadAsync,
     buildSelectedColumnClipboardPayloadAsync,
     writeMultiFormatToClipboard,
-    copyAllRows,
     copyAllRowsAsync,
-    copyAllRowsAsHtml,
     copyAllRowsAsHtmlAsync,
-    copyAllRowsAsMd,
     copyAllRowsAsMdAsync,
     resolvePlainText,
     type ClipboardRowResolver,
 } from './selection/clipboard.js';
 
 export { __testHooks } from './selection/clipboard.js';
-import {
-    RANGE_CHART_MENU,
-    canCreateRangeChart,
-    openRangeChartModal,
-} from './rangeChart.js';
+import { canCreateRangeChart } from './rangeChart.js';
 import {
     panelGetIsEditMode,
     requestResultsViewFocus,
@@ -856,9 +846,6 @@ function performSelectAll() {
         currentMouseX = e.clientX;
         currentMouseY = e.clientY;
         
-        // Still need to calculate target if mouse is outside wrapper
-        const target = document.elementFromPoint(currentMouseX, currentMouseY);
-        
         // Ensure auto-scroll loop runs even if mouse is outside the wrapper
         if (!autoScrollFrame) {
             autoScrollFrame = requestAnimationFrame(handleAutoScroll);
@@ -924,7 +911,7 @@ function performSelectAll() {
         // F2 — enter cell edit mode (if edit mode is active)
         if (e.key === 'F2') {
             let isEditMode = false;
-            try { isEditMode = panelGetIsEditMode(); } catch (_) {}
+            try { isEditMode = panelGetIsEditMode(); } catch { /* panel may be unavailable during teardown */ }
             if (!isEditMode) return;
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -1336,7 +1323,7 @@ function performSelectAll() {
 
             // Delete Row(s) — only in edit mode
             let inEditMode = false;
-            try { inEditMode = panelGetIsEditMode(); } catch (_) {}
+            try { inEditMode = panelGetIsEditMode(); } catch { /* panel may be unavailable during teardown */ }
             if (inEditMode) {
                 const sepRow = document.createElement('div');
                 sepRow.style.height = '1px';

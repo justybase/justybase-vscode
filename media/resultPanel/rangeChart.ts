@@ -670,7 +670,7 @@ function assignSeriesField(columnId: string, sourceZone: string, insertIndex: nu
         return;
     }
 
-    let seriesIds = activeState.setup.seriesColumnIds.filter((id) => id !== columnId);
+    const seriesIds = activeState.setup.seriesColumnIds.filter((id) => id !== columnId);
 
     if (sourceZone === 'category' && activeState.setup.categoryColumnId === columnId) {
         activeState.setup.categoryColumnId = '';

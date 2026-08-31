@@ -1,12 +1,10 @@
 // Messages module - Message handling for result panel
 import { decode } from '@msgpack/msgpack';
-import { asHostMessage, getHostState, postHostMessage, setHostState } from './protocol.js';
+import { asHostMessage, postHostMessage } from './protocol.js';
 import type { ResultPanelExecutionState } from './hostContracts.js';
 import {
     saveCurrentSourceToCache,
     getCachedSource,
-    saveScrollStateForSource,
-    getScrollStateFromCache,
     saveScrollStateToCache,
     getScrollStateFromGlobalCache,
     setActiveGridIndex,
@@ -15,15 +13,10 @@ import {
     getGrid,
     pruneSourceResultsCache,
     evictSourceCacheNotInList,
-    getColumnFilterState,
     getAggregationState,
     setAggregationState,
-    getPinnedColumnsState,
     getResultFormattingPayload,
-    getResultFormattingState,
     setResultFormattingPayload,
-    setResultFormattingState,
-    getLayoutMode,
     normalizeResultSetsEditability,
     resetEditSession,
     releaseResultSetRows,
@@ -54,7 +47,7 @@ import {
     invalidateSourceSwitchEnd,
     UxPerfMark,
 } from './uxPerf.js';
-import type { ColumnAggregationState, LogRow, ResultSet } from './types.js';
+import type { LogRow, ResultSet } from './types.js';
 import {
     asScrollState,
     callPanelMethod,
@@ -87,14 +80,9 @@ import {
 import { clearAllDiskGrouping } from './diskGrouping.js';
 import {
     saveAllGridStates,
-    getSavedStateFor,
-    findScrollStateBySource,
     getScrollTarget,
     getGridWrapperForResultSet,
     applyScrollForResultSet,
-    savePinnedState,
-    saveScrollStatesToResultSets,
-    restoreScrollFromResultSet,
     setPreserveScrollDuringHydrate,
 } from './grid/persistence.js';
 
@@ -1209,7 +1197,7 @@ export function handleCancelExecution(message: Record<string, unknown>): void {
 
 export function handleAppendRows(message: Record<string, unknown>): void {
     let resultSetIndex = message.resultSetIndex as number;
-    let rows = message.rows as unknown[] | Uint8Array | { type?: string; data?: number[] };
+    const rows = message.rows as unknown[] | Uint8Array | { type?: string; data?: number[] };
     const totalRows = message.totalRows as number | undefined;
     const limitReached = message.limitReached as boolean | undefined;
     const isLog = message.isLog as boolean | undefined;

@@ -587,16 +587,6 @@ interface SelectedClipboardPayload {
     md: string;
 }
 
-function writeToClipboard(text: string, description: string): void {
-    vscode.postMessage({
-        command: 'setContext',
-        key: 'netezza.resultsCopyPrimed',
-        value: false
-    });
-
-    writePlainTextToClipboard(text, `Copied ${description} to clipboard`);
-}
-
 export function resolvePlainText(payload: SelectedClipboardPayload, plainTextFormat?: string): string {
     if (plainTextFormat === 'csv') {
         return createCsvTable(payload.headers, payload.matrix, ',');

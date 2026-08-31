@@ -41,6 +41,7 @@ function getResultCellValue(row: unknown, column: ResultSetColumn, index: number
 }
 
 export function prepareColumns(rs: ResultSet, _rsIndex: number): GridColumnDef[] {
+    void _rsIndex;
     return rs.columns.map((col: ResultSetColumn, index: number) => {
         const inferred = (!col.type
             ? inferNumericTypeFromRows(rs.data, index)
@@ -262,7 +263,7 @@ export function evaluateConditions(
                     try {
                         const regexStr1 = '^' + condValue.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.') + '$';
                         return new RegExp(regexStr1, 'i').test(stringValue);
-                    } catch(e) {
+                    } catch {
                         return false;
                     }
                 default:
@@ -298,7 +299,7 @@ export function evaluateConditions(
                 try {
                     const regexStr = '^' + condValue.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.') + '$';
                     return new RegExp(regexStr, 'i').test(stringValue);
-                } catch(e) {
+                } catch {
                     return false;
                 }
             case 'isEmpty':

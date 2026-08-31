@@ -229,7 +229,6 @@ const PRIMARY_EXPORT_DESTINATIONS: ExportDestinationOption[] = [
     }
 ];
 
-let pendingPrimaryExportFormat: string | null = null;
 type ExportRowScope = 'loaded' | 'all';
 let pendingPrimaryExportScope: ExportRowScope | null = null;
 
@@ -259,7 +258,6 @@ function closeExportPrimaryMenu(): void {
     if (menu) {
         menu.style.display = 'none';
     }
-    pendingPrimaryExportFormat = null;
     pendingPrimaryExportScope = null;
     const exportBtn = document.querySelector('#exportSplitBtn .split-btn__primary');
     if (exportBtn) {
@@ -360,7 +358,6 @@ function renderExportPrimaryFormatMenu(): void {
     }
 
     menu.innerHTML = '';
-    pendingPrimaryExportFormat = null;
 
     const header = document.createElement('div');
     header.className = 'export-menu-header';
@@ -382,7 +379,6 @@ function renderExportPrimaryDestinationMenu(formatId: string, rowScope: ExportRo
     }
 
     menu.innerHTML = '';
-    pendingPrimaryExportFormat = formatId;
     pendingPrimaryExportScope = rowScope;
 
     const header = document.createElement('div');
@@ -430,7 +426,6 @@ function renderExportPrimaryScopeMenu(formatId: string): void {
     if (!menu) return;
 
     menu.innerHTML = '';
-    pendingPrimaryExportFormat = formatId;
     pendingPrimaryExportScope = null;
 
     const header = document.createElement('div');

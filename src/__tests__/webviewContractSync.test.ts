@@ -48,7 +48,6 @@ const RESULT_PANEL_FRONTEND_MESSAGE_FILES = [
 ];
 
 const RESULT_PANEL_GRID_PROTOCOL_FILES = [
-  "media/resultPanel/grid/tableBuilder.ts",
   "media/resultPanel/grid/alternateViews.ts",
   "media/resultPanel/selection/clipboard.ts",
 ];

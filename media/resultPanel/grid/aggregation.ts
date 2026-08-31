@@ -348,6 +348,7 @@ function getAggFn(agg: ColumnAggregationValue): string {
 }
 
 function getAggPrecision(agg: ColumnAggregationValue, _typeInfo: AggTypeInfo): number | null {
+    void _typeInfo;
     if (typeof agg === 'object' && agg !== null && agg.precision !== null && agg.precision !== undefined) {
         return agg.precision;
     }
