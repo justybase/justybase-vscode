@@ -109,3 +109,21 @@ artifact and the candidate change. Preserve the Output Channel trace and the exa
 platform/host mode with the test result. A green natural Extension Host run does
 not replace the deterministic missing-shell recovery test because the delivery
 race depends on host/webview scheduling.
+
+### Automated lifecycle contract
+
+`src/__tests__/resultPanelStateContract.test.ts` is the executable state contract
+for the Result Panel host state. It covers the transitions that are easiest to
+regress when a result is replaced or a view is recreated:
+
+- stable result identity and manually pinned results across source switches and
+  a new execution;
+- pin/index updates after closing a result set;
+- partial streaming followed by cancellation, including rejection of late
+  chunks; and
+- source disposal, removal of source-owned pins, and active-source recovery.
+
+The test intentionally drives `ResultStateManager` rather than a mock facade.
+This keeps identity, invalidation, cancellation, and cleanup assertions tied to
+the same state owner used by `ResultPanelView`. Browser and Extension Host
+checks remain responsible for DOM geometry, revival, and protocol ordering.
