@@ -2,7 +2,6 @@ import type {
     CanvasPoint,
     ExplainPlanGraphNode,
     ExplainPlanGraphPayload,
-    ExplainPlanGraphWebviewToHostMessage,
     NodeDragState,
     PanDragState,
     TransformState,

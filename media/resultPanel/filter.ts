@@ -107,6 +107,7 @@ export function applyRowLimitReachedFlag(rs: ResultSet | null | undefined, limit
 }
 
 function appendRowLimitWarning(container: HTMLElement, _rs: ResultSet): void {
+    void _rs;
     const limit = Number(getResultPanelWindow().queryRowLimit) || 200000;
     const warning = document.createElement('span');
     warning.className = 'row-limit-warning';
@@ -193,7 +194,7 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         rowCountInfo.textContent = '';
         rowCountInfo.style.opacity = '';
         const matchCount = sortedMatches.length;
-        let text = `${matchCount.toLocaleString()} row${matchCount !== 1 ? 's' : ''} of ${totalRows.toLocaleString()}`;
+        const text = `${matchCount.toLocaleString()} row${matchCount !== 1 ? 's' : ''} of ${totalRows.toLocaleString()}`;
         rowCountInfo.appendChild(document.createTextNode(text));
         if (isResultSetRowLimitReached(rs)) {
             appendRowLimitWarning(rowCountInfo, rs);
@@ -772,7 +773,7 @@ async function showDiskColumnFilterDropdown(
 
     const sortedUniqueValues = sortFilterValues(uniqueValues, column.columnDef.dataType);
     const isNumericColumn = detectNumericColumn(sortedUniqueValues);
-    const { checkboxes, checkedValues, getFilteredValues, getSelectedCount } = createValuesTabContent(
+    const { checkboxes, getFilteredValues, getSelectedCount } = createValuesTabContent(
         valuesContent,
         sortedUniqueValues,
         currentFilter,
@@ -1502,6 +1503,7 @@ function detectNumericColumn(uniqueValues: string[]): boolean {
 }
 
 function createDropdownContainer(anchorElement: HTMLElement, _columnHeader: string): HTMLDivElement {
+    void _columnHeader;
     const dropdown = document.createElement('div');
     dropdown.className = 'column-filter-dropdown';
     dropdown.style.position = 'fixed';
@@ -1527,7 +1529,7 @@ function createDropdownContainer(anchorElement: HTMLElement, _columnHeader: stri
     const availableHeightAbove = Math.max(0, rect.top - viewportMargin - anchorGap);
 
     // Use whichever side has more space
-    let isPositionedAbove = availableHeightAbove > availableHeightBelow;
+    const isPositionedAbove = availableHeightAbove > availableHeightBelow;
     let availableHeight = isPositionedAbove ? availableHeightAbove : availableHeightBelow;
 
     // If neither side has enough space, use maximum available viewport height
@@ -1711,7 +1713,7 @@ function createValuesTabContent(
     const valuesContainer = document.createElement('div');
     valuesContainer.className = 'filter-values-container';
 
-    let checkedValues = new Set<string>();
+    const checkedValues = new Set<string>();
     if (currentFilter && Array.isArray(currentFilter) && currentFilter.length > 0) {
         currentFilter.forEach(v => checkedValues.add(v));
     } else if (defaultSelectAll) {
@@ -2304,7 +2306,7 @@ export function showAggregationDropdown(
     const availableHeightBelow = Math.max(0, window.innerHeight - rect.bottom - viewportMargin - anchorGap);
     const availableHeightAbove = Math.max(0, rect.top - viewportMargin - anchorGap);
 
-    let isPositionedAbove = availableHeightAbove > availableHeightBelow;
+    const isPositionedAbove = availableHeightAbove > availableHeightBelow;
     let availableHeight = isPositionedAbove ? availableHeightAbove : availableHeightBelow;
 
     const maxViewportHeight = window.innerHeight - viewportMargin * 2;

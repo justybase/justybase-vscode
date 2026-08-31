@@ -2,7 +2,6 @@ import type {
     TableDesignerColumn,
     TableDesignerHostToWebviewMessage,
     TableDesignerInitialContext,
-    TableDesignerWebviewToHostMessage,
 } from './hostContracts.js';
 import { eventTargetAsHtmlElement, eventTargetAsInput, getElementById } from './dom.js';
 import { postToHost } from './protocol.js';

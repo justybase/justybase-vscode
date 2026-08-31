@@ -2,15 +2,11 @@ import type {
     SessionMonitorAlert,
     SessionMonitorAlertSettings,
     SessionMonitorData,
-    SessionMonitorHostToWebviewMessage,
     SessionMonitorOverview,
-    SessionMonitorQuery,
     SessionMonitorResources,
-    SessionMonitorSession,
     SessionMonitorStorageInfo,
     SessionMonitorViewState,
     SessionMonitorScalar,
-    SessionMonitorWebviewToHostMessage,
 } from './hostContracts.js';
 import { postToHost, asHostMessage } from './protocol.js';
 import { getElementById, queryHtml, eventTargetAsInput } from './dom.js';

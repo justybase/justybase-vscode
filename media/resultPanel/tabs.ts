@@ -11,7 +11,6 @@ import { updateResultLimitBanner } from './banners.js';
 import { updateRefreshFailureBanner } from './refreshFailureBanner.js';
 import { updateControlsVisibility, syncGlobalFilterInput } from './grid.js';
 import { renderRowCountInfo } from './filter.js';
-import { clearLogs } from './export.js';
 import { syncAnalysisView } from './analysis.js';
 import { extractKeyNetezzaErrorInfo } from './grid/alternateViews.js';
 import { postHostMessage } from './protocol.js';
@@ -43,10 +42,6 @@ export function renderDocIndicator(docUri: string | undefined): void {
     const filename = parts[parts.length - 1] || docUri;
     indicator.textContent = '\u25B8 ' + filename;
     indicator.title = docUri;
-}
-
-function isActiveSourceExecutingLocal(): boolean {
-    return isActiveSourceExecuting();
 }
 
 function createLogsTabSpinner() {

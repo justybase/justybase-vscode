@@ -1,7 +1,5 @@
 import type {
     PermissionPayload,
-    SecurityPanelHostToWebviewMessage,
-    SecurityPanelWebviewToHostMessage,
     SecurityPrincipal,
 } from './hostContracts.js';
 import { getElementById } from './dom.js';

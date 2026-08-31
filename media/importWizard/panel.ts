@@ -1,9 +1,7 @@
 import type {
     BackgroundValidationProgress,
-    ImportWizardHostToWebviewMessage,
     ImportWizardPreviewKind,
     ImportWizardState,
-    ImportWizardWebviewToHostMessage,
 } from './hostContracts.js';
 import {
     eventTargetAsInput,

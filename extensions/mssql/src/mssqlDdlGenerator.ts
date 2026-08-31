@@ -433,7 +433,7 @@ export const mssqlAdvancedFeatures: DatabaseAdvancedFeatures = {
             _organizeColumns: string[],
             keysInfo: Map<string, DatabaseDdlKeyInfo>,
             tableComment?: string | null,
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
             _owner?: string | null
         ): string {
             const columnClauses = columns.map((column) => {
