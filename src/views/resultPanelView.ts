@@ -4,12 +4,12 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { encode } from '@msgpack/msgpack';
 import type {
-    ResultPanelInboundMessage,
     ResultPanelOutboundMessage,
     ResultPanelViewData,
     ResultPanelTraceEventPayload,
     ResultPanelTestBridgeResult,
 } from '../contracts/webviews';
+import { parseResultPanelWebviewMessage } from '../contracts/webviews';
 import type { ConnectionManager } from '../core/connectionManager';
 import { ResultStateManager } from '../state/resultStateManager';
 import { ensureResultSetId } from '../state/resultSetIdentity';
@@ -540,7 +540,15 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
         // Handle messages from webview
         const receiveMessageDisposable = webviewView.webview.onDidReceiveMessage(message => {
-            const inboundMessage: ResultPanelInboundMessage = message;
+            const inboundMessage = parseResultPanelWebviewMessage(message);
+            if (!inboundMessage) {
+                traceResultPanelEvent({
+                    phase: 'webview_message_rejected',
+                    sourceUri: this._stateManager.activeSourceUri,
+                    reason: 'invalid_result_panel_message',
+                });
+                return;
+            }
             const messageRecord = message as Record<string, unknown>;
             traceResultPanelEvent({
                 phase: 'webview_message',

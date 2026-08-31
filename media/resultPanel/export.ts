@@ -12,6 +12,7 @@ import {
     getActiveSourceUri,
     getResultSetAt,
     getResultSets,
+    requireActiveSourceUri,
 } from './types.js';
 import type { ResultSetColumn, TanStackRow, TanStackTable } from './types.js';
 
@@ -907,7 +908,7 @@ export function exportToMdFile(): void {
     }
 
     const data = {
-        sourceUri: getActiveSourceUri(),
+        sourceUri: requireActiveSourceUri(),
         mdDocument,
         resultSetIndices: dataResults.map(resultSet => resultSets.indexOf(resultSet)),
     };

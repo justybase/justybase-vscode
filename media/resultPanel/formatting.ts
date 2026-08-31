@@ -258,7 +258,7 @@ function readFormState() {
     const scope = asSelect('resultFormattingScope')?.value ?? 'result';
     const kind = asSelect('resultFormattingKind')?.value ?? 'auto';
     return {
-        scope,
+        scope: scope as import('./hostContracts.js').ResultFormattingScope,
         kind,
         settings: {
             integer: {

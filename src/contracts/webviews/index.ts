@@ -33,6 +33,11 @@ export {
 } from './resultPanelContracts';
 
 export {
+    parseResultPanelHostMessage,
+    parseResultPanelWebviewMessage,
+} from './resultPanelRuntime';
+
+export {
     QUERY_HISTORY_HOST_TO_WEBVIEW_TYPES,
     QUERY_HISTORY_INBOUND_TYPES,
     QUERY_HISTORY_OUTBOUND_TYPES,
