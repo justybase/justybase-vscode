@@ -86,7 +86,6 @@ import {
 } from './diskBackedGrid.js';
 import { clearAllDiskGrouping } from './diskGrouping.js';
 import {
-    type SavedGridState,
     saveAllGridStates,
     getSavedStateFor,
     findScrollStateBySource,
@@ -100,6 +99,13 @@ import {
 } from './grid/persistence.js';
 
 export type { SavedGridState } from './grid/persistence.js';
+export type { PersistedGridStateEnvelopeV1 } from './grid/persistence.js';
+export {
+    GRID_STATE_SCHEMA_KIND,
+    GRID_STATE_SCHEMA_VERSION,
+    GRID_STATE_STORAGE_KEY,
+    buildGridStateKey,
+} from './grid/persistence.js';
 export { updateResultLimitBanner } from './banners.js';
 export {
     saveAllGridStates,

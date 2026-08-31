@@ -46,7 +46,12 @@ export {
   saveAllGridStates,
   getSavedStateFor,
   savePinnedState,
+  buildGridStateKey,
+  GRID_STATE_SCHEMA_KIND,
+  GRID_STATE_SCHEMA_VERSION,
+  GRID_STATE_STORAGE_KEY,
 } from './resultPanel/messages.js';
+export type { PersistedGridStateEnvelopeV1, SavedGridState } from './resultPanel/messages.js';
 export {
   renderDocIndicator,
   renderResultSetTabs,
