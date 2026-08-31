@@ -1,7 +1,11 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertLintRatchet, checkChangedCoverage, lintSummary, parseChangedLines, parseLcov } from './quality-gate.mjs';
-import { buildReport } from './quality-report.mjs';
+import { prepareQualityArtifacts } from './prepare-quality-artifacts.mjs';
+import { buildReport, qualityInputFailures } from './quality-report.mjs';
 
 const lintBaseline = { lint: { total: 3, areas: { media: 2, apps: 1 } } };
 
@@ -48,6 +52,42 @@ test('does not require branch coverage where changed lines have no branches', ()
   assert.deepEqual(result.failures, []);
 });
 
+test('prefers the full LCOV path over an earlier duplicate basename', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/src/core/index.ts\n@@ -1 +2 @@\n',
+    lcov: [
+      'SF:src/other/index.ts',
+      'DA:2,0',
+      'end_of_record',
+      'SF:src/core/index.ts',
+      'DA:2,1',
+      'end_of_record',
+    ].join('\n'),
+    baseline: { changedHighRiskCoverage: { lines: 100, branches: 100, roots: ['src/core/'] } },
+  });
+
+  assert.equal(result.files[0].coveredLines, 1);
+  assert.deepEqual(result.failures, []);
+});
+
+test('rejects an ambiguous LCOV basename fallback', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/src/core/index.ts\n@@ -1 +2 @@\n',
+    lcov: [
+      'SF:generated/first/index.ts',
+      'DA:2,1',
+      'end_of_record',
+      'SF:generated/second/index.ts',
+      'DA:2,1',
+      'end_of_record',
+    ].join('\n'),
+    baseline: { changedHighRiskCoverage: { lines: 100, branches: 100, roots: ['src/core/'] } },
+  });
+
+  assert.equal(result.files.length, 0);
+  assert.match(result.failures[0], /no LCOV record/);
+});
+
 test('rejects changed high-risk files missing from coverage', () => {
   const result = checkChangedCoverage({
     diff: '+++ b/src/migration/migrationService.ts\n@@ -1 +1 @@\n',
@@ -89,4 +129,50 @@ test('builds a schema-compatible report and evaluates audit/docs status', () => 
     audit: { metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 1, critical: 0, total: 1 } } },
   });
   assert.equal(failedAudit.dependencies.auditStatus, 'fail');
+});
+
+test('removes stale quality and coverage artifacts before collection', () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-quality-'));
+  const artifactRoot = path.join(temporaryRoot, 'artifacts', 'quality');
+  const coverageRoot = path.join(temporaryRoot, 'coverage');
+
+  try {
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    fs.mkdirSync(coverageRoot, { recursive: true });
+    fs.writeFileSync(path.join(artifactRoot, 'jest-results.json'), '{"stale":true}\n');
+    fs.writeFileSync(path.join(coverageRoot, 'coverage-summary.json'), '{"stale":true}\n');
+
+    prepareQualityArtifacts({ artifactRoot, coverageRoot });
+
+    assert.equal(fs.existsSync(path.join(artifactRoot, 'jest-results.json')), false);
+    assert.equal(fs.existsSync(path.join(coverageRoot, 'coverage-summary.json')), false);
+    assert.equal(fs.existsSync(artifactRoot), true);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('rejects failed collectors and missing quality inputs', () => {
+  const successfulStatuses = Object.fromEntries(
+    ['testCoverage', 'lint', 'audit', 'docs', 'commit', 'gitStatus'].map(name => [name, { exitCode: 0, signal: null, error: null }]),
+  );
+  const validInputs = {
+    commandStatuses: successfulStatuses,
+    jest: { numTotalTestSuites: 1, numTotalTests: 1 },
+    coverage: { total: {
+      statements: { pct: 71 }, branches: { pct: 58 }, functions: { pct: 76 }, lines: { pct: 72 },
+    } },
+    lintResults: [],
+    audit: { metadata: { vulnerabilities: { high: 0, critical: 0 } } },
+    documentation: { checkStatus: 'pass' },
+    commit: 'abc123',
+  };
+
+  assert.deepEqual(qualityInputFailures(validInputs), []);
+  assert.match(qualityInputFailures({
+    ...validInputs,
+    commandStatuses: { ...successfulStatuses, audit: { exitCode: 1, signal: null, error: null } },
+  })[0], /audit collector exited with code 1/);
+  assert.match(qualityInputFailures({ ...validInputs, lintResults: undefined }).join('\n'), /lint artifact/);
+  assert.match(qualityInputFailures({ ...validInputs, audit: undefined }).join('\n'), /audit artifact/);
 });

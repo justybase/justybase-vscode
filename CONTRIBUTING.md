@@ -40,8 +40,10 @@ npm run quality:report
 `quality/quality-baseline.json`. For changes under its high-risk `src/` roots,
 run `npm run test:coverage:changed` after fetching the base branch; the gate
 requires 80% changed-line and 70% changed-branch coverage. `quality:report`
-writes the ignored, schema-versioned evidence bundle under
-`artifacts/quality/` and never belongs in a commit.
+clears previous quality/coverage output, records every collector exit status,
+and rejects missing or failed evidence before writing the ignored,
+schema-versioned bundle under `artifacts/quality/`. Generated evidence never
+belongs in a commit.
 
 The Extension Host gate uses temporary SQLite data. It also verifies a real
 virtualized grid: a 144-row, wide result is scrolled vertically and

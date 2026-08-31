@@ -266,6 +266,20 @@ describe('ResultPanelMessageHandler', () => {
 
             expect(insert).toHaveBeenCalledWith(position, '1234.50');
         });
+
+        it('should insert an empty SQL string literal when display text is empty', () => {
+            const { editor, insert, position } = createMockActiveEditor();
+            (vscode.window as typeof vscode.window & { activeTextEditor: unknown }).activeTextEditor = editor as unknown as vscode.TextEditor;
+
+            handler.handleMessage({
+                command: 'insertCellContent',
+                text: '',
+                dataType: 'text',
+                sqlText: "''"
+            });
+
+            expect(insert).toHaveBeenCalledWith(position, "''");
+        });
     });
 
     describe('switchSource message', () => {
