@@ -87,17 +87,37 @@ export function parseLcov(source) {
   return records;
 }
 
-function findLcovRecord(records, file) {
+function findLcovRecords(records, file) {
   const wanted = relativePath(file);
-  const basenameMatches = [];
+  const exactMatches = [];
 
   for (const [source, record] of records) {
     const normalized = normalizePath(source);
-    if (normalized === wanted || normalized.endsWith(`/${wanted}`)) return record;
-    if (path.basename(normalized) === path.basename(wanted)) basenameMatches.push(record);
+    if (normalized === wanted || normalized.endsWith(`/${wanted}`)) exactMatches.push(record);
   }
 
-  return basenameMatches.length === 1 ? basenameMatches[0] : undefined;
+  if (exactMatches.length > 0) return exactMatches;
+
+  const basenameMatches = [...records]
+    .filter(([source]) => path.basename(normalizePath(source)) === path.basename(wanted))
+    .map(([, record]) => record);
+  return basenameMatches.length === 1 ? basenameMatches : [];
+}
+
+function mergeLcovRecords(records) {
+  const merged = { lines: new Map(), branches: new Map() };
+  for (const record of records) {
+    for (const [line, hitCount] of record.lines) {
+      if (!merged.lines.has(line) || (merged.lines.get(line) ?? 0) < hitCount) {
+        merged.lines.set(line, hitCount);
+      }
+    }
+    for (const [key, branch] of record.branches) {
+      const existing = merged.branches.get(key);
+      if (!existing || (!existing.hit && branch.hit)) merged.branches.set(key, branch);
+    }
+  }
+  return merged;
 }
 
 export function parseChangedLines(diff) {
@@ -133,11 +153,12 @@ export function checkChangedCoverage({ diff, lcov, baseline }) {
   const files = [];
   for (const [file, lines] of changed) {
     if (!isHighRiskPath(file, baseline.changedHighRiskCoverage.roots)) continue;
-    const record = findLcovRecord(records, path.join(root, file));
-    if (!record) {
+    const matchingRecords = findLcovRecords(records, path.join(root, file));
+    if (matchingRecords.length === 0) {
       failures.push(`${file}: no LCOV record was produced for changed high-risk code.`);
       continue;
     }
+    const record = mergeLcovRecords(matchingRecords);
     const executable = [...lines].filter(line => record.lines.has(line));
     const covered = executable.filter(line => (record.lines.get(line) ?? 0) > 0);
     const linePercent = executable.length === 0 ? 100 : (covered.length / executable.length) * 100;
