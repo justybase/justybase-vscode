@@ -150,6 +150,58 @@ describe('MetadataCache disk persistence integration', () => {
         ]);
     });
 
+    it('does not hydrate a snapshot after the connection fingerprint changes', async () => {
+        populateFull('NZ');
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
+        await cache.dispose();
+
+        const changedConnectionManager = {
+            ...mockConnectionManager,
+            getConnectionMetadata: () => ({
+                host: 'replacement.host',
+                port: 5480,
+                database: 'SYSTEM',
+                user: 'admin',
+                dbType: 'netezza' as const,
+            }),
+        };
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            changedConnectionManager as never,
+        );
+        await cache2.initialize();
+        await cache2.whenConnectionMetadataHydrated('NZ');
+
+        expect(cache2.getDatabases('NZ')).toBeUndefined();
+        expect(cache2.getTables('NZ', 'DB1.S1')).toBeUndefined();
+        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(false);
+        expect((await cache2['_diskStorage']!.readV3Index())?.connections.NZ).toBeDefined();
+        await cache2.dispose();
+    });
+
+    it('keeps only the manifest database list when the metadata blob is corrupt', async () => {
+        populateFull('NZ');
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
+        await cache.dispose();
+
+        fs.writeFileSync(getV3ConnectionMetadataPath(tempDir, 'NZ'), Buffer.from('corrupt-gzip'));
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        await cache2.initialize();
+        await cache2.whenConnectionMetadataHydrated('NZ');
+
+        expect(cache2.getDatabases('NZ')).toEqual([
+            expect.objectContaining({ DATABASE: 'DB1' }),
+        ]);
+        expect(cache2.getTables('NZ', 'DB1.S1')).toBeUndefined();
+        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(false);
+        await cache2.dispose();
+    });
+
     it('discards an expired connection snapshot from memory and disk before refresh', async () => {
         populateFull('NZ');
         await persistFull('NZ');
@@ -551,6 +603,30 @@ describe('MetadataCache disk persistence integration', () => {
         expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(false);
         expect(cache2.hasColumnsOnDisk('NZ', 'DB1')).toBe(false);
         expect(cache2.getColumns('NZ', 'DB1.S1.T1')).toBeUndefined();
+    });
+
+    it('reports recovery and withholds columns when the persisted column blob is corrupt', async () => {
+        populateFull('NZ');
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
+        await cache.dispose();
+
+        fs.writeFileSync(getV3ColumnFilePath(tempDir, 'NZ', 'DB1'), Buffer.from('corrupt-gzip'));
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        const recovery = jest.fn();
+        cache2.onDidNeedColumnRecovery(recovery);
+        await cache2.initialize();
+        await cache2.whenConnectionMetadataHydrated('NZ');
+        await cache2.ensureColumnsLoaded('NZ', 'DB1');
+
+        expect(recovery).toHaveBeenCalledWith('NZ');
+        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(false);
+        expect(cache2.hasColumnsOnDisk('NZ', 'DB1')).toBe(false);
+        expect(cache2.getColumns('NZ', 'DB1.S1.T1')).toBeUndefined();
+        await cache2.dispose();
     });
 
     it('should discard in-flight column disk load after clearCache', async () => {

@@ -71,6 +71,7 @@ describe('metadata host ↔ LSP coherence', () => {
         connectionManager,
       );
     });
+    const invalidationSubscription = cache.onDidInvalidate(() => bridge.clearAll());
 
     const first = await bridge.getTableInfo(
       documentUri,
@@ -81,7 +82,6 @@ describe('metadata host ↔ LSP coherence', () => {
     expect(first?.columns[0]?.type).toBe('INTEGER');
 
     cache.invalidateSchema('NZ', 'DB1', 'ADMIN');
-    bridge.clearAll();
 
     cache.setColumns('NZ', 'DB1.ADMIN.T1', [
       { ATTNAME: 'C1', FORMAT_TYPE: 'VARCHAR(32)', label: 'C1' },
@@ -94,6 +94,7 @@ describe('metadata host ↔ LSP coherence', () => {
       'ADMIN',
     );
     expect(second?.columns[0]?.type).toBe('VARCHAR(32)');
+    invalidationSubscription.dispose();
   });
 
   it('documentValidationSession drops cached diagnostics when metadataEpoch changes', () => {
