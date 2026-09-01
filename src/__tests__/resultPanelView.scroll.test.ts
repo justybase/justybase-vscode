@@ -569,6 +569,74 @@ describe('ResultPanelView Scroll Preservation', () => {
             }));
         });
 
+        it('falls back to the legacy result props identity when the stored identity is absent', () => {
+            const sourceUri = 'file:///legacy-identity.sql';
+            provider.startExecution(sourceUri);
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            const stateManager = (provider as unknown as {
+                _stateManager: { resultsMap: Map<string, Array<{ resultSetId?: string }>> };
+            })._stateManager;
+            const resultSet = stateManager.resultsMap.get(sourceUri)?.[1];
+            if (!resultSet) throw new Error('Expected a streaming result set.');
+            resultSet.resultSetId = undefined;
+            (provider as unknown as { _streamingTransportSequence: Map<string, number> })
+                ._streamingTransportSequence.delete(sourceUri);
+            postedMessages = [];
+
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[2]],
+                isFirstChunk: false,
+                isLastChunk: true,
+                totalRowsSoFar: 2,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            expect(postedMessages.find(message => message.command === 'appendRows')).toEqual(expect.objectContaining({
+                resultSetId: undefined,
+                chunkSequence: 0,
+            }));
+        });
+
+        it('uses the default completion sequence when a terminal chunk has no rows', () => {
+            const sourceUri = 'file:///empty-terminal.sql';
+            provider.startExecution(sourceUri);
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            (provider as unknown as { _streamingTransportSequence: Map<string, number> })
+                ._streamingTransportSequence.delete(sourceUri);
+            postedMessages = [];
+
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [],
+                isFirstChunk: false,
+                isLastChunk: true,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            expect(postedMessages.find(message => message.command === 'appendRows')).toBeUndefined();
+            expect(postedMessages.find(message => message.command === 'streamingComplete')).toEqual(expect.objectContaining({
+                lastChunkSequence: 0,
+            }));
+        });
+
         it('should not send incremental streaming messages for inactive source', () => {
             const backgroundSource = 'file:///background.sql';
             const activeSource = 'file:///active.sql';

@@ -647,6 +647,7 @@ async function runExtensionHostScenario(
         await provider.runResultPanelTestBridge('diskQuery');
         await requestExtensionHostScreenshot('02-result-grid');
 
+        /* istanbul ignore next -- exercised by the real Extension Host harness. */
         const filteredByUnicode = asRecord(await provider.runResultPanelTestBridge('setGlobalFilter', {
             value: 'Łódź',
             expectedVisibleRowCount: 4,
@@ -655,6 +656,7 @@ async function runExtensionHostScenario(
             throw new Error(`Global filter did not reduce the deterministic result to four rows (observed ${String(filteredByUnicode.visibleRowCount)}).`);
         }
         await requestExtensionHostScreenshot('03-global-filter');
+        /* istanbul ignore next -- exercised by the real Extension Host harness. */
         const clearedGlobal = asRecord(await provider.runResultPanelTestBridge('clearGlobalFilter', {
             expectedVisibleRowCount: 12,
         }));
