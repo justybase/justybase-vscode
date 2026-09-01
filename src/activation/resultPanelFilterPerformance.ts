@@ -1,3 +1,4 @@
+/* istanbul ignore file -- this test-only command is exercised by the real Extension Host harness. */
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
