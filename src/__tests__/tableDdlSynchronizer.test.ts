@@ -158,6 +158,8 @@ describe('TableDdlSynchronizer', () => {
                 },
             ],
         });
+        const invalidated = jest.fn();
+        fixture.metadataCache.onDidInvalidate(invalidated);
 
         await fixture.synchronizer.handleStatementSucceeded({
             sql: 'CREATE TABLE NEW_T (ID INTEGER)',
@@ -170,6 +172,7 @@ describe('TableDdlSynchronizer', () => {
             expect.objectContaining({ OBJNAME: 'NEW_T', OBJID: 42, objType: 'TABLE' }),
         ]);
         expect(fixture.schemaProvider.refresh).toHaveBeenCalledTimes(1);
+        expect(invalidated).toHaveBeenCalledWith('CONN');
     });
 
     it('warms column cache in ATTNUM order after CREATE TABLE', async () => {
@@ -343,6 +346,8 @@ describe('TableDdlSynchronizer', () => {
                 },
             ],
         });
+        const invalidated = jest.fn();
+        fixture.metadataCache.onDidInvalidate(invalidated);
         const base = {
             connectionName: 'CONN',
             documentUri: 'file:///query.sql',
@@ -357,6 +362,7 @@ describe('TableDdlSynchronizer', () => {
         expect(fixture.metadataCache.getTables('CONN', 'JUST_DATA.ADMIN')).toBeUndefined();
         await fixture.synchronizer.handleStatementSucceeded({ ...base, sql: 'ROLLBACK' });
         expect(fixture.metadataCache.getTables('CONN', 'JUST_DATA.ADMIN')).toBeUndefined();
+        expect(invalidated).not.toHaveBeenCalled();
 
         await fixture.synchronizer.handleStatementSucceeded({ ...base, sql: 'BEGIN' });
         await fixture.synchronizer.handleStatementSucceeded({
@@ -373,6 +379,8 @@ describe('TableDdlSynchronizer', () => {
                 buildColumnCacheKey('JUST_DATA', 'ADMIN', 'TX_T'),
             )?.map(column => column.ATTNAME),
         ).toEqual(['ID']);
+        expect(invalidated).toHaveBeenCalledTimes(1);
+        expect(invalidated).toHaveBeenCalledWith('CONN');
     });
 
     it('removes dropped tables and their cached columns', async () => {
