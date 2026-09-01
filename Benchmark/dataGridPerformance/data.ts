@@ -7,7 +7,8 @@ export type DataGridProfile =
     | 'worker-boundary-19999'
     | 'worker-boundary-20000'
     | 'large'
-    | 'wide';
+    | 'wide'
+    | 'filter-regression-4000x32';
 
 export interface DataGridProfileDefinition {
     profile: DataGridProfile;
@@ -35,6 +36,7 @@ const PROFILE_DEFINITIONS: readonly DataGridProfileDefinition[] = [
     { profile: 'worker-boundary-20000', rowCount: 20_000, columnCount: 8 },
     { profile: 'large', rowCount: 100_000, columnCount: 16 },
     { profile: 'wide', rowCount: 10_000, columnCount: 32 },
+    { profile: 'filter-regression-4000x32', rowCount: 4_000, columnCount: 32 },
 ];
 
 const BASE_COLUMNS: readonly ColumnDefinition[] = [

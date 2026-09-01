@@ -104,7 +104,8 @@
         const definitions = {
             small: [1000, 8], inline: [10000, 8],
             'worker-boundary-19999': [19999, 8], 'worker-boundary-20000': [20000, 8],
-            large: [100000, 16], wide: [10000, 32]
+            large: [100000, 16], wide: [10000, 32],
+            'filter-regression-4000x32': [4000, 32]
         };
         const [rowCount, columnCount] = definitions[profile] || definitions.inline;
         const columnNames = ['ID', 'AMOUNT', 'NAME', 'EVENT_DATE', 'EVENT_AT', 'ACTIVE', 'OPTIONAL_TEXT', 'LONG_TEXT', 'CATEGORY', 'RATIO', 'QUANTITY', 'REFERENCE', 'OPTIONAL_AMOUNT', 'SEARCH_LABEL', 'RANKING', 'PAYLOAD'];
@@ -180,7 +181,8 @@
             if (normalized === 'needle-absent') return 0;
             return null;
         }
-        function waitForSearchDone(startedAt, eventStart, requiredWorkerResults = 1, finalQuery = '') {
+        const FILTER_DEBOUNCE_MS = 200;
+        function waitForSearchDone(startedAt, eventStart, requiredWorkerResults = 1, finalQuery = '', lastInputAt = startedAt) {
             return new Promise((resolve, reject) => {
                 const deadline = performance.now() + 30000;
                 function poll() {
@@ -197,7 +199,7 @@
                     const resultRowsReady = expected === null
                         ? count !== null
                         : count === expected && (expected === 0 || expected === rows.length || firstVisibleText.toLowerCase().includes(normalizedQuery));
-                    if (!busy && count !== null && resultRowsReady && workerSettled && performance.now() - startedAt >= 75) {
+                    if (!busy && count !== null && resultRowsReady && workerSettled && performance.now() - lastInputAt >= FILTER_DEBOUNCE_MS + 25) {
                         resolve({
                             durationMs: performance.now() - startedAt,
                             rowCount: count,
@@ -233,8 +235,79 @@
                 const startedAt = performance.now();
                 const eventStart = window.__workerEvents.length;
                 input.value = query;
+                const lastInputAt = performance.now();
                 input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
-                return waitForSearchDone(startedAt, eventStart, 1, query);
+                return waitForSearchDone(startedAt, eventStart, 1, query, lastInputAt);
+            },
+            measureInlineFilter: (query, sampleCount = 3) => {
+                const grid = window.getGrid(0);
+                const table = grid?.tanTable;
+                if (!table) {
+                    throw new Error('Result Panel grid is not initialized');
+                }
+
+                table.setGlobalFilter('');
+                table.getFilteredRowModel();
+                const samples = [];
+                let rowCount = -1;
+                for (let index = 0; index < sampleCount; index += 1) {
+                    // Change the query each time so TanStack cannot return its memoized row model.
+                    // The row-level search cache should still make later keystroke-like queries cheap.
+                    const sampleQuery = index === 0 ? String(query) : `${String(query)}-${index}`;
+                    table.setGlobalFilter(sampleQuery);
+                    const startedAt = performance.now();
+                    rowCount = table.getFilteredRowModel().rows.length;
+                    samples.push(performance.now() - startedAt);
+                }
+                table.setGlobalFilter('');
+                table.getFilteredRowModel();
+                return { samples, rowCount };
+            },
+            measureUiFilter: async query => {
+                // Let any render scheduled by a direct model measurement settle before instrumenting the next search.
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const input = document.getElementById('globalFilter');
+                const tbody = document.querySelector('.grid-wrapper.active tbody');
+                if (!input || !tbody) {
+                    throw new Error('Result Panel filter controls are not initialized');
+                }
+
+                let bodyAppends = 0;
+                const originalAppendChild = Node.prototype.appendChild;
+                Node.prototype.appendChild = function(node) {
+                    if (this === tbody) {
+                        bodyAppends += 1;
+                    }
+                    return originalAppendChild.call(this, node);
+                };
+
+                const startedAt = performance.now();
+                input.value = String(query);
+                input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+                const expected = expectedSearchCount(query);
+                const deadline = performance.now() + 30000;
+                try {
+                    return await new Promise((resolve, reject) => {
+                        function poll() {
+                            const busy = document.getElementById('globalFilter')?.getAttribute('aria-busy') === 'true'
+                                || document.getElementById('rowCountInfo')?.textContent?.includes('Searching');
+                            const count = displayedCount();
+                            const resultRowsReady = expected === null ? count !== null : count === expected;
+                            if (!busy && resultRowsReady && bodyAppends > 0) {
+                                resolve({ durationMs: performance.now() - startedAt, rowCount: count, bodyAppends });
+                                return;
+                            }
+                            if (performance.now() > deadline) {
+                                reject(new Error('Timed out waiting for instrumented Result Panel filter'));
+                                return;
+                            }
+                            requestAnimationFrame(poll);
+                        }
+                        poll();
+                    });
+                } finally {
+                    Node.prototype.appendChild = originalAppendChild;
+                }
             },
             searchBurst: async () => {
                 const input = document.getElementById('globalFilter');
@@ -242,8 +315,10 @@
                 const eventStart = window.__workerEvents.length;
                 input.value = 'needle-start'; input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
                 await new Promise(resolve => setTimeout(resolve, 60));
-                input.value = 'needle-middle'; input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
-                const result = await waitForSearchDone(startedAt, eventStart, 2, 'needle-middle');
+                input.value = 'needle-middle';
+                const lastInputAt = performance.now();
+                input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+                const result = await waitForSearchDone(startedAt, eventStart, 1, 'needle-middle', lastInputAt);
                 return { ...result, finalFilter: input.value };
             }
         };

@@ -27,6 +27,7 @@ import { DuckDbResultBridge } from '../services/duckdbResultBridge';
 import { ResultSet } from '../types';
 import { detectEditSource } from '../results/editSourceDetector';
 import { MessagePackEncoder } from '../core/streaming';
+import { streamingManager } from '../core/queryCancellation';
 import { diskBackedStoreRegistry } from '../core/resultDataProvider/diskBackedStoreRegistry';
 import { setContextIfChanged } from '../services/contextKeyService';
 import {
@@ -195,6 +196,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     private _streamingRowCountLastReported = new Map<string, number>();
     /** Result set for the statement currently being streamed per source. */
     private _streamingResultSets = new Map<string, ResultSet | null>();
+    /** Sequence number of the next appendRows transport message per source. */
+    private _streamingTransportSequence = new Map<string, number>();
     /** Active UX source-switch trace propagated into setActiveSource / hydrate. */
     private _pendingUxTraceId: string | undefined;
     private readonly _context?: vscode.ExtensionContext;
@@ -456,6 +459,23 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
     public getResultPanelTestBridgePendingRequestCount(): number {
         return this._pendingTestBridgeRequests.size;
+    }
+
+    /** Bounded counters used by the test-only Extension Host leak gate. */
+    public getResultPanelRuntimeDiagnostics(): {
+        activeCommandCount: number;
+        executingSourceCount: number;
+        streamingResultCount: number;
+        streamingTransportCount: number;
+        pendingResultSyncCount: number;
+    } {
+        return {
+            activeCommandCount: streamingManager.getActiveUris().length,
+            executingSourceCount: this._stateManager.executingSources.size,
+            streamingResultCount: this._streamingResultSets.size,
+            streamingTransportCount: this._streamingTransportSequence.size,
+            pendingResultSyncCount: this._pendingResultSyncSources.size,
+        };
     }
 
     /** Prepare the real webview before an Extension Host scenario starts. */
@@ -754,6 +774,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     public closeSource(sourceUri: string) {
         this._pendingResultSyncSources.delete(sourceUri);
         this._streamingResultSets.delete(sourceUri);
+        this._streamingTransportSequence.delete(sourceUri);
         this._stateManager.closeSource(sourceUri);
         this._updateWebview();
     }
@@ -768,6 +789,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         });
         const { clearedUnpinnedResults } = this._stateManager.startExecution(sourceUri);
         this._streamingResultSets.delete(sourceUri);
+        this._streamingTransportSequence.delete(sourceUri);
         // Full hydrate only when unpinned tabs (e.g. Error) were removed — avoids wiping
         // live/pinned state on every re-run.
         // A newly-created source has no Logs shell in the webview yet. Force one
@@ -813,6 +835,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         const hadCompletedStreaming = this._stateManager.isStreamingCompleted(sourceUri);
         this._stateManager.clearStreamingCompleted(sourceUri);
         this._streamingResultSets.delete(sourceUri);
+        this._streamingTransportSequence.delete(sourceUri);
         // The next statement may be DML/DDL and therefore produce no new tabular
         // shell. Keep the webview's marker scoped to the previous statement.
         if (hadCompletedStreaming && this._stateManager.activeSourceUri === sourceUri) {
@@ -1113,6 +1136,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
     public cancelExecution(sourceUri: string, currentRowCounts?: number[]) {
         this._stateManager.cancelExecution(sourceUri, currentRowCounts);
+        this._streamingTransportSequence.delete(sourceUri);
         this._updateWebview();
 
         // Notify webview to discard pending messages
@@ -1124,6 +1148,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
     public finalizeExecution(sourceUri: string) {
         this._streamingResultSets.delete(sourceUri);
+        this._streamingTransportSequence.delete(sourceUri);
         this._stateManager.finalizeExecution(sourceUri);
         traceResultPanelEvent({
             phase: 'finalize_execution',
@@ -1401,6 +1426,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             return false;
         } finally {
             this._streamingResultSets.delete(sourceUri);
+            this._streamingTransportSequence.delete(sourceUri);
             this._stateManager.finalizeResultRefresh(sourceUri, resultSetIndex);
             this._updateWebview();
             const durationMs = Date.now() - startTime;
@@ -2047,6 +2073,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             const hadCompletedStreaming = this._stateManager.isStreamingCompleted(sourceUri);
             this._stateManager.clearStreamingCompleted(sourceUri);
             this._streamingResultSets.set(sourceUri, null);
+            this._streamingTransportSequence.set(sourceUri, 0);
             if (hadCompletedStreaming && isActiveSource) {
                 this._postLightweightActiveSourceUpdate(sourceUri);
             }
@@ -2172,13 +2199,19 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                         result.props.limitReached,
                     );
                 } else {
+                    const chunkSequence = this._streamingTransportSequence.get(sourceUri) ?? 0;
+                    const resultSetId = resultSet?.resultSetId ?? result.props.resultSetId;
                     const encodedMessage: ResultPanelOutboundMessage = {
                         ...result.props,
                         rows: encode(this._encoder.sanitizeForMessagePack(rowsToSend)),
                         sourceUri,
+                        resultSetId,
+                        chunkSequence,
+                        fromRow: Math.max(0, chunk.totalRowsSoFar - chunk.rows.length),
                         diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled(),
                     };
                     this._postMessageToWebview(encodedMessage);
+                    this._streamingTransportSequence.set(sourceUri, chunkSequence + 1);
                 }
             }
         }
@@ -2207,9 +2240,15 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                     sourceUri,
                     resultSetIndex: completedResultSetIndex,
                     totalRows: chunk.totalRowsSoFar,
-                    limitReached: activeResultSet?.limitReached === true
+                    limitReached: activeResultSet?.limitReached === true,
+                    resultSetId: activeResultSet?.resultSetId,
+                    lastChunkSequence: Math.max(
+                        0,
+                        (this._streamingTransportSequence.get(sourceUri) ?? 1) - 1,
+                    ),
                 });
             }
+            this._streamingTransportSequence.delete(sourceUri);
         }
     }
 

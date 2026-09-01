@@ -30,6 +30,7 @@ interface TableCreateOptions {
     onColumnPinningChange?: TableStateUpdater<unknown>;
     onColumnVisibilityChange?: TableStateUpdater<unknown>;
     globalFilterFn?: (row: unknown, columnId: string, filterValue: string) => boolean;
+    getColumnCanGlobalFilter?: (column: { id: string }) => boolean;
     getCoreRowModel: TableRowModelGetter;
     getSortedRowModel: TableRowModelGetter;
     getFilteredRowModel: TableRowModelGetter;

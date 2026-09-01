@@ -36,10 +36,33 @@ iterations is the recommended race stress value:
 JUSTYBASE_EXTENSION_HOST_REPEAT=20 npm run test:extension-host
 ```
 
+Repeated runs write one report and trace per iteration plus a versioned
+`*-repeat-summary.json`; artifacts are not overwritten. All requested
+iterations run even when one fails, and the command returns a failure after
+the aggregate report is written. A weekly Linux workflow runs the recommended
+20-iteration gate. Pull requests retain the single Linux/Windows scenario.
+
 The command is intentionally not contributed in `package.json`. The
 `justybase.test.extensionHostScenario` command exists only while
 `NODE_ENV=test` and `JUSTYBASE_RESULT_PANEL_TRACE=1` are set inside the test
 Extension Host.
+
+## Filter performance gate
+
+The real Extension Host filter benchmark exercises a temporary SQLite result
+with 4,000 rows and 32 columns through the production SQL command and webview
+message bridge:
+
+```bash
+npm run test:extension-host:filter-performance
+```
+
+It records cold and warm inline searches, a rapid typing burst, and clearing
+the filter. Each operation must apply exactly once and report the configured
+200 ms quiet period. The generated report contains timings only; the fixture,
+SQL file, profile, and artifacts are temporary and are removed after a
+successful run. Set `JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS=1` to retain the
+sanitized report.
 
 ## Netezza run
 

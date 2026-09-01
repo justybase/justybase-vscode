@@ -24,10 +24,11 @@ The deterministic generator uses a fixed seed and locale-independent values. It 
 | `worker-boundary-20000` | 20,000 × 8 | Just at the worker threshold |
 | `large` | 100,000 × 16 | Worker cold/warm and SQLite search |
 | `wide` | 10,000 × 32 | Reserved for width-sensitive additions |
+| `filter-regression-4000x32` | 4,000 × 32 | Global-filter regression and render-count guard |
 
 The Node/Jest matrix currently measures CSV preview/type analysis/validation/SQL generation, full import-stream preparation and consumption, CSV/CSV.GZ/CSV.ZST/JSON/XLSX/XLSB exports, inline search, worker cold and warm search, and SQLite `queryRows()` plus `countRows()`. XML, SQL, Markdown, Parquet, and XPT are registered as `SKIP` cases until they become part of the reference export matrix.
 
-The Playwright matrix loads the real `dist/media/resultPanel.js`, the real `searchWorker.js`, deterministic browser data, and the Result Panel DOM. It measures first grid render, search-hit positions, clearing, the 19,999/20,000 switch, cold/warm worker behavior, rapid-query ordering, and host payload preparation for full and filtered CSV exports. File writing by the host is intentionally outside the payload-preparation metric.
+The Playwright matrix loads the real `dist/media/resultPanel.js`, the real `searchWorker.js`, deterministic browser data, and the Result Panel DOM. It measures first grid render, search-hit positions, clearing, the 19,999/20,000 switch, the 4,000 × 32 inline filtered-row model and render count, cold/warm worker behavior, rapid-query ordering, and host payload preparation for full and filtered CSV exports. File writing by the host is intentionally outside the payload-preparation metric.
 
 ## Metrics and boundaries
 

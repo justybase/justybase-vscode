@@ -7,6 +7,42 @@ export function compactFilterSearchText(value: string): string {
     return String(value).toLowerCase().replace(FILTER_SEARCH_GROUPING_PATTERN, '');
 }
 
+export interface FilterValueSearchText {
+    lower: string;
+    compact: string;
+}
+
+export function createFilterValueSearchText(value: string): FilterValueSearchText {
+    const lower = String(value).toLowerCase();
+    return {
+        lower,
+        compact: lower.replace(FILTER_SEARCH_GROUPING_PATTERN, ''),
+    };
+}
+
+export function matchesFilterValueSearchText(
+    displayValue: FilterValueSearchText,
+    searchTerm: FilterValueSearchText,
+): boolean {
+    if (displayValue.lower.includes(searchTerm.lower)) {
+        return true;
+    }
+
+    return Boolean(searchTerm.compact) && displayValue.compact.includes(searchTerm.compact);
+}
+
+export type FilterValueMatcher = (displayValue: string) => boolean;
+
+/** Create a reusable matcher so the search term is normalized only once per filter query. */
+export function createFilterValueMatcher(searchTerm: string): FilterValueMatcher {
+    const normalizedSearchTerm = createFilterValueSearchText(searchTerm);
+
+    return (displayValue: string): boolean => matchesFilterValueSearchText(
+        createFilterValueSearchText(displayValue),
+        normalizedSearchTerm,
+    );
+}
+
 export function parseFilterNumericValue(value: string): number | null {
     if (value === 'NULL') {
         return null;
@@ -17,48 +53,29 @@ export function parseFilterNumericValue(value: string): number | null {
 
 /** Match filter dropdown search against display text, including compact numeric forms (e.g. 20101228 vs 2010 12 28, 123456 vs 123 456). */
 export function matchesFilterValueSearch(displayValue: string, searchTerm: string): boolean {
-    const lowerDisplay = String(displayValue).toLowerCase();
-    const lowerNeedle = String(searchTerm).toLowerCase();
-    if (lowerDisplay.includes(lowerNeedle)) {
-        return true;
-    }
-
-    const compactNeedle = compactFilterSearchText(searchTerm);
-    if (!compactNeedle) {
-        return false;
-    }
-
-    return compactFilterSearchText(displayValue).includes(compactNeedle);
+    return createFilterValueMatcher(searchTerm)(displayValue);
 }
 
 export function startsWithFilterValueSearch(displayValue: string, searchTerm: string): boolean {
-    const lowerDisplay = String(displayValue).toLowerCase();
-    const lowerNeedle = String(searchTerm).toLowerCase();
-    if (lowerDisplay.startsWith(lowerNeedle)) {
+    const normalizedDisplayValue = createFilterValueSearchText(displayValue);
+    const normalizedSearchTerm = createFilterValueSearchText(searchTerm);
+    if (normalizedDisplayValue.lower.startsWith(normalizedSearchTerm.lower)) {
         return true;
     }
 
-    const compactNeedle = compactFilterSearchText(searchTerm);
-    if (!compactNeedle) {
-        return false;
-    }
-
-    return compactFilterSearchText(displayValue).startsWith(compactNeedle);
+    return Boolean(normalizedSearchTerm.compact)
+        && normalizedDisplayValue.compact.startsWith(normalizedSearchTerm.compact);
 }
 
 export function endsWithFilterValueSearch(displayValue: string, searchTerm: string): boolean {
-    const lowerDisplay = String(displayValue).toLowerCase();
-    const lowerNeedle = String(searchTerm).toLowerCase();
-    if (lowerDisplay.endsWith(lowerNeedle)) {
+    const normalizedDisplayValue = createFilterValueSearchText(displayValue);
+    const normalizedSearchTerm = createFilterValueSearchText(searchTerm);
+    if (normalizedDisplayValue.lower.endsWith(normalizedSearchTerm.lower)) {
         return true;
     }
 
-    const compactNeedle = compactFilterSearchText(searchTerm);
-    if (!compactNeedle) {
-        return false;
-    }
-
-    return compactFilterSearchText(displayValue).endsWith(compactNeedle);
+    return Boolean(normalizedSearchTerm.compact)
+        && normalizedDisplayValue.compact.endsWith(normalizedSearchTerm.compact);
 }
 
 function shouldSortFilterValuesNumerically(values: string[], dataType: string | undefined): boolean {
