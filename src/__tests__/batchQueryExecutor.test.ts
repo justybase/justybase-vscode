@@ -90,6 +90,7 @@ import {
     runQueriesSequentially,
     runQueriesWithStreaming,
 } from '../core/batchQueryExecutor';
+import { isSafeToRetryAfterBrokenConnection } from '../core/queryRetrySafety';
 import {
     parseSetVariables,
     replaceVariablesInSql,
@@ -158,6 +159,8 @@ describe('batchQueryExecutor', () => {
             setValues: {},
         }));
         (replaceVariablesInSql as jest.Mock).mockImplementation((sql: string) => sql);
+        const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+        (isConnectionBrokenError as jest.Mock).mockReset().mockReturnValue(false);
         mockIsAborted.mockReturnValue(false);
         mockConn = createMockConnection();
         mockConnManager = createMockConnManager();
@@ -168,6 +171,43 @@ describe('batchQueryExecutor', () => {
             shouldCloseConnection: false,
         });
         mockGetInstance.mockReturnValue(mockHistoryManager);
+    });
+
+    describe('retry safety classification', () => {
+        it.each([
+            'SELECT 1',
+            '\uFEFF -- reason\n /* nested /* note */ done */ SELECT * FROM T',
+            'VALUES (1)',
+            'SHOW TABLES',
+            'DESCRIBE T',
+            'EXPLAIN SELECT * FROM T',
+            'EXPLAIN VERBOSE SELECT * FROM T',
+        ])('allows one unambiguous read-only statement: %s', sql => {
+            expect(isSafeToRetryAfterBrokenConnection(sql)).toBe(true);
+        });
+
+        it.each([
+            'INSERT INTO T VALUES (1)',
+            'UPDATE T SET X = 1',
+            'DELETE FROM T',
+            'CREATE TABLE T (X INT)',
+            'CALL MUTATE_STATE()',
+            'WITH X AS (SELECT 1) SELECT * FROM X',
+            'SELECT * INTO CUSTOMER_COPY FROM CUSTOMER',
+            "SELECT nextval('customer_seq')",
+            'SELECT customer_seq.NEXTVAL FROM dual',
+            'SELECT mutate_customer(42)',
+            'SELECT * FROM CUSTOMER FOR UPDATE',
+            'VALUES NEXT VALUE FOR customer_seq',
+            'VALUES mutate_customer(42)',
+            'SELECT 1; SELECT 2',
+            'EXPLAIN ANALYZE SELECT * FROM T',
+            'EXPLAIN SELECT * INTO CUSTOMER_COPY FROM CUSTOMER',
+            'EXPLAIN INSERT INTO T VALUES (1)',
+            '/* unterminated',
+        ])('rejects unsafe or ambiguous replay: %s', sql => {
+            expect(isSafeToRetryAfterBrokenConnection(sql)).toBe(false);
+        });
     });
 
     // ── runQueriesSequentially ─────────────────────────────────────
@@ -362,6 +402,7 @@ END_PROC;`;
                 results: [{ columns: [{ name: 'a' }], rows: [[1]], limitReached: false }],
                 error: null,
             });
+            const onStatementFailed = jest.fn();
 
             await expect(
                 runQueriesSequentially(
@@ -369,10 +410,61 @@ END_PROC;`;
                     ['SELECT 1', 'SELECT 2'],
                     mockConnManager,
                     'file:///test.sql',
+                    undefined,
+                    undefined,
+                    undefined,
+                    false,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    0,
+                    undefined,
+                    [],
+                    { onStatementFailed },
                 ),
             ).rejects.toThrow('Query cancelled');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(onStatementFailed).toHaveBeenCalledWith({
+                sql: 'SELECT 2',
+                connectionName: 'testConn',
+                documentUri: 'file:///test.sql',
+                errorMessage: 'Query cancelled',
+            });
+        });
+
+        it('runs transaction cleanup when safe-execute confirmation cancels the batch', async () => {
+            const confirmSafeExecute = jest.fn().mockResolvedValue(false);
+            const onStatementFailed = jest.fn();
+
+            const results = await runQueriesSequentially(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                0,
+                undefined,
+                [],
+                { confirmSafeExecute, onStatementFailed },
+            );
+
+            expect(results).toEqual([]);
+            expect(mockExecuteAndFetch).not.toHaveBeenCalled();
+            expect(onStatementFailed).toHaveBeenCalledWith({
+                sql: 'SELECT 1',
+                connectionName: 'testConn',
+                documentUri: 'file:///test.sql',
+                errorMessage: 'Query execution cancelled by user',
+            });
         });
 
         it('should throw when no connection selected', async () => {
@@ -708,7 +800,7 @@ END_PROC;`;
 
         it('should emit retrying status and reuse executionId on broken connection retry', async () => {
             const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
-            (isConnectionBrokenError as jest.Mock).mockReturnValueOnce(true);
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
 
             const queryStartCallback = jest.fn().mockReturnValue('exec-retry');
             const queryEndCallback = jest.fn();
@@ -740,33 +832,143 @@ END_PROC;`;
                 1,
                 'exec-retry',
                 0,
-                expect.any(Number),
-                'error',
-                'Connection lost',
-            );
-            expect(queryEndCallback).toHaveBeenNthCalledWith(
-                2,
-                'exec-retry',
-                0,
                 0,
                 'retrying',
                 'Connection was closed by server. Reconnecting and retrying...',
             );
             expect(queryEndCallback).toHaveBeenNthCalledWith(
-                3,
+                2,
                 'exec-retry',
                 1,
                 expect.any(Number),
                 'success',
             );
+            expect(queryEndCallback).toHaveBeenCalledTimes(2);
+            expect(mockHistoryManager.addEntry).toHaveBeenCalledTimes(1);
             expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith(
                 'file:///test.sql',
             );
         });
 
+        it('emits one terminal error when the read-only reconnect retry also fails', async () => {
+            const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+
+            const queryStartCallback = jest.fn().mockReturnValue('exec-retry-failed');
+            const queryEndCallback = jest.fn();
+            mockExecuteAndFetch
+                .mockRejectedValueOnce(new Error('Connection lost'))
+                .mockRejectedValueOnce(new Error('Connection still unavailable'));
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+            )).rejects.toThrow('after reconnect attempt');
+
+            expect(queryEndCallback.mock.calls.map((call: unknown[]) => call[3])).toEqual([
+                'retrying',
+                'error',
+            ]);
+            expect(queryEndCallback).toHaveBeenLastCalledWith(
+                'exec-retry-failed',
+                0,
+                expect.any(Number),
+                'error',
+                'Connection still unavailable',
+            );
+            expect(mockHistoryManager.addEntry).toHaveBeenCalledTimes(1);
+        });
+
+        it('emits cancellation as the only terminal status', async () => {
+            const queryStartCallback = jest.fn().mockReturnValue('exec-cancelled');
+            const queryEndCallback = jest.fn();
+            const onStatementFailed = jest.fn();
+            mockExecuteAndFetch.mockResolvedValue({
+                results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
+                error: new Error('Query cancelled'),
+                status: 'cancelled',
+            });
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+                undefined,
+                0,
+                undefined,
+                [],
+                { onStatementFailed },
+            )).rejects.toThrow('Query cancelled');
+
+            expect(queryEndCallback).toHaveBeenCalledTimes(1);
+            expect(queryEndCallback).toHaveBeenCalledWith(
+                'exec-cancelled',
+                1,
+                expect.any(Number),
+                'cancelled',
+                'Query cancelled',
+            );
+            expect(onStatementFailed).toHaveBeenCalledWith(expect.objectContaining({
+                connectionName: 'testConn',
+                documentUri: 'file:///test.sql',
+                errorMessage: 'Query cancelled',
+            }));
+        });
+
+        it('does not retry a write after a broken connection and reports an unknown outcome', async () => {
+            const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+
+            const queryStartCallback = jest.fn().mockReturnValue('exec-write');
+            const queryEndCallback = jest.fn();
+            mockExecuteAndFetch.mockRejectedValue(new Error('Connection lost'));
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                ['UPDATE CUSTOMER SET ACTIVE = 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+            )).rejects.toThrow('database outcome may be unknown');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(queryEndCallback).toHaveBeenCalledTimes(1);
+            expect(queryEndCallback).toHaveBeenCalledWith(
+                'exec-write',
+                0,
+                expect.any(Number),
+                'error',
+                expect.stringContaining('could not be proven safe to retry'),
+            );
+        });
+
         it('does not retry a macro branch after a broken connection', async () => {
             const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
-            (isConnectionBrokenError as jest.Mock).mockReturnValueOnce(true);
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
             mockExecuteAndFetch.mockRejectedValue(new Error('Connection lost'));
 
             await expect(runQueriesSequentially(
@@ -777,9 +979,32 @@ END_PROC;`;
 %END;`],
                 mockConnManager,
                 'file:///test.sql',
-            )).rejects.toThrow('Connection lost');
+            )).rejects.toThrow('could not be proven safe to retry');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
+        it('does not retry after an executable SQL macro was expanded', async () => {
+            const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            mockExecuteAndFetch
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'id' }], rows: [[1]], limitReached: false }],
+                    error: null,
+                })
+                .mockRejectedValueOnce(new Error('Connection lost'));
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                ['SELECT %SQL(DELETE FROM audit_log RETURNING id)'],
+                mockConnManager,
+                'file:///test.sql',
+            )).rejects.toThrow('could not be proven safe to retry');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
+            expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('DELETE FROM audit_log RETURNING id');
+            expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 1');
             expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
         });
 
@@ -1214,7 +1439,7 @@ END_PROC;`;
 
         it('should emit retrying status during streaming reconnect retry', async () => {
             const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
-            (isConnectionBrokenError as jest.Mock).mockReturnValueOnce(true);
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
 
             const queryStartCallback = jest.fn().mockReturnValue('stream-retry');
             const queryEndCallback = jest.fn();
@@ -1247,28 +1472,119 @@ END_PROC;`;
                 1,
                 'stream-retry',
                 0,
-                expect.any(Number),
-                'error',
-                'Connection lost',
-            );
-            expect(queryEndCallback).toHaveBeenNthCalledWith(
-                2,
-                'stream-retry',
-                0,
                 0,
                 'retrying',
                 'Connection was closed by server. Reconnecting and retrying...',
             );
             expect(queryEndCallback).toHaveBeenNthCalledWith(
-                3,
+                2,
                 'stream-retry',
                 10,
                 expect.any(Number),
                 'success',
             );
+            expect(queryEndCallback).toHaveBeenCalledTimes(2);
             expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith(
                 'file:///test.sql',
             );
+        });
+
+        it('keeps partial streamed rows and does not retry after a chunk was delivered', async () => {
+            const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+
+            const queryStartCallback = jest.fn().mockReturnValue('stream-partial');
+            const queryEndCallback = jest.fn();
+            const chunkCallback = jest.fn();
+            const partialChunk = {
+                columns: [{ name: 'id' }],
+                rows: [[1], [2]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 2,
+                limitReached: false,
+            };
+            mockExecuteWithStreaming.mockImplementationOnce(async (...args: any[]) => {
+                await args[6](partialChunk);
+                return {
+                    totalRows: 2,
+                    limitReached: false,
+                    error: new Error('Connection lost'),
+                    status: 'error',
+                };
+            });
+
+            await expect(runQueriesWithStreaming(
+                mockContext,
+                ['SELECT * FROM CUSTOMER'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                chunkCallback,
+                2,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+            )).rejects.toThrow('partial result was kept');
+
+            expect(chunkCallback).toHaveBeenCalledWith(0, partialChunk, 'SELECT * FROM CUSTOMER');
+            expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(queryEndCallback).toHaveBeenCalledTimes(1);
+            expect(queryEndCallback).toHaveBeenCalledWith(
+                'stream-partial',
+                2,
+                expect.any(Number),
+                'error',
+                expect.stringContaining('partial result was kept'),
+            );
+        });
+
+        it('emits one cancelled terminal status for a cancelled stream', async () => {
+            const queryStartCallback = jest.fn().mockReturnValue('stream-cancelled');
+            const queryEndCallback = jest.fn();
+            const onStatementFailed = jest.fn();
+            mockExecuteWithStreaming.mockResolvedValue({
+                totalRows: 3,
+                limitReached: false,
+                error: new Error('Query cancelled'),
+                status: 'cancelled',
+            });
+
+            await expect(runQueriesWithStreaming(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                5000,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+                undefined,
+                0,
+                undefined,
+                { onStatementFailed },
+            )).rejects.toThrow('Query cancelled');
+
+            expect(queryEndCallback).toHaveBeenCalledTimes(1);
+            expect(queryEndCallback).toHaveBeenCalledWith(
+                'stream-cancelled',
+                3,
+                expect.any(Number),
+                'cancelled',
+                'Query cancelled',
+            );
+            expect(onStatementFailed).toHaveBeenCalledWith(expect.objectContaining({
+                connectionName: 'testConn',
+                documentUri: 'file:///test.sql',
+                errorMessage: 'Query cancelled',
+            }));
         });
 
         it('should close connection when shouldCloseConnection is true', async () => {

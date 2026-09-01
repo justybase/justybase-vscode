@@ -189,6 +189,7 @@ describe('singleQueryExecutor', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        (isConnectionBrokenError as jest.Mock).mockReset().mockReturnValue(false);
         mockConn = createMockConnection();
         mockConnManager = createMockConnManager();
         mockContext = createMockContext();
@@ -522,6 +523,42 @@ describe('singleQueryExecutor', () => {
                 }),
             ).rejects.toThrow('after reconnect attempt');
         });
+
+        it('retries a timed-out read-only statement once', async () => {
+            mockExecuteAndFetch
+                .mockRejectedValueOnce(new Error('Connection timeout after 30 seconds'))
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
+                    error: null,
+                });
+
+            const result = await runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 1',
+                connectionManager: mockConnManager,
+                documentUri: 'file:///test.sql',
+            });
+
+            expect(result.data).toEqual([[1]]);
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not retry a timed-out write with an unknown outcome', async () => {
+            mockExecuteAndFetch.mockRejectedValue(
+                new Error('Connection timeout after 30 seconds'),
+            );
+
+            await expect(runQueryRaw({
+                context: mockContext,
+                query: 'DELETE FROM CUSTOMER',
+                connectionManager: mockConnManager,
+                documentUri: 'file:///test.sql',
+            })).rejects.toThrow('database outcome may be unknown');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
     });
 
     // ── executeRawQuery ────────────────────────────────────────────
@@ -654,6 +691,77 @@ describe('singleQueryExecutor', () => {
             expect(result.data).toEqual([[1]]);
             expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not retry a write after a broken connection', async () => {
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            mockExecuteAndFetch.mockRejectedValue(new Error('connection reset'));
+
+            await expect(executeRawQuery(
+                mockConnManager,
+                'testConn',
+                true,
+                'file:///test.sql',
+                'UPDATE CUSTOMER SET ACTIVE = 1',
+                undefined,
+                logger,
+            )).rejects.toThrow('database outcome may be unknown');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
+        it('classifies expanded SQL before allowing a reconnect retry', async () => {
+            const { resolveQueryVariablesWithValues } = require('../core/variableResolver');
+            (resolveQueryVariablesWithValues as jest.Mock).mockResolvedValueOnce(
+                'SELECT 1; UPDATE CUSTOMER SET ACTIVE = 1',
+            );
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            mockExecuteAndFetch.mockRejectedValue(new Error('connection reset'));
+
+            await expect(executeRawQuery(
+                mockConnManager,
+                'testConn',
+                true,
+                'file:///test.sql',
+                'SELECT &statement',
+                undefined,
+                logger,
+                { statement: '1' },
+            )).rejects.toThrow('could not be proven safe to retry');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
+        it('does not replay the main query after an executable SQL macro', async () => {
+            const { resolveQueryVariablesWithValues } = require('../core/variableResolver');
+            (resolveQueryVariablesWithValues as jest.Mock).mockImplementationOnce(
+                async (
+                    _query: string,
+                    _values: Record<string, string>,
+                    _logCallback: unknown,
+                    macroContext: { onExecutableMacro?: (kind: 'query') => void },
+                ) => {
+                    macroContext.onExecutableMacro?.('query');
+                    return 'SELECT 1';
+                },
+            );
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            mockExecuteAndFetch.mockRejectedValue(new Error('connection reset'));
+
+            await expect(executeRawQuery(
+                mockConnManager,
+                'testConn',
+                true,
+                'file:///test.sql',
+                'SELECT 1',
+                undefined,
+                logger,
+            )).rejects.toThrow('could not be proven safe to retry');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
         });
 
         it('does not reconnect after its execution lease is superseded', async () => {
