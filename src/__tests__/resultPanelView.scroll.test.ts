@@ -531,6 +531,44 @@ describe('ResultPanelView Scroll Preservation', () => {
             expect(hydrateMessages.length).toBe(0);
         });
 
+        it('uses result identity and zero sequence fallbacks when transport state is absent', () => {
+            const sourceUri = 'file:///fallbacks.sql';
+            provider.startExecution(sourceUri);
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            const stateManager = (provider as unknown as { _stateManager: { resultsMap: Map<string, Array<{ resultSetId?: string }>> } })._stateManager;
+            const resultSet = stateManager.resultsMap.get(sourceUri)?.[1];
+            if (!resultSet) throw new Error('Expected a streaming result set.');
+            resultSet.resultSetId = 'result-set-fallback-test';
+            (provider as unknown as { _streamingTransportSequence: Map<string, number> })._streamingTransportSequence.delete(sourceUri);
+            postedMessages = [];
+
+            provider.appendStreamingChunk(sourceUri, 0, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[2]],
+                isFirstChunk: false,
+                isLastChunk: true,
+                totalRowsSoFar: 2,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            expect(postedMessages.find(message => message.command === 'appendRows')).toEqual(expect.objectContaining({
+                resultSetId: 'result-set-fallback-test',
+                chunkSequence: 0,
+            }));
+            expect(postedMessages.find(message => message.command === 'streamingComplete')).toEqual(expect.objectContaining({
+                resultSetId: 'result-set-fallback-test',
+                lastChunkSequence: 0,
+            }));
+        });
+
         it('should not send incremental streaming messages for inactive source', () => {
             const backgroundSource = 'file:///background.sql';
             const activeSource = 'file:///active.sql';

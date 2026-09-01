@@ -1,7 +1,11 @@
 import * as vscode from 'vscode';
-import { registerResultPanelRegressionCommand } from '../activation/resultPanelRegression';
+import { runExtensionHostFilterPerformance } from '../activation/resultPanelFilterPerformance';
+import { buildReport, registerResultPanelRegressionCommand } from '../activation/resultPanelRegression';
 
 jest.mock('vscode');
+jest.mock('../activation/resultPanelFilterPerformance', () => ({
+    runExtensionHostFilterPerformance: jest.fn(),
+}));
 
 describe('result panel regression command registration', () => {
     const previousNodeEnv = process.env.NODE_ENV;
@@ -46,8 +50,49 @@ describe('result panel regression command registration', () => {
         await expect(regressionHandler()).resolves.toEqual({ status: 'passed' });
         expect(runRegressionScenario).toHaveBeenCalledWith(undefined);
 
+        const performanceHandler = registrations.find(call => call[0] === 'justybase.test.extensionHostFilterPerformance')?.[1] as (args?: unknown) => Promise<unknown>;
+        const performanceReport = { status: 'passed' };
+        (runExtensionHostFilterPerformance as jest.Mock).mockResolvedValue(performanceReport);
+        await expect(performanceHandler({ tableName: 'fixture' })).resolves.toBe(performanceReport);
+        await expect(performanceHandler()).resolves.toBe(performanceReport);
+        expect(runExtensionHostFilterPerformance).toHaveBeenCalledWith(
+            context,
+            resultPanelProvider,
+            connectionManager,
+            { tableName: 'fixture' },
+        );
+
+        process.env.JUSTYBASE_RESULT_PANEL_TRACE = '0';
+        expect(() => performanceHandler()).toThrow(/requires result-panel tracing/);
+
         disposable?.dispose();
         expect((vscode.commands.registerCommand as jest.Mock).mock.results[0]?.value.dispose).toHaveBeenCalled();
+    });
+
+    it('includes runtime diagnostics in the scenario report', () => {
+        const provider = {
+            getResultPanelTraceSnapshot: () => [],
+            getResultsForSource: () => [{ isLog: false, data: [[1], [2]] }],
+            getResultPanelTestBridgePendingRequestCount: () => 3,
+            getResultPanelRuntimeDiagnostics: () => ({
+                activeCommandCount: 1,
+                executingSourceCount: 2,
+                streamingResultCount: 3,
+                streamingTransportCount: 4,
+                pendingResultSyncCount: 5,
+            }),
+        } as never;
+
+        expect(buildReport(provider, 'sqlite', 'file:///fixture.sql', Date.now(), 'passed', true)).toEqual(expect.objectContaining({
+            resultSetCount: 1,
+            rowCounts: [2],
+            pendingRequestCount: 3,
+            activeCommandCount: 1,
+            executingSourceCount: 2,
+            streamingResultCount: 3,
+            streamingTransportCount: 4,
+            pendingResultSyncCount: 5,
+        }));
     });
 
     it('does not register commands outside test sessions', () => {

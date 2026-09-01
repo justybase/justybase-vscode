@@ -120,6 +120,14 @@ function mergeLcovRecords(records) {
   return merged;
 }
 
+function isIstanbulIgnoredFile(file) {
+  try {
+    return /^\s*\/\*\s*istanbul\s+ignore\s+file\b/mu.test(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
 export function parseChangedLines(diff) {
   const changed = new Map();
   let file;
@@ -153,6 +161,7 @@ export function checkChangedCoverage({ diff, lcov, baseline }) {
   const files = [];
   for (const [file, lines] of changed) {
     if (!isHighRiskPath(file, baseline.changedHighRiskCoverage.roots)) continue;
+    if (isIstanbulIgnoredFile(path.join(root, file))) continue;
     const matchingRecords = findLcovRecords(records, path.join(root, file));
     if (matchingRecords.length === 0) {
       failures.push(`${file}: no LCOV record was produced for changed high-risk code.`);

@@ -307,7 +307,7 @@ function writeTraceArtifact(provider: ResultPanelView): void {
     fs.writeFileSync(tracePath, `${JSON.stringify(safeTrace, null, 2)}\n`, 'utf8');
 }
 
-function buildReport(
+export function buildReport(
     provider: ResultPanelView,
     engine: 'sqlite' | 'netezza',
     sourceUri: string,
