@@ -116,7 +116,6 @@ jobs:
     env:
       JUSTYBASE_EXTENSION_HOST_REPEAT: "20"
       JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS: "1"
-      JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-repeat
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -125,6 +124,8 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run repeated SQLite Extension Host regression
+        env:
+          JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-repeat
         run: xvfb-run -a npm run test:extension-host
       - name: Upload repeated-run diagnostics
         if: always()
