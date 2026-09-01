@@ -105,6 +105,7 @@ import {
     executeMacroExport,
     createMacroFileReadContext,
     prepareQueryForExecution,
+    prepareQueryForExecutionWithMetadata,
     logQueryToHistoryAsync,
     handleBatchRetry,
     handleBatchError,
@@ -529,6 +530,21 @@ describe("queryBatchExecutor", () => {
             expect(result).toBe("SELECT 42 AS max_id WHERE region IN ('EAST', 'WEST');");
             expect(queryExecutor).toHaveBeenCalledWith("SELECT MAX(id) FROM t");
             expect(queryExecutor).toHaveBeenCalledWith("SELECT region FROM r");
+        });
+
+        it("marks SQL query macros as executable retry side effects", async () => {
+            const queryExecutor = jest.fn().mockResolvedValueOnce({ rows: [[42]] });
+
+            const result = await prepareQueryForExecutionWithMetadata(
+                "SELECT %SQL(DELETE FROM audit_log RETURNING id)",
+                {},
+                undefined,
+                queryExecutor,
+            );
+
+            expect(result.sql).toBe("SELECT 42");
+            expect(result.hasExecutableMacro).toBe(true);
+            expect(queryExecutor).toHaveBeenCalledTimes(1);
         });
 
         it("executes %SQL inside directive-only %let statements and skips empty SQL", async () => {

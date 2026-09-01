@@ -379,6 +379,7 @@ export class MacroPreprocessor {
                                         `%EXPORT query has unresolved variables: ${unresolvedExportQueryVariables.join(', ')}`,
                                     );
                                 }
+                                state.context.onExecutableMacro?.('export');
                                 const exportResult = await state.context.exporter(request);
                                 pushScriptEvent(
                                     state,
@@ -447,6 +448,7 @@ export class MacroPreprocessor {
                                         ),
                                     ),
                                 );
+                                state.context.onExecutableMacro?.('python');
                                 const result = await state.context.pythonExecutor(resolvedScript, resolvedArgs);
                                 if (result.exitCode !== 0) {
                                     throw new Error(`%PYTHON script failed with exit code ${result.exitCode}: ${result.stderr}`);
@@ -850,6 +852,7 @@ export class MacroPreprocessor {
 
                 let queryResult: MacroQueryExecutionResult;
                 try {
+                    context.onExecutableMacro?.('query');
                     queryResult = await context.query(resolvedQuery);
                 } catch (error) {
                     throw new Error(

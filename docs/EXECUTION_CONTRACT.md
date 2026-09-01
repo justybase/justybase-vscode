@@ -24,7 +24,11 @@ runQueryRaw
   → return QueryResult
 ```
 
-**Retry logic:** On `isConnectionBrokenError`, closes the persistent connection and retries once using the same flow.
+**Retry logic:** On `isConnectionBrokenError`, a persistent execution retries
+once only when both the original and fully expanded SQL contain one
+allow-listed, call-free read-only statement. Writes, executable macros,
+function/sequence expressions, multi-statement payloads, and ambiguous SQL fail
+without replay and report that the database outcome may be unknown.
 
 **Cancellation note:** single-query execution now clears stale `StreamingManager` cancellation state at the start of a new document-bound run so a previously cancelled execution does not poison the next single-statement run.
 
@@ -44,10 +48,12 @@ for each query:
 
 **Key behaviors:**
 - Cancellation is checked before each statement and after each execution
-- On error, `handleBatchRetry` attempts a reconnect + resume from the failed statement index
+- On a broken connection, `handleBatchRetry` reconnects and resumes from the
+  failed statement index only for one proven read-only statement
 - `yieldAfterStatement` pauses briefly after every 5th fast statement to prevent UI starvation
 - A single statement can emit multiple `QueryResult` objects when `executeAndFetch(...)` returns multiple internal result sets
-- For broken-connection recovery with structured logging, `queryEndCallback` can emit `error` then `retrying` then `success` for the same execution id
+- A reconnect keeps the same execution ID and emits `retrying` before exactly
+  one terminal `success` or `error`; it never emits a pre-retry terminal error
 
 ### 3. Batch Streaming (`batchQueryExecutor.ts → runQueriesWithStreaming`)
 
@@ -180,11 +186,30 @@ Column type resolution follows this priority:
 - Error matches `isConnectionBrokenError` (TCP reset, ECONNRESET, etc.)
 - Not already a retry attempt (`_isRetry === false`)
 - Document has a persistent connection (`keepConnectionOpen`)
+- Original and expanded SQL resolve to one conservatively allow-listed
+  read-only statement
+- Streaming has not delivered a chunk to its consumer
 
 **Retry flow:**
 1. Close the persistent connection (`closeDocumentPersistentConnection`)
 2. Re-execute from the failed statement index (batch) or from scratch (single)
-3. `queryEndCallback` receives `'retrying'` status
+3. `queryEndCallback` receives `'retrying'` using the original execution ID
+4. The retried execution emits exactly one terminal status
+
+Writes, DDL, calls, executable macros, function/sequence expressions,
+multi-statement/ambiguous SQL, and streams with already delivered data are not
+replayed. Partial streamed rows stay visible; the terminal error explains why
+retry was suppressed. Cancellation and rejected safe-execution confirmation
+invoke the statement-failure hook so transaction-scoped metadata synchronization
+cannot retain stale state.
+
+Desktop Result Panel append messages carry the stable result-set identity, an
+authoritative row offset, and a monotonic chunk sequence. Duplicate or delayed
+chunks are ignored. A gap, out-of-order delivery, or premature completion
+causes one source-scoped `requestResultSync`; incremental delivery remains
+blocked until an authoritative hydrate replaces the partial webview state.
+Cancellation, source replacement, hydrate, and disposal reset the transport
+cursor. Legacy unsequenced messages remain accepted for protocol compatibility.
 
 ## UI States
 

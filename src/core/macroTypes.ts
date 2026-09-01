@@ -35,6 +35,8 @@ export interface MacroPreprocessorContext {
     sourceName?: string;
     maxIncludeDepth?: number;
     maxBlockDepth?: number;
+    /** Reports an external action performed while expanding a macro. */
+    onExecutableMacro?: (kind: 'query' | 'export' | 'python') => void;
 }
 
 export interface MacroScriptEvent {

@@ -289,6 +289,7 @@ export async function prepareQueryForExecution(
 export interface PreparedQueryExecution {
     sql: string;
     hasMacroBranch: boolean;
+    hasExecutableMacro: boolean;
 }
 
 /**
@@ -302,12 +303,17 @@ export async function prepareQueryForExecutionWithMetadata(
     macroContext: MacroPreprocessorContext = {},
 ): Promise<PreparedQueryExecution> {
     const environment = new MacroEnvironment(resolvedVars);
+    let executedExternalMacro = false;
     const result = await new MacroPreprocessor().processScript(query, {
         environment,
         replaceVariables: true,
     }, {
         ...macroContext,
         query: queryExecutor ?? macroContext.query,
+        onExecutableMacro: kind => {
+            executedExternalMacro = true;
+            macroContext.onExecutableMacro?.(kind);
+        },
         pythonExecutor: macroContext.pythonExecutor ?? createMacroPythonExecutor(),
         exporter: queryExecutor
             ? request => executeMacroExport(request, queryExecutor, logCallback)
@@ -318,6 +324,9 @@ export async function prepareQueryForExecutionWithMetadata(
     return {
         sql: result.sql,
         hasMacroBranch: result.scriptEvents?.some(event => event.type === 'branch') === true,
+        hasExecutableMacro:
+            executedExternalMacro
+            || (result.scriptEvents?.some(event => event.type !== 'put') ?? false),
     };
 }
 
