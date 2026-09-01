@@ -48,6 +48,26 @@ both scroll axes, dimensions, virtualizer anchor, and the first rendered row
 fingerprint. This makes source/tab/hydration races observable without exposing
 SQL or row values in sanitized CI artifacts.
 
+## Desktop execution lifecycle
+
+`src/core/queryRetrySafety.ts` owns conservative replay classification for
+single, sequential-batch, and streaming desktop execution.
+`src/core/batchQueryExecutor.ts` owns the logical batch lifecycle. A reconnect
+keeps the original execution ID and may emit `retrying`, but the lifecycle
+emits exactly one terminal status: `success`, `error`, or `cancelled`.
+
+Automatic replay after a broken persistent connection is deliberately
+conservative. It is limited to one allow-listed, call-free read-only statement
+after macro expansion. Writes, DDL, calls, executable macros, function/sequence
+expressions, multi-statement or ambiguous SQL are not replayed because their
+database outcome may be unknown. Streaming execution is
+eligible only until its first chunk crosses the consumer boundary; after that,
+partial rows remain visible and the failure is terminal to prevent duplicates.
+The execution-generation guard is checked around chunk delivery so a retired
+execution cannot update a replacement owner. Every cancellation path invokes
+statement-failure cleanup before leaving the batch so transaction-scoped
+metadata state cannot survive a terminated execution.
+
 ## Dependency direction
 
 Keep dependencies flowing downward: contracts → platform-neutral core/runtime →

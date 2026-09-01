@@ -29,52 +29,58 @@ import {
 } from "../utils/sqlConsole";
 import { isConnectionBrokenError } from "./queryRunnerUtils";
 import { assertExecutionCurrent } from "./executionGuard";
-import { findNestedBlockCommentEnd } from "../sql/sqlSourceScan";
-import { SqlParser } from "../sql/sqlParser";
+import {
+    createRetrySafetyError,
+    getSingleExecutableStatement,
+    isSafeToRetryAfterBrokenConnection,
+    skipLeadingSqlTrivia,
+} from './queryRetrySafety';
 
 const SLOW_STREAMING_PHASE_MS = 1000;
 
-function isRowsAffectedStatement(sql: string): boolean {
-    let start = 0;
-    while (start < sql.length) {
-        while (start < sql.length && (sql[start] === '\uFEFF' || /\s/.test(sql[start] ?? ''))) {
-            start += 1;
-        }
+type QueryEndCallback = (
+    executionId: string,
+    rowCount: number,
+    durationMs: number,
+    status: BatchExecutionStatus,
+    error?: string,
+) => void;
 
-        if (sql.startsWith('--', start)) {
-            const relativeLineEnd = sql.slice(start + 2).search(/[\r\n]/u);
-            if (relativeLineEnd < 0) {
-                return false;
-            }
-            const lineEnd = start + 2 + relativeLineEnd;
-            start = lineEnd + (sql[lineEnd] === '\r' && sql[lineEnd + 1] === '\n' ? 2 : 1);
-            continue;
-        }
+const TERMINAL_EXECUTION_STATUSES = new Set<BatchExecutionStatus>([
+    'success',
+    'error',
+    'cancelled',
+]);
 
-        if (sql.startsWith('/*', start)) {
-            const commentEnd = findNestedBlockCommentEnd(sql, start);
-            if (commentEnd === undefined) {
-                return false;
-            }
-            start = commentEnd;
-            continue;
-        }
-
-        break;
+function emitQueryStatus(
+    callback: QueryEndCallback | undefined,
+    terminalExecutionIds: Set<string>,
+    executionId: string | undefined,
+    rowCount: number,
+    durationMs: number,
+    status: BatchExecutionStatus,
+    error?: string,
+): void {
+    if (!callback || !executionId || terminalExecutionIds.has(executionId)) {
+        return;
     }
 
-    return /^(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE)\b/i.test(sql.slice(start));
+    if (TERMINAL_EXECUTION_STATUSES.has(status)) {
+        terminalExecutionIds.add(executionId);
+    }
+    if (error === undefined) {
+        callback(executionId, rowCount, durationMs, status);
+        return;
+    }
+    callback(executionId, rowCount, durationMs, status, error);
 }
 
-/**
- * `recordsAffected` belongs to one driver command. Do not apply it to a
- * result set when the command text contains multiple statements: the driver
- * exposes only the command-level value and it may represent a different
- * statement (or the last statement in the batch).
- */
-function getSingleExecutableStatement(sql: string): string | undefined {
-    const statements = SqlParser.splitStatements(sql).filter(statement => statement.trim().length > 0);
-    return statements.length === 1 ? statements[0] : undefined;
+function isRowsAffectedStatement(sql: string): boolean {
+    const start = skipLeadingSqlTrivia(sql);
+    if (start === undefined) {
+        return false;
+    }
+    return /^(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE)\b/i.test(sql.slice(start));
 }
 
 function mapBatchResult(
@@ -123,13 +129,9 @@ function handleBatchQueryFailure(params: {
     executionId: string | undefined;
     startTime: number;
     batchOptions: BatchQueryRunOptions;
-    queryEndCallback?: (
-        executionId: string,
-        rowCount: number,
-        durationMs: number,
-        status: BatchExecutionStatus,
-        error?: string,
-    ) => void;
+    queryEndCallback?: QueryEndCallback;
+    terminalExecutionIds: Set<string>;
+    rowCount?: number;
     outputChannel?: vscode.OutputChannel;
     allResults?: QueryResult[];
     resultCallback?: (results: QueryResult[]) => void;
@@ -139,10 +141,17 @@ function handleBatchQueryFailure(params: {
     assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
     const errorMsg = params.err instanceof Error ? params.err.message : String(params.err);
     const durationMs = Date.now() - params.startTime;
+    const isCancelled = errorMsg.toLowerCase().includes('cancelled');
 
-    if (params.queryEndCallback && params.executionId) {
-        params.queryEndCallback(params.executionId, 0, durationMs, 'error', errorMsg);
-    }
+    emitQueryStatus(
+        params.queryEndCallback,
+        params.terminalExecutionIds,
+        params.executionId,
+        params.rowCount ?? 0,
+        durationMs,
+        isCancelled ? 'cancelled' : 'error',
+        errorMsg,
+    );
     if (params.outputChannel) {
         params.outputChannel.appendLine(`Error in query ${params.queryIndex + 1}: ${errorMsg}`);
     }
@@ -155,7 +164,7 @@ function handleBatchQueryFailure(params: {
 
     const shouldContinue =
         params.batchOptions.continueOnError === true &&
-        !errorMsg.includes('Query cancelled') &&
+        !isCancelled &&
         !isConnectionBrokenError(params.err);
 
     if (!shouldContinue) {
@@ -227,18 +236,13 @@ export async function runQueriesSequentially(
     sql: string,
     connectionName: string,
   ) => string,
-  queryEndCallback?: (
-    executionId: string,
-    rowCount: number,
-    durationMs: number,
-    status: BatchExecutionStatus,
-    error?: string,
-  ) => void,
+  queryEndCallback?: QueryEndCallback,
   _outputChannel?: vscode.OutputChannel,
   _startIndex: number = 0,
   _resumeExecutionId?: string,
   _existingResults: QueryResult[] = [],
   _batchOptions: BatchQueryRunOptions = {},
+  _terminalExecutionIds: Set<string> = new Set(),
 ): Promise<QueryResult[]> {
   const connManager = connectionManager || new ConnectionManager(context);
   const keepConnectionOpen = documentUri
@@ -249,7 +253,9 @@ export async function runQueriesSequentially(
     const allResults: QueryResult[] = [..._existingResults];
     let currentQueryIndex = _startIndex;
     let currentExecutionId: string | undefined = _resumeExecutionId;
-    let currentQueryAllowsRetry = _batchOptions.retryOnBrokenConnection !== false;
+    let currentQueryAllowsRetry: boolean;
+    let currentFailureWillRetry = false;
+    let currentFailureCameFromExecution: boolean;
 
     const resolvedConnectionName = resolveBatchConnectionName(connManager, documentUri);
     if (documentUri) {
@@ -314,10 +320,16 @@ export async function runQueriesSequentially(
             for (let i = _startIndex; i < queries.length; i++) {
                 assertExecutionCurrent(_batchOptions.isExecutionCurrent);
                 currentQueryIndex = i;
+                const query = queries[i];
                 if (documentUri && streamingManager.isAborted(documentUri)) {
+                    _batchOptions.onStatementFailed?.({
+                        sql: query,
+                        connectionName: resolvedConnectionName,
+                        documentUri,
+                        errorMessage: 'Query cancelled',
+                    });
                     throw new Error('Query cancelled');
                 }
-                const query = queries[i];
                 logBatch(outputChannel, logCallback, `Executing query ${i + 1}/${queries.length}...`);
 
                 let executionId: string | undefined =
@@ -325,7 +337,9 @@ export async function runQueriesSequentially(
                 currentExecutionId = executionId;
                 const startTime = Date.now();
                 let queryToExecute = query;
-                currentQueryAllowsRetry = _batchOptions.retryOnBrokenConnection !== false;
+                currentQueryAllowsRetry = false;
+                currentFailureWillRetry = false;
+                currentFailureCameFromExecution = false;
 
                 try {
                     const preparedQuery = await prepareQueryForExecutionWithMetadata(
@@ -345,13 +359,20 @@ export async function runQueriesSequentially(
                     queryToExecute = preparedQuery.sql;
                     currentQueryAllowsRetry =
                         _batchOptions.retryOnBrokenConnection !== false &&
-                        !preparedQuery.hasMacroBranch;
+                        !preparedQuery.hasExecutableMacro &&
+                        isSafeToRetryAfterBrokenConnection(queryToExecute);
                     if (queryToExecute.trim().length === 0) {
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: variable directive only.`);
                         continue;
                     }
 
                     if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute, i))) {
+                        _batchOptions.onStatementFailed?.({
+                            sql: queryToExecute,
+                            connectionName: resolvedConnectionName,
+                            documentUri,
+                            errorMessage: 'Query execution cancelled by user',
+                        });
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
                         return allResults;
                     }
@@ -364,31 +385,45 @@ export async function runQueriesSequentially(
 
                     if (documentUri && streamingManager.isAborted(documentUri)) {
                         const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(executionId, 0, durationMs, 'cancelled', 'Query cancelled');
-                        }
+                        emitQueryStatus(
+                            queryEndCallback,
+                            _terminalExecutionIds,
+                            executionId,
+                            0,
+                            durationMs,
+                            'cancelled',
+                            'Query cancelled',
+                        );
                         throw new Error('Query cancelled');
                     }
 
                     const { queryTimeout, rowLimit } = getQueryConfig();
+
+                    let executionResult: Awaited<ReturnType<typeof streamingManager.executeAndFetch>>;
+                    try {
+                        executionResult = await streamingManager.executeAndFetch(
+                            connection,
+                            queryToExecute,
+                            rowLimit,
+                            queryTimeout,
+                            documentUri,
+                            sessionId ? String(sessionId) : undefined,
+                            connManager,
+                            maxRows,
+                            createDropSessionCallback(connManager, documentUri),
+                        );
+                    } catch (executionError: unknown) {
+                        currentFailureCameFromExecution = true;
+                        throw executionError;
+                    }
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
 
                     const {
                         results: batchResults,
                         error: batchError,
                         recordsAffected: batchRecordsAffected,
                         status: batchStatus,
-                    } = await streamingManager.executeAndFetch(
-                        connection,
-                        queryToExecute,
-                        rowLimit,
-                        queryTimeout,
-                        documentUri,
-                        sessionId ? String(sessionId) : undefined,
-                        connManager,
-                        maxRows,
-                        createDropSessionCallback(connManager, documentUri),
-                    );
-                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+                    } = executionResult;
 
                     const totalRows = batchResults?.reduce(
                         (sum, rs) => sum + (rs.rows?.length || 0),
@@ -397,10 +432,21 @@ export async function runQueriesSequentially(
 
                     if (batchStatus === 'cancelled' || (documentUri && streamingManager.isAborted(documentUri))) {
                         const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(executionId, totalRows, durationMs, 'cancelled', 'Query cancelled');
-                        }
+                        emitQueryStatus(
+                            queryEndCallback,
+                            _terminalExecutionIds,
+                            executionId,
+                            totalRows,
+                            durationMs,
+                            'cancelled',
+                            'Query cancelled',
+                        );
                         throw new Error('Query cancelled');
+                    }
+
+                    if (batchError) {
+                        currentFailureCameFromExecution = true;
+                        throw batchError;
                     }
 
                     const durationMs = Date.now() - startTime;
@@ -440,19 +486,21 @@ export async function runQueriesSequentially(
                         }
                     }
 
-                    if (batchError) {
-                        throw batchError;
-                    }
-
                     await _batchOptions.onStatementSucceeded?.({
                         sql: queryToExecute,
                         connectionName: resolvedConnectionName,
                         documentUri,
                         connection,
                     });
-                    if (queryEndCallback && executionId) {
-                        queryEndCallback(executionId, totalRows, durationMs, 'success');
-                    }
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+                    emitQueryStatus(
+                        queryEndCallback,
+                        _terminalExecutionIds,
+                        executionId,
+                        totalRows,
+                        durationMs,
+                        'success',
+                    );
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
@@ -467,8 +515,32 @@ export async function runQueriesSequentially(
                         historySchema,
                         details.dbType,
                     );
+                    currentQueryAllowsRetry = false;
                 } catch (err: unknown) {
-                    const errMsg = err instanceof Error ? err.message : String(err);
+                    const brokenConnection = currentFailureCameFromExecution
+                        && isConnectionBrokenError(err);
+                    currentFailureWillRetry =
+                        !_isRetry
+                        && brokenConnection
+                        && currentQueryAllowsRetry
+                        && documentUri !== undefined
+                        && keepConnectionOpen;
+                    if (currentFailureWillRetry) {
+                        throw err;
+                    }
+
+                    const reportedError =
+                        brokenConnection
+                        && !_isRetry
+                        && !currentQueryAllowsRetry
+                        && _batchOptions.retryOnBrokenConnection !== false
+                        && documentUri !== undefined
+                        && keepConnectionOpen
+                        ? createRetrySafetyError(err, false)
+                        : err;
+                    const errMsg = reportedError instanceof Error
+                        ? reportedError.message
+                        : String(reportedError);
                     const isCancelled = errMsg.toLowerCase().includes('cancelled');
                     logQueryToHistoryAsync(
                         historyManager,
@@ -485,13 +557,14 @@ export async function runQueriesSequentially(
                         details.dbType,
                     );
                     handleBatchQueryFailure({
-                        err,
+                        err: reportedError,
                         queryIndex: i,
                         sql: queryToExecute,
                         executionId,
                         startTime,
                         batchOptions: _batchOptions,
                         queryEndCallback,
+                        terminalExecutionIds: _terminalExecutionIds,
                         outputChannel,
                         allResults,
                         resultCallback,
@@ -516,46 +589,70 @@ export async function runQueriesSequentially(
       assertExecutionCurrent(_batchOptions.isExecutionCurrent);
       const retryExecutionId = currentExecutionId;
       const retryQueryIndex = currentQueryIndex;
-      if (!currentQueryAllowsRetry) {
-        await handleBatchError(error, connManager, outputChannel, logCallback, documentUri);
-      }
-      const retryResult = await handleBatchRetry(
-        error,
-        _isRetry,
-        connManager,
-        documentUri,
-        keepConnectionOpen,
-        outputChannel,
-        logCallback,
-        () =>
-          runQueriesSequentially(
-            context,
-            queries,
+      if (currentFailureWillRetry) {
+        try {
+          const retryResult = await handleBatchRetry(
+            error,
+            _isRetry,
             connManager,
             documentUri,
-            logCallback,
-            resultCallback,
-            extensionUri,
-            true,
-            maxRows,
-            queryStartCallback,
-            queryEndCallback,
+            keepConnectionOpen,
             outputChannel,
-            retryQueryIndex,
+            logCallback,
+            () =>
+              runQueriesSequentially(
+                context,
+                queries,
+                connManager,
+                documentUri,
+                logCallback,
+                resultCallback,
+                extensionUri,
+                true,
+                maxRows,
+                queryStartCallback,
+                queryEndCallback,
+                outputChannel,
+                retryQueryIndex,
+                retryExecutionId,
+                allResults,
+                _batchOptions,
+                _terminalExecutionIds,
+              ),
+            retryExecutionId && queryEndCallback
+              ? retryMessage => {
+                  emitQueryStatus(
+                    queryEndCallback,
+                    _terminalExecutionIds,
+                    retryExecutionId,
+                    0,
+                    0,
+                    'retrying',
+                    retryMessage,
+                  );
+                }
+              : undefined,
+            _batchOptions.isExecutionCurrent,
+          );
+          if (retryResult.handled) {
+              return retryResult.result;
+          }
+        } catch (retryError: unknown) {
+          const retryErrorMessage = retryError instanceof Error
+            ? retryError.message
+            : String(retryError);
+          emitQueryStatus(
+            queryEndCallback,
+            _terminalExecutionIds,
             retryExecutionId,
-            allResults,
-            _batchOptions,
-          ),
-        retryExecutionId && queryEndCallback
-          ? retryMessage => {
-              queryEndCallback(retryExecutionId, 0, 0, 'retrying', retryMessage);
-            }
-          : undefined,
-        _batchOptions.isExecutionCurrent,
-      );
-        if (retryResult.handled) {
-            return retryResult.result;
+            0,
+            0,
+            'error',
+            retryErrorMessage,
+          );
+          throw retryError;
         }
+      }
 
         await handleBatchError(error, connManager, outputChannel, logCallback, documentUri);
     }
@@ -591,17 +688,12 @@ export async function runQueriesWithStreaming(
     sql: string,
     connectionName: string,
   ) => string,
-  queryEndCallback?: (
-    executionId: string,
-    rowCount: number,
-    durationMs: number,
-    status: BatchExecutionStatus,
-    error?: string,
-  ) => void,
+  queryEndCallback?: QueryEndCallback,
   _outputChannel?: vscode.OutputChannel,
   _startIndex: number = 0,
   _resumeExecutionId?: string,
   _batchOptions: BatchQueryRunOptions = {},
+  _terminalExecutionIds: Set<string> = new Set(),
 ): Promise<void> {
   const connManager = connectionManager || new ConnectionManager(context);
   const keepConnectionOpen = documentUri
@@ -612,7 +704,11 @@ export async function runQueriesWithStreaming(
 
     let currentQueryIndex = _startIndex;
     let currentExecutionId: string | undefined = _resumeExecutionId;
-    let currentQueryAllowsRetry = _batchOptions.retryOnBrokenConnection !== false;
+    let currentQueryAllowsRetry: boolean;
+    let currentFailureWillRetry = false;
+    let currentFailureCameFromExecution: boolean;
+    let currentQueryDeliveredChunk: boolean;
+    let currentQueryRows = 0;
 
     const resolvedConnectionName = resolveBatchConnectionName(connManager, documentUri);
     if (documentUri) {
@@ -674,10 +770,16 @@ export async function runQueriesWithStreaming(
             for (let i = _startIndex; i < queries.length; i++) {
                 assertExecutionCurrent(_batchOptions.isExecutionCurrent);
                 currentQueryIndex = i;
+                const query = queries[i];
                 if (documentUri && streamingManager.isAborted(documentUri)) {
+                    _batchOptions.onStatementFailed?.({
+                        sql: query,
+                        connectionName: resolvedConnectionName,
+                        documentUri,
+                        errorMessage: 'Query cancelled',
+                    });
                     throw new Error('Query cancelled');
                 }
-                const query = queries[i];
                 logBatch(outputChannel, logCallback, `Executing query ${i + 1}/${queries.length}...`);
 
                 let executionId: string | undefined =
@@ -685,7 +787,11 @@ export async function runQueriesWithStreaming(
                 currentExecutionId = executionId;
                 const startTime = Date.now();
                 let queryToExecute = query;
-                currentQueryAllowsRetry = _batchOptions.retryOnBrokenConnection !== false;
+                currentQueryAllowsRetry = false;
+                currentFailureWillRetry = false;
+                currentFailureCameFromExecution = false;
+                currentQueryDeliveredChunk = false;
+                currentQueryRows = 0;
 
                 try {
                     const preparedQuery = await prepareQueryForExecutionWithMetadata(
@@ -705,13 +811,20 @@ export async function runQueriesWithStreaming(
                     queryToExecute = preparedQuery.sql;
                     currentQueryAllowsRetry =
                         _batchOptions.retryOnBrokenConnection !== false &&
-                        !preparedQuery.hasMacroBranch;
+                        !preparedQuery.hasExecutableMacro &&
+                        isSafeToRetryAfterBrokenConnection(queryToExecute);
                     if (queryToExecute.trim().length === 0) {
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: variable directive only.`);
                         continue;
                     }
 
                     if (_batchOptions.confirmSafeExecute && !(await _batchOptions.confirmSafeExecute(queryToExecute, i))) {
+                        _batchOptions.onStatementFailed?.({
+                            sql: queryToExecute,
+                            connectionName: resolvedConnectionName,
+                            documentUri,
+                            errorMessage: 'Query execution cancelled by user',
+                        });
                         logBatch(outputChannel, logCallback, `Skipping query ${i + 1}/${queries.length}: execution cancelled by user.`);
                         return;
                     }
@@ -724,33 +837,51 @@ export async function runQueriesWithStreaming(
 
                     if (documentUri && streamingManager.isAborted(documentUri)) {
                         const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(executionId, 0, durationMs, 'cancelled', 'Query cancelled');
-                        }
+                        emitQueryStatus(
+                            queryEndCallback,
+                            _terminalExecutionIds,
+                            executionId,
+                            0,
+                            durationMs,
+                            'cancelled',
+                            'Query cancelled',
+                        );
                         throw new Error('Query cancelled');
                     }
 
                     const { queryTimeout, rowLimit } = getQueryConfig();
 
-                    const { totalRows, limitReached, error, recordsAffected, status, timing } =
-                        await streamingManager.executeWithStreaming(
+                    let executionResult: Awaited<ReturnType<typeof streamingManager.executeWithStreaming>>;
+                    try {
+                        executionResult = await streamingManager.executeWithStreaming(
                             connection,
                             queryToExecute,
                             rowLimit,
                             chunkSize,
                             queryTimeout,
                             documentUri,
-                            (chunk: StreamingChunk) => {
+                            async (chunk: StreamingChunk) => {
+                                assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+                                currentQueryDeliveredChunk = true;
+                                currentQueryRows = Math.max(currentQueryRows, chunk.totalRowsSoFar);
                                 if (chunkCallback) {
-                                    chunkCallback(i, chunk, queryToExecute);
+                                    await chunkCallback(i, chunk, queryToExecute);
                                 }
+                                assertExecutionCurrent(_batchOptions.isExecutionCurrent);
                             },
                             sessionId,
                             connManager,
                             maxRows,
                             createDropSessionCallback(connManager, documentUri),
                         );
+                    } catch (executionError: unknown) {
+                        currentFailureCameFromExecution = true;
+                        throw executionError;
+                    }
                     assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+
+                    const { totalRows, limitReached, error, recordsAffected, status, timing } = executionResult;
+                    currentQueryRows = Math.max(currentQueryRows, totalRows);
 
                     if (timing && [
                         timing.resultCompletionWaitMs,
@@ -771,9 +902,15 @@ export async function runQueriesWithStreaming(
 
                     if (status === 'cancelled' || (documentUri && streamingManager.isAborted(documentUri))) {
                         const durationMs = Date.now() - startTime;
-                        if (queryEndCallback && executionId) {
-                            queryEndCallback(executionId, totalRows, durationMs, 'cancelled', 'Query cancelled');
-                        }
+                        emitQueryStatus(
+                            queryEndCallback,
+                            _terminalExecutionIds,
+                            executionId,
+                            totalRows,
+                            durationMs,
+                            'cancelled',
+                            'Query cancelled',
+                        );
                         throw new Error('Query cancelled');
                     }
 
@@ -788,6 +925,7 @@ export async function runQueriesWithStreaming(
                     }
 
                     if (error) {
+                        currentFailureCameFromExecution = true;
                         throw error;
                     }
                     await _batchOptions.onStatementSucceeded?.({
@@ -796,9 +934,15 @@ export async function runQueriesWithStreaming(
                         documentUri,
                         connection,
                     });
-                    if (queryEndCallback && executionId) {
-                        queryEndCallback(executionId, totalRows, durationMs, 'success');
-                    }
+                    assertExecutionCurrent(_batchOptions.isExecutionCurrent);
+                    emitQueryStatus(
+                        queryEndCallback,
+                        _terminalExecutionIds,
+                        executionId,
+                        totalRows,
+                        durationMs,
+                        'success',
+                    );
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
@@ -813,8 +957,33 @@ export async function runQueriesWithStreaming(
                         historySchema,
                         details.dbType,
                     );
+                    currentQueryAllowsRetry = false;
                 } catch (err: unknown) {
-                    const errMsg = err instanceof Error ? err.message : String(err);
+                    const brokenConnection = currentFailureCameFromExecution
+                        && isConnectionBrokenError(err);
+                    currentFailureWillRetry =
+                        !_isRetry
+                        && brokenConnection
+                        && currentQueryAllowsRetry
+                        && !currentQueryDeliveredChunk
+                        && documentUri !== undefined
+                        && keepConnectionOpen;
+                    if (currentFailureWillRetry) {
+                        throw err;
+                    }
+
+                    const shouldExplainRetryRefusal =
+                        brokenConnection
+                        && _batchOptions.retryOnBrokenConnection !== false
+                        && documentUri !== undefined
+                        && keepConnectionOpen
+                        && (currentQueryDeliveredChunk || (!_isRetry && !currentQueryAllowsRetry));
+                    const reportedError = shouldExplainRetryRefusal
+                        ? createRetrySafetyError(err, currentQueryDeliveredChunk)
+                        : err;
+                    const errMsg = reportedError instanceof Error
+                        ? reportedError.message
+                        : String(reportedError);
                     const isCancelled = errMsg.toLowerCase().includes('cancelled');
                     logQueryToHistoryAsync(
                         historyManager,
@@ -831,13 +1000,15 @@ export async function runQueriesWithStreaming(
                         details.dbType,
                     );
                     handleBatchQueryFailure({
-                        err,
+                        err: reportedError,
                         queryIndex: i,
                         sql: queryToExecute,
                         executionId,
                         startTime,
                         batchOptions: _batchOptions,
                         queryEndCallback,
+                        terminalExecutionIds: _terminalExecutionIds,
+                        rowCount: currentQueryRows,
                         outputChannel,
                         resultCallback: undefined,
                         connectionName: resolvedConnectionName,
@@ -861,46 +1032,70 @@ export async function runQueriesWithStreaming(
       assertExecutionCurrent(_batchOptions.isExecutionCurrent);
       const retryExecutionId = currentExecutionId;
       const retryQueryIndex = currentQueryIndex;
-      if (!currentQueryAllowsRetry) {
-        await handleBatchError(error, connManager, outputChannel, logCallback, documentUri);
-      }
-      const retryResult = await handleBatchRetry(
-        error,
-        _isRetry,
-        connManager,
-        documentUri,
-        keepConnectionOpen,
-        outputChannel,
-        logCallback,
-        () =>
-          runQueriesWithStreaming(
-            context,
-            queries,
+      if (currentFailureWillRetry) {
+        try {
+          const retryResult = await handleBatchRetry(
+            error,
+            _isRetry,
             connManager,
             documentUri,
-            logCallback,
-            chunkCallback,
-            chunkSize,
-            extensionUri,
-            true,
-            maxRows,
-            queryStartCallback,
-            queryEndCallback,
+            keepConnectionOpen,
             outputChannel,
-            retryQueryIndex,
+            logCallback,
+            () =>
+              runQueriesWithStreaming(
+                context,
+                queries,
+                connManager,
+                documentUri,
+                logCallback,
+                chunkCallback,
+                chunkSize,
+                extensionUri,
+                true,
+                maxRows,
+                queryStartCallback,
+                queryEndCallback,
+                outputChannel,
+                retryQueryIndex,
+                retryExecutionId,
+                _batchOptions,
+                _terminalExecutionIds,
+              ),
+            retryExecutionId && queryEndCallback
+              ? retryMessage => {
+                  emitQueryStatus(
+                    queryEndCallback,
+                    _terminalExecutionIds,
+                    retryExecutionId,
+                    0,
+                    0,
+                    'retrying',
+                    retryMessage,
+                  );
+                }
+              : undefined,
+            _batchOptions.isExecutionCurrent,
+          );
+          if (retryResult.handled) {
+              return retryResult.result;
+          }
+        } catch (retryError: unknown) {
+          const retryErrorMessage = retryError instanceof Error
+            ? retryError.message
+            : String(retryError);
+          emitQueryStatus(
+            queryEndCallback,
+            _terminalExecutionIds,
             retryExecutionId,
-            _batchOptions,
-          ),
-        retryExecutionId && queryEndCallback
-          ? retryMessage => {
-              queryEndCallback(retryExecutionId, 0, 0, 'retrying', retryMessage);
-            }
-          : undefined,
-        _batchOptions.isExecutionCurrent,
-      );
-        if (retryResult.handled) {
-            return retryResult.result;
+            currentQueryRows,
+            0,
+            'error',
+            retryErrorMessage,
+          );
+          throw retryError;
         }
+      }
 
         await handleBatchError(error, connManager, outputChannel, logCallback, documentUri);
     }
