@@ -9,7 +9,20 @@ const guideRoot = path.join(docsRoot, 'guide');
 const siteRoot = path.join(root, '_site');
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const failures = [];
-const advertisedDatabaseKinds = new Set(['netezza', 'db2', 'mssql', 'oracle', 'postgresql', 'mysql', 'clickhouse', 'access', 'duckdb', 'sqlite']);
+const advertisedDatabaseKinds = new Set([
+  'netezza',
+  'db2',
+  'mssql',
+  'oracle',
+  'postgresql',
+  'mysql',
+  'clickhouse',
+  'access',
+  'duckdb',
+  'sqlite',
+  'snowflake',
+  'vertica',
+]);
 
 function fail(message) { failures.push(message); }
 async function exists(file) {

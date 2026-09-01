@@ -112,10 +112,20 @@ Streaming and asynchronous UI tests must include more than normal ordering:
 
 - missing, duplicate, delayed, and out-of-order messages or chunks;
 - cancellation before start, during fetch, during render, and during finalize;
-- retry/reconnect and the error → retrying → success sequence;
+- retry/reconnect with `retrying` followed by exactly one terminal `success` or
+  `error` status for the logical execution (never an `error` before retry);
+- conservative replay safety: only one proven, call-free read-only statement
+  may retry, never a write, executable macro, function/sequence expression,
+  ambiguous/multi-statement payload, or a stream after its first delivered
+  chunk;
 - disposal or source switch while work is pending;
 - late callbacks that must not update a new/disposed owner;
 - row-limit, zero-row, partial-result, multi-statement, and multi-result cases;
+
+The desktop Result Panel enforces this transport matrix with stable result-set
+identity, row offsets, monotonic chunk sequences, and authoritative hydrate
+recovery. Its scheduled Linux race gate runs the real Extension Host scenario
+20 times and retains a per-iteration report plus aggregate summary.
 - final assertions that no request, timer, listener, worker, command, or session
   remains active.
 

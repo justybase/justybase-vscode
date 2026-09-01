@@ -212,6 +212,37 @@ describe('MetadataDiskStorage', () => {
         expect(parsed.schemas).toContain('S1');
     });
 
+    it('loads a compatible v2 column blob referenced by v3 and rewrites it as v3', async () => {
+        populateCache('conn1');
+        await storage.saveConnection(cache, 'conn1', Date.now());
+
+        const { gunzipSync, gzipSync } = require('zlib');
+        const columnPath = getV3ColumnFilePath(tempDir, 'conn1', 'DB1');
+        const current = JSON.parse(gunzipSync(fs.readFileSync(columnPath)).toString('utf8')) as {
+            database: string;
+            layers: Record<string, { timestamp: number }>;
+        };
+        const layerKey = Object.keys(current.layers)[0];
+        fs.writeFileSync(columnPath, gzipSync(Buffer.from(JSON.stringify({
+            schemaVersion: CACHE_SCHEMA_VERSION,
+            database: current.database,
+            column: {
+                [layerKey]: {
+                    timestamp: current.layers[layerKey].timestamp,
+                    data: [{ ATTNAME: 'C1', FORMAT_TYPE: 'INT', label: 'C1' }],
+                },
+            },
+        }))));
+
+        expect((await storage.loadAllConnections()).get('conn1')?.column[layerKey]?.data)
+            .toEqual([expect.objectContaining({ ATTNAME: 'C1', FORMAT_TYPE: 'INT' })]);
+
+        await storage.saveConnection(cache, 'conn1', Date.now());
+        const rewritten = JSON.parse(gunzipSync(fs.readFileSync(columnPath)).toString('utf8'));
+        expect(rewritten.schemaVersion).toBe(COLUMN_FILE_SCHEMA_VERSION);
+        expect(rewritten.layers[layerKey]).toBeDefined();
+    });
+
     it('should ignore manifest that is newer than the committed index entry', async () => {
         const committedAt = Date.now() - 10_000;
         populateCache('conn1');
@@ -486,6 +517,46 @@ describe('MetadataDiskStorage', () => {
 
         expect(lockSpy).toHaveBeenCalledWith('__metadata-cache-save__');
         lockSpy.mockRestore();
+    });
+
+    it('rejects an older fence after a newer writer commits the connection', async () => {
+        populateCache('conn1');
+        const oldLease = await storage.acquirePrefetchLease('conn1');
+        expect(oldLease).toBeDefined();
+        await storage.releasePrefetchLease(oldLease);
+
+        const storage2 = new MetadataDiskStorage(tempDir, mockConnectionManager as never);
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        cache2.setDatabases('conn1', [{ DATABASE: 'DB1', label: 'DB1', kind: 9 }]);
+        cache2.setSchemas('conn1', 'DB1', [{ SCHEMA: 'S1', label: 'S1', kind: 19 }]);
+        cache2.setTables('conn1', 'DB1.S1', [{
+            OBJNAME: 'NEW_T', OBJID: 2, SCHEMA: 'S1', label: 'NEW_T', objType: 'TABLE', kind: 6,
+        }], new Map([['DB1.S1.NEW_T', 2]]));
+        cache2.setProcedures('conn1', 'DB1..', [{ PROCEDURE: 'P1', SCHEMA: 'S1', label: 'P1' }]);
+        cache2.setColumns('conn1', 'DB1.S1.NEW_T', [{ ATTNAME: 'NEW_C', FORMAT_TYPE: 'INT', label: 'NEW_C' }]);
+        cache2.setTypeGroups('conn1', 'DB1', ['TABLE']);
+
+        const newLease = await storage2.acquirePrefetchLease('conn1');
+        expect(newLease).toBeDefined();
+        await storage2.saveConnection(cache2, 'conn1', Date.now(), { lease: newLease });
+        await storage2.releasePrefetchLease(newLease);
+
+        await storage.saveConnection(cache, 'conn1', Date.now() + 1, {
+            lease: {
+                connectionName: oldLease!.connectionName,
+                generation: oldLease!.generation,
+                fence: oldLease!.fence,
+            },
+        });
+
+        const loaded = (await storage.loadAllConnections()).get('conn1');
+        expect(loaded?.table['@NZEX@DB1.S1']?.data.map(table => table.OBJNAME)).toEqual(['NEW_T']);
+        expect(loaded?.column['@NZEX@DB1.S1.NEW_T']?.data[0].ATTNAME).toBe('NEW_C');
+        expect(loaded?.column['@NZEX@DB1.S1.T1']).toBeUndefined();
+        await cache2.dispose();
     });
 
     it('should reject when save lock cannot be acquired after retries', async () => {
