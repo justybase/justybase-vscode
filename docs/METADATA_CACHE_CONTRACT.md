@@ -141,11 +141,11 @@ When disk persistence is enabled (`justybase.metadataCache.diskPersistence`, def
 - Prefetch checkpoints metadata to disk; column files are written at checkpoint/dispose.
 - Checkpoints are marked `isComplete: false`. They may be loaded for recovery, but never restore `isConnectionPrefetchFresh`.
 - Only a verified complete snapshot (`isComplete: true`) restores prefetch freshness. Completion requires database, schema, table, procedure/type catalog stages, plus column cache entries for table/view/external-table objects.
-- Another VS Code window writing the v2 index triggers `onExternalCacheUpdate` → re-hydrate metadata → `onDidExternalRefresh`.
+- Another VS Code window writing the v3 index triggers `onExternalCacheUpdate` → re-hydrate metadata → `onDidExternalRefresh`.
 
 Self-writes are skipped when this window holds the prefetch lock.
 
-The manifest is written after metadata and column payloads, and the v2 index is written last. Startup accepts a manifest as fresh only when its timestamp/fingerprint matches the index and the snapshot is complete. A partial snapshot that has not expired may still provide local data while background prefetch refreshes it; an expired snapshot is excluded from hydration and its connection payload is removed before the next clean refresh.
+The manifest is written after metadata and column payloads, and the v3 index is written last. Startup accepts a manifest as fresh only when its timestamp/fingerprint matches the index and the snapshot is complete. A partial snapshot that has not expired may still provide local data while background prefetch refreshes it; an expired snapshot is excluded from hydration and its connection payload is removed before the next clean refresh.
 
 ### Restart and expiry behavior
 
@@ -235,6 +235,18 @@ the generation observed at acquisition, and a fence token allocated under the
 global writer lease. Checkpoints and the final snapshot commit only while that
 lease is valid. A commit is rejected when its generation is old or its fence is
 older than the connection's committed fence.
+
+The v1 monolith and v2 cache root are deliberately left untouched and are not
+used as startup state. A schema-v2 column blob referenced by a valid v3 index
+remains readable for compatibility and is rewritten as dictionary-encoded v3
+on the next successful snapshot. Unknown or corrupt index, manifest, metadata,
+and column payloads are ignored. A corrupt metadata payload clears prefetch
+freshness; a corrupt column payload additionally raises the column-recovery
+event so consumers cannot retain stale column types.
+
+A snapshot is accepted only when its connection fingerprint matches the
+current host, port, database, and dialect. Credentials are never part of the
+fingerprint or persisted payload.
 
 Locks have random owner and lease identifiers. Their lock record is immutable;
 heartbeat files are unique to the lease. Consequently a former owner cannot
