@@ -196,6 +196,16 @@ describe('ResultPanelView Integration', () => {
         }
     });
 
+    test('reports idle runtime diagnostics after the result panel is initialized', () => {
+        expect(provider.getResultPanelRuntimeDiagnostics()).toEqual({
+            activeCommandCount: 0,
+            executingSourceCount: 0,
+            streamingResultCount: 0,
+            streamingTransportCount: 0,
+            pendingResultSyncCount: 0,
+        });
+    });
+
     test('should hydrate pending execution state when webview becomes ready after execution starts', () => {
         const { commands } = jest.requireMock('vscode') as MockedVsCodeModule;
         commands.executeCommand.mockClear();

@@ -184,9 +184,6 @@ function initializeSearchWorker() {
                   prepareDiskFilterWindow(id);
                 }
                 grid.tanTable.setGlobalFilter(currentGlobal);
-                if (grid.render) {
-                  grid.render();
-                }
                 if (resultSet?.storageMode === 'sqlite' && matchedIndices !== null) {
                   grid.scrollToIndex?.(0, 'auto');
                 }
@@ -366,8 +363,11 @@ window.addEventListener('keydown', function(e) {
   }
 });
 
-const GLOBAL_FILTER_DEBOUNCE_MS = 50;
+// Do not touch the row model until the user has paused typing for this interval.
+const GLOBAL_FILTER_DEBOUNCE_MS = 200;
 let globalFilterSearchSeq = 0;
+let globalFilterApplyCount = 0;
+let lastGlobalFilterApplyAt = Number.NaN;
 
 function updateGlobalFilterSearchUi(searching: boolean): void {
   const filterInput = getElementById<HTMLInputElement>("globalFilter");
@@ -415,6 +415,8 @@ async function runWorkerGlobalFilter(
 }
 
 function applyGlobalFilter(value: string): void {
+  globalFilterApplyCount += 1;
+  lastGlobalFilterApplyAt = performance.now();
   const activeIndex = getActiveGridIndex();
   const viewMode = getActiveResultViewMode(activeIndex);
   const activeResult = getResultSetAt(activeIndex) ?? null;
@@ -456,9 +458,6 @@ function applyGlobalFilter(value: string): void {
     updateGlobalFilterSearchUi(false);
     setSearchMatches(activeIndex, null);
     grid.tanTable.setGlobalFilter("");
-    if (grid.render) {
-      grid.render();
-    }
     renderRowCountInfo(activeIndex);
     return;
   }
@@ -467,9 +466,6 @@ function applyGlobalFilter(value: string): void {
     setIsSearching(false);
     setSearchMatches(activeIndex, null);
     grid.tanTable.setGlobalFilter(value);
-    if (grid.render) {
-      grid.render();
-    }
     renderRowCountInfo(activeIndex);
     return;
   }
@@ -489,11 +485,6 @@ const debouncedSearch = debounce((value: unknown) => {
 export function onGlobalFilterChanged(): void {
   const filterInput = getElementById<HTMLInputElement>("globalFilter");
   const value = filterInput ? filterInput.value : "";
-  if (!value.trim()) {
-    debouncedSearch.cancel();
-    applyGlobalFilter("");
-    return;
-  }
   debouncedSearch(value);
 }
 
@@ -2959,6 +2950,11 @@ function setupWindowFunctions(): void {
   panel.postToHost = postHostMessage as (message: Record<string, unknown>) => void;
   panel.__getHostState = getHostState as () => Record<string, unknown> | null;
   panel.__setHostState = setHostState;
+  panel.__getGlobalFilterPerformance = () => ({
+    applyCount: globalFilterApplyCount,
+    lastApplyAt: lastGlobalFilterApplyAt,
+    debounceMs: GLOBAL_FILTER_DEBOUNCE_MS,
+  });
   panel.renderSidebarSchema = renderSidebarSchema;
   panel.onDropGroup = onDropGroup;
   panel.onDragOverGroup = onDragOverGroup;

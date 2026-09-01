@@ -118,6 +118,15 @@ test('rejects changed high-risk files missing from coverage', () => {
   assert.match(result.failures[0], /no LCOV record/);
 });
 
+test('does not require LCOV for Istanbul-ignored files', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/src/activation/resultPanelFilterPerformance.ts\n@@ -1 +1 @@\n',
+    lcov: '',
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } },
+  });
+  assert.deepEqual(result.failures, []);
+});
+
 test('builds a schema-compatible report and evaluates audit/docs status', () => {
   const report = buildReport({
     commit: 'abc123',

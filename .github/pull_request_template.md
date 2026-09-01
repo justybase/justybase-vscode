@@ -26,6 +26,7 @@
 - [ ] `npm run test:coverage`
 - [ ] Changed high-risk coverage checked (when `src/` paths in the baseline scope changed).
 - [ ] Nearest integration, browser, or Extension Host gate run for high-risk behavior.
+- [ ] Result Panel changes passed the `Result panel regression` GitHub Actions workflow; its weekly cron runs the 20x Linux race gate.
 - [ ] `npm run docs:check` (if a public feature, manifest, contract, route, format, or setting changed)
 
 ## Cleanup and failure-path evidence

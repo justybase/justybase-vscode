@@ -28,6 +28,17 @@ interface ExportResult {
     command: string | null;
 }
 
+interface InlineFilterModelResult {
+    samples: number[];
+    rowCount: number;
+}
+
+interface UiFilterResult {
+    durationMs: number;
+    rowCount: number;
+    bodyAppends: number;
+}
+
 interface FixturePerfApi {
     rows: unknown[][];
     rowCount: number;
@@ -36,6 +47,8 @@ interface FixturePerfApi {
     beginExport: () => number;
     exportState: (startedAt: number) => ExportResult;
     search: (query: string) => Promise<SearchResult>;
+    measureInlineFilter: (query: string, sampleCount?: number) => InlineFilterModelResult;
+    measureUiFilter: (query: string) => Promise<UiFilterResult>;
     searchBurst: () => Promise<SearchResult & { finalFilter: string }>;
 }
 
@@ -197,7 +210,48 @@ test.describe('Data Grid performance webview', () => {
         }
     });
 
-    test('measures worker cold/warm searches and rejects stale rapid results', async ({ page }) => {
+    test('keeps a 4,000 x 32 inline filter fast and renders it once', async ({ page }) => {
+        const fixture = await openFixture(page, 'filter-regression-4000x32');
+        const model = await page.evaluate(() => window.__dataGridPerf.measureInlineFilter('needle-absent', 5));
+        expect(model.rowCount).toBe(0);
+        const coldModelMs = model.samples[0] ?? Number.POSITIVE_INFINITY;
+        const warmModelStats = calculateTimingStats(model.samples.slice(1));
+        expect(coldModelMs).toBeLessThan(250);
+        expect(warmModelStats.medianMs).toBeLessThan(20);
+        addRecord(
+            'search',
+            'webview_global_filter_model',
+            'filter-regression-4000x32/missing',
+            fixture.totalRows,
+            fixture.columnCount,
+            'inline',
+            model.samples,
+            checked(0, model.rowCount),
+            fixture.bytes,
+            undefined,
+            ['First sample builds the row search cache; later samples use new query text and the same cached rows.'],
+        );
+
+        const ui = await page.evaluate(() => window.__dataGridPerf.measureUiFilter('needle-absent'));
+        expect(ui.rowCount).toBe(0);
+        expect(ui.bodyAppends).toBe(1);
+        addRecord(
+            'search',
+            'webview_global_filter_render',
+            'filter-regression-4000x32/missing',
+            fixture.totalRows,
+            fixture.columnCount,
+            'inline',
+            [ui.durationMs],
+            checked(0, ui.rowCount),
+            fixture.bytes,
+            undefined,
+            [`tbody append operations: ${ui.bodyAppends}.`],
+        );
+        expect(fixture.errors, fixture.errors.join('\n')).toEqual([]);
+    });
+
+    test('measures worker cold/warm searches and coalesces rapid queries', async ({ page }) => {
         const fixture = await openFixture(page, 'large');
         const cold = await search(page, 'needle-start');
         expect(cold.rowCount).toBe(1);
@@ -214,6 +268,7 @@ test.describe('Data Grid performance webview', () => {
         expect(rapid.finalFilter).toBe('needle-middle');
         expect(rapid.rowCount).toBe(1);
         expect(rapid.firstVisibleText).toContain('needle-middle');
+        expect(rapid.workerMessages.filter(message => message.command === 'search')).toHaveLength(1);
         addRecord('search', 'webview_rapid_queries', 'large/start-then-middle', fixture.totalRows, fixture.columnCount, 'worker', [rapid.durationMs], checked(1, rapid.rowCount), fixture.bytes, undefined, ['The final filter must win when worker responses arrive out of order.']);
 
         const missing = await search(page, 'needle-absent');

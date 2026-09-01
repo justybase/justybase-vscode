@@ -355,9 +355,17 @@ interface ResultPanelHostToWebviewMessageMap {
         refreshSql?: string;
         executionTimestamp?: number;
         resultSetId?: string;
+        chunkSequence?: number;
         diskBackedStreamCapEnabled?: boolean;
     };
-    streamingComplete: { sourceUri: string; resultSetIndex: number; totalRows: number; limitReached: boolean };
+    streamingComplete: {
+        sourceUri: string;
+        resultSetIndex: number;
+        totalRows: number;
+        limitReached: boolean;
+        resultSetId?: string;
+        lastChunkSequence?: number;
+    };
     switchToResultSet: { resultSetIndex: number };
     resultFormattingState: { data: unknown };
     saveEdits: { sourceUri: string; resultSetIndex: number; editSource: unknown; edits: unknown[]; deleteRowIndices?: number[] };

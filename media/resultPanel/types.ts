@@ -429,6 +429,11 @@ export interface ResultPanelGlobals {
     __getHostState?: () => Record<string, unknown> | null;
     __setHostState?: (state: Record<string, unknown>) => void;
     __getResultSyncPendingRequestCount?: () => number;
+    __getGlobalFilterPerformance?: () => {
+        applyCount: number;
+        lastApplyAt: number;
+        debounceMs: number;
+    };
     renderSidebarSchema?: () => void;
     onFilterChanged?: () => void;
     clearFilter?: () => void;

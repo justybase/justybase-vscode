@@ -1,6 +1,8 @@
 name: Result panel regression
 
 on:
+  schedule:
+    - cron: "0 3 * * 2"
   workflow_dispatch:
     inputs:
       capture_screenshots:
@@ -38,6 +40,7 @@ permissions:
 
 jobs:
   extension-host:
+    if: github.event_name != 'schedule'
     name: Extension Host (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -85,6 +88,7 @@ jobs:
           if-no-files-found: warn
 
   webview:
+    if: github.event_name != 'schedule'
     name: Bundled webview protocol fixture
     runs-on: ubuntu-latest
     steps:
@@ -104,3 +108,29 @@ jobs:
           name: result-panel-playwright
           path: test-results
           if-no-files-found: warn
+
+  extension-host-repeat:
+    if: github.event_name == 'schedule'
+    name: Extension Host race gate (Linux, 20x)
+    runs-on: ubuntu-latest
+    env:
+      JUSTYBASE_EXTENSION_HOST_REPEAT: "20"
+      JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS: "1"
+      JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-repeat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run repeated SQLite Extension Host regression
+        run: xvfb-run -a npm run test:extension-host
+      - name: Upload repeated-run diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-panel-extension-host-repeat-linux
+          path: ${{ runner.temp }}/justybase-extension-host-repeat
+          if-no-files-found: error
+          retention-days: 14

@@ -4451,6 +4451,7 @@
     "test:extensions:integration": "node scripts/run-extensions-integration-gate.js",
     "test:extensions:vscode": "node scripts/run-extensions-vscode-smoke.js",
     "test:extension-host": "npm run build && node scripts/extensionHost/extensionHost.js --engine=sqlite",
+    "test:extension-host:filter-performance": "npm run build && node scripts/extensionHost/extensionHost.js --suite=result-panel-filter-performance --engine=sqlite",
     "test:extension-host:authoring": "npm run build && node scripts/extensionHost/extensionHost.js --suite=authoring --engine=sqlite",
     "test:extension-host:screenshots": "npm run build && node scripts/extensionHost/extensionHost.js --engine=sqlite --screenshots",
     "test:extension-host:authoring:screenshots": "npm run build && node scripts/extensionHost/extensionHost.js --suite=authoring --engine=sqlite --screenshots",

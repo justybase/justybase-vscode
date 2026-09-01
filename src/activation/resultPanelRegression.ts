@@ -12,6 +12,7 @@ import {
     traceResultPanelEvent,
     type ResultPanelTraceRecord,
 } from '../views/resultPanelTrace';
+import { runExtensionHostFilterPerformance } from './resultPanelFilterPerformance';
 
 interface ResultPanelRegressionCommandArgs {
     sourceUri?: string;
@@ -29,6 +30,11 @@ export interface ExtensionHostScenarioReport {
     hostRequests: string[];
     hostResponses: string[];
     pendingRequestCount: number;
+    activeCommandCount: number;
+    executingSourceCount: number;
+    streamingResultCount: number;
+    streamingTransportCount: number;
+    pendingResultSyncCount: number;
     untitledLanguageLifecyclePassed: boolean;
     durationMs: number;
     error?: string;
@@ -301,7 +307,7 @@ function writeTraceArtifact(provider: ResultPanelView): void {
     fs.writeFileSync(tracePath, `${JSON.stringify(safeTrace, null, 2)}\n`, 'utf8');
 }
 
-function buildReport(
+export function buildReport(
     provider: ResultPanelView,
     engine: 'sqlite' | 'netezza',
     sourceUri: string,
@@ -330,6 +336,7 @@ function buildReport(
         event => event.origin === 'webview',
         event => event.phase,
     );
+    const runtime = provider.getResultPanelRuntimeDiagnostics();
     return {
         engine,
         scenarioId: SCENARIO_ID,
@@ -341,6 +348,7 @@ function buildReport(
         hostRequests,
         hostResponses,
         pendingRequestCount: provider.getResultPanelTestBridgePendingRequestCount(),
+        ...runtime,
         untitledLanguageLifecyclePassed,
         durationMs: Date.now() - startedAt,
         ...(status === 'failed' ? { error: 'scenario_failed' } : {}),
@@ -639,12 +647,19 @@ async function runExtensionHostScenario(
         await provider.runResultPanelTestBridge('diskQuery');
         await requestExtensionHostScreenshot('02-result-grid');
 
-        const filteredByUnicode = asRecord(await provider.runResultPanelTestBridge('setGlobalFilter', { value: 'Łódź' }));
+        /* istanbul ignore next -- exercised by the real Extension Host harness. */
+        const filteredByUnicode = asRecord(await provider.runResultPanelTestBridge('setGlobalFilter', {
+            value: 'Łódź',
+            expectedVisibleRowCount: 4,
+        }));
         if (asNumber(filteredByUnicode.visibleRowCount, -1) !== 4) {
             throw new Error(`Global filter did not reduce the deterministic result to four rows (observed ${String(filteredByUnicode.visibleRowCount)}).`);
         }
         await requestExtensionHostScreenshot('03-global-filter');
-        const clearedGlobal = asRecord(await provider.runResultPanelTestBridge('clearGlobalFilter'));
+        /* istanbul ignore next -- exercised by the real Extension Host harness. */
+        const clearedGlobal = asRecord(await provider.runResultPanelTestBridge('clearGlobalFilter', {
+            expectedVisibleRowCount: 12,
+        }));
         if (asNumber(clearedGlobal.visibleRowCount, -1) !== 12) {
             throw new Error('Clearing the global filter did not restore all rows.');
         }
@@ -918,6 +933,25 @@ export function registerResultPanelRegressionCommand(
                     throw new Error('Extension Host scenario requires result-panel tracing.');
                 }
                 return runExtensionHostScenario(context, resultPanelProvider, connectionManager, args ?? {});
+            },
+        ));
+        disposables.push(vscode.commands.registerCommand(
+            'justybase.test.extensionHostFilterPerformance',
+            (args?: {
+                sourceFilePath?: string;
+                workDir?: string;
+                sqliteDatabasePath?: string;
+                tableName?: string;
+            }) => {
+                if (!isResultPanelTraceEnabled()) {
+                    throw new Error('Extension Host filter performance requires result-panel tracing.');
+                }
+                return runExtensionHostFilterPerformance(
+                    context,
+                    resultPanelProvider,
+                    connectionManager,
+                    args ?? {},
+                );
             },
         ));
     }

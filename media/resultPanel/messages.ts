@@ -85,6 +85,7 @@ import {
     applyScrollForResultSet,
     setPreserveScrollDuringHydrate,
 } from './grid/persistence.js';
+import { StreamingSequenceTracker } from './streamingSequence.js';
 
 export type { SavedGridState } from './grid/persistence.js';
 export type { PersistedGridStateEnvelopeV1 } from './grid/persistence.js';
@@ -185,6 +186,7 @@ function parseSourceUri(value: string | undefined): string | undefined {
 }
 
 const pendingResultSyncSources = new Set<string>();
+const streamingSequenceTracker = new StreamingSequenceTracker();
 
 /** Number of source-specific recovery requests waiting for host hydration. */
 export function getResultSyncPendingRequestCount(): number {
@@ -717,6 +719,8 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     // retry. The host normally follows this message with hydrate; if that
     // delivery races, the next append can request recovery again.
     if (activeSource !== sourceUri) {
+        streamingSequenceTracker.reset(activeSource);
+        streamingSequenceTracker.reset(sourceUri);
         if (activeSource) {
             pendingResultSyncSources.delete(activeSource);
         }
@@ -993,6 +997,7 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
             }
             setActiveSourceUri(hydratedSource);
         }
+        streamingSequenceTracker.reset(hydratedSource);
 
         if (data.sourcesJson) {
             const sources = JSON.parse(data.sourcesJson) as string[];
@@ -1175,6 +1180,7 @@ export function handleCancelExecution(message: Record<string, unknown>): void {
     if (sourceUri) {
         panel.executingSources?.delete(sourceUri);
         panel.streamingCompletedSources?.delete(sourceUri);
+        streamingSequenceTracker.reset(sourceUri);
     }
 
     if (getActiveSourceUri() === sourceUri) {
@@ -1415,6 +1421,35 @@ export function handleAppendRows(message: Record<string, unknown>): void {
             return;
         }
 
+        const sequenceDecision = streamingSequenceTracker.evaluate(
+            sourceUri,
+            {
+                resultSetId: typeof message.resultSetId === 'string' ? message.resultSetId : undefined,
+                chunkSequence: typeof message.chunkSequence === 'number' ? message.chunkSequence : undefined,
+                fromRow,
+                totalRows,
+                isFirstChunk,
+            },
+            {
+                resultSetId: rs.resultSetId,
+                totalRows: rs.totalRowCount ?? rs.data.length,
+            },
+        );
+        if (sequenceDecision.kind !== 'apply') {
+            if (sequenceDecision.kind === 'desync') {
+                requestAuthoritativeResultSync(sourceUri, sequenceDecision.reason);
+            }
+            traceResultPanel({
+                phase: 'append_ignored',
+                sourceUri,
+                resultSetIndex,
+                reason: sequenceDecision.kind === 'desync'
+                    ? sequenceDecision.reason
+                    : `stream-${sequenceDecision.kind}`,
+            });
+            return;
+        }
+
         if (isDiskBackedResultSet(rs)) {
             applyRowLimitReachedFlag(rs, limitReached === true);
             if (typeof totalRows === 'number') {
@@ -1558,6 +1593,27 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
             reason: 'result-set-missing',
         });
         return;
+    }
+    if (!isDiskBackedResultSet(rs)) {
+        const sequenceDecision = streamingSequenceTracker.complete(
+            sourceUri,
+            typeof message.resultSetId === 'string' ? message.resultSetId : undefined,
+            typeof message.lastChunkSequence === 'number' ? message.lastChunkSequence : undefined,
+        );
+        if (sequenceDecision.kind !== 'apply') {
+            if (sequenceDecision.kind === 'desync') {
+                requestAuthoritativeResultSync(sourceUri, sequenceDecision.reason);
+            }
+            traceResultPanel({
+                phase: 'streaming_complete_ignored',
+                sourceUri,
+                resultSetIndex,
+                reason: sequenceDecision.kind === 'desync'
+                    ? sequenceDecision.reason
+                    : `stream-${sequenceDecision.kind}`,
+            });
+            return;
+        }
     }
     rs.isStreamingComplete = true;
     applyRowLimitReachedFlag(rs, limitReached === true);

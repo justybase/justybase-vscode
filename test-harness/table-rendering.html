@@ -202,8 +202,9 @@
     <script>
         const queryParams = new URLSearchParams(window.location.search);
         const protocolMode = queryParams.get('protocol');
-        const protocolScenario = protocolMode === '1' || protocolMode === 'missing-shell';
+        const protocolScenario = protocolMode === '1' || protocolMode === 'missing-shell' || protocolMode === 'faulty-stream';
         const protocolMissingShellScenario = protocolMode === 'missing-shell';
+        const protocolFaultyStreamScenario = protocolMode === 'faulty-stream';
         const initiallyHidden = queryParams.get('initiallyHidden') === '1';
         if (queryParams.get('disableResizeObserver') === '1') {
             try {
@@ -404,6 +405,105 @@
                         resultSetIndex: 1,
                         totalRows: 1,
                         limitReached: false,
+                    });
+                }, 20);
+                return;
+            }
+            if (protocolFaultyStreamScenario) {
+                dispatchHostMessage({
+                    command: 'hydrate',
+                    data: {
+                        activeSourceJson: JSON.stringify(sourceUri),
+                        sourcesJson: JSON.stringify([sourceUri]),
+                        pinnedSourcesJson: JSON.stringify([sourceUri]),
+                        pinnedResultsJson: JSON.stringify([]),
+                        activeResultSetIndex: 0,
+                        resultSetsJson: JSON.stringify([logResult]),
+                        executingSourcesJson: JSON.stringify([sourceUri]),
+                        streamingCompletedSourcesJson: JSON.stringify([]),
+                        resultPanelTraceEnabled: true,
+                    },
+                });
+                const first = {
+                    command: 'appendRows',
+                    sourceUri,
+                    resultSetIndex: 1,
+                    rows: [[1], [2]],
+                    fromRow: 0,
+                    totalRows: 2,
+                    resultSetId: 'fault-result-1',
+                    chunkSequence: 0,
+                    isFirstChunk: true,
+                    isLastChunk: false,
+                    limitReached: false,
+                    columns: [{ name: 'id', type: 'integer' }],
+                    sql: 'SELECT id FROM fault_fixture',
+                    executionTimestamp: 101,
+                };
+                dispatchHostMessage(first);
+                dispatchHostMessage(Object.assign({}, first, { isFirstChunk: false }));
+                dispatchHostMessage(Object.assign({}, first, {
+                    rows: [[5], [6]],
+                    fromRow: 4,
+                    totalRows: 6,
+                    chunkSequence: 2,
+                    isFirstChunk: false,
+                }));
+                dispatchHostMessage(Object.assign({}, first, {
+                    rows: [[3], [4]],
+                    fromRow: 2,
+                    totalRows: 4,
+                    resultSetId: 'retired-result',
+                    chunkSequence: 1,
+                    isFirstChunk: false,
+                }));
+                setTimeout(function() {
+                    dispatchHostMessage({
+                        command: 'hydrate',
+                        data: {
+                            activeSourceJson: JSON.stringify(sourceUri),
+                            sourcesJson: JSON.stringify([sourceUri]),
+                            pinnedSourcesJson: JSON.stringify([sourceUri]),
+                            pinnedResultsJson: JSON.stringify([]),
+                            activeResultSetIndex: 1,
+                            resultSetsJson: JSON.stringify([
+                                logResult,
+                                {
+                                    columns: [{ name: 'id', type: 'integer' }],
+                                    data: [[1], [2], [3], [4], [5], [6]],
+                                    totalRowCount: 6,
+                                    executionTimestamp: 101,
+                                    resultSetId: 'fault-result-1',
+                                    sql: 'SELECT id FROM fault_fixture',
+                                },
+                            ]),
+                            executingSourcesJson: JSON.stringify([sourceUri]),
+                            streamingCompletedSourcesJson: JSON.stringify([]),
+                            resultPanelTraceEnabled: true,
+                            resultSyncVersion: 1,
+                        },
+                    });
+                    dispatchHostMessage({
+                        command: 'appendRows',
+                        sourceUri,
+                        resultSetIndex: 1,
+                        rows: [[7], [8]],
+                        fromRow: 6,
+                        totalRows: 8,
+                        resultSetId: 'fault-result-1',
+                        chunkSequence: 3,
+                        isFirstChunk: false,
+                        isLastChunk: true,
+                        limitReached: false,
+                    });
+                    dispatchHostMessage({
+                        command: 'streamingComplete',
+                        sourceUri,
+                        resultSetIndex: 1,
+                        totalRows: 8,
+                        limitReached: false,
+                        resultSetId: 'fault-result-1',
+                        lastChunkSequence: 3,
                     });
                 }, 20);
                 return;

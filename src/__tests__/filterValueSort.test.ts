@@ -1,4 +1,9 @@
-import { matchesFilterValueSearch, parseFilterNumericValue, sortFilterValues } from '../../media/resultPanel/filterValueSort';
+import {
+    createFilterValueMatcher,
+    matchesFilterValueSearch,
+    parseFilterNumericValue,
+    sortFilterValues,
+} from '../../media/resultPanel/filterValueSort';
 
 describe('sortFilterValues', () => {
     it('sorts INT4 column values numerically ascending', () => {
@@ -55,5 +60,12 @@ describe('matchesFilterValueSearch', () => {
     it('parses grouped BIGINT values for numeric sort', () => {
         expect(parseFilterNumericValue('123 456')).toBe(123456);
         expect(parseFilterNumericValue('1 000 000')).toBe(1000000);
+    });
+
+    it('creates a reusable matcher with the same compact-search semantics', () => {
+        const matcher = createFilterValueMatcher('20101228');
+
+        expect(matcher('2010 12 28')).toBe(true);
+        expect(matcher('2010 12 29')).toBe(false);
     });
 });

@@ -306,12 +306,11 @@ describe('ResultStateManager', () => {
             expect(manager.getExecutionLogs(sourceUri)[0].status).toBe('retrying');
         });
 
-        it('should preserve error then retrying then success sequence for one execution', () => {
+        it('should preserve retrying then one terminal success for one execution', () => {
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);
 
             const { id } = manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
-            manager.logExecutionEnd(id, 0, 'error', 'Connection lost');
             manager.logExecutionEnd(
                 id,
                 0,
@@ -325,10 +324,32 @@ describe('ResultStateManager', () => {
                 .data
                 .map(row => row[1] as string);
 
-            expect(messages.some(message => message.includes('✗ ERROR: SELECT 1 | conn1'))).toBe(true);
+            expect(messages.some(message => message.includes('✗ ERROR: SELECT 1 | conn1'))).toBe(false);
             expect(messages.some(message => message.includes('↻ RETRYING: SELECT 1 | conn1 | Connection was closed by server. Reconnecting and retrying...'))).toBe(true);
             expect(messages.some(message => message.includes('✓ SUCCESS: SELECT 1 | conn1'))).toBe(true);
             expect(manager.getExecutionLogs(sourceUri)[0].status).toBe('success');
+        });
+
+        it('ignores retrying and duplicate terminal updates after execution ended', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+
+            const { id } = manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+            manager.logExecutionEnd(id, 0, 'error', 'Connection lost');
+            const retryUpdate = manager.logExecutionEnd(id, 0, 'retrying', 'Retrying too late');
+            const successUpdate = manager.logExecutionEnd(id, 3, 'success');
+
+            const messages = manager.resultsMap
+                .get(sourceUri)![0]
+                .data
+                .map(row => row[1] as string);
+
+            expect(retryUpdate).toBeUndefined();
+            expect(successUpdate).toBeUndefined();
+            expect(messages.filter(message => message.includes('✗ ERROR: SELECT 1 | conn1'))).toHaveLength(1);
+            expect(messages.some(message => message.includes('↻ RETRYING'))).toBe(false);
+            expect(messages.some(message => message.includes('✓ SUCCESS: SELECT 1 | conn1'))).toBe(false);
+            expect(manager.getExecutionLogs(sourceUri)[0].status).toBe('error');
         });
     });
 

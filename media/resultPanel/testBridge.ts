@@ -70,6 +70,11 @@ interface TestBridgeResult {
         firstVisibleRowIndex?: number;
         firstVisibleRowFingerprint: string;
     };
+    durationMs?: number;
+    filterApplyCount?: number;
+    filterApplyLatencyMs?: number;
+    filterDebounceMs?: number;
+    filterValue?: string;
 }
 
 const ACTION_TIMEOUT_MS = 15_000;
@@ -243,14 +248,87 @@ function hashFingerprint(value: string): string {
     return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
-async function setGlobalFilter(value: string): Promise<TestBridgeResult> {
+function filterApplyMetrics(
+    startedAt: number,
+    lastInputAt: number,
+    applyCountBefore: number,
+): Pick<TestBridgeResult, 'durationMs' | 'filterApplyCount' | 'filterApplyLatencyMs' | 'filterDebounceMs'> {
+    const panel = getResultPanelWindow();
+    const metrics = panel.__getGlobalFilterPerformance?.();
+    const applyCountAfter = metrics?.applyCount ?? applyCountBefore;
+    const filterApplyCount = Math.max(0, applyCountAfter - applyCountBefore);
+    const filterApplyLatencyMs = filterApplyCount > 0 && metrics && Number.isFinite(metrics.lastApplyAt)
+        ? Math.max(0, metrics.lastApplyAt - lastInputAt)
+        : undefined;
+    return {
+        durationMs: performance.now() - startedAt,
+        filterApplyCount,
+        ...(filterApplyLatencyMs === undefined ? {} : { filterApplyLatencyMs }),
+        ...(metrics ? { filterDebounceMs: metrics.debounceMs } : {}),
+    };
+}
+
+function expectedVisibleRowCount(args: Record<string, unknown>): number | undefined {
+    const value = args.expectedVisibleRowCount;
+    return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+async function waitForExpectedFilterRows(expected: number | undefined): Promise<void> {
+    if (expected === undefined) return;
+    await waitFor(
+        `global filter to show ${expected} rows`,
+        () => {
+            const resultSetIndex = getActiveGridIndex();
+            return visibleRowCount(getResultSetAt(resultSetIndex), resultSetIndex) === expected;
+        },
+    );
+}
+
+async function settleGlobalFilterAction(
+    values: string[],
+    intervalMs: number,
+    expected: number | undefined,
+): Promise<TestBridgeResult> {
     const input = document.getElementById('globalFilter') as HTMLInputElement | null;
     if (!input) throw new Error('Global filter input is not available.');
-    input.value = value;
-    getResultPanelWindow().onFilterChanged?.();
-    await sleep(175);
+    if (values.length === 0) throw new Error('At least one global filter value is required.');
+
+    const startedAt = performance.now();
+    const applyCountBefore = getResultPanelWindow().__getGlobalFilterPerformance?.().applyCount ?? 0;
+    let lastInputAt = startedAt;
+    for (let index = 0; index < values.length; index += 1) {
+        const value = values[index];
+        input.value = value;
+        lastInputAt = performance.now();
+        getResultPanelWindow().onFilterChanged?.();
+        if (intervalMs > 0 && index < values.length - 1) {
+            await sleep(intervalMs);
+        }
+    }
+
+    const debounceMs = getResultPanelWindow().__getGlobalFilterPerformance?.().debounceMs ?? 200;
+    await sleep(debounceMs + 25);
+    await waitForExpectedFilterRows(expected);
     renderRowCountInfo();
-    return snapshot();
+    return {
+        ...snapshot(),
+        ...filterApplyMetrics(startedAt, lastInputAt, applyCountBefore),
+        filterValue: input.value,
+    };
+}
+
+async function setGlobalFilter(args: Record<string, unknown>): Promise<TestBridgeResult> {
+    return settleGlobalFilterAction(
+        [asString(args.value)],
+        0,
+        expectedVisibleRowCount(args),
+    );
+}
+
+async function setGlobalFilterBurst(args: Record<string, unknown>): Promise<TestBridgeResult> {
+    const values = Array.isArray(args.values) ? args.values.map(value => String(value)) : [];
+    const intervalMs = Math.max(0, asNumber(args.intervalMs, 50));
+    return settleGlobalFilterAction(values, intervalMs, expectedVisibleRowCount(args));
 }
 
 async function setColumnFilter(args: Record<string, unknown>): Promise<TestBridgeResult> {
@@ -399,9 +477,11 @@ async function dispatchAction(action: string, argsValue: unknown): Promise<unkno
         case 'snapshot':
             return snapshot();
         case 'setGlobalFilter':
-            return setGlobalFilter(asString(args.value));
+            return setGlobalFilter(args);
         case 'clearGlobalFilter':
-            return setGlobalFilter('');
+            return setGlobalFilter({ ...args, value: '' });
+        case 'setGlobalFilterBurst':
+            return setGlobalFilterBurst(args);
         case 'setColumnFilter':
             return setColumnFilter(args);
         case 'scrollResult':

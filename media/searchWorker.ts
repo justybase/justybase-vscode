@@ -81,23 +81,19 @@ function getCellValue(
     return String(val);
 }
 
-function compactFilterSearchText(value: string): string {
-    return String(value).toLowerCase().replace(/[\s\u00A0\u202F,]/g, '');
-}
+const FILTER_SEARCH_GROUPING_PATTERN = /[\s\u00A0\u202F,]/g;
 
-function cellMatchesGlobalFilter(cellText: string, query: string): boolean {
+function cellMatchesGlobalFilter(cellText: string, lowerQuery: string, compactQuery: string): boolean {
     const lowerCell = cellText.toLowerCase();
-    const lowerQuery = query.toLowerCase();
     if (lowerCell.includes(lowerQuery)) {
         return true;
     }
 
-    const compactQuery = compactFilterSearchText(query);
     if (!compactQuery) {
         return false;
     }
 
-    return compactFilterSearchText(cellText).includes(compactQuery);
+    return lowerCell.replace(FILTER_SEARCH_GROUPING_PATTERN, '').includes(compactQuery);
 }
 
 function findMatchedIndices(
@@ -106,6 +102,8 @@ function findMatchedIndices(
     query: string,
 ): number[] {
     const matchedIndices: number[] = [];
+    const lowerQuery = String(query).toLowerCase();
+    const compactQuery = lowerQuery.replace(FILTER_SEARCH_GROUPING_PATTERN, '');
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         const row = rows[rowIndex];
@@ -114,7 +112,7 @@ function findMatchedIndices(
         for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
             const column = columns[columnIndex];
             const cellText = getCellValue(row, columnIndex, column);
-            if (cellMatchesGlobalFilter(cellText, query)) {
+            if (cellMatchesGlobalFilter(cellText, lowerQuery, compactQuery)) {
                 match = true;
                 break;
             }

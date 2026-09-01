@@ -403,6 +403,8 @@ export type ResultPanelHostToWebviewMessage =
         executionTimestamp?: number;
         /** Stable host-issued identity for the result being streamed. */
         resultSetId?: string;
+        /** Monotonic sequence of tabular append messages for this result. */
+        chunkSequence?: number;
         /** Mirrors host isDiskBackedResultsAvailable — webview caps rows only when true. */
         diskBackedStreamCapEnabled?: boolean;
     }
@@ -412,6 +414,8 @@ export type ResultPanelHostToWebviewMessage =
         resultSetIndex: number;
         totalRows: number;
         limitReached: boolean;
+        resultSetId?: string;
+        lastChunkSequence?: number;
     }
     | { command: 'switchToResultSet'; resultSetIndex: number }
     | { command: 'resultFormattingState'; data: ResultFormattingPayload }

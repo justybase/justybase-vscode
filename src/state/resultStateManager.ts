@@ -57,6 +57,12 @@ interface ExecutionLogEntry {
     errorMessage?: string;
 }
 
+const TERMINAL_EXECUTION_LOG_STATUSES = new Set<ExecutionLogEntry['status']>([
+    'success',
+    'error',
+    'cancelled',
+]);
+
 type AppendStreamingResult =
     | { type: 'incremental'; props: AppendRowsMessage }
     | { type: 'diskBackedActivate'; props: DiskBackedActivateProps }
@@ -575,6 +581,7 @@ export class ResultStateManager {
      * @param rowCount Number of rows returned
      * @param status Status: 'success', 'error', 'cancelled', or 'retrying'
      * @param errorMessage Optional error message if status is 'error'
+     * @returns The appended log update, or undefined for a late update after a terminal status
      */
     public logExecutionEnd(
         executionId: string,
@@ -586,6 +593,9 @@ export class ResultStateManager {
         for (const [sourceUri, logs] of this._executionLogs.entries()) {
             const entry = logs.find(e => e.id === executionId);
             if (entry) {
+                if (TERMINAL_EXECUTION_LOG_STATUSES.has(entry.status)) {
+                    return undefined;
+                }
                 entry.endTime = Date.now();
                 entry.rowCount = rowCount;
                 entry.status = status;
@@ -1481,7 +1491,8 @@ export class ResultStateManager {
                         rows: chunk.rows,
                         totalRows: chunk.totalRowsSoFar,
                         isLastChunk: chunk.isLastChunk,
-                        limitReached: targetResultSet.limitReached === true
+                        limitReached: targetResultSet.limitReached === true,
+                        resultSetId: targetResultSet.resultSetId,
                     }
                 };
             }
