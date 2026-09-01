@@ -70,6 +70,27 @@ test('prefers the full LCOV path over an earlier duplicate basename', () => {
   assert.deepEqual(result.failures, []);
 });
 
+test('merges duplicate LCOV records for the same source file', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/src/activation/resultPanelRegression.ts\n@@ -1 +2 @@\n',
+    lcov: [
+      'SF:src/activation/resultPanelRegression.ts',
+      'DA:2,0',
+      'BRDA:2,0,0,-',
+      'end_of_record',
+      'SF:/home/dusko/source/justybase-vscode/src/activation/resultPanelRegression.ts',
+      'DA:2,1',
+      'BRDA:2,0,0,1',
+      'end_of_record',
+    ].join('\n'),
+    baseline: { changedHighRiskCoverage: { lines: 100, branches: 100, roots: ['src/activation/'] } },
+  });
+
+  assert.equal(result.files[0].coveredLines, 1);
+  assert.equal(result.files[0].coveredBranches, 1);
+  assert.deepEqual(result.failures, []);
+});
+
 test('rejects an ambiguous LCOV basename fallback', () => {
   const result = checkChangedCoverage({
     diff: '+++ b/src/core/index.ts\n@@ -1 +2 @@\n',
