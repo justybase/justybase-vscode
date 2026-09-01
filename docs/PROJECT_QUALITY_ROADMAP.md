@@ -112,12 +112,12 @@ silently applies data belonging to another result identity.
 | TQ03 | P0 | XL | UI owners | in-progress | Result Panel now has an executable host-state contract covering stable identity, pinned/index transitions, source removal, streaming cancellation, late-chunk rejection, and active-source recovery. Evidence: `src/__tests__/resultPanelStateContract.test.ts`, `docs/RESULT_PANEL_REGRESSION.md`. Extend the same contract to the remaining stateful panels. Verified 2026-08-31. |
 | TQ04 | P0 | L | Web owner | planned | Add jsdom and Testing Library coverage for React tabs, editor preferences, connection dialogs, schema navigation, result-grid state, errors, cancellation, and reload restoration. The current three reducer tests are insufficient for the shipped surface. |
 | TQ05 | P0 | L | Browser/host test owner | planned | Put high-traffic webviews, not only smoke rendering, under Playwright or Extension Host CI. Replace fixed waits with observable readiness where possible and retain sanitized failure snapshots/traces. |
-| TQ06 | P0 | XL | Execution owner | planned | Test missing, duplicate, delayed, and out-of-order chunks; cancellation in every phase; late messages after disposal; retry/reconnect; partial data; zero rows; multiple result sets; and resource cleanup. |
-| TQ07 | P1 | L | Metadata owner | planned | Cover restart, corruption, stale TTL, DDL invalidation, concurrent refresh, lock expiry, cache-version migration, and connection-fingerprint changes through disk and LSP consumers. |
+| TQ06 | P0 | XL | Execution owner | done | Desktop reconnect replay is limited to one proven call-free read-only statement before any streamed chunk. Result transport now carries stable identity, row offsets, and monotonic sequence; duplicate/delayed chunks are ignored and gaps/out-of-order delivery recover through one authoritative hydrate. The Extension Host runner retains per-iteration evidence and has a weekly Linux 20x race gate. Evidence: `src/core/queryRetrySafety.ts`, `media/resultPanel/streamingSequence.ts`, `src/__tests__/streamingSequence.test.ts`, `src/__tests__/resultPanelHydrateDedup.test.ts`, `scripts/extensionHost/extensionHost.js`, `.github/workflows/result-panel-regression.yml`. Verified 2026-09-01. |
+| TQ07 | P1 | L | Metadata owner | done | Restart, corrupt metadata/columns, stale TTL, committed DDL invalidation, same-process prefetch deduplication, two-writer fence ordering, lock expiry, v2-column-to-v3 rewrite, future/legacy isolation, fingerprint changes, external refresh, and host↔LSP invalidation are covered. Evidence: `src/__tests__/metadataCache.diskPersistence.test.ts`, `src/__tests__/metadataDiskStorage.test.ts`, `src/__tests__/metadataDiskLock.test.ts`, `src/__tests__/tableDdlSynchronizer.test.ts`, `src/__tests__/metadataHostLspCoherence.test.ts`, `src/__tests__/integration/metadataCacheRestart.integration.test.ts`. Verified 2026-09-01. |
 | TQ08 | P1 | XL | Data movement owner | planned | Add import/export/migration round trips for nulls, Unicode, large integers, decimals, timestamps/time zones, duplicate headers, empty files, cancellation, partial failure, and temporary-resource cleanup. |
 | TQ09 | P1 | XL | Dialect owners | planned | Build a reusable dialect contract for connection, metadata, completion, diagnostics, quoting, cancellation, read-only behavior, DDL, and import/export. Run local/container databases on PRs and controlled credentialed systems on schedules. |
 | TQ10 | P2 | L | Core test owner | planned | Add property-based tests for identifiers, quoting, state keys, pagination, and format round trips. Run targeted mutation testing periodically on pure safety-critical modules rather than on every PR. |
-| TQ11 | P1 | M | CI owner | planned | Run the Result Panel Extension Host scenario with `JUSTYBASE_EXTENSION_HOST_REPEAT=20` on a schedule. Track flake rate, duration, pending requests, leaked handles, and artifact availability. |
+| TQ11 | P1 | M | CI owner | done | The weekly Linux Result Panel workflow runs `JUSTYBASE_EXTENSION_HOST_REPEAT=20`, retains per-iteration sanitized reports/traces and an aggregate summary, records duration/pending requests/artifact availability, and fails after collecting all iteration outcomes. Evidence: `.github/workflows/result-panel-regression.yml`, `scripts/extensionHost/extensionHost.js`, `docs/RESULT_PANEL_EXTENSION_HOST_RUNBOOK.md`. Verified 2026-09-01. |
 
 ### Reference Result Panel state matrix
 
@@ -185,7 +185,7 @@ Assertions and layers:
 
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
-| DQ01 | P0 | M | Documentation owner | in-progress | Reconcile the web parity audit with executable evidence. Implemented aggregation, grouping, pivot, virtualization, and related grid capabilities must not remain listed as missing. |
+| DQ01 | P0 | M | Documentation owner | done | Reconciled the web parity audit with implementation paths and executable evidence, including explicit evidence gaps for React pivot, virtualization, and persisted state instead of treating implemented features as missing or fully proven. Evidence: `docs/WEB_PARITY_AUDIT.md`, `apps/api/tests/querySessions.test.ts`, `apps/api/tests/server.test.ts`, `apps/web/src/queryState.test.ts`. Verified 2026-08-31. |
 | DQ02 | P0 | M | Test/documentation owners | done | Testing strategy now owns risk tiers, stateful-test contracts, live-suite selection, coverage ratchets, flake policy, and quality-tooling gates. Evidence: `docs/TESTING_STRATEGY.md`, CI quality/unit jobs. Verified 2026-08-31. |
 | DQ03 | P1 | L | Documentation tooling owner | planned | Validate roadmap IDs, statuses, review dates, evidence links, and machine-verifiable feature claims in `docs:check`. |
 | DQ04 | P1 | XL | Product/architecture owners | planned | Move capability status toward a generated registry consumed by tests and documentation so implementation and parity claims cannot drift independently. |
@@ -207,7 +207,7 @@ Functional work follows quality readiness; it does not bypass it.
 
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
-| FQ01 | P0 | M | Product/documentation owner | in-progress | Correct the desktop/web/API/companion inventory and attach executable evidence to supported capability claims. |
+| FQ01 | P0 | M | Product/documentation owner | done | Audited the desktop, shared-package, Web/API, MCP, and ten-companion inventory; restored Snowflake and Vertica to the public matrix as Preview and attached the nearest executable gates to supported claims. Evidence: `docs/WEB_PARITY_AUDIT.md`, `docs/guide/reference/database-support.md`, `scripts/docs-check.mjs`, `.github/workflows/optional-extension-build.yml`. Verified 2026-08-31. |
 | FQ02 | P0 | XL | Subsystem owners | planned | Close state loss, cancellation, reload, metadata invalidation, error recovery, and cleanup gaps before increasing feature breadth in that subsystem. |
 | FQ03 | P1 | XL | Web owner | planned | After React and API gates exist, prioritize remaining code actions, selected-statement/run modes, durable tab/grid state, metadata refresh, context actions, row detail, and guarded DDL/import workflows. |
 | FQ04 | P1 | XL | Dialect owners | planned | Require the common dialect contract before promoting a database from preview to supported. Document unsupported versions and capability differences explicitly. |
@@ -215,7 +215,7 @@ Functional work follows quality readiness; it does not bypass it.
 
 ## Delivery sequence
 
-### Phase 0 — Establish truth
+### Phase 0 — Establish truth (delivered 2026-08-31)
 
 - Publish this roadmap and audited baseline.
 - Correct stale web parity and UX claims.
@@ -247,8 +247,9 @@ high-risk UI/transport changes have enforceable contracts.
 
 Exit evidence: `npm run test:quality-tools`, `npm run lint:extended:check`,
 `npm run test:validate`, `npm run docs:check`, and `npm run check-types:media`.
-The next quality-ratchet target is 100 extended-lint warnings while Phase 1
-continues with state-contract and protocol work.
+The 100-warning milestone was surpassed; the current frozen baseline is 70 and
+the next cleanup target is zero warnings. Phase 1 continues with React,
+accessibility, architecture, and state-contract gates.
 
 ### Phase 2 — Reliability and decomposition
 

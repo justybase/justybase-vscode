@@ -4,7 +4,7 @@ description: Compare the advertised JustyBase dialects by runtime, authoring dep
 audience: reference
 category: Reference
 status: Supported
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 product_version: 3.17.10
 ---
 
@@ -21,6 +21,8 @@ JustyBase presents one workspace shell, but a capability is only available when 
 | PostgreSQL | Preview companion runtime | PostgreSQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain, partitions, indexes, and maintenance paths where implemented | Provider-specific import/export and maintenance operations | Preview; partial by feature |
 | MySQL | Preview companion runtime (`8.0+` scope) | MySQL parser profile, completion, formatting, diagnostics | Metadata, DDL, object search, index/partition catalog views | Explain, Index Designer, and method-specific Partition Manager | Provider-specific import/export and guarded table-structure operations | Preview; MariaDB and advanced partition restructuring outside scope |
 | ClickHouse | Preview companion runtime over HTTP/HTTPS; user/password authentication | ClickHouse parser profile with PREWHERE, ARRAY JOIN, QUALIFY, LIMIT BY, WITH FILL, DDL options, completion, formatting, diagnostics | `system.databases`, `system.tables`, `system.columns`, object/source search | `SHOW CREATE TABLE`, cache DDL, textual EXPLAIN, MergeTree sorting/partition metadata | Shared CSV/clipboard import, streaming results, query cancellation, sessions/query kill, OPTIMIZE TABLE, partition inspection | Preview; self-hosted and ClickHouse Cloud; no relational indexes/procedures |
+| Snowflake | Preview companion runtime using `snowflake-sdk`; password, OAuth, or key-pair configuration | Snowflake SQL authoring, completion, formatting, diagnostics | Databases, schemas, tables, views, procedures, functions, sequences, stages, streams, tasks, file formats, warehouses | `GET_DDL`, `EXPLAIN USING JSON`, and recent-query profile inspection | Stage-oriented import/export guidance, stream/task drafts, shared result workflows | Preview; warehouse credits and account privileges apply |
+| Vertica | Preview companion runtime using `vertica-nodejs`; TLS and session options | Vertica SQL authoring, completion, snippets, diagnostics | `v_catalog`/`v_monitor` metadata, object and source search | DDL, explain graph, tuning, projections and skew inspection | Import previews, statistics/purge helpers, session monitoring, shared result workflows | Preview; runtime setup and privileges required |
 | Access | Preview Access reader/session plus local embedded runtime | File SQL authoring and local completion; not a warehouse dialect | MDB/ACCDB tables, columns, DDL boundary | File/session operations; no warehouse session model | Access file import/edit/export plus local result workflows | Preview; file/runtime boundary |
 | Files / DuckDB / SQLite | Preview local DuckDB or SQLite runtime; no server credential required | File SQL dialects, local completion and formatting | Lazy local catalogs and source profiles | Local DDL, explain, integrity/maintenance varies by runtime | CSV/TSV, XLSX/XLSB, Parquet, Avro, Access; result export | Preview desktop/local; file sources can be read-only |
 
@@ -38,6 +40,6 @@ Include database kind, version, connection mode, a minimal SQL/object example, e
 
 ## Generated source inventory
 
-The Pages build records the advertised `DatabaseKind` values found in the shared contract. Shared contracts also contain preview-compatible kinds such as Snowflake and Vertica, but those are intentionally excluded from this public matrix until their product pages and validation boundary are ready; their repository appendices are technical references, not support promises:
+The Pages build records every advertised `DatabaseKind` found in the shared contract. A listed companion is a repository and packaging inventory claim, not a promise of identical depth: Snowflake, Vertica, and the other optional runtimes remain Preview until their common dialect contract and live validation meet the promotion criteria in the quality roadmap.
 
 <!-- GENERATED:DATABASES -->
