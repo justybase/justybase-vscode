@@ -11,7 +11,11 @@ import {
     setResultFormattingState,
     saveScrollStateToCache,
 } from '../state.js';
-import { matchesFilterValueSearch } from '../filterValueSort.js';
+import {
+    createFilterValueSearchText,
+    matchesFilterValueSearchText,
+} from '../filterValueSort.js';
+import type { FilterValueSearchText } from '../filterValueSort.js';
 import { GLOBAL_FILTER_WORKER_ROW_THRESHOLD } from '../searchWorkerBridge.js';
 import {
     formatCellValue,
@@ -275,6 +279,11 @@ export function createResultSetGrid(
     let disposed = false;
     let debouncedSaveOnScroll: ReturnType<typeof debounce> | null = null;
     let immediateScrollSaveHandler: EventListener | null = null;
+    let globalFilterSavePending = false;
+    const debouncedSaveGlobalFilterState = debounce(() => {
+        globalFilterSavePending = false;
+        saveAllGridStates();
+    }, 200);
 
     let tanTable: GridTanStackTable;
 
@@ -1855,9 +1864,58 @@ export function createResultSetGrid(
 
 
 
+    let cachedGlobalFilterValue: string | undefined;
+    let cachedGlobalFilterSearchText: FilterValueSearchText | undefined;
+    let globalFilterSearchCache = new WeakMap<object, FilterValueSearchText[]>();
+    const globalFilterColumnId = columns[0]?.id;
+    const getGlobalFilterSearchText = (filterValue: string): FilterValueSearchText => {
+        const query = String(filterValue);
+        if (cachedGlobalFilterSearchText && cachedGlobalFilterValue === query) {
+            return cachedGlobalFilterSearchText;
+        }
+
+        cachedGlobalFilterValue = query;
+        cachedGlobalFilterSearchText = createFilterValueSearchText(query);
+        return cachedGlobalFilterSearchText;
+    };
+    const toGlobalFilterDisplayValue = (value: unknown): string => (
+        value === null || value === undefined ? 'NULL' : String(value)
+    );
+    const getGlobalFilterRowSearchTexts = (groupableRow: GroupableTanStackRow): FilterValueSearchText[] => {
+        const original = groupableRow.original;
+        const cacheKey = typeof original === 'object' && original !== null ? original : undefined;
+        if (cacheKey) {
+            const cached = globalFilterSearchCache.get(cacheKey);
+            if (cached) {
+                return cached;
+            }
+        }
+
+        const values: FilterValueSearchText[] = [];
+        if (Array.isArray(original)) {
+            for (const value of original) {
+                values.push(createFilterValueSearchText(toGlobalFilterDisplayValue(value)));
+            }
+        } else {
+            for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+                values.push(createFilterValueSearchText(toGlobalFilterDisplayValue(
+                    groupableRow.getValue(String(columnIndex)),
+                )));
+            }
+        }
+
+        if (cacheKey) {
+            globalFilterSearchCache.set(cacheKey, values);
+        }
+        return values;
+    };
+
     tanTable = createTable({
         data: rs.data,
         columns,
+        // TanStack invokes a global filter once for every globally filterable column.
+        // The predicate below scans the complete row, so one invocation per row is enough.
+        getColumnCanGlobalFilter: (column: { id: string }) => column.id === globalFilterColumnId,
         state: {
             get sorting() { return tableState.sorting; },
             get globalFilter() { return tableState.globalFilter; },
@@ -1885,6 +1943,9 @@ export function createResultSetGrid(
         },
         onGlobalFilterChange: (updater) => {
             tableState.globalFilter = typeof updater === 'function' ? updater(tableState.globalFilter) : updater;
+            if (!tableState.globalFilter) {
+                globalFilterSearchCache = new WeakMap<object, FilterValueSearchText[]>();
+            }
             setGlobalFilterState(rsIndex, tableState.globalFilter, rs.executionTimestamp, getActiveSourceUri());
             if (getResultSetAt(rsIndex)?.storageMode === 'sqlite') {
                 syncDiskQuerySpecFromGrid(rsIndex);
@@ -1897,7 +1958,8 @@ export function createResultSetGrid(
             invalidateRowNumberCache();
             invalidateAggregationCache();
             scheduleRender();
-            saveAllGridStates();
+            globalFilterSavePending = true;
+            debouncedSaveGlobalFilterState();
         },
         onColumnFiltersChange: (updater) => {
             tableState.columnFilters = typeof updater === 'function' ? updater(tableState.columnFilters) : updater;
@@ -1993,24 +2055,18 @@ export function createResultSetGrid(
                 return true;
             }
 
-            const query = String(filterValue);
             const original = groupableRow.original;
-            if (!original || !Array.isArray(original)) {
+            if (!original) {
                 return false;
             }
 
-            for (let c = 0; c < original.length; c++) {
-                let val = original[c];
-                if (val === null || val === undefined) {
-                    val = 'NULL';
-                } else {
-                    val = String(val);
-                }
-                if (matchesFilterValueSearch(val, query)) {
+            const searchText = getGlobalFilterSearchText(filterValue);
+            const rowSearchTexts = getGlobalFilterRowSearchTexts(groupableRow);
+            for (const cellSearchText of rowSearchTexts) {
+                if (matchesFilterValueSearchText(cellSearchText, searchText)) {
                     return true;
                 }
             }
-
             return false;
         },
         getCoreRowModel: getCoreRowModel(),
@@ -2069,6 +2125,11 @@ export function createResultSetGrid(
             resolvedRowHeight = null;
         },
         dispose: () => {
+            debouncedSaveGlobalFilterState.cancel();
+            if (globalFilterSavePending) {
+                globalFilterSavePending = false;
+                saveAllGridStates();
+            }
             disposed = true;
             if (typeof debouncedSaveOnScroll?.cancel === 'function') {
                 debouncedSaveOnScroll.cancel();
@@ -2096,6 +2157,7 @@ export function createResultSetGrid(
             if (tanTable.options) {
                 tanTable.options.data = [];
             }
+            globalFilterSearchCache = new WeakMap<object, FilterValueSearchText[]>();
             rowPool.length = 0;
             cellPool.length = 0;
         },

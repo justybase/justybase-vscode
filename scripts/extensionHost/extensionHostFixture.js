@@ -3,6 +3,9 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 const SQLITE_TABLE_NAME = 'jbl_extension_host_fixture';
+const FILTER_PERFORMANCE_TABLE_NAME = 'jbl_extension_host_filter_performance';
+const FILTER_PERFORMANCE_ROW_COUNT = 4000;
+const FILTER_PERFORMANCE_COLUMN_COUNT = 32;
 
 // Keep these rows intentionally boring and stable. The Extension Host and
 // Playwright fixtures use the same value patterns so a failed trace can be
@@ -85,6 +88,45 @@ function createSqliteFixture(databasePath) {
     database.close();
 }
 
+/** Create the wide in-memory result used by the real Extension Host filter benchmark. */
+function createSqliteFilterPerformanceFixture(databasePath) {
+    fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+    const database = new DatabaseSync(databasePath);
+    const columns = [
+        'id',
+        ...Array.from(
+            { length: FILTER_PERFORMANCE_COLUMN_COUNT - 1 },
+            (_unused, index) => `c${String(index + 1).padStart(2, '0')}`,
+        ),
+    ];
+    database.exec(`DROP TABLE IF EXISTS ${quoteSqliteIdentifier(FILTER_PERFORMANCE_TABLE_NAME)}`);
+    database.exec(`
+        CREATE TABLE ${quoteSqliteIdentifier(FILTER_PERFORMANCE_TABLE_NAME)} (
+            ${quoteSqliteIdentifier('id')} INTEGER PRIMARY KEY,
+            ${columns.slice(1).map(column => `${quoteSqliteIdentifier(column)} TEXT NOT NULL`).join(',\n            ')}
+        )
+    `);
+    const placeholders = columns.map(() => '?').join(', ');
+    const insert = database.prepare(`
+        INSERT INTO ${quoteSqliteIdentifier(FILTER_PERFORMANCE_TABLE_NAME)}
+        (${columns.map(quoteSqliteIdentifier).join(', ')})
+        VALUES (${placeholders})
+    `);
+    for (let rowIndex = 1; rowIndex <= FILTER_PERFORMANCE_ROW_COUNT; rowIndex += 1) {
+        const row = [rowIndex];
+        for (let columnIndex = 1; columnIndex < FILTER_PERFORMANCE_COLUMN_COUNT; columnIndex += 1) {
+            const marker = rowIndex === 1 && columnIndex === 1
+                ? 'needle-start'
+                : rowIndex === Math.floor(FILTER_PERFORMANCE_ROW_COUNT / 2) && columnIndex === 1
+                    ? 'needle-middle'
+                    : `cell-${rowIndex}-${columnIndex}`;
+            row.push(marker);
+        }
+        insert.run(...row);
+    }
+    database.close();
+}
+
 function selectSql(tableName = SQLITE_TABLE_NAME, schemaName) {
     const table = schemaName
         ? `${quoteNetezzaIdentifier(schemaName)}.${quoteNetezzaIdentifier(tableName)}`
@@ -155,8 +197,12 @@ function getFixtureRowCount() {
 module.exports = {
     FIXTURE_COLUMNS,
     FIXTURE_ROWS,
+    FILTER_PERFORMANCE_COLUMN_COUNT,
+    FILTER_PERFORMANCE_ROW_COUNT,
+    FILTER_PERFORMANCE_TABLE_NAME,
     SQLITE_TABLE_NAME,
     createSqliteFixture,
+    createSqliteFilterPerformanceFixture,
     selectSql,
     selectSubsetSql,
     updateSql,

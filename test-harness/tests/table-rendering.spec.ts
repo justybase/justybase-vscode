@@ -338,4 +338,26 @@ test.describe('Table rendering', () => {
         await expect(page.locator('#gridContainer table thead th').nth(1)).toContainText('id');
         await expect(page.locator('#gridContainer td.row-number-cell')).toHaveCount(1);
     });
+
+    test('recovers missing, duplicate, delayed, and out-of-order stream chunks without duplicate rows', async ({ page }) => {
+        await page.goto(`${TEST_PAGE}?protocol=faulty-stream`, { waitUntil: 'networkidle' });
+        await page.waitForFunction(
+            () => document.getElementById('renderStatus')?.textContent?.includes('✅'),
+            { timeout: 15000 },
+        );
+
+        await expect.poll(() => page.evaluate(() => {
+            const messages = (window as unknown as { __postedMessages?: Array<{ command?: string; reason?: string }> })
+                .__postedMessages ?? [];
+            return messages.filter(message =>
+                message.command === 'requestResultSync'
+                && message.reason === 'out-of-order-chunk',
+            ).length;
+        })).toBe(1);
+
+        await expect(page.locator('#gridContainer td.row-number-cell')).toHaveCount(8, { timeout: 10000 });
+        await expect(page.locator('#rowCountInfo')).toContainText('8');
+        const ids = await page.locator('#gridContainer tbody tr td:nth-child(2)').allTextContents();
+        expect(ids.map(value => Number(value.trim())).filter(Number.isFinite)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    });
 });

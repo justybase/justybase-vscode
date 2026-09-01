@@ -37,6 +37,11 @@ async function run() {
     assert.ok(report.resultSetCount >= 2, 'Scenario must include Logs and tabular results.');
     assert.ok(report.rowCounts.includes(12), 'Scenario report must include the deterministic 12-row result.');
     assert.equal(report.pendingRequestCount, 0, 'Scenario must finish without host bridge requests.');
+    assert.equal(report.activeCommandCount, 0, 'Scenario must finish without registered streaming commands.');
+    assert.equal(report.executingSourceCount, 0, 'Scenario must finish without executing result sources.');
+    assert.equal(report.streamingResultCount, 0, 'Scenario must finish without tracked streaming results.');
+    assert.equal(report.streamingTransportCount, 0, 'Scenario must finish without transport cursors.');
+    assert.equal(report.pendingResultSyncCount, 0, 'Scenario must finish without deferred result synchronization.');
     assert.equal(
         report.untitledLanguageLifecyclePassed,
         true,

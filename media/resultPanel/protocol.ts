@@ -244,8 +244,15 @@ function validateHostMessage(message: MessageRecord): boolean {
         case 'appendRows':
             return isIndex(message.resultSetIndex) && hasRows(message)
                 && isIndex(message.totalRows) && typeof message.isLastChunk === 'boolean'
-                && typeof message.limitReached === 'boolean';
+                && typeof message.limitReached === 'boolean'
+                && (message.resultSetId === undefined || hasString(message, 'resultSetId'))
+                && (message.chunkSequence === undefined || isIndex(message.chunkSequence))
+                && (message.fromRow === undefined || isIndex(message.fromRow));
         case 'streamingComplete':
+            return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
+                && isIndex(message.totalRows) && typeof message.limitReached === 'boolean'
+                && (message.resultSetId === undefined || hasString(message, 'resultSetId'))
+                && (message.lastChunkSequence === undefined || isIndex(message.lastChunkSequence));
         case 'rowCountUpdate':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.totalRows) && typeof message.limitReached === 'boolean';

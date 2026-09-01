@@ -561,4 +561,66 @@ describe('handleHydrate executingSources dedup', () => {
             data: [[1]]
         }));
     });
+
+    it('applies sequenced chunks once and requests one authoritative sync after a gap', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }],
+            data: [],
+            executionTimestamp: 9,
+            isLog: true,
+            name: 'Logs',
+        }];
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        const { handleAppendRows } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+        };
+        const first = {
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[1], [2]],
+            fromRow: 0,
+            totalRows: 2,
+            resultSetId: 'stream-result-1',
+            chunkSequence: 0,
+            isFirstChunk: true,
+            isLastChunk: false,
+            limitReached: false,
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT id FROM t',
+            executionTimestamp: 20,
+        };
+
+        handleAppendRows(first);
+        handleAppendRows({ ...first, isFirstChunk: false });
+
+        expect(win.resultSets[1].data).toEqual([[1], [2]]);
+        protocol.postHostMessage.mockClear();
+
+        handleAppendRows({
+            ...first,
+            rows: [[5], [6]],
+            fromRow: 4,
+            totalRows: 6,
+            chunkSequence: 2,
+            isFirstChunk: false,
+        });
+        handleAppendRows({
+            ...first,
+            rows: [[7], [8]],
+            fromRow: 6,
+            totalRows: 8,
+            chunkSequence: 3,
+            isFirstChunk: false,
+        });
+
+        expect(win.resultSets[1].data).toEqual([[1], [2]]);
+        expect(protocol.postHostMessage).toHaveBeenCalledTimes(1);
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestResultSync',
+            sourceUri,
+            reason: 'out-of-order-chunk',
+        });
+    });
 });
