@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Partial
 last_verified: 2026-08-19
-product_version: 3.17.10
+product_version: 3.17.11
 ---
 
 # Migration Studio and ETL Designer
