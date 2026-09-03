@@ -109,6 +109,7 @@ import {
     logQueryToHistoryAsync,
     handleBatchRetry,
     handleBatchError,
+    isCancellationError,
     createDropSessionCallback,
     getQueryConfig,
 } from "../core/queryBatchExecutor";
@@ -208,6 +209,37 @@ async function readWorkbookSheets(
 describe("queryBatchExecutor", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+    });
+
+    describe("isCancellationError", () => {
+        it.each([
+            "Query cancelled",
+            "Canceled.",
+            "canceling statement due to user request",
+            "operation aborted",
+            "The operation was aborted.",
+            "Variable input cancelled by user",
+            "cancelled: user request",
+            "ORA-01013: user requested cancel of current operation",
+        ])("recognizes a driver cancellation: %s", message => {
+            expect(isCancellationError(new Error(message))).toBe(true);
+        });
+
+        it('recognizes a DOM AbortError by name', () => {
+            expect(isCancellationError({ name: 'AbortError' })).toBe(true);
+        });
+
+        it('recognizes the shared export cancellation code', () => {
+            expect(isCancellationError({ code: 'EXPORT_CANCELLED', message: 'stopped' })).toBe(true);
+        });
+
+        it.each([
+            'column "cancel" does not exist',
+            'column "cancelled" does not exist',
+            'query returned a value named cancel',
+        ])("does not infer cancellation from SQL error text: %s", message => {
+            expect(isCancellationError(new Error(message))).toBe(false);
+        });
     });
 
     // -----------------------------------------------------------------------

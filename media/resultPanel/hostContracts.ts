@@ -372,12 +372,13 @@ interface ResultPanelHostToWebviewMessageMap {
     diskBackedActivate: {
         sourceUri: string;
         resultSetIndex: number;
+        resultSetId?: string;
         totalRows: number;
         columns: { name: string; type?: string; scale?: number }[];
         rows: Uint8Array | unknown[][];
         limitReached: boolean;
     };
-    rowCountUpdate: { sourceUri: string; resultSetIndex: number; totalRows: number; limitReached: boolean };
+    rowCountUpdate: { sourceUri: string; resultSetIndex: number; resultSetId?: string; totalRows: number; limitReached: boolean };
     rowWindow: {
         sourceUri: string;
         resultSetIndex: number;

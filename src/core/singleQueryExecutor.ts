@@ -28,6 +28,7 @@ import {
   executeMacroExport,
   executeMacroQuery,
   getQueryConfig,
+  isCancellationError,
 } from "./queryBatchExecutor";
 import {
   isBusyConnectionError,
@@ -297,11 +298,10 @@ export async function runQueryRaw(
     }
     let activeError: unknown = error;
     const durationMs = Date.now() - queryStartTime;
-    const errObj = error as { message?: string };
-    const errMsg = errObj.message || String(error);
-    const isCancelled = errMsg.toLowerCase().includes('cancelled') || errMsg.toLowerCase().includes('cancel');
+    const isCancelled = isCancellationError(error);
     if (
       isConnectionTimeoutError(error)
+      && !isCancelled
       && documentUri
       && keepConnectionOpen
       && isSafeExecutedSqlRetry(queryToExecute, error)
@@ -360,6 +360,7 @@ export async function runQueryRaw(
       }
     } else if (
       isConnectionTimeoutError(error)
+      && !isCancelled
       && documentUri
       && keepConnectionOpen
       && error instanceof ExecutedSqlError
@@ -370,6 +371,7 @@ export async function runQueryRaw(
     // Silent auxiliary queries (refresh, All rows): wait and retry once when connection is still busy.
     if (
       isBusyConnectionError(error)
+      && !isCancelled
       && documentUri
       && keepConnectionOpen
       && silent
@@ -537,6 +539,7 @@ export async function executeRawQuery(
     assertExecutionCurrent(isExecutionCurrent);
     const brokenPersistentConnection =
       !isRetryAttempt
+      && !isCancellationError(error)
       && keepConnectionOpen
       && documentUri
       && isConnectionBrokenError(error);
@@ -787,10 +790,9 @@ async function executeRawQueryOnce(
     };
   } catch (error: unknown) {
     if (operationStatus === 'success') {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      operationStatus = /cancel/i.test(errorMessage)
+      operationStatus = isCancellationError(error)
         ? 'cancelled'
-        : /timeout|timed out/i.test(errorMessage)
+        : /timeout|timed out/i.test(error instanceof Error ? error.message : String(error))
           ? 'timeout'
           : 'error';
     }

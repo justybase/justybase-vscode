@@ -43,6 +43,7 @@ import {
     type ExecutionCurrentCheck,
 } from "./executionGuard";
 import { formatBinaryValue } from "../export/binaryValue";
+import { isCancellationError } from './cancellation';
 import {
     convertToExcelNumberIfNumericString,
     shouldConvertToExcelNumber,
@@ -127,6 +128,12 @@ export interface BatchConnectionSetup {
     historyManager: QueryHistoryManager;
     details: { host: string; database: string };
     noticeHandler: (msg: unknown) => void;
+}
+
+export { isCancellationError };
+
+function isBatchCancellationRequested(documentUri: string | undefined): boolean {
+    return documentUri !== undefined && streamingManager.isAborted(documentUri);
 }
 
 /**
@@ -784,6 +791,10 @@ export async function handleBatchRetry<T>(
         documentUri &&
         keepConnectionOpen
     ) {
+        if (isBatchCancellationRequested(documentUri)) {
+            throw new Error('Query cancelled', { cause: error });
+        }
+
         const retryMsg =
             "Connection was closed by server. Reconnecting and retrying...";
         if (outputChannel) {
@@ -796,13 +807,27 @@ export async function handleBatchRetry<T>(
         }
 
         // Close the broken persistent connection
+        if (isBatchCancellationRequested(documentUri)) {
+            throw new Error('Query cancelled', { cause: error });
+        }
         await connManager.closeDocumentPersistentConnection(documentUri);
         assertExecutionCurrent(isExecutionCurrent);
+        if (isBatchCancellationRequested(documentUri)) {
+            throw new Error('Query cancelled', { cause: error });
+        }
 
         try {
+            if (isBatchCancellationRequested(documentUri)) {
+                throw new Error('Query cancelled', { cause: error });
+            }
             const result = await retryFn();
             return { handled: true, result };
         } catch (retryError: unknown) {
+            if (isCancellationError(retryError) || isBatchCancellationRequested(documentUri)) {
+                throw retryError instanceof Error
+                    ? retryError
+                    : new Error('Query cancelled', { cause: retryError });
+            }
             const retryErrObj = retryError as { message?: string };
             const retryErrorMessage = `Error (after reconnect attempt): ${retryErrObj.message || String(retryError)}`;
             if (outputChannel) {

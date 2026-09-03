@@ -20,6 +20,7 @@ import {
     logQueryToHistoryAsync,
     handleBatchRetry,
     handleBatchError,
+    isCancellationError,
     createDropSessionCallback,
     getQueryConfig,
 } from "./queryBatchExecutor";
@@ -51,6 +52,10 @@ const TERMINAL_EXECUTION_STATUSES = new Set<BatchExecutionStatus>([
     'error',
     'cancelled',
 ]);
+
+function isBatchCancellationRequested(documentUri: string | undefined): boolean {
+    return documentUri !== undefined && streamingManager.isAborted(documentUri);
+}
 
 function emitQueryStatus(
     callback: QueryEndCallback | undefined,
@@ -141,7 +146,7 @@ function handleBatchQueryFailure(params: {
     assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
     const errorMsg = params.err instanceof Error ? params.err.message : String(params.err);
     const durationMs = Date.now() - params.startTime;
-    const isCancelled = errorMsg.toLowerCase().includes('cancelled');
+    const isCancelled = isCancellationError(params.err);
 
     emitQueryStatus(
         params.queryEndCallback,
@@ -258,7 +263,7 @@ export async function runQueriesSequentially(
     let currentFailureCameFromExecution: boolean;
 
     const resolvedConnectionName = resolveBatchConnectionName(connManager, documentUri);
-    if (documentUri) {
+    if (documentUri && !_isRetry) {
         streamingManager.clearAborted(documentUri);
     }
     assertExecutionCurrent(_batchOptions.isExecutionCurrent);
@@ -517,10 +522,14 @@ export async function runQueriesSequentially(
                     );
                     currentQueryAllowsRetry = false;
                 } catch (err: unknown) {
+                    const cancellationRequested =
+                        isBatchCancellationRequested(documentUri) || isCancellationError(err);
                     const brokenConnection = currentFailureCameFromExecution
+                        && !cancellationRequested
                         && isConnectionBrokenError(err);
                     currentFailureWillRetry =
-                        !_isRetry
+                        !cancellationRequested
+                        && !_isRetry
                         && brokenConnection
                         && currentQueryAllowsRetry
                         && documentUri !== undefined
@@ -529,8 +538,9 @@ export async function runQueriesSequentially(
                         throw err;
                     }
 
-                    const reportedError =
-                        brokenConnection
+                    const reportedError = cancellationRequested
+                        ? new Error('Query cancelled', { cause: err })
+                        : brokenConnection
                         && !_isRetry
                         && !currentQueryAllowsRetry
                         && _batchOptions.retryOnBrokenConnection !== false
@@ -541,7 +551,7 @@ export async function runQueriesSequentially(
                     const errMsg = reportedError instanceof Error
                         ? reportedError.message
                         : String(reportedError);
-                    const isCancelled = errMsg.toLowerCase().includes('cancelled');
+                    const isCancelled = isCancellationError(reportedError);
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
@@ -581,6 +591,12 @@ export async function runQueriesSequentially(
             if (outputChannel) outputChannel.appendLine("All queries completed.");
         } finally {
             connection.removeListener("notice", noticeHandler);
+            // A cancel can arrive while the broken connection is being
+            // unwound. Do this check before cleanup completes so the outer
+            // handler cannot turn that cancellation into a reconnect retry.
+            if (currentFailureWillRetry && isBatchCancellationRequested(documentUri)) {
+                currentFailureWillRetry = false;
+            }
             if (shouldCloseConnection) {
                 await connection.close();
             }
@@ -589,6 +605,32 @@ export async function runQueriesSequentially(
       assertExecutionCurrent(_batchOptions.isExecutionCurrent);
       const retryExecutionId = currentExecutionId;
       const retryQueryIndex = currentQueryIndex;
+      if (isBatchCancellationRequested(documentUri)) {
+        currentFailureWillRetry = false;
+        const alreadyTerminal = retryExecutionId !== undefined
+          && _terminalExecutionIds.has(retryExecutionId);
+        if (!alreadyTerminal) {
+          emitQueryStatus(
+            queryEndCallback,
+            _terminalExecutionIds,
+            retryExecutionId,
+            0,
+            0,
+            'cancelled',
+            'Query cancelled',
+          );
+          const cancelledQuery = queries[retryQueryIndex];
+          if (cancelledQuery !== undefined) {
+            _batchOptions.onStatementFailed?.({
+              sql: cancelledQuery,
+              connectionName: resolvedConnectionName,
+              documentUri,
+              errorMessage: 'Query cancelled',
+            });
+          }
+        }
+        await handleBatchError(new Error('Query cancelled', { cause: error }), connManager, outputChannel, logCallback, documentUri);
+      }
       if (currentFailureWillRetry) {
         try {
           const retryResult = await handleBatchRetry(
@@ -641,15 +683,27 @@ export async function runQueriesSequentially(
           const retryErrorMessage = retryError instanceof Error
             ? retryError.message
             : String(retryError);
+          const retryWasCancelled =
+            isCancellationError(retryError) || isBatchCancellationRequested(documentUri);
+          const retryWasAlreadyTerminal =
+            retryExecutionId !== undefined && _terminalExecutionIds.has(retryExecutionId);
           emitQueryStatus(
             queryEndCallback,
             _terminalExecutionIds,
             retryExecutionId,
             0,
             0,
-            'error',
-            retryErrorMessage,
+            retryWasCancelled ? 'cancelled' : 'error',
+            retryWasCancelled ? 'Query cancelled' : retryErrorMessage,
           );
+          if (retryWasCancelled && retryExecutionId !== undefined && !retryWasAlreadyTerminal) {
+            _batchOptions.onStatementFailed?.({
+              sql: queries[retryQueryIndex] ?? '',
+              connectionName: resolvedConnectionName,
+              documentUri,
+              errorMessage: 'Query cancelled',
+            });
+          }
           throw retryError;
         }
       }
@@ -711,7 +765,7 @@ export async function runQueriesWithStreaming(
     let currentQueryRows = 0;
 
     const resolvedConnectionName = resolveBatchConnectionName(connManager, documentUri);
-    if (documentUri) {
+    if (documentUri && !_isRetry) {
         streamingManager.clearAborted(documentUri);
     }
     assertExecutionCurrent(_batchOptions.isExecutionCurrent);
@@ -959,10 +1013,14 @@ export async function runQueriesWithStreaming(
                     );
                     currentQueryAllowsRetry = false;
                 } catch (err: unknown) {
+                    const cancellationRequested =
+                        isBatchCancellationRequested(documentUri) || isCancellationError(err);
                     const brokenConnection = currentFailureCameFromExecution
+                        && !cancellationRequested
                         && isConnectionBrokenError(err);
                     currentFailureWillRetry =
-                        !_isRetry
+                        !cancellationRequested
+                        && !_isRetry
                         && brokenConnection
                         && currentQueryAllowsRetry
                         && !currentQueryDeliveredChunk
@@ -978,13 +1036,15 @@ export async function runQueriesWithStreaming(
                         && documentUri !== undefined
                         && keepConnectionOpen
                         && (currentQueryDeliveredChunk || (!_isRetry && !currentQueryAllowsRetry));
-                    const reportedError = shouldExplainRetryRefusal
+                    const reportedError = cancellationRequested
+                        ? new Error('Query cancelled', { cause: err })
+                        : shouldExplainRetryRefusal
                         ? createRetrySafetyError(err, currentQueryDeliveredChunk)
                         : err;
                     const errMsg = reportedError instanceof Error
                         ? reportedError.message
                         : String(reportedError);
-                    const isCancelled = errMsg.toLowerCase().includes('cancelled');
+                    const isCancelled = isCancellationError(reportedError);
                     logQueryToHistoryAsync(
                         historyManager,
                         details.host,
@@ -1024,6 +1084,11 @@ export async function runQueriesWithStreaming(
             if (outputChannel) outputChannel.appendLine("All queries completed.");
         } finally {
             connection.removeListener("notice", noticeHandler);
+            // Preserve a cancellation which races with broken-connection
+            // cleanup; a retry is never valid after the user aborts.
+            if (currentFailureWillRetry && isBatchCancellationRequested(documentUri)) {
+                currentFailureWillRetry = false;
+            }
             if (shouldCloseConnection) {
                 await connection.close();
             }
@@ -1032,6 +1097,32 @@ export async function runQueriesWithStreaming(
       assertExecutionCurrent(_batchOptions.isExecutionCurrent);
       const retryExecutionId = currentExecutionId;
       const retryQueryIndex = currentQueryIndex;
+      if (isBatchCancellationRequested(documentUri)) {
+        currentFailureWillRetry = false;
+        const alreadyTerminal = retryExecutionId !== undefined
+          && _terminalExecutionIds.has(retryExecutionId);
+        if (!alreadyTerminal) {
+          emitQueryStatus(
+            queryEndCallback,
+            _terminalExecutionIds,
+            retryExecutionId,
+            currentQueryRows,
+            0,
+            'cancelled',
+            'Query cancelled',
+          );
+          const cancelledQuery = queries[retryQueryIndex];
+          if (cancelledQuery !== undefined) {
+            _batchOptions.onStatementFailed?.({
+              sql: cancelledQuery,
+              connectionName: resolvedConnectionName,
+              documentUri,
+              errorMessage: 'Query cancelled',
+            });
+          }
+        }
+        await handleBatchError(new Error('Query cancelled', { cause: error }), connManager, outputChannel, logCallback, documentUri);
+      }
       if (currentFailureWillRetry) {
         try {
           const retryResult = await handleBatchRetry(
@@ -1084,15 +1175,27 @@ export async function runQueriesWithStreaming(
           const retryErrorMessage = retryError instanceof Error
             ? retryError.message
             : String(retryError);
+          const retryWasCancelled =
+            isCancellationError(retryError) || isBatchCancellationRequested(documentUri);
+          const retryWasAlreadyTerminal =
+            retryExecutionId !== undefined && _terminalExecutionIds.has(retryExecutionId);
           emitQueryStatus(
             queryEndCallback,
             _terminalExecutionIds,
             retryExecutionId,
             currentQueryRows,
             0,
-            'error',
-            retryErrorMessage,
+            retryWasCancelled ? 'cancelled' : 'error',
+            retryWasCancelled ? 'Query cancelled' : retryErrorMessage,
           );
+          if (retryWasCancelled && retryExecutionId !== undefined && !retryWasAlreadyTerminal) {
+            _batchOptions.onStatementFailed?.({
+              sql: queries[retryQueryIndex] ?? '',
+              connectionName: resolvedConnectionName,
+              documentUri,
+              errorMessage: 'Query cancelled',
+            });
+          }
           throw retryError;
         }
       }

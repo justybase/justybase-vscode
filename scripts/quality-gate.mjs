@@ -70,7 +70,10 @@ export function parseLcov(source) {
   for (const line of source.split(/\r?\n/u)) {
     if (line.startsWith('SF:')) {
       current = { lines: new Map(), branches: new Map() };
-      records.set(normalizePath(line.slice(3)), current);
+      const normalizedSource = normalizePath(line.slice(3));
+      const sourceRecords = records.get(normalizedSource) ?? [];
+      sourceRecords.push(current);
+      records.set(normalizedSource, sourceRecords);
     } else if (current && line.startsWith('DA:')) {
       const [lineNumber, hitCount] = line.slice(3).split(',').map(Number);
       if (Number.isFinite(lineNumber) && Number.isFinite(hitCount)) current.lines.set(lineNumber, hitCount);
@@ -91,17 +94,18 @@ function findLcovRecords(records, file) {
   const wanted = relativePath(file);
   const exactMatches = [];
 
-  for (const [source, record] of records) {
+  for (const [source, sourceRecords] of records) {
     const normalized = normalizePath(source);
-    if (normalized === wanted || normalized.endsWith(`/${wanted}`)) exactMatches.push(record);
+    if (normalized === wanted || normalized.endsWith(`/${wanted}`)) exactMatches.push(...sourceRecords);
   }
 
   if (exactMatches.length > 0) return exactMatches;
 
   const basenameMatches = [...records]
-    .filter(([source]) => path.basename(normalizePath(source)) === path.basename(wanted))
-    .map(([, record]) => record);
-  return basenameMatches.length === 1 ? basenameMatches : [];
+    .filter(([source]) => path.basename(normalizePath(source)) === path.basename(wanted));
+  return basenameMatches.length === 1
+    ? basenameMatches[0][1]
+    : [];
 }
 
 function mergeLcovRecords(records) {

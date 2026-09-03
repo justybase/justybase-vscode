@@ -424,6 +424,7 @@ export type ResultPanelHostToWebviewMessage =
         command: 'diskBackedActivate';
         sourceUri: string;
         resultSetIndex: number;
+        resultSetId?: string;
         totalRows: number;
         columns: { name: string; type?: string; scale?: number }[];
         rows: Uint8Array | unknown[][];
@@ -433,6 +434,7 @@ export type ResultPanelHostToWebviewMessage =
         command: 'rowCountUpdate';
         sourceUri: string;
         resultSetIndex: number;
+        resultSetId?: string;
         totalRows: number;
         limitReached: boolean;
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 
 interface MockDiskResultSet {
+    resultSetId?: string;
     columns: Array<{ name: string; type: string }>;
     data: unknown[][];
     storageMode: 'sqlite';
@@ -17,6 +18,12 @@ const mockResultSet: MockDiskResultSet = {
     totalRowCount: 700_000,
     limitReached: false,
 };
+
+let mockActiveSource = 'file:///large-result.sql';
+const mockSyncDiskStreamingRowCount = jest.fn((resultSet: MockDiskResultSet, totalRows: number) => {
+    resultSet.totalRowCount = totalRows;
+    resultSet.diskFilteredCount = totalRows;
+});
 
 const mockWrapper = {
     scrollTop: 12_345,
@@ -66,7 +73,7 @@ jest.mock('../../media/resultPanel/diskQuerySpec.js', () => ({
     ),
     getDiskQuerySpec: jest.fn(() => undefined),
     syncDiskQuerySpecFromGrid: jest.fn(() => undefined),
-    syncDiskStreamingRowCount: jest.fn(),
+    syncDiskStreamingRowCount: mockSyncDiskStreamingRowCount,
 }));
 
 jest.mock('../../media/resultPanel/diskQueryUtils.js', () => ({
@@ -74,7 +81,7 @@ jest.mock('../../media/resultPanel/diskQueryUtils.js', () => ({
 }));
 
 jest.mock('../../media/resultPanel/types.js', () => ({
-    getActiveSourceUri: jest.fn(() => 'file:///large-result.sql'),
+    getActiveSourceUri: jest.fn(() => mockActiveSource),
     callPanelMethod: jest.fn(),
     getResultSetAt: jest.fn(() => mockResultSet),
     getResultSets: jest.fn(() => [mockResultSet]),
@@ -85,11 +92,14 @@ describe('diskBackedGrid row window scroll preservation', () => {
     beforeEach(() => {
         mockResultSet.data = [];
         mockResultSet.totalRowCount = 700_000;
+        mockResultSet.resultSetId = undefined;
+        mockActiveSource = 'file:///large-result.sql';
         mockWrapper.scrollTop = 12_345;
         mockWrapper.scrollLeft = 67;
         mockGrid.tanTable.options.data = [];
         mockGrid.render.mockClear();
         mockGrid.scrollToIndex.mockClear();
+        mockSyncDiskStreamingRowCount.mockClear();
     });
 
     it('preserves active pixel scroll position when a SQLite window is applied', () => {
@@ -121,5 +131,140 @@ describe('diskBackedGrid row window scroll preservation', () => {
 
         expect(diskBackedGrid.DISK_WINDOW_ROWS).toBe(2_000);
         expect(diskBackedGrid.DISK_PAGE_SIZE).toBe(800);
+    });
+
+    it('preserves the stable result identity when disk activation arrives', () => {
+        mockResultSet.resultSetId = 'stable-result-1';
+        const { handleDiskBackedActivate } = require('../../media/resultPanel/diskBackedGrid.js') as {
+            handleDiskBackedActivate: (message: Record<string, unknown>) => void;
+        };
+
+        handleDiskBackedActivate({
+            command: 'diskBackedActivate',
+            sourceUri: mockActiveSource,
+            resultSetIndex: 0,
+            resultSetId: 'stable-result-1',
+            totalRows: 700_000,
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[1]],
+            limitReached: false,
+        });
+
+        expect(mockResultSet.resultSetId).toBe('stable-result-1');
+        expect(mockResultSet.data).toEqual([[1]]);
+    });
+
+    it('accepts a new activation identity for a legacy result shell', () => {
+        const originalRows = [[7]];
+        mockResultSet.data = originalRows;
+        const { handleDiskBackedActivate } = require('../../media/resultPanel/diskBackedGrid.js') as {
+            handleDiskBackedActivate: (message: Record<string, unknown>) => void;
+        };
+
+        handleDiskBackedActivate({
+            command: 'diskBackedActivate',
+            sourceUri: mockActiveSource,
+            resultSetIndex: 0,
+            resultSetId: 'new-result',
+            totalRows: 700_000,
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[1]],
+            limitReached: false,
+        });
+
+        expect(mockResultSet.resultSetId).toBe('new-result');
+        expect(mockResultSet.data).toEqual([[1]]);
+    });
+
+    it('rejects a same-source activation for a result that no longer owns the slot', () => {
+        mockResultSet.resultSetId = 'current-result';
+        const originalRows = [[7]];
+        mockResultSet.data = originalRows;
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        protocol.postHostMessage.mockClear();
+        const { handleDiskBackedActivate } = require('../../media/resultPanel/diskBackedGrid.js') as {
+            handleDiskBackedActivate: (message: Record<string, unknown>) => void;
+        };
+
+        handleDiskBackedActivate({
+            command: 'diskBackedActivate',
+            sourceUri: mockActiveSource,
+            resultSetIndex: 0,
+            resultSetId: 'stale-result',
+            totalRows: 700_000,
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[99]],
+            limitReached: false,
+        });
+
+        expect(mockResultSet.resultSetId).toBe('current-result');
+        expect(mockResultSet.data).toBe(originalRows);
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestResultSync',
+            sourceUri: mockActiveSource,
+            reason: 'disk-backed-activation-result-mismatch',
+        });
+        expect(mockGrid.render).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stale row-count update for a result that no longer owns the slot', () => {
+        mockResultSet.resultSetId = 'current-result';
+        mockResultSet.totalRowCount = 12;
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        protocol.postHostMessage.mockClear();
+        const { handleRowCountUpdate } = require('../../media/resultPanel/diskBackedGrid.js') as {
+            handleRowCountUpdate: (message: Record<string, unknown>) => void;
+        };
+
+        handleRowCountUpdate({
+            command: 'rowCountUpdate',
+            sourceUri: mockActiveSource,
+            resultSetIndex: 0,
+            resultSetId: 'stale-result',
+            totalRows: 700_000,
+            limitReached: true,
+        });
+
+        expect(mockResultSet.totalRowCount).toBe(12);
+        expect(mockResultSet.limitReached).toBe(false);
+        expect(mockSyncDiskStreamingRowCount).not.toHaveBeenCalled();
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestResultSync',
+            sourceUri: mockActiveSource,
+            reason: 'row-count-update-result-identity-mismatch',
+        });
+    });
+
+    it('ignores delayed disk messages for a source that is no longer active', () => {
+        const originalRows = [[7]];
+        mockResultSet.data = originalRows;
+        mockResultSet.totalRowCount = 7;
+        mockActiveSource = 'file:///other-result.sql';
+        const { handleDiskBackedActivate, handleRowCountUpdate } = require('../../media/resultPanel/diskBackedGrid.js') as {
+            handleDiskBackedActivate: (message: Record<string, unknown>) => void;
+            handleRowCountUpdate: (message: Record<string, unknown>) => void;
+        };
+
+        handleDiskBackedActivate({
+            command: 'diskBackedActivate',
+            sourceUri: 'file:///large-result.sql',
+            resultSetIndex: 0,
+            resultSetId: 'stale-result',
+            totalRows: 700_000,
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[99]],
+            limitReached: false,
+        });
+        handleRowCountUpdate({
+            command: 'rowCountUpdate',
+            sourceUri: 'file:///large-result.sql',
+            resultSetIndex: 0,
+            totalRows: 700_000,
+            limitReached: true,
+        });
+
+        expect(mockResultSet.data).toBe(originalRows);
+        expect(mockResultSet.totalRowCount).toBe(7);
+        expect(mockResultSet.limitReached).toBe(false);
     });
 });

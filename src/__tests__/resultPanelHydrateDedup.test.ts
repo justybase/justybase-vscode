@@ -562,6 +562,195 @@ describe('handleHydrate executingSources dedup', () => {
         }));
     });
 
+    it('does not replace an existing shell when the first chunk is duplicated', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }],
+            data: [['10:00', 'previous']],
+            executionTimestamp: 9,
+            isLog: true,
+            name: 'Logs',
+        }, {
+            columns: [{ name: 'id', type: 'int' }],
+            data: [[1], [2]],
+            executionTimestamp: 20,
+            resultSetId: 'stream-result-1',
+            isLog: false,
+            isStreamingComplete: false,
+        }];
+        win.streamingCompletedSources = new Set([sourceUri]);
+
+        const { handleAppendRows } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+        };
+        const existingResultSet = win.resultSets[1];
+        const firstChunk = {
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[9], [10]],
+            totalRows: 2,
+            isFirstChunk: true,
+            isLastChunk: false,
+            limitReached: false,
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT id FROM t',
+            executionTimestamp: 21,
+            resultSetId: 'stream-result-1',
+            chunkSequence: 0,
+            fromRow: 0,
+        };
+
+        handleAppendRows(firstChunk);
+        const acceptedResultSet = win.resultSets[1];
+        win.streamingCompletedSources = new Set([sourceUri]);
+        handleAppendRows(firstChunk);
+
+        expect(acceptedResultSet).not.toBe(existingResultSet);
+        expect(win.resultSets[1]).toBe(acceptedResultSet);
+        expect(win.resultSets[1].data).toEqual([[9], [10]]);
+        expect(win.streamingCompletedSources.has(sourceUri)).toBe(true);
+    });
+
+    it('keeps execution loading when a completion arrives ahead of the stream', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }],
+            data: [],
+            executionTimestamp: 9,
+            isLog: true,
+            name: 'Logs',
+        }, {
+            columns: [{ name: 'id', type: 'int' }],
+            data: [[1], [2]],
+            executionTimestamp: 20,
+            resultSetId: 'stream-result-1',
+            isLog: false,
+            isStreamingComplete: false,
+        }];
+
+        const { handleAppendRows, handleStreamingComplete, inferExecutionState } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+            handleStreamingComplete: (message: Record<string, unknown>) => void;
+            inferExecutionState: () => string;
+        };
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[3]],
+            fromRow: 2,
+            totalRows: 3,
+            resultSetId: 'stream-result-1',
+            chunkSequence: 0,
+            isFirstChunk: false,
+            isLastChunk: false,
+            limitReached: false,
+        });
+        handleStreamingComplete({
+            command: 'streamingComplete',
+            sourceUri,
+            resultSetIndex: 1,
+            totalRows: 4,
+            resultSetId: 'stream-result-1',
+            lastChunkSequence: 2,
+            limitReached: false,
+        });
+
+        expect(win.resultSets[1].data).toEqual([[1], [2], [3]]);
+        expect(win.resultSets[1].isStreamingComplete).toBe(false);
+        expect(win.streamingCompletedSources?.has(sourceUri)).not.toBe(true);
+        expect(inferExecutionState()).toBe('loading');
+    });
+
+    it('accepts identity-only completion after legacy append messages', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }],
+            data: [],
+            executionTimestamp: 9,
+            isLog: true,
+            name: 'Logs',
+        }];
+
+        const { handleAppendRows, handleStreamingComplete, inferExecutionState } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+            handleStreamingComplete: (message: Record<string, unknown>) => void;
+            inferExecutionState: () => string;
+        };
+
+        handleAppendRows({
+            command: 'appendRows',
+            sourceUri,
+            resultSetIndex: 1,
+            rows: [[42]],
+            totalRows: 1,
+            isFirstChunk: true,
+            isLastChunk: true,
+            limitReached: false,
+            resultSetId: 'legacy-result',
+            columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 42',
+            executionTimestamp: 20,
+        });
+        handleStreamingComplete({
+            command: 'streamingComplete',
+            sourceUri,
+            resultSetIndex: 1,
+            totalRows: 1,
+            limitReached: false,
+            resultSetId: 'legacy-result',
+        });
+
+        expect(win.resultSets[1].data).toEqual([[42]]);
+        expect(win.resultSets[1].isStreamingComplete).toBe(true);
+        expect(win.streamingCompletedSources.has(sourceUri)).toBe(true);
+        expect(inferExecutionState()).toBe('finalizing');
+    });
+
+    it('does not apply completion for a result identity that no longer owns the slot', () => {
+        const win = window as any;
+        const originalRows = [[7]];
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }],
+            data: [],
+            isLog: true,
+            name: 'Logs',
+        }, {
+            columns: [{ name: 'id', type: 'int' }],
+            data: originalRows,
+            resultSetId: 'current-result',
+            isStreamingComplete: false,
+        }];
+        const protocol = require('../../media/resultPanel/protocol.js') as { postHostMessage: jest.Mock };
+        protocol.postHostMessage.mockClear();
+
+        const { handleStreamingComplete, inferExecutionState } = require('../../media/resultPanel/messages.js') as {
+            handleStreamingComplete: (message: Record<string, unknown>) => void;
+            inferExecutionState: () => string;
+        };
+
+        handleStreamingComplete({
+            command: 'streamingComplete',
+            sourceUri,
+            resultSetIndex: 1,
+            totalRows: 1,
+            limitReached: false,
+            resultSetId: 'stale-result',
+        });
+
+        expect(win.resultSets[1].data).toBe(originalRows);
+        expect(win.resultSets[1].isStreamingComplete).toBe(false);
+        expect(win.streamingCompletedSources?.has(sourceUri)).not.toBe(true);
+        expect(inferExecutionState()).toBe('loading');
+        expect(protocol.postHostMessage).toHaveBeenCalledWith({
+            command: 'requestResultSync',
+            sourceUri,
+            reason: 'streaming-complete-result-identity-mismatch',
+        });
+    });
+
     it('applies sequenced chunks once and requests one authoritative sync after a gap', () => {
         const win = window as any;
         win.resultSets = [{

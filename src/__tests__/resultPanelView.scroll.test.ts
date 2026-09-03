@@ -737,6 +737,7 @@ describe('ResultPanelView Scroll Preservation', () => {
             expect(rowCountMessages[rowCountMessages.length - 1]).toEqual(expect.objectContaining({
                 sourceUri,
                 resultSetIndex: 1,
+                resultSetId: expect.any(String),
                 totalRows: 2,
             }));
         });

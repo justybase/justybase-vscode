@@ -178,6 +178,15 @@ describe('batchQueryExecutor', () => {
             'SELECT 1',
             '\uFEFF -- reason\n /* nested /* note */ done */ SELECT * FROM T',
             'VALUES (1)',
+            "SELECT 'mutate_customer(42)'",
+            'SELECT $$mutate_customer(42)$$',
+            'SELECT $body$mutate_customer(42)$body$',
+            'SELECT 1 /* mutate_customer(42) */',
+            'SELECT 1 -- mutate_customer(42)\n',
+            '--compact comment\nSELECT * FROM T',
+            'SELECT * FROM T WHERE id = $1',
+            "SELECT payload #> '{customer}' FROM T",
+            "SELECT payload #>> '{customer,name}' FROM T",
             'SHOW TABLES',
             'DESCRIBE T',
             'EXPLAIN SELECT * FROM T',
@@ -197,6 +206,16 @@ describe('batchQueryExecutor', () => {
             "SELECT nextval('customer_seq')",
             'SELECT customer_seq.NEXTVAL FROM dual',
             'SELECT mutate_customer(42)',
+            'SELECT "mutate_customer"(42)',
+            'SELECT [mutate_customer](42)',
+            'SELECT `mutate_customer`(42)',
+            'SELECT функция(42)',
+            "SELECT $$'$$, mutate_customer(42), $$'$$",
+            'SELECT 1 # mutate_customer(42)',
+            'SELECT 1--mutate_customer(42)',
+            'SELECT 1 /*! mutate_customer(42) */',
+            '/*! SET @state = 1 */ SELECT 1',
+            "SELECT '{\"a\": 1}'::jsonb # mutate_customer(42)",
             'SELECT * FROM CUSTOMER FOR UPDATE',
             'VALUES NEXT VALUE FOR customer_seq',
             'VALUES mutate_customer(42)',
@@ -387,6 +406,43 @@ END_PROC;`;
             expect(results[1].message).toContain('divide by zero');
             expect(results[2].data).toEqual([[2]]);
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(3);
+        });
+
+        it('keeps a SQL error containing the word cancel as an error', async () => {
+            mockExecuteAndFetch
+                .mockResolvedValueOnce({
+                    results: [],
+                    error: new Error('column "cancel" does not exist'),
+                    status: 'error',
+                })
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'value' }], rows: [[2]], limitReached: false }],
+                    error: null,
+                });
+
+            const results = await runQueriesSequentially(
+                mockContext,
+                ['SELECT cancel', 'SELECT 2'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                0,
+                undefined,
+                [],
+                { continueOnError: true },
+            );
+
+            expect(results[0]?.isError).toBe(true);
+            expect(results[0]?.message).toBe('column "cancel" does not exist');
+            expect(results[1]?.data).toEqual([[2]]);
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
         });
 
         it('should stop remaining queries when cancellation is requested between statements', async () => {
@@ -848,6 +904,46 @@ END_PROC;`;
             expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith(
                 'file:///test.sql',
             );
+            expect(mockClearAborted).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not replay a sequential query when cancellation races reconnect cleanup', async () => {
+            const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            const queryStartCallback = jest.fn().mockReturnValue('exec-cancel-race');
+            const queryEndCallback = jest.fn();
+            const onStatementFailed = jest.fn();
+            mockExecuteAndFetch.mockRejectedValueOnce(new Error('Connection lost'));
+            mockConnManager.closeDocumentPersistentConnection.mockImplementationOnce(async () => {
+                mockIsAborted.mockReturnValue(true);
+            });
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+                undefined,
+                0,
+                undefined,
+                [],
+                { onStatementFailed },
+            )).rejects.toThrow('Query cancelled');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledTimes(1);
+            expect(queryEndCallback.mock.calls.map((call: unknown[]) => call[3])).toEqual([
+                'retrying',
+                'cancelled',
+            ]);
+            expect(onStatementFailed).toHaveBeenCalledTimes(1);
         });
 
         it('emits one terminal error when the read-only reconnect retry also fails', async () => {
@@ -1487,6 +1583,46 @@ END_PROC;`;
             expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith(
                 'file:///test.sql',
             );
+            expect(mockClearAborted).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not replay a streaming query when cancellation races reconnect cleanup', async () => {
+            const { isConnectionBrokenError } = require('../core/queryRunnerUtils');
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            const queryStartCallback = jest.fn().mockReturnValue('stream-cancel-race');
+            const queryEndCallback = jest.fn();
+            const onStatementFailed = jest.fn();
+            mockExecuteWithStreaming.mockRejectedValueOnce(new Error('Connection lost'));
+            mockConnManager.closeDocumentPersistentConnection.mockImplementationOnce(async () => {
+                mockIsAborted.mockReturnValue(true);
+            });
+
+            await expect(runQueriesWithStreaming(
+                mockContext,
+                ['SELECT 1'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                5000,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+                undefined,
+                0,
+                undefined,
+                { onStatementFailed },
+            )).rejects.toThrow('Query cancelled');
+
+            expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledTimes(1);
+            expect(queryEndCallback.mock.calls.map((call: unknown[]) => call[3])).toEqual([
+                'retrying',
+                'cancelled',
+            ]);
+            expect(onStatementFailed).toHaveBeenCalledTimes(1);
         });
 
         it('keeps partial streamed rows and does not retry after a chunk was delivered', async () => {

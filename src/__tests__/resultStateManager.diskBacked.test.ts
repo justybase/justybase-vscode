@@ -102,6 +102,9 @@ describeIfSqlite('ResultStateManager disk-backed migration', () => {
 
         expect(migrateResult.type).toBe('diskBackedActivate');
         const resultSet = manager.resultsMap.get(sourceUri)![1];
+        if (migrateResult.type === 'diskBackedActivate') {
+            expect(migrateResult.props.resultSetId).toBe(resultSet.resultSetId);
+        }
         expect(resultSet.storageMode).toBe('sqlite');
         expect(resultSet.data).toHaveLength(0);
         expect(resultSet.totalRowCount).toBe(5);
@@ -109,6 +112,20 @@ describeIfSqlite('ResultStateManager disk-backed migration', () => {
 
         const rows = manager.getDiskBackedRows(resultSet.diskStoreId!, 0, 10);
         expect(rows).toEqual([[1], [2], [3], [4], [5]]);
+
+        const rowCountUpdate = manager.appendStreamingChunk(sourceUri, {
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[6]],
+            isFirstChunk: false,
+            isLastChunk: false,
+            totalRowsSoFar: 6,
+            limitReached: false,
+        }, 'SELECT * FROM t');
+
+        expect(rowCountUpdate.type).toBe('rowCountUpdate');
+        if (rowCountUpdate.type === 'rowCountUpdate') {
+            expect(rowCountUpdate.props.resultSetId).toBe(resultSet.resultSetId);
+        }
     });
 
     it('migrates BIGINT extremes to SQLite instead of falling back to memory', () => {

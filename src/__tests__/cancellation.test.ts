@@ -38,4 +38,22 @@ describe('cancellation contract', () => {
         expect(error.partial).toBe(true);
         expect(isCancellationError(error)).toBe(true);
     });
+
+    it('does not classify arbitrary SQL error text as cancellation', () => {
+        expect(isCancellationError(new Error('column "cancel" does not exist'))).toBe(false);
+        expect(isCancellationError(new Error('column "cancelled" does not exist'))).toBe(false);
+    });
+
+    it.each([
+        'Variable input cancelled by user',
+        'cancelled: user request',
+        'The operation was aborted.',
+    ])('recognizes cancellation message: %s', message => {
+        expect(isCancellationError(new Error(message))).toBe(true);
+    });
+
+    it('recognizes a DOM AbortError by name', () => {
+        expect(isCancellationError({ name: 'AbortError', message: 'The operation was aborted.' })).toBe(true);
+        expect(isCancellationError({ name: 'AbortError' })).toBe(true);
+    });
 });

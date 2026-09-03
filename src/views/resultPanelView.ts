@@ -2084,6 +2084,10 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
         if (
             isActiveSource
+            // The result identity is created by appendStreamingChunk. Do not
+            // report a first-chunk count against a previous occupant of the
+            // same result-set slot.
+            && !chunk.isFirstChunk
             && this._shouldPreReportStreamingRowCount(sourceUri, resultSetIndex, chunk.totalRowsSoFar)
             && this._shouldEmitStreamingRowCountReport(sourceUri, resultSetIndex, chunk.totalRowsSoFar, chunk.isLastChunk)
         ) {
@@ -2129,6 +2133,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 command: 'diskBackedActivate',
                 sourceUri: result.props.sourceUri,
                 resultSetIndex: result.props.resultSetIndex,
+                resultSetId: result.props.resultSetId,
                 totalRows: result.props.totalRows,
                 columns: result.props.columns,
                 rows: encode(this._encoder.sanitizeForMessagePack(result.props.firstPageRows)),
@@ -2155,6 +2160,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                     result.props.resultSetIndex,
                     result.props.totalRows,
                     result.props.limitReached,
+                    false,
+                    result.props.resultSetId,
                 );
             }
         } else if (result.type === 'incremental' && isActiveSource) {
@@ -2176,6 +2183,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                     result.props.resultSetIndex,
                     chunk.totalRowsSoFar,
                     result.props.limitReached,
+                    false,
+                    result.props.resultSetId,
                 );
             } else {
                 const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[result.props.resultSetIndex];
@@ -2197,6 +2206,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                         result.props.resultSetIndex,
                         chunk.totalRowsSoFar,
                         result.props.limitReached,
+                        false,
+                        result.props.resultSetId,
                     );
                 } else {
                     const chunkSequence = this._streamingTransportSequence.get(sourceUri) ?? 0;
@@ -2234,6 +2245,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                     chunk.totalRowsSoFar,
                     activeResultSet?.limitReached === true || chunk.limitReached,
                     true,
+                    activeResultSet?.resultSetId,
                 );
                 this._postMessageToWebview({
                     command: 'streamingComplete',
@@ -2332,6 +2344,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         totalRows: number,
         limitReached: boolean,
         force = false,
+        resultSetId?: string,
     ): void {
         const key = this._streamingRowCountKey(sourceUri, resultSetIndex);
         const lastReported = this._streamingRowCountLastReported.get(key);
@@ -2343,6 +2356,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             command: 'rowCountUpdate',
             sourceUri,
             resultSetIndex,
+            resultSetId: resultSetId
+                ?? this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex]?.resultSetId,
             totalRows,
             limitReached,
         });
@@ -2999,6 +3014,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     private _postDiskBackedActivateFromProps(props: {
         sourceUri: string;
         resultSetIndex: number;
+        resultSetId?: string;
         totalRows: number;
         columns: ResultSet['columns'];
         firstPageRows: unknown[][];
@@ -3013,6 +3029,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             command: 'diskBackedActivate',
             sourceUri: props.sourceUri,
             resultSetIndex: props.resultSetIndex,
+            resultSetId: props.resultSetId,
             totalRows: props.totalRows,
             columns: props.columns,
             rows: encode(this._encoder.sanitizeForMessagePack(props.firstPageRows)),

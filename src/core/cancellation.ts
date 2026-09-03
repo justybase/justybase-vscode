@@ -33,6 +33,19 @@ export interface CancellationCleanupResult {
     timedOut: boolean;
 }
 
+function isKnownCancellationMessage(message: string): boolean {
+    const normalized = message.trim().replace(/^error:\s*/iu, '');
+    return /^(?:cancelled|canceled)(?:\s*[:;,-]\s*.+)?\.?$/iu.test(normalized)
+        || /^(?:the\s+)?(?:query|statement|command|operation|request|execution)(?:\s+\w+)*\s+(?:was\s+)?cancel(?:led|ed)\b/iu.test(normalized)
+        || /^cancel(?:l?ing|led|ed)\s+statement\s+due\s+to\s+user\s+request\b/iu.test(normalized)
+        || /^query\s+execution\s+was\s+interrupted\b/iu.test(normalized)
+        || /^user\s+(?:cancelled|canceled)\b/iu.test(normalized)
+        || /^user\s+requested\s+interrupt\b/iu.test(normalized)
+        || /^variable\s+(?:prompt|input)\s+cancel(?:led|ed)\b/iu.test(normalized)
+        || /^(?:the\s+)?operation\s+(?:was\s+)?aborted\b/iu.test(normalized)
+        || /^aborterror\b/iu.test(normalized);
+}
+
 const DEFAULT_READER_CLOSE_TIMEOUT_MS = 5_000;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -112,16 +125,54 @@ export async function cancelCommandAndCloseReader(
 }
 
 export function isCancellationError(error: unknown): boolean {
-    if (error instanceof ExportCancelledError) {
-        return true;
+    let current: unknown = error;
+    for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth += 1) {
+        if (current instanceof ExportCancelledError) {
+            return true;
+        }
+
+        const candidate = current as {
+            code?: unknown;
+            errorNum?: unknown;
+            message?: unknown;
+            name?: unknown;
+            cause?: unknown;
+        };
+        const code = String(candidate.code ?? '').toUpperCase();
+        const name = String(candidate.name ?? '').toUpperCase();
+        if (
+            code === EXPORT_CANCELLED_CODE
+            || code === 'ABORT_ERR'
+            || code === 'ERR_CANCELED'
+            || code === 'ECANCELED'
+            || code === 'QUERY_CANCELED'
+            || code === 'QUERY_CANCELLED'
+            || code === 'REQUEST_CANCELED'
+            || code === 'REQUEST_CANCELLED'
+            || code === 'ERR_ABORTED'
+            || code === 'CANCELED'
+            || code === 'CANCELLED'
+            || name === 'ABORTERROR'
+        ) {
+            return true;
+        }
+        if (String(candidate.errorNum ?? '') === '1013') {
+            return true;
+        }
+
+        const message = typeof candidate.message === 'string'
+            ? candidate.message
+            : current instanceof Error
+                ? current.message
+                : typeof current === 'string'
+                    ? current
+                    : '';
+        if (isKnownCancellationMessage(message) || /^ORA-01013\b/iu.test(message.trim())) {
+            return true;
+        }
+        current = candidate.cause;
     }
-    const candidate = error as { code?: unknown; errorNum?: unknown; message?: unknown } | null;
-    const code = String(candidate?.code ?? '');
-    const errorNum = String(candidate?.errorNum ?? '');
-    const message = String(candidate?.message ?? error ?? '').toLowerCase();
-    return code === EXPORT_CANCELLED_CODE
-        || errorNum === '1013'
-        || /ora-01013|cancel(?:led|ed)|user requested interrupt|operation aborted|aborterror/.test(message);
+    return false;
 }
 
 export function isTimeoutError(error: unknown): boolean {
