@@ -30,6 +30,8 @@ export interface DiskBackedActivateProps {
     command: 'diskBackedActivate';
     sourceUri: string;
     resultSetIndex: number;
+    /** Stable identity used by the webview for grid/scroll state persistence. */
+    resultSetId?: string;
     totalRows: number;
     columns: ColumnDefinition[];
     firstPageRows: unknown[][];
@@ -40,6 +42,8 @@ export interface RowCountUpdateProps {
     command: 'rowCountUpdate';
     sourceUri: string;
     resultSetIndex: number;
+    /** Stable identity used to reject delayed counts from an older execution. */
+    resultSetId?: string;
     totalRows: number;
     limitReached: boolean;
 }

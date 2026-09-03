@@ -91,6 +91,69 @@ test('merges duplicate LCOV records for the same source file', () => {
   assert.deepEqual(result.failures, []);
 });
 
+test('merges exact duplicate LCOV records in either order, including branches', () => {
+  const source = 'src/activation/resultPanelRegression.ts';
+  for (const [firstLineHit, secondLineHit, firstBranchHit, secondBranchHit] of [
+    [0, 1, '-', '1'],
+    [1, 0, '1', '-'],
+  ]) {
+    const records = parseLcov([
+      `SF:${source}`,
+      `DA:2,${firstLineHit}`,
+      `BRDA:2,0,0,${firstBranchHit}`,
+      'end_of_record',
+      `SF:${source}`,
+      `DA:2,${secondLineHit}`,
+      `BRDA:2,0,0,${secondBranchHit}`,
+      'end_of_record',
+    ].join('\n'));
+    assert.equal(records.get(source)?.length, 2);
+
+    const result = checkChangedCoverage({
+      diff: `+++ b/${source}\n@@ -1 +2 @@\n`,
+      lcov: [
+        `SF:${source}`,
+        `DA:2,${firstLineHit}`,
+        `BRDA:2,0,0,${firstBranchHit}`,
+        'end_of_record',
+        `SF:${source}`,
+        `DA:2,${secondLineHit}`,
+        `BRDA:2,0,0,${secondBranchHit}`,
+        'end_of_record',
+      ].join('\n'),
+      baseline: { changedHighRiskCoverage: { lines: 100, branches: 100, roots: ['src/activation/'] } },
+    });
+
+    assert.equal(result.files[0].coveredLines, 1);
+    assert.equal(result.files[0].coveredBranches, 1);
+    assert.deepEqual(result.failures, []);
+  }
+});
+
+test('merges duplicate basename-only LCOV records for one source key', () => {
+  const source = 'index.ts';
+  const lcov = [
+    `SF:${source}`,
+    'DA:2,0',
+    'BRDA:2,0,0,-',
+    'end_of_record',
+    `SF:${source}`,
+    'DA:2,1',
+    'BRDA:2,0,0,1',
+    'end_of_record',
+  ].join('\n');
+
+  const result = checkChangedCoverage({
+    diff: '+++ b/src/activation/index.ts\n@@ -1 +2 @@\n',
+    lcov,
+    baseline: { changedHighRiskCoverage: { lines: 100, branches: 100, roots: ['src/activation/'] } },
+  });
+
+  assert.equal(result.files[0].coveredLines, 1);
+  assert.equal(result.files[0].coveredBranches, 1);
+  assert.deepEqual(result.failures, []);
+});
+
 test('rejects an ambiguous LCOV basename fallback', () => {
   const result = checkChangedCoverage({
     diff: '+++ b/src/core/index.ts\n@@ -1 +2 @@\n',

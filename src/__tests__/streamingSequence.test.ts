@@ -69,6 +69,36 @@ describe('StreamingSequenceTracker', () => {
         });
     });
 
+    it('treats a repeated terminal completion as a duplicate', () => {
+        const tracker = new StreamingSequenceTracker();
+
+        expect(tracker.evaluate(sourceUri, chunk(0, 0, 2))).toEqual({ kind: 'apply' });
+        expect(tracker.complete(sourceUri, 'result-1', 0)).toEqual({ kind: 'apply' });
+        expect(tracker.complete(sourceUri, 'result-1', 0)).toEqual({ kind: 'duplicate' });
+    });
+
+    it('deduplicates identity-only terminal completions after accepting them', () => {
+        const tracker = new StreamingSequenceTracker();
+
+        expect(tracker.evaluate(sourceUri, chunk(0, 0, 2))).toEqual({ kind: 'apply' });
+        expect(tracker.complete(sourceUri, 'result-1', undefined)).toEqual({ kind: 'apply' });
+        expect(tracker.complete(sourceUri, 'result-1', undefined)).toEqual({ kind: 'duplicate' });
+    });
+
+    it('accepts identity-only completion when legacy appends left no cursor', () => {
+        const tracker = new StreamingSequenceTracker();
+
+        expect(tracker.complete(sourceUri, 'legacy-result', undefined)).toEqual({ kind: 'apply' });
+        expect(tracker.complete(sourceUri, 'legacy-result', undefined)).toEqual({ kind: 'duplicate' });
+    });
+
+    it('rejects an invalid terminal sequence when identity-only compatibility does not apply', () => {
+        const tracker = new StreamingSequenceTracker();
+
+        expect(tracker.complete(sourceUri, 'result-1', -1)).toEqual({ kind: 'stale' });
+        expect(tracker.complete(sourceUri, 'result-1', undefined)).toEqual({ kind: 'apply' });
+    });
+
     it('keeps legacy unsequenced messages compatible', () => {
         const tracker = new StreamingSequenceTracker();
 

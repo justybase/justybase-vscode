@@ -524,6 +524,23 @@ describe('singleQueryExecutor', () => {
             ).rejects.toThrow('after reconnect attempt');
         });
 
+        it('does not reconnect after a DOM AbortError even when the connection is reported broken', async () => {
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            mockExecuteAndFetch.mockRejectedValue(
+                Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }),
+            );
+
+            await expect(runQueryRaw({
+                context: mockContext,
+                query: 'SELECT 1',
+                connectionManager: mockConnManager,
+                documentUri: 'file:///test.sql',
+            })).rejects.toThrow('The operation was aborted.');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
         it('retries a timed-out read-only statement once', async () => {
             mockExecuteAndFetch
                 .mockRejectedValueOnce(new Error('Connection timeout after 30 seconds'))
@@ -555,6 +572,25 @@ describe('singleQueryExecutor', () => {
                 connectionManager: mockConnManager,
                 documentUri: 'file:///test.sql',
             })).rejects.toThrow('database outcome may be unknown');
+
+            expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
+            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            'SELECT "mutate_customer"(42)',
+            'SELECT [mutate_customer](42)',
+            'SELECT `mutate_customer`(42)',
+        ])('does not retry a quoted function call with an unknown outcome: %s', async query => {
+            (isConnectionBrokenError as jest.Mock).mockReturnValue(true);
+            mockExecuteAndFetch.mockRejectedValue(new Error('connection reset'));
+
+            await expect(runQueryRaw({
+                context: mockContext,
+                query,
+                connectionManager: mockConnManager,
+                documentUri: 'file:///test.sql',
+            })).rejects.toThrow('could not be proven safe to retry');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
             expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();

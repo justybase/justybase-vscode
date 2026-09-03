@@ -259,7 +259,8 @@ function validateHostMessage(message: MessageRecord): boolean {
         case 'diskBackedActivate':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.totalRows) && hasRows(message)
-                && Array.isArray(message.columns) && typeof message.limitReached === 'boolean';
+                && Array.isArray(message.columns) && typeof message.limitReached === 'boolean'
+                && (message.resultSetId === undefined || hasString(message, 'resultSetId'));
         case 'rowWindow':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.offset) && hasRows(message) && isIndex(message.requestId);

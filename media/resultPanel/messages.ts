@@ -69,6 +69,7 @@ import {
 import { handleResultPanelTestBridgeMessage } from './testBridge.js';
 import {
     handleDiskBackedActivate,
+    isDiskBackedActivationRelevant,
     handleDiskQueryResult,
     handleRowCountUpdate,
     handleRowWindow,
@@ -525,7 +526,9 @@ export function setupStreamingMessageHandler(): void {
                 handleStreamingComplete(message);
                 break;
             case 'diskBackedActivate':
-                clearAllDiskGrouping();
+                if (isDiskBackedActivationRelevant(message)) {
+                    clearAllDiskGrouping();
+                }
                 handleDiskBackedActivate(message);
                 break;
             case 'rowCountUpdate':
@@ -1230,7 +1233,6 @@ export function handleAppendRows(message: Record<string, unknown>): void {
 
     const activeSource = getActiveSourceUri();
     if (sourceUri && activeSource && sourceUri !== activeSource) {
-        pendingResultSyncSources.delete(sourceUri);
         traceResultPanel({
             phase: 'append_ignored',
             sourceUri,
@@ -1238,18 +1240,6 @@ export function handleAppendRows(message: Record<string, unknown>): void {
             reason: 'source-mismatch',
         });
         return;
-    }
-
-    if (isFirstChunk && !isLog) {
-        const panel = getResultPanelWindow();
-        const completionSource = sourceUri ?? activeSource;
-        if (completionSource) {
-            panel.streamingCompletedSources?.delete(completionSource);
-        }
-        resetStreamingCompletionMarkers();
-        clearAllSearchWorkerData();
-        clearAllDiskGrouping();
-        resetEditSession();
     }
 
     if (rows instanceof Uint8Array || (rows && (rows as { type?: string }).type === 'Buffer') ||
@@ -1281,6 +1271,52 @@ export function handleAppendRows(message: Record<string, unknown>): void {
         if (resolvedLogIndex >= 0) {
             resultSetIndex = resolvedLogIndex;
         }
+    }
+
+    if (!isLog) {
+        const existingResultSet = resultSets[resultSetIndex];
+        const sequenceDecision = streamingSequenceTracker.evaluate(
+            sourceUri,
+            {
+                resultSetId: typeof message.resultSetId === 'string' ? message.resultSetId : undefined,
+                chunkSequence: typeof message.chunkSequence === 'number' ? message.chunkSequence : undefined,
+                fromRow,
+                totalRows,
+                isFirstChunk,
+            },
+            existingResultSet
+                ? {
+                    resultSetId: existingResultSet.resultSetId,
+                    totalRows: existingResultSet.totalRowCount ?? existingResultSet.data.length,
+                }
+                : undefined,
+        );
+        if (sequenceDecision.kind !== 'apply') {
+            if (sequenceDecision.kind === 'desync') {
+                requestAuthoritativeResultSync(sourceUri, sequenceDecision.reason);
+            }
+            traceResultPanel({
+                phase: 'append_ignored',
+                sourceUri,
+                resultSetIndex,
+                reason: sequenceDecision.kind === 'desync'
+                    ? sequenceDecision.reason
+                    : `stream-${sequenceDecision.kind}`,
+            });
+            return;
+        }
+    }
+
+    if (isFirstChunk && !isLog) {
+        const panel = getResultPanelWindow();
+        const completionSource = sourceUri ?? activeSource;
+        if (completionSource) {
+            panel.streamingCompletedSources?.delete(completionSource);
+        }
+        resetStreamingCompletionMarkers();
+        clearAllSearchWorkerData();
+        clearAllDiskGrouping();
+        resetEditSession();
     }
 
     let createdShell = false;
@@ -1421,35 +1457,6 @@ export function handleAppendRows(message: Record<string, unknown>): void {
             return;
         }
 
-        const sequenceDecision = streamingSequenceTracker.evaluate(
-            sourceUri,
-            {
-                resultSetId: typeof message.resultSetId === 'string' ? message.resultSetId : undefined,
-                chunkSequence: typeof message.chunkSequence === 'number' ? message.chunkSequence : undefined,
-                fromRow,
-                totalRows,
-                isFirstChunk,
-            },
-            {
-                resultSetId: rs.resultSetId,
-                totalRows: rs.totalRowCount ?? rs.data.length,
-            },
-        );
-        if (sequenceDecision.kind !== 'apply') {
-            if (sequenceDecision.kind === 'desync') {
-                requestAuthoritativeResultSync(sourceUri, sequenceDecision.reason);
-            }
-            traceResultPanel({
-                phase: 'append_ignored',
-                sourceUri,
-                resultSetIndex,
-                reason: sequenceDecision.kind === 'desync'
-                    ? sequenceDecision.reason
-                    : `stream-${sequenceDecision.kind}`,
-            });
-            return;
-        }
-
         if (isDiskBackedResultSet(rs)) {
             applyRowLimitReachedFlag(rs, limitReached === true);
             if (typeof totalRows === 'number') {
@@ -1563,17 +1570,8 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
         totalRows,
     });
 
-    if (sourceUri) {
-        const panel = getResultPanelWindow();
-        if (!panel.streamingCompletedSources) {
-            panel.streamingCompletedSources = new Set<string>();
-        }
-        panel.streamingCompletedSources.add(sourceUri);
-    }
-
     const activeSource = getActiveSourceUri();
     if (sourceUri && activeSource && sourceUri !== activeSource) {
-        pendingResultSyncSources.delete(sourceUri);
         traceResultPanel({
             phase: 'streaming_complete_ignored',
             sourceUri,
@@ -1594,10 +1592,23 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
         });
         return;
     }
+    const resultSetId = typeof message.resultSetId === 'string' && message.resultSetId.length > 0
+        ? message.resultSetId
+        : undefined;
+    if (resultSetId !== undefined && rs.resultSetId !== undefined && rs.resultSetId !== resultSetId) {
+        requestAuthoritativeResultSync(sourceUri, 'streaming-complete-result-identity-mismatch');
+        traceResultPanel({
+            phase: 'streaming_complete_ignored',
+            sourceUri,
+            resultSetIndex,
+            reason: 'result-set-identity-mismatch',
+        });
+        return;
+    }
     if (!isDiskBackedResultSet(rs)) {
         const sequenceDecision = streamingSequenceTracker.complete(
             sourceUri,
-            typeof message.resultSetId === 'string' ? message.resultSetId : undefined,
+            resultSetId,
             typeof message.lastChunkSequence === 'number' ? message.lastChunkSequence : undefined,
         );
         if (sequenceDecision.kind !== 'apply') {
@@ -1614,6 +1625,14 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
             });
             return;
         }
+    }
+
+    if (sourceUri) {
+        const panel = getResultPanelWindow();
+        if (!panel.streamingCompletedSources) {
+            panel.streamingCompletedSources = new Set<string>();
+        }
+        panel.streamingCompletedSources.add(sourceUri);
     }
     rs.isStreamingComplete = true;
     applyRowLimitReachedFlag(rs, limitReached === true);

@@ -50,6 +50,8 @@ for each query:
 - Cancellation is checked before each statement and after each execution
 - On a broken connection, `handleBatchRetry` reconnects and resumes from the
   failed statement index only for one proven read-only statement
+- Cancellation observed during reconnect cleanup is terminal: the persistent
+  connection is not replayed, and the execution emits one `cancelled` status.
 - `yieldAfterStatement` pauses briefly after every 5th fast statement to prevent UI starvation
 - A single statement can emit multiple `QueryResult` objects when `executeAndFetch(...)` returns multiple internal result sets
 - A reconnect keeps the same execution ID and emits `retrying` before exactly
@@ -194,7 +196,8 @@ Column type resolution follows this priority:
 1. Close the persistent connection (`closeDocumentPersistentConnection`)
 2. Re-execute from the failed statement index (batch) or from scratch (single)
 3. `queryEndCallback` receives `'retrying'` using the original execution ID
-4. The retried execution emits exactly one terminal status
+4. The retried execution emits exactly one terminal status; cancellation before
+   replay produces `cancelled` and no second database execution
 
 Writes, DDL, calls, executable macros, function/sequence expressions,
 multi-statement/ambiguous SQL, and streams with already delivered data are not
@@ -202,6 +205,11 @@ replayed. Partial streamed rows stay visible; the terminal error explains why
 retry was suppressed. Cancellation and rejected safe-execution confirmation
 invoke the statement-failure hook so transaction-scoped metadata synchronization
 cannot retain stale state.
+
+The dialect-neutral allow-list treats PostgreSQL positional parameters (`$n`),
+JSON path operators (`#>`/`#>>`), and compact leading line comments as inert
+syntax. A standalone `#` and an inline compact `--text` remain ambiguous and
+therefore suppress automatic retry.
 
 Desktop Result Panel append messages carry the stable result-set identity, an
 authoritative row offset, and a monotonic chunk sequence. Duplicate or delayed
@@ -282,8 +290,8 @@ cursor. Legacy unsequenced messages remain accepted for protocol compatibility.
 See [SQL_RESULTS_FILTERING.md](./SQL_RESULTS_FILTERING.md) for how **Loaded rows**, **All rows + LIMIT**, and **disk-backed** filtering relate.
 
 1. Host spill triggers at `min(memoryRowThreshold, rowThreshold)` (defaults: **25 000** / **500 000**). This is independent of the webview stream cap (`DISK_BACKED_WEBVIEW_STREAM_CAP` = **250 000**).
-2. When spill activates during streaming, the host clears `ResultSet.data`, subsequent chunks insert directly into SQLite, and the webview receives `diskBackedActivate` with a first page plus a ~600-row scroll window.
-3. While still streaming above the webview cap but before/after spill, the webview may receive `rowCountUpdate` instead of full `appendRows` payloads.
+2. When spill activates during streaming, the host clears `ResultSet.data`, subsequent chunks insert directly into SQLite, and the webview receives `diskBackedActivate` with the stable `resultSetId`, a first page, and a ~600-row scroll window.
+3. While still streaming above the webview cap but before/after spill, the webview may receive `rowCountUpdate` instead of full `appendRows` payloads. The message carries the optional stable `resultSetId` when available; a mismatched identity is ignored and requests an authoritative sync, while legacy messages without an identity remain compatible.
 4. After streaming completes, disk-backed sources must **not** be fully re-hydrated into the webview when `node:sqlite` is available.
 5. Filters, sort, global search, aggregations, and export operate on the full SQLite store via `DiskQuerySpec` (not the visible window only).
 6. Disk-backed grouping uses lazy SQL `GROUP BY` tree expansion (`queryDiskGroups`); group/leaf pages load in 600-row windows with scroll-triggered pagination.

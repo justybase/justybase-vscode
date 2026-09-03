@@ -127,22 +127,49 @@ export class StreamingSequenceTracker {
         resultSetId: string | undefined,
         lastChunkSequence: number | undefined,
     ): StreamingSequenceDecision {
-        if (
-            !sourceUri
-            || !resultSetId
-            || !Number.isInteger(lastChunkSequence)
-            || (lastChunkSequence ?? -1) < 0
-        ) {
+        if (!sourceUri || !resultSetId) {
             return { kind: 'apply' };
         }
-        const completedSequence = lastChunkSequence as number;
+        const sequenceOmitted = lastChunkSequence === undefined;
+        const hasValidSequence = Number.isInteger(lastChunkSequence)
+            && (lastChunkSequence ?? -1) >= 0;
         const cursor = this.cursors.get(sourceUri);
-        if (!cursor || cursor.resultSetId !== resultSetId) {
+        if (!cursor) {
+            if (sequenceOmitted) {
+                // A partially upgraded host may send a stable result identity
+                // while its append messages remain legacy/unsequenced. Accept
+                // that terminal marker and remember it for deduplication.
+                this.cursors.set(sourceUri, {
+                    resultSetId,
+                    nextSequence: 0,
+                    nextRow: 0,
+                    desynchronized: false,
+                    terminal: true,
+                });
+                return { kind: 'apply' };
+            }
             return { kind: 'stale' };
+        }
+        if (cursor.resultSetId !== resultSetId) {
+            return { kind: 'stale' };
+        }
+        if (cursor.terminal) {
+            return { kind: 'duplicate' };
         }
         if (cursor.desynchronized) {
             return { kind: 'stale' };
         }
+        if (sequenceOmitted) {
+            // Preserve compatibility with hosts which have started sending a
+            // result identity but do not yet include the terminal sequence.
+            // Once accepted, a repeated terminal message is still harmless.
+            cursor.terminal = true;
+            return { kind: 'apply' };
+        }
+        if (!hasValidSequence) {
+            return { kind: 'stale' };
+        }
+        const completedSequence = lastChunkSequence as number;
         if (completedSequence < cursor.nextSequence - 1) {
             return { kind: 'duplicate' };
         }

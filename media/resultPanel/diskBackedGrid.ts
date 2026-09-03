@@ -569,11 +569,51 @@ export function handleDiskQueryResult(message: Record<string, unknown>): void {
     }
 }
 
+function isDiskBackedActivationIdentityMismatch(message: Record<string, unknown>): boolean {
+    const resultSetId = typeof message.resultSetId === 'string' ? message.resultSetId : undefined;
+    if (resultSetId === undefined) {
+        return false;
+    }
+
+    const resultSetIndex = message.resultSetIndex as number;
+    const currentResultSet = getResultSetAt(resultSetIndex);
+    return currentResultSet !== undefined
+        && currentResultSet.resultSetId !== undefined
+        && currentResultSet.resultSetId !== resultSetId;
+}
+
+/** Check all identity guards before a disk activation can clear or replace UI state. */
+export function isDiskBackedActivationRelevant(message: Record<string, unknown>): boolean {
+    const sourceUri = typeof message.sourceUri === 'string' ? message.sourceUri : undefined;
+    const activeSource = getActiveSourceUri();
+    if (sourceUri && activeSource && sourceUri !== activeSource) {
+        return false;
+    }
+    return !isDiskBackedActivationIdentityMismatch(message);
+}
+
 export function handleDiskBackedActivate(message: Record<string, unknown>): void {
+    if (!isDiskBackedActivationRelevant(message)) {
+        const sourceUri = typeof message.sourceUri === 'string' ? message.sourceUri : undefined;
+        const activeSource = getActiveSourceUri();
+        if (sourceUri && activeSource && sourceUri !== activeSource) {
+            return;
+        }
+        if (sourceUri) {
+            postHostMessage({
+                command: 'requestResultSync',
+                sourceUri,
+                reason: 'disk-backed-activation-result-mismatch',
+            });
+        }
+        return;
+    }
+
     const resultSetIndex = message.resultSetIndex as number;
     const totalRows = message.totalRows as number;
     const columns = message.columns as ResultSet['columns'];
     const limitReached = message.limitReached as boolean | undefined;
+    const resultSetId = typeof message.resultSetId === 'string' ? message.resultSetId : undefined;
     const rows = decodeRows(message.rows);
 
     let rs = getResultSetAt(resultSetIndex);
@@ -588,6 +628,7 @@ export function handleDiskBackedActivate(message: Record<string, unknown>): void
             limitReached: limitReached === true,
             isStreamingComplete: false,
             isEditable: false,
+            resultSetId,
         };
         const next = [...getResultSets()];
         next[resultSetIndex] = rs;
@@ -607,6 +648,9 @@ export function handleDiskBackedActivate(message: Record<string, unknown>): void
         if (limitReached === true) {
             rs.limitReached = true;
         }
+        if (resultSetId !== undefined) {
+            rs.resultSetId = resultSetId;
+        }
     }
 
     clearAllSearchWorkerData();
@@ -618,13 +662,35 @@ export function handleDiskBackedActivate(message: Record<string, unknown>): void
 }
 
 export function handleRowCountUpdate(message: Record<string, unknown>): void {
+    const sourceUri = typeof message.sourceUri === 'string' ? message.sourceUri : undefined;
+    const activeSource = getActiveSourceUri();
+    if (sourceUri && activeSource && sourceUri !== activeSource) {
+        return;
+    }
+
     const resultSetIndex = message.resultSetIndex as number;
     const totalRows = message.totalRows as number;
     const limitReached = message.limitReached as boolean | undefined;
+    const resultSetId = typeof message.resultSetId === 'string' && message.resultSetId.length > 0
+        ? message.resultSetId
+        : undefined;
 
     const rs = getResultSetAt(resultSetIndex);
     if (!rs) {
         return;
+    }
+    if (resultSetId !== undefined && rs.resultSetId !== undefined && rs.resultSetId !== resultSetId) {
+        if (sourceUri) {
+            postHostMessage({
+                command: 'requestResultSync',
+                sourceUri,
+                reason: 'row-count-update-result-identity-mismatch',
+            });
+        }
+        return;
+    }
+    if (resultSetId !== undefined && rs.resultSetId === undefined) {
+        rs.resultSetId = resultSetId;
     }
 
     syncDiskStreamingRowCount(rs, totalRows);
