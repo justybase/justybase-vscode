@@ -25,6 +25,8 @@ const legacyExternalDatabaseTests = [
     'db2.integration.test.ts',
     'vertica.integration.test.ts',
     'access.integration.test.ts',
+    'databaseTunnel.integration.test.ts',
+    'databaseTunnel.live.integration.test.ts',
     'allRowsTimeoutSession.live.integration.test.ts',
     'mcpLive.integration.test.ts',
     'sasLikeMacros.e2e.test.ts',
