@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.17.11
+product_version: 3.17.12
 ---
 
 # Query Flow and File Search
