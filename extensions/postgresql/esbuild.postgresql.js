@@ -12,7 +12,7 @@ async function main() {
         sourcesContent: true,
         platform: 'node',
         outfile: 'dist/extension.js',
-        external: ['vscode', 'pg'],
+        external: ['vscode', 'pg', 'ws'],
         logLevel: 'info'
     });
 
