@@ -127,6 +127,11 @@ class FakeWrapper {
         this.listeners.set(type, entries);
     }
 
+    removeEventListener(type: string, listener: (event: Record<string, unknown>) => void) {
+        const entries = this.listeners.get(type) || [];
+        this.listeners.set(type, entries.filter(entry => entry !== listener));
+    }
+
     dispatchMouseDown(target: FakeCell, options: Record<string, unknown> = {}) {
         const event = {
             target,
@@ -697,5 +702,48 @@ describe('result panel selection lifecycle', () => {
         handlers.destroy();
 
         expect(postHostMessage).toHaveBeenLastCalledWith({ command: 'selectionStatsChanged', stats: null });
+    });
+
+    it('detaches wrapper and document listeners when the selection handler is destroyed', () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: {
+                wrappers: FakeWrapper[];
+                documentMock: { activeWrapper: FakeWrapper | null; dispatchKeydown: (event: Record<string, unknown>) => void };
+            };
+        }).__selectionTestState;
+        const dataCell = new FakeCell('value');
+        const row = new FakeRow(0, [new FakeCell('1', ['row-number-cell']), dataCell]);
+        const wrapper = new FakeWrapper([row]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+        const tableApi = {
+            getAllColumns: () => [], getRowModel: () => ({ rows: [] }), getFilteredRowModel: () => ({ rows: [] }),
+            getVisibleLeafColumns: () => [{ id: '0', columnDef: { header: 'col' } }],
+        };
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1) as unknown as {
+            destroy: () => void;
+        };
+
+        handlers.destroy();
+        handlers.destroy();
+
+        wrapper.dispatchMouseDown(dataCell);
+        expect(dataCell.classList.contains('selected-cell')).toBe(false);
+
+        const event = {
+            key: 'a',
+            ctrlKey: true,
+            metaKey: false,
+            target: null,
+            defaultPrevented: false,
+            preventDefault() {
+                this.defaultPrevented = true;
+            },
+            stopImmediatePropagation() {}
+        };
+        documentMock.dispatchKeydown(event);
+        expect(dataCell.classList.contains('selected-cell')).toBe(false);
+        expect(event.defaultPrevented).toBe(false);
     });
 });
