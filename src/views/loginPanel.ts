@@ -12,7 +12,7 @@ import { resolveConnectionDatabaseKind } from '../core/connectionFactory';
 import { allAvailableDialects } from '../dialects';
 import { createStandardConnectionForm } from '../core/connectionFormBuilder';
 import { ConnectionManager, ConnectionDetails } from '../core/connectionManager';
-import { normalizeDatabaseTunnelConfig } from '../core/databaseTunnel';
+import { isDatabaseTunnelRelayChanged, normalizeDatabaseTunnelConfig } from '../core/databaseTunnel';
 import { getConnectionAccentOptions } from '../utils/connectionAccent';
 import { getDialectIconWebviewUri } from '../utils/dialectIcons';
 import { detectFileDataFormat } from '../services/fileConnectionProfileService';
@@ -185,9 +185,27 @@ export class LoginPanel {
                                 vscode.window.showErrorMessage(validationError);
                                 return;
                             }
+                            const tunnelTokenError = await this._validateTunnelTokenForRelayChange(
+                                data,
+                                originalName,
+                                tunnelToken,
+                            );
+                            if (tunnelTokenError) {
+                                vscode.window.showErrorMessage(tunnelTokenError);
+                                return;
+                            }
 
-                            if (tunnelToken !== undefined || clearTunnelToken) {
-                                await this.connectionManager.saveConnection(data, tunnelToken, clearTunnelToken);
+                            const renamed = Boolean(
+                                originalName
+                                && originalName.trim() !== data.name?.trim(),
+                            );
+                            if (tunnelToken !== undefined || clearTunnelToken || renamed) {
+                                await this.connectionManager.saveConnection(
+                                    data,
+                                    tunnelToken,
+                                    clearTunnelToken,
+                                    renamed ? originalName : undefined,
+                                );
                             } else {
                                 await this.connectionManager.saveConnection(data);
                             }
@@ -238,6 +256,15 @@ export class LoginPanel {
                             const validationError = this._validateConnectionData(data, false);
                             if (validationError) {
                                 vscode.window.showErrorMessage(validationError);
+                                return;
+                            }
+                            const tunnelTokenError = await this._validateTunnelTokenForRelayChange(
+                                data,
+                                originalName,
+                                tunnelToken,
+                            );
+                            if (tunnelTokenError) {
+                                vscode.window.showErrorMessage(tunnelTokenError);
                                 return;
                             }
 
@@ -381,6 +408,23 @@ export class LoginPanel {
         }
 
         return data;
+    }
+
+    private async _validateTunnelTokenForRelayChange(
+        data: ConnectionDetails,
+        originalName: string | undefined,
+        tunnelToken: string | undefined,
+    ): Promise<string | undefined> {
+        if (!data.tunnel || !originalName || tunnelToken?.trim()) {
+            return undefined;
+        }
+
+        const existing = await this.connectionManager.getConnection(originalName);
+        if (existing?.tunnel && isDatabaseTunnelRelayChanged(existing.tunnel, data.tunnel)) {
+            return 'A new bearer token is required when the database tunnel relay URL changes.';
+        }
+
+        return undefined;
     }
 
     private _sanitizeConnectionForWebview(connection: ConnectionDetails): ConnectionDetails {
@@ -1512,7 +1556,7 @@ export class LoginPanel {
                     renderList();
                 }
 
-                function buildConnectionData(includeNameFallback) {
+                function buildConnectionData(includeNameFallback, preserveExistingTunnelIdentityForTest) {
                     const dialect = getSelectedDialect();
                     const data = {
                         name: document.getElementById('name').value,
@@ -1562,8 +1606,16 @@ export class LoginPanel {
                         if (!tunnelServerUrl || !tunnelTargetId || !tunnelLocalPort || !tunnelToken) {
                             throw new Error('Tunnel form fields are not available.');
                         }
+                        const editingSameProfile = Boolean(
+                            currentEditName
+                            && String(data.name || '').trim() === String(currentEditName).trim(),
+                        );
                         data.tunnel = {
-                            id: existingTunnel && existingTunnel.id ? existingTunnel.id : createTunnelId(),
+                            id: existingTunnel
+                                && existingTunnel.id
+                                && (editingSameProfile || preserveExistingTunnelIdentityForTest)
+                                ? existingTunnel.id
+                                : createTunnelId(),
                             serverUrl: tunnelServerUrl.value,
                             targetId: tunnelTargetId.value,
                             localPort: Number(tunnelLocalPort.value)
@@ -1601,7 +1653,7 @@ export class LoginPanel {
                 function testConnection() {
                     vscode.postMessage({
                         command: 'test',
-                        data: buildConnectionData(true),
+                        data: buildConnectionData(true, true),
                         originalName: currentEditName,
                         passwordChanged: passwordDirty
                     });

@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ConnectionManager, ConnectionDetails } from '../core/connectionManager';
+import { configureDatabaseTunnelRuntime } from '../core/connectionFactory';
 import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
 import { MockNzConnection } from '../__mocks__/mockNzConnection';
 import { resetDatabaseDialectTestingState } from './dialectTestUtils';
@@ -182,6 +183,7 @@ describe('ConnectionManager', () => {
                 getToken,
                 storeToken,
                 deleteToken,
+                isActive: jest.fn(() => false),
                 getStatuses: jest.fn(() => []),
             };
             const tunnelManager = new ConnectionManager(mockContext, tunnelRuntime);
@@ -211,8 +213,10 @@ describe('ConnectionManager', () => {
                         serverUrl: 'https://relay-b.example.test',
                     },
                 };
-                await tunnelManager.saveConnection(changedRelayDetails);
-                expect(tokens.has(initialDetails.tunnel!.id)).toBe(false);
+                await expect(tunnelManager.saveConnection(changedRelayDetails)).rejects.toThrow(
+                    'A new bearer token is required when the database tunnel relay URL changes.',
+                );
+                expect(tokens.get(initialDetails.tunnel!.id)).toBe('old-relay-token');
 
                 await tunnelManager.saveConnection(changedRelayDetails, 'new-relay-token');
                 expect(tokens.get(initialDetails.tunnel!.id)).toBe('new-relay-token');
@@ -220,6 +224,62 @@ describe('ConnectionManager', () => {
                 await tunnelManager.saveConnection(changedRelayDetails, undefined, true);
                 expect(tokens.has(initialDetails.tunnel!.id)).toBe(false);
                 expect(deleteToken).toHaveBeenCalledWith(initialDetails.tunnel!.id);
+            } finally {
+                await tunnelManager.dispose();
+            }
+        });
+
+        it('gives a renamed tunnel profile its own id and token', async () => {
+            const tokens = new Map<string, string>();
+            const stop = jest.fn(async () => undefined);
+            const deleteToken = jest.fn(async (id: string) => {
+                tokens.delete(id);
+            });
+            const tunnelRuntime: DatabaseTunnelRuntime = {
+                ensureStarted: jest.fn(async () => ({ host: '127.0.0.1' as const, port: 15432 })),
+                stop,
+                stopAll: jest.fn(async () => undefined),
+                getToken: jest.fn(async (id: string) => tokens.get(id)),
+                storeToken: jest.fn(async (id: string, token: string) => {
+                    tokens.set(id, token);
+                }),
+                deleteToken,
+                isActive: jest.fn(() => false),
+                getStatuses: jest.fn(() => []),
+            };
+            const tunnelManager = new ConnectionManager(mockContext, tunnelRuntime);
+            await tunnelManager.ensureFullyLoaded();
+
+            const original: ConnectionDetails = {
+                ...postgresqlConnection,
+                name: 'OriginalTunnel',
+                tunnel: {
+                    id: 'original-tunnel-id',
+                    serverUrl: 'https://relay.example.test',
+                    targetId: 'warehouse',
+                    localPort: 15432,
+                },
+            };
+
+            try {
+                await tunnelManager.saveConnection(original, 'relay-token');
+                await tunnelManager.setActiveConnection(original.name);
+
+                await tunnelManager.saveConnection(
+                    { ...original, name: 'RenamedTunnel' },
+                    undefined,
+                    false,
+                    original.name,
+                );
+
+                const renamed = await tunnelManager.getConnection('RenamedTunnel');
+                expect(await tunnelManager.getConnection('OriginalTunnel')).toBeUndefined();
+                expect(renamed?.tunnel?.id).toBeDefined();
+                expect(renamed?.tunnel?.id).not.toBe(original.tunnel!.id);
+                expect(await tunnelRuntime.getToken(renamed!.tunnel!.id)).toBe('relay-token');
+                expect(await tunnelRuntime.getToken(original.tunnel!.id)).toBeUndefined();
+                expect(stop).toHaveBeenCalledWith(original.tunnel!.id);
+                expect(tunnelManager.getActiveConnectionName()).toBe('RenamedTunnel');
             } finally {
                 await tunnelManager.dispose();
             }
@@ -484,6 +544,50 @@ describe('ConnectionManager', () => {
     describe('Connection Testing', () => {
         it('should successfully test sqlite in-memory connections', async () => {
             await expect(manager.testConnection(sqliteConnection)).resolves.toBeUndefined();
+        });
+
+        it('should stop a tunnel started only for Test Connection', async () => {
+            const databaseConnection = new MockNzConnection();
+            registerDatabaseDialect({
+                ...postgresqlDialect,
+                createConnection: () => databaseConnection,
+            });
+            const stop = jest.fn(async () => undefined);
+            const tunnelRuntime: DatabaseTunnelRuntime = {
+                ensureStarted: jest.fn(async () => ({ host: '127.0.0.1' as const, port: 15432 })),
+                stop,
+                stopAll: jest.fn(async () => undefined),
+                getToken: jest.fn(async () => undefined),
+                storeToken: jest.fn(async () => undefined),
+                deleteToken: jest.fn(async () => undefined),
+                isActive: jest.fn(() => false),
+                getStatuses: jest.fn(() => []),
+            };
+            const tunnelManager = new ConnectionManager(mockContext, tunnelRuntime);
+            await tunnelManager.ensureFullyLoaded();
+            configureDatabaseTunnelRuntime(tunnelRuntime);
+
+            const details: ConnectionDetails = {
+                ...postgresqlConnection,
+                name: 'TestTunnel',
+                host: '127.0.0.1',
+                port: 15432,
+                tunnel: {
+                    id: 'test-only-tunnel',
+                    serverUrl: 'https://relay.example.test',
+                    targetId: 'warehouse',
+                    localPort: 15432,
+                },
+            };
+
+            try {
+                await tunnelManager.testConnection(details, 'test-token');
+                expect(stop).toHaveBeenCalledWith(details.tunnel!.id);
+                expect(databaseConnection._connected).toBe(false);
+            } finally {
+                configureDatabaseTunnelRuntime(undefined);
+                await tunnelManager.dispose();
+            }
         });
 
         it('should resolve sqlite current database to the logical main catalog', async () => {
@@ -1664,6 +1768,62 @@ describe('ConnectionManager', () => {
             expect(connections).toEqual([]);
 
             await newManager.dispose();
+        });
+
+        it('should keep a profile usable when its persisted tunnel config is malformed', async () => {
+            secretsStore.set('netezza-vscode-connections', JSON.stringify({
+                BrokenTunnel: {
+                    ...sampleConnection,
+                    name: 'BrokenTunnel',
+                    tunnel: {
+                        id: 'broken',
+                        serverUrl: 'not-a-url',
+                        targetId: 'warehouse',
+                        localPort: 15432,
+                    },
+                },
+                HealthyConnection: {
+                    ...sampleConnection,
+                    name: 'HealthyConnection',
+                },
+            }));
+
+            const restored = new ConnectionManager(mockContext);
+            await restored.ensureFullyLoaded();
+
+            expect(await restored.getConnection('BrokenTunnel')).toMatchObject({
+                name: 'BrokenTunnel',
+                host: sampleConnection.host,
+            });
+            expect((await restored.getConnection('BrokenTunnel'))?.tunnel).toBeUndefined();
+            expect(await restored.getConnection('HealthyConnection')).toMatchObject({
+                name: 'HealthyConnection',
+            });
+
+            await restored.dispose();
+        });
+
+        it('should not throw during fast-load when a cached tunnel config is malformed', async () => {
+            globalState.set('justybase.connectionsCache', {
+                BrokenTunnel: {
+                    ...sampleConnection,
+                    name: 'BrokenTunnel',
+                    tunnel: {
+                        id: 'broken',
+                        serverUrl: 'not-a-url',
+                        targetId: 'warehouse',
+                        localPort: 15432,
+                    },
+                },
+            });
+
+            const restored = new ConnectionManager(mockContext);
+            await restored.ensureFullyLoaded();
+
+            expect(await restored.getConnection('BrokenTunnel')).toMatchObject({ name: 'BrokenTunnel' });
+            expect((await restored.getConnection('BrokenTunnel'))?.tunnel).toBeUndefined();
+
+            await restored.dispose();
         });
     });
 });
