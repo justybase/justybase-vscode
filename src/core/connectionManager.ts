@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import {
     DatabaseCapabilities,
@@ -240,16 +241,54 @@ function normalizeConnectionDetails(details: SharedConnectionDetails, inferLegac
 function normalizeConnectionMap(
     connections: Record<string, SharedConnectionDetails>
 ): Record<string, ConnectionDetails> {
-    return Object.fromEntries(
-        Object.entries(connections).map(([name, details]) => {
-            const storedName = details.name && details.name.trim().length > 0 ? details.name : name;
+    const normalizedConnections: Record<string, ConnectionDetails> = {};
+    for (const [name, details] of Object.entries(connections)) {
+        if (!details || typeof details !== 'object') {
+            logWithFallback('warn', `[ConnectionManager] Ignoring invalid connection profile '${name}'.`);
+            continue;
+        }
+
+        const storedName = typeof details.name === 'string' && details.name.trim().length > 0
+            ? details.name
+            : name;
+        try {
             const normalizedDetails = normalizeConnectionDetails({
                 ...details,
                 name: storedName
             }, true);
-            return [storedName, { ...normalizedDetails, name: storedName }];
-        })
-    );
+            normalizedConnections[storedName] = { ...normalizedDetails, name: storedName };
+        } catch (error: unknown) {
+            if (!details.tunnel) {
+                logWithFallback('warn', `[ConnectionManager] Ignoring invalid connection profile '${storedName}'.`, error);
+                continue;
+            }
+
+            // A malformed tunnel must not prevent the rest of the saved
+            // connection store from loading. Keep the profile usable as a
+            // direct connection and let the user configure the tunnel again.
+            const withoutTunnel = { ...details };
+            delete withoutTunnel.tunnel;
+            try {
+                const normalizedDetails = normalizeConnectionDetails({
+                    ...withoutTunnel,
+                    name: storedName
+                }, true);
+                normalizedConnections[storedName] = { ...normalizedDetails, name: storedName };
+                logWithFallback(
+                    'warn',
+                    `[ConnectionManager] Ignoring malformed tunnel configuration for '${storedName}'.`,
+                    error,
+                );
+            } catch (profileError: unknown) {
+                logWithFallback('warn', `[ConnectionManager] Ignoring invalid connection profile '${storedName}'.`, profileError);
+            }
+        }
+    }
+    return normalizedConnections;
+}
+
+function createDatabaseTunnelId(): string {
+    return `tunnel-${randomUUID()}`;
 }
 
 function validateConnectionDetails(
@@ -575,20 +614,53 @@ export class ConnectionManager {
         await updateMementoValue(this.context.globalState, compatibilityStateKeys.connectionsCache, cache);
     }
 
+    private hasTunnelReference(tunnelId: string): boolean {
+        return Object.values(this._connections).some(connection => connection.tunnel?.id === tunnelId);
+    }
+
     async saveConnection(
         details: SharedConnectionDetails,
         tunnelToken?: string,
         clearTunnelToken = false,
+        originalName?: string,
     ) {
         await this.ensureLoaded();
         const normalizedDetails = normalizeConnectionDetails(details);
         validateConnectionDetails(normalizedDetails, { requireName: true });
-        const storedDetails: ConnectionDetails = {
+        const storedName = normalizedDetails.name as string;
+        const sourceName = originalName?.trim();
+        const renamedDetails = sourceName && sourceName !== storedName
+            ? this._connections[sourceName]
+            : undefined;
+        if (sourceName && sourceName !== storedName && !renamedDetails) {
+            throw new Error(`Connection '${sourceName}' no longer exists.`);
+        }
+        if (renamedDetails && this._connections[storedName]) {
+            throw new Error(`Connection '${storedName}' already exists.`);
+        }
+
+        let storedDetails: ConnectionDetails = {
             ...normalizedDetails,
-            name: normalizedDetails.name as string
+            name: storedName
         };
-        const previousDetails = this._connections[storedDetails.name];
-        const relayUrlChanged = isDatabaseTunnelRelayChanged(previousDetails?.tunnel, storedDetails.tunnel);
+        const previousDetails = this._connections[storedName];
+        const sourceTunnel = renamedDetails?.tunnel ?? previousDetails?.tunnel;
+
+        // A renamed profile must own a separate token/listener. The webview
+        // already creates a fresh id for this case, but enforce the invariant
+        // here too for API and other non-webview callers.
+        if (
+            renamedDetails?.tunnel
+            && storedDetails.tunnel
+            && renamedDetails.tunnel.id === storedDetails.tunnel.id
+        ) {
+            storedDetails = {
+                ...storedDetails,
+                tunnel: { ...storedDetails.tunnel, id: createDatabaseTunnelId() },
+            };
+        }
+
+        const relayUrlChanged = isDatabaseTunnelRelayChanged(sourceTunnel, storedDetails.tunnel);
 
         if (storedDetails.tunnel) {
             if (!this.databaseTunnelRuntime) {
@@ -596,32 +668,52 @@ export class ConnectionManager {
             }
             const existingToken = await this.databaseTunnelRuntime.getToken(storedDetails.tunnel.id);
             const nextToken = tunnelToken?.trim();
+            const sourceToken = renamedDetails?.tunnel && !relayUrlChanged
+                ? await this.databaseTunnelRuntime.getToken(renamedDetails.tunnel.id)
+                : undefined;
+            if (relayUrlChanged && !nextToken) {
+                throw new Error('A new bearer token is required when the database tunnel relay URL changes.');
+            }
             if (nextToken) {
                 await this.databaseTunnelRuntime.storeToken(storedDetails.tunnel.id, nextToken);
             } else if (clearTunnelToken || relayUrlChanged) {
                 await this.databaseTunnelRuntime.deleteToken(storedDetails.tunnel.id);
             } else if (existingToken) {
                 // Keep the existing token when the password-style field is blank.
+            } else if (sourceToken) {
+                await this.databaseTunnelRuntime.storeToken(storedDetails.tunnel.id, sourceToken);
             } else {
                 throw new Error('A bearer token is required when a database tunnel is enabled.');
             }
         }
 
-        if (
-            previousDetails?.tunnel
-            && (!storedDetails.tunnel || !sameDatabaseTunnelConfig(previousDetails.tunnel, storedDetails.tunnel))
-            && this.databaseTunnelRuntime
-        ) {
-            await this.databaseTunnelRuntime.stop(previousDetails.tunnel.id);
-            if (!storedDetails.tunnel || previousDetails.tunnel.id !== storedDetails.tunnel.id) {
-                await this.databaseTunnelRuntime.deleteToken(previousDetails.tunnel.id);
+        this._connections[storedDetails.name] = storedDetails;
+        if (renamedDetails && sourceName) {
+            delete this._connections[sourceName];
+        }
+
+        if (this.databaseTunnelRuntime) {
+            const replacedTunnels = [previousDetails?.tunnel, renamedDetails?.tunnel]
+                .filter((tunnel): tunnel is NonNullable<typeof tunnel> => Boolean(tunnel));
+            const stoppedIds = new Set<string>();
+            for (const replacedTunnel of replacedTunnels) {
+                const stillSameTunnel = storedDetails.tunnel
+                    && sameDatabaseTunnelConfig(replacedTunnel, storedDetails.tunnel);
+                if (stillSameTunnel || stoppedIds.has(replacedTunnel.id)) {
+                    continue;
+                }
+                stoppedIds.add(replacedTunnel.id);
+                await this.databaseTunnelRuntime.stop(replacedTunnel.id);
+                if (!this.hasTunnelReference(replacedTunnel.id)) {
+                    await this.databaseTunnelRuntime.deleteToken(replacedTunnel.id);
+                }
             }
         }
 
-        this._connections[storedDetails.name] = storedDetails;
-
         // If it's the first connection, make it active
         if (!this._activeConnectionName) {
+            await this.setActiveConnection(storedDetails.name);
+        } else if (renamedDetails && sourceName && this._activeConnectionName === sourceName) {
             await this.setActiveConnection(storedDetails.name);
         }
 
@@ -641,19 +733,41 @@ export class ConnectionManager {
             ? this._connections[normalizedDetails.name]
             : undefined;
         const relayUrlChanged = isDatabaseTunnelRelayChanged(previousDetails?.tunnel, normalizedDetails.tunnel);
-        const connection = await createConnectedDatabaseConnectionFromDetails(
-            normalizedDetails,
-            undefined,
-            { tunnelToken, clearTunnelToken: clearTunnelToken || relayUrlChanged },
-        ) as NzConnection;
-
-        // createConnectedDatabaseConnectionFromDetails already completes the
-        // driver handshake. Keep this method limited to cleanup so tunneled
-        // and direct profiles follow the same lifecycle.
+        const tunnel = normalizedDetails.tunnel;
+        const tunnelRuntime = this.databaseTunnelRuntime;
+        const testToken = tunnel && tunnelRuntime
+            ? (tunnelToken?.trim() || (!clearTunnelToken ? await tunnelRuntime.getToken(tunnel.id) : undefined))
+            : undefined;
+        const reusedTunnel = Boolean(
+            tunnel
+            && tunnelRuntime
+            && testToken
+            && tunnelRuntime.isActive(tunnel, testToken),
+        );
+        let connection: NzConnection | undefined;
         try {
+            connection = await createConnectedDatabaseConnectionFromDetails(
+                normalizedDetails,
+                undefined,
+                { tunnelToken, clearTunnelToken: clearTunnelToken || relayUrlChanged },
+            ) as NzConnection;
             await connection.close();
         } catch (closeErr: unknown) {
-            logWithFallback('warn', '[ConnectionManager] Ignored error during connection.close() in testConnection:', closeErr);
+            if (connection) {
+                logWithFallback('warn', '[ConnectionManager] Ignored error during connection.close() in testConnection:', closeErr);
+            } else {
+                throw closeErr;
+            }
+        } finally {
+            const tunnelStartedForTest = Boolean(
+                tunnel
+                && tunnelRuntime
+                && testToken
+                && tunnelRuntime.isActive(tunnel, testToken),
+            );
+            if (tunnel && tunnelRuntime && !reusedTunnel && (connection || tunnelStartedForTest)) {
+                await tunnelRuntime.stop(tunnel.id);
+            }
         }
     }
 
@@ -664,12 +778,12 @@ export class ConnectionManager {
             // (documents will need to reconnect with different connection)
 
             const removedDetails = this._connections[name];
-            if (removedDetails.tunnel && this.databaseTunnelRuntime) {
+            delete this._connections[name];
+
+            if (removedDetails.tunnel && this.databaseTunnelRuntime && !this.hasTunnelReference(removedDetails.tunnel.id)) {
                 await this.databaseTunnelRuntime.stop(removedDetails.tunnel.id);
                 await this.databaseTunnelRuntime.deleteToken(removedDetails.tunnel.id);
             }
-
-            delete this._connections[name];
 
             // If active connection was deleted, reset active
             if (this._activeConnectionName === name) {

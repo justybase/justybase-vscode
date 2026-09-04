@@ -75,6 +75,8 @@ export interface DatabaseTunnelRuntime {
     getToken(id: string): Promise<string | undefined>;
     storeToken(id: string, token: string): Promise<void>;
     deleteToken(id: string): Promise<void>;
+    /** Return true only when the exact config/token pair is already listening. */
+    isActive(config: DatabaseTunnelConfig, token: string): boolean;
     getStatuses(): DatabaseTunnelStatus[];
 }
 
@@ -251,6 +253,18 @@ export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
 
     public async deleteToken(id: string): Promise<void> {
         await this.secrets.delete(this.getSecretKey(id));
+    }
+
+    public isActive(config: DatabaseTunnelConfig, token: string): boolean {
+        const normalized = normalizeDatabaseTunnelConfig(config);
+        const active = this.active.get(normalized.id);
+        return Boolean(
+            active
+            && !active.stopRequested
+            && active.state === 'listening'
+            && active.token === token.trim()
+            && sameDatabaseTunnelConfig(active.config, normalized),
+        );
     }
 
     public getStatuses(): DatabaseTunnelStatus[] {
