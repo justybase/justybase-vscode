@@ -12,6 +12,7 @@ import { resolveConnectionDatabaseKind } from '../core/connectionFactory';
 import { allAvailableDialects } from '../dialects';
 import { createStandardConnectionForm } from '../core/connectionFormBuilder';
 import { ConnectionManager, ConnectionDetails } from '../core/connectionManager';
+import { normalizeDatabaseTunnelConfig } from '../core/databaseTunnel';
 import { getConnectionAccentOptions } from '../utils/connectionAccent';
 import { getDialectIconWebviewUri } from '../utils/dialectIcons';
 import { detectFileDataFormat } from '../services/fileConnectionProfileService';
@@ -20,6 +21,7 @@ interface LoginPanelDialectDefinition {
     kind: DatabaseKind;
     displayName: string;
     defaultPort?: number;
+    supportsRawTcpTunnel?: boolean;
     connectionForm: DatabaseConnectionFormSchema;
 }
 
@@ -34,6 +36,7 @@ function getLoginPanelDialects(): LoginPanelDialectDefinition[] {
         kind: dialect.kind,
         displayName: dialect.displayName,
         defaultPort: dialect.defaultPort,
+        supportsRawTcpTunnel: dialect.supportsRawTcpTunnel,
         connectionForm: dialect.connectionForm ?? buildFallbackConnectionForm(dialect.defaultPort)
     }));
 }
@@ -168,6 +171,10 @@ export class LoginPanel {
                         try {
                             const originalName = typeof message.originalName === 'string' ? message.originalName : undefined;
                             const passwordChanged = message.passwordChanged === true;
+                            const tunnelToken = typeof message.data.tunnelToken === 'string'
+                                ? message.data.tunnelToken
+                                : undefined;
+                            const clearTunnelToken = message.data.clearTunnelToken === true;
                             const data = await this._preserveStoredPassword(
                                 this._normalizeIncomingConnection(message.data),
                                 originalName,
@@ -179,12 +186,17 @@ export class LoginPanel {
                                 return;
                             }
 
-                            await this.connectionManager.saveConnection(data);
+                            if (tunnelToken !== undefined || clearTunnelToken) {
+                                await this.connectionManager.saveConnection(data, tunnelToken, clearTunnelToken);
+                            } else {
+                                await this.connectionManager.saveConnection(data);
+                            }
                             const savedMessage = data.dbType === 'access'
                                 ? `Connection '${data.name}' saved. Reconnect any open Access SQL tab for the new read/write mode.`
                                 : `Connection '${data.name}' saved and activated!`;
                             vscode.window.showInformationMessage(savedMessage);
                             await this.sendConnectionsToWebview();
+                            await this._postMessage({ command: 'clearTunnelTokenField' });
                         } catch (e: unknown) {
                             const errorMsg = e instanceof Error ? e.message : String(e);
                             vscode.window.showErrorMessage(`Error saving: ${errorMsg}`);
@@ -214,6 +226,10 @@ export class LoginPanel {
                         try {
                             const originalName = typeof message.originalName === 'string' ? message.originalName : undefined;
                             const passwordChanged = message.passwordChanged === true;
+                            const tunnelToken = typeof message.data.tunnelToken === 'string'
+                                ? message.data.tunnelToken
+                                : undefined;
+                            const clearTunnelToken = message.data.clearTunnelToken === true;
                             const data = await this._preserveStoredPassword(
                                 this._normalizeIncomingConnection(message.data),
                                 originalName,
@@ -226,7 +242,11 @@ export class LoginPanel {
                             }
 
                             vscode.window.showInformationMessage('Testing connection...');
-                            await this.connectionManager.testConnection(data);
+                            if (tunnelToken !== undefined || clearTunnelToken) {
+                                await this.connectionManager.testConnection(data, tunnelToken, clearTunnelToken);
+                            } else {
+                                await this.connectionManager.testConnection(data);
+                            }
                             vscode.window.showInformationMessage('Connection successful!');
                         } catch (e: unknown) {
                             const errorMsg = e instanceof Error ? e.message : String(e);
@@ -327,6 +347,7 @@ export class LoginPanel {
             user: data.user ?? '',
             password: data.password,
             ...(normalizedOptions ? { options: normalizedOptions } : {}),
+            ...(data.tunnel ? { tunnel: data.tunnel } : {}),
             // Keep the picker key so required-field validation sees the value.
             ...(dialect.kind === 'file' || dialect.kind === 'access' ? { filePath: filePath.trim() } : {}),
             dbType: dialect.kind,
@@ -440,6 +461,23 @@ export class LoginPanel {
 
             if (field.required && !this._hasRequiredFieldValue(value, field)) {
                 return `${field.label} is required`;
+            }
+        }
+
+        if (data.tunnel) {
+            if (!dialect.supportsRawTcpTunnel) {
+                return `${dialect.displayName} does not support transparent TCP tunnels`;
+            }
+            try {
+                normalizeDatabaseTunnelConfig(data.tunnel);
+            } catch (error: unknown) {
+                return error instanceof Error ? error.message : String(error);
+            }
+            if (data.host?.trim() !== '127.0.0.1') {
+                return 'Host must be 127.0.0.1 when a TCP tunnel is enabled';
+            }
+            if (data.port !== data.tunnel.localPort) {
+                return 'Port must match the TCP tunnel local port';
             }
         }
 
@@ -690,6 +728,23 @@ export class LoginPanel {
                     font-size: 12px;
                     color: var(--vscode-descriptionForeground);
                 }
+                .tunnel-section {
+                    margin-top: 10px;
+                    padding: 14px;
+                    border: 1px solid var(--vscode-panel-border);
+                    border-radius: 4px;
+                    background: var(--vscode-textCodeBlock-background);
+                }
+                .tunnel-title {
+                    margin-bottom: 12px;
+                    font-weight: 600;
+                }
+                .tunnel-fields {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 0 15px;
+                    margin-top: 12px;
+                }
                 .file-field-row {
                     display: flex;
                     align-items: center;
@@ -864,6 +919,39 @@ export class LoginPanel {
 
                     <div id="dialectFields" class="form-grid">${initialFieldsHtml}</div>
 
+                    <div id="tunnelSection" class="tunnel-section" style="display: none;">
+                        <div class="tunnel-title">Connection tunnel</div>
+                        <label class="checkbox-label" for="tunnelEnabled">
+                            <input type="checkbox" id="tunnelEnabled">
+                            <span>Use HTTPS/WSS TCP tunnel</span>
+                        </label>
+                        <div id="tunnelFields" class="tunnel-fields">
+                            <div class="form-group field-full">
+                                <label for="tunnelServerUrl">Server URL <span class="required-marker">*</span></label>
+                                <input type="url" id="tunnelServerUrl" placeholder="https://gateway.example.com">
+                                <div class="form-hint">Use the relay base URL. The target path is added automatically.</div>
+                            </div>
+                            <div class="form-group field-half">
+                                <label for="tunnelTargetId">Target ID <span class="required-marker">*</span></label>
+                                <input type="text" id="tunnelTargetId" placeholder="reports">
+                            </div>
+                            <div class="form-group field-half">
+                                <label for="tunnelLocalPort">Local TCP port <span class="required-marker">*</span></label>
+                                <input type="number" id="tunnelLocalPort" min="1" max="65535" value="15432">
+                            </div>
+                            <div class="form-group field-full">
+                                <label for="tunnelToken">Bearer token</label>
+                                <input type="password" id="tunnelToken" placeholder="Token (blank keeps the saved token)">
+                                <div class="form-hint">Stored separately in VS Code SecretStorage; it is not the database password.</div>
+                                <label class="checkbox-label" for="tunnelClearToken">
+                                    <input type="checkbox" id="tunnelClearToken">
+                                    <span>Remove the saved bearer token</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-hint">The database driver will connect to 127.0.0.1 and this local port. The relay chooses the remote host and port by Target ID.</div>
+                    </div>
+
                     <div class="actions">
                         <button id="btnSave" onclick="save()">Save & Connect</button>
                         <button id="btnTest" class="secondary" onclick="testConnection()">Test Connection</button>
@@ -878,6 +966,7 @@ export class LoginPanel {
                 let activeName = null;
                 let currentEditName = null;
                 let passwordDirty = false;
+                let tunnelEndpointSnapshot;
                 const dialectIcons = ${dialectIconUris};
                 const defaultIconSrc = ${JSON.stringify(String(defaultIconUri))};
                 const accentOptions = ${accentOptions};
@@ -1177,6 +1266,86 @@ export class LoginPanel {
                     applyLocalMode();
                 }
 
+                function createTunnelId() {
+                    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                        return 'tunnel-' + crypto.randomUUID();
+                    }
+                    return 'tunnel-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+                }
+
+                function normalizeTunnelServerUrlForComparison(value) {
+                    return String(value || '').trim().replace(/[?#].*$/, '').replace(/\\/+$/, '');
+                }
+
+                function synchronizeDatabaseTunnelUiState(kind) {
+                    const section = document.getElementById('tunnelSection');
+                    const enabled = document.getElementById('tunnelEnabled');
+                    const serverUrl = document.getElementById('tunnelServerUrl');
+                    const targetId = document.getElementById('tunnelTargetId');
+                    const localPort = document.getElementById('tunnelLocalPort');
+                    const host = document.getElementById('host');
+                    const port = document.getElementById('port');
+                    const supported = Boolean(getDialect(kind).supportsRawTcpTunnel);
+
+                    if (!section || !enabled || !serverUrl || !targetId || !localPort) {
+                        return;
+                    }
+
+                    section.style.display = supported ? 'block' : 'none';
+                    if (!supported) {
+                        enabled.checked = false;
+                        tunnelEndpointSnapshot = undefined;
+                        if (host) host.readOnly = false;
+                        if (port) port.readOnly = false;
+                        return;
+                    }
+
+                    if (!targetId.value) targetId.value = 'reports';
+                    if (!localPort.value) localPort.value = '15432';
+
+                    if (enabled.checked) {
+                        if (!tunnelEndpointSnapshot && host && port) {
+                            tunnelEndpointSnapshot = { host: host.value, port: port.value };
+                        }
+                        if (host) {
+                            host.value = '127.0.0.1';
+                            host.readOnly = true;
+                            host.title = 'TCP tunnel listener';
+                        }
+                        if (port) {
+                            port.value = localPort.value;
+                            port.readOnly = true;
+                            port.title = 'TCP tunnel local port';
+                        }
+                    } else {
+                        if (host) host.readOnly = false;
+                        if (port) port.readOnly = false;
+                        if (tunnelEndpointSnapshot && host && port) {
+                            host.value = tunnelEndpointSnapshot.host;
+                            port.value = tunnelEndpointSnapshot.port;
+                        }
+                        tunnelEndpointSnapshot = undefined;
+                    }
+                }
+
+                function loadDatabaseTunnelFields(tunnel) {
+                    const enabled = document.getElementById('tunnelEnabled');
+                    const serverUrl = document.getElementById('tunnelServerUrl');
+                    const targetId = document.getElementById('tunnelTargetId');
+                    const localPort = document.getElementById('tunnelLocalPort');
+                    const token = document.getElementById('tunnelToken');
+                    const clearToken = document.getElementById('tunnelClearToken');
+                    if (!enabled || !serverUrl || !targetId || !localPort || !token) return;
+
+                    enabled.checked = Boolean(tunnel);
+                    serverUrl.value = tunnel ? (tunnel.serverUrl || '') : '';
+                    targetId.value = tunnel ? (tunnel.targetId || 'reports') : 'reports';
+                    localPort.value = tunnel ? String(tunnel.localPort || 15432) : '15432';
+                    token.value = '';
+                    if (clearToken) clearToken.checked = false;
+                    tunnelEndpointSnapshot = undefined;
+                }
+
                 window.addEventListener('message', event => {
                     const message = event.data;
                     switch (message.command) {
@@ -1185,6 +1354,13 @@ export class LoginPanel {
                             activeName = message.activeName;
                             renderList();
                             break;
+                        case 'clearTunnelTokenField': {
+                            const token = document.getElementById('tunnelToken');
+                            const clearToken = document.getElementById('tunnelClearToken');
+                            if (token) token.value = '';
+                            if (clearToken) clearToken.checked = false;
+                            break;
+                        }
                         case 'browseFileResult': {
                             const input = document.getElementById(message.fieldKey);
                             if (input && typeof message.path === 'string') {
@@ -1212,6 +1388,7 @@ export class LoginPanel {
                 initializeAccentOptions();
                 updateFormHeading();
                 synchronizeDialectUiState(defaultDialectKind);
+                synchronizeDatabaseTunnelUiState(defaultDialectKind);
                 const initialPasswordField = document.getElementById('password');
                 if (initialPasswordField && initialPasswordField.dataset.initializedPasswordTracking !== 'true') {
                     initialPasswordField.addEventListener('input', () => {
@@ -1240,7 +1417,34 @@ export class LoginPanel {
                             portElement.value = dialect.defaultPort;
                         }
                     }
+                    synchronizeDatabaseTunnelUiState(document.getElementById('dbType').value);
                 });
+
+                const tunnelEnabledElement = document.getElementById('tunnelEnabled');
+                if (tunnelEnabledElement) {
+                    tunnelEnabledElement.addEventListener('change', () => {
+                        synchronizeDatabaseTunnelUiState(document.getElementById('dbType').value);
+                    });
+                }
+                const tunnelLocalPortElement = document.getElementById('tunnelLocalPort');
+                if (tunnelLocalPortElement) {
+                    tunnelLocalPortElement.addEventListener('input', () => {
+                        const enabledElement = document.getElementById('tunnelEnabled');
+                        const portElement = document.getElementById('port');
+                        if (enabledElement && portElement && enabledElement.checked) {
+                            portElement.value = tunnelLocalPortElement.value;
+                        }
+                    });
+                }
+                const tunnelTokenElement = document.getElementById('tunnelToken');
+                if (tunnelTokenElement) {
+                    tunnelTokenElement.addEventListener('input', () => {
+                        const clearTokenElement = document.getElementById('tunnelClearToken');
+                        if (clearTokenElement && tunnelTokenElement.value) {
+                            clearTokenElement.checked = false;
+                        }
+                    });
+                }
 
                 function renderList() {
                     const list = document.getElementById('connectionList');
@@ -1283,10 +1487,12 @@ export class LoginPanel {
                     document.getElementById('name').value = conn.name;
                     document.getElementById('dbType').value = kind;
                     renderDialectFields(kind, buildFieldValueMapFromConnection({ ...conn, dbType: kind }));
+                    loadDatabaseTunnelFields(conn.tunnel);
                     document.getElementById('accentColor').value = conn.accentColor || '';
                     document.getElementById('btnDelete').style.display = 'block';
                     updateFormHeading();
                     synchronizeDialectUiState(kind);
+                    synchronizeDatabaseTunnelUiState(kind);
                     updateAccentPreview();
                     renderList();
                 }
@@ -1296,10 +1502,12 @@ export class LoginPanel {
                     document.getElementById('name').value = '';
                     document.getElementById('dbType').value = defaultDialectKind;
                     renderDialectFields(defaultDialectKind, {});
+                    loadDatabaseTunnelFields(undefined);
                     document.getElementById('accentColor').value = '';
                     document.getElementById('btnDelete').style.display = 'none';
                     updateFormHeading();
                     synchronizeDialectUiState(defaultDialectKind);
+                    synchronizeDatabaseTunnelUiState(defaultDialectKind);
                     updateAccentPreview();
                     renderList();
                 }
@@ -1341,6 +1549,37 @@ export class LoginPanel {
                         && existingConnection.options.fileWorkspace;
                     if (workspaceOption) {
                         data.options = { ...(data.options || {}), fileWorkspace: workspaceOption };
+                    }
+
+                    const tunnelEnabledElement = document.getElementById('tunnelEnabled');
+                    const tunnelEnabled = Boolean(tunnelEnabledElement && tunnelEnabledElement.checked);
+                    if (tunnelEnabled && dialect.supportsRawTcpTunnel) {
+                        const existingTunnel = existingConnection && existingConnection.tunnel;
+                        const tunnelServerUrl = document.getElementById('tunnelServerUrl');
+                        const tunnelTargetId = document.getElementById('tunnelTargetId');
+                        const tunnelLocalPort = document.getElementById('tunnelLocalPort');
+                        const tunnelToken = document.getElementById('tunnelToken');
+                        if (!tunnelServerUrl || !tunnelTargetId || !tunnelLocalPort || !tunnelToken) {
+                            throw new Error('Tunnel form fields are not available.');
+                        }
+                        data.tunnel = {
+                            id: existingTunnel && existingTunnel.id ? existingTunnel.id : createTunnelId(),
+                            serverUrl: tunnelServerUrl.value,
+                            targetId: tunnelTargetId.value,
+                            localPort: Number(tunnelLocalPort.value)
+                        };
+                        const tokenValue = tunnelToken.value.trim();
+                        data.tunnelToken = tokenValue || undefined;
+                        const clearTunnelToken = document.getElementById('tunnelClearToken');
+                        const relayChanged = Boolean(
+                            existingTunnel
+                            && normalizeTunnelServerUrlForComparison(existingTunnel.serverUrl)
+                                !== normalizeTunnelServerUrlForComparison(tunnelServerUrl.value)
+                            && !tokenValue,
+                        );
+                        data.clearTunnelToken = Boolean(
+                            (clearTunnelToken && clearTunnelToken.checked) || relayChanged,
+                        );
                     }
 
                     if (includeNameFallback && !data.name) {

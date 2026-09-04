@@ -7,6 +7,7 @@ import type {
   DatabaseConnectionOptions,
   DatabaseDataReader,
   DatabaseKind,
+  DatabaseTunnelConfig,
 } from "@justybase/contracts";
 
 export type {
@@ -18,6 +19,7 @@ export type {
   DatabaseConnectionOptions,
   DatabaseDataReader,
   DatabaseKind,
+  DatabaseTunnelConfig,
 };
 
 export interface EditSource {
@@ -104,6 +106,7 @@ export interface ConnectionDetails {
   password?: string;
   options?: DatabaseConnectionOptions;
   dbType?: DatabaseKind;
+  tunnel?: DatabaseTunnelConfig;
   accentColor?: string;
   schema?: string;
 }

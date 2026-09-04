@@ -356,6 +356,9 @@ describe('LoginPanel', () => {
                         command: 'updateConnections'
                     })
                 );
+                expect(mockWebviewPanel.webview.postMessage).toHaveBeenCalledWith({
+                    command: 'clearTunnelTokenField'
+                });
             });
 
             it('should preserve the stored password when editing without changing it', async () => {

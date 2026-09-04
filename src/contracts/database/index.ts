@@ -29,6 +29,7 @@ export type {
   DatabaseConnectionStaticConstructor,
   DatabaseConnectionFormSchema,
   DatabaseConnectionOptions,
+  DatabaseTunnelConfig,
   DatabaseConnectionFieldSchema,
   DatabaseConnectionFieldType,
   DatabaseConnectionFieldOption,
@@ -139,6 +140,8 @@ export interface DatabaseDialect {
   metadataProvider: DatabaseMetadataProvider;
   sqlAuthoring: DatabaseSqlAuthoring;
   advancedFeatures?: DatabaseAdvancedFeatures;
+  /** Whether the driver speaks a transparent TCP protocol suitable for the core tunnel. */
+  supportsRawTcpTunnel?: boolean;
   getConnectionConstructor(): import("@justybase/contracts").DatabaseConnectionStaticConstructor;
   createConnection(
     config: import("@justybase/contracts").DatabaseConnectionConfig,

@@ -24,8 +24,8 @@ Browse schemas and routines, write SQL, run it, and investigate the output in th
 - DDL generation for tables, views, routines, and sequences.
 - PostgreSQL `COPY` import for CSV, XLSX, and XLSB data.
 - `EXPLAIN (FORMAT JSON)` parsing and shared tuning-advisor scaffolding.
-- Authenticated PostgreSQL TCP tunnelling through an HTTPS/WSS server, with a
-  local `127.0.0.1` listener for JustyBase and other PostgreSQL clients.
+- Authenticated raw TCP tunnelling through an HTTPS/WSS server, using the
+  core tunnel runtime for PostgreSQL and other TCP database dialects.
 
 ### Write with database context
 
@@ -56,16 +56,18 @@ The explain viewer normalizes PostgreSQL JSON plans. Tuning advice is heuristic 
 
 ## HTTPS/WSS tunnel
 
-If PostgreSQL is reachable only from a remote server, install and run the
-reference FastAPI relay in [`samples/postgresql-tunnel`](../../samples/postgresql-tunnel/).
-In VS Code use **PostgreSQL: Configure Tunnel**, then **PostgreSQL: Start
-Tunnel**. The tunnel listens on `127.0.0.1:15432` by default; configure a
-normal PostgreSQL profile with that host and port. Port `5432` is also valid
-when it is free.
+TCP tunnelling is configured in the common **Add Connection** form. Enable
+**Use HTTPS/WSS TCP tunnel** on a PostgreSQL profile and enter the relay base
+URL, named target id, free local port, and bearer token. The core extension
+starts the loopback listener lazily for **Test Connection** or the first query;
+the token is kept in VS Code SecretStorage. The database password and
+PostgreSQL SSL settings remain in the normal profile.
 
-The server uses named allowlisted targets and a bearer token. The token is
-stored in VS Code SecretStorage. Configure HTTPS/WSS on the reverse proxy and
-do not expose an arbitrary host/port forwarding endpoint.
+Use the shared FastAPI reference relay in
+[`samples/database-tunnel`](../../samples/database-tunnel/). It supports
+PostgreSQL, Netezza, Oracle, and other raw TCP targets through a server-side
+allowlist. The full deployment, reverse-proxy, troubleshooting, and live-test
+instructions are in [`docs/database-tunnel.md`](../../docs/database-tunnel.md).
 
 ## Development and packaging
 

@@ -12,7 +12,8 @@ This pack is published with `"preview": true` in `extensions/postgresql/package.
 
 ## What this pack provides
 
-- Shared connection UI with PostgreSQL-specific fields such as `searchPath`, `sslMode`, and statement timeout
+- Shared connection form with standard host, port, database, user, and password fields
+- PostgreSQL-specific connection fields — `searchPath`, `sslMode`/`sslServerName`, connect timeout, and session statement timeout — applied when a connection is established
 - Metadata-driven schema explorer for schemas, tables, views, functions, procedures, and sequences
 - Metadata-aware SQL completion through the shared LSP path, backed by the dedicated PostgreSQL parser
 - Dedicated PostgreSQL lexer/parser in core (`src/dialects/postgresql/sql`) with strict syntax validation on the shared LSP stack
@@ -73,46 +74,26 @@ npm run test:postgres:integration
 
 ## PostgreSQL over HTTPS/WSS tunnel
 
-When the desktop machine can reach only an HTTPS server, while that server can
-reach PostgreSQL, the PostgreSQL companion can expose a loopback TCP listener
-and relay each connection through an authenticated WebSocket. PostgreSQL and
-the `pg` driver remain unaware of the relay:
+TCP tunneling is implemented globally in the core extension and is also
+available to Netezza and Oracle. The complete deployment, UI, security, and
+live-test procedure is maintained in
+[`docs/database-tunnel.md`](database-tunnel.md).
 
-```text
-JustyBase -> 127.0.0.1:15432 -> WSS/443 -> FastAPI -> private PostgreSQL:5432
-```
+For PostgreSQL, the important detail is that database TLS is independent from
+the outer WSS link: configure `sslMode` and (when needed) `sslServerName` in
+the normal PostgreSQL connection profile. With `verify-full`, use
+`127.0.0.1` as the driver Host and set the remote certificate DNS name as the
+TLS server name.
 
-The reference FastAPI server is in
-[`samples/postgresql-tunnel`](../samples/postgresql-tunnel/). It uses named
-server-side targets and never accepts an arbitrary host or port from the
-client. Configure and start a tunnel from the Command Palette with:
-
-- **PostgreSQL: Configure Tunnel**
-- **PostgreSQL: Start Tunnel**
-- **PostgreSQL: Stop Tunnel**
-- **PostgreSQL: Tunnel Status**
-
-Then create a normal PostgreSQL connection with host `127.0.0.1` (or
-`localhost`) and the configured local port. Port `15432` is the default;
-`5432` is also supported when it is free. The tunnel token is kept in VS Code
-SecretStorage and is not part of the database connection profile.
-
-Use `sslMode=require` or `verify-full` according to the remote PostgreSQL
-deployment. With `verify-full`, use `127.0.0.1` and set the optional PostgreSQL
-`TLS Server Name` field to the DNS name present in the database certificate.
-The tunnel is desktop-only; a browser cannot open the local TCP listener.
-
-The test is skipped unless `POSTGRES_LIVE_TEST_*` environment variables are set.
-
-Optional docker-compose environment:
+The local relay test is:
 
 ```bash
-docker compose -f extensions/postgresql/docker-compose.integration.yml up -d
-POSTGRES_LIVE_TEST_HOST=127.0.0.1 \
-POSTGRES_LIVE_TEST_PORT=55432 \
-POSTGRES_LIVE_TEST_DATABASE=justybase \
-POSTGRES_LIVE_TEST_USER=justybase \
-POSTGRES_LIVE_TEST_PASSWORD=justybase \
-npm run test:postgres:integration
-docker compose -f extensions/postgresql/docker-compose.integration.yml down -v
+npm run test:database:tunnel
+```
+
+The combined live relay test starts the FastAPI sample and requires credentials
+for both targets under test:
+
+```bash
+npm run test:database:tunnel:live
 ```

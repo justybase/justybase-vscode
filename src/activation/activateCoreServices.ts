@@ -5,6 +5,8 @@ import { MetadataCache } from '../metadataCache';
 import { runQueryRaw } from '../core/queryRunner';
 import { Logger } from '../utils/logger';
 import { getExtensionDocumentParseSession } from '../core/extensionDocumentParseSession';
+import { DatabaseTunnelManager } from '../core/databaseTunnel';
+import { configureDatabaseTunnelRuntime } from '../core/connectionFactory';
 import {
     createExtensionServices,
     type ExtensionServices,
@@ -13,6 +15,7 @@ import {
 export interface CoreServicesActivationResult {
     services: ExtensionServices;
     metadataCacheInit: Promise<void>;
+    databaseTunnelManager: DatabaseTunnelManager;
 }
 
 /**
@@ -23,7 +26,12 @@ export function activateCoreServices(
     logger: Logger,
 ): CoreServicesActivationResult {
     let t = performance.now();
-    const connectionManager = new ConnectionManager(context);
+    const databaseTunnelManager = new DatabaseTunnelManager(
+        context.secrets,
+        (message, error) => logger.warn(`[Database tunnel] ${message}`, error),
+    );
+    configureDatabaseTunnelRuntime(databaseTunnelManager);
+    const connectionManager = new ConnectionManager(context, databaseTunnelManager);
     logger.info(`[perf] ConnectionManager ctor: ${(performance.now() - t).toFixed(1)}ms`);
 
     t = performance.now();
@@ -62,5 +70,5 @@ export function activateCoreServices(
         runQueryRaw,
     );
 
-    return { services, metadataCacheInit };
+    return { services, metadataCacheInit, databaseTunnelManager };
 }

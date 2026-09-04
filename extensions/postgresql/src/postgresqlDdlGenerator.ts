@@ -8,6 +8,7 @@ import type {
     DatabaseDdlResult,
 } from '@justybase/contracts';
 import type { ConnectionDetails } from '../../../src/types';
+import { activateCoreExtension } from '../../../src/api/companionActivation';
 import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
 import { formatIdentifierForSql } from '../../../src/utils/identifierUtils';
 import { PostgreSqlConnection } from './postgresqlConnection';
@@ -150,6 +151,23 @@ async function createConnectionFromDetails(
     connectionDetails: ConnectionDetails,
     databaseOverride?: string,
 ): Promise<DatabaseConnection> {
+    const api = await activateCoreExtension();
+    if (api.createConnectedDatabaseConnectionFromDetails) {
+        return await api.createConnectedDatabaseConnectionFromDetails(
+            { ...connectionDetails, dbType: 'postgresql' },
+            databaseOverride,
+        );
+    }
+
+    if (connectionDetails.tunnel) {
+        throw new Error(
+            'The installed JustyBase core extension cannot open tunneled database connections. Update the core extension and try again.',
+        );
+    }
+
+    // Keep direct DDL generation usable with a version 1 core that predates
+    // the optional connected-profile API. Tunneled profiles must go through
+    // core so their loopback listener and SecretStorage token are managed.
     const connection = new PostgreSqlConnection({
         host: connectionDetails.host,
         port: connectionDetails.port,

@@ -16,6 +16,7 @@ export interface StubDialectOptions {
     traitsOverrides?: DatabaseDialectTraitsOverrides;
     connectionFormOptions?: StandardConnectionFieldOptions;
     extensionDisplayName?: string;
+    supportsRawTcpTunnel?: boolean;
 }
 
 export function createStubDialect(
@@ -39,6 +40,7 @@ export function createStubDialect(
         capabilities: createDatabaseCapabilities(),
         connectionForm: createStandardConnectionForm(connectionFormOptions),
         traits: createDatabaseDialectTraits(options.traitsOverrides),
+        ...(options.supportsRawTcpTunnel ? { supportsRawTcpTunnel: true } : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         metadataProvider: {} as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

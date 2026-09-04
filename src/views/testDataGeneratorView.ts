@@ -9,19 +9,11 @@ import { ConnectionManager, ConnectionDetails } from '../core/connectionManager'
 import { executeQueryHelper, quoteNameIfNeeded } from '../ddl/helpers';
 import { Logger } from '../utils/logger';
 import { NzConnection as NzConnectionType } from '../types';
-import { createNzConnection } from '../core/nzConnectionFactory';
+import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { MetadataCache } from '../metadataCache';
 
 async function createAndConnectNzConnection(details: ConnectionDetails): Promise<NzConnectionType> {
-    const connection = createNzConnection({
-        host: details.host,
-        port: details.port,
-        database: details.database,
-        user: details.user,
-        password: details.password
-    });
-    await connection.connect();
-    return connection as unknown as NzConnectionType;
+    return await createConnectedDatabaseConnectionFromDetails(details) as NzConnectionType;
 }
 
 interface TableColumn {

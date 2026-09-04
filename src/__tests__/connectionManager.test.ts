@@ -14,6 +14,7 @@ import { resetDatabaseDialectTestingState } from './dialectTestUtils';
 import { postgresqlDialect } from '../../extensions/postgresql/src/postgresqlDialect';
 import { oracleDialect } from '../../extensions/oracle/src/oracleDialect';
 import { SqliteConnection } from '../dialects/sqlite';
+import type { DatabaseTunnelRuntime } from '../core/databaseTunnel';
 
 const mockNzConnectionConstructor = jest.fn(() => new MockNzConnection());
 
@@ -163,6 +164,65 @@ describe('ConnectionManager', () => {
             const connections = await manager.getConnections();
             expect(connections).toHaveLength(1);
             expect(connections[0]).toMatchObject(sampleConnection);
+        });
+
+        it('should clear tunnel tokens explicitly and when the relay URL changes', async () => {
+            const tokens = new Map<string, string>();
+            const getToken = jest.fn(async (id: string) => tokens.get(id));
+            const storeToken = jest.fn(async (id: string, token: string) => {
+                tokens.set(id, token);
+            });
+            const deleteToken = jest.fn(async (id: string) => {
+                tokens.delete(id);
+            });
+            const tunnelRuntime: DatabaseTunnelRuntime = {
+                ensureStarted: jest.fn(async (_config, _token) => ({ host: '127.0.0.1' as const, port: 15432 })),
+                stop: jest.fn(async () => undefined),
+                stopAll: jest.fn(async () => undefined),
+                getToken,
+                storeToken,
+                deleteToken,
+                getStatuses: jest.fn(() => []),
+            };
+            const tunnelManager = new ConnectionManager(mockContext, tunnelRuntime);
+            await tunnelManager.ensureFullyLoaded();
+
+            const initialDetails: ConnectionDetails = {
+                ...postgresqlConnection,
+                name: 'TunnelConnection',
+                host: '127.0.0.1',
+                port: 15432,
+                tunnel: {
+                    id: 'tunnel-connection-manager-test',
+                    serverUrl: 'https://relay-a.example.test',
+                    targetId: 'warehouse',
+                    localPort: 15432,
+                },
+            };
+
+            try {
+                await tunnelManager.saveConnection(initialDetails, 'old-relay-token');
+                expect(tokens.get(initialDetails.tunnel!.id)).toBe('old-relay-token');
+
+                const changedRelayDetails: ConnectionDetails = {
+                    ...initialDetails,
+                    tunnel: {
+                        ...initialDetails.tunnel!,
+                        serverUrl: 'https://relay-b.example.test',
+                    },
+                };
+                await tunnelManager.saveConnection(changedRelayDetails);
+                expect(tokens.has(initialDetails.tunnel!.id)).toBe(false);
+
+                await tunnelManager.saveConnection(changedRelayDetails, 'new-relay-token');
+                expect(tokens.get(initialDetails.tunnel!.id)).toBe('new-relay-token');
+
+                await tunnelManager.saveConnection(changedRelayDetails, undefined, true);
+                expect(tokens.has(initialDetails.tunnel!.id)).toBe(false);
+                expect(deleteToken).toHaveBeenCalledWith(initialDetails.tunnel!.id);
+            } finally {
+                await tunnelManager.dispose();
+            }
         });
 
         it('should reject connection without name', async () => {

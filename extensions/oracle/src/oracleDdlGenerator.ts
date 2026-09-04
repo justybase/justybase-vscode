@@ -8,6 +8,7 @@ import type {
     DatabaseDdlResult
 } from '@justybase/contracts';
 import type { ConnectionDetails } from '../../../src/types';
+import { activateCoreExtension } from '../../../src/api/companionActivation';
 import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
 import { formatIdentifierForSql } from '../../../src/utils/identifierUtils';
 import { OracleConnection } from './oracleConnection';
@@ -229,13 +230,29 @@ function isSupportedObjectType(objectType: string): boolean {
 }
 
 async function createConnectionFromDetails(connectionDetails: ConnectionDetails): Promise<DatabaseConnection> {
+    const api = await activateCoreExtension();
+    if (api.createConnectedDatabaseConnectionFromDetails) {
+        return await api.createConnectedDatabaseConnectionFromDetails(
+            { ...connectionDetails, dbType: 'oracle' },
+        );
+    }
+
+    if (connectionDetails.tunnel) {
+        throw new Error(
+            'The installed JustyBase core extension cannot open tunneled database connections. Update the core extension and try again.',
+        );
+    }
+
+    // Keep direct DDL generation usable with a version 1 core that predates
+    // the optional connected-profile API. Tunneled profiles must go through
+    // core so their loopback listener and SecretStorage token are managed.
     const connection = new OracleConnection({
         host: connectionDetails.host,
         port: connectionDetails.port,
         database: connectionDetails.database,
         user: connectionDetails.user,
         password: connectionDetails.password,
-        options: connectionDetails.options
+        options: connectionDetails.options,
     });
     await connection.connect();
     return connection;
