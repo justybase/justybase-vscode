@@ -12,6 +12,8 @@ module.exports = [
   "db2.integration.test.ts",
   "vertica.integration.test.ts",
   "access.integration.test.ts",
+  "databaseTunnel.integration.test.ts",
+  "databaseTunnel.live.integration.test.ts",
   "allRowsTimeoutSession.live.integration.test.ts",
   "netezzaAdvancedFeatures.live.integration.test.ts",
   "netezzaDropSession.live.integration.test.ts",
