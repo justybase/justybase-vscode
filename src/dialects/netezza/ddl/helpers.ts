@@ -2,6 +2,7 @@
  * DDL Generator - Helper Functions
  */
 import type { NzConnection, ConnectionDetails } from '../../../types';
+import { createConnectedDatabaseConnectionFromDetails } from '../../../core/connectionFactory';
 
 /**
  * Execute query and return array of objects (shim for NzConnection)
@@ -104,20 +105,9 @@ export async function createConnectionFromDetails(
     details: ConnectionDetails, 
     databaseOverride?: string
 ): Promise<NzConnection> {
-    const config = {
-        host: details.host,
-        port: details.port || 5480,
-        database: databaseOverride || details.database,
-        user: details.user,
-        password: details.password
-    };
-
-    const { ClientTypeId, NzConnection } = require('@justybase/netezza-driver');
-    const connection = new NzConnection({
-        ...config,
-        clientType: ClientTypeId?.SqlDotnet ?? 11,
-    });
-    await connection.connect();
-    return connection;
+    return await createConnectedDatabaseConnectionFromDetails(
+        details,
+        databaseOverride,
+    ) as NzConnection;
 }
 

@@ -6,7 +6,9 @@ import {
     listRegisteredDatabaseDialects,
     registerDatabaseDialect
 } from '../core/factories/databaseDialectRegistry';
-import { createDatabaseConnectionFromDetails } from '../core/connectionFactory';
+import {
+    createConnectedDatabaseConnectionFromDetails,
+} from '../core/connectionFactory';
 import type { ConnectionManager } from '../core/connectionManager';
 import type { ConnectionDetails } from '../types';
 import { ensurePersistentConnectionReadyForQuery } from '../core/connectionReadiness';
@@ -47,6 +49,11 @@ export interface JustyBaseLiteApi {
     readonly version: 1;
     registerDatabaseDialect(dialect: DatabaseDialect): DatabaseDialect;
     listRegisteredDatabaseDialects(): readonly DatabaseDialect[];
+    /** Create a connected profile through core, including an optional TCP tunnel. */
+    createConnectedDatabaseConnectionFromDetails?(
+        details: ConnectionDetails,
+        databaseOverride?: string,
+    ): Promise<import('../contracts/database').DatabaseConnection>;
     /**
      * Save (or reuse) a connection profile and open a SQL editor bound to it.
      * Used by companion extensions such as DuckDB + Files ("Query file with SQL").
@@ -95,6 +102,8 @@ export function createJustyBaseLiteApi(
         version: 1,
         registerDatabaseDialect,
         listRegisteredDatabaseDialects,
+        createConnectedDatabaseConnectionFromDetails: (details, databaseOverride) =>
+            createConnectedDatabaseConnectionFromDetails(details, databaseOverride),
         openFileSqlSession: (details, options) =>
             openFileSqlSession(context, connectionManager, details, options),
         openFileSqlWorkspaceSession: (filePaths, options) =>
@@ -276,8 +285,7 @@ async function withNamedConnection<T>(
         throw new Error(`Connection '${connectionName}' is not available.`);
     }
 
-    const connection = createDatabaseConnectionFromDetails(details);
-    await connection.connect();
+    const connection = await createConnectedDatabaseConnectionFromDetails(details);
     try {
         return await operation(connection);
     } finally {

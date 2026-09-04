@@ -1,11 +1,8 @@
-import { createRequire } from 'node:module';
 import * as net from 'node:net';
 import type { SecretStorage } from 'vscode';
+import type { DatabaseTunnelConfig } from '../contracts/database';
 
-const _extensionRequire = createRequire(__filename);
-
-const TUNNEL_PROFILES_STATE_KEY = 'justybase.postgresql.tunnelProfiles.v1';
-const TUNNEL_SECRET_PREFIX = 'justybase.postgresql.tunnel.token.';
+const TUNNEL_SECRET_PREFIX = 'justybase.database.tunnel.token.';
 const LOOPBACK_HOST = '127.0.0.1';
 const DEFAULT_LOCAL_PORT = 15432;
 const MAX_QUEUE_BYTES = 4 * 1024 * 1024;
@@ -31,35 +28,20 @@ interface WebSocketConstructor {
     new (url: string, options: { headers: { Authorization: string }; handshakeTimeout: number }): WebSocketLike;
 }
 
-interface StateStore {
-    get<T>(key: string, defaultValue?: T): T | undefined;
-    update(key: string, value: unknown): Thenable<void>;
+// Keep this as a literal CommonJS require so esbuild includes ws in the core
+// VSIX even though the package is built with --no-dependencies.
+const WebSocket = require('ws') as WebSocketConstructor;
+
+interface RelayConnection {
+    close(): void;
 }
-
-export type TunnelState = 'stopped' | 'listening' | 'error';
-
-export interface PostgreSqlTunnelProfile {
-    id: string;
-    name: string;
-    serverUrl: string;
-    targetId: string;
-    localPort: number;
-}
-
-export interface PostgreSqlTunnelStatus extends PostgreSqlTunnelProfile {
-    host: string;
-    state: TunnelState;
-    activeConnections: number;
-    error?: string;
-}
-
-type TunnelProfileRecord = PostgreSqlTunnelProfile;
 
 interface ActiveTunnel {
-    profile: TunnelProfileRecord;
+    config: DatabaseTunnelConfig;
+    connectionName?: string;
     server: net.Server;
     token: string;
-    state: TunnelState;
+    state: DatabaseTunnelState;
     activeConnections: Set<RelayConnection>;
     listenPromise?: Promise<void>;
     closePromise?: Promise<void>;
@@ -67,18 +49,84 @@ interface ActiveTunnel {
     error?: string;
 }
 
-interface RelayConnection {
-    close(): void;
+export type DatabaseTunnelState = 'stopped' | 'listening' | 'error';
+
+export interface DatabaseTunnelStatus extends DatabaseTunnelConfig {
+    host: string;
+    state: DatabaseTunnelState;
+    activeConnections: number;
+    connectionName?: string;
+    error?: string;
+}
+
+export interface DatabaseTunnelEndpoint {
+    host: typeof LOOPBACK_HOST;
+    port: number;
+}
+
+export interface DatabaseTunnelRuntime {
+    ensureStarted(
+        config: DatabaseTunnelConfig,
+        token: string,
+        connectionName?: string,
+    ): Promise<DatabaseTunnelEndpoint>;
+    stop(id: string): Promise<void>;
+    stopAll(): Promise<void>;
+    getToken(id: string): Promise<string | undefined>;
+    storeToken(id: string, token: string): Promise<void>;
+    deleteToken(id: string): Promise<void>;
+    getStatuses(): DatabaseTunnelStatus[];
+}
+
+export const databaseTunnelDefaults = {
+    localHost: LOOPBACK_HOST,
+    localPort: DEFAULT_LOCAL_PORT,
+} as const;
+
+export function normalizeDatabaseTunnelConfig(config: DatabaseTunnelConfig): DatabaseTunnelConfig {
+    const id = config.id.trim();
+    const serverUrl = normalizeServerUrl(config.serverUrl);
+    const targetId = config.targetId.trim();
+    const localPort = Math.floor(config.localPort);
+
+    if (!id) throw new Error('Database tunnel id is required.');
+    if (!targetId) throw new Error('Database tunnel target id is required.');
+    if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+        throw new Error('Database tunnel local port must be an integer between 1 and 65535.');
+    }
+
+    return { id, serverUrl, targetId, localPort };
+}
+
+export function sameDatabaseTunnelConfig(
+    left: DatabaseTunnelConfig,
+    right: DatabaseTunnelConfig,
+): boolean {
+    const normalizedLeft = normalizeDatabaseTunnelConfig(left);
+    const normalizedRight = normalizeDatabaseTunnelConfig(right);
+    return normalizedLeft.id === normalizedRight.id
+        && normalizedLeft.serverUrl === normalizedRight.serverUrl
+        && normalizedLeft.targetId === normalizedRight.targetId
+        && normalizedLeft.localPort === normalizedRight.localPort;
+}
+
+export function isDatabaseTunnelRelayChanged(
+    left: DatabaseTunnelConfig | undefined,
+    right: DatabaseTunnelConfig | undefined,
+): boolean {
+    if (!left || !right) return false;
+    return normalizeDatabaseTunnelConfig(left).serverUrl
+        !== normalizeDatabaseTunnelConfig(right).serverUrl;
 }
 
 function getWebSocketConstructor(): WebSocketConstructor {
-    return _extensionRequire('ws') as WebSocketConstructor;
+    return WebSocket;
 }
 
 function normalizeServerUrl(value: string): string {
     const parsed = new URL(value.trim());
     if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) {
-        throw new Error('Tunnel server URL must use http(s) or ws(s).');
+        throw new Error('Database tunnel server URL must use http(s) or ws(s).');
     }
 
     parsed.search = '';
@@ -95,43 +143,8 @@ function buildTunnelUrl(serverUrl: string, targetId: string): string {
     return parsed.toString();
 }
 
-function normalizeProfile(profile: PostgreSqlTunnelProfile): TunnelProfileRecord {
-    const id = profile.id.trim();
-    const name = profile.name.trim();
-    const serverUrl = normalizeServerUrl(profile.serverUrl);
-    const targetId = profile.targetId.trim();
-    const localPort = Math.floor(profile.localPort);
-
-    if (!id) throw new Error('Tunnel profile id is required.');
-    if (!name) throw new Error('Tunnel profile name is required.');
-    if (!targetId) throw new Error('Tunnel target id is required.');
-    if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
-        throw new Error('Tunnel local port must be an integer between 1 and 65535.');
-    }
-
-    return { id, name, serverUrl, targetId, localPort };
-}
-
-function normalizeIncomingProfile(value: unknown): TunnelProfileRecord | undefined {
-    if (!value || typeof value !== 'object') return undefined;
-    const candidate = value as Partial<PostgreSqlTunnelProfile>;
-    if (
-        typeof candidate.id !== 'string'
-        || typeof candidate.name !== 'string'
-        || typeof candidate.serverUrl !== 'string'
-        || typeof candidate.targetId !== 'string'
-        || typeof candidate.localPort !== 'number'
-    ) return undefined;
-
-    try {
-        return normalizeProfile(candidate as PostgreSqlTunnelProfile);
-    } catch {
-        return undefined;
-    }
-}
-
 function toBuffer(data: WebSocketMessageData): Buffer {
-    if (typeof data === 'string') throw new Error('Tunnel accepts binary WebSocket frames only.');
+    if (typeof data === 'string') throw new Error('Database tunnel accepts binary WebSocket frames only.');
     if (Buffer.isBuffer(data)) return data;
     if (data instanceof ArrayBuffer) return Buffer.from(data);
     return Buffer.concat(data.map(item => Buffer.from(item)));
@@ -142,117 +155,79 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * A local TCP-to-WebSocket relay. Each local PostgreSQL socket gets its own
- * WebSocket, so PostgreSQL framing, cancellation and TLS all pass through
- * unchanged and never need to be interpreted by the tunnel.
+ * Transparent TCP-to-WebSocket relay for network database drivers.
+ * PostgreSQL, Netezza, Oracle and their TLS handshakes are forwarded without
+ * being parsed by the client-side tunnel.
  */
-export class PostgreSqlTunnelManager {
-    private readonly _active = new Map<string, ActiveTunnel>();
-    private readonly _logger: (message: string, error?: unknown) => void;
+export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
+    private readonly active = new Map<string, ActiveTunnel>();
+    private readonly logger: (message: string, error?: unknown) => void;
 
     public constructor(
-        private readonly _state: StateStore,
-        private readonly _secrets: SecretStorage,
+        private readonly secrets: SecretStorage,
         logger: (message: string, error?: unknown) => void = () => undefined,
     ) {
-        this._logger = logger;
+        this.logger = logger;
     }
 
-    public async listProfiles(): Promise<PostgreSqlTunnelProfile[]> {
-        const stored = this._state.get<unknown[]>(TUNNEL_PROFILES_STATE_KEY, []) ?? [];
-        return stored
-            .map(normalizeIncomingProfile)
-            .filter((profile): profile is TunnelProfileRecord => profile !== undefined)
-            .map(profile => ({ ...profile }));
-    }
+    public async ensureStarted(
+        config: DatabaseTunnelConfig,
+        token: string,
+        connectionName?: string,
+    ): Promise<DatabaseTunnelEndpoint> {
+        const normalized = normalizeDatabaseTunnelConfig(config);
+        const trimmedToken = token.trim();
+        if (!trimmedToken) throw new Error('Database tunnel token is required.');
 
-    public async saveProfile(profile: PostgreSqlTunnelProfile, token?: string): Promise<PostgreSqlTunnelProfile> {
-        const normalized = normalizeProfile(profile);
-        const existing = await this.listProfiles();
-        const existingToken = await this.getToken(normalized.id);
-        const nextToken = token?.trim() || existingToken;
-        if (!nextToken) throw new Error('Tunnel token is required.');
-        const profiles = [...existing.filter(item => item.id !== normalized.id), normalized];
-        await this._state.update(TUNNEL_PROFILES_STATE_KEY, profiles);
-        await this._secrets.store(this.getSecretKey(normalized.id), nextToken);
-        return { ...normalized };
-    }
-
-    public async deleteProfile(id: string): Promise<void> {
-        const normalizedId = id.trim();
-        const profiles = await this.listProfiles();
-        if (this._active.has(normalizedId)) await this.stop(normalizedId);
-        await this._state.update(TUNNEL_PROFILES_STATE_KEY, profiles.filter(profile => profile.id !== normalizedId));
-        await this._secrets.delete(this.getSecretKey(normalizedId));
-    }
-
-    public async getToken(id: string): Promise<string | undefined> {
-        return await this._secrets.get(this.getSecretKey(id.trim()));
-    }
-
-    public async start(id: string): Promise<PostgreSqlTunnelStatus> {
-        const profile = (await this.listProfiles()).find(item => item.id === id.trim());
-        if (!profile) throw new Error(`Tunnel profile '${id}' was not found.`);
-        const token = await this.getToken(profile.id);
-        if (!token) throw new Error(`No token is configured for tunnel profile '${profile.name}'.`);
-        return await this.startWithToken(profile, token);
-    }
-
-    public async startWithToken(profile: PostgreSqlTunnelProfile, token: string): Promise<PostgreSqlTunnelStatus> {
-        const normalized = normalizeProfile(profile);
-        if (!token.trim()) throw new Error('Tunnel token is required.');
-        if (this._active.has(normalized.id)) await this.stop(normalized.id);
+        const existing = this.active.get(normalized.id);
+        if (
+            existing
+            && !existing.stopRequested
+            && sameDatabaseTunnelConfig(existing.config, normalized)
+            && existing.token === trimmedToken
+            && existing.state === 'listening'
+        ) {
+            existing.connectionName = connectionName ?? existing.connectionName;
+            return { host: LOOPBACK_HOST, port: normalized.localPort };
+        }
+        if (existing) await this.stop(normalized.id);
 
         const active: ActiveTunnel = {
-            profile: normalized,
+            config: normalized,
+            connectionName,
             server: net.createServer(socket => {
                 void this.openRelay(active, socket);
             }),
-            token: token.trim(),
+            token: trimmedToken,
             state: 'stopped',
             activeConnections: new Set(),
             stopRequested: false,
         };
-        this._active.set(normalized.id, active);
+        this.active.set(normalized.id, active);
 
         try {
-            active.listenPromise = new Promise<void>((resolve, reject) => {
-                const onError = (error: Error): void => {
-                    active.server.removeListener('listening', onListening);
-                    reject(error);
-                };
-                const onListening = (): void => {
-                    active.server.removeListener('error', onError);
-                    active.server.on('error', error => {
-                        active.state = 'error';
-                        active.error = errorMessage(error);
-                        this._logger('PostgreSQL tunnel server error.', error);
-                    });
-                    resolve();
-                };
-                active.server.once('error', onError);
-                active.server.once('listening', onListening);
-                active.server.listen(normalized.localPort, LOOPBACK_HOST);
-            });
+            active.listenPromise = this.listen(active);
             await active.listenPromise;
             if (active.stopRequested) {
-                throw new Error('PostgreSQL tunnel was stopped while it was starting.');
+                throw new Error('Database tunnel was stopped while it was starting.');
             }
             active.state = 'listening';
-            return this.toStatus(active);
+            return { host: LOOPBACK_HOST, port: normalized.localPort };
         } catch (error: unknown) {
             active.state = 'error';
             active.error = errorMessage(error);
-            if (this._active.get(normalized.id) === active) this._active.delete(normalized.id);
+            if (this.active.get(normalized.id) === active) this.active.delete(normalized.id);
             await this.closeServer(active);
-            throw new Error(`Could not start PostgreSQL tunnel: ${active.error}`, { cause: error });
+            throw new Error(`Could not start database tunnel: ${active.error}`, { cause: error });
         }
     }
 
     public async stop(id: string): Promise<void> {
-        const active = this._active.get(id.trim());
+        const normalizedId = id.trim();
+        const active = this.active.get(normalizedId);
         if (!active) return;
-        this._active.delete(active.profile.id);
+
+        this.active.delete(normalizedId);
         active.stopRequested = true;
         for (const connection of active.activeConnections) connection.close();
         active.activeConnections.clear();
@@ -261,15 +236,57 @@ export class PostgreSqlTunnelManager {
     }
 
     public async stopAll(): Promise<void> {
-        await Promise.all([...this._active.keys()].map(id => this.stop(id)));
+        await Promise.all([...this.active.keys()].map(id => this.stop(id)));
     }
 
-    public getStatuses(): PostgreSqlTunnelStatus[] {
-        return [...this._active.values()].map(active => this.toStatus(active));
+    public async getToken(id: string): Promise<string | undefined> {
+        return await this.secrets.get(this.getSecretKey(id));
+    }
+
+    public async storeToken(id: string, token: string): Promise<void> {
+        const trimmed = token.trim();
+        if (!trimmed) throw new Error('Database tunnel token is required.');
+        await this.secrets.store(this.getSecretKey(id), trimmed);
+    }
+
+    public async deleteToken(id: string): Promise<void> {
+        await this.secrets.delete(this.getSecretKey(id));
+    }
+
+    public getStatuses(): DatabaseTunnelStatus[] {
+        return [...this.active.values()].map(active => ({
+            ...active.config,
+            host: LOOPBACK_HOST,
+            state: active.state,
+            activeConnections: active.activeConnections.size,
+            ...(active.connectionName ? { connectionName: active.connectionName } : {}),
+            ...(active.error ? { error: active.error } : {}),
+        }));
     }
 
     public getSecretKey(id: string): string {
-        return `${TUNNEL_SECRET_PREFIX}${id}`;
+        return `${TUNNEL_SECRET_PREFIX}${id.trim()}`;
+    }
+
+    private listen(active: ActiveTunnel): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            const onError = (error: Error): void => {
+                active.server.removeListener('listening', onListening);
+                reject(error);
+            };
+            const onListening = (): void => {
+                active.server.removeListener('error', onError);
+                active.server.on('error', error => {
+                    active.state = 'error';
+                    active.error = errorMessage(error);
+                    this.logger('Database tunnel server error.', error);
+                });
+                resolve();
+            };
+            active.server.once('error', onError);
+            active.server.once('listening', onListening);
+            active.server.listen(active.config.localPort, LOOPBACK_HOST);
+        });
     }
 
     private async openRelay(active: ActiveTunnel, socket: net.Socket): Promise<void> {
@@ -302,7 +319,7 @@ export class PostgreSqlTunnelManager {
 
         const finish = (reason?: unknown): void => {
             if (closed) return;
-            if (reason) this._logger(`PostgreSQL tunnel connection closed: ${errorMessage(reason)}`);
+            if (reason) this.logger(`Database tunnel connection closed: ${errorMessage(reason)}`);
             relay.close();
         };
 
@@ -361,6 +378,10 @@ export class PostgreSqlTunnelManager {
 
         socket.on('data', (chunk: Buffer) => {
             if (closed) return;
+            // A WebSocket send is asynchronous. Stop the local stream before
+            // queueing the chunk so a large result cannot keep filling this
+            // process while the relay is slower than the database client.
+            socket.pause();
             socketQueue.push(chunk);
             socketQueueBytes += chunk.length;
             if (socketQueueBytes > MAX_QUEUE_BYTES) {
@@ -375,7 +396,7 @@ export class PostgreSqlTunnelManager {
 
         try {
             const WebSocket = getWebSocketConstructor();
-            websocket = new WebSocket(buildTunnelUrl(active.profile.serverUrl, active.profile.targetId), {
+            websocket = new WebSocket(buildTunnelUrl(active.config.serverUrl, active.config.targetId), {
                 headers: { Authorization: `Bearer ${active.token}` },
                 handshakeTimeout: 15_000,
             });
@@ -390,7 +411,7 @@ export class PostgreSqlTunnelManager {
             websocket.on('message', (data, isBinary) => {
                 if (closed) return;
                 if (!isBinary) {
-                    finish(new Error('Tunnel accepts binary WebSocket frames only.'));
+                    finish(new Error('Database tunnel accepts binary WebSocket frames only.'));
                     return;
                 }
                 let buffer: Buffer;
@@ -415,16 +436,6 @@ export class PostgreSqlTunnelManager {
         }
     }
 
-    private toStatus(active: ActiveTunnel): PostgreSqlTunnelStatus {
-        return {
-            ...active.profile,
-            host: LOOPBACK_HOST,
-            state: active.state,
-            activeConnections: active.activeConnections.size,
-            ...(active.error ? { error: active.error } : {}),
-        };
-    }
-
     private async closeServer(active: ActiveTunnel): Promise<void> {
         if (active.closePromise) {
             await active.closePromise;
@@ -440,7 +451,7 @@ export class PostgreSqlTunnelManager {
             try {
                 await active.listenPromise;
             } catch {
-                return;
+                // The listener may have failed before it became active.
             }
         }
         if (!active.server.listening) return;
@@ -461,10 +472,3 @@ export class PostgreSqlTunnelManager {
         });
     }
 }
-
-export const postgresqlTunnelDefaults = {
-    localHost: LOOPBACK_HOST,
-    localPort: DEFAULT_LOCAL_PORT,
-} as const;
-
-export const postgresqlTunnelStateKey = TUNNEL_PROFILES_STATE_KEY;

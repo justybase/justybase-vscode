@@ -1,6 +1,7 @@
 import { createStubDialect } from '../stubDialectFactory';
 
 export const oracleDialect = createStubDialect('oracle', 'Oracle', 1521, {
+    supportsRawTcpTunnel: true,
     connectionFormOptions: {
         databasePlaceholder: 'SID or service name',
     },

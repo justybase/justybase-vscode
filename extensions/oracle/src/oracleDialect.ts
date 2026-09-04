@@ -19,6 +19,7 @@ export const oracleDialect: DatabaseDialect = {
   kind: "oracle",
   displayName: "Oracle",
   defaultPort: 1521,
+  supportsRawTcpTunnel: true,
   capabilities: createDatabaseCapabilities({
     supportsExplainPlan: true,
     supportsExplainGraph: true,

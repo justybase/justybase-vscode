@@ -43,46 +43,8 @@ jest.mock('../core/queryRunner', () => ({
     });
   })
 }));
-jest.mock('../core/nzConnectionFactory', () => ({
-  createNzConnection: jest.fn()
-}));
-
 // Import mocked modules
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
-import { createNzConnection } from '../core/nzConnectionFactory';
-
-function createMockReader(columns: string[], rows: unknown[][]) {
-    let rowIndex = -1;
-
-    return {
-        fieldCount: columns.length,
-        read: jest.fn(async () => {
-            rowIndex += 1;
-            return rowIndex < rows.length;
-        }),
-        close: jest.fn(async () => undefined),
-        getName: jest.fn((index: number) => columns[index]),
-        getValue: jest.fn((index: number) => rows[rowIndex]?.[index])
-    };
-}
-
-function createMockStorageConnection(columns: string[], rows: unknown[][]) {
-    const reader = createMockReader(columns, rows);
-    const command = {
-        commandTimeout: 0,
-        executeReader: jest.fn(async () => reader),
-        cancel: jest.fn(async () => undefined)
-    };
-    const connection = {
-        connect: jest.fn(async () => undefined),
-        close: jest.fn(async () => undefined),
-        createCommand: jest.fn(() => command),
-        on: jest.fn(),
-        removeListener: jest.fn()
-    };
-
-    return { connection, command, reader };
-}
 
 describe('SessionMonitorView', () => {
     let mockContext: vscode.ExtensionContext;
@@ -206,8 +168,6 @@ describe('SessionMonitorView', () => {
       });
     });
 
-    const defaultStorageConnection = createMockStorageConnection([], []);
-    (createNzConnection as jest.Mock).mockReturnValue(defaultStorageConnection.connection);
   });
 
     afterEach(() => {

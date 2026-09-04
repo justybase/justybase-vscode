@@ -153,6 +153,8 @@ export interface DatabaseDialect {
   metadataProvider: DatabaseMetadataProvider;
   sqlAuthoring: DatabaseSqlAuthoring;
   advancedFeatures?: DatabaseAdvancedFeatures;
+  /** Whether the driver speaks a transparent TCP protocol suitable for a core tunnel. */
+  supportsRawTcpTunnel?: boolean;
   getConnectionConstructor(): DatabaseConnectionStaticConstructor;
   createConnection(config: DatabaseConnectionConfig): DatabaseConnection;
 }

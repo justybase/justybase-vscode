@@ -19,6 +19,7 @@ export const postgresqlDialect: DatabaseDialect = {
   kind: "postgresql",
   displayName: "PostgreSQL",
   defaultPort: 5432,
+  supportsRawTcpTunnel: true,
   capabilities: createDatabaseCapabilities({
     supportsExplainPlan: true,
     supportsExplainGraph: true,

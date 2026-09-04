@@ -1,8 +1,6 @@
 import { runQueryRaw, queryResultToRows } from "../../core/queryRunner";
-import {
-  createNzConnection,
-  NzConnection,
-} from "../../core/nzConnectionFactory";
+import { NzConnection } from "../../core/nzConnectionFactory";
+import { createConnectedDatabaseConnectionFromDetails } from "../../core/connectionFactory";
 import type { DatabaseSessionMonitorProvider } from "../../contracts/database";
 import type {
   ConnectionManager,
@@ -172,16 +170,12 @@ async function fetchStorageForDatabase(
         GROUP BY TS.SCHEMA
     `;
 
-  const connection = createNzConnection({
-    host: details.host,
-    port: details.port || 5480,
+  const connection = await createConnectedDatabaseConnectionFromDetails({
+    ...details,
     database,
-    user: details.user,
-    password: details.password,
-  });
+  }) as NzConnection;
 
   try {
-    await connection.connect();
     const rows = await executeQueryRows(connection, sql);
     return rows.map((row) => ({
       DATABASE: String(row.DATABASE || database),

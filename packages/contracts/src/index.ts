@@ -8,7 +8,7 @@ export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualifica
 
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic } from './database';
 
-export type { ConnectionDetails, NamedConnectionDetails } from './connectionDetails';
+export type { ConnectionDetails, DatabaseTunnelConfig, NamedConnectionDetails } from './connectionDetails';
 
 export type { TuningReport, TuningRecommendation, TuningEvidence, TuningSeverity, TuningRisk, TuningEvidenceSource, TuningReportMetadata } from './tuning/types';
 export { clampConfidence, buildTuningSummary, createTuningReport } from './tuning/types';

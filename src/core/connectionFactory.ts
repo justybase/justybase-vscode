@@ -11,11 +11,13 @@ import {
   DatabaseMaintenanceProvider,
   DatabaseMetadataProvider,
   DatabaseKind,
+  DatabaseTunnelConfig,
   DatabaseTuningAdvisor,
   createDatabaseCapabilities,
   DATABASE_KIND_DISPLAY_NAMES,
   normalizeDatabaseKind,
 } from "../contracts/database";
+import type { DatabaseTunnelRuntime } from './databaseTunnel';
 import { ensureBuiltInDialectsRegistered } from "../dialects";
 import {
   getDatabaseDialectByKind,
@@ -40,6 +42,32 @@ const OPTIONAL_EXTENSION_NAMES: Readonly<Partial<Record<DatabaseKind, string>>> 
   clickhouse: "JustyBase SQL Editor (ClickHouse)",
   access: "JustyBase SQL Editor (Microsoft Access)",
 };
+
+export interface DatabaseConnectionDetails {
+  name?: string;
+  host: string;
+  port?: number;
+  database: string;
+  user: string;
+  password?: string;
+  options?: DatabaseConnectionConfig["options"];
+  dbType?: string | DatabaseKind;
+  tunnel?: DatabaseTunnelConfig;
+}
+
+export interface DatabaseConnectionOpenOptions {
+  /** Temporary token used by the unsaved connection form during Test Connection. */
+  tunnelToken?: string;
+  /** Prevents Test Connection from falling back to a token already in SecretStorage. */
+  clearTunnelToken?: boolean;
+}
+
+let databaseTunnelRuntime: DatabaseTunnelRuntime | undefined;
+
+/** Configure the core-owned tunnel runtime once during extension activation. */
+export function configureDatabaseTunnelRuntime(runtime: DatabaseTunnelRuntime | undefined): void {
+  databaseTunnelRuntime = runtime;
+}
 
 function createInstallHint(kind: DatabaseKind): string {
   const connectionDisplayName = DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind;
@@ -101,27 +129,14 @@ export function getDatabaseConnectionConstructor(
   return getDatabaseDialect(kind).getConnectionConstructor();
 }
 
-export function createDatabaseConnectionFromDetails(details: {
-  host: string;
-  port?: number;
-  database: string;
-  user: string;
-  password?: string;
-  options?: DatabaseConnectionConfig["options"];
-  dbType?: string | DatabaseKind;
-}): DatabaseConnection {
+export function createDatabaseConnectionFromDetails(details: DatabaseConnectionDetails): DatabaseConnection {
+  if (details.tunnel) {
+    throw new Error(
+      'This connection uses a TCP tunnel. Use createConnectedDatabaseConnectionFromDetails so the tunnel can start asynchronously.',
+    );
+  }
   const dialect = getDatabaseDialect(details.dbType);
-  return createDatabaseConnection(
-    {
-      host: details.host,
-      port: details.port ?? dialect.defaultPort,
-      database: details.database,
-      user: details.user,
-      password: details.password,
-      options: details.options,
-    },
-    details.dbType,
-  );
+  return createDatabaseConnection(buildDatabaseConnectionConfig(details, dialect), details.dbType);
 }
 
 export function getDatabaseCapabilities(
@@ -152,27 +167,19 @@ export function getRegisteredDatabaseDialects(): readonly DatabaseDialect[] {
 }
 
 export async function createConnectedDatabaseConnectionFromDetails(
-  details: {
-    host: string;
-    port?: number;
-    database: string;
-    user: string;
-    password?: string;
-    options?: DatabaseConnectionConfig["options"];
-    dbType?: string | DatabaseKind;
-  },
+  details: DatabaseConnectionDetails,
   databaseOverride?: string,
+  openOptions: DatabaseConnectionOpenOptions = {},
 ): Promise<DatabaseConnection> {
   const dialect = getDatabaseDialect(details.dbType);
+  const endpoint = await resolveTunnelEndpoint(
+    details,
+    dialect,
+    openOptions.tunnelToken,
+    openOptions.clearTunnelToken,
+  );
   const connection = createDatabaseConnection(
-    {
-      host: details.host,
-      port: details.port ?? dialect.defaultPort,
-      database: databaseOverride ?? details.database,
-      user: details.user,
-      password: details.password,
-      options: details.options,
-    },
+    buildDatabaseConnectionConfig(details, dialect, databaseOverride, endpoint),
     details.dbType,
   );
   try {
@@ -186,6 +193,50 @@ export async function createConnectedDatabaseConnectionFromDetails(
     }
     throw error;
   }
+}
+
+function buildDatabaseConnectionConfig(
+  details: DatabaseConnectionDetails,
+  dialect: DatabaseDialect,
+  databaseOverride?: string,
+  endpoint?: { host: string; port: number },
+): DatabaseConnectionConfig {
+  return {
+    host: endpoint?.host ?? details.host,
+    port: endpoint?.port ?? details.port ?? dialect.defaultPort,
+    database: databaseOverride ?? details.database,
+    user: details.user,
+    password: details.password,
+    options: details.options,
+  };
+}
+
+async function resolveTunnelEndpoint(
+  details: DatabaseConnectionDetails,
+  dialect: DatabaseDialect,
+  tokenOverride?: string,
+  clearStoredToken = false,
+): Promise<{ host: string; port: number } | undefined> {
+  if (!details.tunnel) return undefined;
+  if (!dialect.supportsRawTcpTunnel) {
+    throw new Error(`Database dialect '${dialect.displayName}' does not support transparent TCP tunnels.`);
+  }
+  if (dialect.kind === 'oracle' && typeof details.options?.connectString === 'string' && details.options.connectString.trim()) {
+    throw new Error(
+      'Oracle TCP tunnels require Host, Port and Service Name. Connect String Override is not supported with a tunnel.',
+    );
+  }
+  if (!databaseTunnelRuntime) {
+    throw new Error('The core database tunnel runtime is not initialized. Reload the VS Code window and try again.');
+  }
+
+  const token = clearStoredToken
+    ? tokenOverride?.trim()
+    : tokenOverride?.trim() || await databaseTunnelRuntime.getToken(details.tunnel.id);
+  if (!token) {
+    throw new Error(`No token is configured for database tunnel '${details.tunnel.id}'.`);
+  }
+  return await databaseTunnelRuntime.ensureStarted(details.tunnel, token, details.name);
 }
 
 export async function executeDatabaseQuery<T = Record<string, unknown>>(

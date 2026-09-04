@@ -62,6 +62,10 @@ npm run build
 ## Runtime notes
 
 - The saved `database` field is the Oracle **service name** unless **Connect String Override** is set.
+- Oracle can use the core HTTPS/WSS raw TCP tunnel. Enable it in the common
+  connection form and use Host, Port, and Service Name; a Connect String
+  Override is not compatible with a transparent tunnel. See the shared
+  [database tunnel guide](database-tunnel.md).
 - Compatibility shims implement `CURRENT_CATALOG`, `CURRENT_SCHEMA`, `CURRENT_SID`, and `SET CATALOG` for shared core SQL; `SET CATALOG` does not switch Oracle services.
 - Failed imports clean up tables created in the current run; existing tables are never dropped automatically.
 

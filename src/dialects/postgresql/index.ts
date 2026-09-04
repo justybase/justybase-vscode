@@ -1,6 +1,7 @@
 import { createStubDialect } from '../stubDialectFactory';
 
 export const postgresqlDialect = createStubDialect('postgresql', 'PostgreSQL', 5432, {
+    supportsRawTcpTunnel: true,
     connectionFormOptions: {
         userPlaceholder: 'PostgreSQL user',
     },

@@ -8,13 +8,7 @@ import { ConnectionManager, ConnectionDetails } from '../../core/connectionManag
 import { runQueryRaw } from '../../core/queryRunner';
 import { ExportManager } from '../../export/exportManager';
 import type { ResultSet } from '../../types';
-import { MockNzConnection } from '../../__mocks__/mockNzConnection';
 import { EditDataItem } from '../../views/editDataProvider';
-
-// Mock the nzConnectionFactory
-jest.mock('../../core/nzConnectionFactory', () => ({
-    createNzConnection: jest.fn(() => new MockNzConnection())
-}));
 
 // Mock query runner
 jest.mock('../../core/queryRunner', () => ({

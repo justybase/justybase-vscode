@@ -8,10 +8,16 @@ import {
     type ConnectionDetails as SharedConnectionDetails
 } from '../types';
 import {
-    createDatabaseConnectionFromDetails,
+    createConnectedDatabaseConnectionFromDetails,
     getDatabaseCapabilities,
     resolveConnectionDatabaseKind
 } from './connectionFactory';
+import {
+    isDatabaseTunnelRelayChanged,
+    normalizeDatabaseTunnelConfig,
+    sameDatabaseTunnelConfig,
+    type DatabaseTunnelRuntime,
+} from './databaseTunnel';
 import {
     compatibilitySecretKeys,
     compatibilityStateKeys,
@@ -217,6 +223,7 @@ function normalizeConnectionDetails(details: SharedConnectionDetails, inferLegac
     const options = details.options && Object.keys(details.options).length > 0
         ? { ...details.options }
         : undefined;
+    const tunnel = details.tunnel ? normalizeDatabaseTunnelConfig(details.tunnel) : undefined;
     const normalizedKind = inferLegacyKind
         ? resolveStoredDatabaseKind({ ...details, options })
         : resolveConnectionDatabaseKind(details.dbType);
@@ -224,6 +231,7 @@ function normalizeConnectionDetails(details: SharedConnectionDetails, inferLegac
     return {
         ...details,
         options,
+        ...(tunnel ? { tunnel } : {}),
         dbType: normalizedKind,
         accentColor: normalizeConnectionAccentColor(details.accentColor)
     };
@@ -359,7 +367,10 @@ export class ConnectionManager {
     private _onDidChangeDocumentDatabase = new vscode.EventEmitter<string>();
     readonly onDidChangeDocumentDatabase = this._onDidChangeDocumentDatabase.event;
 
-    constructor(private context: vscode.ExtensionContext) {
+    constructor(
+        private context: vscode.ExtensionContext,
+        private readonly databaseTunnelRuntime?: DatabaseTunnelRuntime,
+    ) {
         this.restorePersistedDocumentContexts();
 
         // Fast-load: restore connection list from globalState cache (synchronous, <1ms)
@@ -564,7 +575,11 @@ export class ConnectionManager {
         await updateMementoValue(this.context.globalState, compatibilityStateKeys.connectionsCache, cache);
     }
 
-    async saveConnection(details: SharedConnectionDetails) {
+    async saveConnection(
+        details: SharedConnectionDetails,
+        tunnelToken?: string,
+        clearTunnelToken = false,
+    ) {
         await this.ensureLoaded();
         const normalizedDetails = normalizeConnectionDetails(details);
         validateConnectionDetails(normalizedDetails, { requireName: true });
@@ -572,6 +587,37 @@ export class ConnectionManager {
             ...normalizedDetails,
             name: normalizedDetails.name as string
         };
+        const previousDetails = this._connections[storedDetails.name];
+        const relayUrlChanged = isDatabaseTunnelRelayChanged(previousDetails?.tunnel, storedDetails.tunnel);
+
+        if (storedDetails.tunnel) {
+            if (!this.databaseTunnelRuntime) {
+                throw new Error('Database tunnel support is not initialized. Reload the VS Code window and try again.');
+            }
+            const existingToken = await this.databaseTunnelRuntime.getToken(storedDetails.tunnel.id);
+            const nextToken = tunnelToken?.trim();
+            if (nextToken) {
+                await this.databaseTunnelRuntime.storeToken(storedDetails.tunnel.id, nextToken);
+            } else if (clearTunnelToken || relayUrlChanged) {
+                await this.databaseTunnelRuntime.deleteToken(storedDetails.tunnel.id);
+            } else if (existingToken) {
+                // Keep the existing token when the password-style field is blank.
+            } else {
+                throw new Error('A bearer token is required when a database tunnel is enabled.');
+            }
+        }
+
+        if (
+            previousDetails?.tunnel
+            && (!storedDetails.tunnel || !sameDatabaseTunnelConfig(previousDetails.tunnel, storedDetails.tunnel))
+            && this.databaseTunnelRuntime
+        ) {
+            await this.databaseTunnelRuntime.stop(previousDetails.tunnel.id);
+            if (!storedDetails.tunnel || previousDetails.tunnel.id !== storedDetails.tunnel.id) {
+                await this.databaseTunnelRuntime.deleteToken(previousDetails.tunnel.id);
+            }
+        }
+
         this._connections[storedDetails.name] = storedDetails;
 
         // If it's the first connection, make it active
@@ -583,21 +629,31 @@ export class ConnectionManager {
         this._onDidChangeConnections.fire();
     }
 
-    async testConnection(details: SharedConnectionDetails): Promise<void> {
+    async testConnection(
+        details: SharedConnectionDetails,
+        tunnelToken?: string,
+        clearTunnelToken = false,
+    ): Promise<void> {
+        await this.ensureLoaded();
         const normalizedDetails = normalizeConnectionDetails(details);
         validateConnectionDetails(normalizedDetails);
-        const connection = createDatabaseConnectionFromDetails(normalizedDetails) as NzConnection;
+        const previousDetails = normalizedDetails.name
+            ? this._connections[normalizedDetails.name]
+            : undefined;
+        const relayUrlChanged = isDatabaseTunnelRelayChanged(previousDetails?.tunnel, normalizedDetails.tunnel);
+        const connection = await createConnectedDatabaseConnectionFromDetails(
+            normalizedDetails,
+            undefined,
+            { tunnelToken, clearTunnelToken: clearTunnelToken || relayUrlChanged },
+        ) as NzConnection;
 
+        // createConnectedDatabaseConnectionFromDetails already completes the
+        // driver handshake. Keep this method limited to cleanup so tunneled
+        // and direct profiles follow the same lifecycle.
         try {
-            await connection.connect();
-        } finally {
-            if (connection) {
-                try {
-                    await connection.close();
-                } catch (closeErr: unknown) {
-                    logWithFallback('warn', '[ConnectionManager] Ignored error during connection.close() in testConnection:', closeErr);
-                }
-            }
+            await connection.close();
+        } catch (closeErr: unknown) {
+            logWithFallback('warn', '[ConnectionManager] Ignored error during connection.close() in testConnection:', closeErr);
         }
     }
 
@@ -606,6 +662,12 @@ export class ConnectionManager {
         if (this._connections[name]) {
             // Close any document persistent connections using this connection
             // (documents will need to reconnect with different connection)
+
+            const removedDetails = this._connections[name];
+            if (removedDetails.tunnel && this.databaseTunnelRuntime) {
+                await this.databaseTunnelRuntime.stop(removedDetails.tunnel.id);
+                await this.databaseTunnelRuntime.deleteToken(removedDetails.tunnel.id);
+            }
 
             delete this._connections[name];
 
@@ -813,7 +875,7 @@ export class ConnectionManager {
 
         let conn: NzConnection | undefined;
         try {
-            conn = createDatabaseConnectionFromDetails({
+            conn = await createConnectedDatabaseConnectionFromDetails({
                 ...details,
                 database: connectionDatabase,
             }) as NzConnection;
@@ -821,7 +883,6 @@ export class ConnectionManager {
                 ? `persistent Netezza tab connection for ${normalizedUri}`
                 : `transient document connection for ${normalizedUri}`;
             logWithFallback('info', `[ConnectionManager] Connecting ${connectionLabel}`);
-            await conn.connect();
             logWithFallback('info', `[ConnectionManager] ${connectionLabel} established`);
 
             if (shouldApplyCatalogOverride && databaseOverride) {

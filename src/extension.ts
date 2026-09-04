@@ -69,9 +69,11 @@ import { SQL_AUTHORING_LANGUAGE_IDS } from './utils/sqlLanguage';
 import { TableDdlSynchronizer } from './metadata/tableDdlSynchronizer';
 import { metadataSessionSweeper } from './metadata/metadataSessionSweeper';
 import { setMetadataQueryConcurrencyLimit } from './metadata/metadataQueryLimiter';
+import { configureDatabaseTunnelRuntime } from './core/connectionFactory';
 
 let isExtensionShuttingDown = false;
 let deferredFeatureScheduler: DeferredFeatureScheduler | undefined;
+let databaseTunnelManager: import('./core/databaseTunnel').DatabaseTunnelManager | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<JustyBaseLiteApi> {
     isExtensionShuttingDown = false;
@@ -101,7 +103,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
 
     checkForConflictingExtensions(context).catch(() => undefined);
 
-    const { services, metadataCacheInit } = activateCoreServices(context, logger);
+    const coreActivation = activateCoreServices(context, logger);
+    databaseTunnelManager = coreActivation.databaseTunnelManager;
+    const { services, metadataCacheInit } = coreActivation;
     const { connectionManager, metadataCache, schemaProvider } = services;
     const tableDdlSynchronizer = new TableDdlSynchronizer(
         context,
@@ -432,6 +436,15 @@ export async function deactivate() {
         tempFileRegistry.disposeAll();
     } catch (e) {
         logWithFallback('error', 'Error cleaning up disk-backed result stores:', e);
+    }
+
+    try {
+        await databaseTunnelManager?.stopAll();
+    } catch (e) {
+        logWithFallback('error', 'Error stopping database tunnels:', e);
+    } finally {
+        databaseTunnelManager = undefined;
+        configureDatabaseTunnelRuntime(undefined);
     }
 
     logWithFallback('info', 'Netezza extension: Deactivation complete.');

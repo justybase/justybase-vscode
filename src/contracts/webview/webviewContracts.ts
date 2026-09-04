@@ -289,7 +289,12 @@ export interface SessionMonitorData {
 // Login Panel — Inbound (Webview → Extension Host)
 // ============================================================================
 
-export type LoginPanelConnectionDraft = Partial<ConnectionDetails>;
+export interface LoginPanelConnectionDraft extends Partial<ConnectionDetails> {
+    /** Only present in the transient webview draft; never persisted with the profile. */
+    tunnelToken?: string;
+    /** Explicitly remove the SecretStorage token when saving an existing tunnel profile. */
+    clearTunnelToken?: boolean;
+}
 
 export type LoginPanelInboundMessage =
     | {
@@ -318,6 +323,7 @@ export type LoginPanelOutboundMessage =
         connections: ConnectionDetails[];
         activeName: string | undefined;
     }
+    | { command: 'clearTunnelTokenField' }
     | {
         command: 'browseFileResult';
         fieldKey: string;
@@ -459,5 +465,6 @@ export const LOGIN_PANEL_INBOUND_COMMANDS = [
 
 export const LOGIN_PANEL_OUTBOUND_COMMANDS = [
     'updateConnections',
+    'clearTunnelTokenField',
     'browseFileResult'
 ] as const satisfies readonly LoginPanelOutboundMessage['command'][];
