@@ -24,7 +24,7 @@ declare module "pg" {
     database?: string;
     user?: string;
     password?: string;
-    ssl?: boolean | { rejectUnauthorized: boolean };
+    ssl?: boolean | { rejectUnauthorized: boolean; servername?: string };
     connectionTimeoutMillis?: number;
     statement_timeout?: number;
     application_name?: string;

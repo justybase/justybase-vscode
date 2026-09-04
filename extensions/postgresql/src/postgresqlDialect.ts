@@ -67,6 +67,16 @@ export const postgresqlDialect: DatabaseDialect = {
         layout: "half",
       },
       {
+        key: "sslServerName",
+        label: "TLS Server Name",
+        type: "text",
+        storage: "options",
+        placeholder: "Optional certificate DNS name",
+        description:
+          "Optional TLS server name. Useful when PostgreSQL is reached through a local tunnel; use 127.0.0.1 as Host with verify-full.",
+        layout: "full",
+      },
+      {
         key: "connectTimeout",
         label: "Connect Timeout (s)",
         type: "number",

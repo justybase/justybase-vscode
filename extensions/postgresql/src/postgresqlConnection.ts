@@ -116,6 +116,7 @@ function resolveCopyImportRequest(sql: string): CopyImportRequest | undefined {
 
 function buildClientConfig(config: DatabaseConnectionConfig): ClientConfig {
     const sslMode = getStringOption(config, 'sslMode');
+    const sslServerName = getStringOption(config, 'sslServerName');
     const connectTimeout = getNumberOption(config, 'connectTimeout');
 
     const clientConfig: ClientConfig = {
@@ -128,9 +129,15 @@ function buildClientConfig(config: DatabaseConnectionConfig): ClientConfig {
     };
 
     if (sslMode === 'require') {
-        clientConfig.ssl = { rejectUnauthorized: false };
+        clientConfig.ssl = {
+            rejectUnauthorized: false,
+            ...(sslServerName ? { servername: sslServerName } : {})
+        };
     } else if (sslMode === 'verify-full') {
-        clientConfig.ssl = { rejectUnauthorized: true };
+        clientConfig.ssl = {
+            rejectUnauthorized: true,
+            ...(sslServerName ? { servername: sslServerName } : {})
+        };
     }
 
     if (connectTimeout !== undefined && connectTimeout > 0) {

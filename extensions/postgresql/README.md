@@ -24,6 +24,8 @@ Browse schemas and routines, write SQL, run it, and investigate the output in th
 - DDL generation for tables, views, routines, and sequences.
 - PostgreSQL `COPY` import for CSV, XLSX, and XLSB data.
 - `EXPLAIN (FORMAT JSON)` parsing and shared tuning-advisor scaffolding.
+- Authenticated PostgreSQL TCP tunnelling through an HTTPS/WSS server, with a
+  local `127.0.0.1` listener for JustyBase and other PostgreSQL clients.
 
 ### Write with database context
 
@@ -51,6 +53,19 @@ Each connection targets one PostgreSQL database. Create another saved profile to
 ## Runtime notes
 
 The explain viewer normalizes PostgreSQL JSON plans. Tuning advice is heuristic and focuses on scans, join shape, planner cost, and row-estimate drift. Generic `DROP SESSION <pid>` compatibility maps to `pg_terminate_backend(pid)` when permissions allow it.
+
+## HTTPS/WSS tunnel
+
+If PostgreSQL is reachable only from a remote server, install and run the
+reference FastAPI relay in [`samples/postgresql-tunnel`](../../samples/postgresql-tunnel/).
+In VS Code use **PostgreSQL: Configure Tunnel**, then **PostgreSQL: Start
+Tunnel**. The tunnel listens on `127.0.0.1:15432` by default; configure a
+normal PostgreSQL profile with that host and port. Port `5432` is also valid
+when it is free.
+
+The server uses named allowlisted targets and a bearer token. The token is
+stored in VS Code SecretStorage. Configure HTTPS/WSS on the reverse proxy and
+do not expose an arbitrary host/port forwarding endpoint.
 
 ## Development and packaging
 

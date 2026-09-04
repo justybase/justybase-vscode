@@ -71,6 +71,37 @@ Optional local integration:
 npm run test:postgres:integration
 ```
 
+## PostgreSQL over HTTPS/WSS tunnel
+
+When the desktop machine can reach only an HTTPS server, while that server can
+reach PostgreSQL, the PostgreSQL companion can expose a loopback TCP listener
+and relay each connection through an authenticated WebSocket. PostgreSQL and
+the `pg` driver remain unaware of the relay:
+
+```text
+JustyBase -> 127.0.0.1:15432 -> WSS/443 -> FastAPI -> private PostgreSQL:5432
+```
+
+The reference FastAPI server is in
+[`samples/postgresql-tunnel`](../samples/postgresql-tunnel/). It uses named
+server-side targets and never accepts an arbitrary host or port from the
+client. Configure and start a tunnel from the Command Palette with:
+
+- **PostgreSQL: Configure Tunnel**
+- **PostgreSQL: Start Tunnel**
+- **PostgreSQL: Stop Tunnel**
+- **PostgreSQL: Tunnel Status**
+
+Then create a normal PostgreSQL connection with host `127.0.0.1` (or
+`localhost`) and the configured local port. Port `15432` is the default;
+`5432` is also supported when it is free. The tunnel token is kept in VS Code
+SecretStorage and is not part of the database connection profile.
+
+Use `sslMode=require` or `verify-full` according to the remote PostgreSQL
+deployment. With `verify-full`, use `127.0.0.1` and set the optional PostgreSQL
+`TLS Server Name` field to the DNS name present in the database certificate.
+The tunnel is desktop-only; a browser cannot open the local TCP listener.
+
 The test is skipped unless `POSTGRES_LIVE_TEST_*` environment variables are set.
 
 Optional docker-compose environment:
