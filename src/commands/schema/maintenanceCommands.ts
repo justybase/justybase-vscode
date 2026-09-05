@@ -8,7 +8,7 @@ import type {
   DatabaseMaintenanceServices,
   DatabaseMaintenanceTarget,
 } from '../../contracts/database';
-import { getDatabaseMaintenanceProvider } from '../../core/connectionFactory';
+import { getDatabaseMaintenanceProvider, getRequiredDatabaseDdlProvider } from '../../core/connectionFactory';
 import { runQuery, runQueryRaw, queryResultToRows } from '../../core/queryRunner';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getFullName, executeWithProgress } from './helpers';
@@ -96,6 +96,9 @@ function createMaintenanceServices(deps: SchemaCommandsDependencies): DatabaseMa
     },
     async getConnectionDetails(connectionName: string) {
       return deps.connectionManager.getConnection(connectionName);
+    },
+    getDdlProvider(kind) {
+      return getRequiredDatabaseDdlProvider(kind);
     },
     async openSqlDocument(content: string, language = 'sql'): Promise<void> {
       const document = await vscode.workspace.openTextDocument({
