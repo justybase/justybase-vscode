@@ -31,6 +31,7 @@ jest.mock('vscode', () => ({
 type MockMaintenanceServices = DatabaseMaintenanceServices & {
     executeSql: jest.Mock;
     getConnectionDetails: jest.Mock;
+    getDdlProvider: jest.Mock;
     openSqlDocument: jest.Mock;
     executeWithProgress: jest.Mock;
     executeAndReport: jest.Mock;
@@ -51,6 +52,7 @@ function createServices(connectionDetails: ConnectionDetails | undefined = baseC
         context: {} as vscode.ExtensionContext,
         executeSql: jest.fn().mockResolvedValue(undefined),
         getConnectionDetails: jest.fn().mockResolvedValue(connectionDetails),
+        getDdlProvider: jest.fn().mockReturnValue(undefined),
         openSqlDocument: jest.fn().mockResolvedValue(undefined),
         executeWithProgress: jest.fn(async (_title: string, task: () => Promise<unknown>) => task()),
         executeAndReport: jest.fn().mockResolvedValue(undefined)
@@ -329,6 +331,31 @@ describe('db2MaintenanceProvider', () => {
         await expect(db2MaintenanceProvider.recreateTable!(target, services)).rejects.toThrow(
             'Connection details not found for db2-conn.'
         );
+    });
+
+    it('uses the host-provided DDL provider across the companion bundle boundary', async () => {
+        const services = createServices();
+        const ddlProvider = {
+            generateDDL: jest.fn().mockResolvedValue({
+                success: true,
+                ddlCode: 'CREATE TABLE ADMIN.SALES (ID INTEGER);'
+            })
+        } as unknown as DatabaseDdlProvider;
+        services.getDdlProvider.mockReturnValue(ddlProvider);
+        jest.spyOn(connectionFactory, 'getRequiredDatabaseDdlProvider').mockImplementation(() => {
+            throw new Error('companion-local registry should not be used');
+        });
+
+        await db2MaintenanceProvider.recreateTable!(target, services);
+
+        expect(ddlProvider.generateDDL).toHaveBeenCalledWith(
+            baseConnectionDetails,
+            'SAMPLE',
+            'ADMIN',
+            'SALES',
+            'TABLE'
+        );
+        expect(services.openSqlDocument).toHaveBeenCalledWith('CREATE TABLE ADMIN.SALES (ID INTEGER);');
     });
 });
 

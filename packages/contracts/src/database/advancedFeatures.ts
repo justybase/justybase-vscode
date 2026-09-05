@@ -281,6 +281,14 @@ export interface DatabaseMaintenanceServices {
   context: unknown;
   executeSql(sql: string, connectionName: string, progressTitle: string): Promise<void>;
   getConnectionDetails(connectionName: string): Promise<ConnectionDetails | undefined>;
+  /**
+   * Resolve a DDL provider in the host extension's dialect registry.
+   *
+   * Companion extensions are bundled separately from the core extension, so
+   * looking the provider up from a maintenance provider can otherwise inspect
+   * a different in-memory registry.
+   */
+  getDdlProvider?(kind: string): DatabaseDdlProvider | undefined;
   openSqlDocument(content: string, language?: string): Promise<void>;
   executeWithProgress<T>(title: string, task: () => Promise<T>): Promise<T>;
   executeAndReport(

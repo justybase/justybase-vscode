@@ -19,7 +19,10 @@ export async function openRecreateTableScript(
         throw new Error(`Connection details not found for ${target.connectionName}.`);
     }
 
-    const ddlProvider = getRequiredDatabaseDdlProvider(kind);
+    // Optional companion extensions are bundled separately from the core
+    // extension. Prefer the provider resolved by the host services so the
+    // lookup uses the core registry rather than the companion's private copy.
+    const ddlProvider = services.getDdlProvider?.(kind) ?? getRequiredDatabaseDdlProvider(kind);
     const result = await ddlProvider.generateDDL(
         connectionDetails,
         target.databaseName,
