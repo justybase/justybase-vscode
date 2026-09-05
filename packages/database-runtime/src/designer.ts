@@ -29,12 +29,25 @@ export class EmptyDesignerPlanError extends Error {
   }
 }
 
+function isDesignerOperationSupported(
+  capability: DatabaseDesignerCapabilities['constructs'][DatabaseDesignerCapabilityKey],
+  operation: DesignerOperation,
+  allowAlternative: boolean,
+): boolean {
+  return capability.operations.includes(operation)
+    && capability.level !== 'unsupported'
+    && capability.level !== 'runtime-unavailable'
+    && capability.level !== 'privilege-blocked'
+    && (allowAlternative || capability.level !== 'alternative');
+}
+
 export function hasDesignerOperation(
   capabilities: DatabaseDesignerCapabilities,
   capabilityKey: DatabaseDesignerCapabilityKey,
   operation: DesignerOperation,
+  allowAlternative = false,
 ): boolean {
-  return capabilities.constructs[capabilityKey].operations.includes(operation);
+  return isDesignerOperationSupported(capabilities.constructs[capabilityKey], operation, allowAlternative);
 }
 
 export function assertDesignerOperationSupported(
@@ -44,11 +57,7 @@ export function assertDesignerOperationSupported(
   allowAlternative = false,
 ): void {
   const capability = capabilities.constructs[capabilityKey];
-  if (!capability.operations.includes(operation)
-    || capability.level === 'unsupported'
-    || capability.level === 'runtime-unavailable'
-    || capability.level === 'privilege-blocked'
-    || (!allowAlternative && capability.level === 'alternative')) {
+  if (!isDesignerOperationSupported(capability, operation, allowAlternative)) {
     throw new UnsupportedDesignerOperationError(capabilityKey, operation, capability.reason);
   }
 }

@@ -4,7 +4,13 @@
  */
 
 import { formatIdentifierForSql } from '../utils/identifierUtils';
-import { getDatabaseDesignerCapabilities, UnsupportedDesignerOperationError } from '../contracts/database';
+import {
+    getDatabaseDesignerCapabilities,
+    resolveDatabaseDesignerCapabilities,
+    UnsupportedDesignerOperationError,
+    type DatabaseDesignerCapability,
+    type DatabaseDesignerRuntimeContext,
+} from '../contracts/database';
 
 export interface TableDesignerColumnInput {
     name: string;
@@ -17,6 +23,8 @@ export interface TableDesignerColumnInput {
 
 export interface TableDesignerCreateInput {
     databaseKind: string;
+    readOnly?: boolean;
+    runtimeAvailable?: boolean;
     dbName: string;
     schemaName: string | undefined;
     tableName: string;
@@ -40,6 +48,8 @@ export interface TableDesignerProfile {
     newColumnType: string;
     newColumnLength: string;
 }
+
+export type TableDesignerRuntimeContext = Pick<DatabaseDesignerRuntimeContext, 'readOnly' | 'runtimeAvailable'>;
 
 const NETEZZA_DATA_TYPES = [
     'INTEGER', 'BIGINT', 'SMALLINT', 'BYTEINT',
@@ -103,19 +113,30 @@ function normalizeKind(kind: string | undefined): string {
     return (kind ?? '').trim().toLowerCase();
 }
 
-export function isTableDesignerSupported(kind: string | undefined): boolean {
+function getTableDesignerCapability(
+    kind: string | undefined,
+    context?: TableDesignerRuntimeContext,
+): DatabaseDesignerCapability {
+    const base = getDatabaseDesignerCapabilities(kind);
+    return context
+        ? resolveDatabaseDesignerCapabilities(base, { databaseKind: base.kind, ...context }).constructs.table
+        : base.constructs.table;
+}
+
+export function isTableDesignerSupported(kind: string | undefined, context?: TableDesignerRuntimeContext): boolean {
     const profile = getTableDesignerProfile(kind);
-    const capability = getDatabaseDesignerCapabilities(kind).constructs.table;
+    const capability = getTableDesignerCapability(kind, context);
     return profile.supported
         && capability.operations.includes('create')
         && capability.level !== 'unsupported'
-        && capability.level !== 'runtime-unavailable';
+        && capability.level !== 'runtime-unavailable'
+        && capability.level !== 'privilege-blocked';
 }
 
-export function getTableDesignerUnsupportedReason(kind: string | undefined): string | undefined {
+export function getTableDesignerUnsupportedReason(kind: string | undefined, context?: TableDesignerRuntimeContext): string | undefined {
     const profile = getTableDesignerProfile(kind);
-    const capability = getDatabaseDesignerCapabilities(kind).constructs.table;
-    if (!capability.operations.includes('create') || capability.level === 'unsupported' || capability.level === 'runtime-unavailable') {
+    const capability = getTableDesignerCapability(kind, context);
+    if (!capability.operations.includes('create') || capability.level === 'unsupported' || capability.level === 'runtime-unavailable' || capability.level === 'privilege-blocked') {
         return capability.reason ?? profile.reason;
     }
     return profile.reason;
@@ -414,11 +435,15 @@ function buildColumnDefinition(kind: string, column: TableDesignerColumnInput): 
 export function buildTableDesignerCreateSql(input: TableDesignerCreateInput): string {
     const kind = normalizeKind(input.databaseKind);
     const profile = getTableDesignerProfile(kind);
-    const capability = getDatabaseDesignerCapabilities(kind).constructs.table;
+    const capability = getTableDesignerCapability(kind, {
+        readOnly: input.readOnly,
+        runtimeAvailable: input.runtimeAvailable,
+    });
     if (!profile.supported
         || !capability.operations.includes('create')
         || capability.level === 'unsupported'
-        || capability.level === 'runtime-unavailable') {
+        || capability.level === 'runtime-unavailable'
+        || capability.level === 'privilege-blocked') {
         throw new UnsupportedDesignerOperationError(
             'table',
             'create',

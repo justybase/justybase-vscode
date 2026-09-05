@@ -98,13 +98,74 @@ export interface ClickHousePartitionOperationInput {
   partition: string;
 }
 
+const STRING_LIKE_DEFAULT_TYPES = new Set([
+  'VARCHAR', 'NVARCHAR', 'VARCHAR2', 'CHAR', 'CHARACTER', 'NCHAR', 'TEXT',
+  'DATE', 'TIME', 'TIMESTAMP', 'DATETIME', 'TIMESTAMPTZ', 'TIMESTAMP_NTZ', 'TIMESTAMP_TZ',
+]);
+
 function requireFragment(value: string, label: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`${label} is required.`);
-  if (trimmed.includes('\u0000') || /[;]|--|\/\*|\*\//.test(trimmed)) {
+  if (hasUnsafeFragmentSyntax(trimmed)) {
     throw new Error(`${label} cannot contain SQL statement separators or comments.`);
   }
   return trimmed;
+}
+
+type DesignerQuote = "'" | '"' | '`' | '[';
+
+function hasUnsafeFragmentSyntax(value: string): boolean {
+  let quote: DesignerQuote | undefined;
+  let dollarQuote: string | undefined;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] ?? '';
+    const next = value[index + 1] ?? '';
+
+    if (dollarQuote) {
+      if (value.startsWith(dollarQuote, index)) {
+        index += dollarQuote.length - 1;
+        dollarQuote = undefined;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (quote === '[') {
+        if (character === ']' && next === ']') index += 1;
+        else if (character === ']') quote = undefined;
+      } else if (character === quote && next === quote) {
+        index += 1;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (character === '[') {
+      quote = '[';
+      continue;
+    }
+    if (character === '$') {
+      const match = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u.exec(value.slice(index));
+      if (match) {
+        dollarQuote = match[0];
+        index += match[0].length - 1;
+        continue;
+      }
+    }
+    if (character === ';'
+      || (character === '-' && next === '-')
+      || (character === '/' && next === '*')
+      || (character === '*' && next === '/')) {
+      return true;
+    }
+  }
+  return value.includes('\u0000');
 }
 
 function requireTriggerBody(value: string): string {
@@ -119,8 +180,47 @@ function requireViewDefinition(value: string): string {
   return requireFragment(withoutTrailingTerminator, 'View query');
 }
 
-function requireIdentifier(value: string, label: string): string {
-  return requireFragment(value, label);
+function unquoteIdentifier(value: string, databaseKind: DatabaseKind): string {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) return trimmed;
+  if ((databaseKind === 'mysql' || databaseKind === 'clickhouse')
+    && trimmed.startsWith('`') && trimmed.endsWith('`')) {
+    return trimmed.slice(1, -1).replace(/``/g, '`');
+  }
+  if (databaseKind === 'mssql' && trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    return trimmed.slice(1, -1).replace(/]]/g, ']');
+  }
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/""/g, '"');
+  }
+  return trimmed;
+}
+
+function requireIdentifier(value: string, label: string, databaseKind: DatabaseKind): string {
+  return unquoteIdentifier(requireFragment(value, label), databaseKind);
+}
+
+function renderDefaultExpression(value: string, dataType: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  const upper = trimmed.toUpperCase();
+  const functionLike = upper.includes('()')
+    || upper === 'CURRENT_DATE'
+    || upper === 'CURRENT_TIME'
+    || upper === 'CURRENT_TIMESTAMP'
+    || upper === 'NOW'
+    || upper === 'SYSDATE'
+    || upper === 'NULL'
+    || upper === 'CURRENT_USER'
+    || upper === 'GETDATE';
+  if (functionLike || trimmed.startsWith("'") || trimmed.startsWith('(')) return trimmed;
+
+  const typeName = dataType.trim().toUpperCase().replace(/\s*\([^)]*\)\s*$/u, '');
+  if (STRING_LIKE_DEFAULT_TYPES.has(typeName)) {
+    return `'${trimmed.replace(/'/g, "''")}'`;
+  }
+  return trimmed;
 }
 
 export function quoteDesignerIdentifier(value: string, databaseKind: DatabaseKind): string {
@@ -137,20 +237,39 @@ function splitTopLevelList(value: string): string[] {
   const values: string[] = [];
   let start = 0;
   let depth = 0;
-  let quote: "'" | '"' | undefined;
+  let quote: DesignerQuote | undefined;
+  let dollarQuote: string | undefined;
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index] ?? '';
     const next = value[index + 1] ?? '';
+    if (dollarQuote) {
+      if (value.startsWith(dollarQuote, index)) {
+        index += dollarQuote.length - 1;
+        dollarQuote = undefined;
+      }
+      continue;
+    }
     if (quote) {
-      if (character === quote && next === quote) {
+      if (quote === '[') {
+        if (character === ']' && next === ']') index += 1;
+        else if (character === ']') quote = undefined;
+      } else if (character === quote && next === quote) {
         index += 1;
       } else if (character === quote) {
         quote = undefined;
       }
       continue;
     }
-    if (character === "'" || character === '"') {
+    if (character === "'" || character === '"' || character === '`') {
       quote = character;
+    } else if (character === '[') {
+      quote = '[';
+    } else if (character === '$') {
+      const match = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u.exec(value.slice(index));
+      if (match) {
+        dollarQuote = match[0];
+        index += match[0].length - 1;
+      }
     } else if (character === '(') {
       depth += 1;
     } else if (character === ')' && depth > 0) {
@@ -164,10 +283,10 @@ function splitTopLevelList(value: string): string[] {
   return values.filter(Boolean);
 }
 
-function identifiers(value: string, label: string): string[] {
+function identifiers(value: string, label: string, databaseKind: DatabaseKind): string[] {
   const values = splitTopLevelList(value);
   if (values.length === 0) throw new Error(`Enter at least one ${label}.`);
-  return values.map(item => requireIdentifier(item, label));
+  return values.map(item => requireIdentifier(item, label, databaseKind));
 }
 
 function normalizedKind(databaseKind: DatabaseKind): string {
@@ -183,10 +302,10 @@ function qualifiedDesignerReference(
   schema: string,
   table: string,
 ): string {
-  const tableName = quoteDesignerIdentifier(requireIdentifier(table, 'Referenced table'), databaseKind);
+  const tableName = quoteDesignerIdentifier(requireIdentifier(table, 'Referenced table', databaseKind), databaseKind);
   const schemaName = schema.trim();
   return schemaName
-    ? `${quoteDesignerIdentifier(requireIdentifier(schemaName, 'Referenced schema'), databaseKind)}.${tableName}`
+    ? `${quoteDesignerIdentifier(requireIdentifier(schemaName, 'Referenced schema', databaseKind), databaseKind)}.${tableName}`
     : tableName;
 }
 
@@ -259,9 +378,9 @@ export function buildAddColumnSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'alterTable', 'alter');
-  const name = requireIdentifier(input.name, 'Column name');
+  const name = requireIdentifier(input.name, 'Column name', databaseKind);
   const dataType = requireFragment(input.dataType, 'Column data type');
-  const defaultExpression = input.defaultExpression.trim();
+  const defaultExpression = renderDefaultExpression(input.defaultExpression, dataType);
   if (defaultExpression) requireFragment(defaultExpression, 'Default expression');
   return `ALTER TABLE ${targetSql} ADD COLUMN ${quoteDesignerIdentifier(name, databaseKind)} ${dataType}${defaultExpression ? ` DEFAULT ${defaultExpression}` : ''}${input.notNull ? ' NOT NULL' : ''};`;
 }
@@ -273,8 +392,8 @@ export function buildRelationalIndexSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'indexes', 'create');
-  const name = requireIdentifier(input.name, 'Index name');
-  const columns = identifiers(input.columns, 'index column');
+  const name = requireIdentifier(input.name, 'Index name', databaseKind);
+  const columns = identifiers(input.columns, 'index column', databaseKind);
   return `CREATE ${input.unique ? 'UNIQUE ' : ''}INDEX ${quoteDesignerIdentifier(name, databaseKind)} ON ${targetSql} (${columns.map(column => quoteDesignerIdentifier(column, databaseKind)).join(', ')});`;
 }
 
@@ -285,7 +404,7 @@ export function buildDropIndexSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'indexes', 'drop');
-  const name = quoteDesignerIdentifier(requireIdentifier(indexName, 'Index name'), databaseKind);
+  const name = quoteDesignerIdentifier(requireIdentifier(indexName, 'Index name', databaseKind), databaseKind);
   const kind = normalizedKind(databaseKind);
   if (kind === 'mysql' || kind === 'mssql') return `DROP INDEX ${name} ON ${targetSql};`;
   return `DROP INDEX ${name};`;
@@ -299,9 +418,9 @@ export function buildForeignKeySql(
 ): string {
   assertOperation(capability, 'foreignKeys', 'create');
   validateConstraintOptions(databaseKind, input);
-  const name = requireIdentifier(input.name, 'Constraint name');
-  const columns = identifiers(input.columns, 'foreign-key column');
-  const referencedColumns = identifiers(input.referencedColumns, 'referenced column');
+  const name = requireIdentifier(input.name, 'Constraint name', databaseKind);
+  const columns = identifiers(input.columns, 'foreign-key column', databaseKind);
+  const referencedColumns = identifiers(input.referencedColumns, 'referenced column', databaseKind);
   if (columns.length !== referencedColumns.length) {
     throw new Error('The number of local and referenced columns must match.');
   }
@@ -322,7 +441,7 @@ export function buildCheckConstraintSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'checks', 'create');
-  const name = requireIdentifier(input.name, 'Constraint name');
+  const name = requireIdentifier(input.name, 'Constraint name', databaseKind);
   const expression = requireFragment(input.expression, 'CHECK expression');
   if (input.notValid && normalizedKind(databaseKind) !== 'postgresql') {
     throw new Error('NOT VALID is supported only by PostgreSQL CHECK constraints.');
@@ -359,9 +478,9 @@ export function buildTriggerSql(
   if (!allowedLevels.includes(input.level)) {
     throw new Error(`Trigger level ${input.level} is not supported by this dialect.`);
   }
-  const name = requireIdentifier(input.name, 'Trigger name');
+  const name = requireIdentifier(input.name, 'Trigger name', databaseKind);
   const updateColumns = input.event === 'UPDATE' && input.updateColumns.trim()
-    ? identifiers(input.updateColumns, 'UPDATE OF column')
+    ? identifiers(input.updateColumns, 'UPDATE OF column', databaseKind)
     : [];
   if (updateColumns.length > 0 && !triggerCapability.supportsUpdateColumns) {
     throw new Error('UPDATE OF column lists are not supported by this dialect.');
@@ -402,7 +521,7 @@ export function buildDropTriggerSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'triggers', 'drop');
-  const name = quoteDesignerIdentifier(requireIdentifier(input.name, 'Trigger name'), databaseKind);
+  const name = quoteDesignerIdentifier(requireIdentifier(input.name, 'Trigger name', databaseKind), databaseKind);
   const kind = normalizedKind(databaseKind);
   if (kind === 'mssql' || kind === 'postgresql') return `DROP TRIGGER ${name} ON ${targetSql};`;
   return `DROP TRIGGER ${name};`;
@@ -458,7 +577,7 @@ export function buildDropConstraintSql(
     ? 'foreignKeys'
     : constraintKind === 'check' ? 'checks' : 'alterTable';
   assertOperation(capability, capabilityKey, 'drop');
-  const name = quoteDesignerIdentifier(requireIdentifier(constraintName, 'Constraint name'), databaseKind);
+  const name = quoteDesignerIdentifier(requireIdentifier(constraintName, 'Constraint name', databaseKind), databaseKind);
   const kind = normalizedKind(databaseKind);
   if (kind === 'mysql' && constraintKind === 'foreignKey') {
     return `ALTER TABLE ${targetSql} DROP FOREIGN KEY ${name};`;
@@ -475,10 +594,12 @@ export function buildNetezzaPhysicalDesignSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'partitions', 'alter', true);
-  return [
-    buildNetezzaDistributionSql(targetSql, input, capability),
-    renderNetezzaOrganizationSql(targetSql, input),
-  ].join('\n');
+  const statements = [buildNetezzaDistributionSql(targetSql, input, capability)];
+  const hasOrganizationChange = input.organizationNone
+    || input.organizationColumns.trim().length > 0
+    || input.organizationMaxRowsPerZone.trim().length > 0;
+  if (hasOrganizationChange) statements.push(renderNetezzaOrganizationSql(targetSql, input));
+  return statements.join('\n');
 }
 
 export function buildNetezzaDistributionSql(
@@ -491,7 +612,7 @@ export function buildNetezzaDistributionSql(
   if (input.distributionMethod === 'RANDOM') {
     statements.push(`ALTER TABLE ${targetSql} DISTRIBUTE ON RANDOM;`);
   } else {
-    const columns = identifiers(input.distributionColumns, 'distribution column');
+    const columns = identifiers(input.distributionColumns, 'distribution column', 'netezza');
     statements.push(`ALTER TABLE ${targetSql} DISTRIBUTE ON (${columns.map(column => quoteDesignerIdentifier(column, 'netezza')).join(', ')});`);
   }
   return statements.join('\n');
@@ -513,7 +634,7 @@ function renderNetezzaOrganizationSql(
   if (input.organizationNone) {
     return `ALTER TABLE ${targetSql} ORGANIZE ON NONE;`;
   }
-  const columns = identifiers(input.organizationColumns, 'organization column');
+  const columns = identifiers(input.organizationColumns, 'organization column', 'netezza');
   const maxRowsPerZone = optionalPositiveInteger(input.organizationMaxRowsPerZone, 'MAX_ROWS_PER_ZONE');
   return `ALTER TABLE ${targetSql} ORGANIZE ON (${columns.map(column => quoteDesignerIdentifier(column, 'netezza')).join(', ')})${maxRowsPerZone ? ` WITH (MAX_ROWS_PER_ZONE=${maxRowsPerZone})` : ''};`;
 }
@@ -524,7 +645,7 @@ export function buildClickHouseSkippingIndexSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'indexes', 'create', true);
-  const name = requireIdentifier(input.name, 'Index name');
+  const name = requireIdentifier(input.name, 'Index name', 'clickhouse');
   const expression = requireFragment(input.expression, 'Index expression');
   const indexType = requireFragment(input.indexType, 'Index type');
   if (!/^[A-Za-z][A-Za-z0-9_]*(?:\([^;]*\))?$/.test(indexType)) throw new Error('Unsupported ClickHouse data-skipping index type.');
@@ -539,7 +660,7 @@ export function buildClickHouseSkippingIndexDropSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'indexes', 'drop', true);
-  return `ALTER TABLE ${targetSql} DROP INDEX ${quoteDesignerIdentifier(requireIdentifier(indexName, 'Index name'), 'clickhouse')};`;
+  return `ALTER TABLE ${targetSql} DROP INDEX ${quoteDesignerIdentifier(requireIdentifier(indexName, 'Index name', 'clickhouse'), 'clickhouse')};`;
 }
 
 export function buildClickHousePartitionOperationSql(
@@ -563,9 +684,9 @@ export function buildVerticaProjectionSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'indexes', 'create', true);
-  const name = requireIdentifier(input.name, 'Projection name');
-  const columns = identifiers(input.columns, 'projection column');
-  const orderBy = input.orderBy.trim() ? identifiers(input.orderBy, 'sort column') : columns;
+  const name = requireIdentifier(input.name, 'Projection name', 'vertica');
+  const columns = identifiers(input.columns, 'projection column', 'vertica');
+  const orderBy = input.orderBy.trim() ? identifiers(input.orderBy, 'sort column', 'vertica') : columns;
   const segmentation = input.segmentation.trim() ? requireFragment(input.segmentation, 'Segmentation expression') : '';
   const kSafety = input.kSafety.trim();
   if (kSafety && (!/^\d+$/.test(kSafety) || Number(kSafety) < 0)) throw new Error('K-safety must be a non-negative integer.');
@@ -579,7 +700,7 @@ export function buildVerticaProjectionDropSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'indexes', 'drop', true);
-  return `DROP PROJECTION ${quoteDesignerIdentifier(requireIdentifier(projectionName, 'Projection name'), 'vertica')};`;
+  return `DROP PROJECTION ${quoteDesignerIdentifier(requireIdentifier(projectionName, 'Projection name', 'vertica'), 'vertica')};`;
 }
 
 export function buildSnowflakeClusteringSql(

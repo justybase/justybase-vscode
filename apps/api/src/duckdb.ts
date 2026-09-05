@@ -44,6 +44,7 @@ const openDatabases = new Map<string, Promise<OpenDuckDb>>();
 const executionLocks = new Map<string, Promise<void>>();
 const FALLBACK_ROW_LIMIT = 200_000;
 let duckDbModulePromise: Promise<DuckDbModule> | undefined;
+let duckDbRuntimeAvailabilityCache: { candidates: string; available: boolean } | undefined;
 
 function rowLimit(value: number): number {
   return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : FALLBACK_ROW_LIMIT;
@@ -74,14 +75,27 @@ function moduleCandidates(): string[] {
  * reports a detailed installation error if the runtime disappears later.
  */
 export function isDuckDbRuntimeAvailable(): boolean {
-  for (const candidate of moduleCandidates()) {
+  const candidates = moduleCandidates();
+  const candidateKey = candidates.join('\u0000');
+  if (duckDbRuntimeAvailabilityCache?.candidates === candidateKey) {
+    return duckDbRuntimeAvailabilityCache.available;
+  }
+
+  const available = candidates.some(candidate => {
     try {
-      if (asDuckDbModule(moduleRequire(candidate))) return true;
+      return Boolean(asDuckDbModule(moduleRequire(candidate)));
     } catch {
       // Try the next optional installation location.
+      return false;
     }
-  }
-  return false;
+  });
+  duckDbRuntimeAvailabilityCache = { candidates: candidateKey, available };
+  return available;
+}
+
+/** Clear the synchronous capability probe after installing or removing DuckDB at runtime. */
+export function invalidateDuckDbRuntimeAvailability(): void {
+  duckDbRuntimeAvailabilityCache = undefined;
 }
 
 async function loadDuckDb(): Promise<DuckDbModule> {
@@ -90,7 +104,14 @@ async function loadDuckDb(): Promise<DuckDbModule> {
       for (const candidate of moduleCandidates()) {
         try {
           const loaded = asDuckDbModule(moduleRequire(candidate));
-          if (loaded) return loaded;
+          if (loaded) {
+            invalidateDuckDbRuntimeAvailability();
+            duckDbRuntimeAvailabilityCache = {
+              candidates: moduleCandidates().join('\u0000'),
+              available: true,
+            };
+            return loaded;
+          }
         } catch {
           // Try the next optional installation location.
         }
@@ -98,6 +119,7 @@ async function loadDuckDb(): Promise<DuckDbModule> {
       throw new Error('DuckDB runtime dependency "@duckdb/node-api" is not installed. Install the optional DuckDB extension or set JUSTYBASE_DUCKDB_MODULE_PATH.');
     }).catch(error => {
       duckDbModulePromise = undefined;
+      invalidateDuckDbRuntimeAvailability();
       throw error;
     });
   }
@@ -282,7 +304,7 @@ export async function listDuckDbObjects(profile: StoredConnection, database: str
     schema: String(row.table_schema ?? ''),
     database: String(row.table_catalog ?? database),
     objectType: String(row.table_type ?? '').toUpperCase() === 'BASE TABLE' ? 'TABLE' : String(row.table_type ?? '').toUpperCase(),
-    ...(typeof row.view_sql === 'string' && row.view_sql.trim() ? { description: row.view_sql } : {}),
+    ...(typeof row.view_sql === 'string' && row.view_sql.trim() ? { viewSql: row.view_sql.trim() } : {}),
   })).filter(row => row.name.length > 0);
 }
 

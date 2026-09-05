@@ -247,6 +247,16 @@ function fingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function fingerprintTarget(target: DatabaseDesignerTarget): Pick<DatabaseDesignerTarget, 'connectionId' | 'database' | 'schema' | 'objectName' | 'objectType'> {
+  return {
+    connectionId: target.connectionId,
+    database: target.database,
+    schema: target.schema,
+    objectName: target.objectName,
+    objectType: target.objectType,
+  };
+}
+
 async function loadSqliteViewSnapshot(
   profile: StoredConnection,
   request: DesignerSnapshotRequest,
@@ -287,7 +297,7 @@ async function loadSqliteViewSnapshot(
     objectName,
     objectType: 'VIEW',
   };
-  const snapshotValue = { target, objectType: 'VIEW', sourceDdl, definition };
+  const snapshotValue = { target: fingerprintTarget(target), objectType: 'VIEW', sourceDdl, definition };
   const snapshot: DatabaseObjectSnapshot = {
     target,
     objectType: 'VIEW',
@@ -404,7 +414,7 @@ async function loadSqliteSnapshot(
     objectName,
     objectType: 'TABLE',
   };
-  const snapshotValue = { target, objectType: 'TABLE', sourceDdl, definition };
+  const snapshotValue = { target: fingerprintTarget(target), objectType: 'TABLE', sourceDdl, definition };
   const snapshot: DatabaseObjectSnapshot = {
     target,
     objectType: 'TABLE',
@@ -468,7 +478,7 @@ async function loadDuckDbViewSnapshot(
     objectName,
     objectType: 'VIEW',
   };
-  const snapshotValue = { target, objectType: 'VIEW', sourceDdl, definition };
+  const snapshotValue = { target: fingerprintTarget(target), objectType: 'VIEW', sourceDdl, definition };
   const snapshot: DatabaseObjectSnapshot = {
     target,
     objectType: 'VIEW',
@@ -602,7 +612,7 @@ async function loadDuckDbSnapshot(
     objectName,
     objectType: 'TABLE',
   };
-  const snapshotValue = { target, objectType: 'TABLE', sourceDdl, definition };
+  const snapshotValue = { target: fingerprintTarget(target), objectType: 'TABLE', sourceDdl, definition };
   const snapshot: DatabaseObjectSnapshot = {
     target,
     objectType: 'TABLE',

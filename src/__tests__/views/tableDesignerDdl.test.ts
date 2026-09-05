@@ -169,6 +169,16 @@ describe('table designer DDL', () => {
         expect(() => buildTableDesignerCreateSql(input({ databaseKind: 'mystery' }))).toThrow('mystery');
     });
 
+    it('rejects table creation for a read-only runtime context', () => {
+        expect(isTableDesignerSupported('sqlite', { readOnly: true, runtimeAvailable: true })).toBe(false);
+        expect(getTableDesignerUnsupportedReason('sqlite', { readOnly: true, runtimeAvailable: true })).toContain('read-only');
+        expect(() => buildTableDesignerCreateSql(input({
+            databaseKind: 'sqlite',
+            readOnly: true,
+            runtimeAvailable: true,
+        }))).toThrow(UnsupportedDesignerOperationError);
+    });
+
     it('validates the design and rejects injectable column types', () => {
         expect(() => buildTableDesignerCreateSql(input({ tableName: '' }))).toThrow('table name');
         expect(() => buildTableDesignerCreateSql(input({ columns: [] }))).toThrow('at least one column');

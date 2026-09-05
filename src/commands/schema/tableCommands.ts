@@ -15,6 +15,7 @@ import {
     isTableDesignerSupported,
 } from '../../views/tableDesignerDdl';
 import { getCoreDatabaseDesignerCapabilities } from '../../core/designerCapabilities';
+import { tryGetDatabaseDialect } from '../../core/connectionFactory';
 import { assertDesignerOperation } from '../../views/designerOperationGuard';
 
 /**
@@ -26,12 +27,20 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
     return [
         // Unified entry point: dispatch to the registered dialect designer.
         vscode.commands.registerCommand('netezza.openObjectDesigner', async (item: SchemaItemData) => {
-            if (!item || !item.label || !item.dbName || !item.schema || (item.objType && item.objType !== 'TABLE')) {
+            if (!item || !item.label || !item.dbName || (item.objType && item.objType !== 'TABLE')) {
                 vscode.window.showErrorMessage('Select a table before opening the Object Designer.');
                 return;
             }
 
             const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+            // MySQL uses the database/catalog as its schema-like container in
+            // the flat schema tree. Keep the delegated command's required
+            // schema field aligned with the create-table designer fallback.
+            const targetSchema = item.schema || (databaseKind === 'mysql' ? item.dbName : undefined);
+            if (!targetSchema) {
+                vscode.window.showErrorMessage('Select a table with a schema before opening the Object Designer.');
+                return;
+            }
             const commandByKind: Readonly<Record<string, string>> = {
                 netezza: 'netezza.alterTableWizard',
                 mysql: 'justybase.mysql.alterTableDesigner',
@@ -40,7 +49,10 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
             const delegatedCommand = databaseKind ? commandByKind[databaseKind] : undefined;
             if (delegatedCommand) {
                 try {
-                    await vscode.commands.executeCommand(delegatedCommand, item);
+                    await vscode.commands.executeCommand(
+                        delegatedCommand,
+                        item.schema ? item : { ...item, schema: targetSchema },
+                    );
                     return;
                 } catch (error: unknown) {
                     const message = error instanceof Error ? error.message : String(error);
@@ -62,10 +74,17 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
             }
 
             const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
-            if (!isTableDesignerSupported(databaseKind)) {
+            const connectionDetails = item.connectionName
+                ? connectionManager.getConnectionMetadata(item.connectionName)
+                : undefined;
+            const designerContext = {
+                readOnly: connectionDetails?.options?.readOnly === true,
+                runtimeAvailable: Boolean(tryGetDatabaseDialect(databaseKind)),
+            };
+            if (!isTableDesignerSupported(databaseKind, designerContext)) {
                 vscode.window.showErrorMessage(
-                    getTableDesignerUnsupportedReason(databaseKind) ??
-                    'The Table Designer is not available for this database connection.'
+                    getTableDesignerUnsupportedReason(databaseKind, designerContext) ??
+                        'The Table Designer is not available for this database connection.'
                 );
                 return;
             }
@@ -98,10 +117,19 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
             }
 
             try {
+                const connectionDetails = item.connectionName
+                    ? connectionManager.getConnectionMetadata(item.connectionName)
+                    : undefined;
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName) ?? 'netezza';
                 assertDesignerOperation(
-                    connectionManager.getConnectionDatabaseKind?.(item.connectionName) ?? 'netezza',
+                    databaseKind,
                     'alterTable',
                     'alter',
+                    false,
+                    {
+                        readOnly: connectionDetails?.options?.readOnly === true,
+                        runtimeAvailable: Boolean(tryGetDatabaseDialect(databaseKind)),
+                    },
                 );
             } catch (error: unknown) {
                 vscode.window.showErrorMessage(error instanceof Error ? error.message : 'ALTER TABLE is not available for this connection.');

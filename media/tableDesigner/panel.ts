@@ -4,7 +4,10 @@ import {
     getTableDesignerProfile,
     type TableDesignerCreateInput,
 } from '../../src/views/tableDesignerDdl.js';
-import { getDatabaseDesignerCapabilities } from '../../packages/contracts/src/database/designerCapabilities.js';
+import {
+    getDatabaseDesignerCapabilities,
+    resolveDatabaseDesignerCapabilities,
+} from '../../packages/contracts/src/database/designerCapabilities.js';
 import type {
     TableDesignerColumn,
     TableDesignerHostToWebviewMessage,
@@ -19,7 +22,12 @@ const context = (
     window as unknown as { initialContext: TableDesignerInitialContext }
 ).initialContext;
 const profile = getTableDesignerProfile(context.databaseKind);
-const designerCapabilities = getDatabaseDesignerCapabilities(context.databaseKind);
+const baseDesignerCapabilities = getDatabaseDesignerCapabilities(context.databaseKind);
+const designerCapabilities = resolveDatabaseDesignerCapabilities(baseDesignerCapabilities, {
+    databaseKind: baseDesignerCapabilities.kind,
+    readOnly: context.readOnly,
+    runtimeAvailable: context.runtimeAvailable,
+});
 const tableCapability = getDesignerCapability(designerCapabilities, 'table');
 const canCreateTable = isDesignerOperationSupported(designerCapabilities, 'table', 'create');
 
@@ -328,6 +336,8 @@ function updateDDL(): void {
 
     const input: TableDesignerCreateInput = {
         databaseKind: context.databaseKind,
+        readOnly: context.readOnly,
+        runtimeAvailable: context.runtimeAvailable,
         dbName: context.dbName,
         schemaName: context.schemaName || undefined,
         tableName: tableNameInput.value,

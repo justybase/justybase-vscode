@@ -4,6 +4,8 @@ export interface TableDesignerInitialContext {
     databaseKind: string;
     targetDisplay: string;
     sqliteKeywords: string[];
+    readOnly: boolean;
+    runtimeAvailable: boolean;
 }
 
 export interface TableDesignerColumn {

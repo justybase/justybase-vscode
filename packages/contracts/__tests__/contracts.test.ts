@@ -205,6 +205,7 @@ describe("@justybase/contracts", () => {
 
       expect(resolved.constructs.table.level).toBe("privilege-blocked");
       expect(resolved.constructs.table.operations).toEqual(["read"]);
+      expect(resolved.constructs.table.reason).toContain("read-only");
       expect(base.constructs.table.level).toBe("supported");
     });
 

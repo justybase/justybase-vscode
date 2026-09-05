@@ -480,8 +480,8 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
       const columns = await api.columns(connectionId, node.database ?? database ?? '', node.schema ?? '', node.objectName ?? node.label);
       const type = node.objectType?.toUpperCase() === 'VIEW' ? 'VIEW' : 'TABLE';
       const ddl = type === 'VIEW'
-        ? (/^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(node.description?.trim() ?? '')
-          ? node.description!.trim()
+        ? (/^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(node.viewSql?.trim() ?? '')
+          ? node.viewSql!.trim()
           : `-- View definition is not exposed by the lightweight metadata endpoint.\n-- Columns visible in ${objectSqlName(node)}: ${columns.map(column => quoteIdentifier(column.name, databaseKind)).join(', ') || '(none)'}\n-- Retrieve the source definition from the database catalog before executing this DDL.`)
         : `CREATE TABLE ${objectSqlName(node)} (\n${columns.map(column => `  ${quoteIdentifier(column.name, databaseKind)} ${column.type || 'VARCHAR(1)'}`).join(',\n')}\n);`;
       await navigator.clipboard.writeText(ddl);

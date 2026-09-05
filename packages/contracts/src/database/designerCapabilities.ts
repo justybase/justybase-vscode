@@ -794,7 +794,9 @@ function withoutMutationOperations(
       level: 'privilege-blocked',
       reasonCode: 'read-only',
       operations,
-      reason: capabilityValue.reason ?? 'The current connection is read-only.',
+      reason: capabilityValue.reason
+        ? `${capabilityValue.reason} The current connection is read-only.`
+        : 'The current connection is read-only.',
     };
   }
   return capabilityValue;

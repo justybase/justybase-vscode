@@ -93,8 +93,8 @@ function isMutatingCapability(capability: DatabaseDesignerCapability | undefined
     && (capability.level === 'supported' || capability.level === 'limited'));
 }
 
-function viewDefinitionFromMetadata(description: string | undefined): string {
-  const source = description?.trim() ?? '';
+function viewDefinitionFromMetadata(viewSql: string | undefined, description?: string): string {
+  const source = (viewSql ?? description)?.trim() ?? '';
   if (!/^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(source)) return '';
   const match = /^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b[\s\S]*?\bAS\s+([\s\S]*?)\s*;?$/i.exec(source);
   return match?.[1]?.trim().replace(/;\s*$/u, '') ?? '';
@@ -338,7 +338,7 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
     setTriggerLevel('ROW');
     setTriggerWhen('');
     setTriggerBody('');
-    setViewDefinition(viewDefinitionFromMetadata(target.description));
+    setViewDefinition(viewDefinitionFromMetadata(target.viewSql, target.description));
     setViewReplace(true);
     setRoutineParameters('');
     setRoutineReturnType('INTEGER');
@@ -383,7 +383,7 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
     };
-  }, [connectionId, database, databaseKind, isTableTarget, target.database, target.description, target.label, target.objectName, target.objectType, target.schema]);
+  }, [connectionId, database, databaseKind, isTableTarget, target.database, target.description, target.label, target.objectName, target.objectType, target.schema, target.viewSql]);
 
   useEffect(() => {
     let disposed = false;

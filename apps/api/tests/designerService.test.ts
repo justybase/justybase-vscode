@@ -4,6 +4,7 @@ import {
   assertDesignerPlanCurrent,
   assertDesignerPlanHasChanges,
   EmptyDesignerPlanError,
+  hasDesignerOperation,
   StaleDesignerSnapshotError,
   UnsupportedDesignerOperationError,
 } from '@justybase/database-runtime';
@@ -74,6 +75,9 @@ describe('designerService', () => {
 
   it('keeps the execution boundary guarded when a caller bypasses the UI', () => {
     const capabilities = getDatabaseDesignerCapabilities('netezza');
+    expect(hasDesignerOperation(capabilities, 'foreignKeys', 'read')).toBe(false);
+    expect(hasDesignerOperation(capabilities, 'indexes', 'create')).toBe(false);
+    expect(hasDesignerOperation(capabilities, 'indexes', 'create', true)).toBe(true);
     expect(() => assertDesignerOperationSupported(capabilities, 'checks', 'create')).toThrow(UnsupportedDesignerOperationError);
     expect(() => assertDesignerOperationSupported(capabilities, 'indexes', 'create')).toThrow(UnsupportedDesignerOperationError);
     expect(() => assertDesignerOperationSupported(capabilities, 'indexes', 'create', true)).not.toThrow();

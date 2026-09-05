@@ -5,6 +5,7 @@ import type {
 } from '../contracts/webviews/tableDesignerContracts';
 import { ConnectionManager } from '../core/connectionManager';
 import { runQuery } from '../core/queryRunner';
+import { tryGetDatabaseDialect } from '../core/connectionFactory';
 import { SQLITE_RESERVED_KEYWORD_LIST } from '../utils/identifierUtils';
 import { getTableDesignerContainerDisplay } from './tableDesignerDdl';
 
@@ -82,12 +83,17 @@ export class TableDesignerView {
         const styleUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'tableDesigner.css'));
         const databaseKind = this.connectionManager.getConnectionDatabaseKind(this.connectionName);
         const targetDisplay = getTableDesignerTargetDisplay(databaseKind, this.dbName, this.schemaName);
+        const connectionDetails = this.connectionName
+            ? this.connectionManager.getConnectionMetadata(this.connectionName)
+            : undefined;
         const initialContext = JSON.stringify({
             dbName: this.dbName,
             schemaName: this.schemaName ?? '',
             databaseKind,
             targetDisplay,
-            sqliteKeywords: SQLITE_RESERVED_KEYWORD_LIST
+            sqliteKeywords: SQLITE_RESERVED_KEYWORD_LIST,
+            readOnly: connectionDetails?.options?.readOnly === true,
+            runtimeAvailable: Boolean(tryGetDatabaseDialect(databaseKind)),
         }).replace(/</g, '\\u003c');
 
         const nonce = getNonce();
@@ -213,6 +219,16 @@ export class TableDesignerView {
 
         if (!ddl || ddl.trim() === '') {
             this.postToWebview({ command: 'setError', text: 'DDL is empty. Add a table name and at least one column.' });
+            return;
+        }
+
+        const connectionDetails = this.connectionName
+            ? this.connectionManager.getConnectionMetadata(this.connectionName)
+            : undefined;
+        if (connectionDetails?.options?.readOnly === true) {
+            const message = 'This connection is read-only. Table creation is unavailable.';
+            this.postToWebview({ command: 'setError', text: message });
+            vscode.window.showErrorMessage(message);
             return;
         }
 

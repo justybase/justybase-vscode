@@ -101,6 +101,19 @@ describe('object designer SQL builders', () => {
     }, clickhouse.constructs.partitions)).toBe('OPTIMIZE TABLE `analytics`.`events` PARTITION 202401 FINAL;');
   });
 
+  it('allows a Netezza distribution-only physical-design change', () => {
+    const netezza = getDatabaseDesignerCapabilities('netezza');
+    expect(buildNetezzaPhysicalDesignSql('"SYSTEM"."ADMIN"."orders"', {
+      distributionMethod: 'RANDOM',
+      distributionColumns: '',
+      organizationColumns: '',
+      organizationNone: false,
+      organizationMaxRowsPerZone: '',
+    }, netezza.constructs.partitions)).toBe(
+      'ALTER TABLE "SYSTEM"."ADMIN"."orders" DISTRIBUTE ON RANDOM;',
+    );
+  });
+
   it('does not emit mutation SQL for a read-only capability state', () => {
     const readOnly = resolveDatabaseDesignerCapabilities(getDatabaseDesignerCapabilities('postgresql'), {
       databaseKind: 'postgresql',
@@ -177,6 +190,57 @@ describe('object designer SQL builders', () => {
       initiallyDeferred: false,
       notValid: false,
     }, mysql.constructs.foreignKeys)).toThrow('Deferrable');
+  });
+
+  it('allows separators and comment markers inside quoted SQL literals', () => {
+    const postgresql = getDatabaseDesignerCapabilities('postgresql');
+    expect(buildAddColumnSql('"public"."orders"', 'postgresql', {
+      name: 'note',
+      dataType: 'TEXT',
+      notNull: false,
+      defaultExpression: "'a--b;/*still a literal*/'",
+    }, postgresql.constructs.alterTable)).toContain("DEFAULT 'a--b;/*still a literal*/'");
+    expect(buildCheckConstraintSql('"public"."orders"', 'postgresql', {
+      name: 'valid_note',
+      expression: "note <> '--'",
+      notValid: false,
+    }, postgresql.constructs.checks)).toContain("CHECK (note <> '--')");
+    expect(buildViewSql('"public"."notes_view"', {
+      definition: "SELECT ';' AS separator, '--' AS marker FROM notes",
+      replace: false,
+    }, postgresql.constructs.views)).toContain("SELECT ';' AS separator, '--' AS marker");
+  });
+
+  it('quotes plain string defaults while preserving SQL default expressions', () => {
+    const postgresql = getDatabaseDesignerCapabilities('postgresql');
+    expect(buildAddColumnSql('"public"."orders"', 'postgresql', {
+      name: 'status',
+      dataType: 'VARCHAR(32)',
+      notNull: false,
+      defaultExpression: 'pending',
+    }, postgresql.constructs.alterTable)).toContain("DEFAULT 'pending'");
+    expect(buildAddColumnSql('"public"."orders"', 'postgresql', {
+      name: 'created_at',
+      dataType: 'TIMESTAMP',
+      notNull: false,
+      defaultExpression: 'CURRENT_TIMESTAMP',
+    }, postgresql.constructs.alterTable)).toContain('DEFAULT CURRENT_TIMESTAMP');
+  });
+
+  it('splits and normalizes dialect-quoted identifiers containing commas', () => {
+    const mysql = getDatabaseDesignerCapabilities('mysql');
+    expect(buildRelationalIndexSql('`sales`.`orders`', 'mysql', {
+      name: 'orders_idx',
+      columns: '`a,b`, c',
+      unique: false,
+    }, mysql.constructs.indexes)).toContain('(`a,b`, `c`)');
+
+    const mssql = getDatabaseDesignerCapabilities('mssql');
+    expect(buildRelationalIndexSql('[dbo].[orders]', 'mssql', {
+      name: 'orders_idx',
+      columns: '[a,b], [c]]d]',
+      unique: false,
+    }, mssql.constructs.indexes)).toContain('([a,b], [c]]d])');
   });
 
   it('builds a SQLite row trigger with UPDATE OF and WHEN', () => {
