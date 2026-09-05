@@ -19,6 +19,7 @@ export const mysqlDialect: DatabaseDialect = {
   kind: "mysql",
   displayName: "MySQL",
   defaultPort: 3306,
+  supportsRawTcpTunnel: true,
   capabilities: createDatabaseCapabilities({
     supportsExplainPlan: true,
     supportsExplainGraph: true,

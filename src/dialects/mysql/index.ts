@@ -1,6 +1,7 @@
 import { createStubDialect } from '../stubDialectFactory';
 
 export const mysqlDialect = createStubDialect('mysql', 'MySQL', 3306, {
+	supportsRawTcpTunnel: true,
     connectionFormOptions: {
         databasePlaceholder: 'Database name',
         userPlaceholder: 'MySQL user',

@@ -1,3 +1,9 @@
+import {
+    buildTableDesignerCreateSql,
+    getTableDesignerContainerDisplay,
+    getTableDesignerProfile,
+    type TableDesignerCreateInput,
+} from '../../src/views/tableDesignerDdl.js';
 import type {
     TableDesignerColumn,
     TableDesignerHostToWebviewMessage,
@@ -10,18 +16,7 @@ import { postToHost } from './protocol.js';
 const context = (
     window as unknown as { initialContext: TableDesignerInitialContext }
 ).initialContext;
-const isSqlite = context.databaseKind === 'sqlite';
-const isDb2 = context.databaseKind === 'db2';
-const isNetezzaDialect = !isSqlite && !isDb2;
-const SQLITE_RESERVED_KEYWORDS = new Set(context.sqliteKeywords || []);
-const DB2_RESERVED_KEYWORDS = new Set([
-    'ADD', 'ALTER', 'AND', 'AS', 'BY', 'CHECK', 'COLUMN', 'CONSTRAINT', 'CREATE', 'CURRENT', 'DATE',
-    'DEFAULT', 'DELETE', 'DESC', 'DISTINCT', 'DROP', 'EXISTS', 'FOREIGN', 'FROM', 'FULL', 'GROUP',
-    'HAVING', 'IN', 'INDEX', 'INNER', 'INSERT', 'INTO', 'IS', 'JOIN', 'KEY', 'LEFT', 'LIKE', 'NOT',
-    'NULL', 'ON', 'OR', 'ORDER', 'OUTER', 'PRIMARY', 'PROCEDURE', 'REFERENCES', 'RIGHT', 'SCHEMA',
-    'SELECT', 'SET', 'TABLE', 'TIME', 'TIMESTAMP', 'UNION', 'UNIQUE', 'UPDATE', 'USER', 'VALUES', 'VIEW',
-    'WHERE',
-]);
+const profile = getTableDesignerProfile(context.databaseKind);
 
 let columns: TableDesignerColumn[] = [
     { id: 1, name: 'ID', type: 'INTEGER', length: '', notNull: true, pk: true, distribute: false, defaultValue: '' },
@@ -75,6 +70,11 @@ function validateDesign(): string | null {
         return 'Every column needs a name before executing DDL.';
     }
 
+    const untypedColumns = columns.filter((column) => !(column.type || '').trim());
+    if (untypedColumns.length > 0) {
+        return `Column "${untypedColumns[0].name}" needs a data type before executing DDL.`;
+    }
+
     return null;
 }
 
@@ -111,80 +111,51 @@ window.addEventListener('message', (event: MessageEvent<TableDesignerHostToWebvi
     handleHostMessage(message);
 });
 
-const DEFAULT_DATA_TYPES = [
-    'INTEGER', 'BIGINT', 'SMALLINT', 'BYTEINT',
-    'NUMERIC', 'DECIMAL', 'REAL', 'DOUBLE PRECISION',
-    'CHARACTER', 'VARCHAR', 'NCHAR', 'NVARCHAR',
-    'DATE', 'TIME', 'TIMESTAMP', 'INTERVAL',
-    'BOOLEAN', 'JSON', 'JSONB',
-];
-const SQLITE_DATA_TYPES = ['INTEGER', 'REAL', 'TEXT', 'BLOB', 'NUMERIC'];
-
-function getDataTypes(): string[] {
-    return isSqlite ? SQLITE_DATA_TYPES : DEFAULT_DATA_TYPES;
-}
-
-function quoteIdentifier(identifier: string): string {
-    return `"${identifier.replace(/"/g, '""')}"`;
-}
-
-function formatIdentifier(identifier: string): string {
-    const value = (identifier || '').trim();
-    if (!value) {
-        return value;
-    }
-
-    if (isSqlite) {
-        const simpleIdentifier = /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
-        if (simpleIdentifier && !SQLITE_RESERVED_KEYWORDS.has(value.toUpperCase())) {
-            return value;
-        }
-    } else if (isDb2) {
-        const db2SimpleIdentifier = /^[A-Z_][A-Z0-9_]*$/.test(value);
-        if (db2SimpleIdentifier && !DB2_RESERVED_KEYWORDS.has(value.toUpperCase())) {
-            return value;
-        }
-    } else {
-        return quoteIdentifier(value);
-    }
-
-    return quoteIdentifier(value);
-}
-
-function buildTargetPath(tableName: string): string {
-    if (isSqlite) {
-        const catalog = context.schemaName || context.dbName;
-        return catalog ? `${formatIdentifier(catalog)}.${formatIdentifier(tableName)}` : formatIdentifier(tableName);
-    }
-    if (isDb2) {
-        const schema = (context.schemaName || '').trim();
-        return schema ? `${formatIdentifier(schema)}.${formatIdentifier(tableName)}` : formatIdentifier(tableName);
-    }
-    return `${quoteIdentifier(context.dbName)}.${quoteIdentifier(context.schemaName)}.${quoteIdentifier(tableName)}`;
+function getDataTypes(): readonly string[] {
+    return profile.dataTypes;
 }
 
 function updateDialectUi(): void {
     const organizeSection = getElementById('organizeSection');
     const organizeNoneLabel = getElementById('organizeNoneLabel');
+    const ifNotExistsLabel = getElementById('ifNotExistsLabel');
 
     document.querySelectorAll('.distribution-column').forEach(element => {
-        element.classList.toggle('hidden', !isNetezzaDialect);
+        element.classList.toggle('hidden', !profile.supportsDistribution);
     });
 
     if (organizeSection) {
-        organizeSection.classList.toggle('hidden', !isNetezzaDialect);
+        organizeSection.classList.toggle('hidden', !profile.supportsOrganize);
     }
     if (organizeNoneLabel) {
-        organizeNoneLabel.classList.toggle('hidden', !isNetezzaDialect);
+        organizeNoneLabel.classList.toggle('hidden', !profile.supportsOrganize);
+    }
+    if (ifNotExistsLabel) {
+        ifNotExistsLabel.classList.toggle('hidden', !profile.supportsIfNotExists);
+    }
+
+    const targetDisplay = getElementById('targetDisplay');
+    if (targetDisplay) {
+        targetDisplay.textContent = getTableDesignerContainerDisplay(
+            context.databaseKind,
+            context.dbName,
+            context.schemaName || undefined,
+        );
     }
 
     const tableTypeSelect = getElementById<HTMLSelectElement>('tableType');
-    if ((isSqlite || isDb2) && tableTypeSelect) {
-        tableTypeSelect.innerHTML = `
-            <option value="PERMANENT">PERMANENT</option>
-            <option value="TEMP">TEMP</option>
-            <option value="TEMPORARY">TEMPORARY</option>
-        `;
+    if (tableTypeSelect) {
+        const previousValue = tableTypeSelect.value;
+        tableTypeSelect.innerHTML = '';
+        profile.tableTypeOptions.forEach(option => {
+            const element = document.createElement('option');
+            element.value = option.value;
+            element.textContent = option.label;
+            tableTypeSelect?.appendChild(element);
+        });
+        if (previousValue && profile.tableTypeOptions.some(option => option.value === previousValue)) {
+            tableTypeSelect.value = previousValue;
+        }
     }
 }
 
@@ -199,8 +170,8 @@ document.addEventListener('DOMContentLoaded', () => {
         columns.push({
             id: nextId++,
             name: `COLUMN_${columns.length + 1}`,
-            type: isSqlite ? 'TEXT' : 'VARCHAR',
-            length: isSqlite ? '' : '255',
+            type: profile.newColumnType,
+            length: profile.newColumnLength,
             notNull: false,
             pk: false,
             distribute: false,
@@ -280,7 +251,7 @@ function renderColumns(): void {
         tbody.appendChild(tr);
     });
 
-    if (!isNetezzaDialect) {
+    if (!profile.supportsDistribution) {
         document.querySelectorAll('.distribution-column').forEach(element => element.classList.add('hidden'));
     }
 
@@ -343,91 +314,30 @@ function updateDDL(): void {
         return;
     }
 
-    let tableName = tableNameInput.value.trim();
-    if (!tableName) tableName = isSqlite ? 'new_table' : 'NEW_TABLE';
+    const input: TableDesignerCreateInput = {
+        databaseKind: context.databaseKind,
+        dbName: context.dbName,
+        schemaName: context.schemaName || undefined,
+        tableName: tableNameInput.value,
+        tableType: tableTypeSelect.value,
+        ifNotExists: ifNotExistsInput.checked,
+        columns: columns.map(column => ({
+            name: column.name,
+            type: column.type,
+            length: column.length,
+            notNull: column.notNull,
+            pk: column.pk,
+            defaultValue: column.defaultValue,
+        })),
+        distributeColumns: columns.filter(column => column.distribute).map(column => column.name),
+        organizeNone: organizeNoneInput.checked,
+        organizeColumns: organizeColumnsInput.value.split(','),
+        tableConstraints: tableConstraintsInput.value.split('\n'),
+    };
 
-    const tableType = tableTypeSelect.value;
-    const ifNotExists = ifNotExistsInput.checked;
-    const organizeNone = organizeNoneInput.checked;
-    const organizeColumnsValue = organizeColumnsInput.value.trim();
-    const tableConstraintsValue = tableConstraintsInput.value.trim();
-
-    const createPrefix = tableType === 'PERMANENT' ? 'CREATE TABLE' : `CREATE ${tableType} TABLE`;
-    const ifNotExistsClause = ifNotExists ? ' IF NOT EXISTS' : '';
-    let ddl = `${createPrefix}${ifNotExistsClause} ${buildTargetPath(tableName)} (\n`;
-
-    const pkColumns: string[] = [];
-    const distributeColumns: string[] = [];
-
-    const colDefs = columns.map(col => {
-        let def = `    ${formatIdentifier(col.name || 'UNNAMED')} ${col.type}`;
-
-        if (col.length && ['VARCHAR', 'NVARCHAR', 'CHARACTER', 'NCHAR', 'NUMERIC', 'DECIMAL'].includes(col.type)) {
-            def += `(${col.length})`;
-        }
-
-        if (col.defaultValue) {
-            const isString = ['VARCHAR', 'NVARCHAR', 'CHARACTER', 'NCHAR', 'DATE', 'TIME', 'TIMESTAMP'].includes(col.type);
-            const isFunction = col.defaultValue.toUpperCase().includes('()') || col.defaultValue.toUpperCase() === 'CURRENT_DATE' || col.defaultValue.toUpperCase() === 'CURRENT_TIMESTAMP';
-
-            if (isString && !col.defaultValue.startsWith("'") && !isFunction) {
-                def += ` DEFAULT '${col.defaultValue}'`;
-            } else {
-                def += ` DEFAULT ${col.defaultValue}`;
-            }
-        }
-
-        if (col.notNull) {
-            def += ' NOT NULL';
-        }
-
-        if (col.pk) {
-            pkColumns.push(col.name || 'UNNAMED');
-        }
-
-        if (col.distribute) {
-            distributeColumns.push(col.name || 'UNNAMED');
-        }
-
-        return def;
-    });
-
-    ddl += colDefs.join(',\n');
-
-    if (pkColumns.length > 0) {
-        ddl += `,\n    PRIMARY KEY (${pkColumns.map(column => formatIdentifier(column)).join(', ')})`;
+    try {
+        ddlPreview.value = buildTableDesignerCreateSql(input);
+    } catch (error) {
+        ddlPreview.value = `-- ${error instanceof Error ? error.message : String(error)}`;
     }
-
-    const tableConstraints = tableConstraintsValue
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-
-    tableConstraints.forEach(constraint => {
-        ddl += `,\n    ${constraint}`;
-    });
-
-    ddl += '\n)';
-
-    if (isNetezzaDialect && distributeColumns.length > 0) {
-        ddl += ` DISTRIBUTE ON ("${distributeColumns.join('", "')}")`;
-    } else if (isNetezzaDialect) {
-        ddl += ' DISTRIBUTE ON RANDOM';
-    }
-
-    if (isNetezzaDialect && organizeNone) {
-        ddl += ' ORGANIZE ON NONE';
-    } else if (isNetezzaDialect && organizeColumnsValue) {
-        const organizeColumns = organizeColumnsValue
-            .split(',')
-            .map(col => col.trim())
-            .filter(col => col.length > 0);
-        if (organizeColumns.length > 0) {
-            ddl += ` ORGANIZE ON ("${organizeColumns.join('", "')}")`;
-        }
-    }
-
-    ddl += ';';
-
-    ddlPreview.value = ddl;
 }

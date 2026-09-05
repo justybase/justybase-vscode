@@ -18,6 +18,7 @@ export const clickhouseDialect: DatabaseDialect = {
     kind: 'clickhouse',
     displayName: 'ClickHouse',
     defaultPort: 8123,
+    supportsRawTcpTunnel: true,
     capabilities: createDatabaseCapabilities({
         supportsExplainPlan: true,
         supportsExplainGraph: false,
@@ -57,6 +58,15 @@ export const clickhouseDialect: DatabaseDialect = {
                 ],
                 description: 'Used for HTTPS connections. Custom CA files are not required in v1.',
                 layout: 'half',
+            },
+            {
+                key: 'tlsServerName',
+                label: 'TLS Server Name',
+                type: 'text',
+                storage: 'options',
+                placeholder: 'Optional certificate DNS name',
+                description: 'Optional TLS SNI/server name. Required when HTTPS is reached through a local TCP tunnel and the certificate is issued for the remote host.',
+                layout: 'full',
             },
             {
                 key: 'requestTimeout',

@@ -46,6 +46,11 @@
         ],
         "commands": [
             {
+                "command": "justybase.mysql.alterTableDesigner",
+                "title": "MySQL: Alter Table Designer...",
+                "icon": "$(edit)"
+            },
+            {
                 "command": "justybase.mysql.createIndexWizard",
                 "title": "MySQL: Index Designer...",
                 "icon": "$(symbol-key)"
@@ -66,14 +71,19 @@
             ],
             "justybase.mysql.tableStructures": [
                 {
+                    "command": "justybase.mysql.alterTableDesigner",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
+                    "group": "1_structure@1"
+                },
+                {
                     "command": "justybase.mysql.createIndexWizard",
                     "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
-                    "group": "1_index@1"
+                    "group": "2_index@1"
                 },
                 {
                     "command": "justybase.mysql.managePartitions",
                     "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
-                    "group": "2_partition@1"
+                    "group": "3_partition@1"
                 }
             ]
         }

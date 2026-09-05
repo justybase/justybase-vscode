@@ -30,6 +30,7 @@ export const db2Dialect: DatabaseDialect = {
   kind: "db2",
   displayName: "Db2 LUW",
   defaultPort: 50000,
+  supportsRawTcpTunnel: true,
   capabilities: db2Capabilities,
   connectionForm: {
     fields: [

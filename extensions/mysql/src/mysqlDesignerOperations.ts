@@ -8,14 +8,22 @@ import type {
     MysqlIndexDesignerInitialContext,
 } from '../../../src/contracts/webviews/mysqlIndexDesignerContracts';
 import type {
+    MysqlAlterTableDesignerColumn,
+    MysqlAlterTableDesignerInitialContext,
+} from '../../../src/contracts/webviews/mysqlAlterTableDesignerContracts';
+import type {
     MysqlDesignerPartition,
     MysqlPartitionCapabilities,
     MysqlPartitionDesignerInitialContext,
     MysqlPartitionMethod,
 } from '../../../src/contracts/webviews/mysqlPartitionDesignerContracts';
 import { formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+import { charsetFromCollation } from './mysqlAlterTableDdl';
 import {
+    buildAlterTablePropertiesQuery,
     buildColumnMetadataQuery,
+    buildListCharacterSetsQuery,
+    buildListCollationsQuery,
     buildListIndexesQuery,
     buildListPartitionsQuery,
     buildTablePropertiesQuery,
@@ -28,6 +36,23 @@ interface MysqlRow extends Record<string, unknown> {
 interface MysqlTablePropertiesRow extends MysqlRow {
     ENGINE?: unknown;
     SERVER_VERSION?: unknown;
+}
+
+interface MysqlAlterTablePropertiesRow extends MysqlRow {
+    ENGINE?: unknown;
+    TABLE_COLLATION?: unknown;
+    AUTO_INCREMENT?: unknown;
+    TABLE_COMMENT?: unknown;
+    SERVER_VERSION?: unknown;
+}
+
+interface MysqlCharacterSetRow extends MysqlRow {
+    CHARACTER_SET_NAME?: unknown;
+}
+
+interface MysqlCollationRow extends MysqlRow {
+    COLLATION_NAME?: unknown;
+    CHARACTER_SET_NAME?: unknown;
 }
 
 interface MysqlIndexRow extends MysqlRow {
@@ -260,6 +285,93 @@ async function loadTableProperties(
     return {
         engine: text(rowValue(row, 'ENGINE')) || 'UNKNOWN',
         serverVersion: text(rowValue(row, 'SERVER_VERSION')) || 'UNKNOWN',
+    };
+}
+
+function mapAlterTableColumns(rows: MysqlRow[]): MysqlAlterTableDesignerColumn[] {
+    return rows.map((row, index) => {
+        const name = text(rowValue(row, 'ATTNAME') ?? rowValue(row, 'COLUMN_NAME'));
+        const extra = text(rowValue(row, 'EXTRA')).toLowerCase();
+        return {
+            name,
+            type: text(rowValue(row, 'FORMAT_TYPE') ?? rowValue(row, 'COLUMN_TYPE') ?? rowValue(row, 'DATA_TYPE')),
+            notNull: booleanValue(rowValue(row, 'IS_NOT_NULL')),
+            defaultValue: text(rowValue(row, 'COLDEFAULT') ?? rowValue(row, 'COLUMN_DEFAULT')),
+            autoIncrement: extra.includes('auto_increment'),
+            comment: text(rowValue(row, 'DESCRIPTION') ?? rowValue(row, 'COLUMN_COMMENT')),
+            ordinal: numberValue(rowValue(row, 'ATTNUM') ?? rowValue(row, 'ORDINAL_POSITION')) ?? index + 1,
+            isPrimaryKey: booleanValue(rowValue(row, 'IS_PK')),
+            isForeignKey: booleanValue(rowValue(row, 'IS_FK')),
+        };
+    }).filter(column => column.name);
+}
+
+async function loadAlterTableProperties(
+    target: DatabaseMaintenanceTarget,
+    services: DatabaseMaintenanceServices,
+): Promise<{ engine: string; collation: string; autoIncrement: string; comment: string; serverVersion: string }> {
+    const rows = await services.executeQuery<MysqlAlterTablePropertiesRow>(
+        buildAlterTablePropertiesQuery(target.schemaName, target.tableName),
+        target.connectionName,
+    );
+    const row = rows[0];
+    if (!row) {
+        throw new Error(`MySQL table ${target.qualifiedName} was not found.`);
+    }
+    return {
+        engine: text(rowValue(row, 'ENGINE')) || 'UNKNOWN',
+        collation: text(rowValue(row, 'TABLE_COLLATION')),
+        autoIncrement: text(rowValue(row, 'AUTO_INCREMENT')),
+        comment: text(rowValue(row, 'TABLE_COMMENT')),
+        serverVersion: text(rowValue(row, 'SERVER_VERSION')) || 'UNKNOWN',
+    };
+}
+
+export async function loadMysqlAlterTableDesignerContext(
+    target: DatabaseMaintenanceTarget,
+    services: DatabaseMaintenanceServices,
+): Promise<MysqlAlterTableDesignerInitialContext> {
+    const [properties, columnRows, charsetRows, collationRows] = await Promise.all([
+        loadAlterTableProperties(target, services),
+        services.executeQuery<MysqlRow>(
+            buildColumnMetadataQuery(target.databaseName, target.schemaName, target.tableName),
+            target.connectionName,
+        ),
+        services.executeQuery<MysqlCharacterSetRow>(
+            buildListCharacterSetsQuery(),
+            target.connectionName,
+        ),
+        services.executeQuery<MysqlCollationRow>(
+            buildListCollationsQuery(),
+            target.connectionName,
+        ),
+    ]);
+    const columns = mapAlterTableColumns(columnRows);
+    if (columns.length === 0) {
+        throw new Error(`MySQL did not return columns for ${target.qualifiedName}.`);
+    }
+    return {
+        schema: target.schemaName,
+        tableName: target.tableName,
+        qualifiedTable: formatQualifiedObjectName(undefined, target.schemaName, target.tableName, 'mysql'),
+        serverVersion: properties.serverVersion,
+        columns,
+        options: {
+            engine: properties.engine,
+            charset: charsetFromCollation(properties.collation),
+            collation: properties.collation,
+            autoIncrement: properties.autoIncrement,
+            comment: properties.comment,
+        },
+        charsets: charsetRows
+            .map(row => text(rowValue(row, 'CHARACTER_SET_NAME')))
+            .filter(Boolean),
+        collations: collationRows
+            .map(row => ({
+                name: text(rowValue(row, 'COLLATION_NAME')),
+                charset: text(rowValue(row, 'CHARACTER_SET_NAME')),
+            }))
+            .filter(collation => Boolean(collation.name)),
     };
 }
 

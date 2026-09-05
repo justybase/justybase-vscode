@@ -19,6 +19,7 @@ export const mssqlDialect: DatabaseDialect = {
   kind: "mssql",
   displayName: "MS SQL Server",
   defaultPort: 1433,
+  supportsRawTcpTunnel: true,
   capabilities: createDatabaseCapabilities({
     supportsExplainPlan: true,
     supportsExplainGraph: true,

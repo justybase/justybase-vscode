@@ -850,6 +850,75 @@ ORDER BY child.relname
  * @param tableName The table name
  * @returns SQL query string
  */
+export function buildAlterTablePropertiesQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            c.oid AS TABLE_OID,
+            COALESCE(t.spcname, '') AS TABLESPACE,
+            (
+                SELECT option_value
+                FROM pg_catalog.pg_options_to_table(c.reloptions) AS relopt(option_name, option_value)
+                WHERE relopt.option_name = 'fillfactor'
+            ) AS FILLFACTOR,
+            COALESCE(obj_description(c.oid, 'pg_class'), '') AS TABLE_COMMENT
+        FROM pg_catalog.pg_class c
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        LEFT JOIN pg_catalog.pg_tablespace t
+            ON t.oid = c.reltablespace
+        WHERE n.nspname = ${quoteLiteral(schema)}
+          AND c.relname = ${quoteLiteral(tableName)}
+          AND c.relkind IN (${buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS])})
+    `;
+}
+
+export function buildDesignerListIndexesQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            c.relname AS INDEX_NAME,
+            CASE WHEN i.indisunique THEN 1 ELSE 0 END AS IS_UNIQUE,
+            CASE WHEN i.indisprimary THEN 1 ELSE 0 END AS IS_PRIMARY,
+            am.amname AS INDEX_TYPE,
+            COALESCE(pg_catalog.pg_get_expr(i.indpred, i.indrelid), '') AS PREDICATE,
+            COALESCE(t.spcname, '') AS TABLESPACE,
+            a.attname AS COLUMN_NAME,
+            k.ord AS SEQ,
+            CASE WHEN k.ord <= i.indnkeyatts THEN 1 ELSE 0 END AS IS_KEY,
+            CASE WHEN (i.indoption[k.ord - 1] & 1)::INT = 1 THEN 1 ELSE 0 END AS IS_DESC,
+            CASE WHEN (i.indoption[k.ord - 1] & 2)::INT = 2 THEN 1 ELSE 0 END AS NULLS_FIRST
+        FROM pg_catalog.pg_index i
+        INNER JOIN pg_catalog.pg_class c
+            ON c.oid = i.indexrelid
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        INNER JOIN pg_catalog.pg_class tbl
+            ON tbl.oid = i.indrelid
+        INNER JOIN pg_catalog.pg_namespace tbl_ns
+            ON tbl_ns.oid = tbl.relnamespace
+        INNER JOIN pg_catalog.pg_am am
+            ON am.oid = c.relam
+        LEFT JOIN pg_catalog.pg_tablespace t
+            ON t.oid = c.reltablespace
+        CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+        INNER JOIN pg_catalog.pg_attribute a
+            ON a.attrelid = i.indrelid
+           AND a.attnum = k.attnum
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+        WHERE tbl_ns.nspname = ${quoteLiteral(schema)}
+          AND tbl.relname = ${quoteLiteral(tableName)}
+        ORDER BY c.relname, k.ord
+    `;
+}
+
+export function buildListTablespacesQuery(): string {
+    return `
+        SELECT spcname AS TABLESPACE
+        FROM pg_catalog.pg_tablespace
+        ORDER BY spcname
+    `;
+}
+
 export function buildListIndexesQuery(schema: string, tableName: string): string {
   return `
 SELECT
