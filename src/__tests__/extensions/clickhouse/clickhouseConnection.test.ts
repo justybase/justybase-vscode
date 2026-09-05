@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import {
+    buildClickHouseClientOptions,
     ClickHouseConnection,
     type ClickHouseClientFactory,
 } from '../../../../extensions/clickhouse/src/clickhouseConnection';
@@ -49,5 +50,25 @@ describe('ClickHouseConnection', () => {
 
         await reader.close();
         await connection.close();
+    });
+
+    it('uses the configured TLS server name for HTTPS connections through a local tunnel', () => {
+        const clientConfig = buildClickHouseClientOptions({
+            host: '127.0.0.1',
+            port: 18443,
+            database: 'default',
+            user: 'default',
+            options: {
+                protocol: 'https',
+                tlsMode: 'verify-full',
+                tlsServerName: 'clickhouse.private.example',
+            },
+        }, 'default');
+
+        expect(clientConfig.url?.toString()).toBe('https://127.0.0.1:18443/');
+        expect((clientConfig.http_agent as { options?: { rejectUnauthorized?: boolean; servername?: string } } | undefined)?.options).toEqual(expect.objectContaining({
+            rejectUnauthorized: true,
+            servername: 'clickhouse.private.example',
+        }));
     });
 });

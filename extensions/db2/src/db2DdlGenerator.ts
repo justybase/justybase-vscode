@@ -8,6 +8,7 @@ import type {
     DatabaseDdlResult
 } from '@justybase/contracts';
 import type { ConnectionDetails } from '../../../src/types';
+import { activateCoreExtension } from '../../../src/api/companionActivation';
 import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
 import { Db2Connection } from './db2Connection';
 import {
@@ -240,6 +241,25 @@ function extractRoutineBaseName(objectName: string): string {
 }
 
 async function createConnectionFromDetails(connectionDetails: ConnectionDetails): Promise<DatabaseConnection> {
+    let api: Awaited<ReturnType<typeof activateCoreExtension>> | undefined;
+    try {
+        api = await activateCoreExtension();
+    } catch {
+        // DDL generation remains usable in unit tests and standalone callers.
+    }
+    if (api?.createConnectedDatabaseConnectionFromDetails) {
+        return await api.createConnectedDatabaseConnectionFromDetails({
+            ...connectionDetails,
+            dbType: 'db2',
+        });
+    }
+
+    if (connectionDetails.tunnel) {
+        throw new Error(
+            'The installed JustyBase core extension cannot open tunneled database connections. Update the core extension and try again.',
+        );
+    }
+
     const connection = new Db2Connection({
         host: connectionDetails.host,
         port: connectionDetails.port,

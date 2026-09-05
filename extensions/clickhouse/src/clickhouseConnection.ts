@@ -327,20 +327,41 @@ function isTlsWithoutVerification(config: DatabaseConnectionConfig, url: URL): b
     return getOptionString(config, 'tlsMode')?.toLowerCase() === 'require';
 }
 
-function createClickHouseClient(config: DatabaseConnectionConfig, database: string): ClickHouseClient {
+function getTlsServerName(config: DatabaseConnectionConfig, url: URL): string | undefined {
+    if (url.protocol !== 'https:') {
+        return undefined;
+    }
+
+    const serverName = getOptionString(config, 'tlsServerName')?.trim();
+    return serverName || undefined;
+}
+
+export function buildClickHouseClientOptions(
+    config: DatabaseConnectionConfig,
+    database: string,
+): NonNullable<Parameters<typeof createClient>[0]> {
     const url = buildClientUrl(config);
-    const clientConfig: Parameters<typeof createClient>[0] = {
+    const tlsServerName = getTlsServerName(config, url);
+    const tlsWithoutVerification = isTlsWithoutVerification(config, url);
+    const httpAgent = url.protocol === 'https:' && (tlsServerName || tlsWithoutVerification)
+        ? new https.Agent({
+            rejectUnauthorized: !tlsWithoutVerification,
+            ...(tlsServerName ? { servername: tlsServerName } : {}),
+        })
+        : undefined;
+    return {
         url,
         username: config.user,
         password: config.password ?? '',
         database,
         application: CLICKHOUSE_CLIENT_APPLICATION,
         request_timeout: getOptionNumber(config, 'requestTimeout') ?? 30_000,
-        ...(isTlsWithoutVerification(config, url)
-            ? { http_agent: new https.Agent({ rejectUnauthorized: false }) }
-            : {}),
+        ...(httpAgent ? { http_agent: httpAgent } : {}),
     };
-    return createClient(clientConfig);
+}
+
+function createClickHouseClient(config: DatabaseConnectionConfig, database: string): ClickHouseClient {
+    return createClient(buildClickHouseClientOptions(config, database));
 }
 
 /** Factory seam used by unit tests to keep the connection adapter offline. */

@@ -158,8 +158,9 @@ function errorMessage(error: unknown): string {
 
 /**
  * Transparent TCP-to-WebSocket relay for network database drivers.
- * PostgreSQL, Netezza, Oracle and their TLS handshakes are forwarded without
- * being parsed by the client-side tunnel.
+ * Network database protocols and their TLS handshakes are forwarded without
+ * being parsed by the client-side tunnel. Dialects opt in through
+ * `supportsRawTcpTunnel`.
  */
 export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
     private readonly active = new Map<string, ActiveTunnel>();

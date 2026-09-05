@@ -6,6 +6,7 @@ import type {
 import { getDatabaseDialectByKind, registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
 import { validateDialectTraits } from '../core/dialectTraitsValidator';
 import { resetDatabaseDialectTestingState } from './dialectTestUtils';
+import { allAvailableDialects } from '../dialects';
 import { db2Dialect } from '../../extensions/db2/src/db2Dialect';
 import { duckdbDialect } from '../../extensions/duckdb/src/duckdbDialect';
 import { mssqlDialect } from '../../extensions/mssql/src/mssqlDialect';
@@ -27,21 +28,25 @@ const OPTIONAL_DIALECT_CASES: readonly {
     readonly dialect: DatabaseDialect;
     readonly expectedDefaultPort: number | undefined;
     readonly expectedConnectionFields: readonly string[];
+    readonly supportsRawTcpTunnel?: boolean;
 }[] = [
     {
         dialect: db2Dialect,
         expectedDefaultPort: 50000,
         expectedConnectionFields: ['host', 'port', 'database', 'user', 'password', 'currentSchema'],
+        supportsRawTcpTunnel: true,
     },
     {
         dialect: oracleDialect,
         expectedDefaultPort: 1521,
         expectedConnectionFields: ['host', 'port', 'database', 'user', 'password', 'connectString'],
+        supportsRawTcpTunnel: true,
     },
     {
         dialect: postgresqlDialect,
         expectedDefaultPort: 5432,
         expectedConnectionFields: ['host', 'port', 'database', 'user', 'password', 'searchPath'],
+        supportsRawTcpTunnel: true,
     },
     {
         dialect: verticaDialect,
@@ -72,6 +77,7 @@ const OPTIONAL_DIALECT_CASES: readonly {
         dialect: mssqlDialect,
         expectedDefaultPort: 1433,
         expectedConnectionFields: ['host', 'port', 'database', 'user', 'password', 'domain'],
+        supportsRawTcpTunnel: true,
     },
     {
         dialect: duckdbDialect,
@@ -82,6 +88,7 @@ const OPTIONAL_DIALECT_CASES: readonly {
         dialect: mysqlDialect,
         expectedDefaultPort: 3306,
         expectedConnectionFields: ['host', 'port', 'database', 'user', 'password', 'connectTimeout'],
+        supportsRawTcpTunnel: true,
     },
     {
         dialect: accessDialect,
@@ -100,9 +107,33 @@ const OPTIONAL_DIALECT_CASES: readonly {
             'protocol',
             'tlsMode',
             'requestTimeout',
+            'tlsServerName',
         ],
+        supportsRawTcpTunnel: true,
     },
 ];
+
+describe('database tunnel dialect advertisements', () => {
+    it('advertises the tunnel in the core login-panel stubs for network dialects only', () => {
+        const advertisedKinds = allAvailableDialects
+            .filter((dialect) => dialect.supportsRawTcpTunnel)
+            .map((dialect) => dialect.kind);
+
+        expect(advertisedKinds).toEqual([
+            'netezza',
+            'oracle',
+            'postgresql',
+            'db2',
+            'mssql',
+            'mysql',
+            'clickhouse',
+        ]);
+
+        for (const kind of ['sqlite', 'duckdb', 'file', 'access', 'vertica', 'snowflake'] as const) {
+            expect(allAvailableDialects.find((dialect) => dialect.kind === kind)?.supportsRawTcpTunnel).toBeUndefined();
+        }
+    });
+});
 
 function expectSqlString(query: string): void {
     expect(typeof query).toBe('string');
@@ -124,7 +155,7 @@ function expectMetadataProviderSmokeContract(provider: DatabaseMetadataProvider)
 
 describe.each(OPTIONAL_DIALECT_CASES)(
     '$dialect.kind optional dialect runtime',
-    ({ dialect, expectedDefaultPort, expectedConnectionFields }) => {
+    ({ dialect, expectedDefaultPort, expectedConnectionFields, supportsRawTcpTunnel }) => {
         beforeEach(() => {
             resetDatabaseDialectTestingState();
         });
@@ -136,6 +167,7 @@ describe.each(OPTIONAL_DIALECT_CASES)(
             expect(getDatabaseDialectByKind(dialect.kind)).toBe(dialect);
             expect(validateDialectTraits(dialect.traits)).toEqual([]);
             expect(dialect.defaultPort).toBe(expectedDefaultPort);
+            expect(dialect.supportsRawTcpTunnel).toBe(supportsRawTcpTunnel);
             const fieldKeys = dialect.connectionForm?.fields.map((field) => field.key);
             if (dialect.kind === 'access') {
                 expect(fieldKeys).toEqual(['filePath', 'password', 'readOnly']);
