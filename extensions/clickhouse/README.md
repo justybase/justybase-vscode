@@ -18,6 +18,9 @@ Connect to self-hosted ClickHouse or ClickHouse Cloud through the official `@cli
 - Hostnames, ports, and full HTTP(S) host URLs; the default port is `8123`.
 - Database selection, user/password authentication, and a configurable HTTP request timeout.
 - Database switching from the SQL tab without creating a new workspace profile.
+- HTTPS/WSS TCP tunneling through a named relay target. When the tunneled
+  endpoint uses HTTPS, set **TLS Server Name** to the remote certificate DNS
+  name so certificate verification and SNI continue to use the private host.
 
 Passwords are stored by the core extension in VS Code Secret Storage. Use certificate validation for normal deployments; only skip validation when trust is handled elsewhere in the network.
 

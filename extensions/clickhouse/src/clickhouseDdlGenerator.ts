@@ -9,8 +9,8 @@ import type {
     DatabaseTableDefinitionMetadata,
 } from '@justybase/contracts';
 import type { ConnectionDetails } from '../../../src/types';
+import { activateCoreExtension } from '../../../src/api/companionActivation';
 import {
-    createConnectedDatabaseConnectionFromDetails,
     executeDatabaseQuery,
 } from '../../../src/core/connectionFactory';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
@@ -25,6 +25,7 @@ import {
 import { clickhouseMaintenanceProvider } from './clickhouseMaintenanceProvider';
 import { clickhouseSessionMonitorProvider } from './clickhouseSessionMonitorProvider';
 import { clickhouseImportTypeMapper } from './clickhouseImportTypeMapper';
+import { ClickHouseConnection } from './clickhouseConnection';
 
 type Row = Record<string, unknown>;
 
@@ -298,15 +299,36 @@ function replaceCreateTarget(sourceDdl: string, qualifiedName: string): string {
 }
 
 async function withConnection<T>(details: ConnectionDetails, callback: (connection: DatabaseConnection) => Promise<T>): Promise<T> {
-    const connection = await createConnectedDatabaseConnectionFromDetails({
-        host: details.host,
-        port: details.port,
-        database: details.database,
-        user: details.user,
-        password: details.password,
-        options: details.options,
-        dbType: 'clickhouse',
-    });
+    let api: Awaited<ReturnType<typeof activateCoreExtension>> | undefined;
+    try {
+        api = await activateCoreExtension();
+    } catch {
+        // DDL generation remains usable in unit tests and standalone callers.
+    }
+    let connection: DatabaseConnection;
+    if (api?.createConnectedDatabaseConnectionFromDetails) {
+        connection = await api.createConnectedDatabaseConnectionFromDetails({
+            ...details,
+            dbType: 'clickhouse',
+        });
+    } else {
+        if (details.tunnel) {
+            throw new Error(
+                'The installed JustyBase core extension cannot open tunneled database connections. Update the core extension and try again.',
+            );
+        }
+
+        connection = new ClickHouseConnection({
+            host: details.host,
+            port: details.port,
+            database: details.database,
+            user: details.user,
+            password: details.password,
+            options: details.options,
+        });
+        await connection.connect();
+    }
+
     try {
         return await callback(connection);
     } finally {

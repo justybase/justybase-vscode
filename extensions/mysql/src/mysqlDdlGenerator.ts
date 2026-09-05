@@ -8,6 +8,7 @@ import type {
     DatabaseDdlResult
 } from '@justybase/contracts';
 import type { ConnectionDetails } from '../../../src/types';
+import { activateCoreExtension } from '../../../src/api/companionActivation';
 import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
 import { MysqlConnection } from './mysqlConnection';
@@ -126,16 +127,36 @@ async function withConnection<T>(
     details: ConnectionDetails,
     callback: (connection: DatabaseConnection) => Promise<T>
 ): Promise<T> {
-    const connection = new MysqlConnection({
-        host: details.host,
-        port: details.port,
-        database: details.database,
-        user: details.user,
-        password: details.password,
-        options: details.options
-    });
+    let api: Awaited<ReturnType<typeof activateCoreExtension>> | undefined;
+    try {
+        api = await activateCoreExtension();
+    } catch {
+        // DDL generation remains usable in unit tests and standalone callers.
+    }
+    let connection: DatabaseConnection;
+    if (api?.createConnectedDatabaseConnectionFromDetails) {
+        connection = await api.createConnectedDatabaseConnectionFromDetails({
+            ...details,
+            dbType: 'mysql',
+        });
+    } else {
+        if (details.tunnel) {
+            throw new Error(
+                'The installed JustyBase core extension cannot open tunneled database connections. Update the core extension and try again.',
+            );
+        }
 
-    await connection.connect();
+        connection = new MysqlConnection({
+            host: details.host,
+            port: details.port,
+            database: details.database,
+            user: details.user,
+            password: details.password,
+            options: details.options
+        });
+        await connection.connect();
+    }
+
     try {
         return await callback(connection);
     } finally {

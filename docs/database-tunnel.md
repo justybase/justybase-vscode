@@ -10,10 +10,12 @@ JustyBase database driver -> 127.0.0.1:<local-port>
     -> HTTPS/WSS gateway -> FastAPI relay -> private database host:port
 ```
 
-The current opt-in dialects are Netezza, PostgreSQL, and Oracle. A future TCP
-dialect can enable the same feature by advertising
-`supportsRawTcpTunnel`. SQLite, DuckDB/File SQL, and Access are local-file
-workflows and are intentionally not tunnel targets.
+The current opt-in dialects are Netezza, PostgreSQL, Oracle, Db2, MS SQL
+Server, MySQL, and ClickHouse. A future network dialect can enable the same
+feature by advertising `supportsRawTcpTunnel`. SQLite, DuckDB/File SQL,
+Access, Vertica, and Snowflake are intentionally not tunnel targets; SQLite,
+DuckDB/File SQL, and Access are local-file workflows, while Vertica and
+Snowflake are outside the current raw-tunnel capability boundary.
 
 ## What must be reachable
 
@@ -49,7 +51,7 @@ DATABASE_TUNNEL_BIND_HOST=127.0.0.1
 DATABASE_TUNNEL_BIND_PORT=8000
 DATABASE_TUNNEL_TOKEN=replace-with-a-long-random-token
 DATABASE_TUNNEL_MAX_CONNECTIONS=32
-DATABASE_TUNNEL_TARGETS_JSON='{"postgresql":{"host":"10.20.0.15","port":5432},"netezza":{"host":"10.20.0.25","port":5480}}'
+DATABASE_TUNNEL_TARGETS_JSON='{"postgresql":{"host":"10.20.0.15","port":5432},"netezza":{"host":"10.20.0.25","port":5480},"db2":{"host":"10.20.0.26","port":50000},"mssql":{"host":"10.20.0.27","port":1433},"mysql":{"host":"10.20.0.28","port":3306},"clickhouse":{"host":"10.20.0.29","port":8123}}'
 ```
 
 Start it for local development:
@@ -108,8 +110,8 @@ WebSocket path, and do not expose Uvicorn directly to the internet.
 ## 3. Configure a tunneled connection in JustyBase
 
 Open **JustyBase → Connect → Add Connection** and choose Netezza,
-PostgreSQL, or Oracle. Enable **Use HTTPS/WSS TCP tunnel** in the common
-connection form and enter:
+PostgreSQL, Oracle, Db2, MS SQL Server, MySQL, or ClickHouse. Enable **Use
+HTTPS/WSS TCP tunnel** in the common connection form and enter:
 
 | Field | Example | Meaning |
 | --- | --- | --- |
@@ -146,6 +148,14 @@ never stored in the serializable connection profile or global state cache.
   certificate.
 - Netezza: the Netezza wire protocol is forwarded unchanged; use the remote
   database, user, and password as for a direct connection.
+- Db2, MS SQL Server, and MySQL: use the normal database, user, password,
+  and driver options. The configured database endpoint is forwarded without
+  changing the database protocol.
+- ClickHouse: the relay target must point to the ClickHouse HTTP or HTTPS
+  interface (normally port `8123` or `8443`). Select the matching protocol in
+  the profile. For HTTPS through a tunnel, set **TLS Server Name** to the
+  DNS name present in the remote certificate; certificate verification remains
+  enabled when TLS mode is `verify-full`.
 - Oracle: use Host, Port, and Service Name fields. A custom Oracle Connect
   String override is not compatible with the transparent tunnel because it
   can embed a different endpoint.
