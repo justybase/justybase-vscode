@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { MysqlIndexDesignerView } from '../../../../extensions/mysql/src/mysqlIndexDesignerView';
 import { MysqlPartitionDesignerView } from '../../../../extensions/mysql/src/mysqlPartitionDesignerView';
+import { MysqlAlterTableDesignerView } from '../../../../extensions/mysql/src/mysqlAlterTableDesignerView';
 import type { MysqlIndexDesign } from '../../../contracts/webviews/mysqlIndexDesignerContracts';
+import type { MysqlAlterTableDesign } from '../../../contracts/webviews/mysqlAlterTableDesignerContracts';
 import type { MysqlPartitionOperationRequest } from '../../../contracts/webviews/mysqlPartitionDesignerContracts';
 
 interface TestPanel {
@@ -156,6 +158,47 @@ describe('MySQL designer webview hosts', () => {
         expect(panel.webview.postMessage).toHaveBeenCalledWith({
             command: 'setError',
             text: expect.stringContaining('already exists'),
+        });
+    });
+
+    it('renders the alter table designer and diffs the design into ALTER TABLE DDL', async () => {
+        const panel = createPanel();
+        const services = createServices();
+
+        await MysqlAlterTableDesignerView.createOrShow({} as vscode.ExtensionContext, {
+            target: createTarget(),
+            services,
+        } as never);
+
+        expect(panel.webview.html).toContain('mysqlAlterTableDesigner.js');
+        expect(panel.webview.html).toContain('Alter Table Designer');
+
+        const design: MysqlAlterTableDesign = {
+            columns: [
+                { name: 'id', type: 'bigint', notNull: true, defaultValue: '', autoIncrement: false, comment: '', ordinal: 1, isPrimaryKey: true, isForeignKey: false },
+                { name: 'created_at', type: 'datetime', notNull: true, defaultValue: '', autoIncrement: false, comment: '', ordinal: 2, isPrimaryKey: false, isForeignKey: false },
+            ],
+            options: {
+                engine: 'MyISAM',
+                charset: '',
+                collation: '',
+                autoIncrement: '',
+                comment: '',
+            },
+        };
+        await getMessageHandler(panel)({ command: 'copyDDL', design });
+
+        expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(
+            'ALTER TABLE sales.orders\n    ENGINE = MyISAM;',
+        );
+
+        await getMessageHandler(panel)({ command: 'copyDDL', design: {
+            ...design,
+            options: { engine: 'InnoDB', charset: '', collation: '', autoIncrement: '', comment: '' },
+        } });
+        expect(panel.webview.postMessage).toHaveBeenCalledWith({
+            command: 'setInfo',
+            text: expect.stringContaining('No changes detected'),
         });
     });
 });

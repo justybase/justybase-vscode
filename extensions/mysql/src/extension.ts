@@ -8,7 +8,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const api = await activateCoreExtension();
     api.registerDatabaseDialect(mysqlDialect);
     if (!isMysqlMaintenanceApi(api)) {
-        vscode.window.showWarningMessage('Update the JustyBase core extension to enable MySQL index and partition designers.');
+        vscode.window.showWarningMessage('Update the JustyBase core extension to enable MySQL table, index, and partition designers.');
         return;
     }
     context.subscriptions.push(...registerMysqlDesignerCommands(context, api));

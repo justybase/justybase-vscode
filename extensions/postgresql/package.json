@@ -36,6 +36,48 @@
     "extensionDependencies": [
         "krzysztof-d.justybaselite-netezza"
     ],
+    "contributes": {
+        "submenus": [
+            {
+                "id": "justybase.postgresql.tableStructures",
+                "label": "PostgreSQL: Table Structures",
+                "icon": "$(symbol-structure)"
+            }
+        ],
+        "commands": [
+            {
+                "command": "justybase.postgresql.alterTableDesigner",
+                "title": "PostgreSQL: Alter Table Designer...",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "justybase.postgresql.createIndexWizard",
+                "title": "PostgreSQL: Index Designer...",
+                "icon": "$(symbol-key)"
+            }
+        ],
+        "menus": {
+            "view/item/context": [
+                {
+                    "submenu": "justybase.postgresql.tableStructures",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == postgresql",
+                    "group": "3_maintenance@1"
+                }
+            ],
+            "justybase.postgresql.tableStructures": [
+                {
+                    "command": "justybase.postgresql.alterTableDesigner",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == postgresql",
+                    "group": "1_structure@1"
+                },
+                {
+                    "command": "justybase.postgresql.createIndexWizard",
+                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == postgresql",
+                    "group": "2_index@1"
+                }
+            ]
+        }
+    },
     "scripts": {
         "vscode:prepublish": "npm run build && node ../../scripts/generate-third-party-notices.js .",
         "build": "node esbuild.postgresql.js",

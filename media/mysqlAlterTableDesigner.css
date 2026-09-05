@@ -1,0 +1,61 @@
+/* MySQL Alter Table Designer — complements db2Designer.css. */
+
+.alter-actions {
+    margin-bottom: 10px;
+}
+
+.alter-columns-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--vscode-panel-border);
+}
+
+.alter-columns-table th,
+.alter-columns-table td {
+    padding: 6px 8px;
+    white-space: nowrap;
+}
+
+.alter-columns-table th {
+    font-size: .9em;
+}
+
+.alter-columns-table td input[type="text"] {
+    width: 130px;
+}
+
+.alter-columns-table td:nth-child(2) input {
+    width: 150px;
+}
+
+.alter-columns-table td:nth-child(3) input {
+    width: 170px;
+}
+
+.alter-columns-table td input[type="checkbox"] {
+    display: block;
+    margin: 0 auto;
+}
+
+.alter-columns-table .center-cell {
+    text-align: center;
+}
+
+.alter-columns-table .ordinal {
+    width: 28px;
+    color: var(--vscode-descriptionForeground);
+    text-align: right;
+}
+
+.alter-columns-table input[readonly] {
+    color: var(--vscode-descriptionForeground);
+}
+
+.table-comment-field {
+    grid-column: span 2;
+}
+
+@media (max-width: 850px) {
+    .table-comment-field {
+        grid-column: span 1;
+    }
+}

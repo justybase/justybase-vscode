@@ -7,6 +7,7 @@ import { createStubDialect } from '../stubDialectFactory';
 import { MSSQL_UNQUOTED_IDENTIFIER_PATTERN } from '../../shared/dialect-traits/mssql';
 
 export const mssqlDialect = createStubDialect('mssql', 'MS SQL Server', 1433, {
+	supportsRawTcpTunnel: true,
 	connectionFormOptions: {
 		databasePlaceholder: 'Database name',
 		userPlaceholder: 'SQL Server user',

@@ -6,6 +6,7 @@ import type {
 import { ConnectionManager } from '../core/connectionManager';
 import { runQuery } from '../core/queryRunner';
 import { SQLITE_RESERVED_KEYWORD_LIST } from '../utils/identifierUtils';
+import { getTableDesignerContainerDisplay } from './tableDesignerDdl';
 
 export class TableDesignerView {
     public static readonly viewType = 'netezza.tableDesigner';
@@ -173,7 +174,7 @@ export class TableDesignerView {
                                         </select>
                                     </div>
                                     <div class="input-group checkbox-group">
-                                        <label>
+                                        <label id="ifNotExistsLabel">
                                             <input type="checkbox" id="ifNotExists">
                                             IF NOT EXISTS
                                         </label>
@@ -288,13 +289,7 @@ function getTableDesignerTargetDisplay(
     dbName: string,
     schemaName: string | undefined
 ): string {
-    if (databaseKind === 'sqlite' || databaseKind === 'access' || !schemaName) {
-        return dbName;
-    }
-    if (databaseKind === 'db2') {
-        return `${dbName}.${schemaName}`;
-    }
-    return `${dbName}.${schemaName}`;
+    return getTableDesignerContainerDisplay(databaseKind, dbName, schemaName);
 }
 
 function getNonce() {

@@ -10,6 +10,10 @@ import { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getFullName, requireConnection, executeWithProgress, escapeSqlString, isValidIdentifier } from './helpers';
 import { TableDesignerView } from '../../views/tableDesignerView';
 import { formatIdentifierForSql } from '../../utils/identifierUtils';
+import {
+    getTableDesignerUnsupportedReason,
+    isTableDesignerSupported,
+} from '../../views/tableDesignerDdl';
 
 /**
  * Register table modification commands
@@ -26,11 +30,21 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
             }
 
             const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+            if (!isTableDesignerSupported(databaseKind)) {
+                vscode.window.showErrorMessage(
+                    getTableDesignerUnsupportedReason(databaseKind) ??
+                    'The Table Designer is not available for this database connection.'
+                );
+                return;
+            }
+
             const dbName = item.dbName || 'SYSTEM';
             const schemaName =
-                databaseKind === 'sqlite' || databaseKind === 'access'
-                    ? item.schema
-                    : item.schema || 'ADMIN';
+                databaseKind === 'netezza'
+                    ? item.schema || 'ADMIN'
+                    : databaseKind === 'mysql'
+                        ? item.schema || item.dbName
+                        : item.schema;
             const connectionName = item.connectionName;
 
             if (!await requireConnection(connectionManager)) return;

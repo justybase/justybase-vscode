@@ -335,6 +335,39 @@ export function buildTablePropertiesQuery(schema: string, tableName: string): st
     `;
 }
 
+export function buildAlterTablePropertiesQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            t.ENGINE AS ENGINE,
+            t.TABLE_COLLATION AS TABLE_COLLATION,
+            t.AUTO_INCREMENT AS AUTO_INCREMENT,
+            COALESCE(t.TABLE_COMMENT, '') AS TABLE_COMMENT,
+            VERSION() AS SERVER_VERSION
+        FROM information_schema.tables t
+        WHERE t.TABLE_SCHEMA = ${quoteLiteral(schema)}
+          AND t.TABLE_NAME = ${quoteLiteral(tableName)}
+          AND t.TABLE_TYPE = 'BASE TABLE'
+    `;
+}
+
+export function buildListCharacterSetsQuery(): string {
+    return `
+        SELECT CHARACTER_SET_NAME AS CHARACTER_SET_NAME
+        FROM information_schema.character_sets
+        ORDER BY CHARACTER_SET_NAME
+    `;
+}
+
+export function buildListCollationsQuery(): string {
+    return `
+        SELECT
+            COLLATION_NAME AS COLLATION_NAME,
+            CHARACTER_SET_NAME AS CHARACTER_SET_NAME
+        FROM information_schema.collations
+        ORDER BY CHARACTER_SET_NAME, COLLATION_NAME
+    `;
+}
+
 export function buildListIndexesQuery(schema: string, tableName: string): string {
     return `
         SELECT

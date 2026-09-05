@@ -2,6 +2,7 @@ import type {
     DatabaseConnection,
     DatabaseConnectionConfig,
     DatabaseConnectionStaticConstructor,
+    DatabaseConnectionFieldSchema,
     DatabaseDialect,
     DatabaseDialectTraitsOverrides,
     DatabaseKind,
@@ -17,6 +18,7 @@ export interface StubDialectOptions {
     connectionFormOptions?: StandardConnectionFieldOptions;
     extensionDisplayName?: string;
     supportsRawTcpTunnel?: boolean;
+    additionalConnectionFields?: readonly DatabaseConnectionFieldSchema[];
 }
 
 export function createStubDialect(
@@ -38,7 +40,12 @@ export function createStubDialect(
         displayName,
         ...(defaultPort !== undefined ? { defaultPort } : {}),
         capabilities: createDatabaseCapabilities(),
-        connectionForm: createStandardConnectionForm(connectionFormOptions),
+        connectionForm: {
+            fields: [
+                ...createStandardConnectionForm(connectionFormOptions).fields,
+                ...(options.additionalConnectionFields ?? []),
+            ],
+        },
         traits: createDatabaseDialectTraits(options.traitsOverrides),
         ...(options.supportsRawTcpTunnel ? { supportsRawTcpTunnel: true } : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
