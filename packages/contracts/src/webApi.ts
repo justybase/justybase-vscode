@@ -90,6 +90,8 @@ export interface MetadataObject {
   database?: string;
   objectType?: string;
   description?: string;
+  /** Source SQL for a view, when the provider can expose it cheaply. */
+  viewSql?: string;
 }
 export interface MetadataColumn {
   name: string;
@@ -136,6 +138,7 @@ export interface SchemaTreeNode {
   kind: SchemaNodeKind;
   label: string;
   description?: string;
+  viewSql?: string;
   database?: string;
   schema?: string;
   objectName?: string;

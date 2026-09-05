@@ -413,6 +413,13 @@ describe('web API authentication and connection profiles', () => {
       expect(snapshot.statusCode).toBe(200);
       const snapshotBody = snapshot.json() as { snapshot: { target: Record<string, unknown>; fingerprint: string } };
       const designer = { target: snapshotBody.snapshot.target, baseFingerprint: snapshotBody.snapshot.fingerprint };
+      const renamed = await app.inject({
+        method: 'PUT',
+        url: `/api/connections/${connectionId}`,
+        headers: { cookie, 'x-justybase-csrf': csrf },
+        payload: { name: `Renamed designer connection ${Date.now()}`, host: 'local', database, user: 'local', dbType: 'sqlite', readOnly: false },
+      });
+      expect(renamed.statusCode).toBe(200);
       const preview = await app.inject({
         method: 'POST',
         url: '/api/query/preview',

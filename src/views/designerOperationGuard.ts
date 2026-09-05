@@ -1,7 +1,9 @@
 import {
     getDatabaseDesignerCapabilities,
+    resolveDatabaseDesignerCapabilities,
     UnsupportedDesignerOperationError,
     type DatabaseDesignerCapabilityKey,
+    type DatabaseDesignerRuntimeContext,
     type DatabaseKind,
     type DesignerOperation,
 } from '../contracts/database';
@@ -15,18 +17,23 @@ export function assertDesignerOperation(
     capabilityKey: DatabaseDesignerCapabilityKey,
     operation: DesignerOperation,
     allowAlternative = false,
+    context?: Omit<DatabaseDesignerRuntimeContext, 'databaseKind'>,
 ): void {
-    const capability = getDatabaseDesignerCapabilities(databaseKind);
-    const blocked = !capability.constructs[capabilityKey].operations.includes(operation)
-        || capability.constructs[capabilityKey].level === 'unsupported'
-        || capability.constructs[capabilityKey].level === 'runtime-unavailable'
-        || capability.constructs[capabilityKey].level === 'privilege-blocked'
-        || (!allowAlternative && capability.constructs[capabilityKey].level === 'alternative');
+    const base = getDatabaseDesignerCapabilities(databaseKind);
+    const capabilities = context
+        ? resolveDatabaseDesignerCapabilities(base, { databaseKind: base.kind, ...context })
+        : base;
+    const designerCapability = capabilities.constructs[capabilityKey];
+    const blocked = !designerCapability.operations.includes(operation)
+        || designerCapability.level === 'unsupported'
+        || designerCapability.level === 'runtime-unavailable'
+        || designerCapability.level === 'privilege-blocked'
+        || (!allowAlternative && designerCapability.level === 'alternative');
     if (blocked) {
         throw new UnsupportedDesignerOperationError(
             capabilityKey,
             operation,
-            capability.constructs[capabilityKey].reason,
+            designerCapability.reason,
         );
     }
 }

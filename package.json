@@ -2328,7 +2328,7 @@
         },
         {
           "command": "netezza.openObjectDesigner",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == postgresql)",
           "group": "5_schema@0"
         },
         {

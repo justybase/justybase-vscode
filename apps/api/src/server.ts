@@ -200,9 +200,13 @@ function plannedDigest(mode: QueryExecutionMode, statements: PlannedStatement[])
 }
 
 function designerTargetDigest(target: NonNullable<QueryStartRequest['designer']>['target']): string {
-  const normalized = Object.entries(target)
-    .filter(([, value]) => value !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right));
+  const normalized = {
+    connectionId: target.connectionId,
+    database: target.database,
+    schema: target.schema,
+    objectName: target.objectName,
+    objectType: target.objectType,
+  };
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }
 

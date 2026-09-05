@@ -20,6 +20,8 @@ const mockContext = {
 
 const mockConnectionManager = {
   getConnection: jest.fn(),
+  getConnectionDatabaseKind: jest.fn(),
+  getConnectionMetadata: jest.fn(),
   hasConnection: jest.fn().mockReturnValue(true),
 };
 
@@ -51,6 +53,7 @@ jest.mock("vscode", () => ({
     registerCommand: jest.fn((_cmd: string, _handler: any) => {
       return { command: _cmd, dispose: jest.fn() };
     }),
+    executeCommand: jest.fn().mockResolvedValue(undefined),
   },
   window: {
     showQuickPick: jest.fn(),
@@ -95,6 +98,8 @@ describe("tableCommands", () => {
     (vscode.window.showInformationMessage as jest.Mock).mockReset();
     (vscode.window.showWarningMessage as jest.Mock).mockReset();
     (vscode.window.showErrorMessage as jest.Mock).mockReset();
+    (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReset();
+    (mockConnectionManager.getConnectionMetadata as jest.Mock).mockReset();
   });
 
   describe("registerTableCommands", () => {
@@ -192,6 +197,27 @@ describe("tableCommands", () => {
       );
 
       expect(cmd).toBeDefined();
+    });
+
+    it('uses the MySQL database as the schema-like target for flat tree nodes', async () => {
+      (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue('mysql');
+      registerTableCommands(mockDeps);
+
+      const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+      const command = calls.find((call: any[]) => call[0] === 'netezza.openObjectDesigner');
+      const handler = command[1] as (item: SchemaItemData) => Promise<void>;
+
+      await handler({
+        label: 'orders',
+        dbName: 'sales',
+        objType: 'TABLE',
+        connectionName: 'mysql-connection',
+      });
+
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'justybase.mysql.alterTableDesigner',
+        expect.objectContaining({ schema: 'sales' }),
+      );
     });
   });
 
@@ -614,6 +640,26 @@ describe("tableCommands", () => {
   });
 
   describe("alterTableWizard command", () => {
+    it('rejects mutations from a read-only connection before prompting for DDL', async () => {
+      (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue('sqlite');
+      (mockConnectionManager.getConnectionMetadata as jest.Mock).mockReturnValue({ options: { readOnly: true } });
+      registerTableCommands(mockDeps);
+
+      const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+      const command = calls.find((call: any[]) => call[0] === 'netezza.alterTableWizard');
+      const handler = command[1] as (item: SchemaItemData) => Promise<void>;
+      await handler({
+        label: 'orders',
+        dbName: 'main',
+        schema: 'main',
+        objType: 'TABLE',
+        connectionName: 'sqlite-connection',
+      });
+
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('read-only'));
+      expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+    });
+
     it("should execute add-column ALTER statement after confirmation", async () => {
       registerTableCommands(mockDeps);
 

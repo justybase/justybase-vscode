@@ -64,7 +64,10 @@ export async function getSchemaTree(store: AppStore, config: ApiConfig, userId: 
     const schema = parent.schema ?? '';
     const objectType = parent.objectType ?? 'TABLE';
     const result = await cached(cacheKey(profile, 'objects', database, schema), () => listObjects(profile, database, schema, config.masterKey));
-    const items = result.value.filter(item => item.objectType?.toUpperCase() === objectType).map(item => node('object', item.name, { connectionId, database, schema, objectName: item.name, objectType }, true, { description: item.description }));
+    const items = result.value.filter(item => item.objectType?.toUpperCase() === objectType).map(item => node('object', item.name, { connectionId, database, schema, objectName: item.name, objectType }, true, {
+      description: item.description,
+      viewSql: item.viewSql,
+    }));
     return { nodes: items, stale: result.stale };
   }
   if (parent.kind === 'object') {
