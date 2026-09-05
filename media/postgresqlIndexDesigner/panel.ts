@@ -22,6 +22,8 @@ let keyColumns: KeyColumn[] = [];
 let includeColumns: string[] = [];
 let indexNameTouched = false;
 
+const INCLUDE_INDEX_METHODS = new Set<PostgresqlIndexDesign['method']>(['btree', 'gist', 'spgist']);
+
 function byId<T extends HTMLElement>(id: string): T {
     const element = document.getElementById(id);
     if (!element) {
@@ -232,6 +234,8 @@ function createRowButton(text: string, title: string, onClick: () => void, dange
 }
 
 function renderKeyColumns(): void {
+    const method = byId<HTMLSelectElement>('method').value as PostgresqlIndexDesign['method'];
+    const supportsOrdering = method === 'btree';
     const container = byId('keyColumns');
     container.replaceChildren();
     if (keyColumns.length === 0) {
@@ -266,6 +270,8 @@ function renderKeyColumns(): void {
                 refreshDdl();
             }),
         );
+        const selects = row.querySelectorAll<HTMLSelectElement>('select');
+        selects.forEach(select => { select.disabled = !supportsOrdering; });
         row.append(
             createRowButton('Up', 'Move column up', () => moveKeyColumn(index, -1)),
             createRowButton('Down', 'Move column down', () => moveKeyColumn(index, 1)),
@@ -273,6 +279,25 @@ function renderKeyColumns(): void {
         );
         container.appendChild(row);
     });
+}
+
+function applyMethodRestrictions(): void {
+    const method = byId<HTMLSelectElement>('method').value as PostgresqlIndexDesign['method'];
+    const unique = byId<HTMLInputElement>('unique');
+    const supportsOrdering = method === 'btree';
+    unique.disabled = !supportsOrdering;
+    if (!supportsOrdering) {
+        unique.checked = false;
+        keyColumns.forEach(column => {
+            column.order = 'ASC';
+            column.nulls = 'LAST';
+        });
+    }
+    if (!INCLUDE_INDEX_METHODS.has(method)) {
+        includeColumns = [];
+    }
+    renderKeyColumns();
+    renderIncludeColumns();
 }
 
 function renderIncludeColumns(): void {
@@ -437,7 +462,11 @@ function initialize(): void {
         indexNameTouched = true;
         refreshDdl();
     });
-    ['unique', 'method'].forEach(id => byId(id).addEventListener('change', refreshDdl));
+    byId('unique').addEventListener('change', refreshDdl);
+    byId('method').addEventListener('change', () => {
+        applyMethodRestrictions();
+        refreshDdl();
+    });
     byId<HTMLSelectElement>('tablespace').addEventListener('change', refreshDdl);
     byId<HTMLInputElement>('predicate').addEventListener('input', refreshDdl);
     byId<HTMLButtonElement>('reloadBtn').addEventListener('click', () => vscode.postMessage({ command: 'reload' }));

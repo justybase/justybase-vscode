@@ -1,5 +1,6 @@
 import {
     buildColumnMetadataQuery,
+    buildDesignerListIndexesQuery,
     buildColumnsWithKeysQuery,
     buildDdlColumnsQuery,
     buildFindTableSchemaQuery,
@@ -167,6 +168,13 @@ describe('postgresqlSystemQueries', () => {
 
         expect(sequenceDefinitionQuery).toContain('CREATE SEQUENCE %I.%I INCREMENT BY %s');
         expect(sequenceDefinitionQuery).toContain(`c.relkind = 'S'`);
+    });
+
+    it('keeps expression indexes in the index designer catalog', () => {
+        const query = compactSql(buildDesignerListIndexesQuery('public', 'orders'));
+
+        expect(query).toContain('LEFT JOIN pg_catalog.pg_attribute a');
+        expect(query).toContain('COALESCE(a.attname, pg_catalog.pg_get_indexdef(i.indexrelid, k.ord, true)) AS COLUMN_NAME');
     });
 
     it('builds PostgreSQL object and source search queries for the search contract', () => {

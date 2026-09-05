@@ -291,14 +291,16 @@ async function loadTableProperties(
 function mapAlterTableColumns(rows: MysqlRow[]): MysqlAlterTableDesignerColumn[] {
     return rows.map((row, index) => {
         const name = text(rowValue(row, 'ATTNAME') ?? rowValue(row, 'COLUMN_NAME'));
-        const extra = text(rowValue(row, 'EXTRA')).toLowerCase();
+        const extra = text(rowValue(row, 'EXTRA'));
         return {
             name,
             type: text(rowValue(row, 'FORMAT_TYPE') ?? rowValue(row, 'COLUMN_TYPE') ?? rowValue(row, 'DATA_TYPE')),
             notNull: booleanValue(rowValue(row, 'IS_NOT_NULL')),
             defaultValue: text(rowValue(row, 'COLDEFAULT') ?? rowValue(row, 'COLUMN_DEFAULT')),
-            autoIncrement: extra.includes('auto_increment'),
+            autoIncrement: extra.toLowerCase().includes('auto_increment'),
             comment: text(rowValue(row, 'DESCRIPTION') ?? rowValue(row, 'COLUMN_COMMENT')),
+            extra,
+            generationExpression: text(rowValue(row, 'GENERATION_EXPRESSION')),
             ordinal: numberValue(rowValue(row, 'ATTNUM') ?? rowValue(row, 'ORDINAL_POSITION')) ?? index + 1,
             isPrimaryKey: booleanValue(rowValue(row, 'IS_PK')),
             isForeignKey: booleanValue(rowValue(row, 'IS_FK')),

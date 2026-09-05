@@ -5,6 +5,8 @@ export interface MysqlAlterTableDesignerColumn {
     defaultValue: string;
     autoIncrement: boolean;
     comment: string;
+    extra?: string;
+    generationExpression?: string;
     ordinal: number;
     isPrimaryKey: boolean;
     isForeignKey: boolean;

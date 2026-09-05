@@ -156,6 +156,7 @@ function buildColumnBaseQuery(database: string, schema: string, tableName: strin
             c.COLUMN_COMMENT AS DESCRIPTION,
             c.ORDINAL_POSITION AS ATTNUM,
             c.EXTRA AS EXTRA,
+            COALESCE(c.GENERATION_EXPRESSION, '') AS GENERATION_EXPRESSION,
             CASE WHEN tc.CONSTRAINT_TYPE = 'PRIMARY KEY' THEN 1 ELSE 0 END AS IS_PK,
             CASE WHEN tc.CONSTRAINT_TYPE = 'FOREIGN KEY' THEN 1 ELSE 0 END AS IS_FK
         FROM information_schema.columns c
@@ -193,6 +194,7 @@ function buildColumnsWithKeysBaseQuery(database: string, schema?: string, tableN
             c.COLUMN_COMMENT AS DESCRIPTION,
             c.ORDINAL_POSITION AS ATTNUM,
             c.EXTRA AS EXTRA,
+            COALESCE(c.GENERATION_EXPRESSION, '') AS GENERATION_EXPRESSION,
             CASE WHEN tc.CONSTRAINT_TYPE = 'PRIMARY KEY' THEN 1 ELSE 0 END AS IS_PK,
             CASE WHEN tc.CONSTRAINT_TYPE = 'FOREIGN KEY' THEN 1 ELSE 0 END AS IS_FK
         FROM information_schema.columns c

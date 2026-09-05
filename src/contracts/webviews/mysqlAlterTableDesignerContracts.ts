@@ -7,6 +7,10 @@ export interface MysqlAlterTableDesignerColumn {
     defaultValue: string;
     autoIncrement: boolean;
     comment: string;
+    /** MySQL `information_schema.columns.EXTRA`, retained to protect MODIFY COLUMN. */
+    extra?: string;
+    /** Non-empty for a generated column, whose expression this designer cannot edit safely. */
+    generationExpression?: string;
     ordinal: number;
     isPrimaryKey: boolean;
     isForeignKey: boolean;

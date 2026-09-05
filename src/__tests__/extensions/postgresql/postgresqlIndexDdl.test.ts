@@ -46,19 +46,38 @@ describe('PostgreSQL index DDL', () => {
         );
     });
 
-    it('builds INCLUDE, TABLESPACE, and WHERE predicate clauses', () => {
+    it('builds supported clauses for a GIN index without B-tree ordering', () => {
         expect(buildPostgresqlCreateIndexSql({
             schema: 'public',
             tableName: 'orders',
             design: design({
                 method: 'gin',
-                includeColumns: ['total', 'status'],
                 predicate: "status = 'active'",
                 tablespace: 'fast_ssd',
             }),
         })).toBe(
-            "CREATE INDEX orders_customer_name_idx ON public.orders USING gin (customer_name NULLS LAST) INCLUDE (total, status) TABLESPACE fast_ssd WHERE status = 'active';",
+            "CREATE INDEX orders_customer_name_idx ON public.orders USING gin (customer_name) TABLESPACE fast_ssd WHERE status = 'active';",
         );
+    });
+
+    it('rejects clauses unsupported by the selected access method', () => {
+        expect(() => buildPostgresqlCreateIndexSql({
+            schema: 'public',
+            tableName: 'orders',
+            design: design({ method: 'gin', unique: true }),
+        })).toThrow('UNIQUE indexes are supported only by the B-tree');
+
+        expect(() => buildPostgresqlCreateIndexSql({
+            schema: 'public',
+            tableName: 'orders',
+            design: design({ method: 'gin', includeColumns: ['total'] }),
+        })).toThrow('INCLUDE columns are not supported');
+
+        expect(() => buildPostgresqlCreateIndexSql({
+            schema: 'public',
+            tableName: 'orders',
+            design: design({ method: 'gin', keyColumns: [{ name: 'customer_name', order: 'DESC', nulls: 'LAST' }] }),
+        })).toThrow('Sort direction and NULLS position are supported only by B-tree');
     });
 
     it('accepts a predicate that already starts with WHERE', () => {

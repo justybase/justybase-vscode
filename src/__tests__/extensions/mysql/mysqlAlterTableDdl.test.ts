@@ -121,6 +121,31 @@ describe('MySQL alter table DDL', () => {
         expect(ddl).toContain('MODIFY COLUMN customer_name varchar(120) NULL DEFAULT \'pending\' COMMENT \'buyer name\';');
     });
 
+    it('rejects changes to columns with attributes MODIFY COLUMN cannot preserve', () => {
+        const updatedAt = column({
+            name: 'updated_at',
+            type: 'timestamp',
+            autoIncrement: false,
+            isPrimaryKey: false,
+            extra: 'on update CURRENT_TIMESTAMP',
+        });
+        expect(() => buildMysqlAlterTableSql(context({ columns: [updatedAt] }), design({
+            columns: [{ ...updatedAt, comment: 'last write time' }],
+        }))).toThrow('ON UPDATE expression');
+
+        const generated = column({
+            name: 'total',
+            type: 'decimal(12,2)',
+            autoIncrement: false,
+            isPrimaryKey: false,
+            extra: 'STORED GENERATED',
+            generationExpression: '`price` * `quantity`',
+        });
+        expect(() => buildMysqlAlterTableSql(context({ columns: [generated] }), design({
+            columns: [{ ...generated, comment: 'computed total' }],
+        }))).toThrow('generated expression');
+    });
+
     it('emits DROP COLUMN for removed columns and rejects PRIMARY KEY drops', () => {
         const dropped = design({ columns: [design().columns[0]] });
         expect(buildMysqlAlterTableSql(context(), dropped)).toBe(

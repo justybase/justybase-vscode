@@ -118,6 +118,7 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
   const [indexColumns, setIndexColumns] = useState('');
   const [indexUnique, setIndexUnique] = useState(false);
   const [indexOperation, setIndexOperation] = useState<'create' | 'drop'>('create');
+  const [distributionChanged, setDistributionChanged] = useState(false);
   const [distributionMethod, setDistributionMethod] = useState<NetezzaPhysicalDesignInput['distributionMethod']>('RANDOM');
   const [distributionColumns, setDistributionColumns] = useState('');
   const [organizationColumns, setOrganizationColumns] = useState('');
@@ -254,6 +255,7 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
       }
       if (activeTab === 'partitions' && databaseKind === 'netezza') {
         const input: NetezzaPhysicalDesignInput = {
+          distributionChanged,
           distributionMethod,
           distributionColumns,
           organizationColumns,
@@ -282,7 +284,7 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
     } catch {
       return '';
     }
-  }, [activeTab, checkExpression, checkNotValid, clickHouseIndex, clickHousePartition, columnDefault, columnName, columnNotNull, columnType, constraintName, constraintOperation, constraintType, context, databaseKind, distributionColumns, distributionMethod, foreignKeyColumns, foreignKeyDeferrable, foreignKeyInitiallyDeferred, foreignKeyMatch, foreignKeyNotValid, foreignKeyOnDelete, foreignKeyOnUpdate, indexColumns, indexName, indexOperation, indexUnique, isRoutineTarget, isTableTarget, isViewTarget, organizationColumns, organizationMaxRowsPerZone, organizationNone, referencedColumns, referencedSchema, referencedTable, routineBody, routineExecuteAs, routineParameters, routineReturnType, snowflakeClustering, target.objectType, targetSql, triggerBody, triggerEvent, triggerLevel, triggerName, triggerOperation, triggerTiming, triggerUpdateColumns, triggerWhen, verticaProjection, viewDefinition, viewReplace]);
+  }, [activeTab, checkExpression, checkNotValid, clickHouseIndex, clickHousePartition, columnDefault, columnName, columnNotNull, columnType, constraintName, constraintOperation, constraintType, context, databaseKind, distributionChanged, distributionColumns, distributionMethod, foreignKeyColumns, foreignKeyDeferrable, foreignKeyInitiallyDeferred, foreignKeyMatch, foreignKeyNotValid, foreignKeyOnDelete, foreignKeyOnUpdate, indexColumns, indexName, indexOperation, indexUnique, isRoutineTarget, isTableTarget, isViewTarget, organizationColumns, organizationMaxRowsPerZone, organizationNone, referencedColumns, referencedSchema, referencedTable, routineBody, routineExecuteAs, routineParameters, routineReturnType, snowflakeClustering, target.objectType, targetSql, triggerBody, triggerEvent, triggerLevel, triggerName, triggerOperation, triggerTiming, triggerUpdateColumns, triggerWhen, verticaProjection, viewDefinition, viewReplace]);
 
   useEffect(() => {
     let disposed = false;
@@ -303,6 +305,7 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
     setIndexColumns('');
     setIndexUnique(false);
     setIndexOperation('create');
+    setDistributionChanged(false);
     setDistributionMethod('RANDOM');
     setDistributionColumns('');
     setOrganizationColumns('');
@@ -807,10 +810,11 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
           <section className="object-designer-card">
             <h3>Netezza distribution and organization</h3>
             {!nativeEnabled && <div className="object-designer-inline-warning">{capability?.reason ?? 'Distribution changes are not available for this target.'}</div>}
-            <p className="muted">Netezza uses hash distribution and zone-map organization instead of user-managed table partitions. Both statements are reviewed together.</p>
+            <p className="muted">Netezza uses hash distribution and zone-map organization instead of user-managed table partitions. Distribution remains unchanged unless explicitly selected below.</p>
             <div className="object-designer-form-grid">
-              <label>Distribution method<select value={distributionMethod} onChange={event => { setDistributionMethod(event.target.value as NetezzaPhysicalDesignInput['distributionMethod']); setPreview(null); }} disabled={!nativeEnabled}><option value="RANDOM">RANDOM</option><option value="HASH">HASH</option></select></label>
-              <label>Distribution columns<input value={distributionColumns} onChange={event => { setDistributionColumns(event.target.value); setDistributionMethod('HASH'); setPreview(null); }} disabled={!nativeEnabled || distributionMethod === 'RANDOM'} placeholder="customer_id" /></label>
+              <label className="object-designer-checkbox"><input type="checkbox" checked={distributionChanged} onChange={event => { setDistributionChanged(event.target.checked); setPreview(null); }} disabled={!nativeEnabled} /> Change distribution</label>
+              <label>Distribution method<select value={distributionMethod} onChange={event => { setDistributionMethod(event.target.value as NetezzaPhysicalDesignInput['distributionMethod']); setPreview(null); }} disabled={!nativeEnabled || !distributionChanged}><option value="RANDOM">RANDOM</option><option value="HASH">HASH</option></select></label>
+              <label>Distribution columns<input value={distributionColumns} onChange={event => { setDistributionColumns(event.target.value); setDistributionMethod('HASH'); setDistributionChanged(true); setPreview(null); }} disabled={!nativeEnabled || !distributionChanged || distributionMethod === 'RANDOM'} placeholder="customer_id" /></label>
               <label>Organization columns<input value={organizationColumns} onChange={event => { setOrganizationColumns(event.target.value); setOrganizationNone(false); setPreview(null); }} disabled={!nativeEnabled || organizationNone} placeholder="created_at" /></label>
               <label>MAX_ROWS_PER_ZONE<input value={organizationMaxRowsPerZone} onChange={event => { setOrganizationMaxRowsPerZone(event.target.value); setPreview(null); }} disabled={!nativeEnabled || organizationNone} inputMode="numeric" placeholder="Optional" /></label>
               <label className="object-designer-checkbox"><input type="checkbox" checked={organizationNone} onChange={event => { setOrganizationNone(event.target.checked); setPreview(null); }} disabled={!nativeEnabled} /> ORGANIZE ON NONE</label>

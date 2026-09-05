@@ -157,6 +157,16 @@ function columnChanged(left: MysqlAlterTableDesignerColumn, right: MysqlAlterTab
         || normalizeDefaultValue(left.defaultValue) !== normalizeDefaultValue(right.defaultValue);
 }
 
+function unpreservedMysqlColumnAttribute(column: MysqlAlterTableDesignerColumn): string | undefined {
+    if ((column.generationExpression ?? '').trim() || /\bgenerated\b/i.test(column.extra ?? '')) {
+        return 'a generated expression';
+    }
+    if (/\bon\s+update\b/i.test(column.extra ?? '')) {
+        return 'an ON UPDATE expression';
+    }
+    return undefined;
+}
+
 function charsetFromCollation(collation: string): string {
     const firstSegment = collation.trim().split('_')[0] ?? '';
     return /^[A-Za-z0-9]+$/.test(firstSegment) ? firstSegment : '';
@@ -188,6 +198,10 @@ export function buildMysqlAlterTableSql(
         if (!original) {
             clauses.push(`ADD COLUMN ${buildMysqlColumnDefinitionSql(column)}`);
         } else if (columnChanged(original, column)) {
+            const protectedAttribute = unpreservedMysqlColumnAttribute(original);
+            if (protectedAttribute) {
+                throw new Error(`Column "${original.name}" has ${protectedAttribute}, which the Alter Table Designer cannot preserve during MODIFY COLUMN. Use reviewed SQL for this change.`);
+            }
             clauses.push(`MODIFY COLUMN ${buildMysqlColumnDefinitionSql(column)}`);
         }
     }
