@@ -1,3 +1,5 @@
+import { assertDesignerOperation } from '../../../src/views/designerOperationGuard';
+
 const DB2_RESERVED_KEYWORDS = new Set([
     'ADD', 'ALTER', 'AND', 'AS', 'BY', 'CHECK', 'COLUMN', 'CONSTRAINT', 'CREATE', 'CURRENT', 'DATE',
     'DEFAULT', 'DELETE', 'DESC', 'DISTINCT', 'DROP', 'EXISTS', 'FOREIGN', 'FROM', 'FULL', 'GROUP',
@@ -110,6 +112,7 @@ function requireValue(value: string, label: string): string {
 }
 
 export function buildDb2CreateIndexSql(options: Db2CreateIndexDdlOptions): string {
+    assertDesignerOperation('db2', 'indexes', 'create');
     const indexName = requireValue(options.indexName, 'Index name');
     const keyColumns = options.keyColumns.filter(column => column.name.trim().length > 0);
     if (keyColumns.length === 0) {
@@ -141,6 +144,7 @@ export function buildDb2CreateIndexSql(options: Db2CreateIndexDdlOptions): strin
 }
 
 export function buildDb2DropIndexSql(schema: string, indexName: string): string {
+    assertDesignerOperation('db2', 'indexes', 'drop');
     return `DROP INDEX ${formatDb2QualifiedName(schema, requireValue(indexName, 'Index name'))};`;
 }
 
@@ -161,10 +165,12 @@ export function buildDb2PartitionRangeSql(options: Db2PartitionRangeOptions, inc
 }
 
 export function buildDb2AddPartitionSql(options: Db2AddPartitionDdlOptions): string {
+    assertDesignerOperation('db2', 'partitions', 'create');
     return `ALTER TABLE ${formatDb2QualifiedName(options.schema, options.tableName)} ADD ${buildDb2PartitionRangeSql(options)};`;
 }
 
 export function buildDb2AttachPartitionSql(options: Db2AttachPartitionDdlOptions): string {
+    assertDesignerOperation('db2', 'partitions', 'attach');
     return `ALTER TABLE ${formatDb2QualifiedName(options.schema, options.tableName)} ATTACH ${buildDb2PartitionRangeSql(options, false)} FROM TABLE ${formatDb2QualifiedName(options.sourceSchema, options.sourceTable)};`;
 }
 
@@ -173,10 +179,12 @@ export function buildDb2SetIntegritySql(schema: string, tableName: string): stri
 }
 
 export function buildDb2DetachPartitionSql(options: Db2DetachPartitionDdlOptions): string {
+    assertDesignerOperation('db2', 'partitions', 'detach');
     return `ALTER TABLE ${formatDb2QualifiedName(options.schema, options.tableName)} DETACH PARTITION ${formatDb2Identifier(requireValue(options.partitionName, 'Partition name'))} INTO ${formatDb2QualifiedName(options.detachedSchema, options.detachedTable)};`;
 }
 
 export function buildDb2DropPartitionSql(options: Db2DetachPartitionDdlOptions): string[] {
+    assertDesignerOperation('db2', 'partitions', 'drop');
     const detachedTable = formatDb2QualifiedName(options.detachedSchema, options.detachedTable);
     return [
         buildDb2DetachPartitionSql(options),

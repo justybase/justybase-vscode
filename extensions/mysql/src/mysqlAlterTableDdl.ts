@@ -5,6 +5,7 @@ import type {
 } from '../../../src/contracts/webviews/mysqlAlterTableDesignerContracts';
 import { formatIdentifierForSql } from '../../../src/utils/identifierUtils';
 import { areMysqlIdentifiersEqual } from './mysqlDesignerDdl';
+import { assertDesignerOperation } from '../../../src/views/designerOperationGuard';
 
 function requireValue(value: string | undefined, label: string): string {
     const trimmed = value?.trim() ?? '';
@@ -169,6 +170,7 @@ export function buildMysqlAlterTableSql(
     context: MysqlAlterTableDesignerInitialContext,
     design: MysqlAlterTableDesign,
 ): string {
+    assertDesignerOperation('mysql', 'alterTable', 'alter');
     const originalColumns = new Map(context.columns.map(column => [identifierKey(column.name), column]));
     const designNames = new Set<string>();
     const clauses: string[] = [];

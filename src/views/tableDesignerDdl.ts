@@ -4,6 +4,7 @@
  */
 
 import { formatIdentifierForSql } from '../utils/identifierUtils';
+import { getDatabaseDesignerCapabilities, UnsupportedDesignerOperationError } from '../contracts/database';
 
 export interface TableDesignerColumnInput {
     name: string;
@@ -103,11 +104,21 @@ function normalizeKind(kind: string | undefined): string {
 }
 
 export function isTableDesignerSupported(kind: string | undefined): boolean {
-    return getTableDesignerProfile(kind).supported;
+    const profile = getTableDesignerProfile(kind);
+    const capability = getDatabaseDesignerCapabilities(kind).constructs.table;
+    return profile.supported
+        && capability.operations.includes('create')
+        && capability.level !== 'unsupported'
+        && capability.level !== 'runtime-unavailable';
 }
 
 export function getTableDesignerUnsupportedReason(kind: string | undefined): string | undefined {
-    return getTableDesignerProfile(kind).reason;
+    const profile = getTableDesignerProfile(kind);
+    const capability = getDatabaseDesignerCapabilities(kind).constructs.table;
+    if (!capability.operations.includes('create') || capability.level === 'unsupported' || capability.level === 'runtime-unavailable') {
+        return capability.reason ?? profile.reason;
+    }
+    return profile.reason;
 }
 
 export function getTableDesignerProfile(kind: string | undefined): TableDesignerProfile {
@@ -403,8 +414,16 @@ function buildColumnDefinition(kind: string, column: TableDesignerColumnInput): 
 export function buildTableDesignerCreateSql(input: TableDesignerCreateInput): string {
     const kind = normalizeKind(input.databaseKind);
     const profile = getTableDesignerProfile(kind);
-    if (!profile.supported) {
-        throw new Error(profile.reason ?? `Table Designer is not supported for "${kind}".`);
+    const capability = getDatabaseDesignerCapabilities(kind).constructs.table;
+    if (!profile.supported
+        || !capability.operations.includes('create')
+        || capability.level === 'unsupported'
+        || capability.level === 'runtime-unavailable') {
+        throw new UnsupportedDesignerOperationError(
+            'table',
+            'create',
+            capability.reason ?? profile.reason ?? `Table Designer is not supported for "${kind}".`,
+        );
     }
 
     const tableName = (input.tableName || '').trim();

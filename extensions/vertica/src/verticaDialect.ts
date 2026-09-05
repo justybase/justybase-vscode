@@ -4,7 +4,7 @@ import type {
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
 } from "@justybase/contracts";
-import { createDatabaseCapabilities } from "@justybase/contracts";
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
 import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
 import { verticaDialectTraits } from "../../../src/shared/dialect-traits/vertica";
 import { VerticaConnection } from "./verticaConnection";
@@ -29,6 +29,7 @@ export const verticaDialect: DatabaseDialect = {
     supportsTableMaintenance: true,
     supportsSessionMonitor: true,
   }),
+  designerCapabilities: getDatabaseDesignerCapabilities("vertica"),
   connectionForm: {
     fields: [
       ...createStandardConnectionFields({

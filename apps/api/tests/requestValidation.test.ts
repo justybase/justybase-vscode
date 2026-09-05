@@ -33,6 +33,26 @@ describe('API request validation', () => {
     expect(request.cursorOffset).toBe(3);
   });
 
+  it('validates the optional designer snapshot identity', () => {
+    const request = parseQueryStartRequest({
+      connectionId: 'c',
+      sql: 'ALTER TABLE "main"."orders" ADD COLUMN "status" TEXT;',
+      designer: {
+        target: { connectionId: 'c', database: 'main', schema: 'main', objectName: 'orders', objectType: 'TABLE' },
+        baseFingerprint: 'a'.repeat(64),
+      },
+    });
+    expect(request.designer).toEqual({
+      target: { connectionId: 'c', connectionName: undefined, database: 'main', schema: 'main', objectName: 'orders', objectType: 'TABLE' },
+      baseFingerprint: 'a'.repeat(64),
+    });
+    expect(() => parseQueryStartRequest({
+      connectionId: 'c',
+      sql: 'ALTER TABLE t ADD COLUMN c TEXT;',
+      designer: { target: {}, baseFingerprint: '' },
+    })).toThrow('designer.baseFingerprint is required');
+  });
+
   it('validates aggregate and grouping function names and indices', () => {
     expect(parseQueryAggregateRequest({ functions: ['sum'], columnIndices: [2] })).toEqual(expect.objectContaining({ functions: ['sum'], columnIndices: [2] }));
     expect(() => parseQueryAggregateRequest({ functions: ['drop'] })).toThrow('not supported');

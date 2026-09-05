@@ -4,7 +4,7 @@ import type {
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
 } from "@justybase/contracts";
-import { createDatabaseCapabilities } from "@justybase/contracts";
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
 import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
 import { MsSqlConnection } from "./mssqlConnection";
 import { mssqlAdvancedFeatures } from "./mssqlDdlGenerator";
@@ -28,6 +28,7 @@ export const mssqlDialect: DatabaseDialect = {
     supportsTableMaintenance: true,
     supportsSessionMonitor: true,
   }),
+  designerCapabilities: getDatabaseDesignerCapabilities("mssql"),
   connectionForm: {
     fields: [
       ...createStandardConnectionFields({

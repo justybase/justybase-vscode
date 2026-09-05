@@ -1,6 +1,7 @@
 import type { TuningReport } from '../tuning/types';
 import type { ConnectionDetails } from '../connectionDetails';
 import type { DatabaseConnection } from './connection';
+import type { DatabaseDesignerProvider } from './designerCapabilities';
 
 export interface DatabaseDdlColumnInfo {
   name: string;
@@ -489,6 +490,8 @@ export interface DatabaseCopilotReferenceProvider {
 
 export interface DatabaseAdvancedFeatures {
   ddl?: DatabaseDdlProvider;
+  /** Capability-aware object loading, validation, and change-plan generation. */
+  designer?: DatabaseDesignerProvider;
   importTypeMapper?: DatabaseImportTypeMapper;
   tuningAdvisor?: DatabaseTuningAdvisor;
   maintenance?: DatabaseMaintenanceProvider;

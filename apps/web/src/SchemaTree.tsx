@@ -7,26 +7,32 @@ const ROOT = '__root__';
 
 // ── Qualified name helpers ─────────────────────────────
 
-function quoteIdentifier(value: string): string {
+function quoteIdentifier(value: string, databaseKind: DatabaseKind = 'netezza'): string {
+  if (databaseKind === 'mysql' || databaseKind === 'clickhouse') {
+    return `\`${value.replace(/`/g, '``')}\``;
+  }
+  if (databaseKind === 'mssql') {
+    return `[${value.replace(/]/g, ']]')}]`;
+  }
   return `"${value.replace(/"/g, '""')}"`;
 }
 
 /** One dialect-aware qualification rule used by copy, insert and drag/drop. */
 export function qualifySchemaNode(node: SchemaTreeNode, databaseKind: DatabaseKind = 'netezza'): string {
-  if (node.kind === 'database') return quoteIdentifier(node.database || node.label);
+  if (node.kind === 'database') return quoteIdentifier(node.database || node.label, databaseKind);
   if (node.kind === 'schema') {
     return databaseKind === 'sqlite'
-      ? quoteIdentifier(node.database || node.schema || node.label)
-      : [node.database, node.schema || node.label].filter((part): part is string => Boolean(part)).map(quoteIdentifier).join('.');
+      ? quoteIdentifier(node.database || node.schema || node.label, databaseKind)
+      : [node.database, node.schema || node.label].filter((part): part is string => Boolean(part)).map(part => quoteIdentifier(part, databaseKind)).join('.');
   }
   if (node.kind === 'object' || node.kind === 'column') {
     const objectParts = databaseKind === 'sqlite'
       ? [node.database, node.objectName || node.label]
       : [node.database, node.schema, node.objectName || node.label];
     const parts = node.kind === 'column' ? [...objectParts, node.label] : objectParts;
-    return parts.filter((part): part is string => Boolean(part)).map(quoteIdentifier).join('.');
+    return parts.filter((part): part is string => Boolean(part)).map(part => quoteIdentifier(part, databaseKind)).join('.');
   }
-  return quoteIdentifier(node.label);
+  return quoteIdentifier(node.label, databaseKind);
 }
 
 export function buildExplainSql(sql: string, databaseKind: DatabaseKind = 'netezza'): string {
@@ -218,13 +224,14 @@ const OBJECT_TYPES = [
 
 // ── Main SchemaTree component ───────────────────────────
 
-export function SchemaTree({ connectionId, database, databaseKind = 'netezza', onInsert, onContextChange, onObjectSelect, onOpenQuery, onImport }: {
+export function SchemaTree({ connectionId, database, databaseKind = 'netezza', onInsert, onContextChange, onObjectSelect, onOpenDesigner, onOpenQuery, onImport }: {
   connectionId: string;
   database?: string;
   databaseKind?: DatabaseKind;
   onInsert(value: string): void;
   onContextChange(database?: string, schema?: string): void;
   onObjectSelect?(node: SchemaTreeNode): void;
+  onOpenDesigner?(node: SchemaTreeNode): void;
   onOpenQuery?(sql: string, title: string, node: SchemaTreeNode): void;
   onImport?(node: SchemaTreeNode): void;
 }): ReactElement {
@@ -458,6 +465,11 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
     setObjectMenu(null);
   }
 
+  function openDesigner(node: SchemaTreeNode): void {
+    onOpenDesigner?.(node);
+    setObjectMenu(null);
+  }
+
   function explainObject(node: SchemaTreeNode): void {
     onOpenQuery?.(buildExplainSql(`SELECT *\nFROM ${objectSqlName(node)}\nLIMIT 1000`, databaseKind), `Explain · ${node.label}`, node);
     setObjectMenu(null);
@@ -468,8 +480,10 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
       const columns = await api.columns(connectionId, node.database ?? database ?? '', node.schema ?? '', node.objectName ?? node.label);
       const type = node.objectType?.toUpperCase() === 'VIEW' ? 'VIEW' : 'TABLE';
       const ddl = type === 'VIEW'
-        ? `-- View definition is not exposed by the lightweight metadata endpoint.\n-- Columns visible in ${objectSqlName(node)}: ${columns.map(column => quoteIdentifier(column.name)).join(', ') || '(none)'}\n-- Retrieve the source definition from the database catalog before executing this DDL.`
-        : `CREATE TABLE ${objectSqlName(node)} (\n${columns.map(column => `  ${quoteIdentifier(column.name)} ${column.type || 'VARCHAR(1)'}`).join(',\n')}\n);`;
+        ? (/^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(node.description?.trim() ?? '')
+          ? node.description!.trim()
+          : `-- View definition is not exposed by the lightweight metadata endpoint.\n-- Columns visible in ${objectSqlName(node)}: ${columns.map(column => quoteIdentifier(column.name, databaseKind)).join(', ') || '(none)'}\n-- Retrieve the source definition from the database catalog before executing this DDL.`)
+        : `CREATE TABLE ${objectSqlName(node)} (\n${columns.map(column => `  ${quoteIdentifier(column.name, databaseKind)} ${column.type || 'VARCHAR(1)'}`).join(',\n')}\n);`;
       await navigator.clipboard.writeText(ddl);
       setError('DDL copied to clipboard.');
     } catch (reason: unknown) {
@@ -609,7 +623,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
           )}
         </div>
       )}
-      {objectMenu && <div className="schema-context-menu" style={{ left: objectMenu.x, top: objectMenu.y }} onClick={event => event.stopPropagation()}><strong>{objectMenu.node.label}</strong><button type="button" onClick={() => openObjectData(objectMenu.node)}>View top 1000</button><button type="button" onClick={() => explainObject(objectMenu.node)}>Explain plan</button><button type="button" onClick={() => void copyObjectDdl(objectMenu.node)}>Copy DDL</button><button type="button" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>Import CSV/XLSX</button><button type="button" onClick={() => { onInsert(objectSqlName(objectMenu.node)); setObjectMenu(null); }}>Insert qualified name</button><button type="button" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? 'Remove from favorites' : 'Add to favorites'}</button></div>}
+      {objectMenu && <div className="schema-context-menu" style={{ left: objectMenu.x, top: objectMenu.y }} onClick={event => event.stopPropagation()}><strong>{objectMenu.node.label}</strong><button type="button" onClick={() => openDesigner(objectMenu.node)}>Open Object Designer</button><button type="button" onClick={() => openObjectData(objectMenu.node)}>View top 1000</button><button type="button" onClick={() => explainObject(objectMenu.node)}>Explain plan</button><button type="button" onClick={() => void copyObjectDdl(objectMenu.node)}>Copy DDL</button><button type="button" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>Import CSV/XLSX</button><button type="button" onClick={() => { onInsert(objectSqlName(objectMenu.node)); setObjectMenu(null); }}>Insert qualified name</button><button type="button" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? 'Remove from favorites' : 'Add to favorites'}</button></div>}
     </div>
   );
 }

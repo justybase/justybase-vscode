@@ -4,7 +4,7 @@ import type {
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
 } from "@justybase/contracts";
-import { createDatabaseCapabilities } from "@justybase/contracts";
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
 import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
 import { PostgreSqlConnection } from "./postgresqlConnection";
 import { postgresqlAdvancedFeatures } from "./postgresqlDdlGenerator";
@@ -28,6 +28,7 @@ export const postgresqlDialect: DatabaseDialect = {
     supportsTableMaintenance: true,
     supportsSessionMonitor: true,
   }),
+  designerCapabilities: getDatabaseDesignerCapabilities("postgresql"),
   connectionForm: {
     fields: [
       ...createStandardConnectionFields({

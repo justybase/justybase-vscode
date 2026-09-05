@@ -4,7 +4,7 @@ import type {
     DatabaseConnectionStaticConstructor,
     DatabaseDialect
 } from '@justybase/contracts';
-import { createDatabaseCapabilities } from '@justybase/contracts';
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from '@justybase/contracts';
 import { duckdbDialectTraits } from '../../../src/dialects/duckdb/traits';
 import { DuckDbConnection } from './duckdbConnection';
 import { duckdbMetadataProvider } from './duckdbSchemaProvider';
@@ -28,6 +28,7 @@ export const duckdbDialect: DatabaseDialect = {
         supportsTableMaintenance: true,
         supportsSessionMonitor: true
     }),
+    designerCapabilities: getDatabaseDesignerCapabilities('duckdb'),
     connectionForm: {
         fields: [
             {

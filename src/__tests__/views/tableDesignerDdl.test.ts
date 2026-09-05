@@ -7,6 +7,7 @@ import {
     isTableDesignerSupported,
     type TableDesignerCreateInput,
 } from '../../views/tableDesignerDdl';
+import { UnsupportedDesignerOperationError } from '../../contracts/database';
 
 function input(overrides: Partial<TableDesignerCreateInput> = {}): TableDesignerCreateInput {
     return {
@@ -162,6 +163,7 @@ describe('table designer DDL', () => {
         expect(isTableDesignerSupported('access')).toBe(false);
         expect(getTableDesignerUnsupportedReason('clickhouse')).toContain('MergeTree');
         expect(getTableDesignerUnsupportedReason('access')).toContain('Access');
+        expect(() => buildTableDesignerCreateSql(input({ databaseKind: 'clickhouse' }))).toThrow(UnsupportedDesignerOperationError);
         expect(() => buildTableDesignerCreateSql(input({ databaseKind: 'clickhouse' }))).toThrow('MergeTree');
         expect(() => buildTableDesignerCreateSql(input({ databaseKind: 'access' }))).toThrow('Access');
         expect(() => buildTableDesignerCreateSql(input({ databaseKind: 'mystery' }))).toThrow('mystery');

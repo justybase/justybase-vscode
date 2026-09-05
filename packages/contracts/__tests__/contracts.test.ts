@@ -2,8 +2,12 @@ import {
   SUPPORTED_DATABASE_KINDS,
   DEFAULT_DATABASE_KIND,
   DATABASE_KIND_DISPLAY_NAMES,
+  DESIGNER_CAPABILITY_KEYS,
+  DATABASE_DESIGNER_CAPABILITY_MANIFESTS,
   createDatabaseCapabilities,
   createDatabaseDialectTraits,
+  getDatabaseDesignerCapabilities,
+  resolveDatabaseDesignerCapabilities,
 } from "../src/index";
 
 describe("@justybase/contracts", () => {
@@ -127,6 +131,117 @@ describe("@justybase/contracts", () => {
       });
       expect(traits.qualification?.supportsThreePartName).toBe(true);
       expect(traits.qualification?.twoPartNameStyle).toBe("schema-object");
+    });
+  });
+
+  describe("database designer capabilities", () => {
+    it("defines every capability explicitly for all supported database kinds", () => {
+      for (const kind of SUPPORTED_DATABASE_KINDS) {
+        const manifest = getDatabaseDesignerCapabilities(kind);
+
+        expect(manifest.kind).toBe(kind);
+        expect(manifest.manifestVersion).toBe(1);
+        expect(Object.keys(manifest.constructs).sort()).toEqual(
+          [...DESIGNER_CAPABILITY_KEYS].sort(),
+        );
+
+        for (const capabilityKey of DESIGNER_CAPABILITY_KEYS) {
+          const capability = manifest.constructs[capabilityKey];
+          expect(capability.level).toBeDefined();
+          expect(capability.reasonCode).toBeDefined();
+          expect(capability.operations).toContain("read");
+        }
+      }
+
+      expect(Object.keys(DATABASE_DESIGNER_CAPABILITY_MANIFESTS).sort()).toEqual(
+        [...SUPPORTED_DATABASE_KINDS].sort(),
+      );
+    });
+
+    it("models native alternatives and enforcement caveats", () => {
+      const netezza = getDatabaseDesignerCapabilities("netezza");
+      expect(netezza.constructs.indexes.level).toBe("alternative");
+      expect(netezza.constructs.indexes.reason).toContain("ORGANIZE ON");
+      expect(netezza.constructs.foreignKeys.level).toBe("unsupported");
+      expect(netezza.nativeFeatures).toContain("netezza-distribution");
+
+      const clickhouse = getDatabaseDesignerCapabilities("clickhouse");
+      expect(clickhouse.constructs.indexes.alternative).toBe("table");
+      expect(clickhouse.nativeFeatures).toContain("clickhouse-skipping-index");
+
+      const snowflake = getDatabaseDesignerCapabilities("snowflake");
+      expect(snowflake.constructs.foreignKeys.level).toBe("limited");
+      expect(snowflake.constructs.foreignKeys.enforced).toBe(false);
+      expect(snowflake.nativeFeatures).toContain("snowflake-clustering-key");
+
+      const mysql = getDatabaseDesignerCapabilities("mysql");
+      expect(mysql.constructs.triggers.trigger?.timings).toEqual(["BEFORE", "AFTER"]);
+      expect(mysql.constructs.triggers.trigger?.levels).toEqual(["ROW"]);
+
+      expect(getDatabaseDesignerCapabilities("postgresql").constructs.triggers.trigger?.bodyStyle).toBe("postgresql-function");
+      expect(getDatabaseDesignerCapabilities("oracle").constructs.triggers.trigger?.bodyStyle).toBe("oracle-block");
+      expect(getDatabaseDesignerCapabilities("mssql").constructs.triggers.trigger?.bodyStyle).toBe("mssql-batch");
+      expect(getDatabaseDesignerCapabilities("db2").constructs.triggers.trigger?.bodyStyle).toBe("db2-atomic");
+      expect(getDatabaseDesignerCapabilities("sqlite").constructs.triggers.trigger?.insteadOfObjectKinds).toEqual(["VIEW"]);
+      expect(getDatabaseDesignerCapabilities("sqlite").constructs.triggers.trigger?.timingsByObjectKind?.VIEW).toEqual(["INSTEAD OF"]);
+      expect(getDatabaseDesignerCapabilities("netezza").constructs.procedures.routine?.bodyStyle).toBe("netezza-nzplsql");
+    });
+
+    it("resolves aliases and unknown kinds conservatively", () => {
+      expect(getDatabaseDesignerCapabilities("postgres").kind).toBe("postgresql");
+      expect(getDatabaseDesignerCapabilities("file").kind).toBe("file");
+
+      const unknown = getDatabaseDesignerCapabilities("new-database");
+      expect(unknown.constructs.table.level).toBe("runtime-unavailable");
+      expect(unknown.constructs.table.reasonCode).toBe("runtime");
+    });
+
+    it("does not advertise mutation operations for a read-only connection", () => {
+      const base = getDatabaseDesignerCapabilities("postgresql");
+      const resolved = resolveDatabaseDesignerCapabilities(base, {
+        databaseKind: "postgresql",
+        readOnly: true,
+      });
+
+      expect(resolved.constructs.table.level).toBe("privilege-blocked");
+      expect(resolved.constructs.table.operations).toEqual(["read"]);
+      expect(base.constructs.table.level).toBe("supported");
+    });
+
+    it("marks every capability unavailable when the runtime is absent", () => {
+      const resolved = resolveDatabaseDesignerCapabilities(
+        getDatabaseDesignerCapabilities("postgresql"),
+        { databaseKind: "postgresql", runtimeAvailable: false },
+      );
+
+      for (const key of DESIGNER_CAPABILITY_KEYS) {
+        expect(resolved.constructs[key].level).toBe("runtime-unavailable");
+        expect(resolved.constructs[key].operations).toEqual(["read"]);
+      }
+    });
+
+    it("resolves version, engine, and privilege requirements only when runtime context is known", () => {
+      const mysql = getDatabaseDesignerCapabilities("mysql");
+      const oldServer = resolveDatabaseDesignerCapabilities(mysql, {
+        databaseKind: "mysql",
+        serverVersion: "8.0.15",
+      });
+      expect(oldServer.constructs.checks.level).toBe("unsupported");
+      expect(oldServer.constructs.checks.reasonCode).toBe("version");
+
+      const wrongEngine = resolveDatabaseDesignerCapabilities(mysql, {
+        databaseKind: "mysql",
+        engine: "MyISAM",
+      });
+      expect(wrongEngine.constructs.foreignKeys.level).toBe("unsupported");
+      expect(wrongEngine.constructs.foreignKeys.reasonCode).toBe("engine");
+
+      const missingPrivilege = resolveDatabaseDesignerCapabilities(mysql, {
+        databaseKind: "mysql",
+        privileges: [],
+      });
+      expect(missingPrivilege.constructs.foreignKeys.level).toBe("privilege-blocked");
+      expect(missingPrivilege.constructs.foreignKeys.reasonCode).toBe("privilege");
     });
   });
 });

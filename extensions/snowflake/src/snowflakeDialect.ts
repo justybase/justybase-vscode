@@ -4,7 +4,7 @@ import type {
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
 } from "@justybase/contracts";
-import { createDatabaseCapabilities } from "@justybase/contracts";
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
 import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
 import { snowflakeDialectTraits } from "../../../src/shared/dialect-traits/snowflake";
 import { SnowflakeConnection } from "./snowflakeConnection";
@@ -25,6 +25,7 @@ export const snowflakeDialect: DatabaseDialect = {
     supportsTuningAdvisor: true,
     supportsProcedures: true,
   }),
+  designerCapabilities: getDatabaseDesignerCapabilities("snowflake"),
   connectionForm: {
     fields: [
       ...createStandardConnectionFields({

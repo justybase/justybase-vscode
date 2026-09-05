@@ -5,6 +5,7 @@ import {
   DatabaseConnectionConfig,
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
+  getDatabaseDesignerCapabilities,
 } from "../../contracts/database";
 import { netezzaConnectionForm } from "./connectionForm";
 import { netezzaMetadataProvider } from "./metadata/provider";
@@ -44,6 +45,7 @@ export const netezzaDialect: DatabaseDialect = {
     supportsSessionMonitor: true,
     supportsDistributionMetrics: true,
   }),
+  designerCapabilities: getDatabaseDesignerCapabilities("netezza"),
   connectionForm: netezzaConnectionForm,
   traits: netezzaDialectTraits,
   metadataProvider: netezzaMetadataProvider,

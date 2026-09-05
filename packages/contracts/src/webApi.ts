@@ -1,4 +1,9 @@
-import type { DatabaseKind } from './database';
+import type {
+  DatabaseDesignerCapabilities,
+  DatabaseObjectSnapshot,
+  DatabaseDesignerTarget,
+  DatabaseKind,
+} from './database';
 
 export interface ApiError {
   code: string;
@@ -94,6 +99,35 @@ export interface MetadataColumn {
   isFk?: boolean;
 }
 
+/** Target used by the capability-aware object designer API. */
+export interface DesignerCapabilitiesRequest {
+  connectionId: string;
+  database?: string;
+  schema?: string;
+  objectName?: string;
+  objectType?: string;
+}
+
+export interface DesignerCapabilitiesResponse {
+  target: DatabaseDesignerTarget;
+  capabilities: DatabaseDesignerCapabilities;
+  runtimeAvailable: boolean;
+  readOnly: boolean;
+}
+
+/** Snapshot identity carried by a designer write preview/apply request. */
+export interface DesignerChangeContext {
+  target: DatabaseDesignerTarget;
+  baseFingerprint: string;
+}
+
+export type DesignerSnapshotRequest = DesignerCapabilitiesRequest;
+
+export interface DesignerSnapshotResponse {
+  target: DatabaseDesignerTarget;
+  snapshot: DatabaseObjectSnapshot;
+}
+
 export type SchemaNodeKind = 'connection' | 'database' | 'schema' | 'group' | 'object' | 'column' | 'cte';
 
 export interface SchemaTreeNode {
@@ -171,6 +205,8 @@ export interface QueryStartRequest {
   writeConfirmed?: boolean;
   /** Short-lived server-issued preview token matching this exact SQL and connection. */
   writePreviewToken?: string;
+  /** Optional optimistic-concurrency context from the Object Designer snapshot. */
+  designer?: DesignerChangeContext;
   maxRows?: number;
   timeoutSeconds?: number;
 }

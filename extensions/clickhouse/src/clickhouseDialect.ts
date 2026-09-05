@@ -4,7 +4,7 @@ import type {
     DatabaseConnectionStaticConstructor,
     DatabaseDialect,
 } from '@justybase/contracts';
-import { createDatabaseCapabilities } from '@justybase/contracts';
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from '@justybase/contracts';
 import { createStandardConnectionFields } from '../../../src/core/connectionFormBuilder';
 import { clickhouseDialectTraits } from '../../../src/shared/dialect-traits/clickhouse';
 import { ClickHouseConnection } from './clickhouseConnection';
@@ -25,6 +25,7 @@ export const clickhouseDialect: DatabaseDialect = {
         supportsTableMaintenance: true,
         supportsSessionMonitor: true,
     }),
+    designerCapabilities: getDatabaseDesignerCapabilities('clickhouse'),
     connectionForm: {
         fields: [
             ...createStandardConnectionFields({

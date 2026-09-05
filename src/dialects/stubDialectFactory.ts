@@ -7,7 +7,7 @@ import type {
     DatabaseDialectTraitsOverrides,
     DatabaseKind,
 } from '../contracts/database';
-import { createDatabaseCapabilities, createDatabaseDialectTraits } from '../contracts/database';
+import { createDatabaseCapabilities, createDatabaseDialectTraits, getDatabaseDesignerCapabilities } from '../contracts/database';
 import {
     createStandardConnectionForm,
     type StandardConnectionFieldOptions,
@@ -40,6 +40,7 @@ export function createStubDialect(
         displayName,
         ...(defaultPort !== undefined ? { defaultPort } : {}),
         capabilities: createDatabaseCapabilities(),
+        designerCapabilities: getDatabaseDesignerCapabilities(kind),
         connectionForm: {
             fields: [
                 ...createStandardConnectionForm(connectionFormOptions).fields,

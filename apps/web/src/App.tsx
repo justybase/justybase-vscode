@@ -9,6 +9,7 @@ import { registerSqlLanguageFeatures } from './sqlLanguage';
 import { SchemaTree } from './SchemaTree';
 import { ResultGrid } from './ResultGrid';
 import { InspectorPanel } from './InspectorPanel';
+import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
 import { EditRowPanel } from './EditRowPanel';
 import { ExplainPanel } from './ExplainPanel';
@@ -174,6 +175,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   const [schema, setSchema] = useState(() => restoredWorkspace.current!.tabs.find(tab => tab.id === restoredWorkspace.current!.activeTabId)?.schema ?? '');
   const [columns, setColumns] = useState<MetadataColumn[]>([]);
   const [inspectedObject, setInspectedObject] = useState<SchemaTreeNode | null>(null);
+  const [designerTarget, setDesignerTarget] = useState<SchemaTreeNode | null>(null);
   const [showInspector, setShowInspector] = useState(false);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | null>(null);
   const [editRow, setEditRow] = useState<unknown[] | null>(null);
@@ -680,6 +682,15 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
       setError(reason instanceof Error ? reason.message : 'Could not load columns.')
     );
   }
+
+  function openObjectDesigner(node: SchemaTreeNode): void {
+    if (!selected || node.kind !== 'object' || !node.objectName || !node.database || !node.schema) {
+      setError('Select a schema object before opening the designer.');
+      return;
+    }
+    setDesignerTarget(node);
+    setShowInspector(false);
+  }
   function selectColumn(column: MetadataColumn): void { insertSql(column.name); }
   function openSchemaQuery(nextSql: string, title: string, node: SchemaTreeNode): void {
     const id = `schema-${Date.now()}`;
@@ -757,6 +768,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
               onInsert={insertSql}
               onContextChange={contextChanged}
               onObjectSelect={selectObject}
+              onOpenDesigner={openObjectDesigner}
               onOpenQuery={openSchemaQuery}
               onImport={node => setImportTarget(node)}
             />
@@ -928,6 +940,14 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
       )}
       {showAudit && <AuditPanel entries={audit} onClose={() => setShowAudit(false)} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+      {designerTarget && selected && <ObjectDesigner
+        connectionId={selected.id}
+        database={designerTarget.database ?? database}
+        databaseKind={selected.dbType}
+        target={designerTarget}
+        onClose={() => setDesignerTarget(null)}
+        onApplied={() => { setError('Object designer change submitted. Refresh the schema to see the new definition.'); setDesignerTarget(null); }}
+      />}
       {importTarget && selected && <ImportPanel connectionId={selected.id} database={database} target={importTarget} onClose={() => setImportTarget(null)} onCompleted={() => { setImportTarget(null); setInspectedObject(importTarget); }} />}
       {editRow && activeTab?.source && selected && canEditActiveResult(activeTab, result, selected) && <EditRowPanel connectionId={selected.id} database={activeTab.database ?? database} target={activeTab.source} columns={result.columns} columnTypes={result.columnTypes} values={editRow} onClose={() => setEditRow(null)} onCompleted={message => { setEditRow(null); setError(message); void runQuery('run').catch(() => undefined); }} />}
 

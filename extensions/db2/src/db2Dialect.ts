@@ -5,6 +5,7 @@ import type {
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
 } from "@justybase/contracts";
+import { getDatabaseDesignerCapabilities } from "@justybase/contracts";
 import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
 import { Db2Connection } from "./db2Connection";
 import { db2AdvancedFeatures } from "./db2DdlGenerator";
@@ -32,6 +33,7 @@ export const db2Dialect: DatabaseDialect = {
   defaultPort: 50000,
   supportsRawTcpTunnel: true,
   capabilities: db2Capabilities,
+  designerCapabilities: getDatabaseDesignerCapabilities("db2"),
   connectionForm: {
     fields: [
       ...createStandardConnectionFields({
