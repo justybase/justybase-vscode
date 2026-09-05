@@ -10,6 +10,8 @@ import { assertDesignerOperation } from '../../../src/views/designerOperationGua
 
 export const POSTGRESQL_INDEX_METHODS: readonly PostgresqlIndexMethod[] = ['btree', 'hash', 'gist', 'spgist', 'gin', 'brin'];
 
+const INCLUDE_INDEX_METHODS = new Set<PostgresqlIndexMethod>(['btree', 'gist', 'spgist']);
+
 function requireValue(value: string | undefined, label: string): string {
     const trimmed = value?.trim() ?? '';
     if (!trimmed) {
@@ -48,8 +50,17 @@ function requireTableOptionName(value: string, label: string): string {
     return name;
 }
 
-function formatIndexColumn(column: { name: string; order: 'ASC' | 'DESC'; nulls: 'FIRST' | 'LAST' }): string {
+function formatIndexColumn(
+    column: { name: string; order: 'ASC' | 'DESC'; nulls: 'FIRST' | 'LAST' },
+    method: PostgresqlIndexMethod,
+): string {
     const name = formatIdentifierForSql(requireValue(column.name, 'Index column'), 'postgresql');
+    if (method !== 'btree') {
+        if (column.order !== 'ASC' || column.nulls !== 'LAST') {
+            throw new Error(`Sort direction and NULLS position are supported only by B-tree indexes, not ${method}.`);
+        }
+        return name;
+    }
     const order = column.order === 'DESC' ? ' DESC' : '';
     const nulls = column.nulls === 'FIRST' ? ' NULLS FIRST' : ' NULLS LAST';
     return `${name}${order}${nulls}`;
@@ -82,12 +93,20 @@ export function buildPostgresqlCreateIndexSql(options: {
         throw new Error('Select at least one key column.');
     }
     const method = requireMethod(options.design.method);
+    const includeColumnNames = options.design.includeColumns ?? [];
+
+    if (options.design.unique && method !== 'btree') {
+        throw new Error(`UNIQUE indexes are supported only by the B-tree method, not ${method}.`);
+    }
+    if (includeColumnNames.length > 0 && !INCLUDE_INDEX_METHODS.has(method)) {
+        throw new Error(`INCLUDE columns are not supported by the ${method} index method.`);
+    }
 
     validateUniqueColumns(options.design.keyColumns, 'the key columns');
-    validateUniqueColumns(options.design.includeColumns.map(name => ({ name, order: 'ASC' as const, nulls: 'LAST' as const })), 'the INCLUDE columns');
+    validateUniqueColumns(includeColumnNames.map(name => ({ name, order: 'ASC' as const, nulls: 'LAST' as const })), 'the INCLUDE columns');
 
-    const keyColumns = options.design.keyColumns.map(formatIndexColumn).join(', ');
-    const includeColumns = options.design.includeColumns
+    const keyColumns = options.design.keyColumns.map(column => formatIndexColumn(column, method)).join(', ');
+    const includeColumns = includeColumnNames
         .map(name => formatIdentifierForSql(requireValue(name, 'INCLUDE column'), 'postgresql'))
         .join(', ');
 

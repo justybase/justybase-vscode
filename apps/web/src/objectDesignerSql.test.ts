@@ -58,6 +58,7 @@ describe('object designer SQL builders', () => {
   it('builds the Netezza distribution and zone-map statements together', () => {
     const capabilities = getDatabaseDesignerCapabilities('netezza');
     const sql = buildNetezzaPhysicalDesignSql('"SYSTEM"."ADMIN"."orders"', {
+      distributionChanged: true,
       distributionMethod: 'HASH',
       distributionColumns: 'customer_id',
       organizationColumns: 'created_at',
@@ -104,6 +105,7 @@ describe('object designer SQL builders', () => {
   it('allows a Netezza distribution-only physical-design change', () => {
     const netezza = getDatabaseDesignerCapabilities('netezza');
     expect(buildNetezzaPhysicalDesignSql('"SYSTEM"."ADMIN"."orders"', {
+      distributionChanged: true,
       distributionMethod: 'RANDOM',
       distributionColumns: '',
       organizationColumns: '',
@@ -111,6 +113,20 @@ describe('object designer SQL builders', () => {
       organizationMaxRowsPerZone: '',
     }, netezza.constructs.partitions)).toBe(
       'ALTER TABLE "SYSTEM"."ADMIN"."orders" DISTRIBUTE ON RANDOM;',
+    );
+  });
+
+  it('does not replace distribution when changing only Netezza organization', () => {
+    const netezza = getDatabaseDesignerCapabilities('netezza');
+    expect(buildNetezzaPhysicalDesignSql('"SYSTEM"."ADMIN"."orders"', {
+      distributionChanged: false,
+      distributionMethod: 'RANDOM',
+      distributionColumns: '',
+      organizationColumns: 'created_at',
+      organizationNone: false,
+      organizationMaxRowsPerZone: '',
+    }, netezza.constructs.partitions)).toBe(
+      'ALTER TABLE "SYSTEM"."ADMIN"."orders" ORGANIZE ON ("created_at");',
     );
   });
 

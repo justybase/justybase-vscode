@@ -881,7 +881,7 @@ export function buildDesignerListIndexesQuery(schema: string, tableName: string)
             am.amname AS INDEX_TYPE,
             COALESCE(pg_catalog.pg_get_expr(i.indpred, i.indrelid), '') AS PREDICATE,
             COALESCE(t.spcname, '') AS TABLESPACE,
-            a.attname AS COLUMN_NAME,
+            COALESCE(a.attname, pg_catalog.pg_get_indexdef(i.indexrelid, k.ord, true)) AS COLUMN_NAME,
             k.ord AS SEQ,
             CASE WHEN k.ord <= i.indnkeyatts THEN 1 ELSE 0 END AS IS_KEY,
             CASE WHEN (i.indoption[k.ord - 1] & 1)::INT = 1 THEN 1 ELSE 0 END AS IS_DESC,
@@ -900,7 +900,7 @@ export function buildDesignerListIndexesQuery(schema: string, tableName: string)
         LEFT JOIN pg_catalog.pg_tablespace t
             ON t.oid = c.reltablespace
         CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
-        INNER JOIN pg_catalog.pg_attribute a
+        LEFT JOIN pg_catalog.pg_attribute a
             ON a.attrelid = i.indrelid
            AND a.attnum = k.attnum
            AND a.attnum > 0

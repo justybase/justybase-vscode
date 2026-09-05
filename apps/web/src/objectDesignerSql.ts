@@ -20,6 +20,8 @@ export interface DesignerRelationalIndexInput {
 }
 
 export interface NetezzaPhysicalDesignInput {
+  /** Whether the user explicitly wants to replace the table distribution. */
+  distributionChanged: boolean;
   distributionMethod: 'RANDOM' | 'HASH';
   distributionColumns: string;
   organizationColumns: string;
@@ -594,11 +596,17 @@ export function buildNetezzaPhysicalDesignSql(
   capability?: DatabaseDesignerCapability,
 ): string {
   assertOperation(capability, 'partitions', 'alter', true);
-  const statements = [buildNetezzaDistributionSql(targetSql, input, capability)];
+  const statements: string[] = [];
+  if (input.distributionChanged) {
+    statements.push(buildNetezzaDistributionSql(targetSql, input, capability));
+  }
   const hasOrganizationChange = input.organizationNone
     || input.organizationColumns.trim().length > 0
     || input.organizationMaxRowsPerZone.trim().length > 0;
   if (hasOrganizationChange) statements.push(renderNetezzaOrganizationSql(targetSql, input));
+  if (statements.length === 0) {
+    throw new Error('Select a distribution or organization change.');
+  }
   return statements.join('\n');
 }
 
