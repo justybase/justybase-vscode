@@ -67,6 +67,23 @@ function moduleCandidates(): string[] {
   return [...new Set(candidates.filter((candidate): candidate is string => Boolean(candidate && candidate.trim())))];
 }
 
+/**
+ * Capability endpoints use this synchronous probe to distinguish an installed
+ * optional DuckDB runtime from a profile that only has the shared contract.
+ * The actual connection path still performs the asynchronous module load and
+ * reports a detailed installation error if the runtime disappears later.
+ */
+export function isDuckDbRuntimeAvailable(): boolean {
+  for (const candidate of moduleCandidates()) {
+    try {
+      if (asDuckDbModule(moduleRequire(candidate))) return true;
+    } catch {
+      // Try the next optional installation location.
+    }
+  }
+  return false;
+}
+
 async function loadDuckDb(): Promise<DuckDbModule> {
   if (!duckDbModulePromise) {
     duckDbModulePromise = Promise.resolve().then(() => {
@@ -247,12 +264,25 @@ export async function listDuckDbSchemas(profile: StoredConnection, database: str
 export async function listDuckDbObjects(profile: StoredConnection, database: string, schema?: string): Promise<MetadataObject[]> {
   const catalog = normalizeDuckDbCatalog(database);
   const schemaClause = schema ? ` AND table_schema = ${sqlLiteral(schema)}` : " AND table_schema NOT IN ('information_schema', 'pg_catalog')";
-  const rows = await readRows(profile, `SELECT table_name, table_schema, table_catalog, table_type FROM information_schema.tables WHERE table_catalog = ${sqlLiteral(catalog)}${schemaClause} ORDER BY table_schema, table_name`, catalog);
+  const rows = await readRows(profile, `
+    SELECT table_name, table_schema, table_catalog, table_type, view_sql
+      FROM (
+        SELECT table_name, table_schema, table_catalog, table_type, CAST(NULL AS VARCHAR) AS view_sql
+          FROM information_schema.tables
+         WHERE table_catalog = ${sqlLiteral(catalog)}${schemaClause}
+           AND table_type <> 'VIEW'
+        UNION ALL
+        SELECT view_name AS table_name, schema_name AS table_schema, database_name AS table_catalog, 'VIEW' AS table_type, sql AS view_sql
+          FROM duckdb_views()
+         WHERE database_name = ${sqlLiteral(catalog)}${schema ? ` AND schema_name = ${sqlLiteral(schema)}` : " AND schema_name NOT IN ('information_schema', 'pg_catalog')"}
+      ) objects
+     ORDER BY table_schema, table_name`, catalog);
   return rows.map(row => ({
     name: String(row.table_name ?? ''),
     schema: String(row.table_schema ?? ''),
     database: String(row.table_catalog ?? database),
     objectType: String(row.table_type ?? '').toUpperCase() === 'BASE TABLE' ? 'TABLE' : String(row.table_type ?? '').toUpperCase(),
+    ...(typeof row.view_sql === 'string' && row.view_sql.trim() ? { description: row.view_sql } : {}),
   })).filter(row => row.name.length > 0);
 }
 

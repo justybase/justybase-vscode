@@ -1,4 +1,6 @@
 import type {
+  DesignerCapabilitiesRequest,
+  DesignerChangeContext,
   QueryAggregateRequest,
   QueryExportRequest,
   QueryGroupRequest,
@@ -24,6 +26,34 @@ export class RequestValidationError extends Error {
     super(message);
     this.name = 'RequestValidationError';
   }
+}
+
+export function parseDesignerCapabilitiesRequest(value: unknown): DesignerCapabilitiesRequest {
+  const record = objectValue(value, 'query');
+  return {
+    connectionId: requiredString(record.connectionId, 'connectionId'),
+    database: optionalString(record.database, 'database'),
+    schema: optionalString(record.schema, 'schema'),
+    objectName: optionalString(record.objectName, 'objectName'),
+    objectType: optionalString(record.objectType, 'objectType'),
+  };
+}
+
+function designerChangeContext(value: unknown): DesignerChangeContext | undefined {
+  if (value === undefined || value === null) return undefined;
+  const record = objectValue(value, 'designer');
+  const targetValue = objectValue(record.target, 'designer.target');
+  return {
+    target: {
+      connectionId: optionalString(targetValue.connectionId, 'designer.target.connectionId'),
+      connectionName: optionalString(targetValue.connectionName, 'designer.target.connectionName'),
+      database: optionalString(targetValue.database, 'designer.target.database'),
+      schema: optionalString(targetValue.schema, 'designer.target.schema'),
+      objectName: optionalString(targetValue.objectName, 'designer.target.objectName'),
+      objectType: optionalString(targetValue.objectType, 'designer.target.objectType'),
+    },
+    baseFingerprint: requiredString(record.baseFingerprint, 'designer.baseFingerprint', 256),
+  };
 }
 
 function objectValue(value: unknown, label = 'request body'): Record<string, unknown> {
@@ -195,6 +225,7 @@ export function parseQueryStartRequest(value: unknown): QueryStartRequest {
     cursorOffset: optionalInteger(record.cursorOffset, 'cursorOffset', 0, MAX_SQL_LENGTH),
     writeConfirmed: optionalBoolean(record.writeConfirmed, 'writeConfirmed'),
     writePreviewToken: optionalString(record.writePreviewToken, 'writePreviewToken', 8_192),
+    designer: designerChangeContext(record.designer),
     maxRows: optionalInteger(record.maxRows, 'maxRows', 1, 10_000_000),
     timeoutSeconds: optionalInteger(record.timeoutSeconds, 'timeoutSeconds', 1, 7_200),
   };

@@ -2,6 +2,7 @@ import type { DatabaseSqlAuthoring } from "../../sql/authoring/types";
 import type {
   DatabaseKind as DatabaseKindType,
   DatabaseDialectTraits,
+  DatabaseDesignerCapabilities,
   DatabaseAdvancedFeatures,
   DatabaseMetadataProvider,
   DatabaseConnectionFormSchema,
@@ -19,7 +20,14 @@ export {
   SUPPORTED_DATABASE_KINDS,
   createDatabaseCapabilities,
   createDatabaseDialectTraits,
+  DATABASE_DESIGNER_CAPABILITY_MANIFESTS,
+  DESIGNER_CAPABILITY_KEYS,
+  DESIGNER_OPERATIONS,
+  getDatabaseDesignerCapabilities,
+  getDesignerCapability,
+  resolveDatabaseDesignerCapabilities,
 } from "@justybase/contracts";
+export { UnsupportedDesignerOperationError } from "@justybase/contracts";
 
 export type {
   DatabaseKind,
@@ -73,6 +81,40 @@ export type {
   DatabaseSessionMonitorProvider,
   DatabaseCopilotReferenceProvider,
   DatabaseReferenceTopic,
+  DatabaseDesignerCapabilities,
+  DatabaseDesignerCapability,
+  DatabaseDesignerCapabilityKey,
+  DatabaseDesignerColumn,
+  DatabaseDesignerConstraint,
+  DatabaseDesignerDefinition,
+  DatabaseViewDesignerDefinition,
+  DatabaseTableDesignerDefinition,
+  DatabaseDesignerDiagnostic,
+  DatabaseDesignerIndex,
+  DatabaseDesignerNativeDefinition,
+  DatabaseDesignerPartition,
+  DatabaseDesignerProvider,
+  DatabaseDesignerRelationalIndex,
+  DatabaseDesignerRequirement,
+  DatabaseDesignerRuntimeContext,
+  DatabaseDesignerTarget,
+  DatabaseDesignerTrigger,
+  DatabaseDesignerTriggerCapability,
+  DatabaseDesignerViewCapability,
+  DatabaseDesignerRoutineCapability,
+  DatabaseObjectSnapshot,
+  DatabaseSchemaChangePlan,
+  DatabaseSchemaChangeStatement,
+  DesignerCapabilityReasonCode,
+  DesignerNativeFeature,
+  DesignerOperation,
+  DesignerSupportLevel,
+  DesignerTriggerBodyStyle,
+  DesignerRoutineBodyStyle,
+  DesignerTriggerEvent,
+  DesignerTriggerLevel,
+  DesignerTriggerTiming,
+  DesignerViewReplaceStyle,
 } from "@justybase/contracts";
 
 const DATABASE_KIND_ALIASES: Readonly<Record<string, DatabaseKindType>> = {
@@ -135,6 +177,8 @@ export interface DatabaseDialect {
   displayName: string;
   defaultPort?: number;
   capabilities: DatabaseCapabilities;
+  /** Static baseline; providers may refine this after runtime introspection. */
+  designerCapabilities?: DatabaseDesignerCapabilities;
   connectionForm?: DatabaseConnectionFormSchema;
   traits: DatabaseDialectTraits;
   metadataProvider: DatabaseMetadataProvider;

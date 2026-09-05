@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for tableCommands.ts
- * Commands: grantPermissions, addTableComment, addColumnComment, truncateTable, addPrimaryKey, addForeignKey, alterTableWizard
+ * Commands: grantPermissions, addTableComment, addColumnComment, truncateTable, addPrimaryKey, addForeignKey, alterTableWizard, openObjectDesigner
  */
 
 import * as vscode from "vscode";
@@ -178,6 +178,17 @@ describe("tableCommands", () => {
       const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
       const cmd = calls.find(
         (call: any[]) => call[0] === "netezza.alterTableWizard",
+      );
+
+      expect(cmd).toBeDefined();
+    });
+
+    it("should register the unified object designer command", () => {
+      registerTableCommands(mockDeps);
+
+      const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+      const cmd = calls.find(
+        (call: any[]) => call[0] === "netezza.openObjectDesigner",
       );
 
       expect(cmd).toBeDefined();

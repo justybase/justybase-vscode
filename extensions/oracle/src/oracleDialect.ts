@@ -1,5 +1,6 @@
 import {
   createDatabaseCapabilities,
+  getDatabaseDesignerCapabilities,
   DatabaseConnection,
   DatabaseConnectionConfig,
   DatabaseConnectionStaticConstructor,
@@ -29,6 +30,7 @@ export const oracleDialect: DatabaseDialect = {
     supportsSessionMonitor: true,
     supportsDistributionMetrics: false,
   }),
+  designerCapabilities: getDatabaseDesignerCapabilities("oracle"),
   connectionForm: {
     fields: [
       ...createStandardConnectionFields({

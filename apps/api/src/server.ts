@@ -7,7 +7,8 @@ import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import type { AdminRestoreRequest, AdminUserCreateRequest, AdminUserUpdateRequest, ConnectionProfileInput, ConnectionProfileUpdate, QueryAuditStatus, QueryEditPreviewRequest, QueryEditRequest, QueryEvent, QueryFileImportPreviewRequest, QueryFileImportRequest, QueryImportPreviewRequest, QueryImportRequest, QueryPreviewResponse, QueryPreviewStatement, QueryStartRequest, QueryExecutionMode, QueryWriteResponse, WriteOperationPreviewResponse } from '@justybase/contracts';
+import type { AdminRestoreRequest, AdminUserCreateRequest, AdminUserUpdateRequest, ConnectionProfileInput, ConnectionProfileUpdate, DesignerSnapshotRequest, QueryAuditStatus, QueryEditPreviewRequest, QueryEditRequest, QueryEvent, QueryFileImportPreviewRequest, QueryFileImportRequest, QueryImportPreviewRequest, QueryImportRequest, QueryPreviewResponse, QueryPreviewStatement, QueryStartRequest, QueryExecutionMode, QueryWriteResponse, WriteOperationPreviewResponse } from '@justybase/contracts';
+import { StaleDesignerSnapshotError } from '@justybase/database-runtime';
 import { getSqlStatementAtPosition, splitSqlStatements } from '@justybase/sql-core';
 import { type ApiConfig } from './config';
 import { encryptSecret, verifyPassword } from './security';
@@ -19,7 +20,10 @@ import { getSchemaTree, invalidateSchemaCache, searchSchema } from './schemaServ
 import { attachLspSocket, type LspSession } from './lspProtocol';
 import { createQueryExportStream } from './queryExport';
 import { loadNetezzaSnippets } from './snippets';
+import { getDesignerCapabilitiesResponse } from './designerService';
+import { DesignerSnapshotUnavailableError, getDesignerSnapshotResponse } from './designerSnapshotService';
 import {
+  parseDesignerCapabilitiesRequest,
   parseQueryAggregateRequest,
   parseQueryExportRequest,
   parseQueryGroupRequest,
@@ -195,12 +199,21 @@ function plannedDigest(mode: QueryExecutionMode, statements: PlannedStatement[])
   return createHash('sha256').update(JSON.stringify({ mode, statements: statements.map(statement => ({ index: statement.index, startOffset: statement.startOffset, endOffset: statement.endOffset, sql: statement.sql })) })).digest('hex');
 }
 
+function designerTargetDigest(target: NonNullable<QueryStartRequest['designer']>['target']): string {
+  const normalized = Object.entries(target)
+    .filter(([, value]) => value !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
 interface WritePreviewClaims {
   userId: string;
   connectionId: string;
   database: string;
   mode: QueryExecutionMode;
   statementsDigest: string;
+  designerFingerprint?: string;
+  designerTargetDigest?: string;
   cursorOffset?: number;
   expiresAt: number;
 }
@@ -222,6 +235,8 @@ function verifyPreviewClaims(token: string, masterKey: string): WritePreviewClai
     return typeof claims.userId === 'string' && typeof claims.connectionId === 'string' && typeof claims.database === 'string'
       && (claims.mode === 'single' || claims.mode === 'script' || claims.mode === 'explain')
       && typeof claims.statementsDigest === 'string' && (claims.cursorOffset === undefined || (typeof claims.cursorOffset === 'number' && Number.isFinite(claims.cursorOffset)))
+      && (claims.designerFingerprint === undefined || typeof claims.designerFingerprint === 'string')
+      && (claims.designerTargetDigest === undefined || typeof claims.designerTargetDigest === 'string')
       && typeof claims.expiresAt === 'number' && claims.expiresAt > Date.now()
       ? claims
       : undefined;
@@ -601,7 +616,30 @@ export function planStatements(input: QueryStartRequest, dbType: StoredConnectio
   return { mode, statements: [{ index: 0, startOffset: input.sql.indexOf(sql), endOffset: input.sql.indexOf(sql) + sql.length, sql: mode === 'explain' ? explainSql(sql, dbType) : sql }] };
 }
 
-export function previewQuery(app: FastifyInstance, userId: string, input: QueryStartRequest): QueryPreviewResponse {
+async function assertDesignerSnapshotCurrent(
+  app: FastifyInstance,
+  profile: StoredConnection,
+  input: QueryStartRequest,
+): Promise<void> {
+  const designer = input.designer;
+  if (!designer) return;
+  if (designer.target.connectionId && designer.target.connectionId !== input.connectionId) {
+    throw new Error('Designer target does not belong to the selected connection.');
+  }
+  const target: DesignerSnapshotRequest = {
+    connectionId: input.connectionId,
+    database: designer.target.database ?? input.database,
+    schema: designer.target.schema,
+    objectName: designer.target.objectName,
+    objectType: designer.target.objectType,
+  };
+  const response = await getDesignerSnapshotResponse(profile, target, app.apiConfig.masterKey);
+  if (response.snapshot.fingerprint !== designer.baseFingerprint) {
+    throw new StaleDesignerSnapshotError(designer.baseFingerprint, response.snapshot.fingerprint);
+  }
+}
+
+export async function previewQuery(app: FastifyInstance, userId: string, input: QueryStartRequest): Promise<QueryPreviewResponse> {
   const profile = app.store.getConnection(userId, input.connectionId);
   if (!profile) throw new Error('Connection profile not found.');
   const planned = planStatements(input, profile.dbType);
@@ -620,12 +658,22 @@ export function previewQuery(app: FastifyInstance, userId: string, input: QueryS
     };
   });
   const containsWrite = statements.some(statement => !statement.readOnly);
+  if (containsWrite) await assertDesignerSnapshotCurrent(app, profile, input);
   const expiresAt = Date.now() + WRITE_PREVIEW_TTL_MS;
-  const previewToken = signPreviewClaims({ userId, connectionId: input.connectionId, database, mode: planned.mode, cursorOffset: input.cursorOffset, statementsDigest: plannedDigest(planned.mode, planned.statements), expiresAt }, app.apiConfig.masterKey);
+  const previewToken = signPreviewClaims({
+    userId,
+    connectionId: input.connectionId,
+    database,
+    mode: planned.mode,
+    cursorOffset: input.cursorOffset,
+    statementsDigest: plannedDigest(planned.mode, planned.statements),
+    ...(input.designer ? { designerFingerprint: input.designer.baseFingerprint, designerTargetDigest: designerTargetDigest(input.designer.target) } : {}),
+    expiresAt,
+  }, app.apiConfig.masterKey);
   return { database, readOnly: profile.readOnly, containsWrite, previewToken, expiresAt, statements };
 }
 
-function startQuery(app: FastifyInstance, userId: string, input: QueryStartRequest): { queryId: string; statementCount: number } {
+async function startQuery(app: FastifyInstance, userId: string, input: QueryStartRequest): Promise<{ queryId: string; statementCount: number }> {
   const profile = app.store.getConnection(userId, input.connectionId);
   if (!profile) throw new Error('Connection profile not found.');
   if (!input.sql.trim()) throw new Error('SQL is required.');
@@ -636,9 +684,10 @@ function startQuery(app: FastifyInstance, userId: string, input: QueryStartReque
   if (!profile.readOnly && containsWrite) {
     const claims = typeof input.writePreviewToken === 'string' ? verifyPreviewClaims(input.writePreviewToken, app.apiConfig.masterKey) : undefined;
     if (input.writeConfirmed !== true || !claims) throw new Error('Write confirmation required before executing DML or DDL.');
-    if (claims.userId !== userId || claims.connectionId !== input.connectionId || claims.database !== database || claims.mode !== planned.mode || claims.cursorOffset !== input.cursorOffset || claims.statementsDigest !== plannedDigest(planned.mode, planned.statements)) {
+    if (claims.userId !== userId || claims.connectionId !== input.connectionId || claims.database !== database || claims.mode !== planned.mode || claims.cursorOffset !== input.cursorOffset || claims.statementsDigest !== plannedDigest(planned.mode, planned.statements) || claims.designerFingerprint !== input.designer?.baseFingerprint || claims.designerTargetDigest !== (input.designer ? designerTargetDigest(input.designer.target) : undefined)) {
       throw new Error('Write preview is stale. Preview the exact SQL again before execution.');
     }
+    await assertDesignerSnapshotCurrent(app, profile, input);
   }
 
   const queryId = randomUUID();
@@ -1003,6 +1052,30 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   app.get('/api/metadata/schemas', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return listSchemas(profile, query.database, apiConfig.masterKey); });
   app.get('/api/metadata/objects', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return listObjects(profile, query.database, query.schema, apiConfig.masterKey); });
   app.get('/api/metadata/columns', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string; table?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database || !query.schema || !query.table) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Table scope not found.' }); return listColumns(profile, query.database, query.schema, query.table, apiConfig.masterKey); });
+  app.get('/api/designer/capabilities', { preHandler: authenticate }, async (request, reply) => {
+    try {
+      const input = parseDesignerCapabilitiesRequest(request.query);
+      const profile = store.getConnection(request.user!.id, input.connectionId);
+      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
+      return getDesignerCapabilitiesResponse(profile, input);
+    } catch (error: unknown) {
+      return reply.code(400).send({ code: 'DESIGNER_CAPABILITIES_FAILED', message: error instanceof Error ? error.message : 'Designer capabilities failed.' });
+    }
+  });
+  app.get('/api/designer/snapshot', { preHandler: authenticate }, async (request, reply) => {
+    try {
+      const input = parseDesignerCapabilitiesRequest(request.query);
+      const profile = store.getConnection(request.user!.id, input.connectionId);
+      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
+      return await getDesignerSnapshotResponse(profile, input, apiConfig.masterKey);
+    } catch (error: unknown) {
+      const statusCode = error instanceof Error && 'code' in error && error.code === 'DESIGNER_SNAPSHOT_UNAVAILABLE' ? 501 : 400;
+      return reply.code(statusCode).send({
+        code: error instanceof DesignerSnapshotUnavailableError ? error.code : 'DESIGNER_SNAPSHOT_FAILED',
+        message: error instanceof Error ? error.message : 'Designer snapshot failed.',
+      });
+    }
+  });
 
   app.get('/api/history', { preHandler: authenticate }, async request => store.listHistory(request.user!.id));
   app.get('/api/audit', { preHandler: authenticate }, async request => {
@@ -1079,10 +1152,11 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post('/api/query/preview', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     try {
-      return reply.code(200).send(previewQuery(app, request.user!.id, parseQueryStartRequest(request.body)));
+      return reply.code(200).send(await previewQuery(app, request.user!.id, parseQueryStartRequest(request.body)));
     } catch (error: unknown) {
-      return reply.code(400).send({
-        code: error instanceof RequestValidationError ? error.code : 'QUERY_PREVIEW_REJECTED',
+      const statusCode = error instanceof StaleDesignerSnapshotError ? 409 : error instanceof DesignerSnapshotUnavailableError ? 501 : 400;
+      return reply.code(statusCode).send({
+        code: error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_PREVIEW_REJECTED',
         message: error instanceof Error ? error.message : 'Query preview rejected.',
       });
     }
@@ -1223,11 +1297,12 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post('/api/query', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
     try {
-      const started = startQuery(app, request.user!.id, parseQueryStartRequest(request.body));
+      const started = await startQuery(app, request.user!.id, parseQueryStartRequest(request.body));
       return reply.code(202).send(started);
     } catch (error: unknown) {
-      return reply.code(400).send({
-        code: error instanceof RequestValidationError ? error.code : 'QUERY_REJECTED',
+      const statusCode = error instanceof StaleDesignerSnapshotError ? 409 : error instanceof DesignerSnapshotUnavailableError ? 501 : 400;
+      return reply.code(statusCode).send({
+        code: error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_REJECTED',
         message: error instanceof Error ? error.message : 'Query rejected.',
       });
     }

@@ -16,7 +16,8 @@ compares them with the wizard catalog of DataGrip, DBeaver, and similar editors.
 QuickPick/input-box wizards, and template generators. Purely command-line or
 `SHOW`-based viewers are noted but not counted as wizards.
 
-Legend: **✓** full designer/webview, **dialog** QuickPick/input-box flow,
+Legend: **✓** full designer/webview, **capability matrix** shared designer
+surface with runtime/provider gating, **dialog** QuickPick/input-box flow,
 **view only** read-only inspector, **–** not applicable for the dialect,
 **blank** missing.
 
@@ -25,13 +26,14 @@ Legend: **✓** full designer/webview, **dialog** QuickPick/input-box flow,
 | Wizard | Netezza | Db2 | MySQL | PostgreSQL | Oracle | MSSQL | SQLite | ClickHouse | Vertica | Snowflake | DuckDB/File | Access |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Create table designer | ✓ | ✓ | – | – | – | – | ✓ | – | – | – | – | – |
+| Unified Object Designer (web/API) | ✓ | capability matrix | capability matrix | capability matrix | capability matrix | capability matrix | ✓ | capability matrix | capability matrix | capability matrix | ✓ | capability matrix |
 | Alter table designer | dialog | dialog | ✓ | ✓ | – | – | – | – | – | – | – | – |
 | Index designer | – | ✓ | ✓ | ✓ | – | – | dialog | n/a | – | – | – | – |
 | Partition manager | – | ✓ | ✓ | dialog | – | – | n/a | view only | – | n/a | n/a | n/a |
-| Foreign key wizard | dialog | – | – | – | – | – | view only | n/a | – | – | – | – |
+| Foreign key wizard | – | – | – | – | – | – | view only | n/a | – | – | – | – |
 | Check constraint wizard | – | – | – | – | – | – | – | n/a | – | – | – | – |
-| View wizard | ✓ | – | – | – | – | – | – | – | – | – | – | – |
-| Trigger wizard | – | – | – | – | – | – | view only | n/a | – | – | – | – |
+| View wizard | ✓ | – | – | – | – | – | capability matrix | – | – | – | capability matrix | – |
+| Trigger wizard | – | – | – | – | – | – | capability matrix | n/a | – | – | – | – |
 | Procedure/function wizard | ✓ | – | – | – | – | – | – | – | – | – | – | – |
 | Sequence wizard | – | – | – | ✓ | – | – | n/a | n/a | n/a | – | n/a | n/a |
 | User/role/permission wizard | dialog | – | – | – | – | – | n/a | – | – | – | n/a | n/a |
@@ -49,15 +51,33 @@ The import wizard and migration wizard are dialect-neutral: their adapters cover
 all twelve `DatabaseKind` values, so the **✓** entries above are by design.
 The table designer, visual query builder, ERD, and ETL designer are bundled in
 the core extension; the Db2/MySQL designers live in the companion extensions.
+The Unified Object Designer is available from the self-hosted schema tree and
+uses the shared capability manifest; unsupported or not-yet-connected dialects
+remain visible as explicit status states instead of silently falling back to
+Netezza SQL. DuckDB and SQLite table targets load a provider snapshot with
+source DDL, columns, keys, and indexes before editing; SQLite additionally
+loads trigger definitions. Local DuckDB/SQLite view targets load the source
+query and output columns, and their write preview is protected by the same
+snapshot fingerprint.
 
 ## Current wizard surface (detail)
 
 ### Webview-based designers
 
 - **Visual Table Designer** (`netezza.createTableDesigner`) — create table with
-  columns, PK, defaults, constraints. Dialect-aware for Netezza, Db2, and SQLite;
-  other dialects fall back to Netezza-style DDL and should use the companion
-  designers instead.
+  columns, PK, defaults, constraints. The builder is dialect-aware for the
+  registered table profiles and is capability-gated for unsupported engines.
+- **Unified Object Designer** (self-hosted schema tree) — capability/status
+  overview plus table tabs for add-column, relational indexes, FK/CHECK
+  constraints, and native physical design. Netezza exposes distribution and
+  zone-map organization; ClickHouse exposes data-skipping indexes; Vertica
+  exposes projections; Snowflake exposes clustering keys; SQLite exposes a
+  trigger form for row-level INSERT/UPDATE/DELETE triggers, including `WHEN`
+  and `UPDATE OF` where supported. SQLite/DuckDB view targets also expose a
+  reviewed definition/replacement form. Every change goes through exact SQL
+  preview and a short-lived write token before apply. Netezza procedure targets
+  additionally expose a guarded NZPLSQL template; other routine targets remain
+  capability/status views until provider-specific body adapters are connected.
 - **MySQL Alter Table Designer** (`justybase.mysql.alterTableDesigner`) — diffs a
   column/option design against the live table and emits one `ALTER TABLE`
   statement (ADD/MODIFY/DROP COLUMN, ENGINE, CHARACTER SET, COLLATE,
@@ -94,10 +114,12 @@ the core extension; the Db2/MySQL designers live in the companion extensions.
   (`netezza.createExternalTable`, basic/advanced) — Netezza.
 - **Create Sequence** (`netezza.createSequence`) — PostgreSQL only.
 - **Snowflake wizards** — Stream, Task, Dynamic Table creation and management.
-- **SQLite tools** — add/drop index, view indexes/FKs/triggers, maintenance
-  (vacuum, integrity check, WAL checkpoint).
-- **Netezza table tools** — primary key, foreign key, unique constraint, grants,
-  rename, owner, comments.
+- **SQLite tools** — add/drop index, view indexes/FKs, trigger creation through
+  the self-hosted Object Designer, and maintenance (vacuum, integrity check,
+  WAL checkpoint).
+- **Netezza table tools** — primary key, unique constraint, grants, rename,
+  owner, comments. Foreign-key creation is explicitly blocked because Netezza
+  does not provide an enforced FK surface.
 - **PostgreSQL maintenance** — create/attach/detach/drop partition, create index
   (confirm-and-execute dialogs).
 
@@ -113,8 +135,10 @@ The largest product gaps are, in rough priority order:
    designer (access method, INCLUDE, partial predicates, tablespace). Oracle
    (function-based, bitmap, tablespace), MSSQL (INCLUDE, filtered, columnstore),
    and Netezza remain on dialogs or are missing.
-3. **Foreign key and check constraint wizards.** Missing for MySQL, PostgreSQL,
-   Oracle, MSSQL, and SQLite creation.
+3. **Foreign key and check constraint wizards.** The shared web surface now
+   provides guarded forms where the runtime is available; provider-backed
+   MySQL, PostgreSQL, Oracle, MSSQL, and desktop/companion creation flows are
+   still missing.
 4. **View / trigger / procedure wizards for MySQL, PostgreSQL, Oracle, MSSQL.**
    Only Netezza has procedure templates and a view wizard.
 5. **Partition wizards for Oracle and MSSQL.** Oracle partitioning and the MSSQL
@@ -122,9 +146,11 @@ The largest product gaps are, in rough priority order:
 6. **Sequence wizards for Oracle, MSSQL, Db2, Netezza.** PostgreSQL has one.
 7. **User/role wizards.** Missing for MySQL, PostgreSQL, Oracle, MSSQL,
    ClickHouse, Snowflake (Netezza has grants + security panel).
-8. **Dialect-signature designers.** Vertica projections, ClickHouse MergeTree
-   (ORDER BY/PARTITION BY/TTL), Snowflake clustering keys, Oracle/SQL Server
-   materialized views.
+8. **Remaining dialect-signature designers.** The first web Object Designer
+   slice covers Netezza zone maps/distribution, ClickHouse skipping indexes,
+   Vertica projections, and Snowflake clustering keys. Full MergeTree table
+   definitions (ORDER BY/PARTITION BY/TTL), Oracle/SQL Server storage-specific
+   designers, and provider-backed edit plans remain.
 9. **Schema and data compare beyond Netezza**, plus ERD/Visual Query Builder
    beyond Netezza/DuckDB.
 

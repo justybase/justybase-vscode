@@ -1,8 +1,10 @@
+import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server';
+import { resolveLocalDatabasePath } from '../src/localDatabaseSandbox';
 
 describe('web API authentication and connection profiles', () => {
   let app: FastifyInstance;
@@ -47,6 +49,49 @@ describe('web API authentication and connection profiles', () => {
     const connections = await app.inject({ method: 'GET', url: '/api/connections', headers: { cookie } });
     expect(connections.statusCode).toBe(200);
     expect(connections.json()).toEqual([]);
+  });
+
+  it('serves capability-aware designer state for a connection target', async () => {
+    const unauthenticated = await app.inject({ method: 'GET', url: '/api/designer/capabilities?connectionId=missing' });
+    expect(unauthenticated.statusCode).toBe(401);
+
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
+    const rawCookie = login.headers['set-cookie'];
+    const cookies = Array.isArray(rawCookie) ? rawCookie.map(value => value.split(';')[0]) : [String(rawCookie).split(';')[0]];
+    const cookie = cookies.join('; ');
+    const csrf = cookies.find(value => value.startsWith('justybase_csrf='))?.split('=')[1] ?? '';
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/connections',
+      headers: { cookie, 'x-justybase-csrf': csrf },
+      payload: { name: `Designer Netezza ${Date.now()}`, host: 'localhost', database: 'system', user: 'admin', password: 'secret' },
+    });
+    expect(created.statusCode).toBe(201);
+    const connectionId = String(created.json().id);
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/designer/capabilities?connectionId=${encodeURIComponent(connectionId)}&database=SYSTEM&schema=ADMIN&objectName=FACT_SALES&objectType=TABLE`,
+        headers: { cookie },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual(expect.objectContaining({
+        runtimeAvailable: true,
+        readOnly: true,
+        target: expect.objectContaining({ objectName: 'FACT_SALES', objectType: 'TABLE' }),
+      }));
+      expect(response.json().capabilities.constructs.indexes.level).toBe('privilege-blocked');
+      const snapshot = await app.inject({
+        method: 'GET',
+        url: `/api/designer/snapshot?connectionId=${encodeURIComponent(connectionId)}&database=SYSTEM&schema=ADMIN&objectName=FACT_SALES&objectType=TABLE`,
+        headers: { cookie },
+      });
+      expect(snapshot.statusCode).toBe(501);
+      expect(snapshot.json()).toEqual(expect.objectContaining({ code: 'DESIGNER_SNAPSHOT_UNAVAILABLE' }));
+    } finally {
+      await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf } });
+    }
   });
 
   it('preserves Fastify client-error status codes', async () => {
@@ -332,6 +377,77 @@ describe('web API authentication and connection profiles', () => {
       const page = await app.inject({ method: 'POST', url: `/api/query/${queryId}/page`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { limit: 10 } });
       expect(page.statusCode).toBe(200);
       expect(page.json().rows).toEqual([[42]]);
+    } finally {
+      await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf } });
+    }
+  });
+
+  it('rejects a designer preview when the target changed after the snapshot', async () => {
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
+    const rawCookie = login.headers['set-cookie'];
+    const cookies = Array.isArray(rawCookie) ? rawCookie.map(value => value.split(';')[0]) : [String(rawCookie).split(';')[0]];
+    const cookie = cookies.join('; ');
+    const csrf = cookies.find(value => value.startsWith('justybase_csrf='))?.split('=')[1] ?? '';
+    const database = `designer-concurrency-${Date.now()}.sqlite`;
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/connections',
+      headers: { cookie, 'x-justybase-csrf': csrf },
+      payload: { name: `Designer concurrency ${Date.now()}`, dbType: 'sqlite', database, readOnly: false },
+    });
+    expect(created.statusCode).toBe(201);
+    const connectionId = String(created.json().id);
+    const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { cookie } });
+    const userId = String(me.json().user.id);
+    const databasePath = resolveLocalDatabasePath(database, { root: path.join(dataDir, 'local-databases'), userId });
+    const fixture = new DatabaseSync(databasePath);
+    fixture.exec('CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT);');
+    fixture.close();
+
+    try {
+      const snapshot = await app.inject({
+        method: 'GET',
+        url: `/api/designer/snapshot?connectionId=${encodeURIComponent(connectionId)}&database=main&schema=main&objectName=orders&objectType=TABLE`,
+        headers: { cookie },
+      });
+      expect(snapshot.statusCode).toBe(200);
+      const snapshotBody = snapshot.json() as { snapshot: { target: Record<string, unknown>; fingerprint: string } };
+      const designer = { target: snapshotBody.snapshot.target, baseFingerprint: snapshotBody.snapshot.fingerprint };
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/api/query/preview',
+        headers: { cookie, 'x-justybase-csrf': csrf },
+        payload: { connectionId, database: 'main', mode: 'script', sql: 'ALTER TABLE "main"."orders" ADD COLUMN "created_at" TEXT;', designer },
+      });
+      expect(preview.statusCode).toBe(200);
+
+      const changed = new DatabaseSync(databasePath);
+      changed.exec('ALTER TABLE orders ADD COLUMN external_change TEXT;');
+      changed.close();
+      const stale = await app.inject({
+        method: 'POST',
+        url: '/api/query/preview',
+        headers: { cookie, 'x-justybase-csrf': csrf },
+        payload: { connectionId, database: 'main', mode: 'script', sql: 'ALTER TABLE "main"."orders" ADD COLUMN "created_at" TEXT;', designer },
+      });
+      expect(stale.statusCode).toBe(409);
+      expect(stale.json()).toEqual(expect.objectContaining({ code: 'DESIGNER_SNAPSHOT_STALE' }));
+      const staleApply = await app.inject({
+        method: 'POST',
+        url: '/api/query',
+        headers: { cookie, 'x-justybase-csrf': csrf },
+        payload: {
+          connectionId,
+          database: 'main',
+          mode: 'script',
+          sql: 'ALTER TABLE "main"."orders" ADD COLUMN "created_at" TEXT;',
+          designer,
+          writeConfirmed: true,
+          writePreviewToken: preview.json().previewToken,
+        },
+      });
+      expect(staleApply.statusCode).toBe(409);
+      expect(staleApply.json()).toEqual(expect.objectContaining({ code: 'DESIGNER_SNAPSHOT_STALE' }));
     } finally {
       await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf } });
     }

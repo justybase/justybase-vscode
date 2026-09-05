@@ -6,6 +6,7 @@ import {
     formatIdentifierForSql,
     formatQualifiedObjectName,
 } from '../../../src/utils/identifierUtils';
+import { assertDesignerOperation } from '../../../src/views/designerOperationGuard';
 
 export const POSTGRESQL_INDEX_METHODS: readonly PostgresqlIndexMethod[] = ['btree', 'hash', 'gist', 'spgist', 'gin', 'brin'];
 
@@ -73,6 +74,7 @@ export function buildPostgresqlCreateIndexSql(options: {
     tableName: string;
     design: PostgresqlIndexDesign;
 }): string {
+    assertDesignerOperation('postgresql', 'indexes', 'create');
     const schema = requireValue(options.schema, 'Schema');
     const tableName = requireValue(options.tableName, 'Table name');
     const indexName = requireValue(options.design.indexName, 'Index name');
@@ -101,5 +103,6 @@ export function buildPostgresqlCreateIndexSql(options: {
 }
 
 export function buildPostgresqlDropIndexSql(schema: string, indexName: string): string {
+    assertDesignerOperation('postgresql', 'indexes', 'drop');
     return `DROP INDEX IF EXISTS ${formatQualifiedObjectName(undefined, requireValue(schema, 'Schema'), requireValue(indexName, 'Index name'), 'postgresql')};`;
 }

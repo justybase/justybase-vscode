@@ -2,6 +2,7 @@ import {
     formatIdentifierForSql,
     formatQualifiedObjectName,
 } from '../../../src/utils/identifierUtils';
+import { assertDesignerOperation } from '../../../src/views/designerOperationGuard';
 
 export interface MysqlIndexKeyColumn {
     name: string;
@@ -123,6 +124,7 @@ function validateValuesClause(valuesClause: string, method: 'RANGE' | 'LIST'): s
 }
 
 export function buildMysqlCreateIndexSql(options: MysqlCreateIndexDdlOptions): string {
+    assertDesignerOperation('mysql', 'indexes', 'create');
     const schema = requireValue(options.schema, 'Schema');
     const tableName = requireValue(options.tableName, 'Table name');
     const indexName = requireValue(options.indexName, 'Index name');
@@ -150,25 +152,30 @@ export function buildMysqlCreateIndexSql(options: MysqlCreateIndexDdlOptions): s
 }
 
 export function buildMysqlDropIndexSql(schema: string, tableName: string, indexName: string): string {
+    assertDesignerOperation('mysql', 'indexes', 'drop');
     return `DROP INDEX ${formatIdentifierForSql(requireValue(indexName, 'Index name'), 'mysql')} ON ${formatQualifiedObjectName(undefined, requireValue(schema, 'Schema'), requireValue(tableName, 'Table name'), 'mysql')};`;
 }
 
 export function buildMysqlAddRangeListPartitionSql(options: MysqlAddRangeListPartitionDdlOptions): string {
+    assertDesignerOperation('mysql', 'partitions', 'create');
     const method = options.method === 'LIST' ? 'LIST' : 'RANGE';
     const valuesClause = validateValuesClause(options.valuesClause, method);
     return `ALTER TABLE ${formatQualifiedObjectName(undefined, requireValue(options.schema, 'Schema'), requireValue(options.tableName, 'Table name'), 'mysql')} ADD PARTITION (PARTITION ${formatIdentifierForSql(requireValue(options.partitionName, 'Partition name'), 'mysql')} ${valuesClause});`;
 }
 
 export function buildMysqlAddHashKeyPartitionSql(options: MysqlAddHashKeyPartitionDdlOptions): string {
+    assertDesignerOperation('mysql', 'partitions', 'create');
     const partitionCount = requirePositiveInteger(options.partitionCount, 'Partition count');
     return `ALTER TABLE ${formatQualifiedObjectName(undefined, requireValue(options.schema, 'Schema'), requireValue(options.tableName, 'Table name'), 'mysql')} ADD PARTITION PARTITIONS ${partitionCount};`;
 }
 
 export function buildMysqlDropPartitionSql(options: MysqlDropPartitionDdlOptions): string {
+    assertDesignerOperation('mysql', 'partitions', 'drop');
     return `ALTER TABLE ${formatQualifiedObjectName(undefined, requireValue(options.schema, 'Schema'), requireValue(options.tableName, 'Table name'), 'mysql')} DROP PARTITION ${formatIdentifierForSql(requireValue(options.partitionName, 'Partition name'), 'mysql')};`;
 }
 
 export function buildMysqlCoalescePartitionSql(options: MysqlCoalescePartitionDdlOptions): string {
+    assertDesignerOperation('mysql', 'partitions', 'merge');
     const partitionCount = requirePositiveInteger(options.partitionCount, 'Partitions to coalesce');
     return `ALTER TABLE ${formatQualifiedObjectName(undefined, requireValue(options.schema, 'Schema'), requireValue(options.tableName, 'Table name'), 'mysql')} COALESCE PARTITION ${partitionCount};`;
 }

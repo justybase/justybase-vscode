@@ -12,7 +12,7 @@ import type {
     DatabaseConnectionStaticConstructor,
     DatabaseDialect
 } from '@justybase/contracts';
-import { createDatabaseCapabilities } from '@justybase/contracts';
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from '@justybase/contracts';
 import { duckdbDialectTraits } from '../../../src/dialects/duckdb/traits';
 import { FileDuckDbConnection } from './fileConnection';
 import { duckdbMetadataProvider } from './duckdbSchemaProvider';
@@ -24,6 +24,7 @@ export const fileDialect: DatabaseDialect = {
     kind: 'file',
     displayName: 'Excel (XLSX/XLSB) / CSV / Parquet / Avro / Access (DuckDB)',
     capabilities: createDatabaseCapabilities({}),
+    designerCapabilities: getDatabaseDesignerCapabilities('file'),
     connectionForm: {
         fields: [
             {

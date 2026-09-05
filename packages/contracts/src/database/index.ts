@@ -3,6 +3,8 @@ import type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColu
 import type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides, DatabaseThreePartNamePrefix } from './dialectTraits';
 import type { DatabaseConnection, DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor, DatabaseCommand, DatabaseDataReader } from './connection';
 import type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseDdlGenerationMode, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic } from './advancedFeatures';
+import { UnsupportedDesignerOperationError } from './designerCapabilities';
+import type { DatabaseDesignerCapabilities, DatabaseDesignerCapability, DatabaseDesignerCapabilityKey, DatabaseDesignerColumn, DatabaseDesignerConstraint, DatabaseDesignerDefinition, DatabaseDesignerDiagnostic, DatabaseDesignerIndex, DatabaseDesignerNativeDefinition, DatabaseDesignerPartition, DatabaseDesignerProvider, DatabaseDesignerRelationalIndex, DatabaseDesignerRequirement, DatabaseDesignerRuntimeContext, DatabaseDesignerTarget, DatabaseDesignerTrigger, DatabaseDesignerTriggerCapability, DatabaseDesignerViewCapability, DatabaseDesignerRoutineCapability, DatabaseObjectSnapshot, DatabaseSchemaChangePlan, DatabaseSchemaChangeStatement, DatabaseViewDesignerDefinition, DatabaseTableDesignerDefinition, DesignerCapabilityReasonCode, DesignerNativeFeature, DesignerOperation, DesignerSupportLevel, DesignerRoutineBodyStyle, DesignerTriggerBodyStyle, DesignerTriggerEvent, DesignerTriggerLevel, DesignerTriggerTiming, DesignerViewReplaceStyle } from './designerCapabilities';
 
 export type DatabaseKind =
   | 'netezza'
@@ -58,6 +60,9 @@ export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseC
 export type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseColumnsWithKeysQuerySet, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions };
 export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides, DatabaseThreePartNamePrefix };
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseDdlGenerationMode, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic };
+export type { DatabaseDesignerCapabilities, DatabaseDesignerCapability, DatabaseDesignerCapabilityKey, DatabaseDesignerColumn, DatabaseDesignerConstraint, DatabaseDesignerDefinition, DatabaseDesignerDiagnostic, DatabaseDesignerIndex, DatabaseDesignerNativeDefinition, DatabaseDesignerPartition, DatabaseDesignerProvider, DatabaseDesignerRelationalIndex, DatabaseDesignerRequirement, DatabaseDesignerRuntimeContext, DatabaseDesignerTarget, DatabaseDesignerTrigger, DatabaseDesignerTriggerCapability, DatabaseDesignerViewCapability, DatabaseDesignerRoutineCapability, DatabaseObjectSnapshot, DatabaseSchemaChangePlan, DatabaseSchemaChangeStatement, DatabaseViewDesignerDefinition, DatabaseTableDesignerDefinition, DesignerCapabilityReasonCode, DesignerNativeFeature, DesignerOperation, DesignerSupportLevel, DesignerRoutineBodyStyle, DesignerTriggerBodyStyle, DesignerTriggerEvent, DesignerTriggerLevel, DesignerTriggerTiming, DesignerViewReplaceStyle };
+export { UnsupportedDesignerOperationError };
+export { DATABASE_DESIGNER_CAPABILITY_MANIFESTS, DESIGNER_CAPABILITY_KEYS, DESIGNER_OPERATIONS, getDatabaseDesignerCapabilities, getDesignerCapability, resolveDatabaseDesignerCapabilities } from './designerCapabilities';
 
 export interface DatabaseCapabilities {
   supportsExplainPlan: boolean;
@@ -148,6 +153,8 @@ export interface DatabaseDialect {
   displayName: string;
   defaultPort?: number;
   capabilities: DatabaseCapabilities;
+  /** Static baseline; providers may refine this after runtime introspection. */
+  designerCapabilities?: DatabaseDesignerCapabilities;
   connectionForm?: DatabaseConnectionFormSchema;
   traits: DatabaseDialectTraits;
   metadataProvider: DatabaseMetadataProvider;

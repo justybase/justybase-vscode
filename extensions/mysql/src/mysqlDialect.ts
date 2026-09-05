@@ -4,7 +4,7 @@ import type {
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
 } from "@justybase/contracts";
-import { createDatabaseCapabilities } from "@justybase/contracts";
+import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
 import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
 import { MysqlConnection } from "./mysqlConnection";
 import { mysqlAdvancedFeatures } from "./mysqlDdlGenerator";
@@ -28,6 +28,7 @@ export const mysqlDialect: DatabaseDialect = {
     supportsTableMaintenance: true,
     supportsSessionMonitor: true,
   }),
+  designerCapabilities: getDatabaseDesignerCapabilities("mysql"),
   connectionForm: {
     fields: [
       ...createStandardConnectionFields({

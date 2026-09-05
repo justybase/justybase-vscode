@@ -1,6 +1,16 @@
 import { ClientTypeId, NzConnection } from '@justybase/netezza-driver';
 import type { MetadataColumn, MetadataDatabase, MetadataObject, MetadataSchema, QueryColumn } from '@justybase/contracts';
 
+export {
+  assertDesignerOperationSupported,
+  assertDesignerPlanCurrent,
+  assertDesignerPlanHasChanges,
+  EmptyDesignerPlanError,
+  hasDesignerOperation,
+  StaleDesignerSnapshotError,
+  UnsupportedDesignerOperationError,
+} from './designer';
+
 export interface NetezzaConnectionDetails {
   host: string;
   port: number;

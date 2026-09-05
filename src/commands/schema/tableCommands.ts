@@ -14,6 +14,8 @@ import {
     getTableDesignerUnsupportedReason,
     isTableDesignerSupported,
 } from '../../views/tableDesignerDdl';
+import { getCoreDatabaseDesignerCapabilities } from '../../core/designerCapabilities';
+import { assertDesignerOperation } from '../../views/designerOperationGuard';
 
 /**
  * Register table modification commands
@@ -22,6 +24,36 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
     const { context, connectionManager, metadataCache, schemaProvider } = deps;
 
     return [
+        // Unified entry point: dispatch to the registered dialect designer.
+        vscode.commands.registerCommand('netezza.openObjectDesigner', async (item: SchemaItemData) => {
+            if (!item || !item.label || !item.dbName || !item.schema || (item.objType && item.objType !== 'TABLE')) {
+                vscode.window.showErrorMessage('Select a table before opening the Object Designer.');
+                return;
+            }
+
+            const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+            const commandByKind: Readonly<Record<string, string>> = {
+                netezza: 'netezza.alterTableWizard',
+                mysql: 'justybase.mysql.alterTableDesigner',
+                postgresql: 'justybase.postgresql.alterTableDesigner',
+            };
+            const delegatedCommand = databaseKind ? commandByKind[databaseKind] : undefined;
+            if (delegatedCommand) {
+                try {
+                    await vscode.commands.executeCommand(delegatedCommand, item);
+                    return;
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    vscode.window.showErrorMessage(`Could not open the ${databaseKind} Object Designer: ${message}`);
+                    return;
+                }
+            }
+
+            const capabilities = getCoreDatabaseDesignerCapabilities(databaseKind);
+            const reason = capabilities.constructs.alterTable.reason ?? 'No desktop Object Designer adapter is registered for this database kind yet.';
+            vscode.window.showInformationMessage(`${databaseKind ?? 'This database'} Object Designer: ${reason}`);
+        }),
+
         // Create Table via Visual Designer
         vscode.commands.registerCommand('netezza.createTableDesigner', async (item: SchemaItemData) => {
             if (!item || (!item.dbName && !item.schema)) {
@@ -62,6 +94,17 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
         vscode.commands.registerCommand('netezza.alterTableWizard', async (item: SchemaItemData) => {
             if (!item || !item.label || !item.dbName || !item.schema || (item.objType && item.objType !== 'TABLE')) {
                 vscode.window.showErrorMessage('Invalid selection. Select a table.');
+                return;
+            }
+
+            try {
+                assertDesignerOperation(
+                    connectionManager.getConnectionDatabaseKind?.(item.connectionName) ?? 'netezza',
+                    'alterTable',
+                    'alter',
+                );
+            } catch (error: unknown) {
+                vscode.window.showErrorMessage(error instanceof Error ? error.message : 'ALTER TABLE is not available for this connection.');
                 return;
             }
 
@@ -496,6 +539,17 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
         // Add Foreign Key
         vscode.commands.registerCommand('netezza.addForeignKey', async (item: SchemaItemData) => {
+            if (!item || !item.label || !item.dbName || !item.schema || item.objType !== 'TABLE') {
+                vscode.window.showErrorMessage('Invalid selection. Select a table.');
+                return;
+            }
+            const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+            try {
+                assertDesignerOperation(databaseKind, 'foreignKeys', 'create');
+            } catch (error: unknown) {
+                vscode.window.showErrorMessage(error instanceof Error ? error.message : 'Foreign keys are not available for this connection.');
+                return;
+            }
             if (item && item.label && item.dbName && item.schema && item.objType === 'TABLE') {
                 const fullName = getFullName(item, connectionManager);
 

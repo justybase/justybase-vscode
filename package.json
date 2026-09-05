@@ -495,6 +495,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "netezza.openObjectDesigner",
+        "title": "Open Object Designer",
+        "icon": "$(symbol-structure)"
+      },
+      {
         "command": "netezza.alterTableWizard",
         "title": "Alter Table Wizard",
         "icon": "$(tools)"
@@ -2322,13 +2327,18 @@
           "group": "5_schema@1"
         },
         {
-          "command": "netezza.alterTableWizard",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "command": "netezza.openObjectDesigner",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
           "group": "5_schema@0"
         },
         {
-          "command": "netezza.addForeignKey",
+          "command": "netezza.alterTableWizard",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "group": "5_schema@1"
+        },
+        {
+          "command": "netezza.addForeignKey",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != netezza && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "5_schema@2"
         },
         {

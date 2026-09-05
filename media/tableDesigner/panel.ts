@@ -4,6 +4,7 @@ import {
     getTableDesignerProfile,
     type TableDesignerCreateInput,
 } from '../../src/views/tableDesignerDdl.js';
+import { getDatabaseDesignerCapabilities } from '../../packages/contracts/src/database/designerCapabilities.js';
 import type {
     TableDesignerColumn,
     TableDesignerHostToWebviewMessage,
@@ -12,11 +13,15 @@ import type {
 } from './hostContracts.js';
 import { eventTargetAsHtmlElement, eventTargetAsInput, getElementById } from './dom.js';
 import { postToHost } from './protocol.js';
+import { getDesignerCapability, isDesignerOperationSupported } from '../shared/designerCapability.js';
 
 const context = (
     window as unknown as { initialContext: TableDesignerInitialContext }
 ).initialContext;
 const profile = getTableDesignerProfile(context.databaseKind);
+const designerCapabilities = getDatabaseDesignerCapabilities(context.databaseKind);
+const tableCapability = getDesignerCapability(designerCapabilities, 'table');
+const canCreateTable = isDesignerOperationSupported(designerCapabilities, 'table', 'create');
 
 let columns: TableDesignerColumn[] = [
     { id: 1, name: 'ID', type: 'INTEGER', length: '', notNull: true, pk: true, distribute: false, defaultValue: '' },
@@ -47,8 +52,11 @@ function setExecutingState(executing: boolean): void {
     const executeBtn = getElementById<HTMLButtonElement>('executeDdlBtn');
     const saveBtn = getElementById<HTMLButtonElement>('saveAsSqlBtn');
     if (executeBtn) {
-        executeBtn.disabled = executing;
+        executeBtn.disabled = executing || !canCreateTable;
         executeBtn.textContent = executing ? 'Executing…' : 'Execute Table Creation';
+        if (!canCreateTable) {
+            executeBtn.title = tableCapability.reason ?? 'Table creation is not available for this database kind.';
+        }
     }
     if (saveBtn) {
         saveBtn.disabled = executing;
@@ -119,6 +127,10 @@ function updateDialectUi(): void {
     const organizeSection = getElementById('organizeSection');
     const organizeNoneLabel = getElementById('organizeNoneLabel');
     const ifNotExistsLabel = getElementById('ifNotExistsLabel');
+
+    if (!canCreateTable) {
+        showStatusBanner(tableCapability.reason ?? 'Table creation is not available for this database kind.', 'info');
+    }
 
     document.querySelectorAll('.distribution-column').forEach(element => {
         element.classList.toggle('hidden', !profile.supportsDistribution);
