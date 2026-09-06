@@ -4,7 +4,10 @@ import type {
   DatabaseKind,
   DesignerOperation,
 } from '@justybase/contracts';
-import { UnsupportedDesignerOperationError } from '@justybase/contracts';
+import {
+  UnsupportedDesignerOperationError,
+} from '@justybase/contracts';
+import { assertDesignerCapabilityOperationSupported } from './designer';
 
 export interface DesignerColumnInput {
   name: string;
@@ -360,17 +363,7 @@ function assertOperation(
   operation: DesignerOperation,
   allowAlternative = false,
 ): void {
-  if (!capability || !capability.operations.includes(operation)
-    || capability.level === 'unsupported'
-    || capability.level === 'runtime-unavailable'
-    || capability.level === 'privilege-blocked'
-    || (!allowAlternative && capability.level === 'alternative')) {
-    throw new UnsupportedDesignerOperationError(
-      capabilityKey,
-      operation,
-      capability?.reason ?? `The ${capabilityKey} operation is not available for this target.`,
-    );
-  }
+  assertDesignerCapabilityOperationSupported(capability, capabilityKey, operation, allowAlternative);
 }
 
 export function buildAddColumnSql(

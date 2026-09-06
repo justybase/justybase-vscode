@@ -72,6 +72,18 @@ describe('table designer DDL', () => {
         expect(ddl).toContain('"order" INTEGER');
     });
 
+    it('quotes Netezza identifiers containing dollar signs', () => {
+        const ddl = buildTableDesignerCreateSql(input({
+            databaseKind: 'netezza',
+            dbName: 'SYSTEM',
+            schemaName: 'ADMIN',
+            tableName: 'FOO$',
+            columns: [{ name: 'COL$', type: 'INTEGER', length: '', notNull: false, pk: false, defaultValue: '' }],
+        }));
+        expect(ddl).toContain('SYSTEM.ADMIN."FOO$"');
+        expect(ddl).toContain('"COL$" INTEGER');
+    });
+
     it('drops IF NOT EXISTS for Oracle and uses GLOBAL TEMPORARY with ON COMMIT PRESERVE ROWS', () => {
         const oracle = buildTableDesignerCreateSql(input({
             databaseKind: 'oracle',

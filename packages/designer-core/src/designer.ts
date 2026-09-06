@@ -1,5 +1,6 @@
 import { UnsupportedDesignerOperationError } from '@justybase/contracts';
 import type {
+  DatabaseDesignerCapability,
   DatabaseDesignerCapabilities,
   DatabaseSchemaChangePlan,
   DatabaseDesignerCapabilityKey,
@@ -36,16 +37,32 @@ export function getDesignerCapability(
   return capabilities.constructs[capabilityKey];
 }
 
-function isCapabilityOperationSupported(
-  capability: DatabaseDesignerCapabilities['constructs'][DatabaseDesignerCapabilityKey],
+export function isDesignerCapabilityOperationSupported(
+  capability: DatabaseDesignerCapability | undefined,
   operation: DesignerOperation,
-  allowAlternative: boolean,
+  allowAlternative = false,
 ): boolean {
-  return capability.operations.includes(operation)
+  return Boolean(capability
+    && capability.operations.includes(operation)
     && capability.level !== 'unsupported'
     && capability.level !== 'runtime-unavailable'
     && capability.level !== 'privilege-blocked'
-    && (allowAlternative || capability.level !== 'alternative');
+    && (allowAlternative || capability.level !== 'alternative'));
+}
+
+export function assertDesignerCapabilityOperationSupported(
+  capability: DatabaseDesignerCapability | undefined,
+  capabilityKey: DatabaseDesignerCapabilityKey,
+  operation: DesignerOperation,
+  allowAlternative = false,
+): void {
+  if (!isDesignerCapabilityOperationSupported(capability, operation, allowAlternative)) {
+    throw new UnsupportedDesignerOperationError(
+      capabilityKey,
+      operation,
+      capability?.reason ?? `The ${capabilityKey} operation is not available for this target.`,
+    );
+  }
 }
 
 export function hasDesignerOperation(
@@ -54,7 +71,7 @@ export function hasDesignerOperation(
   operation: DesignerOperation,
   allowAlternative = false,
 ): boolean {
-  return isCapabilityOperationSupported(capabilities.constructs[capabilityKey], operation, allowAlternative);
+  return isDesignerCapabilityOperationSupported(capabilities.constructs[capabilityKey], operation, allowAlternative);
 }
 
 export function isDesignerOperationSupported(
@@ -73,9 +90,7 @@ export function assertDesignerOperationSupported(
   allowAlternative = false,
 ): void {
   const capability = capabilities.constructs[capabilityKey];
-  if (!isCapabilityOperationSupported(capability, operation, allowAlternative)) {
-    throw new UnsupportedDesignerOperationError(capabilityKey, operation, capability.reason);
-  }
+  assertDesignerCapabilityOperationSupported(capability, capabilityKey, operation, allowAlternative);
 }
 
 export function assertDesignerPlanCurrent(

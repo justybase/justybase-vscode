@@ -3,7 +3,7 @@ import {
     getTableDesignerContainerDisplay,
     getTableDesignerProfile,
     type TableDesignerCreateInput,
-} from '../../src/views/tableDesignerDdl.js';
+} from '@justybase/designer-core';
 import {
     getDatabaseDesignerCapabilities,
     resolveDatabaseDesignerCapabilities,

@@ -22,6 +22,7 @@ const repositoryRoot = path.resolve(__dirname, '..', '..');
 const resultPanelSmokeTestPath = path.join(__dirname, 'extensionHostSmoke.js');
 const authoringSmokeTestPath = path.join(__dirname, 'extensionHostAuthoringSmoke.js');
 const filterPerformanceSmokeTestPath = path.join(__dirname, 'extensionHostFilterPerformanceSmoke.js');
+const designerSmokeTestPath = path.join(__dirname, 'designerSmoke.js');
 const requestedVersion = (process.env.RESULT_PANEL_VSCODE_TEST_VERSION || 'stable').trim();
 
 function requestedEngine() {
@@ -33,8 +34,8 @@ function requestedEngine() {
 function requestedSuite() {
     const argument = process.argv.find(value => value.startsWith('--suite='));
     const suite = argument ? argument.slice('--suite='.length) : 'result-panel';
-    if (suite !== 'result-panel' && suite !== 'authoring' && suite !== 'result-panel-filter-performance') {
-        throw new Error('Extension Host suite must be result-panel, result-panel-filter-performance, or authoring.');
+    if (suite !== 'result-panel' && suite !== 'authoring' && suite !== 'result-panel-filter-performance' && suite !== 'designer') {
+        throw new Error('Extension Host suite must be result-panel, result-panel-filter-performance, authoring, or designer.');
     }
     return suite;
 }
@@ -126,7 +127,9 @@ async function main() {
         ? authoringSmokeTestPath
         : suite === 'result-panel-filter-performance'
             ? filterPerformanceSmokeTestPath
-            : resultPanelSmokeTestPath;
+            : suite === 'designer'
+                ? designerSmokeTestPath
+                : resultPanelSmokeTestPath;
     requirePath(path.join(repositoryRoot, 'package.json'), 'core manifest');
     requirePath(path.join(repositoryRoot, 'dist', 'extension.js'), 'core bundle (run npm run build first)');
     requirePath(smokeTestPath, 'Extension Host smoke test');
@@ -146,7 +149,9 @@ async function main() {
             ? `${engine}-result-panel-report.json`
             : suite === 'result-panel-filter-performance'
                 ? `${engine}-result-panel-filter-performance-report.json`
-                : 'authoring-report.json',
+                : suite === 'designer'
+                    ? 'designer-report.json'
+                    : 'authoring-report.json',
     );
     const tracePath = path.join(
         artifactDirectory,
@@ -154,12 +159,18 @@ async function main() {
             ? `${engine}-result-panel-trace.json`
             : suite === 'result-panel-filter-performance'
                 ? `${engine}-result-panel-filter-performance-trace.json`
-                : 'authoring-trace.json',
+                : suite === 'designer'
+                    ? 'designer-trace.json'
+                    : 'authoring-trace.json',
     );
     const sourceFilePath = path.join(workDirectory, 'fixture.sql');
     const databasePath = path.join(workDirectory, 'fixture.sqlite');
     const tableName = engine === 'sqlite'
-        ? suite === 'result-panel-filter-performance' ? FILTER_PERFORMANCE_TABLE_NAME : SQLITE_TABLE_NAME
+        ? suite === 'result-panel-filter-performance'
+            ? FILTER_PERFORMANCE_TABLE_NAME
+            : suite === 'designer'
+                ? 'jbl_extension_host_designer'
+                : SQLITE_TABLE_NAME
         : `jbl_eh_${Date.now()}_${process.pid}`;
 
     if (engine === 'sqlite' && suite === 'result-panel') createSqliteFixture(databasePath);
