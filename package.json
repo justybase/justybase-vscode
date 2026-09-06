@@ -4489,6 +4489,7 @@
     "lint:extended": "eslint media apps packages extensions --ext .ts,.tsx",
     "lint:extended:check": "eslint media apps packages extensions --ext .ts,.tsx --format json | node scripts/quality-gate.mjs lint",
     "check:architecture": "node scripts/architecture-check.mjs",
+    "architecture:report": "node scripts/architecture-check.mjs --report",
     "lint:fix": "eslint src --fix",
     "validate": "npm run check-types && npm run lint",
     "quality:report": "node scripts/run-quality-report.mjs",

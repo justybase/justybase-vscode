@@ -13,6 +13,7 @@ test behavior.
 | Layer | Scope | Command |
 | --- | --- | --- |
 | Static | TypeScript, contracts, API, web | `npm run check-types`, `npm run check-types:api`, `npm run check-types:web` |
+| Architecture | Dependency directions, pure packages, explicit debt and cycles | `npm run check:architecture`, `npm run test:quality-tools` |
 | Lint | Blocking desktop rules plus ratcheted workspace baseline | `npm run lint`, `npm run lint:extended:check` |
 | Quality tooling | Versioned baseline/report and changed-code gate helpers | `npm run test:quality-tools`, `npm run quality:report` |
 | Unit | Parsers, state machines, providers, utilities | `npm run test:validate` |
@@ -27,6 +28,11 @@ or manual because they require credentials and controlled infrastructure.
 `quality/quality-baseline.json`; on a pull request, the CI unit job also runs
 the changed high-risk gate against the pull request base commit. Locally, the
 equivalent is `npm run test:coverage:changed` after fetching `origin/master`.
+
+Shared-code migration slices additionally follow the desktop-first comparison
+and companion gates in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
+Capture old/new behavior on the same fixtures before replacing a facade;
+changing a baseline to accept a difference is not parity evidence.
 
 ## Change risk and required layers
 

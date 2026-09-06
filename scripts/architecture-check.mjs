@@ -11,6 +11,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isBuiltin } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import * as ts from 'typescript';
 
@@ -213,8 +214,19 @@ function validateRules(rawRules) {
   if (!Array.isArray(exceptions)) {
     errors.push(configError('exceptions must be an array.'));
   } else {
-    exceptions.forEach((exception, index) => validateException(exception, `exceptions[${index}]`, errors));
+    exceptions.forEach((exception, index) => validateException(exception, `exceptions[${index}]`, errors, { allowGlob: false }));
   }
+
+  const pureSources = rawRules.pureSources ?? [];
+  const pureExternalImports = rawRules.pureExternalImports ?? [];
+  const pureExternalExceptions = rawRules.pureExternalExceptions ?? [];
+  if (!Array.isArray(pureSources)) errors.push(configError('pureSources must be an array.'));
+  else pureSources.forEach((source, index) => validatePathPattern(source, `pureSources[${index}]`, errors));
+  if (!Array.isArray(pureExternalImports) || pureExternalImports.some(value => !isNonEmptyString(value))) {
+    errors.push(configError('pureExternalImports must contain exact module specifiers.'));
+  }
+  if (!Array.isArray(pureExternalExceptions)) errors.push(configError('pureExternalExceptions must be an array.'));
+  else pureExternalExceptions.forEach((exception, index) => validateException(exception, `pureExternalExceptions[${index}]`, errors, { allowGlob: false }));
 
   const cycleExceptions = rawRules.cycleExceptions ?? [];
   if (!Array.isArray(cycleExceptions)) {
@@ -275,6 +287,9 @@ function validateRules(rawRules) {
       cycleExceptions,
       workspaceEntryPoints,
       forbiddenImports,
+      pureSources,
+      pureExternalImports,
+      pureExternalExceptions,
     },
     errors: [],
   };
@@ -289,6 +304,7 @@ function validateException(exception, field, errors, { allowGlob = true } = {}) 
   validatePathPattern(exception.target, `${field}.target`, errors, { allowGlob });
   if (!isNonEmptyString(exception.reason)) errors.push(configError(`${field}.reason must be a non-empty string.`));
   if (!isNonEmptyString(exception.owner)) errors.push(configError(`${field}.owner must be a non-empty string.`));
+  if (!isNonEmptyString(exception.removeWhen)) errors.push(configError(`${field}.removeWhen must be a non-empty string.`));
   if (exception.allowCycle !== undefined && typeof exception.allowCycle !== 'boolean') {
     errors.push(configError(`${field}.allowCycle must be boolean when present.`));
   }
@@ -778,6 +794,8 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
   const edges = [];
   const uniqueEdges = new Map();
   const matchedExceptions = new Set();
+  const matchedPureExternalExceptions = new Set();
+  const isPure = source => rules.pureSources.some(pattern => matchesPathPattern(pattern, source));
   const forbiddenImports = rules.forbiddenImports;
   for (const [file, sourceFile] of sourceFiles) {
     const source = relativePath(absoluteRoot, file);
@@ -793,6 +811,16 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
         workspacePackages,
       });
       const line = lineNumber(sourceFile, reference.node);
+      if (isPure(source) && target.kind === 'external') {
+        const exceptionIndex = rules.pureExternalExceptions.findIndex(exception => exceptionMatches(exception, source, reference.specifier));
+        const platform = isBuiltin(reference.specifier) || /^(?:node:|vscode(?:\/|$)|react(?:\/|$)|react-dom(?:\/|$)|electron(?:\/|$))/u.test(reference.specifier);
+        if (exceptionIndex >= 0) matchedPureExternalExceptions.add(exceptionIndex);
+        else if (platform || !rules.pureExternalImports.includes(reference.specifier)) {
+          diagnostics.push(makeDiagnostic(ARCHITECTURE_CODES.forbiddenDependency,
+            `${source}:${line} imports module ${reference.specifier} not approved for pure packages.`,
+            { source, specifier: reference.specifier, line }));
+        }
+      }
       for (const rule of forbiddenImports) {
         if (forbiddenImportRuleMatches(rule, source, layer, reference.specifier)) {
           diagnostics.push(makeDiagnostic(
@@ -837,8 +865,11 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
       edges.push(edge);
       const key = edgeKey(edge.source, edge.target);
       if (!uniqueEdges.has(key)) uniqueEdges.set(key, edge);
-      if (layer !== targetLayer) {
-        const allowed = rules.allowedDependencies[layer]?.includes(targetLayer) ?? false;
+      const pureToRuntime = isPure(source) && targetLayer === 'shared' && !isPure(targetRelative);
+      const crossCompanion = layer === 'companions' && targetLayer === 'companions'
+        && source.split('/')[1] !== targetRelative.split('/')[1];
+      if (layer !== targetLayer || pureToRuntime || crossCompanion) {
+        const allowed = !pureToRuntime && !crossCompanion && (rules.allowedDependencies[layer]?.includes(targetLayer) ?? false);
         const exceptionIndex = rules.exceptions.findIndex(exception => exceptionMatches(exception, source, targetRelative));
         if (!allowed && exceptionIndex < 0) {
           diagnostics.push(makeDiagnostic(
@@ -900,6 +931,9 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
       ));
     }
   }
+  for (const [index] of rules.pureExternalExceptions.entries()) {
+    if (!matchedPureExternalExceptions.has(index)) diagnostics.push(configError(`pureExternalExceptions[${index}] does not match a pure production import.`));
+  }
 
   return {
     rules,
@@ -941,6 +975,20 @@ export function runArchitectureCheck(root = process.cwd(), suppliedRules) {
   return true;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && !runArchitectureCheck()) {
-  process.exitCode = 1;
+/** Read-only inventory: exact debt and graph plus counts for each import direction. */
+export function createArchitectureReport(result) {
+  const layerEdges = {};
+  for (const edge of result.edges) {
+    const key = `${edge.sourceLayer} -> ${edge.targetLayer}`;
+    layerEdges[key] = (layerEdges[key] ?? 0) + 1;
+  }
+  return { reportVersion: 1, ...result, layerEdges };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.includes('--report')) {
+    const result = analyzeArchitecture();
+    console.log(JSON.stringify(createArchitectureReport(result), null, 2));
+    if (result.diagnostics.length > 0) process.exitCode = 1;
+  } else if (!runArchitectureCheck()) process.exitCode = 1;
 }

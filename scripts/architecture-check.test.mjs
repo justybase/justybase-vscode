@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +7,9 @@ import test from 'node:test';
 import {
   ARCHITECTURE_CODES,
   analyzeArchitecture,
+  createArchitectureReport,
   findArchitectureDiagnostics,
+  loadArchitectureRules,
 } from './architecture-check.mjs';
 
 function createFixture() {
@@ -221,10 +224,13 @@ test('accepts an existing cycle only with an exact fingerprinted cycle exception
         edgeFingerprint: cycle.edgeFingerprint,
         reason: 'Fixture cycle retained during migration.',
         owner: 'Fixture owner',
+        removeWhen: 'The fixture bridge is removed.',
       }],
     };
     const result = analyzeArchitecture(root, allowedRules);
     assert.deepEqual(result.diagnostics, []);
+    writeFixture(root, 'src/b.ts', "import { a } from './a'; import './b'; export const b = a;");
+    assert.ok(analyzeArchitecture(root, allowedRules).diagnostics.some(d => d.code === ARCHITECTURE_CODES.dependencyCycle));
   } finally {
     removeFixture(root);
   }
@@ -252,6 +258,7 @@ test('does not match a cycle exception anchor from another strongly connected co
         edgeFingerprint: firstCycle.edgeFingerprint,
         reason: 'Incorrectly scoped fixture anchor.',
         owner: 'Fixture owner',
+        removeWhen: 'The fixture bridge is removed.',
       }],
     });
     assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.dependencyCycle
@@ -272,6 +279,7 @@ test('accepts a concrete, reasoned edge exception without accepting a layer-wide
         target: 'src/desktop.ts',
         reason: 'Fixture adapter bridge.',
         owner: 'Fixture owner',
+        removeWhen: 'The fixture bridge is removed.',
       }],
     }));
     assert.deepEqual(result.diagnostics, []);
@@ -325,6 +333,145 @@ test('rejects malformed nested tsconfig diagnostics as ARCH004', () => {
     writeFixture(root, 'apps/api/src/main.ts', 'export const main = true;');
     const result = analyzeArchitecture(root, fixtureRules());
     assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.invalidConfiguration));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('pure packages reject platform modules, unknown drivers and runtime packages through every import form', () => {
+  const root = createFixture();
+  try {
+    const { rules: repositoryRules } = loadArchitectureRules(path.resolve(import.meta.dirname, '..'));
+    writeFixture(root, 'packages/shared/src/runtime.ts', "import 'node:fs'; export const runtime = true;");
+    writeFixture(root, 'packages/contracts/src/index.ts', `
+      import 'fs';
+      export * from 'node:path';
+      import type { ReactNode } from 'react';
+      void import('react-dom/client');
+      const driver = require('mysql2/promise');
+      import editor = require('vscode');
+      type Main = import('electron').App;
+      import 'some-future-database-driver';
+      import { runtime } from '../../shared/src/runtime';
+    `);
+    const result = analyzeArchitecture(root, fixtureRules({
+      pureSources: repositoryRules.pureSources,
+      pureExternalImports: repositoryRules.pureExternalImports,
+    }));
+    assert.equal(result.diagnostics.length, 9);
+    assert.ok(result.diagnostics.every(d => d.code === ARCHITECTURE_CODES.forbiddenDependency));
+    assert.ok(result.diagnostics.some(d => d.target === 'packages/shared/src/runtime.ts'));
+    assert.ok(result.diagnostics.every(d => d.source === 'packages/contracts/src/index.ts'));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('a pure shared engine cannot import a Node runtime even through a workspace alias', () => {
+  const root = createFixture();
+  try {
+    writeJsonFixture(root, 'packages/shared/package.json', { name: '@fixture/runtime', main: 'dist/index.js' });
+    writeFixture(root, 'packages/shared/src/index.ts', "import 'node:fs'; export const runtime = true;");
+    writeFixture(root, 'packages/result-core/src/index.ts', "export { runtime } from '@fixture/runtime';");
+    const result = analyzeArchitecture(root, fixtureRules({
+      layers: { shared: { sources: ['packages/*/src'] } },
+      pureSources: ['packages/*-core/src/**'],
+    }));
+    assert.equal(result.diagnostics.length, 1);
+    assert.equal(result.diagnostics[0].code, ARCHITECTURE_CODES.forbiddenDependency);
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('new shared-to-desktop, web-to-desktop and cross-companion bridges fail', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'src/index.ts', 'export const value = true;');
+    writeFixture(root, 'extensions/other/src/index.ts', 'export const other = true;');
+    writeFixture(root, 'extensions/example/src/index.ts', "export { other } from '../../other/src';");
+    writeFixture(root, 'packages/shared/src/index.ts', "export { value } from '../../../src';");
+    writeFixture(root, 'apps/web/src/index.ts', "export { value } from '../../../src';");
+    const result = analyzeArchitecture(root, fixtureRules());
+    assert.equal(result.diagnostics.length, 3);
+    assert.ok(result.diagnostics.every(d => d.code === ARCHITECTURE_CODES.forbiddenDependency));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('exceptions require removal conditions and exact paths', () => {
+  const root = createFixture();
+  try {
+    for (const exception of [
+      { source: 'src/a.ts', target: 'apps/api/src/a.ts', reason: 'Bridge', owner: 'Owner' },
+      { source: 'src/**', target: 'apps/api/src/a.ts', reason: 'Bridge', owner: 'Owner', removeWhen: 'Migration passes' },
+    ]) {
+      const result = analyzeArchitecture(root, fixtureRules({ exceptions: [exception] }));
+      assert.ok(result.diagnostics.some(d => d.code === ARCHITECTURE_CODES.invalidConfiguration));
+    }
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('a legacy pure external exception cannot authorize another source and must be removed when stale', () => {
+  const root = createFixture();
+  try {
+    const rules = fixtureRules({
+      pureSources: ['packages/contracts/src/**'],
+      pureExternalExceptions: [{ source: 'packages/contracts/src/a.ts', target: 'vscode-languageserver/node',
+        reason: 'Legacy protocol entry', owner: 'SQL owner', removeWhen: 'Browser entry replaces it' }],
+    });
+    writeFixture(root, 'packages/contracts/src/a.ts', "import 'vscode-languageserver/node';");
+    assert.deepEqual(analyzeArchitecture(root, rules).diagnostics, []);
+    writeFixture(root, 'packages/contracts/src/b.ts', "import 'vscode-languageserver/node';");
+    assert.equal(analyzeArchitecture(root, rules).diagnostics[0].code, ARCHITECTURE_CODES.forbiddenDependency);
+    writeFixture(root, 'packages/contracts/src/a.ts', 'export {};');
+    assert.ok(analyzeArchitecture(root, rules).diagnostics.some(d => d.code === ARCHITECTURE_CODES.invalidConfiguration));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('pure engines can use approved portable libraries and other pure packages', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'packages/contracts/src/index.ts', 'export const value = true;');
+    writeFixture(root, 'packages/shared/src/index.ts', "import 'chevrotain'; export { value } from '../../contracts/src';");
+    const rules = fixtureRules({
+      pureSources: ['packages/*/src/**'], pureExternalImports: ['chevrotain'],
+    });
+    const result = analyzeArchitecture(root, rules);
+    assert.deepEqual(result.diagnostics, []);
+    const report = createArchitectureReport(result);
+    assert.equal(report.reportVersion, 1);
+    assert.deepEqual(report.layerEdges, { 'shared -> contracts': 1 });
+    assert.deepEqual(report.edges, result.edges);
+    assert.deepEqual(report.rules, result.rules);
+    assert.deepEqual(report.cycles, result.cycles);
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('report CLI emits JSON, preserves the baseline and fails on violations', () => {
+  const root = createFixture();
+  try {
+    const rules = fixtureRules();
+    writeJsonFixture(root, 'quality/architecture-rules.json', rules);
+    writeFixture(root, 'src/index.ts', 'export const value = true;');
+    const runReport = () => spawnSync(process.execPath,
+      [path.join(import.meta.dirname, 'architecture-check.mjs'), '--report'],
+      { cwd: root, encoding: 'utf8' });
+    const passing = runReport();
+    assert.equal(passing.status, 0, passing.stderr);
+    assert.equal(JSON.parse(passing.stdout).reportVersion, 1);
+    writeFixture(root, 'apps/web/src/index.ts', "export { value } from '../../../src';");
+    const failing = runReport();
+    assert.equal(failing.status, 1, failing.stderr);
+    assert.equal(JSON.parse(failing.stdout).diagnostics[0].code, ARCHITECTURE_CODES.forbiddenDependency);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'quality/architecture-rules.json'), 'utf8')), rules);
   } finally {
     removeFixture(root);
   }

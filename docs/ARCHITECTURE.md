@@ -9,11 +9,49 @@ are tracked in the
 describes the intended structure; the automated architecture check determines
 which parts are currently enforced.
 
+The current dependency map, contract audit, service proposal and ordered
+migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
+That preparation does not move production implementations, create empty
+packages, or create an Electron application.
+
+## Target ownership
+
+Arrows below mean “imports”; product composition roots select and inject
+implementations. A pure engine never imports an adapter or driver.
+
 ```text
-VS Code extension ──┐
-                     ├─ packages/contracts ─ designer-core ─ database-runtime
-Web React editor ─ apps/api ──────── sql-core ────────────────────────┘
+VS Code adapter / API backend / future Electron backend
+    -> Node database-runtime -> dialect-<kind>-runtime -> driver
+    -> pure SQL / metadata / result engines -> contracts
+Desktop webview / React renderer -> pure engines and contracts
+React renderer -> HTTP client -> API backend
 ```
+
+| Logic | Target owner |
+| --- | --- |
+| Parser, linter, completion and SQL scope | `@justybase/sql-core` |
+| Metadata model and pure merge/invalidation rules | future `@justybase/metadata-core` |
+| Result reducer, identity and pure data operations | future `@justybase/result-core` |
+| Execution, cancellation, retry and runtime resource cleanup | `@justybase/database-runtime` |
+| Database-specific driver and Node I/O | future `@justybase/dialect-<kind>-runtime` |
+| Database-specific SQL grammar and authoring | future `@justybase/dialect-<kind>` |
+| Stable public and transport types | `@justybase/contracts` |
+| Secrets, filesystem, transport, editor integration and lifecycle | product adapter |
+| DOM/TanStack webviews and React components | separate desktop and React renderers |
+
+These are ownership decisions, not a claim that extraction is complete.
+`designer-core` already owns pure designer logic; `access-file` is a Node file
+runtime. `sql-core` still bundles desktop sources through explicit debt bridges.
+Pure engines receive schema providers, dialect profiles and other services as
+arguments. Existing registries remain at their current compatibility seams;
+new process-global registries combining products and dialects are prohibited.
+Composition-root review enforces that lifetime/ownership rule; an import graph
+alone cannot detect every global singleton.
+
+The future Electron main process will host/manage the backend; its React
+renderer will use the same HTTP client as web. Backend startup, authentication,
+port selection and shutdown belong to that later composition-root slice.
+Electron APIs must stay in its adapter, never in a shared package.
 
 ## Runtime boundaries
 
@@ -92,8 +130,8 @@ metadata state cannot survive a terminated execution.
 
 ## Dependency direction
 
-Keep dependencies flowing downward: contracts → platform-neutral core/runtime →
-API or desktop adapters → UI. Avoid cycles between result-panel facades,
+Dependencies point from consumers to providers: UI/adapters → core/runtime →
+contracts. Avoid cycles between result-panel facades,
 messages, tabs, and grid persistence. New cross-platform behavior belongs in a
 shared package only when it is free of VS Code APIs and has contract tests in
 both consumers.
@@ -122,7 +160,7 @@ alias resolution never silently falls back to a less strict configuration.
 
 The direction table is intentionally stricter than the current runtime graph.
 Existing integration bridges are listed as individual `source`/`target`
-exceptions with a `reason` and `owner`; there is no `desktop ↔ companions`
+exceptions with a `reason`, `owner` and `removeWhen`; there is no `desktop ↔ companions`
 layer-wide allowance. The current exceptions cover the sql-core reuse of the
 desktop parser/LSP implementation, companion adapters that still consume
 desktop services, desktop registries that load optional companion providers,
@@ -144,6 +182,26 @@ covers resolution, layer rejection, unresolved imports, cycle fingerprints,
 explicit exceptions, production-file filtering, malformed configuration, and
 the complete current graph. Run `npm run check:architecture` for the blocking
 fail-closed gate.
+
+`pureSources` covers contracts and `*-core` packages, including future
+metadata/result engines. Register each future pure dialect package in that
+list when its first implementation is added. Pure packages cannot import a
+shared Node runtime, even through an alias. External imports require an exact
+approved specifier; Node built-ins (bare and `node:`), VS Code, React and
+Electron are rejected. This also rejects existing or new database drivers
+without relying on a driver-name blacklist. The existing SQL facade's
+`vscode-languageserver/node` import is a single source-scoped
+`pureExternalExceptions` debt entry. No new import may inherit it.
+Shared packages reject `vscode` and `electron`; Node runtimes may use Node and
+drivers. Companions may import their own implementation, shared contracts and
+shared engines/runtime helpers, but cannot import another companion directly.
+
+Exceptions require exact paths and become errors when stale. Cycle node lists
+and fingerprints remain unchanged in this preparation. Use
+`npm run architecture:report --silent` for JSON containing the current edge
+map, layer counts, complete cycle list, exceptions and diagnostics. It returns
+a failure exit code on violations and never rewrites the baseline. The same
+checker runs in the PR Quality Checks job and at the start of `verify:pr`.
 
 Persisted UI state and webview messages are architecture boundaries as well as
 implementation details. New persisted formats require a schema version,

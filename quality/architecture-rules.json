@@ -1,5 +1,22 @@
 {
   "version": 1,
+  "pureSources": [
+    "packages/contracts/src/**",
+    "packages/*-core/src/**"
+  ],
+  "pureExternalImports": [
+    "chevrotain",
+    "vscode-languageserver-textdocument"
+  ],
+  "pureExternalExceptions": [
+    {
+      "source": "packages/sql-core/src/runtime.ts",
+      "target": "vscode-languageserver/node",
+      "reason": "The existing SQL facade imports LSP protocol types and InlayHintKind from the Node entry point.",
+      "owner": "SQL authoring owner",
+      "removeWhen": "The SQL extraction uses a browser-safe protocol entry point and desktop/API authoring parity passes."
+    }
+  ],
   "layers": {
     "contracts": {
       "sources": [
@@ -78,7 +95,7 @@
   "forbiddenImports": [
     {
       "layer": "shared",
-      "specifier": "^vscode(?:/|$)"
+      "specifier": "^(?:vscode|electron)(?:/|$)"
     },
     {
       "source": "packages/designer-core/src/**",
@@ -90,1579 +107,1842 @@
       "source": "extensions/access/src/accessDdlProvider.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/access/src/accessDdlProvider.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/access/src/accessDialect.ts",
       "target": "src/dialects/access/traits.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/access/src/accessImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/access/src/accessSqlAuthoring.ts",
       "target": "src/dialects/access/sql/authoring.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/access/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseDdlGenerator.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseDdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseDdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseDdlGenerator.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseDialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseDialect.ts",
       "target": "src/shared/dialect-traits/clickhouse.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseMaintenanceProvider.ts",
       "target": "src/core/maintenanceProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseMaintenanceProvider.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseSessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/clickhouseSessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/extension.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/sql/authoring.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/clickhouse/src/sql/authoring.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2CommandContext.ts",
       "target": "src/api/publicApi.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2Connection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2DdlGenerator.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2DdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2DdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2DesignerDdl.ts",
       "target": "src/views/designerOperationGuard.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2Dialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2Dialect.ts",
       "target": "src/shared/dialect-traits/db2.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2ExplainParser.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2ImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2IndexDesignerView.ts",
       "target": "src/contracts/webviews/db2IndexDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2MaintenanceProvider.ts",
       "target": "src/core/maintenanceProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2MaintenanceProvider.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2PartitionDesignerView.ts",
       "target": "src/contracts/webviews/db2IndexDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2PartitionDesignerView.ts",
       "target": "src/contracts/webviews/db2PartitionDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2SchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2SessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2SessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/db2TuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/sql/authoring.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/sql/authoring.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/sql/qualityRules.ts",
       "target": "src/providers/linterRules.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/db2/src/sql/qualityRules.ts",
       "target": "src/providers/qualityRuleFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbConnection.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbDdlProvider.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbDdlProvider.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbDdlProvider.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbDialect.ts",
       "target": "src/dialects/duckdb/traits.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbExplainParser.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbMaintenanceProvider.ts",
       "target": "src/core/maintenanceProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbMaintenanceProvider.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbSessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbSessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbSqlAuthoring.ts",
       "target": "src/dialects/duckdb/sql/authoring.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/duckdbTuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/fileDialect.ts",
       "target": "src/dialects/duckdb/traits.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/fileDialect.ts",
       "target": "src/dialects/file/sql/authoring.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/fileQueryCommand.ts",
       "target": "src/services/fileConnectionProfileService.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/sql/qualityRules.ts",
       "target": "src/providers/linterRules.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/duckdb/src/sql/qualityRules.ts",
       "target": "src/providers/qualityRuleFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlDdlGenerator.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlDdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlDdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlDialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlDialect.ts",
       "target": "src/shared/dialect-traits/mssql.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlExplainParser.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlMaintenanceProvider.ts",
       "target": "src/core/maintenanceProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlSessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlSessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/mssqlTuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/sql/authoring.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/sql/authoring.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/sql/qualityRules.ts",
       "target": "src/providers/linterRules.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mssql/src/sql/qualityRules.ts",
       "target": "src/providers/qualityRuleFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlAlterTableDdl.ts",
       "target": "src/contracts/webviews/mysqlAlterTableDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlAlterTableDdl.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlAlterTableDdl.ts",
       "target": "src/views/designerOperationGuard.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlAlterTableDesignerView.ts",
       "target": "src/contracts/webviews/mysqlAlterTableDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlCommandContext.ts",
       "target": "src/api/publicApi.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlCommandContext.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDdlGenerator.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDdlGenerator.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDesignerDdl.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDesignerDdl.ts",
       "target": "src/views/designerOperationGuard.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDesignerOperations.ts",
       "target": "src/contracts/webviews/mysqlAlterTableDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDesignerOperations.ts",
       "target": "src/contracts/webviews/mysqlIndexDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDesignerOperations.ts",
       "target": "src/contracts/webviews/mysqlPartitionDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDesignerOperations.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlDialect.ts",
       "target": "src/shared/dialect-traits/mysql.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlExplainParser.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlIndexDesignerView.ts",
       "target": "src/contracts/webviews/mysqlIndexDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlMaintenanceProvider.ts",
       "target": "src/core/maintenanceProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlMaintenanceProvider.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlPartitionDesignerView.ts",
       "target": "src/contracts/webviews/mysqlPartitionDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlSessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlSessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/mysqlTuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/sql/authoring.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/mysql/src/sql/authoring.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleDdlGenerator.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleDdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleDdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleDdlGenerator.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleDialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleDialect.ts",
       "target": "src/shared/dialect-traits/oracle.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleExplainParser.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleMaintenanceProvider.ts",
       "target": "src/core/maintenanceProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleMaintenanceProvider.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleSessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleSessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/oracleTuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/sql/authoring.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/sql/authoring.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/sql/qualityRules.ts",
       "target": "src/providers/linterRules.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/oracle/src/sql/qualityRules.ts",
       "target": "src/providers/qualityRuleFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlAlterTableDdl.ts",
       "target": "src/contracts/webviews/postgresqlAlterTableDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlAlterTableDdl.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlAlterTableDesignerView.ts",
       "target": "src/contracts/webviews/postgresqlAlterTableDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlCommandContext.ts",
       "target": "src/api/publicApi.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlCommandContext.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDdlGenerator.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDdlGenerator.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDesignerOperations.ts",
       "target": "src/contracts/webviews/postgresqlAlterTableDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDesignerOperations.ts",
       "target": "src/contracts/webviews/postgresqlIndexDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDesignerOperations.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlDialect.ts",
       "target": "src/shared/dialect-traits/postgresql-compatible.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlExplainParser.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlIndexDdl.ts",
       "target": "src/contracts/webviews/postgresqlIndexDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlIndexDdl.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlIndexDdl.ts",
       "target": "src/views/designerOperationGuard.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlIndexDesignerView.ts",
       "target": "src/contracts/webviews/postgresqlIndexDesignerContracts.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlMaintenanceProvider.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlSessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlSessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlSqlAuthoring.ts",
       "target": "src/shared/sql-authoring/postgresql-compatible.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/postgresql/src/postgresqlTuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeDdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeDdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeDdlGenerator.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeDialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeDialect.ts",
       "target": "src/shared/dialect-traits/snowflake.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeImportExport.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeImportPlanner.ts",
       "target": "src/import/dataImporter.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeImportPlanner.ts",
       "target": "src/import/tabularDataImporter.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeImportPlanner.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeQueryProfile.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeSystemQueries.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeTuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/sql/authoring.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/sql/builtins.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/sql/keywords.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/sql/signatures.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/snowflake/src/sql/signatures.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/extension.ts",
       "target": "src/api/companionActivation.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/sql/authoring.ts",
       "target": "src/sql/authoring/baseProfiles.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/sql/authoring.ts",
       "target": "src/sql/authoring/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaConnection.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaConnection.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaDdlGenerator.ts",
       "target": "src/core/connectionFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaDdlGenerator.ts",
       "target": "src/core/connectionUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaDdlGenerator.ts",
       "target": "src/types/index.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaDdlGenerator.ts",
       "target": "src/utils/identifierUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaDialect.ts",
       "target": "src/core/connectionFormBuilder.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaDialect.ts",
       "target": "src/shared/dialect-traits/vertica.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaExplainParser.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaImportTypeMapper.ts",
       "target": "src/dialects/netezza/import/typeMapping.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaSchemaProvider.ts",
       "target": "src/core/metadataProviderFactory.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaSessionMonitorProvider.ts",
       "target": "src/core/connectionManager.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaSessionMonitorProvider.ts",
       "target": "src/core/sessionMonitorProviderUtils.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "extensions/vertica/src/verticaTuningAdvisor.ts",
       "target": "src/services/tuning/types.ts",
       "reason": "This companion adapter currently consumes a desktop implementation; migrate it to a shared contract or adapter before removing the bridge.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "This companion consumes the shared contract or public core API instead of the desktop source, and its verify and activation gates pass."
     },
     {
       "source": "media/db2IndexDesigner/panel.ts",
       "target": "extensions/db2/src/db2DesignerDdl.ts",
       "reason": "This media designer panel currently reuses a companion DDL builder; move the builder to a shared package before removing the bridge.",
-      "owner": "Media architecture owner"
+      "owner": "Media architecture owner",
+      "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
       "source": "media/db2PartitionDesigner/panel.ts",
       "target": "extensions/db2/src/db2DesignerDdl.ts",
       "reason": "This media designer panel currently reuses a companion DDL builder; move the builder to a shared package before removing the bridge.",
-      "owner": "Media architecture owner"
+      "owner": "Media architecture owner",
+      "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
       "source": "media/mysqlAlterTableDesigner/panel.ts",
       "target": "extensions/mysql/src/mysqlAlterTableDdl.ts",
       "reason": "This media designer panel currently reuses a companion DDL builder; move the builder to a shared package before removing the bridge.",
-      "owner": "Media architecture owner"
+      "owner": "Media architecture owner",
+      "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
       "source": "media/mysqlIndexDesigner/panel.ts",
       "target": "extensions/mysql/src/mysqlDesignerDdl.ts",
       "reason": "This media designer panel currently reuses a companion DDL builder; move the builder to a shared package before removing the bridge.",
-      "owner": "Media architecture owner"
+      "owner": "Media architecture owner",
+      "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
       "source": "media/mysqlPartitionDesigner/panel.ts",
       "target": "extensions/mysql/src/mysqlDesignerDdl.ts",
       "reason": "This media designer panel currently reuses a companion DDL builder; move the builder to a shared package before removing the bridge.",
-      "owner": "Media architecture owner"
+      "owner": "Media architecture owner",
+      "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
       "source": "media/postgresqlAlterTableDesigner/panel.ts",
       "target": "extensions/postgresql/src/postgresqlAlterTableDdl.ts",
       "reason": "This media designer panel currently reuses a companion DDL builder; move the builder to a shared package before removing the bridge.",
-      "owner": "Media architecture owner"
+      "owner": "Media architecture owner",
+      "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
       "source": "media/postgresqlIndexDesigner/panel.ts",
       "target": "extensions/postgresql/src/postgresqlIndexDdl.ts",
       "reason": "This media designer panel currently reuses a companion DDL builder; move the builder to a shared package before removing the bridge.",
-      "owner": "Media architecture owner"
+      "owner": "Media architecture owner",
+      "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/contracts/database/index.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/core/sqlAuthoringRegistry.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/dialects/netezza/sql/authoring.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/lsp/protocol.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/providers/parsers/identifierRoleCollector.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/providers/parsers/parserSqlContext.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/providers/qualityRuleRegistry.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/providers/types.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/completionEngine.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/diagnosticsUtils.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/documentParseRequest.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/functionCompletionUtils.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/hoverEngine.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/inlayHintEngine.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/lspSchemaProvider.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/metadataBridge.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/signatureHelpUtils.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/services/sqlFormatter.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sql/semanticTokenNames.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sql/sqlParser.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sql/sqlSourceScan.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sqlParser/documentParseSession.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sqlParser/index.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sqlParser/parsingRuntime.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sqlParser/qualityEngineCore.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sqlParser/validationConfig.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
       "target": "src/sqlParser/validator.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner"
+      "owner": "SQL core owner",
+      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
     },
     {
       "source": "src/commands/coreCommands.ts",
       "target": "extensions/snowflake/src/snowflakeQueryProfile.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/commands/importCommands.ts",
       "target": "extensions/snowflake/src/snowflakeImportExport.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/commands/query/queryCommandTuning.ts",
       "target": "extensions/clickhouse/src/clickhouseExplainParser.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/commands/query/queryCommandTuning.ts",
       "target": "extensions/mysql/src/mysqlExplainParser.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/commands/query/queryCommandTuning.ts",
       "target": "extensions/postgresql/src/postgresqlExplainParser.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/commands/query/queryCommandTuning.ts",
       "target": "extensions/snowflake/src/snowflakeQueryProfile.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/clickhouse/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/db2/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/mssql/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/mysql/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/oracle/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/postgresql/src/postgresqlSqlAuthoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/snowflake/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/core/sqlAuthoringRegistry.ts",
       "target": "extensions/vertica/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/dialects/duckdb/sql/authoring.ts",
       "target": "extensions/duckdb/src/sql/qualityRules.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/dialects/file/sql/authoring.ts",
       "target": "extensions/duckdb/src/sql/qualityRules.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/import/importDispatcher.ts",
       "target": "extensions/snowflake/src/snowflakeImportPlanner.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/import/wizard/adapters/SnowflakeImportWizardAdapter.ts",
       "target": "extensions/snowflake/src/snowflakeImportExport.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/import/wizard/adapters/SnowflakeImportWizardAdapter.ts",
       "target": "extensions/snowflake/src/snowflakeImportPlanner.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/sqlParser/parsingRuntime.ts",
       "target": "extensions/clickhouse/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/sqlParser/parsingRuntime.ts",
       "target": "extensions/db2/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/sqlParser/parsingRuntime.ts",
       "target": "extensions/mssql/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/sqlParser/parsingRuntime.ts",
       "target": "extensions/mysql/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/sqlParser/parsingRuntime.ts",
       "target": "extensions/oracle/src/sql/authoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     },
     {
       "source": "src/sqlParser/parsingRuntime.ts",
       "target": "extensions/postgresql/src/postgresqlSqlAuthoring.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
-      "owner": "Desktop architecture owner"
+      "owner": "Desktop architecture owner",
+      "removeWhen": "The companion registers this implementation through the public API and desktop/companion activation parity passes."
     }
   ],
   "cycleExceptions": [
@@ -1675,7 +1955,8 @@
       ],
       "edgeFingerprint": "b095d5e737a0c4c8cc822bb42d047b71d5212e335bf1ae064aafb9de223b4c30",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at apps/api/src/netezza.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "extensions/snowflake/src/snowflakeImportPlanner.ts",
@@ -1778,7 +2059,8 @@
       ],
       "edgeFingerprint": "a4229589af89b08291fe2f314744afa944106c5d27767db416c0bf89dfc53030",
       "reason": "Existing desktop/companion integration cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Companion architecture owner"
+      "owner": "Companion architecture owner",
+      "removeWhen": "The strongly connected component anchored at extensions/snowflake/src/snowflakeImportPlanner.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "media/resultPanel/diskBackedGrid.ts",
@@ -1798,7 +2080,8 @@
       ],
       "edgeFingerprint": "b161bff4b9b74b85ac4f2fff6042eb649d15539295db995339596587a6a37729",
       "reason": "Existing Result Panel module cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Result Panel architecture owner"
+      "owner": "Result Panel architecture owner",
+      "removeWhen": "The strongly connected component anchored at media/resultPanel/diskBackedGrid.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "media/resultPanel/hostContracts.ts",
@@ -1809,7 +2092,8 @@
       ],
       "edgeFingerprint": "61c406677a95ae0a0379f428418bc3046bbe41efb1006628e41dadd2302d5d2d",
       "reason": "Existing Result Panel module cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Result Panel architecture owner"
+      "owner": "Result Panel architecture owner",
+      "removeWhen": "The strongly connected component anchored at media/resultPanel/hostContracts.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "media/visualQueryBuilder/VisualQueryBuilderApp.tsx",
@@ -1820,7 +2104,8 @@
       ],
       "edgeFingerprint": "4a3f34760443610a75ab26b50ecbcf6a8b2062e6100f876ff39ebcfeb8b9e32c",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at media/visualQueryBuilder/VisualQueryBuilderApp.tsx is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "packages/access-file/src/accessFileSession.ts",
@@ -1837,7 +2122,8 @@
       ],
       "edgeFingerprint": "940320651b5f125aaf62ec9cc7a9d64d5e35e1217c4887ffca8181bd9bec5340",
       "reason": "Existing Access file package cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Access package owner"
+      "owner": "Access package owner",
+      "removeWhen": "The strongly connected component anchored at packages/access-file/src/accessFileSession.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "packages/contracts/src/connectionDetails.ts",
@@ -1850,7 +2136,8 @@
       ],
       "edgeFingerprint": "683ebc744430e4524272428df6b103a9c115d53ae906d6146fc5769229369f2a",
       "reason": "Existing contracts type cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Contracts owner"
+      "owner": "Contracts owner",
+      "removeWhen": "The strongly connected component anchored at packages/contracts/src/connectionDetails.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/commands/validationCommands.ts",
@@ -1861,7 +2148,8 @@
       ],
       "edgeFingerprint": "7f9859fb306049a1a99389257840f4f5c0eb154402741c21d37ec3d51ac5db47",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at src/commands/validationCommands.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/contracts/database/index.ts",
@@ -1872,7 +2160,8 @@
       ],
       "edgeFingerprint": "eea36cee368dc28dbbfd34c8a4edfddbdcbda827dfc1012858c87b2752bb9173",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at src/contracts/database/index.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/core/resultDataProvider/types.ts",
@@ -1883,7 +2172,8 @@
       ],
       "edgeFingerprint": "1ba78f61d948257e3d6a4a7e61b557313e1d7538f0740d0c36eff538548753b9",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at src/core/resultDataProvider/types.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/dialects/netezza/sql/authoring.ts",
@@ -1903,7 +2193,8 @@
       ],
       "edgeFingerprint": "71ef8d053e53f6cf7a695e8dbf52f89fb939fa1ba484df425d9fc3c01caec1df",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at src/dialects/netezza/sql/authoring.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/export/exportManager.ts",
@@ -1914,7 +2205,8 @@
       ],
       "edgeFingerprint": "c9923df8a8e953f284e988134606d1bb8048afac486b951af31472a9102ccd55",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at src/export/exportManager.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/services/copilotService.ts",
@@ -1948,7 +2240,8 @@
       ],
       "edgeFingerprint": "1086dcea26b7c3fd5ae7e9fafba3feafb7219b3626625221d3e3c109bd197cfa",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at src/services/copilotService.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/sqlParser/BaseSqlParser.ts",
@@ -1960,7 +2253,8 @@
       ],
       "edgeFingerprint": "eccff9ef9d13246951318694e40e2a16ddd76b8736d83ab1013bd855569697a1",
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner"
+      "owner": "Architecture owner",
+      "removeWhen": "The strongly connected component anchored at src/sqlParser/BaseSqlParser.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     }
   ]
 }
