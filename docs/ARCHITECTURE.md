@@ -98,13 +98,48 @@ messages, tabs, and grid persistence. New cross-platform behavior belongs in a
 shared package only when it is free of VS Code APIs and has contract tests in
 both consumers.
 
-The current `check:architecture` gate protects `contracts`, `sql-core`,
-`database-runtime`, and `designer-core` from direct `vscode` imports; it also
-blocks React, Node, and database-driver imports from `designer-core`. It does
-not yet prove the full dependency direction or detect repository-wide cycles.
-Until CQ03 in the
-quality roadmap is complete, reviewers must inspect new cross-layer imports and
-Result Panel dependencies explicitly.
+The repository-wide gate is configured in
+[`quality/architecture-rules.json`](../quality/architecture-rules.json). It
+parses production TypeScript with the Compiler API and resolves relative paths,
+`tsconfig` aliases, workspace package names, literal `require()` calls,
+dynamic imports, import types, and `.js` specifiers pointing at TypeScript
+sources. It scans only the production roots below; tests, mocks, declarations,
+`dist`, and `node_modules` are excluded.
+
+| Layer | Production roots | Allowed dependency targets |
+| --- | --- | --- |
+| `contracts` | `packages/contracts/src` | `contracts` |
+| `shared` | `packages/*/src` (with the more-specific contracts root assigned to `contracts`) | `contracts`, `shared` |
+| `desktop` | `src` | `contracts`, `shared`, `desktop` |
+| `media` | `media` | `contracts`, `shared`, `desktop`, `media` |
+| `api` | `apps/api/src` | `contracts`, `shared`, `api` |
+| `web` | `apps/web/src` | `contracts`, `shared`, `web` |
+| `companions` | `extensions/*/src` | `contracts`, `shared`, `companions` |
+
+The direction table is intentionally stricter than the current runtime graph.
+Existing integration bridges are listed as individual `source`/`target`
+exceptions with a `reason` and `owner`; there is no `desktop ↔ companions`
+layer-wide allowance. The current exceptions cover the sql-core reuse of the
+desktop parser/LSP implementation, companion adapters that still consume
+desktop services, desktop registries that load optional companion providers,
+and the small media-to-companion designer bridges. These are migration targets,
+not permission to add another bridge without review.
+
+`ARCH001` reports a forbidden direction or platform import,
+`ARCH002` reports an unresolved internal import, `ARCH003` reports a new or
+changed strongly connected component, and `ARCH004` reports invalid or stale
+configuration. Existing cycles are represented by exact node lists and a
+SHA-256 fingerprint of their internal edges in `cycleExceptions`. A new edge
+inside one of those components changes the fingerprint and fails the check;
+new components fail as well. This preserves the Result Panel cycle guard while
+leaving the planned decomposition work to its owning CQ item.
+
+The regression suite in
+[`scripts/architecture-check.test.mjs`](../scripts/architecture-check.test.mjs)
+covers resolution, layer rejection, unresolved imports, cycle fingerprints,
+explicit exceptions, production-file filtering, malformed configuration, and
+the complete current graph. Run `npm run check:architecture` for the blocking
+fail-closed gate.
 
 Persisted UI state and webview messages are architecture boundaries as well as
 implementation details. New persisted formats require a schema version,
