@@ -252,6 +252,13 @@ function validateRules(rawRules) {
     forbiddenImports.forEach((rule, index) => {
       if (!rule || typeof rule !== 'object' || !isNonEmptyString(rule.specifier)) {
         errors.push(configError(`forbiddenImports[${index}] must define a specifier.`));
+      } else {
+        try {
+          new RegExp(rule.specifier, 'u');
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(configError(`forbiddenImports[${index}].specifier is not a valid regular expression: ${message}`));
+        }
       }
       if (rule?.source !== undefined) validatePathPattern(rule.source, `forbiddenImports[${index}].source`, errors);
       if (rule?.layer !== undefined && !layerSet.has(rule.layer)) errors.push(configError(`Unknown forbidden import layer ${rule.layer}.`));
@@ -365,14 +372,7 @@ function findTsConfigFiles(root) {
     .filter(file => fs.existsSync(file));
 }
 
-function readCompilerOptions(_root, configPath) {
-  try {
-    const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, createTsConfigHost());
-    if (parsed?.options) return parsed.options;
-  } catch {
-    // A malformed or intentionally partial tsconfig should not prevent the
-    // resolver from using the safe bundler defaults below.
-  }
+function fallbackCompilerOptions() {
   return {
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
@@ -382,15 +382,59 @@ function readCompilerOptions(_root, configPath) {
   };
 }
 
+function formatTsConfigDiagnostic(configPath, diagnostic) {
+  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+  const location = diagnostic.file && typeof diagnostic.start === 'number'
+    ? `:${diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1}`
+    : '';
+  return configError(`${relativePath(path.dirname(configPath), configPath)}${location}: ${message}`);
+}
+
+function readCompilerOptions(_root, configPath) {
+  try {
+    const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, createTsConfigHost());
+    if (!parsed) {
+      return {
+        options: fallbackCompilerOptions(),
+        errors: [configError(`Cannot parse tsconfig ${configPath}.`)],
+      };
+    }
+    if (parsed.errors?.length > 0) {
+      return {
+        options: parsed.options ?? fallbackCompilerOptions(),
+        errors: parsed.errors.map(diagnostic => formatTsConfigDiagnostic(configPath, diagnostic)),
+      };
+    }
+    if (parsed.options) return { options: parsed.options, errors: [] };
+    return {
+      options: fallbackCompilerOptions(),
+      errors: [configError(`Cannot read compiler options from tsconfig ${configPath}.`)],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      options: fallbackCompilerOptions(),
+      errors: [configError(`Cannot parse tsconfig ${configPath}: ${message}`)],
+    };
+  }
+}
+
 function createCompilerOptionsResolver(root) {
   const configs = findTsConfigFiles(root)
     .map(configPath => ({ configPath: path.resolve(configPath), directory: path.dirname(path.resolve(configPath)) }))
     .sort((left, right) => right.directory.length - left.directory.length);
   const cache = new Map();
-  return filePath => {
+  const errors = [];
+  const resolve = filePath => {
     const config = configs.find(candidate => isPathInside(candidate.directory, filePath));
     const configPath = config?.configPath ?? '<default>';
-    if (!cache.has(configPath)) cache.set(configPath, readCompilerOptions(root, config?.configPath));
+    if (!cache.has(configPath)) {
+      const parsed = configPath === '<default>'
+        ? { options: fallbackCompilerOptions(), errors: [] }
+        : readCompilerOptions(root, configPath);
+      cache.set(configPath, parsed.options);
+      errors.push(...parsed.errors);
+    }
     const options = { ...cache.get(configPath) };
     options.__architectureConfigDirectory = config?.directory ?? root;
     if (options.moduleResolution === undefined) options.moduleResolution = ts.ModuleResolutionKind.Bundler;
@@ -400,6 +444,7 @@ function createCompilerOptionsResolver(root) {
     options.resolveJsonModule = true;
     return options;
   };
+  return { resolve, errors };
 }
 
 function discoverWorkspacePackages(root, rules) {
@@ -460,11 +505,15 @@ function sourceAliasMatch(specifier, compilerOptions) {
   return undefined;
 }
 
-function codeCandidates(basePath, productionFiles) {
+function isTypeScriptSourceFile(filePath) {
+  return productionExtensions.has(path.extname(filePath)) && !filePath.endsWith('.d.ts');
+}
+
+function sourcePathCandidates(basePath) {
   const candidates = [];
   const add = candidate => {
     const absolute = path.resolve(candidate);
-    if (productionFiles.has(absolute)) candidates.push(absolute);
+    if (isTypeScriptSourceFile(absolute) && fs.existsSync(absolute) && fs.statSync(absolute).isFile()) candidates.push(absolute);
   };
   const extension = path.extname(basePath);
   if (productionExtensions.has(extension)) {
@@ -480,6 +529,10 @@ function codeCandidates(basePath, productionFiles) {
     for (const sourceExtension of productionExtensions) add(path.join(directory, `index${sourceExtension}`));
   }
   return [...new Set(candidates)];
+}
+
+function codeCandidates(basePath, productionFiles) {
+  return sourcePathCandidates(basePath).filter(candidate => productionFiles.has(candidate));
 }
 
 function existingNonCodePath(basePath) {
@@ -531,6 +584,9 @@ function resolveKnownSpecifier({ root, importer, specifier, compilerOptions, pro
   const candidate = codeCandidates(basePath, productionFiles)[0];
   if (candidate) return { kind: 'source', target: candidate };
 
+  const outsideProductionCandidate = sourcePathCandidates(basePath)[0];
+  if (outsideProductionCandidate) return { kind: 'outside-production', target: outsideProductionCandidate };
+
   const resolvedAsset = existingNonCodePath(basePath);
   if (resolvedAsset) return { kind: 'asset', target: resolvedAsset };
 
@@ -546,6 +602,7 @@ function resolveKnownSpecifier({ root, importer, specifier, compilerOptions, pro
     if (resolvedCandidate) return { kind: 'source', target: resolvedCandidate };
     if (resolution.isExternalLibraryImport || resolvedFile.includes(`${path.sep}node_modules${path.sep}`)) return { kind: 'external' };
     if (resolution.extension === ts.Extension.Dts || resolvedFile.endsWith('.d.ts')) return { kind: 'declaration' };
+    if (isTypeScriptSourceFile(resolvedFile)) return { kind: 'outside-production', target: resolvedFile };
     if (fs.existsSync(resolvedFile)) return { kind: 'asset', target: resolvedFile };
   }
   return { kind: 'unresolved' };
@@ -555,15 +612,26 @@ function importReferences(sourceFile) {
   const references = [];
   const add = (specifier, node, kind) => references.push({ specifier, node, kind });
   const visit = node => {
-    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+    if (ts.isImportEqualsDeclaration(node)
+      && ts.isExternalModuleReference(node.moduleReference)) {
+      const expression = node.moduleReference.expression;
+      if (ts.isStringLiteralLike(expression)) {
+        add(expression.text, node, 'import-equals');
+      } else if (ts.isCallExpression(expression)
+        && expression.arguments.length >= 1
+        && ts.isStringLiteralLike(expression.arguments[0])) {
+        add(expression.arguments[0].text, node, 'import-equals');
+      }
+    } else if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
       && node.moduleSpecifier
       && ts.isStringLiteralLike(node.moduleSpecifier)) {
       add(node.moduleSpecifier.text, node, ts.isImportDeclaration(node) ? 'import' : 'export');
     } else if (ts.isCallExpression(node)
-      && node.arguments.length === 1
+      && node.arguments.length >= 1
       && ts.isStringLiteralLike(node.arguments[0])
       && (node.expression.kind === ts.SyntaxKind.ImportKeyword
-        || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
+        || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+      && !ts.findAncestor(node, ancestor => ts.isImportEqualsDeclaration(ancestor))) {
       add(node.arguments[0].text, node, node.expression.kind === ts.SyntaxKind.ImportKeyword ? 'dynamic-import' : 'require');
     } else if (ts.isImportTypeNode(node)
       && ts.isLiteralTypeNode(node.argument)
@@ -583,11 +651,7 @@ function lineNumber(sourceFile, node) {
 function forbiddenImportRuleMatches(rule, source, layer, specifier) {
   if (rule.layer && rule.layer !== layer) return false;
   if (rule.source && !matchesPathPattern(rule.source, source)) return false;
-  try {
-    return new RegExp(rule.specifier, 'u').test(specifier);
-  } catch {
-    return false;
-  }
+  return new RegExp(rule.specifier, 'u').test(specifier);
 }
 
 function exceptionMatches(exception, source, target) {
@@ -653,7 +717,10 @@ function isCycleExceptionMatch(exception, component, edges) {
   const actualNodes = [...component].sort();
   if (expectedNodes.length !== actualNodes.length || expectedNodes.some((node, index) => node !== actualNodes[index])) return false;
   if (cycleFingerprint(actualNodes, edges) !== exception.edgeFingerprint) return false;
-  return edges.some(edge => exceptionMatches(exception, edge.source, edge.target));
+  const componentNodes = new Set(component);
+  return edges.some(edge => componentNodes.has(edge.source)
+    && componentNodes.has(edge.target)
+    && exceptionMatches(exception, edge.source, edge.target));
 }
 
 function makeDiagnostic(code, message, extra = {}) {
@@ -687,12 +754,24 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
   if (collected.errors.length > 0) return { rules, diagnostics: collected.errors, files: [], edges: [], cycles: [] };
 
   const productionFiles = new Set(collected.files);
-  const compilerOptionsFor = createCompilerOptionsResolver(absoluteRoot);
+  const compilerOptionsResolver = createCompilerOptionsResolver(absoluteRoot);
   const workspacePackages = discoverWorkspacePackages(absoluteRoot, rules);
   const sourceFiles = new Map();
   for (const file of collected.files) {
     const text = fs.readFileSync(file, 'utf8');
     sourceFiles.set(file, ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX));
+  }
+
+  const graphNodes = [...sourceFiles.keys()].map(file => relativePath(absoluteRoot, file)).sort();
+  for (const file of sourceFiles.keys()) compilerOptionsResolver.resolve(file);
+  if (compilerOptionsResolver.errors.length > 0) {
+    return {
+      rules,
+      diagnostics: compilerOptionsResolver.errors,
+      files: graphNodes,
+      edges: [],
+      cycles: [],
+    };
   }
 
   const diagnostics = [];
@@ -703,7 +782,7 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
   for (const [file, sourceFile] of sourceFiles) {
     const source = relativePath(absoluteRoot, file);
     const layer = collected.fileLayers.get(file);
-    const compilerOptions = compilerOptionsFor(file);
+    const compilerOptions = compilerOptionsResolver.resolve(file);
     for (const reference of importReferences(sourceFile)) {
       const target = resolveKnownSpecifier({
         root: absoluteRoot,
@@ -724,11 +803,14 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
           break;
         }
       }
-      if (target.kind === 'unresolved') {
+      if (target.kind === 'unresolved' || target.kind === 'outside-production') {
+        const targetDescription = target.target
+          ? ` outside the configured production graph: ${relativePath(absoluteRoot, target.target)}`
+          : '';
         diagnostics.push(makeDiagnostic(
           ARCHITECTURE_CODES.unresolvedImport,
-          `${source}:${line} cannot resolve internal import ${JSON.stringify(reference.specifier)}.`,
-          { source, specifier: reference.specifier, line },
+          `${source}:${line} cannot resolve internal import ${JSON.stringify(reference.specifier)}${targetDescription}.`,
+          { source, specifier: reference.specifier, line, ...(target.target ? { target: relativePath(absoluteRoot, target.target) } : {}) },
         ));
         continue;
       }
@@ -772,7 +854,6 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
   }
 
   const graphEdges = [...uniqueEdges.values()].sort((left, right) => edgeKey(left.source, left.target).localeCompare(edgeKey(right.source, right.target)));
-  const graphNodes = [...sourceFiles.keys()].map(file => relativePath(absoluteRoot, file)).sort();
   const components = stronglyConnectedComponents(graphNodes, graphEdges);
   const cycleDiagnostics = [];
   const matchedCycleExceptions = new Set();
