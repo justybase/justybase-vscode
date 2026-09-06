@@ -4478,7 +4478,7 @@
     "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",
     "test:quickfix-regression": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"linterCodeActions.test.ts\"",
     "test:parser-perf": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand --testPathPatterns=\"mssqlParserPerf.test.ts|oracleParserPerf.test.ts\"",
-    "test:quality-tools": "node --test scripts/quality-tools.test.mjs",
+    "test:quality-tools": "node --test scripts/quality-tools.test.mjs scripts/architecture-check.test.mjs",
     "test:coverage:changed": "git diff --unified=0 origin/master...HEAD -- src | node scripts/quality-gate.mjs changed-coverage --base=origin/master",
     "clean:vsix": "node scripts/clean-vsix.js",
     "test:designer-core": "npm run test --workspace @justybase/designer-core",

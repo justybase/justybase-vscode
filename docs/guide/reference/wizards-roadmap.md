@@ -345,6 +345,13 @@ message routing, refresh invalidates stale context, dispose cleans listeners.
 - New high-risk code targets ≥ 80% line / ≥ 70% branch coverage
   (per `docs/TESTING_STRATEGY.md`); run `npm run test:coverage:changed` on the
   PR branch.
+- The shared `designer-core` boundary must pass its package tests, API/web
+  consumer tests, architecture import guard, and the SQLite Extension Host
+  designer scenario before a desktop or web designer refactor is considered
+  complete. The verification sequence is:
+  `npm run test:designer-core`, `npm run test:api`, `npm run test:web`,
+  `npm run check-types`, `npm run check:architecture`, `npm run build`, and
+  `npm run test:extension-host:designer`.
 
 ### Per-feature checklist (definition of done)
 

@@ -40,6 +40,16 @@ target selection separate from presentation. API snapshot services retain
 connection I/O and fingerprinting; pure SQLite/DuckDB parsing is reusable from
 the shared package.
 
+The boundary is validated at three levels: `packages/designer-core` unit tests
+cover capability guards, dialect profiles, SQL builders, and catalog parsing;
+API/web tests cover the consuming workspace packages; and
+`npm run test:extension-host:designer` opens the production desktop designer
+against a temporary SQLite database. `npm run check:architecture` rejects
+platform imports from shared packages, with its own regression tests in
+`scripts/architecture-check.test.mjs`. The cycle intentionally does not add a
+new public contract: existing exports remain additive-compatible across
+desktop, API, and web consumers.
+
 ## Result-panel state and identity
 
 The desktop result panel has a host state machine and a webview state machine.
