@@ -1,7 +1,7 @@
+import { assertDesignerOperationSupported } from '@justybase/designer-core';
 import {
     getDatabaseDesignerCapabilities,
     resolveDatabaseDesignerCapabilities,
-    UnsupportedDesignerOperationError,
     type DatabaseDesignerCapabilityKey,
     type DatabaseDesignerRuntimeContext,
     type DatabaseKind,
@@ -23,17 +23,5 @@ export function assertDesignerOperation(
     const capabilities = context
         ? resolveDatabaseDesignerCapabilities(base, { databaseKind: base.kind, ...context })
         : base;
-    const designerCapability = capabilities.constructs[capabilityKey];
-    const blocked = !designerCapability.operations.includes(operation)
-        || designerCapability.level === 'unsupported'
-        || designerCapability.level === 'runtime-unavailable'
-        || designerCapability.level === 'privilege-blocked'
-        || (!allowAlternative && designerCapability.level === 'alternative');
-    if (blocked) {
-        throw new UnsupportedDesignerOperationError(
-            capabilityKey,
-            operation,
-            designerCapability.reason,
-        );
-    }
+    assertDesignerOperationSupported(capabilities, capabilityKey, operation, allowAlternative);
 }

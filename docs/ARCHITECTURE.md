@@ -11,8 +11,8 @@ which parts are currently enforced.
 
 ```text
 VS Code extension ──┐
-                     ├─ packages/contracts ─ packages/sql-core ─ database-runtime
-Web React editor ─ apps/api ────────────────────────────────────────┘
+                     ├─ packages/contracts ─ designer-core ─ database-runtime
+Web React editor ─ apps/api ──────── sql-core ────────────────────────┘
 ```
 
 ## Runtime boundaries
@@ -27,6 +27,18 @@ Web React editor ─ apps/api ────────────────�
 - `apps/api` owns authentication, per-user storage, query jobs, WebSockets, and
   disk-spooled sessions. `apps/web` consumes contracts through REST/LSP and
   renders Monaco/TanStack views.
+
+## Shared designer boundary
+
+`packages/designer-core` is the browser-safe, platform-neutral home for
+capability guards, reviewed SQL builders, and catalog-row normalization used by
+the web editor, API snapshot adapters, desktop webviews, and companion
+extensions. It may depend on `packages/contracts`, but must not import VS Code,
+React, Node built-ins, or database drivers. `apps/web/src/ObjectDesigner.tsx`
+owns React rendering while its controller and model keep state transitions and
+target selection separate from presentation. API snapshot services retain
+connection I/O and fingerprinting; pure SQLite/DuckDB parsing is reusable from
+the shared package.
 
 ## Result-panel state and identity
 
@@ -76,9 +88,11 @@ messages, tabs, and grid persistence. New cross-platform behavior belongs in a
 shared package only when it is free of VS Code APIs and has contract tests in
 both consumers.
 
-The current `check:architecture` gate protects `contracts`, `sql-core`, and
-`database-runtime` from direct `vscode` imports. It does not yet prove the full
-dependency direction or detect repository-wide cycles. Until CQ03 in the
+The current `check:architecture` gate protects `contracts`, `sql-core`,
+`database-runtime`, and `designer-core` from direct `vscode` imports; it also
+blocks React, Node, and database-driver imports from `designer-core`. It does
+not yet prove the full dependency direction or detect repository-wide cycles.
+Until CQ03 in the
 quality roadmap is complete, reviewers must inspect new cross-layer imports and
 Result Panel dependencies explicitly.
 
