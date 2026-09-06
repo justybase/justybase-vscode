@@ -9,6 +9,12 @@ jest.mock('../sqlParser', () => ({
     }))
 }));
 
+jest.mock('../sqlParser/sqlCoreBackedValidator', () => ({
+    SqlCoreBackedValidator: jest.fn().mockImplementation(() => ({
+        validate: validateMock
+    }))
+}));
+
 jest.mock('../commands/validationCommands', () => ({
     getInitializedSqlValidator: getInitializedSqlValidatorMock,
     getSqlValidationContext: getSqlValidationContextMock

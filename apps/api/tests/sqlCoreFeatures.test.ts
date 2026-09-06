@@ -125,4 +125,50 @@ describe('shared Netezza web SQL core — LSP feature parity (D1)', () => {
     expect(withFix).toBeDefined();
     expect(typeof withFix!.data!.suggestedFix).toBe('string');
   });
+
+  it('preserves typed metadata for SQL025 and SQL026 through the API core', async () => {
+    const uri = 'file:///typed-features.sql';
+    const core = new NetezzaWebLspCore({
+      requestMetadata: async params => {
+        if (params.kind === 'context') {
+          return {
+            connectionName: 'typed-connection',
+            effectiveDatabase: 'DB',
+            effectiveSchema: 'PUBLIC',
+            databaseKind: 'netezza',
+          };
+        }
+        if (params.kind === 'cachedTableInfo' || params.kind === 'tableInfo') {
+          return {
+            exists: true,
+            table: 'ORDERS',
+            database: 'DB',
+            schema: 'PUBLIC',
+            columns: [
+              { name: 'ORDER_ID', type: 'INTEGER' },
+              { name: 'DESCRIPTION', type: 'VARCHAR(80)' },
+            ],
+          };
+        }
+        return [];
+      },
+    });
+    core.setContext(uri, {
+      connectionName: 'typed-connection',
+      effectiveDatabase: 'DB',
+      effectiveSchema: 'PUBLIC',
+      databaseKind: 'netezza',
+    });
+
+    const diagnostics = await core.diagnostics(
+      uri,
+      1,
+      "SELECT * FROM DB.PUBLIC.ORDERS WHERE ORDER_ID = '1' AND DESCRIPTION > 10",
+    );
+
+    expect(diagnostics.map(diagnostic => diagnostic.code)).toEqual(
+      expect.arrayContaining(['SQL025', 'SQL026']),
+    );
+    expect(diagnostics.every(diagnostic => diagnostic.range.start.line >= 0)).toBe(true);
+  });
 });

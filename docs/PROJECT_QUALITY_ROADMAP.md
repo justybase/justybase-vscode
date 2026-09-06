@@ -103,8 +103,10 @@ The follow-up [shared-code preparation](SHARED_CODE_MIGRATION.md) defines target
 ownership, audits duplicate contracts and public companion entry points, and
 orders migration slices with desktop-first parity gates. Its infrastructure
 adds pure-package import checks, exact exceptions with removal conditions and
-the read-only `architecture:report` inventory. No production extraction is
-included; CQ01/CQ02 and subsequent runtime migrations remain separate work.
+the read-only `architecture:report` inventory. The first SQL validation slice
+now provides a reversible compatibility boundary and parity harness; final
+parser ownership in sql-core, CQ01/CQ02 and subsequent runtime migrations
+remain separate work.
 
 Architecture completion means zero new cycles, no `vscode` dependency in shared
 packages, no untyped high-traffic webview command, and no state migration that

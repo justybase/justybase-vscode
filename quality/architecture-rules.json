@@ -1645,13 +1645,6 @@
     },
     {
       "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/diagnosticsUtils.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
       "target": "src/server/documentParseRequest.ts",
       "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
       "owner": "SQL core owner",

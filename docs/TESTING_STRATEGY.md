@@ -17,6 +17,7 @@ test behavior.
 | Lint | Blocking desktop rules plus ratcheted workspace baseline | `npm run lint`, `npm run lint:extended:check` |
 | Quality tooling | Versioned baseline/report and changed-code gate helpers | `npm run test:quality-tools`, `npm run quality:report` |
 | Unit | Parsers, state machines, providers, utilities | `npm run test:validate` |
+| Shared SQL core | Pure validation boundary and package-owned contract tests | `npm run test:sql-core`, `npm run check-types:sql-core` |
 | API/web | Fastify routes and React behavior | `npm run test:api`, `npm run test:web` |
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
 | Browser | Bundled webview rendering and recovery | `npm run test:playwright` |
@@ -33,6 +34,16 @@ Shared-code migration slices additionally follow the desktop-first comparison
 and companion gates in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
 Capture old/new behavior on the same fixtures before replacing a facade;
 changing a baseline to accept a difference is not parity evidence.
+
+The first SQL validation slice has an explicit parity gate. It compares the
+legacy `SqlValidator` with the `@justybase/sql-core/validation` boundary for
+validity, diagnostic order, code, message, severity, positions, offsets,
+suggested fixes and normalized scope. The corpus must include Netezza
+qualification forms, malformed SQL, procedures, typed/untyped metadata and
+SQL025/SQL026 through both desktop and LSP schema providers. Runtime code must
+not execute both implementations merely to obtain parity evidence; the dual
+run is test-only. After the boundary is switched, parser, linter, API and
+Extension Host authoring gates remain required.
 
 ## Change risk and required layers
 

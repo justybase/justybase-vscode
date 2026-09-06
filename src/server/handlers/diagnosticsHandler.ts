@@ -10,6 +10,7 @@ import {
   DocumentParseSession,
   DocumentValidationSession,
 } from "../../sqlParser";
+import { SqlCoreBackedValidator } from "../../sqlParser/sqlCoreBackedValidator";
 import {
   HUGE_SCRIPT_LINE_THRESHOLD,
   LARGE_SCRIPT_CHAR_THRESHOLD,
@@ -174,10 +175,11 @@ export function createDiagnosticsHandler(
         context.effectiveDatabase,
         context.databaseKind,
       );
-      const validator = new SqlValidator(
-        schemaProvider,
-        getDatabaseSqlAuthoring(context.databaseKind).validation,
-      );
+      const authoring = getDatabaseSqlAuthoring(context.databaseKind);
+      const validator =
+        !context.databaseKind || context.databaseKind === "netezza"
+          ? new SqlCoreBackedValidator(schemaProvider, authoring.validation)
+          : new SqlValidator(schemaProvider, authoring.validation);
       const pipelineResult = await runValidationPipeline({
         sql,
         documentUri: document.uri,
