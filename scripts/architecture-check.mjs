@@ -14,8 +14,10 @@ const boundaries = [
   'packages/contracts/src',
   'packages/sql-core/src',
   'packages/database-runtime/src',
+  'packages/designer-core/src',
 ];
 const forbidden = /(?:from\s*['"]vscode['"]|require\(\s*['"]vscode['"]\s*\)|import\s+['"]vscode['"])/u;
+const designerCoreForbidden = /(?:from\s*['"](?:react|react-dom|node:[^'"]+|@justybase\/(?:netezza-driver|spreadsheet-tasks))['"]|require\(\s*['"](?:react|react-dom|node:[^'"]+|@justybase\/(?:netezza-driver|spreadsheet-tasks))['"]\s*\))/u;
 
 function filesIn(directory) {
   if (!fs.existsSync(directory)) return [];
@@ -32,6 +34,9 @@ for (const relativeDirectory of boundaries) {
     const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/u);
     lines.forEach((line, index) => {
       if (forbidden.test(line)) violations.push(`${path.relative(root, file)}:${index + 1}`);
+      if (relativeDirectory === 'packages/designer-core/src' && designerCoreForbidden.test(line)) {
+        violations.push(`${path.relative(root, file)}:${index + 1} (designer-core platform import)`);
+      }
     });
   }
 }

@@ -12,7 +12,10 @@ export default defineConfig({
     // the shared source in the browser bundle so runtime contract helpers
     // (for example UnsupportedDesignerOperationError) remain tree-shakable
     // named exports instead of relying on Rollup's CJS guesser.
-    alias: { '@justybase/contracts': path.join(repositoryRoot, 'packages/contracts/src') },
+    alias: {
+      '@justybase/contracts': path.join(repositoryRoot, 'packages/contracts/src'),
+      '@justybase/designer-core': path.join(repositoryRoot, 'packages/designer-core/src'),
+    },
   },
   server: { port: 5173, proxy: { '/api': { target: 'http://127.0.0.1:3000', ws: true } } },
 });

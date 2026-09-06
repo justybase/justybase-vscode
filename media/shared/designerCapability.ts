@@ -1,3 +1,7 @@
+import {
+    getDesignerCapability as getCoreDesignerCapability,
+    isDesignerOperationSupported as isCoreDesignerOperationSupported,
+} from '@justybase/designer-core';
 import type {
     DatabaseDesignerCapabilities,
     DatabaseDesignerCapability,
@@ -10,7 +14,7 @@ export function getDesignerCapability(
     capabilities: DatabaseDesignerCapabilities,
     key: DatabaseDesignerCapabilityKey,
 ): DatabaseDesignerCapability {
-    return capabilities.constructs[key];
+    return getCoreDesignerCapability(capabilities, key);
 }
 
 export function isDesignerOperationSupported(
@@ -18,12 +22,7 @@ export function isDesignerOperationSupported(
     key: DatabaseDesignerCapabilityKey,
     operation: DesignerOperation,
 ): boolean {
-    const capability = getDesignerCapability(capabilities, key);
-    return capability.operations.includes(operation)
-        && capability.level !== 'unsupported'
-        && capability.level !== 'runtime-unavailable'
-        && capability.level !== 'privilege-blocked'
-        && capability.level !== 'alternative';
+    return isCoreDesignerOperationSupported(capabilities, key, operation);
 }
 
 export function isAlternativeConstruct(

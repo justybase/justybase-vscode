@@ -21,6 +21,7 @@
     "@fastify/websocket": "^11.2.0",
     "@justybase/database-runtime": "*",
     "@justybase/contracts": "*",
+    "@justybase/designer-core": "*",
     "@justybase/netezza-driver": "*",
     "@justybase/spreadsheet-tasks": "*",
     "@justybase/sql-core": "*",

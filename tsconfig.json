@@ -12,6 +12,8 @@
     "paths": {
       "@justybase/contracts": ["./packages/contracts/src"],
       "@justybase/contracts/*": ["./packages/contracts/src/*"],
+      "@justybase/designer-core": ["./packages/designer-core/src"],
+      "@justybase/designer-core/*": ["./packages/designer-core/src/*"],
       "@core/*": ["./src/core/*"],
       "@metadata/*": ["./src/metadata/*"],
       "@types/*": ["./src/types/*"]
