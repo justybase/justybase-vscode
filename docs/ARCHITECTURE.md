@@ -12,10 +12,11 @@ which parts are currently enforced.
 The current dependency map, contract audit, service proposal and ordered
 migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
 The first SQL validation boundary is now implemented as a compatibility slice:
-`@justybase/sql-core/validation` owns the platform-neutral types and
-orchestration seam, while the legacy parser remains behind an explicit
-desktop/API adapter until the pure parser closure is extracted.
-This does not create empty packages or an Electron application.
+`@justybase/sql-core/validation` owns the platform-neutral types, the Netezza
+lexer/parser and parser runtime. Existing desktop/API validation facades still
+own semantic visitor execution until that separate closure is extracted; they
+consume the package-owned CST without changing public results or wire
+contracts. This does not create empty packages or an Electron application.
 
 ## Target ownership
 
@@ -65,8 +66,8 @@ Electron APIs must stay in its adapter, never in a shared package.
 - `src/core/connectionFactory.ts` and `DatabaseDialect` isolate database
   implementations. Shared providers must not assume Netezza behavior.
 - `src/sqlParser`, the dialect lexer/parser, and LSP providers form the SQL
-  authoring pipeline. `packages/sql-core` exposes the platform-neutral subset;
-  it must never import `vscode`.
+  authoring pipeline. `packages/sql-core` owns the Netezza parser subset and
+  exposes platform-neutral types; it must never import `vscode`.
 - `apps/api` owns authentication, per-user storage, query jobs, WebSockets, and
   disk-spooled sessions. `apps/web` consumes contracts through REST/LSP and
   renders Monaco/TanStack views.

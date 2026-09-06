@@ -1,6 +1,8 @@
 import {
   NetezzaSqlValidationCore,
+  parseNetezzaSqlStatements,
   type NetezzaSqlValidationOptions,
+  type NetezzaSqlParseResult,
   type SqlCoreDiagnostic,
   type SqlCoreValidationResult,
 } from "@justybase/sql-core/validation";
@@ -10,6 +12,7 @@ import {
   SqlValidator,
   type ScopeSeed,
 } from "./validator";
+import { isIgnorableTrailingDotParserError } from "./parserErrorUtils";
 import type {
   SqlStatementsParseResult,
 } from "./parsingRuntime";
@@ -24,10 +27,10 @@ import type { StatementBoundary } from "./statementIndex";
  * Compatibility validator used during the first strangler migration step.
  *
  * The public validator shape remains the existing desktop shape, while the
- * parser/validation call crosses the platform-neutral sql-core boundary. Its
- * backend still delegates to the legacy implementation until the pure parser
- * closure is extracted; this makes the switch reversible and gives parity
- * tests a stable seam before behavior is moved.
+ * parser call crosses the platform-neutral sql-core boundary. Semantic
+ * visitor validation is deliberately kept behind the desktop compatibility
+ * facade until its own dependency closure is extracted; this keeps the first
+ * parser move reversible and makes parity failures attributable to parsing.
  */
 export class SqlCoreBackedValidator extends SqlValidator {
   private readonly validationCore: NetezzaSqlValidationCore;
@@ -40,7 +43,26 @@ export class SqlCoreBackedValidator extends SqlValidator {
     super(schemaProvider, validationProfile);
     this.validationOptions = {};
     this.validationCore = new NetezzaSqlValidationCore({
-      validate: (sql) => this.toCoreResult(this.validateLegacy(sql)),
+      parse: (sql) =>
+        parseNetezzaSqlStatements({
+          sql,
+          ignoreParserError: isIgnorableTrailingDotParserError,
+        }),
+      validate: (sql) => {
+        if (/^\s*;+\s*$/.test(sql)) {
+          return this.toCoreResult(this.validateLegacy(sql));
+        }
+        const parseResult = parseNetezzaSqlStatements({
+          sql,
+          ignoreParserError: isIgnorableTrailingDotParserError,
+        });
+        return this.toCoreResult(
+          this.validateLegacyFromParseResult(
+            sql,
+            parseResult as unknown as SqlStatementsParseResult,
+          ),
+        );
+      },
       validateParsed: (sql, parseResult) =>
         this.toCoreResult(
           this.validateLegacyFromParseResult(
@@ -106,9 +128,12 @@ export class SqlCoreBackedValidator extends SqlValidator {
 
   private validateLegacyFromParseResult(
     sql: string,
-    parseResult: SqlStatementsParseResult,
+    parseResult: SqlStatementsParseResult | NetezzaSqlParseResult,
   ): ValidationResult {
-    return super.validateFromParseResult(sql, parseResult);
+    return super.validateFromParseResult(
+      sql,
+      parseResult as unknown as SqlStatementsParseResult,
+    );
   }
 
   private toCoreResult(result: ValidationResult): SqlCoreValidationResult {

@@ -66,7 +66,13 @@ module.exports = {
     // Transform ESM deps used by the SQL parser.
     "/node_modules/(?!chevrotain|@chevrotain|lodash-es|hyparquet|hyparquet-writer|hyparquet-compressors|fzstd|hysnappy)/",
   ],
-  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts", "!src/__tests__/**"],
+  collectCoverageFrom: [
+    "src/**/*.ts",
+    "!src/**/*.d.ts",
+    "!src/__tests__/**",
+    "packages/sql-core/src/**/*.ts",
+    "!packages/sql-core/src/**/*.d.ts",
+  ],
   coverageDirectory: "coverage",
   coverageReporters: ["text-summary", "json-summary", "lcov"],
   coverageThreshold: {

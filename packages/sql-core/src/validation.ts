@@ -1,4 +1,13 @@
 import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
+export {
+  NETEZZA_SQL_PARSING_RUNTIME,
+  parseNetezzaSqlStatements,
+  sanitizeNetezzaSql,
+  type NetezzaSqlLexResult,
+  type NetezzaSqlParseOptions,
+  type NetezzaSqlParseResult,
+  type NetezzaSqlParsingRuntime,
+} from "./parser/runtime";
 
 /** The diagnostic severities shared by the SQL validation boundary. */
 export type SqlCoreDiagnosticSeverity =
@@ -98,12 +107,12 @@ export interface SqlCoreValidationResult {
 }
 
 /**
- * Transitional backend seam.
+ * Transitional validation backend seam.
  *
- * The first migration keeps the legacy parser behind this seam so consumers can
- * be switched and compared independently. The backend will be replaced by the
- * package-owned Netezza parser in the next extraction step without changing the
- * desktop/API-facing contract introduced here.
+ * The parser and parser runtime are package-owned now. The semantic visitor is
+ * still injected so desktop consumers can be switched and compared
+ * independently before that validation dependency closure is extracted, without
+ * changing the desktop/API-facing contract introduced here.
  */
 export interface NetezzaSqlValidationBackend {
   parse?(sql: string, options: NetezzaSqlValidationOptions): unknown;

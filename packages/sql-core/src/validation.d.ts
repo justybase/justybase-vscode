@@ -1,4 +1,28 @@
 import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
+import type { CstNode, IRecognitionException, ILexingResult } from "chevrotain";
+
+export type NetezzaSqlLexResult = ILexingResult;
+export interface NetezzaSqlParsingRuntime {
+  readonly id: "netezza";
+  readonly SqlLexer: { tokenize(text: string, initialMode?: string): NetezzaSqlLexResult };
+  readonly getSqlParserInstance: () => { input: unknown[]; errors: IRecognitionException[]; statements(): CstNode };
+  readonly createSqlParserInstance: () => { input: unknown[]; errors: IRecognitionException[]; statements(): CstNode };
+}
+export interface NetezzaSqlParseOptions {
+  readonly sql: string;
+  readonly ignoreParserError?: (error: IRecognitionException) => boolean;
+}
+export interface NetezzaSqlParseResult {
+  readonly runtime: NetezzaSqlParsingRuntime;
+  readonly lexResult: NetezzaSqlLexResult;
+  readonly cst?: CstNode;
+  readonly parserErrors: IRecognitionException[];
+  readonly actionableParserErrors: IRecognitionException[];
+  readonly usedIsolatedParser: boolean;
+}
+export declare const NETEZZA_SQL_PARSING_RUNTIME: NetezzaSqlParsingRuntime;
+export declare function sanitizeNetezzaSql(sql: string): string;
+export declare function parseNetezzaSqlStatements(options: NetezzaSqlParseOptions): NetezzaSqlParseResult;
 
 export type SqlCoreDiagnosticSeverity = "error" | "warning" | "information" | "hint";
 export interface SqlCorePosition {

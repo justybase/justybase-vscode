@@ -153,7 +153,9 @@ for (const dependencyDir of dependencyDirectories) {
   }
   seen.add(identity);
   const licenseFile = findLicenseFile(dependencyDir);
-  const licenseText = licenseFile ? readFileSync(licenseFile, 'utf8').trim() : undefined;
+  const licenseText = licenseFile
+    ? readFileSync(licenseFile, 'utf8').replace(/\r\n?/gu, '\n').trim()
+    : undefined;
   assert(dependencyManifest.license || licenseText, `${identity} has no license metadata or license text`);
   const declaredLicense = dependencyManifest.license || inferLicenseFromText(licenseText);
   components.push({

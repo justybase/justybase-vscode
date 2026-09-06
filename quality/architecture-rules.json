@@ -2235,19 +2235,6 @@
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
       "owner": "Architecture owner",
       "removeWhen": "The strongly connected component anchored at src/services/copilotService.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
-    },
-    {
-      "source": "src/sqlParser/BaseSqlParser.ts",
-      "target": "src/sqlParser/rules/queryClauseComparisonRules.ts",
-      "nodes": [
-        "src/sqlParser/BaseSqlParser.ts",
-        "src/sqlParser/parser.ts",
-        "src/sqlParser/rules/queryClauseComparisonRules.ts"
-      ],
-      "edgeFingerprint": "eccff9ef9d13246951318694e40e2a16ddd76b8736d83ab1013bd855569697a1",
-      "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner",
-      "removeWhen": "The strongly connected component anchored at src/sqlParser/BaseSqlParser.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     }
   ]
 }

@@ -9,6 +9,25 @@ import { buildReport, qualityInputFailures } from './quality-report.mjs';
 
 const lintBaseline = { lint: { total: 3, areas: { media: 2, apps: 1 } } };
 
+test('all first-party workspace packages declare their distribution license', () => {
+  const packagesRoot = path.resolve(process.cwd(), 'packages');
+  const packageDirectories = fs.readdirSync(packagesRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => path.join(packagesRoot, entry.name));
+
+  for (const packageDirectory of packageDirectories) {
+    const manifestPath = path.join(packageDirectory, 'package.json');
+    if (!fs.existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const hasLicenseFile = fs.readdirSync(packageDirectory)
+      .some(name => /^(licen[cs]e|copying|notice)(\.|$)/iu.test(name));
+    assert.ok(
+      typeof manifest.license === 'string' || hasLicenseFile,
+      `${manifest.name ?? manifestPath} must declare a license or ship license text`,
+    );
+  }
+});
+
 test('aggregates lint warnings by workspace area and rule', () => {
   const summary = lintSummary([
     { filePath: '/home/dusko/source/justybase-vscode/media/a.ts', warningCount: 2, errorCount: 0, messages: [{ severity: 1, ruleId: 'prefer-const' }, { severity: 1, ruleId: 'no-var' }] },

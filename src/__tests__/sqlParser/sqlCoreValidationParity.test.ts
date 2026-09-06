@@ -6,7 +6,15 @@ import {
 } from "../../sqlParser/schemaProvider";
 import { DocumentParseSession } from "../../sqlParser/documentParseSession";
 import { SqlCoreBackedValidator } from "../../sqlParser/sqlCoreBackedValidator";
+import {
+  parseNetezzaSqlStatements,
+  type NetezzaSqlParseResult,
+} from "@justybase/sql-core/validation";
 import { SqlValidator } from "../../sqlParser/validator";
+import {
+  NETEZZA_SQL_PARSING_RUNTIME,
+  parseSqlStatements,
+} from "../../sqlParser";
 import type { Scope, TableInfo, ValidationError, ValidationResult } from "../../sqlParser/types";
 
 interface ParityCase {
@@ -91,6 +99,29 @@ describe("sql-core validation compatibility boundary", () => {
       normalizeResult(legacy.validateFromParseResult(sql, parseResult)),
     );
   });
+
+  it.each([
+    "%let x=5;\n%put Value is &x;\nSELECT &x, ${ x }, $x;",
+    "SELECT * FROM &table_name;\nSELECT * FROM $table_name;\nSELECT * FROM ${ table_name };",
+    "%python script.py --value 1;\n%do;\nSELECT 1;\n%end;",
+    "SELECT %sql(SELECT MAX(DATEKEY) FROM DB.PUBLIC.DIMDATE) AS max_key FROM DB.PUBLIC.DIMDATE WHERE REGION IN (%sqllist(SELECT REGION FROM DB.PUBLIC.REGIONS));",
+    "SELECT * FROM DB.PUBLIC.DIMDATE WHERE DATEKEY >= %eval(20240731 - 30);",
+    `%LET run_bad_sql = 0;
+%IF &run_bad_sql = 1 %THEN %DO;
+  THIS IS NOT VALID SQL FROM A SKIPPED BRANCH
+%ELSE %DO;
+  %PUT skipped invalid branch;
+%END;
+SELECT 1;`,
+  ])("preserves lexer and parser output for macro authoring input", (sql) => {
+    const legacy = parseSqlStatements({
+      sql,
+      runtime: NETEZZA_SQL_PARSING_RUNTIME,
+    });
+    const core = parseNetezzaSqlStatements({ sql });
+
+    expect(normalizeParseResult(core)).toEqual(normalizeParseResult(legacy));
+  });
 });
 
 function normalizeResult(result: ValidationResult): unknown {
@@ -100,6 +131,56 @@ function normalizeResult(result: ValidationResult): unknown {
     warnings: normalizeIssues(result.warnings),
     scope: normalizeScope(result.scope),
   };
+}
+
+function normalizeParseResult(result: NetezzaSqlParseResult | {
+  lexResult: {
+    errors: Array<{ message: string; offset?: number; line?: number; column?: number }>;
+    tokens: Array<{ image: string; startOffset?: number; endOffset?: number; startLine?: number; startColumn?: number; endLine?: number; endColumn?: number }>;
+  };
+  parserErrors: Array<{ message: string; token?: { image?: string; startOffset?: number; startLine?: number; startColumn?: number } }>;
+  actionableParserErrors: Array<{ message: string; token?: { image?: string; startOffset?: number; startLine?: number; startColumn?: number } }>;
+  cst?: { name?: string; children?: Record<string, unknown> };
+}): unknown {
+  return {
+    lexErrors: result.lexResult.errors.map((error) => ({
+      message: error.message,
+      offset: error.offset,
+      line: error.line,
+      column: error.column,
+    })),
+    tokens: result.lexResult.tokens.map((token) => ({
+      image: token.image,
+      startOffset: token.startOffset,
+      endOffset: token.endOffset,
+      startLine: token.startLine,
+      startColumn: token.startColumn,
+      endLine: token.endLine,
+      endColumn: token.endColumn,
+    })),
+    parserErrors: normalizeParserErrors(result.parserErrors),
+    actionableParserErrors: normalizeParserErrors(result.actionableParserErrors),
+    cstName: result.cst?.name,
+    statementCount: result.cst?.children?.statement
+      ? (result.cst.children.statement as unknown[]).length
+      : 0,
+  };
+}
+
+function normalizeParserErrors(
+  errors: Array<{ message: string; token?: { image?: string; startOffset?: number; startLine?: number; startColumn?: number } }>,
+): unknown[] {
+  return errors.map((error) => ({
+    message: error.message,
+    token: error.token
+      ? {
+        image: error.token.image,
+        startOffset: error.token.startOffset,
+        startLine: error.token.startLine,
+        startColumn: error.token.startColumn,
+      }
+      : undefined,
+  }));
 }
 
 function normalizeDiagnostics(result: ValidationResult): NormalizedIssue[] {

@@ -3,9 +3,9 @@
 The preparation stage established the boundaries and the first compatibility
 slice now adds a real `@justybase/sql-core/validation` entrypoint. Runtime
 implementations, result messages, cache serialization and companion APIs remain
-active at their existing paths. The validation entrypoint deliberately keeps
-the legacy parser behind an injected backend until the pure parser dependency
-closure is moved.
+active at their existing paths. The Netezza lexer, grammar and parser runtime
+are now owned by sql-core; the desktop semantic visitor remains behind the
+compatibility adapter until its own pure dependency closure is moved.
 Target ownership is defined in [Architecture](ARCHITECTURE.md); test selection
 and lifecycle requirements remain governed by [Testing strategy](TESTING_STRATEGY.md).
 
@@ -28,7 +28,7 @@ when comparing revisions; do not commit volatile graph/timing reports.
 | `src` | contracts/shared packages, desktop modules, exact companion registry bridges |
 | `media` | shared packages, desktop protocol/types, media modules, exact companion designer bridges |
 | `packages/contracts` | its own public types/helpers; existing type cycle is fingerprinted |
-| `packages/sql-core` | LSP protocol libraries and exact `src` SQL/LSP/registry bridges; not yet a standalone pure engine |
+| `packages/sql-core` | Platform-neutral Netezza lexer/parser plus LSP protocol libraries and remaining exact `src` SQL/LSP/registry bridges |
 | Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime/access-file own Node I/O |
 | `apps/api` | contracts, sql-core, database-runtime and API modules |
 | `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
@@ -43,11 +43,11 @@ adapters. The adapter preserves the existing `ValidationError` shape, parser
 session ownership, incremental validation cache, SQL025/SQL026 metadata flow,
 LSP severity conversion and suggested-fix mapping.
 
-The current backend is intentionally the legacy `SqlValidator`. This is a
-reversible strangler step: parity tests compare the direct legacy result with
-the boundary result before the parser implementation is relocated. The next
-slice may replace only the injected backend with the pure Netezza parser; it
-must not change consumers or wire contracts.
+The current semantic backend is intentionally the legacy `SqlValidator`. This
+is a reversible strangler step: parity tests compare the direct legacy result
+with the boundary result after the package-owned parser has produced the CST.
+The next slice may move the visitor and schema-validation closure into sql-core;
+it must not change consumers or wire contracts.
 
 Required checks for this slice are:
 
@@ -80,7 +80,6 @@ The existing cycle inventory, identified by its configured anchor, is:
 | `src/dialects/netezza/sql/authoring.ts` | Netezza authoring |
 | `src/export/exportManager.ts` | export |
 | `src/services/copilotService.ts` | Copilot services |
-| `src/sqlParser/BaseSqlParser.ts` | parser |
 
 Exact members and internal-edge fingerprints live in `cycleExceptions` and the
 report. New cycles or changed components fail. Breaking a component is planned
