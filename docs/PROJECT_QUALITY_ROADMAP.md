@@ -99,6 +99,13 @@ high-risk change merged without multi-layer evidence.
 | CQ06 | P1 | L | Subsystem owners | planned | Preserve caught error causes, remove empty catches and unused branches, and define ownership for timers, listeners, workers, connections, temporary files, and database sessions. Tests must assert cleanup. |
 | CQ07 | P1 | S | Access package owner | planned | Mark Access index-code data as generated, document and verify its generator/checksum, and exclude it from hand-written size and coverage metrics. |
 
+The follow-up [shared-code preparation](SHARED_CODE_MIGRATION.md) defines target
+ownership, audits duplicate contracts and public companion entry points, and
+orders migration slices with desktop-first parity gates. Its infrastructure
+adds pure-package import checks, exact exceptions with removal conditions and
+the read-only `architecture:report` inventory. No production extraction is
+included; CQ01/CQ02 and subsequent runtime migrations remain separate work.
+
 Architecture completion means zero new cycles, no `vscode` dependency in shared
 packages, no untyped high-traffic webview command, and no state migration that
 silently applies data belonging to another result identity.
