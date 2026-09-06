@@ -8,9 +8,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
-const boundaries = [
+export const architectureBoundaries = [
   'packages/contracts/src',
   'packages/sql-core/src',
   'packages/database-runtime/src',
@@ -28,23 +28,35 @@ function filesIn(directory) {
   });
 }
 
-const violations = [];
-for (const relativeDirectory of boundaries) {
-  for (const file of filesIn(path.join(root, relativeDirectory))) {
-    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/u);
-    lines.forEach((line, index) => {
-      if (forbidden.test(line)) violations.push(`${path.relative(root, file)}:${index + 1}`);
-      if (relativeDirectory === 'packages/designer-core/src' && designerCoreForbidden.test(line)) {
-        violations.push(`${path.relative(root, file)}:${index + 1} (designer-core platform import)`);
-      }
-    });
+export function findArchitectureViolations(root, boundaries = architectureBoundaries) {
+  const violations = [];
+  for (const relativeDirectory of boundaries) {
+    for (const file of filesIn(path.join(root, relativeDirectory))) {
+      const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/u);
+      lines.forEach((line, index) => {
+        if (forbidden.test(line)) violations.push(`${path.relative(root, file)}:${index + 1}`);
+        if (relativeDirectory === 'packages/designer-core/src' && designerCoreForbidden.test(line)) {
+          violations.push(`${path.relative(root, file)}:${index + 1} (designer-core platform import)`);
+        }
+      });
+    }
   }
+  return violations;
 }
 
-if (violations.length > 0) {
-  console.error('Architecture boundary violations (shared packages must not import vscode):');
-  for (const violation of violations) console.error(`- ${violation}`);
-  process.exit(1);
+export function runArchitectureCheck(root = process.cwd()) {
+  const violations = findArchitectureViolations(root);
+  if (violations.length > 0) {
+    console.error('Architecture boundary violations (shared packages must not import vscode):');
+    for (const violation of violations) console.error(`- ${violation}`);
+    return false;
+  }
+
+  console.log(`Architecture boundaries passed (${architectureBoundaries.length} shared package roots checked).`);
+  return true;
 }
 
-console.log(`Architecture boundaries passed (${boundaries.length} shared package roots checked).`);
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  && !runArchitectureCheck()) {
+  process.exitCode = 1;
+}
