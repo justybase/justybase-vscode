@@ -99,7 +99,7 @@ test('resolves relative, export, require, dynamic import, import type, aliases, 
       export { aliased } from '@fixture/shared/alias';
       import type { TypeOnly } from './typeOnly';
       const required = require('./requiree');
-      void import('./dynamic');
+      void import('./dynamic', { with: { type: 'json' } });
       void relative;
       void required;
       const typeOnly: TypeOnly = true;
@@ -112,6 +112,25 @@ test('resolves relative, export, require, dynamic import, import type, aliases, 
     assert.ok(result.edges.some(edge => edge.source === 'src/main.ts' && edge.target === 'src/relative.ts'));
     assert.ok(result.edges.some(edge => edge.source === 'src/main.ts' && edge.target === 'packages/shared/src/alias.ts'));
     assert.ok(result.edges.some(edge => edge.source === 'apps/api/src/main.ts' && edge.target === 'packages/contracts/src/index.ts'));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('scans import-equals and attributed dynamic imports', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'src/dynamic.ts', 'export const dynamic = true;');
+    writeFixture(root, 'src/import-equals.ts', "import vscode = require('vscode'); void vscode;");
+    writeFixture(root, 'src/main.ts', "void import('./dynamic', { with: { type: 'json' } });");
+    const result = analyzeArchitecture(root, fixtureRules({
+      forbiddenImports: [{ layer: 'desktop', specifier: '^vscode$' }],
+    }));
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.forbiddenDependency
+      && diagnostic.specifier === 'vscode'));
+    assert.ok(result.edges.some(edge => edge.source === 'src/main.ts'
+      && edge.target === 'src/dynamic.ts'
+      && edge.kind === 'dynamic-import'));
   } finally {
     removeFixture(root);
   }
@@ -157,6 +176,20 @@ test('reports an unresolved internal import as ARCH002', () => {
   }
 });
 
+test('reports a TypeScript source outside configured production roots as ARCH002', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'tools/helper.ts', 'export const helper = true;');
+    writeFixture(root, 'src/main.ts', "import { helper } from '../tools/helper'; void helper;");
+    const result = analyzeArchitecture(root, fixtureRules());
+    const diagnostic = result.diagnostics.find(candidate => candidate.code === ARCHITECTURE_CODES.unresolvedImport);
+    assert.ok(diagnostic);
+    assert.match(diagnostic.message, /outside the configured production graph: tools\/helper\.ts/);
+  } finally {
+    removeFixture(root);
+  }
+});
+
 test('reports a new cycle as ARCH003', () => {
   const root = createFixture();
   try {
@@ -192,6 +225,37 @@ test('accepts an existing cycle only with an exact fingerprinted cycle exception
     };
     const result = analyzeArchitecture(root, allowedRules);
     assert.deepEqual(result.diagnostics, []);
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('does not match a cycle exception anchor from another strongly connected component', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'src/a.ts', "import { b } from './b'; export const a = b;");
+    writeFixture(root, 'src/b.ts', "import { a } from './a'; export const b = a;");
+    writeFixture(root, 'src/c.ts', "import { d } from './d'; export const c = d;");
+    writeFixture(root, 'src/d.ts', "import { c } from './c'; export const d = c;");
+    const rules = fixtureRules();
+    const baseline = analyzeArchitecture(root, rules);
+    const firstCycle = baseline.cycles.find(cycle => cycle.nodes.includes('src/a.ts'));
+    const otherCycleAnchor = baseline.edges.find(edge => edge.source === 'src/c.ts' && edge.target === 'src/d.ts');
+    assert.ok(firstCycle);
+    assert.ok(otherCycleAnchor);
+    const result = analyzeArchitecture(root, {
+      ...rules,
+      cycleExceptions: [{
+        source: otherCycleAnchor.source,
+        target: otherCycleAnchor.target,
+        nodes: firstCycle.nodes,
+        edgeFingerprint: firstCycle.edgeFingerprint,
+        reason: 'Incorrectly scoped fixture anchor.',
+        owner: 'Fixture owner',
+      }],
+    });
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.dependencyCycle
+      && diagnostic.nodes?.includes('src/a.ts')));
   } finally {
     removeFixture(root);
   }
@@ -239,6 +303,28 @@ test('reports malformed rules as ARCH004 and keeps the check fail-closed', () =>
     const result = analyzeArchitecture(root, { version: 1, layers: {} });
     assert.ok(result.diagnostics.length > 0);
     assert.ok(result.diagnostics.every(diagnostic => diagnostic.code === ARCHITECTURE_CODES.invalidConfiguration));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('rejects malformed forbidden-import regular expressions as ARCH004', () => {
+  const root = createFixture();
+  try {
+    const result = analyzeArchitecture(root, fixtureRules({ forbiddenImports: [{ specifier: '[' }] }));
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.invalidConfiguration));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('rejects malformed nested tsconfig diagnostics as ARCH004', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'apps/api/tsconfig.json', '{ "compilerOptions": { "module": "not-a-module" } }');
+    writeFixture(root, 'apps/api/src/main.ts', 'export const main = true;');
+    const result = analyzeArchitecture(root, fixtureRules());
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.invalidConfiguration));
   } finally {
     removeFixture(root);
   }

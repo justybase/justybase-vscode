@@ -102,9 +102,13 @@ The repository-wide gate is configured in
 [`quality/architecture-rules.json`](../quality/architecture-rules.json). It
 parses production TypeScript with the Compiler API and resolves relative paths,
 `tsconfig` aliases, workspace package names, literal `require()` calls,
-dynamic imports, import types, and `.js` specifiers pointing at TypeScript
-sources. It scans only the production roots below; tests, mocks, declarations,
-`dist`, and `node_modules` are excluded.
+dynamic imports (including import attributes), import-equals declarations,
+import types, and `.js` specifiers pointing at TypeScript sources. It scans only
+the production roots below; tests, mocks, declarations, `dist`, and
+`node_modules` are excluded. A TypeScript source resolved outside those roots
+is reported as `ARCH002`, rather than being treated as an asset. Invalid
+forbidden-import regexes and any `tsconfig` parse diagnostics are `ARCH004`, so
+alias resolution never silently falls back to a less strict configuration.
 
 | Layer | Production roots | Allowed dependency targets |
 | --- | --- | --- |
