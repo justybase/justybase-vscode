@@ -358,6 +358,15 @@ export class SqlValidator {
           errors.push(this.toParserValidationError(lexResult.tokens, error));
         });
       }
+    } else if (!useBestEffortSyntaxValidation) {
+      // The parser deliberately ignores a trailing dot for completion, but a
+      // completed document must not accept an incomplete qualified reference
+      // such as `SELECT D. FROM ...`.
+      parseResult.parserErrors
+        .filter(isIgnorableTrailingDotParserError)
+        .forEach((error) => {
+          errors.push(this.toParserValidationError(lexResult.tokens, error));
+        });
     }
 
     // Step 3: Visit CST and build scope (only if we have a CST and no syntax/lexing errors)
@@ -988,6 +997,7 @@ export class SqlValidator {
     const previousToken = this.getPreviousToken(tokens, tokenIndex, error);
 
     return (
+      this.detectTrailingDotReference(tokens, tokenIndex, previousToken) ??
       this.detectMissingAsInCte(tokens, tokenIndex) ??
       this.detectDoubleComma(token, previousToken) ??
       this.detectUnclosedCaseExpression(tokens, tokenIndex, error.message) ??
@@ -996,6 +1006,25 @@ export class SqlValidator {
       this.detectMissingTableSource(token, previousToken) ??
       this.detectMissingClosingParenthesis(token, error.message)
     );
+  }
+
+  private detectTrailingDotReference(
+    tokens: IToken[],
+    tokenIndex: number,
+    previousToken: IToken | undefined,
+  ): FriendlyParserError | undefined {
+    if (previousToken?.tokenType.name !== "Dot") {
+      return undefined;
+    }
+
+    const qualifier = tokenIndex > 1 ? tokens[tokenIndex - 2]?.image : undefined;
+    const qualifierText = qualifier ? ` '${qualifier}.'` : "";
+    return {
+      message:
+        `Incomplete qualified reference${qualifierText}. `
+        + "Add '*' or a column name after the dot.",
+      position: this.tokenToPosition(previousToken),
+    };
   }
 
   private detectMissingAsInCte(

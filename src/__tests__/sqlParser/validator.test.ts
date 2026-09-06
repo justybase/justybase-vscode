@@ -221,6 +221,21 @@ ORDER BY d.DATEKEY;`);
       expect(parseError?.position).toBeDefined();
     });
 
+    it("should report an incomplete qualified reference before the next clause", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(`SELECT D.
+FROM JUST_DATA.ADMIN.DIMDATE D
+WHERE D.DATEKEY > 0
+LIMIT 50`);
+
+      const parseError = result.errors.find((error) => error.code === "PAR001");
+      expect(parseError).toBeDefined();
+      expect(parseError?.message).toContain("D.");
+      expect(parseError?.message).toContain("'*'");
+      expect(parseError?.position.startLine).toBe(1);
+      expect(parseError?.position.startColumn).toBe(9);
+    });
+
     it("should report PAR101 for missing AS in CTE definition", () => {
       const validator = new SqlValidator();
       const result = validator.validate(

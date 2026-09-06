@@ -75,6 +75,29 @@ describe('SqlLinterProvider lint modes', () => {
         isSqlLanguageClientRunningMock.mockReturnValue(true);
     });
 
+    it('surfaces an incomplete qualified reference as a parser lint issue', async () => {
+        isSqlLanguageClientRunningMock.mockReturnValue(false);
+        validateMock.mockReturnValue({
+            valid: false,
+            errors: [{
+                code: 'PAR001',
+                message: "Incomplete qualified reference 'D.'. Add '*' or a column name after the dot.",
+                severity: 'error',
+                position: { offset: 7, startLine: 1, startColumn: 8, endLine: 1, endColumn: 9 },
+            }],
+            warnings: [],
+            scope: { tables: new Map(), ctes: new Map(), level: 0 },
+        });
+
+        const issues = await provider.lintSql(`SELECT D.
+FROM JUST_DATA.ADMIN.DIMDATE D
+WHERE D.DATEKEY > 0
+LIMIT 50`, {}, false, 'advanced');
+
+        expect(issues.some((issue) => issue.ruleId === 'PAR001')).toBe(true);
+        isSqlLanguageClientRunningMock.mockReturnValue(true);
+    });
+
     it('does not invoke parser validator in quality-only lint mode', async () => {
         const sql = 'SELECT FROM DIMACCOUNT;';
         const issues = await provider.lintSql(sql, {}, false, 'advanced');
