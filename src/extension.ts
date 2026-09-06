@@ -38,6 +38,7 @@ import { activateEditorSync } from './activation/activateEditorSync';
 import { activateNotebookRegistration } from './activation/activateNotebookRegistration';
 import { registerNewSqlTabCommand } from './commands/newSqlTabCommand';
 import { registerResultPanelRegressionCommand } from './activation/resultPanelRegression';
+import { registerDesignerRegressionCommand } from './activation/designerRegression';
 import {
     checkForConflictingExtensions,
     getDatabaseList,
@@ -150,6 +151,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     const resultPanelRegressionCommand = registerResultPanelRegressionCommand(resultPanelProvider, connectionManager, context);
     if (resultPanelRegressionCommand) {
         context.subscriptions.push(resultPanelRegressionCommand);
+    }
+    const designerRegressionCommand = registerDesignerRegressionCommand(connectionManager);
+    if (designerRegressionCommand) {
+        context.subscriptions.push(designerRegressionCommand);
     }
 
     let t = performance.now();

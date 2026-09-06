@@ -14,37 +14,16 @@ import type {
 import { api, connectToQueryEvents, type QueryEventSubscription } from '../api';
 import { qualifySchemaNode } from '../SchemaTree';
 import {
-  buildAddColumnSql,
-  buildCheckConstraintSql,
-  buildClickHousePartitionOperationSql,
-  buildClickHouseSkippingIndexSql,
-  buildClickHouseSkippingIndexDropSql,
-  buildDropIndexSql,
-  buildDropConstraintSql,
-  buildDropTriggerSql,
-  buildForeignKeySql,
-  buildNetezzaRoutineSql,
-  buildTriggerSql,
-  buildNetezzaOrganizationSql,
-  buildNetezzaPhysicalDesignSql,
-  buildRelationalIndexSql,
-  buildSnowflakeClusteringSql,
-  buildSnowflakeClusteringDropSql,
-  buildViewSql,
-  buildVerticaProjectionSql,
-  buildVerticaProjectionDropSql,
+  buildObjectDesignerSql,
   type ClickHousePartitionOperationInput,
   type ClickHouseSkippingIndexInput,
-  type DesignerCheckConstraintInput,
-  type DesignerColumnInput,
   type DesignerForeignKeyInput,
   type DesignerRoutineInput,
   type DesignerTriggerInput,
-  type DesignerViewInput,
-  type DesignerRelationalIndexInput,
   type NetezzaPhysicalDesignInput,
   type SnowflakeClusteringInput,
   type VerticaProjectionInput,
+  type ObjectDesignerDraft,
 } from '@justybase/designer-core';
 import { getDesignerTargetFlags, isMutatingCapability, viewDefinitionFromMetadata, type DesignerTab } from './model';
 
@@ -137,99 +116,63 @@ export function useObjectDesignerController({
 
   const generatedSql = useMemo(() => {
     try {
-      if (!isTableTarget && !isViewTarget && !isRoutineTarget) return '';
-      const capabilityKey: DatabaseDesignerCapabilityKey = activeTab === 'definition'
-        ? isViewTarget ? 'views' : 'procedures'
-        : activeTab === 'columns'
-        ? 'alterTable'
-        : activeTab === 'indexes' ? 'indexes'
-          : activeTab === 'partitions' ? 'partitions'
-            : activeTab === 'triggers' ? 'triggers'
-              : constraintType === 'foreignKey' ? 'foreignKeys' : 'checks';
-      const capability = context?.capabilities.constructs[capabilityKey];
-      if (activeTab === 'definition') {
-        if (isViewTarget) {
-          const input: DesignerViewInput = {
-            definition: viewDefinition,
-            replace: viewReplace && capability?.view?.replaceStyle !== 'create',
-          };
-          return buildViewSql(targetSql, input, capability);
-        }
-        return buildNetezzaRoutineSql(targetSql, {
-          parameters: routineParameters,
-          returnType: routineReturnType,
-          executeAs: routineExecuteAs,
-          body: routineBody,
-        }, capability);
-      }
-      if (activeTab === 'columns') {
-        const input: DesignerColumnInput = { name: columnName, dataType: columnType, notNull: columnNotNull, defaultExpression: columnDefault };
-        return buildAddColumnSql(targetSql, databaseKind, input, capability);
-      }
-      if (activeTab === 'indexes') {
-        if (databaseKind === 'netezza') return buildNetezzaOrganizationSql(targetSql, { organizationColumns, organizationNone, organizationMaxRowsPerZone }, capability);
-        if (databaseKind === 'clickhouse') return indexOperation === 'drop'
-          ? buildClickHouseSkippingIndexDropSql(targetSql, clickHouseIndex.name, capability)
-          : buildClickHouseSkippingIndexSql(targetSql, clickHouseIndex, capability);
-        if (databaseKind === 'vertica') return indexOperation === 'drop'
-          ? buildVerticaProjectionDropSql(verticaProjection.name, capability)
-          : buildVerticaProjectionSql(targetSql, verticaProjection, capability);
-        if (databaseKind === 'snowflake') return indexOperation === 'drop'
-          ? buildSnowflakeClusteringDropSql(targetSql, capability)
-          : buildSnowflakeClusteringSql(targetSql, snowflakeClustering, capability);
-        const input: DesignerRelationalIndexInput = { name: indexName, columns: indexColumns, unique: indexUnique };
-        return indexOperation === 'drop'
-          ? buildDropIndexSql(targetSql, databaseKind, indexName, capability)
-          : buildRelationalIndexSql(targetSql, databaseKind, input, capability);
-      }
-      if (activeTab === 'constraints' && constraintType === 'foreignKey') {
-        if (constraintOperation === 'drop') return buildDropConstraintSql(targetSql, databaseKind, constraintName, 'foreignKey', capability);
-        const input: DesignerForeignKeyInput = {
-          name: constraintName,
-          columns: foreignKeyColumns,
-          referencedSchema,
-          referencedTable,
-          referencedColumns,
-          match: foreignKeyMatch,
-          onDelete: foreignKeyOnDelete,
-          onUpdate: foreignKeyOnUpdate,
-          deferrable: foreignKeyDeferrable,
-          initiallyDeferred: foreignKeyInitiallyDeferred,
-          notValid: foreignKeyNotValid,
-        };
-        return buildForeignKeySql(targetSql, databaseKind, input, capability);
-      }
-      if (activeTab === 'constraints') {
-        if (constraintOperation === 'drop') return buildDropConstraintSql(targetSql, databaseKind, constraintName, 'check', capability);
-        const input: DesignerCheckConstraintInput = { name: constraintName, expression: checkExpression, notValid: checkNotValid };
-        return buildCheckConstraintSql(targetSql, databaseKind, input, capability);
-      }
-      if (activeTab === 'partitions' && databaseKind === 'netezza') {
-        const input: NetezzaPhysicalDesignInput = {
-          distributionChanged,
-          distributionMethod,
-          distributionColumns,
-          organizationColumns,
-          organizationNone,
-          organizationMaxRowsPerZone,
-        };
-        return buildNetezzaPhysicalDesignSql(targetSql, input, capability);
-      }
-      if (activeTab === 'partitions' && databaseKind === 'clickhouse') return buildClickHousePartitionOperationSql(targetSql, clickHousePartition, capability);
-      if (activeTab === 'triggers') {
-        if (triggerOperation === 'drop') return buildDropTriggerSql(targetSql, databaseKind, { name: triggerName }, capability);
-        return buildTriggerSql(targetSql, databaseKind, {
-          name: triggerName,
-          timing: triggerTiming,
-          event: triggerEvent,
-          updateColumns: triggerUpdateColumns,
-          level: triggerLevel,
-          whenExpression: triggerWhen,
-          body: triggerBody,
-          objectType: target.objectType,
-        }, capability);
-      }
-      return '';
+      const draft: ObjectDesignerDraft = {
+        activeTab,
+        columnName,
+        columnType,
+        columnNotNull,
+        columnDefault,
+        indexName,
+        indexColumns,
+        indexUnique,
+        indexOperation,
+        distributionChanged,
+        distributionMethod,
+        distributionColumns,
+        organizationColumns,
+        organizationNone,
+        organizationMaxRowsPerZone,
+        clickHouseIndex,
+        clickHousePartition,
+        verticaProjection,
+        snowflakeClustering,
+        constraintType,
+        constraintOperation,
+        constraintName,
+        foreignKeyColumns,
+        referencedSchema,
+        referencedTable,
+        referencedColumns,
+        foreignKeyMatch,
+        foreignKeyOnDelete,
+        foreignKeyOnUpdate,
+        foreignKeyDeferrable,
+        foreignKeyInitiallyDeferred,
+        foreignKeyNotValid,
+        checkExpression,
+        checkNotValid,
+        triggerName,
+        triggerOperation,
+        triggerTiming,
+        triggerEvent,
+        triggerUpdateColumns,
+        triggerLevel,
+        triggerWhen,
+        triggerBody,
+        viewDefinition,
+        viewReplace,
+        routineParameters,
+        routineReturnType,
+        routineExecuteAs,
+        routineBody,
+      };
+      return buildObjectDesignerSql({
+        targetSql,
+        databaseKind,
+        targetObjectType: target.objectType,
+        capabilities: context?.capabilities,
+        draft,
+      });
     } catch {
       return '';
     }

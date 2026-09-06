@@ -20,6 +20,21 @@ test.describe('Table Designer webview', () => {
         await page.goto('/test-harness/table-designer.html');
         await expect(page.locator('#addColumnBtn')).toBeVisible();
     });
+
+    test('keeps generated DDL functional after editing the design', async ({ page }) => {
+        await page.goto('/test-harness/table-designer.html');
+
+        await page.locator('#tableName').fill('ORDERS');
+        await page.locator('#ifNotExists').check();
+        await page.locator('#organizeColumns').fill('ID');
+        await page.locator('#addColumnBtn').click();
+
+        await expect(page.locator('#ddlPreview')).toHaveValue(
+            /CREATE TABLE IF NOT EXISTS JUST_DATA\.ADMIN\.ORDERS[\s\S]*DISTRIBUTE ON RANDOM[\s\S]*ORGANIZE ON \("ID"\);/u,
+        );
+        await expect(page.locator('#columnsBody tr')).toHaveCount(2);
+        await expect(page.locator('#ddlPreview')).toHaveValue(/COLUMN_2 VARCHAR\(255\)/u);
+    });
 });
 
 test.describe('Visual Query Builder webview', () => {

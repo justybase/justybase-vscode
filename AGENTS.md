@@ -454,6 +454,15 @@ work directory after a successful run. Set
 Reports and traces are sanitized: they contain command names, counters, phases,
 and fingerprints only—never passwords, full SQL, or row values.
 
+The desktop Table Designer regression gate runs the production create-table
+command inside a real Extension Host and verifies that its webview opens,
+the shared DDL implementation preserves SQLite and Netezza output, and
+unsupported/read-only capability states remain disabled:
+
+```bash
+npm run test:extension-host:designer
+```
+
 The same scenario is available for a local development Netezza:
 
 ```bash
@@ -494,8 +503,7 @@ Logs-before-data delivery, hidden-view initialization, and missing-shell
 recovery:
 
 ```bash
-npx playwright test --config=test-harness/playwright.config.ts \
-  test-harness/tests/table-rendering.spec.ts
+npm run test:playwright -- test-harness/tests/table-rendering.spec.ts
 ```
 
 Run the Extension Host command inside WSL2 for a local WSL check. Remote-WSL is

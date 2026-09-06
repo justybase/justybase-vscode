@@ -1,10 +1,12 @@
 export {
+  assertDesignerCapabilityOperationSupported,
   assertDesignerOperationSupported,
   assertDesignerPlanCurrent,
   assertDesignerPlanHasChanges,
   EmptyDesignerPlanError,
   getDesignerCapability,
   hasDesignerOperation,
+  isDesignerCapabilityOperationSupported,
   isDesignerOperationSupported,
   StaleDesignerSnapshotError,
   UnsupportedDesignerOperationError,
@@ -28,3 +30,30 @@ export {
 } from './catalog';
 
 export * from './objectDesignerSql';
+
+export {
+  getAvailableDesignerTabs,
+  getDesignerTargetFlags,
+  isMutatingCapability,
+  viewDefinitionFromMetadata,
+  type DesignerTab,
+  type DesignerTargetFlags,
+} from './objectDesignerModel';
+
+export {
+  buildObjectDesignerSql,
+  type ObjectDesignerDraft,
+  type ObjectDesignerSqlInput,
+} from './objectDesignerSqlModel';
+
+export {
+  buildTableDesignerCreateSql,
+  getTableDesignerContainerDisplay,
+  getTableDesignerProfile,
+  getTableDesignerUnsupportedReason,
+  isTableDesignerSupported,
+  type TableDesignerColumnInput,
+  type TableDesignerCreateInput,
+  type TableDesignerProfile,
+  type TableDesignerRuntimeContext,
+} from './tableDesigner';
