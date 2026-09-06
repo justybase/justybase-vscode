@@ -456,9 +456,6 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      - name: Build shared workspace packages
-        run: npm run build:designer-core
-
       - name: Install DB2 extension dependencies
         working-directory: extensions/db2
         run: npm ci
@@ -515,6 +512,9 @@ jobs:
 
       - name: Install root dependencies
         run: npm ci
+
+      - name: Build shared workspace packages
+        run: npm run build:designer-core
 
       - name: Install DB2 extension dependencies
         working-directory: extensions/db2
