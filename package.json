@@ -4494,6 +4494,7 @@
     "quality:report": "node scripts/run-quality-report.mjs",
     "verify:pr": "npm run check:architecture && npm run check-types && npm run check-types:api && npm run check-types:web && npm run lint && npm run lint:extended:check && npm run test:quality-tools && npm run test:designer-core && npm run test:coverage && npm run test:api && npm run test:web && npm run build && npm run build:all",
     "check-types": "tsc --noEmit && tsc --project tsconfig.media.json --noEmit",
+    "check-types:ts7": "npm exec --yes --package=typescript@7.0.2 -- tsc --version && npm exec --yes --package=typescript@7.0.2 -- tsc --noEmit && npm exec --yes --package=typescript@7.0.2 -- tsc --project tsconfig.media.json --noEmit",
     "check-types:api": "npm run build:designer-core && npm run check-types --workspace @justybase/sql-core && npm run build:sql-core && npm run build:runtime && npm run check-types --workspace @justybase/web-api",
     "check-types:web": "npm run check-types --workspace @justybase/web",
     "check-types:media": "tsc --project tsconfig.media.json --noEmit",

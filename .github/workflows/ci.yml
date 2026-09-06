@@ -131,6 +131,30 @@ jobs:
       - name: Build workspace products
         run: npm run build:all
 
+  typecheck-ts7:
+    name: TypeScript 7 Compatibility (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify TypeScript compiler version
+        run: npm exec --yes --package=typescript@7.0.2 -- tsc --version
+
+      - name: Type check with TypeScript 7
+        run: npm run check-types:ts7
+
   completion-parity:
     name: Completion Parity Gate
     runs-on: ubuntu-latest
