@@ -4,9 +4,13 @@ import {
   type Position,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import {
+  NetezzaSqlValidationCore,
+  type SqlCoreDiagnostic,
+  type SqlCoreValidationResult,
+} from './validation';
 import { netezzaSqlAuthoring } from '../../../src/dialects/netezza/sql/authoring';
 import { LspCompletionEngine } from '../../../src/server/completionEngine';
-import { toDiagnostic } from '../../../src/server/diagnosticsUtils';
 import { MetadataBridge } from '../../../src/server/metadataBridge';
 import { LspSchemaProvider } from '../../../src/server/lspSchemaProvider';
 import { DocumentParseSession } from '../../../src/sqlParser/documentParseSession';
@@ -36,6 +40,7 @@ import { collectIdentifierOccurrencesFromScope, type IdentifierSemanticRole } fr
 import { resolveSqlParsingRuntime } from '../../../src/sqlParser/parsingRuntime';
 import { buildSqlSourceScanIndex } from '../../../src/sql/sqlSourceScan';
 import { KEYWORD_TOKEN_NAMES, MACRO_TOKEN_NAMES, MODIFIER_TOKEN_NAMES } from '../../../src/sql/semanticTokenNames';
+import type { SqlStatementsParseResult } from '../../../src/sqlParser/parsingRuntime';
 
 export type CoreSemanticTokenType = 'enumMember' | 'function' | 'keyword' | 'macro' | 'modifier' | 'variable' | 'type' | 'column' | 'table' | 'alias' | 'schema' | 'database' | 'localVariable';
 export type CoreSemanticTokenModifier = 'readonly' | 'defaultLibrary' | 'italic';
@@ -173,18 +178,17 @@ export class NetezzaWebLspCore {
       databaseKind: context.databaseKind,
       validationProfile: netezzaSqlAuthoring.validation,
     });
-    const result = validator.validateFromParseResult(sql, parseResult);
+    const validationCore = createLegacyValidationCore(validator);
+    const result = validationCore.validateParsed(sql, parseResult);
     const parserDiagnostics: CoreDiagnostic[] = [...result.errors, ...result.warnings].map(issue => {
-      const diagnostic = toDiagnostic(issue) as unknown as CoreDiagnostic & { data?: { suggestedFix?: string } };
-      const suggestedFix = (diagnostic.data as { suggestedFix?: string } | undefined)?.suggestedFix;
       const qualityRuleId = getQualityRuleIdForParserCode(issue.code);
       return {
-        range: diagnostic.range,
-        severity: diagnostic.severity,
-        code: qualityRuleId ?? diagnostic.code,
-        source: qualityRuleId ? 'Netezza Quality' : diagnostic.source,
-        message: qualityRuleId ? `${qualityRuleId}: ${issue.message}` : diagnostic.message,
-        data: suggestedFix ? { suggestedFix } : undefined,
+        range: validationPositionToCoreRange(issue),
+        severity: coreSeverityToLspSeverity(issue.severity),
+        code: qualityRuleId ?? issue.code,
+        source: qualityRuleId ? 'Netezza Quality' : 'SQL LSP',
+        message: qualityRuleId ? `${qualityRuleId}: ${issue.message}` : `${issue.code}: ${issue.message}`,
+        data: issue.suggestedFix ? { suggestedFix: issue.suggestedFix } : undefined,
       };
     });
 
@@ -712,4 +716,72 @@ function classifySemanticTokenType(tokenTypeName: string, image: string, databas
   }
   if (/^[A-Za-z_]/.test(image)) return 'keyword';
   return undefined;
+}
+
+function createLegacyValidationCore(validator: SqlValidator): NetezzaSqlValidationCore {
+  return new NetezzaSqlValidationCore({
+    validate: (sql) => toCoreValidationResult(validator.validate(sql)),
+    validateParsed: (sql, parseResult) =>
+      toCoreValidationResult(
+        validator.validateFromParseResult(
+          sql,
+          parseResult as SqlStatementsParseResult,
+        ),
+      ),
+  });
+}
+
+type LegacyValidationResult = ReturnType<SqlValidator["validate"]>;
+type LegacyValidationError = LegacyValidationResult["errors"][number];
+
+function toCoreValidationResult(result: LegacyValidationResult): SqlCoreValidationResult {
+  return {
+    valid: result.valid,
+    errors: result.errors.map(toCoreDiagnostic),
+    warnings: result.warnings.map(toCoreDiagnostic),
+    scope: result.scope,
+  };
+}
+
+function toCoreDiagnostic(issue: LegacyValidationError): SqlCoreDiagnostic {
+  return {
+    message: issue.message,
+    severity: issue.severity,
+    code: issue.code,
+    position: { ...issue.position },
+    suggestedFix: issue.suggestedFix,
+  };
+}
+
+function validationPositionToCoreRange(issue: SqlCoreDiagnostic): CoreRange {
+  const startLine = Math.max(0, issue.position.startLine - 1);
+  const startCharacter = Math.max(0, issue.position.startColumn - 1);
+  const endLine = Math.max(startLine, issue.position.endLine - 1);
+  const rawEndCharacter = Math.max(0, issue.position.endColumn - 1);
+  const endCharacter =
+    endLine === startLine
+      ? Math.max(startCharacter + 1, rawEndCharacter)
+      : rawEndCharacter;
+
+  return {
+    start: { line: startLine, character: startCharacter },
+    end: { line: endLine, character: endCharacter },
+  };
+}
+
+function coreSeverityToLspSeverity(
+  severity: SqlCoreDiagnostic["severity"],
+): number {
+  switch (severity) {
+    case "error":
+      return 1;
+    case "warning":
+      return 2;
+    case "information":
+      return 3;
+    case "hint":
+      return 4;
+    default:
+      return 2;
+  }
 }

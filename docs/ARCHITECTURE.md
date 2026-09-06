@@ -11,8 +11,11 @@ which parts are currently enforced.
 
 The current dependency map, contract audit, service proposal and ordered
 migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
-That preparation does not move production implementations, create empty
-packages, or create an Electron application.
+The first SQL validation boundary is now implemented as a compatibility slice:
+`@justybase/sql-core/validation` owns the platform-neutral types and
+orchestration seam, while the legacy parser remains behind an explicit
+desktop/API adapter until the pure parser closure is extracted.
+This does not create empty packages or an Electron application.
 
 ## Target ownership
 
@@ -41,7 +44,9 @@ React renderer -> HTTP client -> API backend
 
 These are ownership decisions, not a claim that extraction is complete.
 `designer-core` already owns pure designer logic; `access-file` is a Node file
-runtime. `sql-core` still bundles desktop sources through explicit debt bridges.
+runtime. `sql-core` still bundles desktop sources through explicit debt bridges;
+the validation subpath is the first exception-free extraction seam, not yet the
+final parser implementation.
 Pure engines receive schema providers, dialect profiles and other services as
 arguments. Existing registries remain at their current compatibility seams;
 new process-global registries combining products and dialects are prohibited.

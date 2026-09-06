@@ -1,8 +1,11 @@
-# Shared-code migration preparation
+# Shared-code migration preparation and first compatibility slice
 
-This is the preparation stage only. Runtime implementations, result messages,
-cache serialization and companion APIs remain active at their existing paths.
-Create a package with its first real implementation, never as an empty scaffold.
+The preparation stage established the boundaries and the first compatibility
+slice now adds a real `@justybase/sql-core/validation` entrypoint. Runtime
+implementations, result messages, cache serialization and companion APIs remain
+active at their existing paths. The validation entrypoint deliberately keeps
+the legacy parser behind an injected backend until the pure parser dependency
+closure is moved.
 Target ownership is defined in [Architecture](ARCHITECTURE.md); test selection
 and lifecycle requirements remain governed by [Testing strategy](TESTING_STRATEGY.md).
 
@@ -30,6 +33,28 @@ when comparing revisions; do not commit volatile graph/timing reports.
 | `apps/api` | contracts, sql-core, database-runtime and API modules |
 | `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
 | `extensions` | own modules, contracts/shared helpers, public core activation API, exact legacy desktop implementation bridges |
+
+## First SQL validation slice
+
+`@justybase/sql-core/validation` defines the platform-neutral diagnostic,
+position, schema-provider and validation-result shapes. The desktop LSP handler,
+desktop linter and web/API LSP core cross this boundary through compatibility
+adapters. The adapter preserves the existing `ValidationError` shape, parser
+session ownership, incremental validation cache, SQL025/SQL026 metadata flow,
+LSP severity conversion and suggested-fix mapping.
+
+The current backend is intentionally the legacy `SqlValidator`. This is a
+reversible strangler step: parity tests compare the direct legacy result with
+the boundary result before the parser implementation is relocated. The next
+slice may replace only the injected backend with the pure Netezza parser; it
+must not change consumers or wire contracts.
+
+Required checks for this slice are:
+
+- `npm run test:sql-core` for the package boundary;
+- `sqlCoreValidationParity.test.ts` for diagnostic and scope parity;
+- parser, linter, API and Extension Host authoring suites;
+- `npm run check:architecture` with no new exceptions or cycles.
 
 The complete exception inventory is `quality/architecture-rules.json`, not a
 second manually maintained list. Categories are companion-to-desktop services,
@@ -180,7 +205,8 @@ authenticated owner; it is not a raw server filesystem path.
 
 ## Migration order and comparison gates
 
-1. Extract the Netezza parser/linter into sql-core. The first vertical slice is
+1. Replace the legacy backend behind the validation boundary with the Netezza
+   parser/linter implementation in sql-core. The first vertical slice is
    parser-backed validation for a document plus injected schema metadata:
    input SQL/profile/schema -> parse -> diagnostics -> desktop compatibility
    facade. Move the smallest coherent dependency closure; retain public exports

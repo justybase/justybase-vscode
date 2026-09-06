@@ -51,6 +51,7 @@ module.exports = {
     "^@justybase/contracts/(.*)$": "<rootDir>/packages/contracts/src/$1",
     "^@justybase/designer-core$": "<rootDir>/packages/designer-core/src/index.ts",
     "^@justybase/designer-core/(.*)$": "<rootDir>/packages/designer-core/src/$1",
+    "^@justybase/sql-core/validation$": "<rootDir>/packages/sql-core/src/validation.ts",
     "^(.*/media/.+)\\.js$": "$1.ts",
     // Jest (CJS) cannot resolve ESM-only packages with "exports: { import: ... }" conditions.
     "^hyparquet$": "<rootDir>/node_modules/hyparquet/src/index.js",
