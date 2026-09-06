@@ -1,6 +1,7 @@
 {
   "name": "@justybase/database-runtime",
   "private": true,
+  "license": "Apache-2.0",
   "version": "3.16.8",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
