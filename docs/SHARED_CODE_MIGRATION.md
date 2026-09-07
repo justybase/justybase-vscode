@@ -1,11 +1,11 @@
-# Shared-code migration preparation and first compatibility slice
+# Shared-code migration: Netezza validation boundary
 
-The preparation stage established the boundaries and the first compatibility
-slice now adds a real `@justybase/sql-core/validation` entrypoint. Runtime
-implementations, result messages, cache serialization and companion APIs remain
-active at their existing paths. The Netezza lexer, grammar and parser runtime
-are now owned by sql-core; the desktop semantic visitor remains behind the
-compatibility adapter until its own pure dependency closure is moved.
+The preparation stage established the boundaries and the migration now has a
+platform-neutral `@justybase/sql-core` entrypoint. The Netezza lexer, grammar,
+parser runtime, semantic validator, authoring helpers and quality rules are
+owned by sql-core. Desktop and API adapters retain their public facades,
+metadata/transport composition and stateful cache lifecycles while delegating
+Netezza analysis to the same native backend.
 Target ownership is defined in [Architecture](ARCHITECTURE.md); test selection
 and lifecycle requirements remain governed by [Testing strategy](TESTING_STRATEGY.md).
 
@@ -28,40 +28,45 @@ when comparing revisions; do not commit volatile graph/timing reports.
 | `src` | contracts/shared packages, desktop modules, exact companion registry bridges |
 | `media` | shared packages, desktop protocol/types, media modules, exact companion designer bridges |
 | `packages/contracts` | its own public types/helpers; existing type cycle is fingerprinted |
-| `packages/sql-core` | Platform-neutral Netezza lexer/parser plus LSP protocol libraries and remaining exact `src` SQL/LSP/registry bridges |
+| `packages/sql-core` | Platform-neutral Netezza lexer/parser, semantic validation, authoring and quality rules |
 | Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime/access-file own Node I/O |
 | `apps/api` | contracts, sql-core, database-runtime and API modules |
 | `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
 | `extensions` | own modules, contracts/shared helpers, public core activation API, exact legacy desktop implementation bridges |
 
-## First SQL validation slice
+## Netezza validation boundary
 
-`@justybase/sql-core/validation` defines the platform-neutral diagnostic,
-position, schema-provider and validation-result shapes. The desktop LSP handler,
-desktop linter and web/API LSP core cross this boundary through compatibility
-adapters. The adapter preserves the existing `ValidationError` shape, parser
-session ownership, incremental validation cache, SQL025/SQL026 metadata flow,
-LSP severity conversion and suggested-fix mapping.
+`@justybase/sql-core/validation` defines the canonical diagnostic, position,
+scope, statement-boundary and validation-result shapes. Desktop validation
+profiles are aliases of the contracts package model. The desktop adapter in
+`src/sqlParser/sqlCoreAdapter.ts` and the API adapter in
+`apps/api/src/sqlCoreLsp.ts` cross this boundary explicitly. They preserve the
+existing validation result shape, incremental-cache ownership, SQL025/SQL026
+metadata flow, LSP severity conversion and suggested-fix mapping.
 
-The current semantic backend is intentionally the legacy `SqlValidator`. This
-is a reversible strangler step: parity tests compare the direct legacy result
-with the boundary result after the package-owned parser has produced the CST.
-The next slice may move the visitor and schema-validation closure into sql-core;
-it must not change consumers or wire contracts.
+The current Netezza semantic backend is the package-owned
+`NetezzaSqlSemanticValidator`. Full, parse-result, and incremental validation
+all call it directly. `SqlCoreBackedValidator` implements the shared
+`SqlValidationService` without inheriting from or constructing the legacy
+`SqlValidator`; the latter remains the fallback for non-Netezza dialects and
+the parity oracle for the migration corpus. Desktop compatibility facades
+retain their result shape and incremental cache owner.
 
 Required checks for this slice are:
 
 - `npm run test:sql-core` for the package boundary;
-- `sqlCoreValidationParity.test.ts` for diagnostic and scope parity;
+- `sqlCoreValidationParity.test.ts` for diagnostic, scope and direct
+  `validateIncremental` boundary parity;
 - parser, linter, API and Extension Host authoring suites;
 - `npm run check:architecture` with no new exceptions or cycles.
 
 The complete exception inventory is `quality/architecture-rules.json`, not a
-second manually maintained list. Categories are companion-to-desktop services,
-desktop-to-companion registries, media-to-companion DDL and sql-core-to-desktop
-authoring. Each exact edge has a reason, accountable maintainer role and removal
-condition. The SQL facade also has one exact Node LSP entry-point exception.
-Removing an edge requires removing its stale exception in the same slice.
+second manually maintained list. The remaining categories are
+companion-to-desktop services, desktop-to-companion registries and
+media-to-companion DDL. Each exact edge has a reason, accountable maintainer
+role and removal condition. There is no sql-core-to-desktop or SQL LSP facade
+exception. Removing an edge requires removing its stale exception in the same
+slice.
 
 The existing cycle inventory, identified by its configured anchor, is:
 
@@ -75,7 +80,6 @@ The existing cycle inventory, identified by its configured anchor, is:
 | `packages/access-file/src/accessFileSession.ts` | Access file runtime |
 | `packages/contracts/src/connectionDetails.ts` | shared contract types |
 | `src/commands/validationCommands.ts` | validation commands |
-| `src/contracts/database/index.ts` | desktop dialect contracts |
 | `src/core/resultDataProvider/types.ts` | result storage contracts |
 | `src/dialects/netezza/sql/authoring.ts` | Netezza authoring |
 | `src/export/exportManager.ts` | export |
@@ -140,9 +144,9 @@ would enlarge the duplication before mappings have been proven.
 | Streaming chunks | `src/core/streaming/StreamingManager.ts`: `StreamingChunk`; `src/contracts/webviews/resultPanelContracts.ts`: append/hydrate messages; contracts `QueryRowsEvent` | Canonical internal chunk contract after first/last, partial/cancelled, total counts and ordering mappings are tested; do not equate callback chunks with wire events. |
 | Query events | `packages/contracts/src/webApi.ts`: `QueryEvent`; desktop execution lifecycle and webview command unions | `QueryEvent` remains canonical for HTTP/WebSocket. A result-core event model needs explicit translation and one terminal event per logical execution. |
 | Source/result identity | `src/state/resultSetIdentity.ts`, `ResultSet.resultSetId`; media `ResultSetScope`/`GridScrollState`; API `queryId`, `statementIndex`, `sessionId` | Future contracts source/result ID types and result-core identity rules. IDs are not tab indices, timestamps, storage-session IDs or interchangeable URI strings; adapters retain URI normalization and legacy fallback. |
-| SQL diagnostics | `src/sqlParser/types/index.ts`: `ValidationError`; sql-core `CoreDiagnostic`; contracts `SqlDiagnostic`; desktop quality/LSP mappings | Public range/severity/code DTO in contracts, parser diagnostics in sql-core. Preserve offset and line conventions, rule-code mapping, ranges and suggested fixes. |
+| SQL diagnostics | `@justybase/sql-core/validation`: `ValidationError`, `ValidationResult`, `Scope`, `StatementBoundary`; contracts `SqlDiagnostic`; desktop quality/LSP mappings | Shared structural validation types are canonical in sql-core; adapters retain only runtime, qualification and transport-specific mappings. Preserve offset and line conventions, rule-code mapping, ranges and suggested fixes. |
 | Metadata columns | parser `ColumnInfo`; contracts `MetadataColumn`; desktop `MetadataColumnItem`; `ColumnDefinition` | Portable metadata column DTO in contracts and model in metadata-core. Preserve `dataType`, keys, qualification, aliases; map `FORMAT_TYPE` and LSP `type` explicitly. SQL025/026 must work through both schema providers. |
-| Capabilities and authoring | `packages/contracts/src/database/index.ts`; `src/contracts/database/index.ts`; `src/sql/authoring/types.ts` | contracts owns portable capabilities/profiles; dialect package owns SQL implementation. Desktop parsing hooks and shared profiles differ: verify structural compatibility before replacing facades. |
+| Capabilities and authoring | `packages/contracts/src/database/index.ts`; `src/contracts/database/index.ts`; `src/sql/authoring/types.ts` | contracts owns portable capabilities and validation profiles; desktop authoring keeps only its quality-rule specialization while dialect packages own SQL implementation. |
 | Query/metadata/result services | desktop `StreamingManager`, `MetadataCache`, `ResultStateManager`; API `QuerySessionManager`; web `api.ts` and `queryState.ts` | Small injected service ports below; product adapters retain secrets, I/O, state lifetime and transport. |
 
 ## Proposed product service ports
@@ -205,11 +209,11 @@ authenticated owner; it is not a raw server filesystem path.
 ## Migration order and comparison gates
 
 1. Replace the legacy backend behind the validation boundary with the Netezza
-   parser/linter implementation in sql-core. The first vertical slice is
-   parser-backed validation for a document plus injected schema metadata:
-   input SQL/profile/schema -> parse -> diagnostics -> desktop compatibility
-   facade. Move the smallest coherent dependency closure; retain public exports
-   and diagnostics mappings. Completion remains on its facade until its slice.
+   parser/linter implementation in sql-core. The completed vertical slice is
+   parser-backed validation and authoring for a document plus injected schema
+   metadata: input SQL/profile/schema -> parse -> diagnostics/quality/authoring
+   -> desktop or API compatibility facade. Keep the smallest coherent
+   dependency closure, public exports and diagnostics mappings intact.
 2. Use SQLite and DuckDB as the first dialect packs, splitting pure authoring
    from runtime/driver registration without changing companion registration.
 3. Extract the shared result identity/reducer and pure operations to result-core.

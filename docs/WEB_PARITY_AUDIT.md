@@ -23,19 +23,20 @@ from this repository:
 
 ## 1. Why parity is much closer than it looks
 
-The web backend runs in Node and **reuses the real desktop SQL core instead of a regex port**:
+The web backend runs in Node and **reuses the platform-neutral Netezza SQL core instead of a regex port**:
 
-- `apps/api/src/lspProtocol.ts` → `@justybase/sql-core` `NetezzaWebLspCore`
-  (`packages/sql-core/src/runtime.ts`), which re-bundles the actual extension code:
-  Chevrotain parser (`DocumentParseSession`), `SqlValidator`, `LspCompletionEngine`,
-  `LspSchemaProvider`, `MetadataBridge`, `netezzaSqlAuthoring.validation`.
+- `apps/api/src/lspProtocol.ts` → `apps/api/src/sqlCoreLsp.ts` →
+  `@justybase/sql-core`, which composes the Chevrotain parser, native
+  `NetezzaSqlSemanticValidator`, completion/authoring helpers and
+  `QualityEngineCore` with API-owned metadata and transport state.
 - Completion and diagnostics in the web therefore already carry the same parser-backed
   behavior as the desktop, including SQL003/004/007/025/026 and completion ranking.
 - Query execution, metadata listing and export reuse `@justybase/database-runtime`,
   `@justybase/spreadsheet-tasks` and the same operator contracts.
 
 **Consequence:** most remaining "parity" work lives in the *web surface* (API+UI) and in
-*shimming* the other desktop LSP handlers into `sql-core`, not in re-implementing SQL logic.
+*shimming* the other desktop LSP handlers into the API adapter, not in
+re-implementing SQL logic or importing desktop sources into `sql-core`.
 
 ---
 
@@ -89,9 +90,9 @@ materially behind its implemented functionality; see the quality roadmap.
 
 | Feature | Desktop status / transport | Web | Effort | Notes |
 | --- | --- | :-: | :-: | --- |
-| Completion | ✅ LSP (`completionEngine`) | ✅ main + WS/LSP | – | Web LSP core provides completion; REST fallback regex-based. |
-| Diagnostics (SQL/PAR) | ✅ LSP `publishDiagnostics` | ✅ WS `diagnostics` | – | Same `SqlValidator` via `sql-core`. |
-| Diagnostics (NZ/NZP quality) | ✅ extension linter (`sqlLinterProvider`) | ✅ WS `diagnostics` | M ✅ | `QualityEngineCore` (vscode-free) in `src/sqlParser/qualityEngineCore.ts` — shared single source; desktop `SqlQualityEngine` is now a thin wrapper. `core.diagnostics()` runs NZ/NZP rules + carries parser `suggestedFix` in `data`. |
+| Completion | ✅ LSP (`completionEngine`) | ✅ main + WS/LSP | – | REST and WS use the same API LSP core; parser-derived table/alias context stays in `sql-core`, while API owns metadata/cache lifecycle. |
+| Diagnostics (SQL/PAR) | ✅ LSP `publishDiagnostics` | ✅ WS `diagnostics` | – | Netezza uses the same native validator through desktop/API adapters. |
+| Diagnostics (NZ/NZP quality) | ✅ extension linter (`sqlLinterProvider`) | ✅ WS `diagnostics` | M ✅ | `QualityEngineCore` in `@justybase/sql-core`; desktop `SqlQualityEngine` and API LSP are thin product adapters. Parser-owned `suggestedFix` data and NZ/NZP mappings remain intact. |
 | Hover | ✅ LSP (`hoverHandler`, budgets) | ✅ WS `hover` | ✅ | Wrapped `provideHover` + session-scope deps in `NetezzaWebLspCore.hover()`; Monaco hover provider. |
 | Go to Definition | ✅ LSP | ✅ WS | ✅ | Uses rename-symbol logic (`resolveSqlRenameSymbolWithSession`). |
 | References | ✅ LSP | ✅ WS | ✅ | `symbols.ts` collector, `includeDeclaration` honored. |
@@ -101,24 +102,27 @@ materially behind its implemented functionality; see the quality roadmap.
 | Code actions (linter fixes) | ✅ LSP SQL/PAR + ext NZ/NZP | ❌ | M | Expose `codeActions` JSON-RPC; NZ/NZP still extension-host → needs core port or a "quickfix" REST for NZ codes. |
 | Code actions (refactors) | ✅ ext (Extract CTE / Materialize / Inline) | ❌ | M | `sqlRefactorCodeActions`. |
 | Document symbols | 🟡 ext | ✅ WS | ✅ | Parse-session CST + macro scan mirrored from `documentSymbolProvider` into `documentSymbols()`. |
-| Semantic tokens | ✅ ext (`semanticTokensProvider`) | ✅ WS | ✅ | Lexer/CST-based `computeSemanticTokens()` in `sql-core` (vscode-free) + Monaco `registerDocumentSemanticTokensProvider`; token-name sets shared via `src/sql/semanticTokenNames.ts` (single source, no duplication). |
-| Formatting | 🟡 ext `sqlFormattingProvider` / `formatSql` | ✅ WS `formatting` | ✅ | Shared `formatSql` (now imports `sqlAuthoringRegistry` directly, not `connectionFactory`) — `format()` + Monaco format edit. |
+| Semantic tokens | ✅ ext (`semanticTokensProvider`) | ✅ WS | ✅ | The API adapter composes the vscode-free sql-core lexer and symbol collector into LSP tokens; desktop semantic token ownership remains product-specific. |
+| Formatting | 🟡 ext `sqlFormattingProvider` / `formatSql` | ✅ WS `formatting` | ✅ | Netezza desktop and API formatting use `formatNetezzaSql` from sql-core; other dialect formatter profiles remain desktop-owned. |
 | Snippets (`dialects/*/snippets`) | ✅ | ✅ | ✅ | REST `GET /api/lsp/snippets` reads the committed `.code-snippets` JSON (single source) → Monaco completion provider with `InsertAsSnippet`. |
 | Statement window / Go to prev/next | ✅ ext | ✅ | ✅ | `SqlParser.getAdjacentStatementAtPosition` reused in core `window()` + Monaco Ctrl/Cmd+Up/Down commands. |
 | CodeLens (Run/Explain per statement) | ✅ ext `sqlCodeLensProvider` | ❌ | M | Monaco has no official CodeLens; implement as editor-gutter buttons (low value). |
 
 > **D1 core wiring shipped 2026-08-09** — hover/definition/references/rename/inlayHints/signatureHelp/
-> documentSymbols/format implemented in `packages/sql-core/src/runtime.ts` + `index.d.ts`, JSON-RPC in
-> `apps/api/src/lspProtocol.ts`, Monaco providers in `apps/web/src/sqlLanguage.ts`.
+> documentSymbols/format are composed by `apps/api/src/sqlCoreLsp.ts` from the
+> platform-neutral package, with JSON-RPC in `apps/api/src/lspProtocol.ts` and
+> Monaco providers in `apps/web/src/sqlLanguage.ts`.
 
 > **D1 leftovers shipped 2026-08-09 (same day)** — semantic tokens, snippets, statement window
-> also wired end-to-end: `sql-core.semanticTokens()` + `window()`, JSON-RPC `textDocument/semanticTokens/full`
-> + `justybase/statementNav`, Monaco semantic-tokens provider + snippet completions + Ctrl/Cmd+Up/Down
-> statement nav. Core/API tests: `apps/api/tests/sqlCoreFeatures.test.ts` (8/8).
+> also wired end-to-end by the API product adapter (`apps/api/src/sqlCoreLsp.ts`), with JSON-RPC
+> `textDocument/semanticTokens/full` + `justybase/statementNav`, Monaco semantic-tokens provider
+> + snippet completions + Ctrl/Cmd+Up/Down statement nav. Core/API tests:
+> `apps/api/tests/sqlCoreFeatures.test.ts` (8/8).
 
 > **Commit 1 — NZ/NZP linter diagnostics shipped 2026-08-09** — `SqlQualityEngine` refactored
-> into a thin vscode wrapper around the new vscode-free `QualityEngineCore`
-> (`src/sqlParser/qualityEngineCore.ts`); desktop behavior unchanged (guard: `linterCodeActions`,
+> into a thin VS Code adapter around the vscode-free `QualityEngineCore` in
+> `@justybase/sql-core` (the desktop adapter is `src/sqlParser/qualityEngineCore.ts`);
+> desktop behavior unchanged (guard: `linterCodeActions`,
 > `sqlQualityEngine.unified`, `linterRules.commentRegression`, 83 tests). `core.diagnostics()`
 > now runs NZ/NZP quality rules and transports parser `suggestedFix` via `data.suggestedFix`
 > through JSON-RPC and Monaco markers. Core/API tests: `sqlCoreFeatures.test.ts` (11/11). Code
@@ -358,18 +362,18 @@ database workflow parity.
 
 **Short answer:** the desktop extension and web are **runtime-isolated** — `dist/extension.js`
 and the web server are separate processes, nothing in `apps/web` executes in desktop, and
-desktop is unaffected by web-only code. The only coupling is *at build time*, where
-`packages/sql-core` **imports desktop `src/`** (`runtime.ts` → `src/server/*`, `src/sqlParser/*`).
-So risk is not "web runs against desktop", it is **"desktop source changed to serve both"**.
+desktop is unaffected by web-only code. The shared Netezza package is platform-neutral;
+desktop and API adapters are separate composition layers, so the remaining risk is
+contract/parity drift rather than a hidden desktop import in the web build.
 
 ### Risk tiers per backlog area
 
 | Area | Touches desktop `src/`? | Risk | Why / mitigation |
 | --- | --- | --- | --- |
-| **D1 wiring** (hover, definition, references, rename, inlay, signature, symbols, format) | **No** | 🟢 Low | All engines are LSP-pure (`hoverEngine.ts`, `metadataBridge`, `inlayHintEngine`) — no `vscode` import. Work happened in `packages/sql-core/src/runtime.ts` + `index.d.ts` + `lspProtocol.ts` + `sqlLanguage.ts`, **additive** to the desktop build. **Shipped 2026-08-09** — desktop regression green (`check-types`, `lint`, `build`, `test:validate`; current gate: 9247 tests). Guard: `npm run build:sql-core && npm run test:api`. |
-| **D1 leftovers** (semantic tokens, snippets, statement window) | **No** (one pure-extraction) | 🟢 Low | Semantic tokens reuse the existing lexer + `parseSemanticScopeWithParser` + `identifierRoleCollector`; the token-name sets were **moved** (not copied) to vscode-free `src/sql/semanticTokenNames.ts`, and the desktop provider now imports from there — behavior-identical, verified by `semanticTokensProvider.test.ts` (43 tests). Snippets reuse the committed `.code-snippets` JSON; statement window reuses `SqlParser.getAdjacentStatementAtPosition`. **Shipped 2026-08-09.** |
-| **NZ/NZP linter & NZ quick-fixes** | **Yes** (done for diag) | 🟢 Low–Med | `sqlQualityEngine` refactored into vscode-free `QualityEngineCore` (`src/sqlParser/qualityEngineCore.ts`) with `SqlQualityEngine` as a thin wrapper — desktop behavior identical, verified by `test:validate` (current gate: 9247 tests). NZ/NZP diagnostics now flow through `core.diagnostics()` with `suggestedFix` in `data`. Remaining: code-action providers (`linterCodeActions.ts`, `sqlRefactorCodeActions.ts` call `vscode`) — a future isolated port; keep vscode wrappers thin. |
-| **Formatting** | One-line import | 🟢 Low | `formatSql()` in `src/services/sqlFormatter.ts` was already vscode-free but imported `connectionFactory` (→ dialects index → vscode). To expose it via `sql-core`, the import was swapped to `getDatabaseSqlAuthoring` from `core/sqlAuthoringRegistry` (a passthrough re-export — behavior identical). Desktop verified: `sqlFormatter.test.ts` 17/17, production `npm run build` green. |
+| **D1 wiring** (hover, definition, references, rename, inlay, signature, symbols, format) | **No** | 🟢 Low | Pure parser/authoring helpers, including table/alias context and formatting, live in `@justybase/sql-core`; metadata, LSP DTOs and transport state live in `apps/api/src/sqlCoreLsp.ts`, while the desktop adapter remains local. Completion cache/invalidation has API tests; Extension Host evidence remains required before release. |
+| **D1 leftovers** (semantic tokens, snippets, statement window) | **No** (one pure-extraction) | 🟢 Low | Semantic tokens reuse the existing lexer + `parseSemanticScopeWithParser` + `identifierRoleCollector`; the token-name sets were **moved** (not copied) to vscode-free `src/sql/semanticTokenNames.ts`, and the desktop provider now imports from there — behavior-identical, verified by `semanticTokensProvider.test.ts` (43 tests). The API adapter exposes the same transport operations from `apps/api/src/sqlCoreLsp.ts`. Snippets reuse the committed `.code-snippets` JSON; statement window uses the shared statement splitter. **Shipped 2026-08-09.** |
+| **NZ/NZP linter & NZ quick-fixes** | **Yes** (done for diag) | 🟢 Low–Med | `QualityEngineCore` is in `@justybase/sql-core`, with `src/sqlParser/qualityEngineCore.ts` as a thin desktop adapter. Desktop and API diagnostics preserve parser-owned fixes and NZ/NZP mappings. Remaining code-action providers (`linterCodeActions.ts`, `sqlRefactorCodeActions.ts`) remain product-specific. |
+| **Formatting** | One-line import | 🟢 Low | Netezza formatting is owned by `formatNetezzaSql` in sql-core and called by the desktop facade and API adapter. Other dialect profiles still use the desktop formatter until their own migrations. |
 | **DDL/import / generic run endpoint** | **No** | 🟢 Low | Reuses `@justybase/database-runtime`; web-side only. |
 | **Multi-dialect (contracts)** | Shared package | 🟡 Low-Med | Adding to `DatabaseKind` / `DatabaseDialect` in `@justybase/contracts` **must stay purely additive** (union extension, no removal/re-type of existing fields). Desktop extensions consume the published package. Run `npm run test:api` + contracts tests + `scripts/version-sync` check. |
 | **Stale `sql-core`/`runtime` build** | n/a | 🟡 build-flow | Web can silently run an old parser if `npm run build:sql-core` is skipped. Mitigation: CI builds `build:api` (which includes sql-core) before `test:api`; never ship stale `dist`. |

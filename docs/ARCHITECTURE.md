@@ -11,12 +11,13 @@ which parts are currently enforced.
 
 The current dependency map, contract audit, service proposal and ordered
 migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
-The first SQL validation boundary is now implemented as a compatibility slice:
-`@justybase/sql-core/validation` owns the platform-neutral types, the Netezza
-lexer/parser and parser runtime. Existing desktop/API validation facades still
-own semantic visitor execution until that separate closure is extracted; they
-consume the package-owned CST without changing public results or wire
-contracts. This does not create empty packages or an Electron application.
+The SQL boundary is now implemented as a platform-neutral Netezza core:
+`@justybase/sql-core` owns the lexer, parser, semantic validator, incremental
+validation primitives, authoring helpers, quality rules and validation model.
+Desktop and API adapters compose metadata, transport, editor lifecycle and
+incremental-cache state around that core while preserving their existing public
+shapes. Public results and wire contracts remain unchanged. This does not create empty
+packages or an Electron application.
 
 ## Target ownership
 
@@ -43,11 +44,11 @@ React renderer -> HTTP client -> API backend
 | Secrets, filesystem, transport, editor integration and lifecycle | product adapter |
 | DOM/TanStack webviews and React components | separate desktop and React renderers |
 
-These are ownership decisions, not a claim that extraction is complete.
-`designer-core` already owns pure designer logic; `access-file` is a Node file
-runtime. `sql-core` still bundles desktop sources through explicit debt bridges;
-the validation subpath is the first exception-free extraction seam, not yet the
-final parser implementation.
+These are ownership decisions, not a claim that every future engine already
+exists. `designer-core` already owns pure designer logic; `access-file` is a
+Node file runtime. `sql-core` is platform-neutral and does not bundle desktop
+sources. The API LSP adapter owns metadata bridging and transport composition;
+the desktop adapter owns VS Code integration and stateful cache orchestration.
 Pure engines receive schema providers, dialect profiles and other services as
 arguments. Existing registries remain at their current compatibility seams;
 new process-global registries combining products and dialects are prohibited.
@@ -65,9 +66,13 @@ Electron APIs must stay in its adapter, never in a shared package.
   are loaded after activation and are skipped in tests.
 - `src/core/connectionFactory.ts` and `DatabaseDialect` isolate database
   implementations. Shared providers must not assume Netezza behavior.
-- `src/sqlParser`, the dialect lexer/parser, and LSP providers form the SQL
-  authoring pipeline. `packages/sql-core` owns the Netezza parser subset and
-  exposes platform-neutral types; it must never import `vscode`.
+- `src/sqlParser`, the dialect lexer/parser, and LSP providers form the desktop
+  authoring pipeline. `packages/sql-core` owns the Netezza parser, native
+  validation, authoring and quality subset and exposes platform-neutral types;
+  it must never import VS Code, LSP Node libraries, Node built-ins or drivers.
+- `apps/api/src/sqlCoreLsp.ts` composes the same core with API metadata and LSP
+  transport DTOs. Metadata bridges and WebSocket/HTTP protocol state stay in
+  the API product layer.
 - `apps/api` owns authentication, per-user storage, query jobs, WebSockets, and
   disk-spooled sessions. `apps/web` consumes contracts through REST/LSP and
   renders Monaco/TanStack views.
@@ -167,11 +172,10 @@ alias resolution never silently falls back to a less strict configuration.
 The direction table is intentionally stricter than the current runtime graph.
 Existing integration bridges are listed as individual `source`/`target`
 exceptions with a `reason`, `owner` and `removeWhen`; there is no `desktop ↔ companions`
-layer-wide allowance. The current exceptions cover the sql-core reuse of the
-desktop parser/LSP implementation, companion adapters that still consume
-desktop services, desktop registries that load optional companion providers,
-and the small media-to-companion designer bridges. These are migration targets,
-not permission to add another bridge without review.
+layer-wide allowance. The remaining exceptions cover companion adapters that
+still consume desktop services, desktop registries that load optional companion
+providers, and the small media-to-companion designer bridges. These are
+migration targets, not permission to add another bridge without review.
 
 `ARCH001` reports a forbidden direction or platform import,
 `ARCH002` reports an unresolved internal import, `ARCH003` reports a new or
@@ -193,11 +197,9 @@ fail-closed gate.
 metadata/result engines. Register each future pure dialect package in that
 list when its first implementation is added. Pure packages cannot import a
 shared Node runtime, even through an alias. External imports require an exact
-approved specifier; Node built-ins (bare and `node:`), VS Code, React and
-Electron are rejected. This also rejects existing or new database drivers
-without relying on a driver-name blacklist. The existing SQL facade's
-`vscode-languageserver/node` import is a single source-scoped
-`pureExternalExceptions` debt entry. No new import may inherit it.
+approved specifier; Node built-ins (bare and `node:`), VS Code, LSP libraries,
+React and Electron are rejected. This also rejects existing or new database
+drivers without relying on a driver-name blacklist.
 Shared packages reject `vscode` and `electron`; Node runtimes may use Node and
 drivers. Companions may import their own implementation, shared contracts and
 shared engines/runtime helpers, but cannot import another companion directly.

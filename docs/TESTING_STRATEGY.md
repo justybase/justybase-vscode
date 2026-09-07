@@ -36,14 +36,16 @@ Capture old/new behavior on the same fixtures before replacing a facade;
 changing a baseline to accept a difference is not parity evidence.
 
 The first SQL validation slice has an explicit parity gate. It compares the
-legacy `SqlValidator` with the `@justybase/sql-core/validation` boundary for
+package-owned `NetezzaSqlSemanticValidator` with the legacy `SqlValidator` for
 validity, diagnostic order, code, message, severity, positions, offsets,
 suggested fixes and normalized scope. The corpus must include Netezza
-qualification forms, malformed SQL, procedures, typed/untyped metadata and
-SQL025/SQL026 through both desktop and LSP schema providers. Runtime code must
-not execute both implementations merely to obtain parity evidence; the dual
-run is test-only. After the boundary is switched, parser, linter, API and
-Extension Host authoring gates remain required.
+qualification forms, malformed SQL, procedures, typed/untyped metadata,
+macro masking with astral Unicode and SQL025/SQL026 through both desktop and
+LSP schema providers. Runtime code must not execute both implementations
+merely to obtain parity evidence; the dual run is test-only. After the
+boundary is switched, parser, linter, API and Extension Host authoring gates
+remain required, and non-Netezza dialects continue using their legacy path
+until their own dialect migration begins.
 
 ## Change risk and required layers
 
