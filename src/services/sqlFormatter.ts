@@ -1,3 +1,4 @@
+import { formatNetezzaSql } from "@justybase/sql-core";
 import type { DatabaseKind } from "../contracts/database";
 import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
 
@@ -68,6 +69,12 @@ export function formatSql(
   sql: string,
   options: SqlFormatterOptions = {},
 ): string {
+  // Netezza formatting is shared by desktop and web/API. Other dialects retain
+  // their registered formatter profiles until their own sql-core migration.
+  if (!options.databaseKind || options.databaseKind === "netezza") {
+    return formatNetezzaSql(sql, options);
+  }
+
   if (!sql.trim()) {
     return sql;
   }

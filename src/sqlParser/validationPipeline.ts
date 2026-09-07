@@ -14,7 +14,7 @@ import type {
 import { expandDirtyIndicesForScriptContext } from "./scriptScopeStatements";
 import type { StatementIndex } from "./statementIndex";
 import type { ValidationError, ValidationResult } from "./types";
-import { SqlValidator } from "./validator";
+import type { SqlValidationService } from "./validationService";
 
 export interface IncrementalValidationOptions {
   statementIndex: StatementIndex;
@@ -50,7 +50,7 @@ export interface ValidationPipelineInput {
   validationSession?: DocumentValidationSession;
   parseSession?: DocumentParseSession;
   parseRequest?: DocumentParseRequest;
-  validator: SqlValidator;
+  validator: SqlValidationService;
   /** When false, skip incremental preparation. */
   incremental?: boolean | ValidationPipelineIncrementalOptions;
   /** Reuse a prior prepareIncrementalValidation result (e.g. LSP metadata warm-up). */

@@ -1,5 +1,5 @@
 import { CatalogIntrospection } from '../core/catalogIntrospection';
-import { SqlValidator } from '../sqlParser/validator';
+import { SqlCoreBackedValidator } from '../sqlParser/sqlCoreBackedValidator';
 import { buildSafeExplainForMcp } from './mcpReadOnlyGate';
 import { MCP_TOOL_CATALOG, McpToolCatalogEntry } from './mcpToolCatalog';
 
@@ -428,7 +428,7 @@ export function createMcpToolDefinitions(introspection: CatalogIntrospection): M
 }
 
 function validateSqlText(sql: string): string {
-    const validator = new SqlValidator();
+    const validator = new SqlCoreBackedValidator();
     const result = validator.validate(sql);
 
     const allIssues = [...result.errors, ...result.warnings];
