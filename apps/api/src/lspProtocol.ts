@@ -1,5 +1,5 @@
 import type { SqlLanguageContext } from '@justybase/contracts';
-import { NetezzaWebLspCore, type CoreCompletionItem, type CoreDiagnostic, type WebLspContext, type WebLspMetadataRequestParams } from '@justybase/sql-core';
+import { NetezzaWebLspCore, type CoreCompletionItem, type CoreDiagnostic, type WebLspContext, type WebLspMetadataRequestParams } from './sqlCoreLsp';
 import { listColumns, listDatabases, listObjects, listSchemas } from './netezza';
 import type { ApiConfig } from './config';
 import type { AppStore } from './store';
@@ -13,9 +13,29 @@ interface WebSocketLike {
 interface RpcRequest { jsonrpc?: string; id?: number | string; method?: string; params?: Record<string, unknown>; }
 interface DocumentState { text: string; version: number; context: SqlLanguageContext; }
 
+const OBJECT_CACHE_TTL_MS = 5 * 60 * 1000;
+const objectCache = new Map<string, { expiresAt: number; value: Awaited<ReturnType<typeof listObjects>> }>();
+
 export interface LspSession {
   invalidateConnection(connectionId: string): void;
   invalidateAll(): void;
+}
+
+async function cachedObjects(profile: Parameters<typeof listObjects>[0], database: string, schema: string | undefined, masterKey: string): Promise<Awaited<ReturnType<typeof listObjects>>> {
+  const key = `${profile.id}|${database.toUpperCase()}|${(schema ?? '').toUpperCase()}`;
+  const cached = objectCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = await listObjects(profile, database, schema, masterKey);
+  objectCache.set(key, { expiresAt: Date.now() + OBJECT_CACHE_TTL_MS, value });
+  return value;
+}
+
+export function invalidateLspObjectCache(connectionId?: string): void {
+  if (!connectionId) {
+    objectCache.clear();
+    return;
+  }
+  for (const key of objectCache.keys()) if (key.startsWith(`${connectionId}|`)) objectCache.delete(key);
 }
 
 function contextFor(context: SqlLanguageContext | undefined): WebLspContext {
@@ -39,7 +59,7 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
   if (!database) return [];
   if (params.kind === 'schemas') return listSchemas(profile, database, config.masterKey);
   if (params.kind === 'tables' || params.kind === 'views' || params.kind === 'procedures') {
-    const objects = await listObjects(profile, database, params.schema, config.masterKey);
+    const objects = await cachedObjects(profile, database, params.schema, config.masterKey);
     const requested = params.kind === 'tables' ? 'TABLE' : params.kind === 'views' ? 'VIEW' : 'PROCEDURE';
     return objects.filter(item => requested === 'PROCEDURE' ? item.objectType?.toUpperCase() === 'PROCEDURE' : item.objectType?.toUpperCase() === requested).map(item => ({ name: item.name, database, schema: item.schema ?? params.schema, objectType: objectKind(item.objectType), description: item.description }));
   }
@@ -47,7 +67,7 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
     if (!params.table) return params.kind === 'columns' ? [] : null;
     const schema = params.schema ?? context?.schema;
     if (params.kind === 'tableInfo') {
-      const objects = await listObjects(profile, database, schema || undefined, config.masterKey);
+      const objects = await cachedObjects(profile, database, schema || undefined, config.masterKey);
       const exists = objects.some(item => item.name.toUpperCase() === params.table!.toUpperCase()
         && (!schema || item.schema?.toUpperCase() === schema.toUpperCase()));
       if (!exists) return { exists: false, table: params.table, database, schema: schema ?? '', columns: [] };
@@ -59,10 +79,55 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
     }
     const columns = await listColumns(profile, database, schema, params.table, config.masterKey);
     if (params.kind === 'columns') return columns;
-    return { exists: true, table: params.table, database, schema, columns };
+    const object = await cachedObjects(profile, database, schema, config.masterKey).then(items =>
+      items.find(item => item.name.toUpperCase() === params.table!.toUpperCase()
+        && (!schema || item.schema?.toUpperCase() === schema.toUpperCase())));
+    return {
+      exists: true,
+      table: params.table,
+      database,
+      schema,
+      objectType: object?.objectType,
+      description: object?.description,
+      columns,
+    };
   }
   if (params.kind === 'cachedTableInfo') return null;
-  if (params.kind === 'warmDatabaseColumns' || params.kind === 'qualifyTable' || params.kind === 'netezzaDefaultSchema') return params.kind === 'qualifyTable' ? [] : null;
+  if (params.kind === 'qualifyTable') {
+    if (!params.table) return [];
+    const requestedName = params.table.trim();
+    if (!requestedName) return [];
+    const objects = await cachedObjects(profile, database, params.schema, config.masterKey);
+    const effectiveSchema = context?.schema;
+    const requestedSchema = params.schema;
+    const proposals = objects
+      .filter(item => item.name.toUpperCase() === requestedName.toUpperCase())
+      .filter(item => item.objectType?.toUpperCase() !== 'PROCEDURE')
+      .map(item => {
+        const schema = item.schema ?? requestedSchema ?? '';
+        const qualifiedText = schema
+          ? `${database}.${schema}.${requestedName}`
+          : `${database}..${requestedName}`;
+        return {
+          database,
+          ...(schema ? { schema } : {}),
+          name: requestedName,
+          qualifiedText,
+          isPreferred: Boolean(effectiveSchema && schema && effectiveSchema.toUpperCase() === schema.toUpperCase()),
+        };
+      });
+    const seen = new Set<string>();
+    return proposals
+      .sort((left, right) => Number(right.isPreferred) - Number(left.isPreferred))
+      .filter(item => {
+        const key = item.qualifiedText.toUpperCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 6);
+  }
+  if (params.kind === 'warmDatabaseColumns' || params.kind === 'netezzaDefaultSchema') return null;
   return null;
 }
 
@@ -117,8 +182,16 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
   }
 
   const session: LspSession = {
-    invalidateConnection: connectionId => core.clearConnection(connectionId),
-    invalidateAll: () => { for (const connectionId of knownConnectionIds) core.clearConnection(connectionId); },
+    invalidateConnection: connectionId => {
+      core.clearConnection(connectionId);
+      invalidateLspObjectCache(connectionId);
+    },
+    invalidateAll: () => {
+      for (const connectionId of knownConnectionIds) {
+        core.clearConnection(connectionId);
+        invalidateLspObjectCache(connectionId);
+      }
+    },
   };
 
   socket.on('message', raw => {
@@ -232,9 +305,20 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
         }
         if (request.method === 'textDocument/inlayHint') {
           const textDocument = params.textDocument as { uri?: string } | undefined;
+          const range = params.range as { start?: { line?: number; character?: number }; end?: { line?: number; character?: number } } | undefined;
           const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
           if (!document) { response(request.id, []); return; }
-          const hints = await core.inlayHints(textDocument!.uri!, document.version, document.text);
+          const hints = await core.inlayHints(
+            textDocument!.uri!,
+            document.version,
+            document.text,
+            range?.start && range.end
+              ? {
+                start: { line: range.start.line ?? 0, character: range.start.character ?? 0 },
+                end: { line: range.end.line ?? 0, character: range.end.character ?? 0 },
+              }
+              : undefined,
+          );
           response(request.id, hints.map(hint => ({ position: hint.position, label: hint.label, kind: hint.kind ? { value: hint.kind, tooltip: undefined } : { value: 'type', tooltip: undefined } })));
           return;
         }
@@ -260,7 +344,7 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: 
           const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
           if (!document) { response(request.id, []); return; }
           const options = params.options as { tabSize?: number; insertSpaces?: boolean; keywordCase?: 'upper' | 'lower' | 'preserve' } | undefined;
-          const formatted = await core.format(document.text, document.context.databaseKind ?? 'netezza', { tabWidth: options?.insertSpaces === false ? 4 : Math.max(1, options?.tabSize ?? 4), keywordCase: options?.keywordCase });
+          const formatted = await core.format(document.text, { databaseKind: document.context.databaseKind ?? 'netezza', tabWidth: options?.insertSpaces === false ? 4 : Math.max(1, options?.tabSize ?? 4), keywordCase: options?.keywordCase });
           const lineCount = document.text.split('\n').length;
           response(request.id, [{ range: { start: { line: 0, character: 0 }, end: { line: Math.max(0, lineCount - 1), character: Number.MAX_SAFE_INTEGER } }, newText: formatted }]);
           return;

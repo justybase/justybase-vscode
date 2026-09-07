@@ -1,101 +1,102 @@
-import type { SqlCompletionItem, SqlCompletionRequest, SqlCompletionResponse, SqlDiagnostic, SqlDiagnosticsRequest, SqlDiagnosticsResponse, SqlFormatRequest, SqlFormatResponse } from '@justybase/contracts';
-import { NetezzaWebLspCore } from '@justybase/sql-core';
-import { isProfileReadOnlySql, listColumns, listObjects } from './netezza';
+import type { SqlCompletionItem, SqlCompletionRequest, SqlCompletionResponse, SqlDiagnostic, SqlDiagnosticsRequest, SqlDiagnosticsResponse, SqlFormatRequest, SqlFormatResponse, SqlLanguageContext } from '@justybase/contracts';
+import { NetezzaWebLspCore, type CoreDiagnostic } from './sqlCoreLsp';
+import { invalidateLspObjectCache, requestMetadata } from './lspProtocol';
+import { isProfileReadOnlySql } from './netezza';
 import type { ApiConfig } from './config';
 import type { AppStore, StoredConnection } from './store';
 
-const KEYWORDS = [
-  'SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'ON', 'GROUP BY', 'ORDER BY', 'HAVING',
-  'LIMIT', 'OFFSET', 'UNION', 'UNION ALL', 'EXCEPT', 'INTERSECT', 'WITH', 'AS', 'DISTINCT', 'CASE', 'WHEN', 'THEN', 'ELSE',
-  'END', 'AND', 'OR', 'NOT', 'NULL', 'IS NULL', 'IS NOT NULL', 'IN', 'EXISTS', 'LIKE', 'BETWEEN', 'ASC', 'DESC',
-  'INSERT INTO', 'UPDATE', 'DELETE FROM', 'MERGE INTO', 'CREATE TABLE', 'ALTER TABLE', 'DROP TABLE', 'CALL', 'EXPLAIN',
-];
-
-const FUNCTIONS = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NULLIF', 'CAST', 'SUBSTR', 'TRIM', 'UPPER', 'LOWER', 'CURRENT_DATE', 'CURRENT_TIMESTAMP'];
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-interface CacheEntry<T> { value: T; expiresAt: number; }
-interface TableReference { table: string; alias?: string; }
+interface HttpDocumentState { text: string; version: number; context: SqlLanguageContext; }
+interface HttpCoreCacheEntry {
+  connectionId?: string;
+  expiresAt: number;
+  documentUri: string;
+  documents: Map<string, HttpDocumentState>;
+  core: NetezzaWebLspCore;
+}
 
-const objectCache = new Map<string, CacheEntry<Awaited<ReturnType<typeof listObjects>>>>();
-const columnCache = new Map<string, CacheEntry<Awaited<ReturnType<typeof listColumns>>>>();
+const httpCoreCache = new Map<string, HttpCoreCacheEntry>();
 
 export function invalidateSqlMetadataCache(connectionId?: string): void {
-  if (!connectionId) { objectCache.clear(); columnCache.clear(); return; }
-  const prefix = `${connectionId}|`;
-  for (const key of objectCache.keys()) if (key.startsWith(prefix)) objectCache.delete(key);
-  for (const key of columnCache.keys()) if (key.startsWith(prefix)) columnCache.delete(key);
+  if (!connectionId) { httpCoreCache.clear(); invalidateLspObjectCache(); return; }
+  for (const [key, entry] of httpCoreCache) {
+    if (entry.connectionId === connectionId) httpCoreCache.delete(key);
+  }
+  invalidateLspObjectCache(connectionId);
 }
 
 function getProfile(store: AppStore, userId: string, connectionId: string | undefined): StoredConnection | undefined {
   return connectionId ? store.getConnection(userId, connectionId) : undefined;
 }
 
-function currentToken(sql: string, offset: number): string {
-  const prefix = sql.slice(0, Math.max(0, Math.min(offset, sql.length)));
-  return /[A-Za-z_][A-Za-z0-9_$]*$/.exec(prefix)?.[0] ?? '';
-}
-
-function referencedTables(sql: string): TableReference[] {
-  const references: TableReference[] = [];
-  const pattern = /\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:[A-Za-z_][A-Za-z0-9_$]*\.\.)?(?:[A-Za-z_][A-Za-z0-9_$]*\.)?([A-Za-z_][A-Za-z0-9_$]*)(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_$]*))?/gi;
-  for (const match of sql.matchAll(pattern)) {
-    const table = match[1];
-    const alias = match[2];
-    if (table && !['WHERE', 'JOIN', 'ON', 'GROUP', 'ORDER', 'LIMIT', 'UNION'].includes(table.toUpperCase())) references.push({ table, alias });
-  }
-  return references;
-}
-
-function uniqueItems(items: SqlCompletionItem[], token: string): SqlCompletionItem[] {
-  const seen = new Set<string>();
-  const normalizedToken = token.toUpperCase();
-  return items.filter(item => {
-    const key = `${item.kind}:${item.label.toUpperCase()}`;
-    if (seen.has(key) || !item.label.toUpperCase().startsWith(normalizedToken)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 200);
-}
-
-async function cachedObjects(profile: StoredConnection, database: string, schema: string | undefined, masterKey: string) {
-  const key = `${profile.id}|${database.toUpperCase()}|${(schema ?? '').toUpperCase()}`;
-  const cached = objectCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await listObjects(profile, database, schema, masterKey);
-  objectCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-  return value;
-}
-
-async function cachedColumns(profile: StoredConnection, database: string, schema: string, table: string, masterKey: string) {
-  const key = `${profile.id}|${database.toUpperCase()}|${schema.toUpperCase()}|${table.toUpperCase()}`;
-  const cached = columnCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await listColumns(profile, database, schema, table, masterKey);
-  columnCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-  return value;
-}
-
 export async function provideSqlCompletion(store: AppStore, config: ApiConfig, userId: string, request: SqlCompletionRequest): Promise<SqlCompletionResponse> {
-  const token = currentToken(request.sql, request.offset);
-  const prefix = request.sql.slice(0, request.offset);
-  const items: SqlCompletionItem[] = [
-    ...KEYWORDS.map(label => ({ label, kind: 'keyword' as const })),
-    ...FUNCTIONS.map(label => ({ label, kind: 'function' as const, detail: 'Netezza function' })),
-  ];
-  const profile = getProfile(store, userId, request.connectionId);
-  if (profile && request.database && request.schema) {
-    const objects = await cachedObjects(profile, request.database, request.schema, config.masterKey);
-    items.push(...objects.map(object => ({ label: object.name, kind: object.objectType?.toUpperCase() === 'VIEW' ? 'view' as const : 'table' as const, detail: object.objectType ?? 'TABLE' })));
-    const refs = referencedTables(prefix);
-    const qualifier = /(?:^|[^A-Za-z0-9_$])([A-Za-z_][A-Za-z0-9_$]*)\.[A-Za-z_0-9$]*$/.exec(prefix)?.[1];
-    const targetRefs = qualifier ? refs.filter(reference => reference.alias?.toUpperCase() === qualifier.toUpperCase() || reference.table.toUpperCase() === qualifier.toUpperCase()) : refs;
-    for (const reference of targetRefs.slice(0, 5)) {
-      const columns = await cachedColumns(profile, request.database, request.schema, reference.table, config.masterKey);
-      items.push(...columns.map(column => ({ label: column.name, kind: 'column' as const, detail: column.type })));
-    }
+  const entry = getHttpCore(store, config, userId, request);
+  const position = positionAt(request.sql, request.offset);
+  const items = await entry.core.completion(entry.documentUri, entry.documents.get(entry.documentUri)?.version ?? 1, request.sql, position);
+  return { items: items.map(toHttpCompletionItem) };
+}
+
+function getHttpCore(
+  store: AppStore,
+  config: ApiConfig,
+  userId: string,
+  request: SqlCompletionRequest,
+): HttpCoreCacheEntry {
+  const context: SqlLanguageContext = {
+    connectionId: request.connectionId,
+    database: request.database,
+    schema: request.schema,
+    databaseKind: request.databaseKind ?? 'netezza',
+  };
+  const key = [userId, context.connectionId, context.database, context.schema]
+    .map(value => value?.toUpperCase() ?? '-')
+    .join('|');
+  const now = Date.now();
+  let entry = httpCoreCache.get(key);
+  if (!entry || entry.expiresAt <= now) {
+    const documentUri = `http://justybase.invalid/${encodeURIComponent(userId)}/completion/${encodeURIComponent(key)}`;
+    const documents = new Map<string, HttpDocumentState>();
+    const core = new NetezzaWebLspCore({
+      requestMetadata: params => requestMetadata(params, documents, store, config, userId),
+    });
+    entry = {
+      connectionId: context.connectionId,
+      expiresAt: now + CACHE_TTL_MS,
+      documentUri,
+      documents,
+      core,
+    };
+    httpCoreCache.set(key, entry);
   }
-  return { items: uniqueItems(items, token) };
+  const previous = entry.documents.get(entry.documentUri);
+  entry.documents.set(entry.documentUri, {
+    text: request.sql,
+    version: (previous?.version ?? 0) + 1,
+    context,
+  });
+  entry.core.setContext(entry.documentUri, {
+    connectionName: context.connectionId,
+    effectiveDatabase: context.database,
+    effectiveSchema: context.schema,
+    databaseKind: context.databaseKind,
+    netezzaSchemasEnabled: true,
+  });
+  entry.expiresAt = now + CACHE_TTL_MS;
+  return entry;
+}
+
+function toHttpCompletionItem(item: { label: string; kind?: number; detail?: string; insertText?: string }): SqlCompletionItem {
+  const kind = item.kind === 14
+    ? 'keyword'
+    : item.kind === 3
+      ? 'function'
+      : item.kind === 5
+        ? 'column'
+        : item.kind === 17
+          ? 'view'
+          : 'table';
+  return { label: item.label, kind, detail: item.detail, insertText: item.insertText };
 }
 
 function positionAt(sql: string, offset: number): { line: number; character: number } {
@@ -109,11 +110,16 @@ function diagnostic(sql: string, message: string, severity: SqlDiagnostic['sever
   return { message, severity, code, start: positionAt(sql, offset), end: positionAt(sql, Math.min(sql.length, offset + 1)) };
 }
 
-export async function provideSqlDiagnostics(store: AppStore, _config: ApiConfig, userId: string, request: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse> {
-  const diagnostics: SqlDiagnostic[] = [];
-  const sql = request.sql;
+interface LegacyDelimiterState {
+  quoteOpen: boolean;
+  parentheses: number;
+  unexpectedClosingParenthesisOffsets: number[];
+}
+
+function scanLegacyDelimiters(sql: string): LegacyDelimiterState {
   let quoteOpen = false;
   let parentheses = 0;
+  const unexpectedClosingParenthesisOffsets: number[] = [];
   for (let index = 0; index < sql.length; index += 1) {
     if (sql[index] === "'" && sql[index + 1] === "'") { index += 1; continue; }
     if (sql[index] === "'") { quoteOpen = !quoteOpen; continue; }
@@ -121,11 +127,88 @@ export async function provideSqlDiagnostics(store: AppStore, _config: ApiConfig,
     if (sql[index] === '(') parentheses += 1;
     if (sql[index] === ')') {
       parentheses -= 1;
-      if (parentheses < 0) { diagnostics.push(diagnostic(sql, 'Unexpected closing parenthesis.', 'error', index, 'WEB001')); parentheses = 0; }
+      if (parentheses < 0) {
+        unexpectedClosingParenthesisOffsets.push(index);
+        parentheses = 0;
+      }
     }
   }
-  if (quoteOpen) diagnostics.push(diagnostic(sql, 'Unterminated string literal.', 'error', Math.max(0, sql.lastIndexOf("'")), 'WEB002'));
-  if (parentheses > 0) diagnostics.push(diagnostic(sql, 'Unclosed parenthesis.', 'error', sql.length, 'WEB003'));
+  return { quoteOpen, parentheses, unexpectedClosingParenthesisOffsets };
+}
+
+function legacyDelimiterDiagnostics(sql: string, state: LegacyDelimiterState): SqlDiagnostic[] {
+  const diagnostics: SqlDiagnostic[] = [];
+  if (state.quoteOpen) diagnostics.push(diagnostic(sql, 'Unterminated string literal.', 'error', Math.max(0, sql.lastIndexOf("'")), 'WEB002'));
+  for (const offset of state.unexpectedClosingParenthesisOffsets) {
+    diagnostics.push(diagnostic(sql, 'Unexpected closing parenthesis.', 'error', offset, 'WEB001'));
+  }
+  if (state.parentheses > 0) diagnostics.push(diagnostic(sql, 'Unclosed parenthesis.', 'error', sql.length, 'WEB003'));
+  return diagnostics;
+}
+
+function mapCoreDiagnostic(sql: string, item: CoreDiagnostic, state: LegacyDelimiterState): SqlDiagnostic {
+  const parserCode = String(item.code ?? '');
+  const code = parserCode.startsWith('LEX') && state.quoteOpen
+    ? 'WEB002'
+    : parserCode.startsWith('PAR') && state.unexpectedClosingParenthesisOffsets.length > 0
+      ? 'WEB001'
+      : parserCode.startsWith('PAR') && state.parentheses > 0
+        ? 'WEB003'
+        : parserCode;
+  const message = code === 'WEB001'
+    ? 'Unexpected closing parenthesis.'
+    : code === 'WEB002'
+      ? 'Unterminated string literal.'
+      : code === 'WEB003'
+        ? 'Unclosed parenthesis.'
+        : item.message;
+  const compatibilityPosition = code === 'WEB003' ? positionAt(sql, sql.length) : undefined;
+  return {
+    message,
+    severity: item.severity === 1 ? 'error' : 'warning',
+    code: code || undefined,
+    start: compatibilityPosition ?? item.range.start,
+    end: compatibilityPosition ?? item.range.end,
+  };
+}
+
+async function provideNetezzaDiagnostics(
+  store: AppStore,
+  config: ApiConfig,
+  userId: string,
+  request: SqlDiagnosticsRequest,
+): Promise<SqlDiagnostic[]> {
+  const documentUri = `http://justybase.invalid/${encodeURIComponent(userId)}/lsp-diagnostics`;
+  const documents = new Map([[documentUri, {
+    text: request.sql,
+    version: 1,
+    context: {
+      connectionId: request.connectionId,
+      database: request.database,
+      schema: request.schema,
+      databaseKind: request.databaseKind ?? 'netezza',
+    },
+  }]]);
+  const core = new NetezzaWebLspCore({
+    requestMetadata: params => requestMetadata(params, documents, store, config, userId),
+  });
+  core.setContext(documentUri, {
+    connectionName: request.connectionId,
+    effectiveDatabase: request.database,
+    effectiveSchema: request.schema,
+    databaseKind: request.databaseKind ?? 'netezza',
+    netezzaSchemasEnabled: true,
+  });
+  const state = scanLegacyDelimiters(request.sql);
+  const diagnostics = await core.diagnostics(documentUri, 1, request.sql);
+  return diagnostics.map(item => mapCoreDiagnostic(request.sql, item, state));
+}
+
+export async function provideSqlDiagnostics(store: AppStore, config: ApiConfig, userId: string, request: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse> {
+  const sql = request.sql;
+  const diagnostics = request.databaseKind && request.databaseKind !== 'netezza'
+    ? legacyDelimiterDiagnostics(sql, scanLegacyDelimiters(sql))
+    : await provideNetezzaDiagnostics(store, config, userId, request);
   const profile = getProfile(store, userId, request.connectionId);
   if (profile?.readOnly && sql.trim() && !isProfileReadOnlySql(profile, sql)) diagnostics.push(diagnostic(sql, 'This connection is read-only; the statement may be rejected.', 'warning', 0, 'WEB004'));
   return { diagnostics };
@@ -134,5 +217,5 @@ export async function provideSqlDiagnostics(store: AppStore, _config: ApiConfig,
 /** Direct HTTP formatter for clients that do not keep the LSP WebSocket open. */
 export async function formatSqlDocument(_store: AppStore, _config: ApiConfig, _userId: string, request: SqlFormatRequest): Promise<SqlFormatResponse> {
   const core = new NetezzaWebLspCore({ requestMetadata: async params => params.kind === 'context' ? { databaseKind: 'netezza' } : [] });
-  return { sql: await core.format(request.sql, request.databaseKind ?? 'netezza', { tabWidth: Math.max(1, request.tabSize ?? 4), keywordCase: request.keywordCase }) };
+  return { sql: await core.format(request.sql, { databaseKind: request.databaseKind ?? 'netezza', tabWidth: Math.max(1, request.tabSize ?? 4), keywordCase: request.keywordCase }) };
 }
