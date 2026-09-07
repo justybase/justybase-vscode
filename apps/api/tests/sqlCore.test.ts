@@ -1,6 +1,79 @@
-import { getSqlStatementAtPosition, NetezzaWebLspCore, splitSqlStatements } from '@justybase/sql-core';
+import { getSqlStatementAtPosition, NetezzaWebLspCore, splitSqlStatements } from '../src/sqlCoreLsp';
+import { invalidateSqlMetadataCache, provideSqlCompletion } from '../src/lsp';
+import type { ApiConfig } from '../src/config';
+import type { AppStore } from '../src/store';
+import { listObjects } from '../src/netezza';
+
+jest.mock('../src/netezza', () => ({
+  isProfileReadOnlySql: jest.fn(),
+  listColumns: jest.fn(),
+  listDatabases: jest.fn(),
+  listObjects: jest.fn(),
+  listSchemas: jest.fn(),
+}));
 
 describe('shared Netezza web SQL core', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    invalidateSqlMetadataCache();
+  });
+
+  it('routes HTTP completion through the shared Netezza authoring core', async () => {
+    const result = await provideSqlCompletion(
+      {} as AppStore,
+      { masterKey: 'test-master-key' } as ApiConfig,
+      'user-1',
+      { sql: 'SELECT NV', offset: 'SELECT NV'.length, databaseKind: 'netezza' },
+    );
+
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'NVL', kind: 'function' }),
+    ]));
+  });
+
+  it('warms referenced table metadata before completing a qualified column', async () => {
+    const uri = 'file:///qualified-completion.sql';
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      if (params.kind === 'context') return { connectionName: 'connection-1', effectiveDatabase: 'DB', effectiveSchema: 'PUBLIC', databaseKind: 'netezza' };
+      if (params.kind === 'tables') return [{ name: 'ORDERS', database: 'DB', schema: 'PUBLIC', objectType: 'table' }];
+      if (params.kind === 'cachedTableInfo' || params.kind === 'tableInfo') {
+        return { exists: true, table: 'ORDERS', database: 'DB', schema: 'PUBLIC', columns: [{ name: 'ID', type: 'INTEGER' }] };
+      }
+      return [];
+    } });
+    core.setContext(uri, { connectionName: 'connection-1', effectiveDatabase: 'DB', effectiveSchema: 'PUBLIC', databaseKind: 'netezza' });
+
+    const sql = 'SELECT O.I FROM ORDERS O';
+    const items = await core.completion(uri, 1, sql, { line: 0, character: 'SELECT O.I'.length });
+
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'ID', kind: 5, detail: 'INTEGER' }),
+    ]));
+  });
+
+  it('isolates HTTP metadata cache by connection and invalidates the matching entry', async () => {
+    const store = { getConnection: jest.fn().mockReturnValue({ id: 'connection-1' }) } as unknown as AppStore;
+    (listObjects as jest.Mock).mockResolvedValue([
+      { name: 'ORDERS', schema: 'PUBLIC', objectType: 'TABLE' },
+    ]);
+    const request = {
+      sql: 'SELECT OR',
+      offset: 'SELECT OR'.length,
+      connectionId: 'connection-1',
+      database: 'DB',
+      schema: 'PUBLIC',
+      databaseKind: 'netezza' as const,
+    };
+
+    await provideSqlCompletion(store, { masterKey: 'test-master-key' } as ApiConfig, 'user-1', request);
+    await provideSqlCompletion(store, { masterKey: 'test-master-key' } as ApiConfig, 'user-1', request);
+    expect(listObjects).toHaveBeenCalledTimes(1);
+
+    invalidateSqlMetadataCache('connection-1');
+    await provideSqlCompletion(store, { masterKey: 'test-master-key' } as ApiConfig, 'user-1', request);
+    expect(listObjects).toHaveBeenCalledTimes(2);
+  });
+
   it('provides parser-backed completion and diagnostics without a database connection', async () => {
     const core = new NetezzaWebLspCore({ requestMetadata: async params => params.kind === 'context' ? { databaseKind: 'netezza' } : [] });
     core.setContext('file:///query.sql', { databaseKind: 'netezza' });
