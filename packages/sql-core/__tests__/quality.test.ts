@@ -1,7 +1,12 @@
+jest.unmock("chevrotain");
+
 import {
   QualityEngineCore,
+  getQualityRuleIdForParserCode,
+  isParserDiagnosticRuleId,
   netezzaProcedureQualityRules,
   netezzaSqlQualityRules,
+  parseQualitySeverity,
 } from "../src/quality";
 import { NetezzaSqlSemanticValidator } from "../src/validation";
 
@@ -37,5 +42,28 @@ describe("Netezza sql-core quality", () => {
     ]));
     expect(netezzaProcedureQualityRules.find((rule) => rule.id === "NZP009")?.onDemandOnly).toBe(true);
     expect(netezzaProcedureQualityRules.find((rule) => rule.id === "NZP001")?.onDemandOnly).toBe(false);
+  });
+
+  it("maps parser settings and diagnostic severities", () => {
+    expect(getQualityRuleIdForParserCode("SQL043")).toBe("NZ002");
+    expect(getQualityRuleIdForParserCode("UNKNOWN")).toBeUndefined();
+    expect(isParserDiagnosticRuleId("PAR005")).toBe(true);
+    expect(isParserDiagnosticRuleId("NZ005")).toBe(false);
+    expect(parseQualitySeverity("error")).toBe(0);
+    expect(parseQualitySeverity("warning")).toBe(1);
+    expect(parseQualitySeverity("information")).toBe(2);
+    expect(parseQualitySeverity("hint")).toBe(3);
+    expect(parseQualitySeverity("off")).toBeNull();
+  });
+
+  it("honors parser-result overrides and disabled rules", () => {
+    const validator = new NetezzaSqlSemanticValidator();
+    const engine = new QualityEngineCore(validator, netezzaSqlQualityRules);
+    const parserResult = validator.validate("SELECT 1");
+    expect(engine.analyzeWithOptions("SELECT 1", {
+      parserResult,
+      rulesConfig: { NZ005: "off" },
+      includeParserDiagnostics: false,
+    }).issues.some((issue) => issue.ruleId === "NZ005")).toBe(false);
   });
 });

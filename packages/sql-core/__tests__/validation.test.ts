@@ -1,3 +1,5 @@
+jest.unmock("chevrotain");
+
 import {
   NetezzaSqlSemanticValidator,
   type SchemaProvider,

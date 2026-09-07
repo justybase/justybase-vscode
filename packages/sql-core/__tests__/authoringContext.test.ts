@@ -1,3 +1,5 @@
+jest.unmock("chevrotain");
+
 import { collectNetezzaAuthoringContext } from "../src/authoringContext";
 
 describe("collectNetezzaAuthoringContext", () => {

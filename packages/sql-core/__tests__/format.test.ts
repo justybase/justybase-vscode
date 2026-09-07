@@ -1,3 +1,5 @@
+jest.unmock("chevrotain");
+
 import { formatNetezzaSql } from "../src/format";
 
 describe("formatNetezzaSql", () => {
