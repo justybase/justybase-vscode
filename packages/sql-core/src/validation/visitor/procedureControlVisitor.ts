@@ -179,4 +179,3 @@ export function whenClause(
     host.visit(ctx.procedureStatements[0]);
   }
 }
-

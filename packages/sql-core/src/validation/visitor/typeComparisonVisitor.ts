@@ -319,4 +319,3 @@ function resolveColumnDataType(
   );
   return knownColumn?.dataType;
 }
-

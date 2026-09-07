@@ -352,7 +352,7 @@ export function externalTableOption(visitor: ExternalTableVisitorHost, ctx: Reco
   validateExternalTableOption(visitor, optionName, optionToken, valueInfo);
 }
 
-export function externalTableOptionValue(visitor: ExternalTableVisitorHost, 
+export function externalTableOptionValue(visitor: ExternalTableVisitorHost,
   ctx: Record<string, CstNode[] | IToken[]>,
 ): ExternalOptionValueInfo {
   if (ctx.externalTableParenthesizedValue?.[0]) {
@@ -410,7 +410,7 @@ export function externalTableOptionValue(visitor: ExternalTableVisitorHost,
   };
 }
 
-export function externalTableNumericValue(visitor: ExternalTableVisitorHost, 
+export function externalTableNumericValue(visitor: ExternalTableVisitorHost,
   ctx: Record<string, IToken[]>,
 ): ExternalOptionValueInfo {
   const sign = ctx.Minus?.[0] ? "-" : ctx.Plus?.[0] ? "+" : "";
@@ -424,7 +424,7 @@ export function externalTableNumericValue(visitor: ExternalTableVisitorHost,
   };
 }
 
-export function externalTableParenthesizedValue(visitor: ExternalTableVisitorHost, 
+export function externalTableParenthesizedValue(visitor: ExternalTableVisitorHost,
   ctx: Record<string, CstNode[] | IToken[]>,
 ): ExternalOptionValueInfo {
   const nested = (ctx.externalTableParenthesizedElement ?? []).map((node) =>
@@ -444,7 +444,7 @@ export function externalTableParenthesizedValue(visitor: ExternalTableVisitorHos
   };
 }
 
-export function externalTableParenthesizedElement(visitor: ExternalTableVisitorHost, 
+export function externalTableParenthesizedElement(visitor: ExternalTableVisitorHost,
   ctx: Record<string, CstNode[] | IToken[]>,
 ): ExternalOptionValueInfo {
   if (ctx.externalTableParenthesizedValue?.[0]) {
@@ -483,4 +483,3 @@ export function externalTableParenthesizedElement(visitor: ExternalTableVisitorH
     token,
   };
 }
-

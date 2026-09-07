@@ -384,4 +384,3 @@ function validateAndQualifyTableReference(
     qualifiedNameNode,
   );
 }
-

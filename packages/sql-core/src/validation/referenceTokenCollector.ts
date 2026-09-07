@@ -39,4 +39,3 @@ export function getOrderedCstTokens(
 ): IToken[] {
   return getOrderedReferenceTokens(nodeOrChildren, new Set());
 }
-
