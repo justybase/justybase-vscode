@@ -14,7 +14,8 @@
       "@justybase/contracts/*": ["./packages/contracts/src/*"],
       "@justybase/designer-core": ["./packages/designer-core/src"],
       "@justybase/designer-core/*": ["./packages/designer-core/src/*"],
-      "@justybase/sql-core/validation": ["./packages/sql-core/src/validation.ts"],
+      "@justybase/sql-core": ["./packages/sql-core/src/index.ts"],
+      "@justybase/sql-core/*": ["./packages/sql-core/src/*"],
       "@core/*": ["./src/core/*"],
       "@metadata/*": ["./src/metadata/*"],
       "@types/*": ["./src/types/*"]
