@@ -5,18 +5,9 @@
     "packages/*-core/src/**"
   ],
   "pureExternalImports": [
-    "chevrotain",
-    "vscode-languageserver-textdocument"
+    "chevrotain"
   ],
-  "pureExternalExceptions": [
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "vscode-languageserver/node",
-      "reason": "The existing SQL facade imports LSP protocol types and InlayHintKind from the Node entry point.",
-      "owner": "SQL authoring owner",
-      "removeWhen": "The SQL extraction uses a browser-safe protocol entry point and desktop/API authoring parity passes."
-    }
-  ],
+  "pureExternalExceptions": [],
   "layers": {
     "contracts": {
       "sources": [
@@ -90,7 +81,7 @@
     ]
   },
   "workspaceEntryPoints": {
-    "@justybase/sql-core": "packages/sql-core/src/runtime.ts"
+    "@justybase/sql-core": "packages/sql-core/src/index.ts"
   },
   "forbiddenImports": [
     {
@@ -1581,188 +1572,6 @@
       "removeWhen": "The DDL builder is provided by designer-core and desktop designer parity passes."
     },
     {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/contracts/database/index.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/core/sqlAuthoringRegistry.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/dialects/netezza/sql/authoring.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/lsp/protocol.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/providers/parsers/identifierRoleCollector.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/providers/parsers/parserSqlContext.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/providers/qualityRuleRegistry.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/providers/types.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/completionEngine.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/documentParseRequest.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/functionCompletionUtils.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/hoverEngine.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/inlayHintEngine.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/lspSchemaProvider.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/metadataBridge.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/server/signatureHelpUtils.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/services/sqlFormatter.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sql/semanticTokenNames.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sql/sqlParser.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sql/sqlSourceScan.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sqlParser/documentParseSession.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sqlParser/index.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sqlParser/parsingRuntime.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sqlParser/qualityEngineCore.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sqlParser/validationConfig.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
-      "source": "packages/sql-core/src/runtime.ts",
-      "target": "src/sqlParser/validator.ts",
-      "reason": "sql-core currently bundles the desktop SQL/LSP implementation; extract a platform-neutral implementation before removing this bridge.",
-      "owner": "SQL core owner",
-      "removeWhen": "The referenced SQL implementation is owned by sql-core and desktop/API authoring parity passes."
-    },
-    {
       "source": "src/commands/coreCommands.ts",
       "target": "extensions/snowflake/src/snowflakeQueryProfile.ts",
       "reason": "The desktop registry currently consumes an optional companion implementation; replace the direct source import with an extension registration contract.",
@@ -2145,18 +1954,6 @@
       "removeWhen": "The strongly connected component anchored at src/commands/validationCommands.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
-      "source": "src/contracts/database/index.ts",
-      "target": "src/sql/authoring/types.ts",
-      "nodes": [
-        "src/contracts/database/index.ts",
-        "src/sql/authoring/types.ts"
-      ],
-      "edgeFingerprint": "eea36cee368dc28dbbfd34c8a4edfddbdcbda827dfc1012858c87b2752bb9173",
-      "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner",
-      "removeWhen": "The strongly connected component anchored at src/contracts/database/index.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
-    },
-    {
       "source": "src/core/resultDataProvider/types.ts",
       "target": "src/types/index.ts",
       "nodes": [
@@ -2167,27 +1964,6 @@
       "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
       "owner": "Architecture owner",
       "removeWhen": "The strongly connected component anchored at src/core/resultDataProvider/types.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
-    },
-    {
-      "source": "src/dialects/netezza/sql/authoring.ts",
-      "target": "src/dialects/netezza/sql/qualityRules.ts",
-      "nodes": [
-        "src/dialects/netezza/sql/authoring.ts",
-        "src/dialects/netezza/sql/qualityRules.ts",
-        "src/providers/parsers/parserSqlContext.ts",
-        "src/providers/parsers/scope/aliasScope.ts",
-        "src/providers/parsers/scope/index.ts",
-        "src/providers/procedureRules.ts",
-        "src/sqlParser/documentParseSession.ts",
-        "src/sqlParser/parsingRuntime.ts",
-        "src/sqlParser/procedure/procedureAnalysis.ts",
-        "src/sqlParser/procedure/procedureParseGate.ts",
-        "src/sqlParser/symbols.ts"
-      ],
-      "edgeFingerprint": "71ef8d053e53f6cf7a695e8dbf52f89fb939fa1ba484df425d9fc3c01caec1df",
-      "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner",
-      "removeWhen": "The strongly connected component anchored at src/dialects/netezza/sql/authoring.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/export/exportManager.ts",

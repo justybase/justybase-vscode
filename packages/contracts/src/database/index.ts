@@ -80,6 +80,8 @@ export interface DatabaseSqlFunctionSignature {
   name: string;
   parameters: readonly string[];
   description: string;
+  /** Optional example shown by authoring clients. */
+  example?: string;
 }
 
 export interface DatabaseSqlTypeSpec {
@@ -90,6 +92,8 @@ export interface DatabaseSqlTypeSpec {
 }
 
 export interface DatabaseSqlValidationProfile {
+  /** Dialect identity used when semantic validation resolves ambiguous names. */
+  databaseKind?: DatabaseKind;
   builtinFunctions: ReadonlySet<string>;
   systemColumns: ReadonlySet<string>;
   specialBuiltinValues: ReadonlySet<string>;
