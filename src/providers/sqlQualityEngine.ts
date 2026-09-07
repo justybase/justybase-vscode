@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { SqlValidator } from "../sqlParser";
+import type { SqlValidationService } from "../sqlParser";
 import type { ValidationError } from "../sqlParser";
 import {
   QualityEngineCore,
@@ -9,10 +9,10 @@ import {
 } from "../sqlParser/qualityEngineCore";
 import { LintRule } from "./linterRules";
 /**
- * Thin vscode wrapper around the pure QualityEngineCore. The core logic (rule
- * iteration, procedure gate, sorting, suggestedFix extraction) lives in the
- * vscode-free `src/sqlParser/qualityEngineCore.ts` so both the desktop
- * extension and the web LSP core share a single implementation.
+ * Thin VS Code wrapper around the desktop orchestration adapter. Rule
+ * iteration, procedure gating, sorting and suggested-fix extraction are owned
+ * by the platform-neutral `@justybase/sql-core` QualityEngineCore; the local
+ * adapter only supplies the desktop validator/session shape.
  *
  * The only vscode dependency here is mapping the numeric LintSeverity back to
  * `vscode.DiagnosticSeverity` for the desktop diagnostic collection.
@@ -21,7 +21,7 @@ export class SqlQualityEngine {
   private readonly core: QualityEngineCore;
 
   constructor(
-    validator: SqlValidator,
+    validator: SqlValidationService,
     rules: readonly LintRule[] = getUnifiedSqlQualityRules(),
   ) {
     this.core = new QualityEngineCore(validator, rules);

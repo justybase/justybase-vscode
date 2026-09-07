@@ -11,6 +11,7 @@ import {
   DocumentValidationSession,
 } from "../../sqlParser";
 import { SqlCoreBackedValidator } from "../../sqlParser/sqlCoreBackedValidator";
+import type { SqlValidationService } from "../../sqlParser/validationService";
 import {
   HUGE_SCRIPT_LINE_THRESHOLD,
   LARGE_SCRIPT_CHAR_THRESHOLD,
@@ -176,7 +177,7 @@ export function createDiagnosticsHandler(
         context.databaseKind,
       );
       const authoring = getDatabaseSqlAuthoring(context.databaseKind);
-      const validator =
+      const validator: SqlValidationService =
         !context.databaseKind || context.databaseKind === "netezza"
           ? new SqlCoreBackedValidator(schemaProvider, authoring.validation)
           : new SqlValidator(schemaProvider, authoring.validation);
