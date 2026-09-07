@@ -8,7 +8,7 @@ const liveDbIgnorePatterns = require("./scripts/jestLiveDbIgnorePatterns.cjs");
 module.exports = {
   preset: "ts-jest",
   testEnvironment: "node",
-  roots: ["<rootDir>/src"],
+  roots: ["<rootDir>/src", "<rootDir>/packages/sql-core"],
   setupFiles: ["<rootDir>/src/__tests__/unitNetworkGuard.setup.ts"],
   testMatch: ["**/__tests__/**/*.test.ts"],
   testPathIgnorePatterns: [
