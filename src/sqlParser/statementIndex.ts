@@ -1,11 +1,8 @@
 import { simpleHash } from "../providers/parsers/hashUtils";
 import { SqlParser } from "../sql/sqlParser";
+import type { StatementBoundary as CoreStatementBoundary } from "@justybase/sql-core/validation";
 
-export interface StatementBoundary {
-  index: number;
-  startOffset: number;
-  endOffset: number;
-  sql: string;
+export interface StatementBoundary extends CoreStatementBoundary {
   contentHash: string;
 }
 

@@ -94,3 +94,5 @@ export type {
   ParsedStatement,
   ValidationResult,
 } from "./types";
+export type { ScopeSeed } from "./types";
+export type { SqlValidationService } from "./validationService";

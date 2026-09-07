@@ -12,6 +12,7 @@ import type {
   ValidationError,
   TokenPosition,
   TableInfo,
+  ScopeSeed,
 } from "./types";
 import type { SchemaProvider } from "./schemaProvider";
 import type { DatabaseSqlValidationProfile } from "../sql/authoring/types";
@@ -22,6 +23,7 @@ import type {
   DocumentParseSession,
 } from "./documentParseSession";
 import type { StatementBoundary } from "./statementIndex";
+import type { SqlValidationService } from "./validationService";
 import {
   SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN,
   SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN,
@@ -42,10 +44,7 @@ interface PreParseCheckResult {
   duplicateKeywordOffsets: Set<number>;
 }
 
-export interface ScopeSeed {
-  createdProcedures?: readonly string[];
-  createdTables?: readonly TableInfo[];
-}
+export type { ScopeSeed } from "./types";
 
 const SCRIPT_SCOPE_IDENTIFIER_PATTERN =
   String.raw`(?:\[(?:[^\]]|\]\])*\]|"(?:[^"]|"")*"|[#A-Za-z0-9_$]+)`;
@@ -224,7 +223,7 @@ const SQL_KEYWORDS = [
   "TRANSFORM",
 ];
 
-export class SqlValidator {
+export class SqlValidator implements SqlValidationService {
   private visitor: SqlVisitor;
   private schemaProvider?: SchemaProvider;
   private readonly validationProfile: DatabaseSqlValidationProfile;
@@ -363,7 +362,15 @@ export class SqlValidator {
       // completed document must not accept an incomplete qualified reference
       // such as `SELECT D. FROM ...`.
       parseResult.parserErrors
-        .filter(isIgnorableTrailingDotParserError)
+        // A dot at the physical end of a document is a normal completion
+        // state. Report the malformed reference when the parser recovered at
+        // a real clause/boundary, but keep the EOF recovery contract used by
+        // the result panel and authoring tests.
+        .filter(
+          (error) =>
+            isIgnorableTrailingDotParserError(error) &&
+            error.token?.tokenType.name !== "EOF",
+        )
         .forEach((error) => {
           errors.push(this.toParserValidationError(lexResult.tokens, error));
         });
@@ -659,7 +666,7 @@ export class SqlValidator {
   validateIncremental(
     sql: string,
     parseResult: SqlStatementsParseResult,
-    dirtyIndices: number[],
+    dirtyIndices: readonly number[],
     cachedDiagnostics: Map<number, ValidationError[]>,
     scopeSeeds: Map<number, ScopeSeed> = new Map(),
   ): ValidationResult {

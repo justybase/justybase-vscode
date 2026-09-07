@@ -9,6 +9,7 @@ import { isSqlLanguageClientRunning } from "../activation/lspRegistration";
 import { getDatabaseSqlAuthoring } from "../core/connectionFactory";
 import { LintIssue, RuleSeverityConfig } from "./linterRules";
 import { SqlCoreBackedValidator } from "../sqlParser/sqlCoreBackedValidator";
+import type { SqlValidationService } from "../sqlParser/validationService";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import { DocumentValidationSession } from "../sqlParser/documentValidationSession";
 import {
@@ -52,7 +53,7 @@ export class SqlLinterProvider {
     }
   > = new Map();
   private readonly lintDebounceMs = DEFAULT_LINT_DEBOUNCE_MS;
-  private readonly validator = new SqlCoreBackedValidator();
+  private readonly validator: SqlValidationService = new SqlCoreBackedValidator();
   private readonly parseSession: DocumentParseSession;
   private readonly validationSession: DocumentValidationSession;
   private readonly columnMetadataWarnedConnections = new Set<string>();

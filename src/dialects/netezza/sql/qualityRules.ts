@@ -1,60 +1,36 @@
-import * as linterRulesModule from '../../../providers/linterRules';
-import * as procedureRulesModule from '../../../providers/procedureRules';
-import { isParserOwnedQualityRule } from '../../../providers/qualityRuleRegistry';
+import {
+    netezzaProcedureQualityRules as coreProcedureQualityRules,
+    netezzaSqlQualityRules as coreSqlQualityRules,
+} from '@justybase/sql-core';
+import type { DatabaseSqlQualityRule } from '@justybase/contracts';
 import type { LintIssue, LintRule } from '../../../providers/linterRules';
 
-function isLintIssue(value: unknown): value is LintIssue {
-    if (typeof value !== 'object' || value === null) {
-        return false;
-    }
-
-    const candidate = value as Partial<LintIssue>;
-    return (
-        typeof candidate.ruleId === 'string' &&
-        typeof candidate.message === 'string' &&
-        typeof candidate.severity === 'number' &&
-        typeof candidate.startOffset === 'number' &&
-        typeof candidate.endOffset === 'number'
-    );
-}
-
-function isLintRule(value: unknown): value is LintRule {
-    if (typeof value !== 'object' || value === null) {
-        return false;
-    }
-
-    const candidate = value as Partial<LintRule>;
-    if (!(
-        typeof candidate.id === 'string' &&
-        typeof candidate.name === 'string' &&
-        typeof candidate.description === 'string' &&
-        typeof candidate.check === 'function'
-    )) {
-        return false;
-    }
-
-    try {
-        const probeResult = candidate.check('');
-        return Array.isArray(probeResult) && probeResult.every(issue => isLintIssue(issue));
-    } catch {
-        return false;
-    }
-}
-
-function collectRulesByExportPrefix(moduleExports: Record<string, unknown>, exportPrefix: string): LintRule[] {
-    const collectedRules: LintRule[] = [];
-
-    for (const [exportName, exportedValue] of Object.entries(moduleExports)) {
-        if (exportName.startsWith(exportPrefix) && isLintRule(exportedValue)) {
-            collectedRules.push(exportedValue);
-        }
-    }
-
-    return collectedRules.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' }));
+/**
+ * Desktop compatibility view of the canonical Netezza quality rules.
+ * Diagnostics are produced by the package-owned rule functions; this adapter
+ * only preserves the historic desktop LintRule shape for authoring packs.
+ */
+function toDesktopRule(rule: DatabaseSqlQualityRule): LintRule {
+    return {
+        id: rule.id,
+        name: rule.name,
+        description: rule.description,
+        defaultSeverity: rule.defaultSeverity,
+        onDemandOnly: rule.onDemandOnly,
+        check(sql: string): LintIssue[] {
+            return rule.check(sql).map((issue) => ({
+                ruleId: issue.ruleId,
+                message: issue.message,
+                severity: issue.severity,
+                startOffset: issue.startOffset,
+                endOffset: issue.endOffset,
+                suggestedFix: issue.suggestedFix,
+            }));
+        },
+    };
 }
 
 export const netezzaSqlQualityRules: readonly LintRule[] = [
-    ...collectRulesByExportPrefix(linterRulesModule as Record<string, unknown>, 'ruleNZ')
-        .filter((rule) => !isParserOwnedQualityRule(rule.id)),
-    ...collectRulesByExportPrefix(procedureRulesModule as Record<string, unknown>, 'ruleNZP')
-];
+    ...coreSqlQualityRules,
+    ...coreProcedureQualityRules,
+].map(toDesktopRule);

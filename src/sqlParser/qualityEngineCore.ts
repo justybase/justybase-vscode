@@ -1,5 +1,9 @@
 import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
-import { SqlValidator } from "../sqlParser";
+import {
+  QualityEngineCore as SharedQualityEngineCore,
+  type QualityResult as SharedQualityResult,
+} from "@justybase/sql-core";
+import type { SqlValidationService } from "./validationService";
 import type { ValidationError, ValidationResult } from "../sqlParser";
 import type {
   DocumentParseRequest,
@@ -13,32 +17,24 @@ import {
   isProcedureSql,
   warmProcedureParseGate,
 } from "./procedure/procedureParseGate";
-import {
+import type {
   LintIssue,
   LintRule,
   RuleSeverityConfig,
-  parseSeverity,
 } from "../providers/linterRules";
-import { isParserOwnedQualityRule } from "../providers/qualityRuleRegistry";
-import { isParserDiagnosticEnabled } from "../providers/parserDiagnosticRuleConfig";
 
-const EMPTY_VALIDATION_SCOPE: ValidationResult["scope"] = {
-  tables: new Map(),
-  ctes: new Map(),
-  level: 0,
-};
-
-let _unifiedSqlQualityRules: readonly LintRule[] | undefined;
+let cachedUnifiedSqlQualityRules: readonly LintRule[] | undefined;
 
 /**
- * Get the unified SQL quality rules for the default database dialect.
- * Uses lazy initialization to ensure dialects are registered before access.
+ * Return the registered rules for the active desktop authoring profile.
+ * Netezza's registration is an adapter over the platform-neutral sql-core
+ * rules; other dialect packs may still provide their desktop rules here.
  */
 export function getUnifiedSqlQualityRules(): readonly LintRule[] {
-  if (!_unifiedSqlQualityRules) {
-    _unifiedSqlQualityRules = getDatabaseSqlAuthoring().qualityRules;
+  if (!cachedUnifiedSqlQualityRules) {
+    cachedUnifiedSqlQualityRules = getDatabaseSqlAuthoring().qualityRules;
   }
-  return _unifiedSqlQualityRules;
+  return cachedUnifiedSqlQualityRules;
 }
 
 export interface SqlQualityResult {
@@ -49,28 +45,34 @@ export interface SqlQualityResult {
 export interface SqlQualityAnalyzeOptions {
   rulesConfig?: Record<string, RuleSeverityConfig>;
   includeOnDemandRules?: boolean;
-  /** When false, only NZ/NZP quality rules run (parser diagnostics come from LSP). */
+  /** When false, only quality rules run; parser diagnostics come from LSP. */
   includeParserDiagnostics?: boolean;
-  /** When true, skip eager procedure parse warm-up (LSP already validates procedures). */
+  /** When true, skip eager procedure parse warm-up because LSP already parsed. */
   skipProcedureParseWarmup?: boolean;
   parseSession?: DocumentParseSession;
   parseRequest?: DocumentParseRequest;
-  /** When provided, use incremental (per-statement) validation instead of full CST walk. */
   incrementalValidation?: {
     statementIndex: StatementIndex;
     dirtyIndices: readonly number[];
     cachedDiagnostics: Map<number, ValidationError[]>;
   };
-  /** Document validation session for persisting per-statement diagnostic caches. */
   validationSession?: DocumentValidationSession;
-  /** Document URI for per-statement diagnostic cache key. */
   documentUri?: string;
 }
 
 const PARSER_RULE_ID_PATTERN = /^(SQL|PAR|LEX|PARW)\d+$/i;
 
-function isProcedureQualityRule(ruleId: string): boolean {
-  return ruleId.startsWith("NZP");
+function emptyValidationResult(): ValidationResult {
+  return {
+    valid: true,
+    errors: [],
+    warnings: [],
+    scope: {
+      tables: new Map(),
+      ctes: new Map(),
+      level: 0,
+    },
+  };
 }
 
 export function isParserDiagnosticRuleId(ruleId: string): boolean {
@@ -78,20 +80,27 @@ export function isParserDiagnosticRuleId(ruleId: string): boolean {
 }
 
 /**
- * Pure, vscode-free quality analysis core shared by the desktop extension
- * (SqlQualityEngine) and the web LSP core (packages/sql-core). Produces
- * LintIssues with numeric LintSeverity — no VS Code types.
+ * Desktop adapter around the platform-neutral quality engine. The adapter is
+ * responsible only for desktop parse-session orchestration and the legacy
+ * ValidationResult shape. Rule ownership, severity, ordering and parser/
+ * quality de-duplication live in @justybase/sql-core.
  */
 export class QualityEngineCore {
-  constructor(
-    private readonly validator: SqlValidator,
-    private readonly rules: readonly LintRule[] = getUnifiedSqlQualityRules(),
-  ) {}
+  private readonly shared: SharedQualityEngineCore<ValidationResult>;
+
+  public constructor(
+    private readonly validator: SqlValidationService,
+    rules: readonly LintRule[] = getUnifiedSqlQualityRules(),
+  ) {
+    this.shared = new SharedQualityEngineCore<ValidationResult>({
+      validate: (sql) => this.validator.validate(sql),
+    }, rules);
+  }
 
   public analyze(
     sql: string,
     rulesConfig: Record<string, RuleSeverityConfig> = {},
-    includeOnDemandRules: boolean = false,
+    includeOnDemandRules = false,
   ): SqlQualityResult {
     return this.analyzeWithOptions(sql, {
       rulesConfig,
@@ -100,11 +109,10 @@ export class QualityEngineCore {
     });
   }
 
-  /** Quality-rules-only analysis for extension linter (LSP owns SQL/PAR diagnostics). */
   public analyzeQualityRulesOnly(
     sql: string,
     rulesConfig: Record<string, RuleSeverityConfig> = {},
-    includeOnDemandRules: boolean = false,
+    includeOnDemandRules = false,
   ): SqlQualityResult {
     return this.analyzeWithOptions(sql, {
       rulesConfig,
@@ -117,95 +125,38 @@ export class QualityEngineCore {
     sql: string,
     options: SqlQualityAnalyzeOptions = {},
   ): SqlQualityResult {
-    const {
-      rulesConfig = {},
-      includeOnDemandRules = false,
-      includeParserDiagnostics = true,
-      parseSession,
-      parseRequest,
-      skipProcedureParseWarmup = false,
-    } = options;
-
+    const includeParserDiagnostics = options.includeParserDiagnostics ?? true;
     const parserResult = includeParserDiagnostics
       ? this.validateWithOptionalParseSession(sql, options)
-      : {
-          valid: true,
-          errors: [],
-          warnings: [],
-          scope: EMPTY_VALIDATION_SCOPE,
-        };
-    const parserIssues = includeParserDiagnostics
-      ? [...parserResult.errors, ...parserResult.warnings]
-          .filter((issue) =>
-            isParserDiagnosticEnabled(issue.code, rulesConfig),
-          )
-          .map((issue) => this.toLintIssue(issue))
-      : [];
-    const ruleIssues: LintIssue[] = [];
-    const includeProcedureRules = isProcedureSql(sql);
+      : emptyValidationResult();
 
-    if (includeProcedureRules && !skipProcedureParseWarmup) {
+    const includeProcedureRules = isProcedureSql(sql);
+    if (includeProcedureRules) {
       beginProcedureRuleEvaluation();
-      warmProcedureParseGate(sql, parseSession, parseRequest);
-    } else if (includeProcedureRules) {
-      beginProcedureRuleEvaluation();
+      if (!options.skipProcedureParseWarmup) {
+        warmProcedureParseGate(sql, options.parseSession, options.parseRequest);
+      }
     }
 
     try {
-      for (const rule of this.rules) {
-        if (!includeProcedureRules && isProcedureQualityRule(rule.id)) {
-          continue;
-        }
-
-        if (isParserOwnedQualityRule(rule.id)) {
-          continue;
-        }
-
-        if (!includeOnDemandRules && rule.onDemandOnly) {
-          continue;
-        }
-
-        const configuredSeverity = rulesConfig[rule.id];
-        const severityOverride = configuredSeverity
-          ? parseSeverity(configuredSeverity)
-          : undefined;
-        if (severityOverride === null) {
-          continue;
-        }
-
-        const issuesForRule = rule.check(sql).map((issue) => ({
-          ...issue,
-          severity: severityOverride ?? issue.severity,
-        }));
-        ruleIssues.push(...issuesForRule);
-      }
+      const result: SharedQualityResult<ValidationResult> =
+        this.shared.analyzeWithOptions(sql, {
+          rulesConfig: options.rulesConfig,
+          includeOnDemandRules: options.includeOnDemandRules,
+          includeParserDiagnostics,
+          parserResult,
+        });
+      return result;
     } finally {
       if (includeProcedureRules) {
         endProcedureRuleEvaluation();
       }
     }
-
-    const issues = [...parserIssues, ...ruleIssues].sort((a, b) => {
-      if (a.startOffset !== b.startOffset) {
-        return a.startOffset - b.startOffset;
-      }
-
-      if (a.endOffset !== b.endOffset) {
-        return a.endOffset - b.endOffset;
-      }
-
-      return a.ruleId.localeCompare(b.ruleId);
-    });
-
-    return {
-      parserResult,
-      issues,
-    };
   }
 
   private validateWithOptionalParseSession(
     sql: string,
-    options: SqlQualityAnalyzeOptions = {},
+    options: SqlQualityAnalyzeOptions,
   ): ValidationResult {
     const {
       parseSession,
@@ -224,16 +175,18 @@ export class QualityEngineCore {
       );
       const allDiagnostics = [...result.errors, ...result.warnings];
       const dirty = new Set(incrementalValidation.dirtyIndices);
-      for (const stmt of incrementalValidation.statementIndex.statements) {
-        if (!dirty.has(stmt.index)) {
-          continue;
-        }
-        const stmtDiags = allDiagnostics.filter(
-          (d) =>
-            d.position.offset >= stmt.startOffset &&
-            d.position.offset <= stmt.endOffset,
+      for (const statement of incrementalValidation.statementIndex.statements) {
+        if (!dirty.has(statement.index)) continue;
+        const statementDiagnostics = allDiagnostics.filter(
+          (diagnostic) =>
+            diagnostic.position.offset >= statement.startOffset &&
+            diagnostic.position.offset <= statement.endOffset,
         );
-        validationSession.storeStatementDiagnostics(documentUri, stmt, stmtDiags);
+        validationSession.storeStatementDiagnostics(
+          documentUri,
+          statement,
+          statementDiagnostics,
+        );
       }
       return result;
     }
@@ -257,38 +210,7 @@ export class QualityEngineCore {
     });
     return this.validator.validateFromParseResult(sql, parseResult);
   }
-
-  private toLintIssue(issue: ValidationError): LintIssue {
-    const lineLength = issue.position.endColumn - issue.position.startColumn;
-    const span =
-      issue.position.endLine === issue.position.startLine
-        ? Math.max(1, lineLength)
-        : Math.max(1, lineLength);
-
-    return {
-      ruleId: issue.code,
-      message: `${issue.code}: ${issue.message}`,
-      severity: this.toNumericSeverity(issue.severity),
-      startOffset: issue.position.offset,
-      endOffset: issue.position.offset + span,
-      suggestedFix: issue.suggestedFix,
-    };
-  }
-
-  private toNumericSeverity(
-    severity: ValidationError["severity"],
-  ): LintIssue["severity"] {
-    switch (severity) {
-      case "error":
-        return 0;
-      case "warning":
-        return 1;
-      case "information":
-        return 2;
-      case "hint":
-        return 3;
-      default:
-        return 1;
-    }
-  }
 }
+
+/** @deprecated Use getUnifiedSqlQualityRules() for lazy initialization. */
+export const unifiedSqlQualityRules: readonly LintRule[] = [];

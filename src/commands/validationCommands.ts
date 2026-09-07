@@ -6,6 +6,8 @@ import * as vscode from "vscode";
 import { isSqlLanguageClientRunning } from "../activation/lspRegistration";
 import { getDatabaseSqlAuthoring } from "../core/connectionFactory";
 import { SqlValidator } from "../sqlParser";
+import { SqlCoreBackedValidator } from "../sqlParser/sqlCoreBackedValidator";
+import type { SqlValidationService } from "../sqlParser";
 import { createMetadataCacheSchemaProvider } from "../sqlParser/metadataCacheAdapter";
 import { getLogger } from "../utils/logger";
 import type { MetadataCache } from "../metadataCache";
@@ -20,7 +22,7 @@ interface SqlValidationContext {
 }
 
 // Global validator instance (will be initialized with dependencies)
-let validatorInstance: SqlValidator | undefined;
+let validatorInstance: SqlValidationService | undefined;
 let validationContext: SqlValidationContext | undefined;
 
 /**
@@ -50,21 +52,31 @@ export function getSqlAuthoringForDocument(documentUri?: string) {
 export function createSqlValidatorForDocument(
   documentUri?: string,
   schemaProvider?: SchemaProvider,
-): SqlValidator {
+): SqlValidationService {
   const authoring = getSqlAuthoringForDocument(documentUri);
+  const databaseKind =
+    validationContext?.connectionManager?.getExecutionDatabaseKind?.(
+      documentUri,
+    );
+  // Keep every non-Netezza authoring profile on its established validator
+  // until its dialect pack is migrated. Netezza is the first native semantic
+  // sql-core consumer and still presents the same desktop facade.
+  const Validator = !databaseKind || databaseKind === "netezza"
+    ? SqlCoreBackedValidator
+    : SqlValidator;
 
   if (schemaProvider) {
-    return new SqlValidator(schemaProvider, authoring.validation);
+    return new Validator(schemaProvider, authoring.validation);
   }
 
   if (!validationContext) {
-    return new SqlValidator(undefined, authoring.validation);
+    return new Validator(undefined, authoring.validation);
   }
 
   const connectionName =
     validationContext.connectionManager.resolveConnectionName?.(documentUri);
   if (!connectionName) {
-    return new SqlValidator(undefined, authoring.validation);
+    return new Validator(undefined, authoring.validation);
   }
 
   const resolvedSchemaProvider = createMetadataCacheSchemaProvider(
@@ -74,7 +86,7 @@ export function createSqlValidatorForDocument(
     documentUri,
   );
 
-  return new SqlValidator(resolvedSchemaProvider, authoring.validation);
+  return new Validator(resolvedSchemaProvider, authoring.validation);
 }
 
 /**
@@ -83,7 +95,7 @@ export function createSqlValidatorForDocument(
  */
 export function getInitializedSqlValidator(
   documentUri?: string,
-): SqlValidator | undefined {
+): SqlValidationService | undefined {
   if (documentUri && validationContext) {
     return createSqlValidatorForDocument(documentUri);
   }
