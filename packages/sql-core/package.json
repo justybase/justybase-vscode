@@ -15,17 +15,20 @@
       "types": "./dist/validation.d.ts",
       "require": "./dist/validation.js",
       "default": "./dist/validation.js"
+    },
+    "./quality": {
+      "types": "./dist/quality/index.d.ts",
+      "require": "./dist/quality/index.js",
+      "default": "./dist/quality/index.js"
     }
   },
   "scripts": {
     "build": "node ../../scripts/build-sql-core.js",
-    "check-types": "tsc --ignoreConfig --noEmit --module commonjs --moduleResolution bundler --target es2022 --lib es2022 --types node --strict --esModuleInterop --skipLibCheck src/runtime.ts src/validation.ts",
+    "check-types": "tsc -p tsconfig.build.json --noEmit",
     "test": "jest --runInBand"
   },
   "dependencies": {
     "@justybase/contracts": "*",
-    "chevrotain": "^12.0.0",
-    "vscode-languageserver": "^10.1.0",
-    "vscode-languageserver-textdocument": "^1.0.13"
+    "chevrotain": "^12.0.0"
   }
 }

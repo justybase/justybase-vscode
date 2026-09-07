@@ -6,7 +6,7 @@ export default tseslint.config(
     ...tseslint.configs.recommended,
     {
         ignores: [
-            'dist/**',
+            '**/dist/**',
             'driver/**',
             'node_modules/**',
             'ExcelHelpersTs/**',

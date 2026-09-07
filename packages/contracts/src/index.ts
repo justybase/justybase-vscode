@@ -1,4 +1,4 @@
-export type { DatabaseKind, DatabaseCapabilities, DatabaseDialect, DatabaseSqlAuthoring, DatabaseSqlValidationProfile, DatabaseSqlTypeSpec, DatabaseSqlLintIssue, DatabaseSqlQualityRule, DatabaseSqlFormatterProfile, DatabaseSqlParsingProfile, DatabaseSqlStaticAssetProfile } from './database';
+export type { DatabaseKind, DatabaseCapabilities, DatabaseDialect, DatabaseSqlAuthoring, DatabaseSqlFunctionSignature, DatabaseSqlValidationProfile, DatabaseSqlTypeSpec, DatabaseSqlLintIssue, DatabaseSqlQualityRule, DatabaseSqlFormatterProfile, DatabaseSqlParsingProfile, DatabaseSqlStaticAssetProfile } from './database';
 export { DEFAULT_DATABASE_KIND, DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, createDatabaseCapabilities, createDatabaseDialectTraits } from './database';
 export type { DatabaseConnection, DatabaseCommand, DatabaseDataReader } from './database';
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor } from './database';
