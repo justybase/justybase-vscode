@@ -52,4 +52,3 @@ export function visitInExpression(visitor: SqlVisitorHost, ctx: VisitorCtx): voi
         });
     }
 }
-

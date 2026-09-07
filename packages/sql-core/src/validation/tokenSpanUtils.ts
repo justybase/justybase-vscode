@@ -21,4 +21,3 @@ export function getCstNodeTokenSpan(node: CstNode): TokenPosition | undefined {
     ? undefined
     : getTokenSpanPositionFromEndpoints(tokens[0], tokens[tokens.length - 1]);
 }
-

@@ -82,4 +82,3 @@ export interface SqlVisitorHost {
   getDuplicateOutputWarningSuppressionDepth(): number;
   setDuplicateOutputWarningSuppressionDepth(value: number): void;
 }
-

@@ -111,4 +111,3 @@ export const supportsProcedureAnySizeArgument = (typeName: string): boolean => {
   const spec = getNetezzaTypeSpec(typeName);
   return !!spec && PROCEDURE_ANY_SIZE_TEXT_TYPES.has(spec.canonical);
 };
-

@@ -130,4 +130,3 @@ export const NETEZZA_SYSTEM_COLUMNS = new Set<string>([
     'DELETEXID',
     'DATASLICEID'
 ]);
-

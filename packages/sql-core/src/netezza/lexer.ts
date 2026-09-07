@@ -271,9 +271,9 @@ export const Action = createToken({ name: 'Action', pattern: /ACTION/i, longer_a
 // Literals
 // ============================================================================
 
-export const NumberLiteral = createToken({ 
-    name: 'NumberLiteral', 
-    pattern: /\d+(\.\d+)?([eE][+-]?\d+)?/ 
+export const NumberLiteral = createToken({
+    name: 'NumberLiteral',
+    pattern: /\d+(\.\d+)?([eE][+-]?\d+)?/
 })
 
 export const StringLiteral = createToken({
@@ -388,12 +388,12 @@ export const allTokens = [
     // Comments first (to be skipped)
     LineComment,
     BlockComment,
-    
+
      // Multi-word keywords first (before single-word keywords)
      GroupBy,
      OrderBy,
      PartitionBy,
-    
+
     // Keywords (case insensitive)
     AtSet,
     Select,
@@ -589,7 +589,7 @@ export const allTokens = [
     Desc,
     Fetch,
     First,
-    
+
     // Operators (longer patterns first)
      NotEquals,
      LessThanEquals,
@@ -616,7 +616,7 @@ export const allTokens = [
     LBracket,
     RBracket,
     Parameter,
-    
+
     // Literals
     BracedVariable,
     BracesOnlyVariable,
@@ -624,11 +624,11 @@ export const allTokens = [
     DollarIdentifier,
     NumberLiteral,
     StringLiteral,
-    
+
     // Identifiers
     QuotedIdentifier,
     Identifier,
-    
+
     // Whitespace (last)
     WhiteSpace
 ]

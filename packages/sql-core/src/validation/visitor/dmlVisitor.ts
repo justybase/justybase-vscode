@@ -354,4 +354,3 @@ function getValuesRowExpressionCounts(valuesClause: CstNode): number[] {
   }
   return Array.from({ length: rowCount }, () => perRow);
 }
-

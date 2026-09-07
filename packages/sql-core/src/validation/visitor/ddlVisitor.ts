@@ -454,4 +454,3 @@ export function alterTableSetPrivilegesAction(
 export function alterTableCascadeRestrictClause(): void {
   // No validation needed
 }
-

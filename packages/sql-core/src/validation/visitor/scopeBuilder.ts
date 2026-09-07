@@ -141,8 +141,8 @@ export class ScopeBuilder {
         if (!table) return undefined
 
         const upperColumn = columnName.toUpperCase()
-        return table.columns.find(col => 
-            col.name.toUpperCase() === upperColumn || 
+        return table.columns.find(col =>
+            col.name.toUpperCase() === upperColumn ||
             col.alias?.toUpperCase() === upperColumn
         )
     }
@@ -205,7 +205,7 @@ export class ScopeBuilder {
     getAllVisibleColumns(): ColumnInfo[] {
         const columns: ColumnInfo[] = []
         const tables = this.getAllVisibleTables()
-        
+
         tables.forEach(table => {
             columns.push(...table.columns)
         })
@@ -218,4 +218,3 @@ export class ScopeBuilder {
         this.scopeStack = []
     }
 }
-
