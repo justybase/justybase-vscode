@@ -104,9 +104,20 @@ ownership, audits duplicate contracts and public companion entry points, and
 orders migration slices with desktop-first parity gates. Its infrastructure
 adds pure-package import checks, exact exceptions with removal conditions and
 the read-only `architecture:report` inventory. The first SQL validation slice
-now provides a reversible compatibility boundary and parity harness; final
-parser ownership in sql-core, CQ01/CQ02 and subsequent runtime migrations
-remain separate work.
+now has package-owned Netezza parser and semantic validation, a reversible
+compatibility boundary and a parity harness. Legacy validation remains for
+non-Netezza dialects. CQ01/CQ02 and subsequent runtime migrations remain
+separate work, ordered in the [refactoring plan](REFACTORING_PLAN.md).
+
+R2 runtime extraction is being verified as a separate vertical slice: SQLite,
+DuckDB and Netezza have instance-scoped Node runtime packages, API adapters use
+the registry, desktop SQLite/DuckDB facades share the runtime sessions, and the
+Netezza driver is imported only by `@justybase/netezza-runtime`. Evidence is in
+the three package manifests/sources, API runtime tests, DuckDB/File SQL
+integration suites and the architecture package-boundary gate. R2 is not yet
+accepted: full lifecycle, packaging and Extension Host gates remain to be
+verified, including live Netezza. Windows Extension Host requires its matching
+environment; the Linux environment does not provide evidence for Windows.
 
 Architecture completion means zero new cycles, no `vscode` dependency in shared
 packages, no untyped high-traffic webview command, and no state migration that

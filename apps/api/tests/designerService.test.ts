@@ -10,6 +10,7 @@ import {
 } from '@justybase/database-runtime';
 import { getDatabaseDesignerCapabilities } from '@justybase/contracts';
 import type { StoredConnection } from '../src/store';
+import { createApiDatabaseRuntimeRegistry } from '../src/databaseRuntime/registry';
 
 function profile(overrides: Partial<StoredConnection> = {}): StoredConnection {
   return {
@@ -29,6 +30,7 @@ function profile(overrides: Partial<StoredConnection> = {}): StoredConnection {
 }
 
 describe('designerService', () => {
+  const runtimes = createApiDatabaseRuntimeRegistry({ masterKey: 'test-key' });
   it('returns the registered API runtime as available and preserves the target', () => {
     const response = getDesignerCapabilitiesResponse(profile(), {
       connectionId: 'connection-1',
@@ -36,7 +38,7 @@ describe('designerService', () => {
       schema: 'ADMIN',
       objectName: 'FACT_SALES',
       objectType: 'TABLE',
-    });
+    }, runtimes);
 
     expect(response.runtimeAvailable).toBe(true);
     expect(response.readOnly).toBe(false);
@@ -55,6 +57,7 @@ describe('designerService', () => {
     const response = getDesignerCapabilitiesResponse(
       profile({ dbType: 'mysql' }),
       { connectionId: 'connection-1' },
+      runtimes,
     );
 
     expect(response.runtimeAvailable).toBe(false);
@@ -66,6 +69,7 @@ describe('designerService', () => {
     const response = getDesignerCapabilitiesResponse(
       profile({ readOnly: true }),
       { connectionId: 'connection-1' },
+      runtimes,
     );
 
     expect(response.capabilities.constructs.table.level).toBe('privilege-blocked');

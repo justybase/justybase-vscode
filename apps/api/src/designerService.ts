@@ -4,7 +4,7 @@ import {
   type DesignerCapabilitiesResponse,
   type DesignerCapabilitiesRequest,
 } from '@justybase/contracts';
-import { isDuckDbRuntimeAvailable } from './duckdb';
+import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import type { StoredConnection } from './store';
 
 /**
@@ -12,16 +12,16 @@ import type { StoredConnection } from './store';
  * Other kinds remain visible through the shared manifest, but must not appear
  * executable until an API-side driver/runtime adapter is registered.
  */
-function hasApiRuntime(profile: StoredConnection): boolean {
-  if (profile.dbType === 'duckdb') return isDuckDbRuntimeAvailable();
-  return profile.dbType === 'netezza' || profile.dbType === 'sqlite';
+function hasApiRuntime(profile: StoredConnection, runtimes: Pick<ApiDatabaseRuntimeRegistry, 'isAvailable'>): boolean {
+  return runtimes.isAvailable(profile);
 }
 
 export function getDesignerCapabilitiesResponse(
   profile: StoredConnection,
   request: DesignerCapabilitiesRequest,
+  runtimes: Pick<ApiDatabaseRuntimeRegistry, 'isAvailable'>,
 ): DesignerCapabilitiesResponse {
-  const runtimeAvailable = hasApiRuntime(profile);
+  const runtimeAvailable = hasApiRuntime(profile, runtimes);
   const target = {
     connectionId: profile.id,
     connectionName: profile.name,

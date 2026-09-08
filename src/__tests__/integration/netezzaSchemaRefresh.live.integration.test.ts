@@ -320,6 +320,7 @@ function createRefreshRunner(trace: RefreshTrace): DisposableQueryRunnerRawFn {
 async function waitForTerminalRefresh(
     cache: MetadataCache,
     runner: DisposableQueryRunnerRawFn,
+    manual = false,
 ): Promise<MetadataPrefetchRefreshDetails> {
     return new Promise<MetadataPrefetchRefreshDetails>((resolve, reject) => {
         let settled = false;
@@ -345,7 +346,7 @@ async function waitForTerminalRefresh(
         }, TEST_TIMEOUT_MS);
 
         try {
-            cache.triggerConnectionPrefetch(CONNECTION_NAME, runner);
+            cache.triggerConnectionPrefetch(CONNECTION_NAME, runner, { manual });
         } catch (error: unknown) {
             clearTimeout(timeout);
             subscription.dispose();
@@ -357,9 +358,10 @@ async function waitForTerminalRefresh(
 async function runPublicRefresh(
     cache: MetadataCache,
     runner: DisposableQueryRunnerRawFn,
+    manual = false,
 ): Promise<MetadataPrefetchRefreshDetails> {
     try {
-        return await waitForTerminalRefresh(cache, runner);
+        return await waitForTerminalRefresh(cache, runner, manual);
     } finally {
         await runner.dispose?.();
     }
@@ -657,7 +659,8 @@ describeIfLive('Netezza schema refresh - live read-only integration', () => {
                 expect(cache.isConnectionPrefetchFresh(CONNECTION_NAME)).toBe(false);
 
                 const retryTrace = createRefreshTrace();
-                const retryDetails = await runPublicRefresh(cache, createRefreshRunner(retryTrace));
+                // Automatic retries are deliberately suppressed during the failure cooldown.
+                const retryDetails = await runPublicRefresh(cache, createRefreshRunner(retryTrace), true);
                 expect(retryDetails.stage).toBe('complete');
                 expect(cache.isConnectionPrefetchFresh(CONNECTION_NAME)).toBe(true);
                 expect(retryTrace.catalogCalls.some(call => call.kind === 'objects')).toBe(true);
@@ -717,7 +720,7 @@ describeIfLive('Netezza schema refresh - live read-only integration', () => {
                 expect(failedDetails.snapshot?.complete).toBe(false);
 
                 const retryTrace = createRefreshTrace();
-                const retryDetails = await runPublicRefresh(cache, createRefreshRunner(retryTrace));
+                const retryDetails = await runPublicRefresh(cache, createRefreshRunner(retryTrace), true);
                 expect(retryDetails.stage).toBe('complete');
                 expect(retryTrace.catalogCalls.some(call => call.kind === 'external-columns')).toBe(true);
                 expect(cache.isConnectionPrefetchFresh(CONNECTION_NAME)).toBe(true);

@@ -1,8 +1,8 @@
 import type { SqlCompletionItem, SqlCompletionRequest, SqlCompletionResponse, SqlDiagnostic, SqlDiagnosticsRequest, SqlDiagnosticsResponse, SqlFormatRequest, SqlFormatResponse, SqlLanguageContext } from '@justybase/contracts';
 import { NetezzaWebLspCore, type CoreDiagnostic } from './sqlCoreLsp';
 import { invalidateLspObjectCache, requestMetadata } from './lspProtocol';
-import { isProfileReadOnlySql } from './netezza';
 import type { ApiConfig } from './config';
+import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import type { AppStore, StoredConnection } from './store';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -30,8 +30,8 @@ function getProfile(store: AppStore, userId: string, connectionId: string | unde
   return connectionId ? store.getConnection(userId, connectionId) : undefined;
 }
 
-export async function provideSqlCompletion(store: AppStore, config: ApiConfig, userId: string, request: SqlCompletionRequest): Promise<SqlCompletionResponse> {
-  const entry = getHttpCore(store, config, userId, request);
+export async function provideSqlCompletion(store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, request: SqlCompletionRequest): Promise<SqlCompletionResponse> {
+  const entry = getHttpCore(store, runtimes, userId, request);
   const position = positionAt(request.sql, request.offset);
   const items = await entry.core.completion(entry.documentUri, entry.documents.get(entry.documentUri)?.version ?? 1, request.sql, position);
   return { items: items.map(toHttpCompletionItem) };
@@ -39,7 +39,7 @@ export async function provideSqlCompletion(store: AppStore, config: ApiConfig, u
 
 function getHttpCore(
   store: AppStore,
-  config: ApiConfig,
+  runtimes: ApiDatabaseRuntimeRegistry,
   userId: string,
   request: SqlCompletionRequest,
 ): HttpCoreCacheEntry {
@@ -58,7 +58,7 @@ function getHttpCore(
     const documentUri = `http://justybase.invalid/${encodeURIComponent(userId)}/completion/${encodeURIComponent(key)}`;
     const documents = new Map<string, HttpDocumentState>();
     const core = new NetezzaWebLspCore({
-      requestMetadata: params => requestMetadata(params, documents, store, config, userId),
+      requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId),
     });
     entry = {
       connectionId: context.connectionId,
@@ -174,7 +174,7 @@ function mapCoreDiagnostic(sql: string, item: CoreDiagnostic, state: LegacyDelim
 
 async function provideNetezzaDiagnostics(
   store: AppStore,
-  config: ApiConfig,
+  runtimes: ApiDatabaseRuntimeRegistry,
   userId: string,
   request: SqlDiagnosticsRequest,
 ): Promise<SqlDiagnostic[]> {
@@ -190,7 +190,7 @@ async function provideNetezzaDiagnostics(
     },
   }]]);
   const core = new NetezzaWebLspCore({
-    requestMetadata: params => requestMetadata(params, documents, store, config, userId),
+    requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId),
   });
   core.setContext(documentUri, {
     connectionName: request.connectionId,
@@ -204,13 +204,13 @@ async function provideNetezzaDiagnostics(
   return diagnostics.map(item => mapCoreDiagnostic(request.sql, item, state));
 }
 
-export async function provideSqlDiagnostics(store: AppStore, config: ApiConfig, userId: string, request: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse> {
+export async function provideSqlDiagnostics(store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, request: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse> {
   const sql = request.sql;
   const diagnostics = request.databaseKind && request.databaseKind !== 'netezza'
     ? legacyDelimiterDiagnostics(sql, scanLegacyDelimiters(sql))
-    : await provideNetezzaDiagnostics(store, config, userId, request);
+    : await provideNetezzaDiagnostics(store, runtimes, userId, request);
   const profile = getProfile(store, userId, request.connectionId);
-  if (profile?.readOnly && sql.trim() && !isProfileReadOnlySql(profile, sql)) diagnostics.push(diagnostic(sql, 'This connection is read-only; the statement may be rejected.', 'warning', 0, 'WEB004'));
+  if (profile?.readOnly && sql.trim() && !runtimes.isReadOnlySql(profile, sql)) diagnostics.push(diagnostic(sql, 'This connection is read-only; the statement may be rejected.', 'warning', 0, 'WEB004'));
   return { diagnostics };
 }
 

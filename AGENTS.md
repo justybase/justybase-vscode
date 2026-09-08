@@ -20,13 +20,16 @@ Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / Pur
 - `packages/contracts/` — shared public TypeScript contracts used by desktop, web, API, and companion extensions.
 - `packages/sql-core/` — VS Code-free SQL/LSP surface shared with the web API. Do not introduce a `vscode` import here.
 - `packages/database-runtime/` — shared database execution/runtime helpers used by the web API and other platform-neutral consumers.
+- `packages/sqlite-runtime/` — instance-owned SQLite execution, metadata, cancellation, and cleanup; product adapters authorize paths.
+- `packages/duckdb-runtime/` — structural DuckDB session/runtime used by API and DuckDB/File SQL adapters.
+- `packages/netezza-runtime/` — Netezza driver boundary and instance-scoped runtime used by API, desktop, and MCP.
 - `packages/access-file/` — standalone MDB/ACCDB reader and Access file-session package.
 - `apps/api/` — self-hosted Fastify API and WebSocket server.
 - `apps/web/` — React/Vite self-hosted web editor.
 - `Benchmark/` — local performance suites; generated result files are ignored.
 - `test-harness/` — Playwright and browser harnesses for webviews and the web SQL workspace.
 
-The root `package.json` uses npm workspaces for `packages/*` and `apps/*`. The root API build handles the `contracts -> sql-core -> database-runtime -> api` dependency chain; build `@justybase/access-file` separately when working on that package. Use the root scripts rather than committing generated `dist/` output.
+The root `package.json` uses npm workspaces for `packages/*` and `apps/*`. The root API build handles the `contracts -> sql-core -> duckdb-runtime/netezza-runtime -> database-runtime/sqlite-runtime -> api` dependency chain; build `@justybase/access-file` separately when working on that package. Use the root scripts rather than committing generated `dist/` output.
 
 ### Quality and Documentation Sources of Truth
 
@@ -52,7 +55,10 @@ npm run build              # Desktop extension, webviews, LSP, workers, and MCP 
 npm run build:dev          # Same as build; retained for development workflows
 npm run build:watch        # Watch all root esbuild entry points
 npm run build:minified     # Opt-in minified desktop bundles
-npm run build:api          # contracts -> sql-core -> database-runtime -> web API
+npm run build:api          # contracts -> sql-core -> dialect runtimes -> database-runtime -> web API
+npm run build:sqlite-runtime # contracts -> shared SQLite Node runtime
+npm run build:duckdb-runtime  # contracts -> shared DuckDB Node runtime
+npm run build:netezza-runtime # contracts -> Netezza driver boundary/runtime
 npm run build:web          # Vite build for apps/web
 npm run build:all          # API and web builds
 npm run clean              # Remove root dist/
@@ -87,6 +93,9 @@ npm run test:watch                                      # Watch mode
 npm run test:completion-parity                          # Completion parity tests
 npm run test:quickfix-regression                        # Quickfix regression tests
 npm run test:api                                        # Build shared packages and test apps/api
+npm run test:sqlite-runtime                             # Shared SQLite runtime unit/lifecycle tests
+npm run test:duckdb-runtime                             # Shared DuckDB runtime unit/lifecycle tests
+npm run test:netezza-runtime                            # Shared Netezza runtime unit/lifecycle tests
 npm run test:web                                        # Test apps/web
 npm run test:playwright                                 # Browser/webview harness
 ```
@@ -224,6 +233,9 @@ Optional extensions expose corresponding `package:<dialect>` and `package:<diale
 - `@justybase/contracts` is the additive contract boundary. Keep new request/response fields compatible with desktop and web consumers.
 - `@justybase/sql-core` must remain independent of VS Code. It is consumed by `apps/api`; importing `vscode` or desktop-only providers here breaks the web build.
 - `@justybase/database-runtime` owns reusable execution and read-only safety helpers. Keep web/API execution logic here when it is not platform-specific.
+- `@justybase/sqlite-runtime` owns SQLite sessions and Node I/O. Pass only product-authorized absolute paths or `:memory:`; sandbox and user authorization remain in the product adapter.
+- `@justybase/duckdb-runtime` owns DuckDB sessions, module resolution, catalog serialization, bounded reads, cancellation, and instance ownership. File SQL conversion/view setup stays in the companion adapter.
+- `@justybase/netezza-runtime` is the sole production owner of the Netezza driver import. Product adapters pass resolved credentials/targets; do not import the driver directly from API, desktop dialects, MCP, or compatibility helpers.
 - `apps/api` is a multi-user/self-hosted server. Keep credentials and secrets in its environment/configuration, never in source or fixtures.
 - `src/mcp/` contains the bundled read-only Netezza MCP server. Preserve the read-only gate for both stdio and HTTP transports.
 

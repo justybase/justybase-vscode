@@ -12,6 +12,7 @@ import { netezzaMetadataProvider } from "./metadata/provider";
 import { netezzaSqlAuthoring } from "./sql/authoring";
 import { netezzaDialectTraits } from "./traits";
 import { getOptionNumber } from "../../core/connectionUtils";
+import { createNetezzaConnection, getNetezzaConnectionConstructor, type NetezzaDriverConfig } from "@justybase/netezza-runtime";
 
 /**
  * NPS can take several seconds to accept a catalog connection while the
@@ -54,14 +55,11 @@ export const netezzaDialect: DatabaseDialect = {
     return getAdvancedFeatures();
   },
   getConnectionConstructor(): DatabaseConnectionStaticConstructor {
-    return require("@justybase/netezza-driver")
-      .NzConnection as DatabaseConnectionStaticConstructor;
+    return getNetezzaConnectionConstructor() as unknown as DatabaseConnectionStaticConstructor;
   },
   createConnection(config: DatabaseConnectionConfig): DatabaseConnection {
-    const NzConnectionClass = netezzaDialect.getConnectionConstructor();
-    const { ClientTypeId } = require("@justybase/netezza-driver");
     const configuredTimeout = getOptionNumber(config, "connectionTimeout");
-    return new NzConnectionClass({
+    return createNetezzaConnection({
       ...config,
       // @justybase/netezza-driver expects this setting at the top level,
       // while shared connection details store dialect options in `options`.
@@ -70,7 +68,7 @@ export const netezzaDialect: DatabaseDialect = {
           ? configuredTimeout
           : DEFAULT_NETEZZA_CONNECTION_TIMEOUT_SECONDS,
       // NPS compatibility identity required by DROP SESSION on some systems.
-      clientType: ClientTypeId?.SqlDotnet ?? 11,
-    } as DatabaseConnectionConfig);
+      clientType: 11,
+    } as unknown as NetezzaDriverConfig) as unknown as DatabaseConnection;
   },
 };

@@ -8,6 +8,23 @@ jest.mock('@justybase/netezza-driver', () => ({
 }));
 
 describe('nzConnectionFactory', () => {
+    it.each([
+        [0, 0],
+        [12, 12],
+        [-1, 30],
+    ])('maps configured timeout %s to driver timeout %s', (configured, expected) => {
+        const mockConnection = new EventEmitter();
+        mockNzConnectionConstructor.mockImplementation(() => mockConnection);
+        const connection = createNzConnection({
+            host: 'localhost', database: 'TESTDB', user: 'admin',
+            options: { connectionTimeout: configured },
+        });
+        expect(connection).toBe(mockConnection);
+        expect(mockNzConnectionConstructor).toHaveBeenCalledWith(expect.objectContaining({
+            connectionTimeout: expected,
+        }));
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
     });

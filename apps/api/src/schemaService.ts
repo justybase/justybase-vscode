@@ -1,6 +1,5 @@
 import type { SchemaSearchRequest, SchemaSearchResponse, SchemaTreeNode, SchemaTreeResponse } from '@justybase/contracts';
-import { listColumns, listDatabases, listObjects, listSchemas } from './netezza';
-import type { ApiConfig } from './config';
+import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import type { AppStore, StoredConnection } from './store';
 
 const TTL_MS = 12 * 60 * 60 * 1000;
@@ -42,16 +41,16 @@ function profileFor(store: AppStore, userId: string, connectionId: string): Stor
   return profile;
 }
 
-export async function getSchemaTree(store: AppStore, config: ApiConfig, userId: string, connectionId: string, parentId?: string): Promise<SchemaTreeResponse> {
+export async function getSchemaTree(store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, connectionId: string, parentId?: string): Promise<SchemaTreeResponse> {
   const profile = profileFor(store, userId, connectionId);
   if (!parentId) {
-    const result = await cached(cacheKey(profile, 'databases'), () => listDatabases(profile, config.masterKey));
+    const result = await cached(cacheKey(profile, 'databases'), () => runtimes.listDatabases(profile));
     return { nodes: result.value.map(item => node('database', item.name, { connectionId, database: item.name }, true)), stale: result.stale };
   }
   const parent = decodeNode(parentId);
   if (parent.kind === 'database') {
     const database = parent.database ?? '';
-    const result = await cached(cacheKey(profile, 'schemas', database), () => listSchemas(profile, database, config.masterKey));
+    const result = await cached(cacheKey(profile, 'schemas', database), () => runtimes.listSchemas(profile, database));
     return { nodes: result.value.map(item => node('schema', item.name, { connectionId, database, schema: item.name }, true)), stale: result.stale };
   }
   if (parent.kind === 'schema') {
@@ -63,7 +62,7 @@ export async function getSchemaTree(store: AppStore, config: ApiConfig, userId: 
     const database = parent.database ?? '';
     const schema = parent.schema ?? '';
     const objectType = parent.objectType ?? 'TABLE';
-    const result = await cached(cacheKey(profile, 'objects', database, schema), () => listObjects(profile, database, schema, config.masterKey));
+    const result = await cached(cacheKey(profile, 'objects', database, schema), () => runtimes.listObjects(profile, database, schema));
     const items = result.value.filter(item => item.objectType?.toUpperCase() === objectType).map(item => node('object', item.name, { connectionId, database, schema, objectName: item.name, objectType }, true, {
       description: item.description,
       viewSql: item.viewSql,
@@ -74,22 +73,22 @@ export async function getSchemaTree(store: AppStore, config: ApiConfig, userId: 
     const database = parent.database ?? '';
     const schema = parent.schema ?? '';
     const table = parent.objectName ?? '';
-    const result = await cached(cacheKey(profile, 'columns', database, schema, table), () => listColumns(profile, database, schema, table, config.masterKey));
+    const result = await cached(cacheKey(profile, 'columns', database, schema, table), () => runtimes.listColumns(profile, database, schema, table));
     return { nodes: result.value.map(item => node('column', item.name, { connectionId, database, schema, objectName: table, columnType: item.type }, false, { description: item.description })), stale: result.stale };
   }
   return { nodes: [] };
 }
 
-export async function searchSchema(store: AppStore, config: ApiConfig, userId: string, request: SchemaSearchRequest): Promise<SchemaSearchResponse> {
+export async function searchSchema(store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, request: SchemaSearchRequest): Promise<SchemaSearchResponse> {
   const profile = profileFor(store, userId, request.connectionId);
   const term = request.term.trim().toUpperCase();
   if (!term) return { items: [] };
-  const databases = request.database ? [{ name: request.database }] : await listDatabases(profile, config.masterKey);
+  const databases = request.database ? [{ name: request.database }] : await runtimes.listDatabases(profile);
   const items: SchemaSearchResponse['items'] = [];
   for (const database of databases.slice(0, request.searchAllDatabases ? databases.length : 1)) {
-    const schemas = request.schema ? [{ name: request.schema }] : await listSchemas(profile, database.name, config.masterKey);
+    const schemas = request.schema ? [{ name: request.schema }] : await runtimes.listSchemas(profile, database.name);
     for (const schema of schemas) {
-      const objects = await listObjects(profile, database.name, schema.name, config.masterKey);
+      const objects = await runtimes.listObjects(profile, database.name, schema.name);
       for (const object of objects) {
         const type = object.objectType?.toUpperCase() ?? 'OBJECT';
         if (request.objectTypes?.length && !request.objectTypes.some(item => item.toUpperCase() === type)) continue;

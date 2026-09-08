@@ -1,16 +1,16 @@
 import { getSqlStatementAtPosition, NetezzaWebLspCore, splitSqlStatements } from '../src/sqlCoreLsp';
 import { invalidateSqlMetadataCache, provideSqlCompletion } from '../src/lsp';
-import type { ApiConfig } from '../src/config';
+import type { ApiDatabaseRuntimeRegistry } from '../src/databaseRuntime/contracts';
 import type { AppStore } from '../src/store';
-import { listObjects } from '../src/netezza';
 
-jest.mock('../src/netezza', () => ({
-  isProfileReadOnlySql: jest.fn(),
+const listObjects = jest.fn();
+const runtimes = {
+  isReadOnlySql: jest.fn(),
   listColumns: jest.fn(),
   listDatabases: jest.fn(),
-  listObjects: jest.fn(),
+  listObjects,
   listSchemas: jest.fn(),
-}));
+} as unknown as ApiDatabaseRuntimeRegistry;
 
 describe('shared Netezza web SQL core', () => {
   beforeEach(() => {
@@ -21,7 +21,7 @@ describe('shared Netezza web SQL core', () => {
   it('routes HTTP completion through the shared Netezza authoring core', async () => {
     const result = await provideSqlCompletion(
       {} as AppStore,
-      { masterKey: 'test-master-key' } as ApiConfig,
+      runtimes,
       'user-1',
       { sql: 'SELECT NV', offset: 'SELECT NV'.length, databaseKind: 'netezza' },
     );
@@ -65,12 +65,12 @@ describe('shared Netezza web SQL core', () => {
       databaseKind: 'netezza' as const,
     };
 
-    await provideSqlCompletion(store, { masterKey: 'test-master-key' } as ApiConfig, 'user-1', request);
-    await provideSqlCompletion(store, { masterKey: 'test-master-key' } as ApiConfig, 'user-1', request);
+    await provideSqlCompletion(store, runtimes, 'user-1', request);
+    await provideSqlCompletion(store, runtimes, 'user-1', request);
     expect(listObjects).toHaveBeenCalledTimes(1);
 
     invalidateSqlMetadataCache('connection-1');
-    await provideSqlCompletion(store, { masterKey: 'test-master-key' } as ApiConfig, 'user-1', request);
+    await provideSqlCompletion(store, runtimes, 'user-1', request);
     expect(listObjects).toHaveBeenCalledTimes(2);
   });
 

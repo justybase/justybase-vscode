@@ -11,6 +11,12 @@
 !packages/contracts/**
 !packages/database-runtime/
 !packages/database-runtime/**
+!packages/sqlite-runtime/
+!packages/sqlite-runtime/**
+!packages/duckdb-runtime/
+!packages/duckdb-runtime/**
+!packages/netezza-runtime/
+!packages/netezza-runtime/**
 !packages/sql-core/
 !packages/sql-core/**
 !packages/access-file/

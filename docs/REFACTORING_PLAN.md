@@ -1,0 +1,355 @@
+# Refactoring Plan: VS Code, Web, and Future Electron
+
+## Goal and Principles
+
+Practical modularity means sharing SQL logic, database handling, metadata,
+and results while retaining product adapters. Production VS Code extensions
+preserve behavior, commands, settings, and companion compatibility. Existing
+web/API implementations serve to confirm portability. We are not building a
+new Electron application, new web features, or a single GUI for all products.
+
+This plan specifies the migration sequence; it is not a second quality
+backlog. Statuses and completion evidence remain in the
+[quality roadmap](PROJECT_QUALITY_ROADMAP.md). The
+[architecture](ARCHITECTURE.md), [testing strategy](TESTING_STRATEGY.md),
+[execution contract](EXECUTION_CONTRACT.md),
+[metadata contract](METADATA_CACHE_CONTRACT.md), and
+[migration preparation](SHARED_CODE_MIGRATION.md) apply.
+
+## Baseline from the Analysis
+
+- `sql-core` owns the Netezza parser and semantic validation; desktop facades
+  and legacy implementations for other dialects still have consumers.
+- `designer-core` already separates designer logic from products.
+- `database-runtime` is a facade for shared helpers and does not import a
+  driver. The instance-scoped `netezza-runtime`, `sqlite-runtime`, and
+  `duckdb-runtime` packages own I/O, lifecycle, cancellation, and metadata as
+  appropriate. The API has an adapter registry, while the desktop and DuckDB
+  companion use the same sessions.
+- The desktop metadata cache mixes model rules with VS Code, configuration,
+  logging, prefetch, and disk concerns. The API has its cache and connections
+  in module state.
+- Result Panel concentrates state, transport, persistence, and rendering in
+  large coordinators; splitting by line count does not solve this problem.
+- Companions import the main extension's implementation. The React client
+  binds transport to `window.location` and `document.cookie`.
+- The graph report found no violations during the analysis, but it contained
+  numerous explicit exceptions and cycles, including type cycles. The counts
+  are updated by `architecture:report`; they are not a frozen criterion or a
+  list of runtime cycles.
+- The initial `test:quality-tools` run failed: the report CLI test could not
+  read the JSON. Full product tests were not run at that time. R0 requires
+  explaining the cause and collecting reliable results before production
+  migration.
+
+## Target Boundaries
+
+| Layer | Responsibility | Constraints |
+| --- | --- | --- |
+| contracts | Stable public and transport types | Platform-free; consumer compatibility |
+| sql-core | Parsing, validation, and shared authoring mechanisms | No Node, VS Code, React, Electron, or drivers |
+| designer-core | Models, capabilities, and pure DDL logic | I/O and rendering belong in adapters |
+| result-core, new | Identity, state transitions, and shared data operations | No DOM, transport, or disk |
+| metadata-core, new | Keys, merging, completeness, and invalidation | No connections, timers, or disk |
+| database-runtime | Execution, cancellation, retry, limits, and cleanup | Database dependencies are passed explicitly |
+| Dialect runtime | Driver, connection, catalog, and database behavior | No product dependencies |
+| VS Code adapter | Activation, commands, editors, secrets, and webviews | Preserve existing public entry points |
+| API | Authorization, transport, and server-instance state | No extension dependencies |
+| React/webview | Rendering, interactions, and presentation state | No drivers or secrets |
+
+Imports flow from products toward engines/runtimes and contracts. The product
+composition selects the driver. Factories and constructors receive concrete
+dependencies; no DI container or global service locator is introduced.
+
+A package is created together with the migrated implementation, its consumer,
+and its tests. We do not create empty packages or a universal engine for all
+SQL differences. React and webviews retain separate components and editor
+integrations.
+
+The future Electron application will manage the backend in the main process,
+while the renderer will use the same HTTP client and events as the web. For
+now, we are preparing the backend factory, resource shutdown, address
+configuration, and engine independence. Preload, IPC, installers, updates,
+and system integration are out of scope.
+
+## Implementation Stages
+
+### R0 — Reliable Gates and Documentation
+
+Related: CQ03 and quality/documentation management.
+
+1. Explain the CLI failure: status, stderr, stdout completeness, and launch
+   conditions. Fix the cause without weakening assertions.
+2. Align the roadmap and migration documents with the current ownership of the
+   Netezza parser.
+3. Distinguish execution cycles from type cycles; every remaining exception
+   must have an owner and a removal condition in the graph configuration.
+4. Collect baseline gate results in artifacts outside version control;
+   environment limitations and unrun tests do not count as passing.
+
+Acceptance: correct quality tools, consistent documentation, and an explicit
+gate status.
+
+### R1 — Package Boundaries
+
+Related: CQ03.
+
+1. Add explicit constraints between shared packages; the `shared` layer alone
+   does not define the permitted dependencies of individual engines.
+2. Prohibit direct and indirect Node/driver imports from renderers.
+3. Replace `packages/.../src/...` imports with public exports, starting with
+   the existing SQL facades. Export only the surfaces that are needed.
+4. Break small contract and protocol cycles through leaf modules.
+5. Remove exceptions after removing the dependency, without automatically
+   expanding the baseline.
+
+Acceptance: boundary negative tests, no new exceptions, and correct product
+builds.
+
+### R2 — Runtime Pilot: SQLite, DuckDB, and the Netezza Boundary
+
+Status: implementation and verification in progress. The web API has an
+instance-scoped runtime registry, `@justybase/sqlite-runtime` shares a session
+with the desktop, `@justybase/duckdb-runtime` shares a session with the API
+and the DuckDB/File SQL companion, and `@justybase/netezza-runtime` is the
+sole owner of the driver import in the production runtime path.
+`@justybase/database-runtime` retains compatibility exports without a driver
+dependency. Adapters still own the sandbox, secrets, path resolution, and
+read-only policy. No Electron application has been created.
+
+1. Share SQLite between the API and desktop while preserving their different
+   path, value, and read-only-policy adapters.
+2. Share DuckDB between the API and the DuckDB/File SQL companion through an
+   explicit optional-module resolver, instance ownership, and a session with
+   no path assumptions.
+3. Move Netezza I/O into the dialect runtime and preserve the existing
+   exports as compatibility facades; the driver is loaded in one module.
+4. Replace database selection in the API with an instance registry and remove
+   the Netezza/SQLite cycle through independent execution contracts.
+5. The runtime receives a resolved path after the product has checked
+   permissions, not a server-side StoredConnection. Preserve the file
+   sandbox.
+6. Base ports on DatabaseConnection/Command/DataReader; add new operations as
+   consumers require them. Preserve explicit capabilities and lazy loading.
+
+Acceptance: correct integrations, DuckDB activation and packaging, SQLite/
+DuckDB/Netezza value and cancellation compatibility, lifecycle tests, and no
+imports of product implementations from runtimes. The formal Windows gate
+remains a release-CI task because the current environment is Linux/WSL.
+
+Open before closing R2: full verification of lifecycle and cancellation in
+desktop adapters, and verification of a clean build. Existing extractions do
+not yet constitute acceptance of the phase.
+
+Verification progress (2026-09-08, Linux):
+
+- Netezza runtime: 7 tests covering cancellation before and during the
+  connection, per-execution database selection, rollback on errors, and
+  callback cleanup. Lazy driver loading and compatibility of optional
+  configuration fields were restored.
+- DuckDB runtime: 9 tests covering the queue, stale cancellation handles,
+  closing during loading, catalog reset, concurrent connection, and instance
+  ownership.
+- API: 15 suites / 84 tests; the global DuckDB facade was removed, and
+  runtime availability in Designer comes from the application registry.
+- DuckDB/File SQL integrations: 10 / 20 tests respectively; `verify:duckdb`
+  and VSIX packaging for DuckDB and the main extension completed successfully.
+- Extension Host SQLite: the result panel and Table Designer passed outside
+  the sandbox; the sandbox blocked Chromium startup (SIGTRAP).
+- Extension Host Netezza (result panel) and companion activation passed.
+- Quality-tool tests: 42 passed outside the sandbox; inside the sandbox, the
+  child-process CLI test ends with EPERM. Documentation and version checks
+  passed. The API/web build passed.
+- Live Netezza integrations: 152 passed, 13 skipped, and 1 timeout in
+  `netezzaSchemaRefresh.live.integration.test.ts` (catalog-object refresh
+  retry, 600 s limit). The cause was an automatic retry during an intentional
+  cooldown without starting a new refresh. The test now uses an explicit
+  manual retry; the entire refresh suite passed again (4 passed, 2 skipped,
+  about 14 s). The full live gate then passed: 13 suites, 153 passed tests,
+  and 13 skipped tests (about 67 s).
+- The first full desktop run revealed three suites with Netezza import and
+  configuration regressions; after the fixes, all three suites passed (133
+  tests). The next run passed 543 suites / 9,591 tests, but the branch
+  coverage threshold stopped the gate (57.99% with 58% required). Three
+  timeout contract tests (zero, positive, and negative) were added, covering
+  two missing branches in the Netezza adapter. The rerun passed 543 suites /
+  9,594 tests and the branch coverage threshold (58%). Full `verify:pr`
+  completed with exit code 0: API 15 suites / 84 tests, web 3 suites / 22
+  tests, types, lint, architecture, and final desktop/API/web builds all
+  passed.
+
+Remaining R2 implementation tasks (do not confuse these with the gates that
+have passed):
+
+1. Complete serialization, cancellation, and draining in the desktop DuckDB
+   adapter, including File SQL; check a stale command handle against the next
+   command, close during connection/execution, and file cleanup after failed
+   setup.
+2. Verify the public SQLite session and `node:sqlite` initialization in a
+   supported Extension Host; add direct ownership/close tests.
+3. Verify installation and build in an isolated clean checkout without
+   generated `dist/`; successful local builds do not prove this property.
+4. Only after closing the points above, update the R2 status and decide
+   whether to move to R3; check Windows on Windows CI/Extension Host.
+
+### R3 — Shared Result Model and Result Panel
+
+Related: CQ01, CQ04, CQ05.
+
+1. Extract result-core: stable identity and pure state transitions.
+2. Distinguish source, execution, result set, and storage session; index and
+   timestamp are not new identities. Preserve `resultSetId` and the legacy
+   fallback.
+3. Preserve both protocols; adapters map them to the internal model.
+4. Separate coordination, messages, persistence, table configuration, and
+   interactions in the host/webview. Preserve the existing facades.
+5. Extract shared filtering and aggregation after demonstrating compatibility
+   for NULL, decimal, and large numbers. Switch the desktop first, then the
+   web reducer.
+
+The host/backend owns execution data; the renderer owns presentation state.
+Preserve chunk sequences, offsets, hydration, versioning, and recovery.
+Presentation state must not persist entire results as UI state.
+
+Acceptance: two consumers of the shared model, a state and scroll matrix, and
+no cycles in the migrated orchestration.
+
+### R4 — Metadata Rules
+
+Related: CQ02, CQ06.
+
+1. Extract metadata-core: keys, merging, completeness, indexes, and
+   invalidation.
+2. Preserve exact catalog names; SQL naming rules belong to the dialect.
+   Replace unconditional uppercasing of API keys after a regression test for
+   name collisions.
+3. Separate the prefetch plan from I/O, UI progress, and persistence. Pass
+   time into pure TTL rules; timers remain in adapters.
+4. The API cache belongs to the instance and its owner/connection. Generation
+   tracking discards stale responses. Preserve the current format and disk
+   restoration.
+5. Preserve full-snapshot replacement and refreshed-type merging, DB..TABLE,
+   case sensitivity distinctions, and `dataType` through both SchemaProviders.
+
+Acceptance: shared desktop/API rules, cache restart, VIEW refresh preserving
+TABLE, and SQL025/026 working through both adapters.
+
+### R5 — Execution Orchestration and Resources
+
+Related: CQ02, CQ06, and the execution contract.
+
+1. Separate execution from the editor, messages, history, and authorization.
+2. Move the shared single/batch/stream lifecycle into database-runtime with a
+   factory for connection providers, configuration, logging, and events.
+3. Preserve separate read-only and replay policies: read-only does not mean
+   safe repeatability. Do not replay writes or streams after their first
+   delivery.
+4. Replace global maps with instance state. The desktop singleton may be a
+   facade over the instance created during activation.
+5. Define the owners of readers, commands, connections, timers, workers,
+   files, and subscriptions. Disposing a subscription does not mean
+   cancelling or releasing results.
+6. Cleanup is idempotent even after an error. Preserve the error cause; remove
+   empty catches from migrated paths without exposing secrets.
+
+Acceptance: one terminal execution status, no stale callbacks, a preserved
+retry contract, cleanup, and isolation between two backend instances.
+
+### R6 — Companions Independent of Core Internals
+
+1. Replace `src` imports with contracts, packages, or public core services.
+2. Separate pure dialect knowledge, runtime, and activation; do not migrate
+   all parsers to a universal implementation.
+3. The activation helper belongs to the VS Code adapter. Preserve API v1,
+   identifiers, commands, settings, method optionality, and registration.
+4. Remove companion imports from webviews; put DDL in pure modules and route
+   I/O through the host.
+5. Order after DuckDB: Access, PostgreSQL, MySQL, MSSQL, ClickHouse, Db2,
+   Oracle, Snowflake, Vertica. Each companion has separate acceptance.
+
+Companion acceptance: no imports of core implementation, activation, packaging,
+integrations, and explicitly described live-environment gaps.
+
+### R7 — Current API and React
+
+Related: CQ02, CQ06.
+
+1. Split routes into auth/admin, connections, queries, results/export,
+   metadata, designer, and LSP. Preserve authorization and validation hooks.
+2. Extract use cases, instance composition, and backend shutdown.
+3. Split React into document, connection, execution, and persistence
+   controllers; App remains the composition root. Add cleanup on tab close and
+   logout.
+4. Make the API client a factory for HTTP/WebSocket addresses and the CSRF
+   adapter; preserve cookie authentication. Keep the client in the product
+   until there is a second consumer.
+
+Acceptance: compatible web functionality, configurable host, and no mutable
+state shared between API instances.
+
+### R8 — Closure
+
+1. Remove replaced implementations after all consumers have migrated. Legacy
+   SQL for other dialects retains an owner and a removal condition.
+2. Remove old exceptions; ratchet and document the remaining debt.
+3. Organize the Access data generator/checksum (CQ07).
+4. Update workspaces, builds, packaging, and versions using the existing
+   scripts.
+5. Tie capabilities to tests and documentation without promoting database
+   support.
+6. Describe the actual public entry points and the owners of state and
+   resources.
+
+Acceptance: a new product does not require imports from VS Code internals;
+existing products use real shared implementations.
+
+## Compatibility and Verification
+
+Public companion APIs, wire messages, and HTTP preserve their meaning. The
+internal model does not require replacing `data` with `rows` or renumbering
+the transport. New required fields and union variants require a compatibility
+review. DTOs contain no secrets, driver objects, or VS Code handles. Persistent
+format migration is a separate change.
+
+| Area | Scenarios |
+| --- | --- |
+| SQL | DB..TABLE, quoting, procedures, malformed SQL, SQL025/026, Unicode, completion |
+| Execution | Cancel before start/fetch/render/finalize, reconnect, no write replay, partial rows, one terminal state |
+| Results | Logs/source/result switching, pin/close, refresh, revival, streaming, disk, empty, zero-sized layout |
+| Scroll | Non-zero vertical and horizontal offsets, stable ID, and virtualizer anchor after restore |
+| Metadata | VIEW/TABLE merge, case sensitivity, invalidation during load, restart, partial snapshot |
+| Values | NULL, decimal, bigint, dates, binaries, aggregation, and export |
+| Isolation | Two users and two backends, foreign results and inaccessible files |
+| Companions | Public activation, missing driver/capability, packaged VSIX |
+| Security | Read-only MCP on both transports, API auth, sandbox, and message validation |
+
+Every stage: the nearest tests, types, lint, and architecture checks. Stage
+integration: `npm run verify:pr`, `npm run docs:check`,
+`npm run version:check`. SQL additionally requires sql-core, parity, parser,
+Extension Host authoring, and the LSP benchmark; MSSQL/Oracle construction
+must remain below 2000 ms. Results require Extension Host, Playwright
+table-rendering, and web components. Metadata requires disk restart and both
+SchemaProviders. Dialects require verify, integration, companion activation,
+and packaging. Verify VS Code on Linux and Windows; Remote-WSL requires a
+separate environment.
+
+Order: R0 → R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8. Every extraction follows:
+behavior test → extraction → desktop facade → VS Code gate → API/web → removal
+of the replaced path. Code used only by the API has the appropriate API gate.
+Comparison of old and new is test-only, never by executing production SQL
+twice. A facade enables returning to the previous delegation, while data
+remains readable. Do not mask differences by updating expectations, thresholds,
+or fixed sleeps.
+
+## Definition of Done
+
+- Production VS Code preserves behavior and compatibility.
+- SQL, results, and metadata have shared owners used by the products.
+- Runtime and orchestration do not import products; companions do not import
+  core internals.
+- Renderers do not depend on Node/drivers; the backend has isolated
+  create/close operations.
+- Migrated boundaries are acyclic; remaining debt has a removal condition.
+- Compatibility, cleanup, and packaging tests confirm operation; gaps are
+  explicit.
+- Documentation describes the actual state without declaring Electron ready.

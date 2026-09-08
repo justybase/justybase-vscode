@@ -1,5 +1,8 @@
-import { ClientTypeId, NzConnection } from '@justybase/netezza-driver';
-import type { NzConnectionConfig } from '@justybase/netezza-driver';
+import {
+  createConnectedNetezzaConnection,
+  type NetezzaDriverConnection,
+  type NetezzaDriverConfig,
+} from '@justybase/netezza-runtime';
 import type { ConnectionDetails } from '../types';
 import { getOptionNumber } from './connectionUtils';
 
@@ -13,14 +16,14 @@ import { getOptionNumber } from './connectionUtils';
 export async function createConnectedNetezzaConnectionFromDetails(
     details: ConnectionDetails,
     databaseOverride?: string,
-): Promise<NzConnection> {
-    const connectionConfig: NzConnectionConfig = {
+): Promise<NetezzaDriverConnection> {
+    const connectionConfig: NetezzaDriverConfig = {
         host: details.host,
         port: details.port ?? 5480,
         database: databaseOverride ?? details.database,
         user: details.user,
         password: details.password ?? '',
-        clientType: ClientTypeId?.SqlDotnet ?? 11,
+        clientType: 11,
         connectionTimeout: getOptionNumber({
             host: details.host,
             port: details.port,
@@ -30,23 +33,11 @@ export async function createConnectedNetezzaConnectionFromDetails(
             options: details.options,
         }, 'connectionTimeout')
     };
-    const connection = new NzConnection(connectionConfig);
-
-    try {
-        await connection.connect();
-        return connection;
-    } catch (error: unknown) {
-        try {
-            await connection.close();
-        } catch {
-            // Preserve the original connection failure.
-        }
-        throw error;
-    }
+    return createConnectedNetezzaConnection(connectionConfig);
 }
 
 export async function executeNetezzaDatabaseQuery<T = Record<string, unknown>>(
-    connection: NzConnection,
+    connection: NetezzaDriverConnection,
     sql: string,
 ): Promise<T[]> {
     const reader = await connection.createCommand(sql).executeReader();

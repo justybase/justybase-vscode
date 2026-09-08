@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { executeSqliteQuery, closeSqliteDatabase, isSqliteReadOnlySql, listSqliteColumns, listSqliteDatabases, listSqliteObjects, listSqliteSchemas } from '../src/sqlite';
-import type { QueryCallbacks, QueryOptions } from '../src/netezza';
+import { SqliteApiDatabaseRuntime, isSqliteReadOnlySql } from '../src/databaseRuntime/sqliteRuntime';
+import type { ApiQueryOptions, QueryCallbacks } from '../src/databaseRuntime/contracts';
 import type { StoredConnection } from '../src/store';
 
 type QueryCommand = { cancel(): Promise<void> };
@@ -25,7 +25,8 @@ function profile(root: string): StoredConnection {
   };
 }
 
-const options: QueryOptions = { masterKey: '', maxRows: 10, timeoutSeconds: 30, readOnly: false, database: 'main' };
+const options: ApiQueryOptions = { maxRows: 10, timeoutSeconds: 30, readOnly: false, database: 'main' };
+const runtime = new SqliteApiDatabaseRuntime();
 
 async function run(profileValue: StoredConnection, sql: string, queryOptions = options, callbacks: Partial<QueryCallbacks> = {}) {
   const received: { columns: unknown[]; rows: unknown[][]; command?: QueryCommand } = { columns: [], rows: [] };
@@ -34,7 +35,7 @@ async function run(profileValue: StoredConnection, sql: string, queryOptions = o
     onRows: (rows, totalRows) => { received.rows.push(...rows); callbacks.onRows?.(rows, totalRows); },
     onCommand: command => { received.command = command; callbacks.onCommand?.(command); },
   };
-  const result = await executeSqliteQuery(profileValue, sql, queryOptions, fullCallbacks);
+  const result = await runtime.execute(profileValue, sql, queryOptions, fullCallbacks);
   return { result, received };
 }
 
@@ -51,8 +52,8 @@ describe('SQLite local runtime', () => {
     await run(connection, "INSERT INTO records VALUES (3, 'three')");
   });
 
-  afterEach(() => {
-    closeSqliteDatabase(connection.id);
+  afterEach(async () => {
+    await runtime.closeAll();
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -71,10 +72,10 @@ describe('SQLite local runtime', () => {
     await run(connection, 'CREATE TABLE aux.items (id INTEGER, name TEXT)');
     await run(connection, "INSERT INTO aux.items VALUES (7, 'attached')");
 
-    expect((await listSqliteDatabases(connection)).map(item => item.name)).toEqual(['main', 'aux']);
-    expect(await listSqliteSchemas(connection, 'aux')).toEqual([{ database: 'aux', name: 'aux' }]);
-    expect(await listSqliteObjects(connection, 'aux', 'aux')).toEqual([expect.objectContaining({ name: 'items', database: 'aux', schema: 'aux' })]);
-    expect(await listSqliteColumns(connection, 'aux', 'aux', 'items')).toEqual([
+    expect((await runtime.listDatabases(connection)).map(item => item.name)).toEqual(['main', 'aux']);
+    expect(await runtime.listSchemas(connection, 'aux')).toEqual([{ database: 'aux', name: 'aux' }]);
+    expect(await runtime.listObjects(connection, 'aux', 'aux')).toEqual([expect.objectContaining({ name: 'items', database: 'aux', schema: 'aux' })]);
+    expect(await runtime.listColumns(connection, 'aux', 'aux', 'items')).toEqual([
       { name: 'id', type: 'INTEGER', isPk: false },
       { name: 'name', type: 'TEXT', isPk: false },
     ]);
@@ -92,7 +93,7 @@ describe('SQLite local runtime', () => {
 
   it('can cancel a worker-backed file read', async () => {
     let command: QueryCommand | undefined;
-    const pending = executeSqliteQuery(connection, 'WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers) SELECT value FROM numbers', { ...options, maxRows: 100_000 }, {
+    const pending = runtime.execute(connection, 'WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers) SELECT value FROM numbers', { ...options, maxRows: 100_000 }, {
       onColumns: () => undefined,
       onRows: () => undefined,
       onCommand: value => { command = value; },
@@ -109,7 +110,7 @@ describe('SQLite local runtime', () => {
       expect(isSqliteReadOnlySql('PRAGMA table_info(records)')).toBe(true);
 
       await run(memoryConnection, 'PRAGMA user_version(123)');
-      await expect(executeSqliteQuery(memoryConnection, 'PRAGMA user_version(456)', { ...options, readOnly: true }, {
+      await expect(runtime.execute(memoryConnection, 'PRAGMA user_version(456)', { ...options, readOnly: true }, {
         onColumns: () => undefined,
         onRows: () => undefined,
         onCommand: () => undefined,
@@ -118,7 +119,7 @@ describe('SQLite local runtime', () => {
       const version = await run(memoryConnection, 'PRAGMA user_version', { ...options, readOnly: true });
       expect(version.received.rows).toEqual([[123]]);
     } finally {
-      closeSqliteDatabase(memoryConnection.id);
+      await runtime.closeConnection(memoryConnection.id);
     }
   });
 
@@ -126,7 +127,7 @@ describe('SQLite local runtime', () => {
     const memoryConnection = { ...connection, id: `${connection.id}-memory`, database: ':memory:' };
     try {
       let command: QueryCommand | undefined;
-      const pending = executeSqliteQuery(memoryConnection, 'WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers) SELECT value FROM numbers', { ...options, maxRows: 100_000 }, {
+      const pending = runtime.execute(memoryConnection, 'WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers) SELECT value FROM numbers', { ...options, maxRows: 100_000 }, {
         onColumns: () => undefined,
         onRows: () => undefined,
         onCommand: value => { command = value; },
@@ -135,7 +136,7 @@ describe('SQLite local runtime', () => {
       await command!.cancel();
       await expect(pending).rejects.toThrow('cancelled');
     } finally {
-      closeSqliteDatabase(memoryConnection.id);
+      await runtime.closeConnection(memoryConnection.id);
     }
   });
 });

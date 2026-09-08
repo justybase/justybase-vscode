@@ -12,9 +12,12 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | @chevrotain/regexp-to-ast | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | @chevrotain/utils | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | @hono/node-server | 2.1.1 | MIT | [upstream](https://github.com/honojs/node-server) |
+| @justybase/duckdb-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/netezza-driver | 3.0.0 | Apache-2.0 | [upstream](https://github.com/justybase/justybase_netezza_node_driver) |
+| @justybase/netezza-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/spreadsheet-tasks | 2.1.1 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
 | @justybase/sql-core | 3.16.8 | Apache-2.0 | See npm package metadata |
+| @justybase/sqlite-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @modelcontextprotocol/sdk | 1.30.0 | MIT | [upstream](https://github.com/modelcontextprotocol/typescript-sdk) |
 | @msgpack/msgpack | 3.1.3 | ISC | [upstream](https://github.com/msgpack/msgpack-javascript) |
 | @tanstack/table-core | 8.21.3 | MIT | [upstream](https://github.com/TanStack/table) |
@@ -114,7 +117,10 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 
 The following published packages declare the listed SPDX license in their package metadata but do not ship a separate license text:
 
+- @justybase/duckdb-runtime@3.16.8 — Apache-2.0
+- @justybase/netezza-runtime@3.16.8 — Apache-2.0
 - @justybase/sql-core@3.16.8 — Apache-2.0
+- @justybase/sqlite-runtime@3.16.8 — Apache-2.0
 
 ## Included license texts
 
