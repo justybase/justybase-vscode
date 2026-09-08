@@ -55,6 +55,8 @@ module.exports = {
     "^@justybase/duckdb-runtime/(.*)$": "<rootDir>/packages/duckdb-runtime/src/$1",
     "^@justybase/netezza-runtime$": "<rootDir>/packages/netezza-runtime/src/index.ts",
     "^@justybase/netezza-runtime/(.*)$": "<rootDir>/packages/netezza-runtime/src/$1",
+    "^@justybase/result-core$": "<rootDir>/packages/result-core/src/index.ts",
+    "^@justybase/result-core/(.*)$": "<rootDir>/packages/result-core/src/$1",
     "^@justybase/sql-core/validation$": "<rootDir>/packages/sql-core/src/validation.ts",
     "^@justybase/sql-core$": "<rootDir>/packages/sql-core/src/index.ts",
     "^@justybase/sql-core/(.*)$": "<rootDir>/packages/sql-core/src/$1",

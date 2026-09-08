@@ -8,7 +8,8 @@
     "packages/sqlite-runtime": ["packages/contracts"],
     "packages/duckdb-runtime": ["packages/contracts"],
     "packages/netezza-runtime": ["packages/contracts"],
-    "packages/access-file": []
+    "packages/access-file": [],
+    "packages/result-core": []
   },
   "browserSources": ["media/**", "apps/web/src/**"],
   "browserExternalImports": [

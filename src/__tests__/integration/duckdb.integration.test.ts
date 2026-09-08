@@ -22,8 +22,10 @@ import { importDataToDuckDb } from '../../import/duckdbImporter';
 import type { ConnectionDetails } from '../../types';
 import {
     cancelReaderExecution,
+    closeReaderTwice,
     expectConnectionCloseIsIdempotent,
     expectReaderCloseAndReuse,
+    withTimeout,
 } from './connectionLifecycleHelpers';
 
 const extensionRequire = createRequire(path.join(process.cwd(), 'extensions', 'duckdb', 'package.json'));
@@ -375,6 +377,103 @@ describeIfInstalled('duckdb integration', () => {
             expect(Number(controlRows[0][0])).toBe(2);
         } finally {
             await connection.close();
+        }
+    }, 120000);
+
+    it('does not interrupt a newer command when a stale command handle is cancelled', async () => {
+        const connection = new DuckDbConnection({
+            host: '',
+            database: databasePath,
+            user: '',
+            password: '',
+            options: {
+                mode: 'file'
+            }
+        });
+
+        await connection.connect();
+        try {
+            const stale = connection.createCommand(
+                'SELECT count(*) FROM range(5000000) a, range(5000000) b'
+            );
+            await cancelReaderExecution(stale, stale.executeReader(), {
+                cancelAfterMs: 500,
+                settleTimeoutMs: 20000,
+            });
+
+            // Keep `next` long enough that the stale cancel (500 ms in) lands
+            // while it is still executing on slower and faster machines alike.
+            const next = connection.createCommand(
+                'SELECT count(*) FROM range(250000) a, range(250000) b'
+            );
+            const execution = next.executeReader();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await stale.cancel();
+
+            const outcome = await withTimeout(
+                execution.then(
+                    reader => ({ kind: 'reader' as const, reader }),
+                    (error: unknown) => ({ kind: 'error' as const, error }),
+                ),
+                30000,
+                'The next command did not settle after a stale cancellation.',
+            );
+            if (outcome.kind === 'reader') {
+                await closeReaderTwice(outcome.reader);
+            }
+            expect(outcome.kind).toBe('reader');
+
+            const controlRows = await readRows(
+                await connection.createCommand('SELECT 1 AS still_alive').executeReader()
+            );
+            expect(Number(controlRows[0]?.[0])).toBe(1);
+        } finally {
+            await connection.close();
+        }
+    }, 120000);
+
+    it('drains and closes the connection while a query is executing', async () => {
+        const connection = new DuckDbConnection({
+            host: '',
+            database: databasePath,
+            user: '',
+            password: '',
+            options: {
+                mode: 'file'
+            }
+        });
+
+        await connection.connect();
+        try {
+            const command = connection.createCommand(
+                'SELECT count(*) FROM range(5000000) a, range(5000000) b'
+            );
+            const execution = command.executeReader();
+            await new Promise(resolve => setTimeout(resolve, 400));
+
+            await withTimeout(
+                connection.close(),
+                20000,
+                'Connection close did not settle while a query was executing.',
+            );
+
+            const outcome = await withTimeout(
+                execution.then(
+                    reader => ({ kind: 'reader' as const, reader }),
+                    (error: unknown) => ({ kind: 'error' as const, error }),
+                ),
+                20000,
+                'The in-flight query did not settle after the connection closed.',
+            );
+            if (outcome.kind === 'reader') {
+                await closeReaderTwice(outcome.reader);
+            }
+
+            await expect(
+                connection.createCommand('SELECT 1').executeReader()
+            ).rejects.toThrow(/not open/i);
+        } finally {
+            await connection.close().catch(() => undefined);
         }
     }, 120000);
 

@@ -23,6 +23,8 @@
 !packages/access-file/**
 !packages/designer-core/
 !packages/designer-core/**
+!packages/result-core/
+!packages/result-core/**
 !apps/
 !apps/**
 

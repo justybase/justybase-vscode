@@ -18,6 +18,8 @@
       "@justybase/duckdb-runtime/*": ["./packages/duckdb-runtime/src/*"],
       "@justybase/netezza-runtime": ["./packages/netezza-runtime/src"],
       "@justybase/netezza-runtime/*": ["./packages/netezza-runtime/src/*"],
+      "@justybase/result-core": ["./packages/result-core/src"],
+      "@justybase/result-core/*": ["./packages/result-core/src/*"],
       "@justybase/sql-core": ["./packages/sql-core/src/index.ts"],
       "@justybase/sql-core/*": ["./packages/sql-core/src/*"],
       "@justybase/sqlite-runtime": ["./packages/sqlite-runtime/src"],

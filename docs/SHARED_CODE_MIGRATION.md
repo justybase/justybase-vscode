@@ -34,7 +34,7 @@ when comparing revisions; do not commit volatile graph/timing reports.
 | `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
 | `extensions` | own modules, contracts/shared helpers, public core activation API, exact legacy desktop implementation bridges |
 
-## Runtime extraction in R2 (acceptance pending)
+## Runtime extraction in R2 (closed 2026-09-08)
 
 The three database-specific Node runtimes now have explicit ownership:
 
@@ -56,9 +56,10 @@ execution (including a per-query database override); the manager retains a
 target fingerprint rather than credentials. The future Electron main process can instantiate the same
 runtime packages without importing VS Code or React.
 
-This describes the implementation boundary, not completion of R2. Full
-lifecycle, Extension Host, packaging and live-database acceptance remains
-tracked in `REFACTORING_PLAN.md`.
+Closure evidence for R2 (lifecycle/cancellation in desktop DuckDB and File
+SQL, direct `SqliteSession` ownership/close tests plus real Extension Host
+SQLite runs, and a clean-checkout build/package verification) is recorded in
+`REFACTORING_PLAN.md` under "R2 closure evidence".
 
 ## Netezza validation boundary
 

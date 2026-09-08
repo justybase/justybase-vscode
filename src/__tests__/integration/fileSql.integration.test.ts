@@ -105,6 +105,13 @@ function stringifyCells(rows: readonly (readonly unknown[])[]): string[][] {
     return rows.map(row => row.map(value => (value instanceof Date ? value.toISOString() : String(value))));
 }
 
+/** Directories left behind by File SQL conversions under os.tmpdir(). */
+function listFileSqlTempDirectories(): string[] {
+    return fs.readdirSync(os.tmpdir())
+        .filter(name => name.startsWith('justybase-file-sql-'))
+        .map(name => path.join(os.tmpdir(), name));
+}
+
 /** Copy a committed Access fixture into the test temp dir (fixtures are read-only). */
 function copyAccessFixture(tempDir: string, fixtureName: string, destinationName: string): string {
     const fixturePath = path.join(__dirname, '..', 'fixtures', 'access', fixtureName);
@@ -205,6 +212,26 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         } finally {
             await connection.close();
         }
+    });
+
+    it('removes the temporary conversion directory when File SQL setup fails', async () => {
+        fs.mkdirSync(tempDir, { recursive: true });
+        const invalidXlsbPath = path.join(tempDir, 'broken.xlsb');
+        fs.writeFileSync(invalidXlsbPath, 'this is not an xlsb workbook\n', 'utf8');
+
+        const before = new Set(listFileSqlTempDirectories());
+        const connection = fileDialect.createConnection({
+            host: 'local',
+            database: invalidXlsbPath,
+            user: 'file',
+        });
+
+        await expect(connection.connect()).rejects.toThrow();
+
+        const leakedDirectories = listFileSqlTempDirectories().filter(dir => !before.has(dir));
+        expect(leakedDirectories).toEqual([]);
+
+        await connection.close().catch(() => undefined);
     });
 
     it('joins multiple CSV files through a read-only File SQL workspace', async () => {
