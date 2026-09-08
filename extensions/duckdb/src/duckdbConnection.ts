@@ -37,6 +37,10 @@ interface DuckDbExecutionResult {
     recordsAffected: number;
 }
 
+/** Bounded wait for in-flight queries during close; interrupt is reliable in
+ * practice, but a stuck native query must not hang the close path forever. */
+const CLOSE_DRAIN_TIMEOUT_MS = 15_000;
+
 export type { DuckDbModule };
 
 const _duckdbResolver: DuckDbModuleResolver = createDuckDbModuleResolver({
@@ -170,13 +174,18 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
         this._connected = false;
         if (session && this._executing.size > 0) {
             // Drain in-flight commands before closing the native connection so
-            // a pending query cannot hang or corrupt the close.
+            // a pending query cannot hang or corrupt the close. The wait is
+            // bounded so a stuck native query cannot hang close() forever.
             try {
                 await this.cancelActiveCommand();
             } catch {
                 // Preserve the close path; cancellation failure must not skip draining.
             }
-            await Promise.allSettled([...this._executing.keys()]);
+            const drain = Promise.allSettled([...this._executing.keys()]);
+            await Promise.race([
+                drain,
+                new Promise<void>(resolve => setTimeout(resolve, CLOSE_DRAIN_TIMEOUT_MS)),
+            ]);
         }
         this._session = undefined;
         this._connection = undefined;
