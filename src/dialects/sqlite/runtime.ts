@@ -75,6 +75,21 @@ function normalizeCatalogIdentifier(value: string): string {
     return trimmed;
 }
 
+/**
+ * Normalizes `readBigInts` values for the desktop result pipeline. With
+ * `readBigInts: true` node:sqlite returns every INTEGER as a BigInt; safe
+ * values keep their historical number type, out-of-range values become
+ * strings instead of throwing RangeError on read.
+ */
+function normalizeValue(value: unknown): unknown {
+    if (typeof value === 'bigint') {
+        return value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number(value)
+            : value.toString();
+    }
+    return value;
+}
+
 function inferColumnTypeName(rows: readonly unknown[][], index: number): string {
     for (const row of rows) {
         const value = row[index];
@@ -176,7 +191,9 @@ export class SqliteConnection extends EventEmitter implements DatabaseConnection
 
         try {
             ensureDatabaseParentDirectory(this._databaseLocation);
-            this._session = new SqliteSession(this._databaseLocation);
+            // Keep 64-bit integers lossless at the node:sqlite boundary; the
+            // desktop adapter normalizes them below for display.
+            this._session = new SqliteSession(this._databaseLocation, { readBigInts: true });
             this._connected = true;
         } catch (error) {
             throw new Error(`Failed to connect to SQLite database: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -253,7 +270,7 @@ export class SqliteConnection extends EventEmitter implements DatabaseConnection
         const database = this.getDatabase();
         const statement = database.prepare(trimmedSql);
         statement.setReturnArrays(true);
-        const rows = statement.all() as unknown as unknown[][];
+        const rows = (statement.all() as unknown as unknown[][]).map(row => row.map(normalizeValue));
         const columns = buildColumnDefinitions(statement.columns(), rows);
         const recordsAffected = isDmlStatement(trimmedSql)
             ? Number(
