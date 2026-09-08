@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import type { DatabaseConnectionConfig } from '@justybase/contracts';
-import { DuckDbConnection, loadDuckDb } from './duckdbConnection';
+import { DuckDbConnection } from './duckdbConnection';
 import { convertXlsbToCsvs } from './xlsbConversion';
 import { convertAccessTablesToCsvs } from './accessConversion';
 import {
@@ -63,36 +63,8 @@ export class FileDuckDbConnection extends DuckDbConnection {
         return this._tempDir;
     }
 
-    public override async connect(): Promise<void> {
-        if (this._connected) {
-            return;
-        }
-
-        const duckdb = await loadDuckDb();
-        const instance = await duckdb.DuckDBInstance.create(undefined);
-
-        try {
-            const connection = await instance.connect();
-            this._instance = instance;
-            this._connection = connection;
-            this._connected = true;
-
-            await this._setupFileViews();
-            await this.refreshSessionContext();
-        } catch (error) {
-            try {
-                instance.closeSync();
-            } catch {
-                // Ignore cleanup failures while surfacing the original error.
-            }
-            this._instance = undefined;
-            this._connection = undefined;
-            this._connected = false;
-            throw new Error(
-                `Failed to connect to data file: ${error instanceof Error ? error.message : String(error)}`,
-                { cause: error },
-            );
-        }
+    protected override async initializeAfterConnect(): Promise<void> {
+        await this._setupFileViews();
     }
 
     private async _setupFileViews(): Promise<void> {

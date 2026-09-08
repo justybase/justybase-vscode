@@ -1,8 +1,7 @@
 import type { SqlLanguageContext } from '@justybase/contracts';
 import { NetezzaWebLspCore, type CoreCompletionItem, type CoreDiagnostic, type WebLspContext, type WebLspMetadataRequestParams } from './sqlCoreLsp';
-import { listColumns, listDatabases, listObjects, listSchemas } from './netezza';
-import type { ApiConfig } from './config';
-import type { AppStore } from './store';
+import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
+import type { AppStore, StoredConnection } from './store';
 
 interface WebSocketLike {
   readyState: number;
@@ -14,18 +13,18 @@ interface RpcRequest { jsonrpc?: string; id?: number | string; method?: string; 
 interface DocumentState { text: string; version: number; context: SqlLanguageContext; }
 
 const OBJECT_CACHE_TTL_MS = 5 * 60 * 1000;
-const objectCache = new Map<string, { expiresAt: number; value: Awaited<ReturnType<typeof listObjects>> }>();
+const objectCache = new Map<string, { expiresAt: number; value: Awaited<ReturnType<ApiDatabaseRuntimeRegistry['listObjects']>> }>();
 
 export interface LspSession {
   invalidateConnection(connectionId: string): void;
   invalidateAll(): void;
 }
 
-async function cachedObjects(profile: Parameters<typeof listObjects>[0], database: string, schema: string | undefined, masterKey: string): Promise<Awaited<ReturnType<typeof listObjects>>> {
+async function cachedObjects(runtimes: ApiDatabaseRuntimeRegistry, profile: StoredConnection, database: string, schema: string | undefined): Promise<Awaited<ReturnType<ApiDatabaseRuntimeRegistry['listObjects']>>> {
   const key = `${profile.id}|${database.toUpperCase()}|${(schema ?? '').toUpperCase()}`;
   const cached = objectCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await listObjects(profile, database, schema, masterKey);
+  const value = await runtimes.listObjects(profile, database, schema);
   objectCache.set(key, { expiresAt: Date.now() + OBJECT_CACHE_TTL_MS, value });
   return value;
 }
@@ -47,7 +46,7 @@ function objectKind(value: string | undefined): 'table' | 'view' | 'procedure' {
   return normalized === 'VIEW' ? 'view' : normalized === 'PROCEDURE' ? 'procedure' : 'table';
 }
 
-export async function requestMetadata(params: WebLspMetadataRequestParams, documents: Map<string, DocumentState>, store: AppStore, config: ApiConfig, userId: string): Promise<unknown> {
+export async function requestMetadata(params: WebLspMetadataRequestParams, documents: Map<string, DocumentState>, store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string): Promise<unknown> {
   const document = documents.get(params.documentUri);
   const context = document?.context;
   if (params.kind === 'context') return contextFor(context);
@@ -55,11 +54,11 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
   const profile = connectionId ? store.getConnection(userId, connectionId) : undefined;
   if (!profile) return [];
   const database = params.database ?? context?.database;
-  if (params.kind === 'databases') return listDatabases(profile, config.masterKey);
+  if (params.kind === 'databases') return runtimes.listDatabases(profile);
   if (!database) return [];
-  if (params.kind === 'schemas') return listSchemas(profile, database, config.masterKey);
+  if (params.kind === 'schemas') return runtimes.listSchemas(profile, database);
   if (params.kind === 'tables' || params.kind === 'views' || params.kind === 'procedures') {
-    const objects = await cachedObjects(profile, database, params.schema, config.masterKey);
+    const objects = await cachedObjects(runtimes, profile, database, params.schema);
     const requested = params.kind === 'tables' ? 'TABLE' : params.kind === 'views' ? 'VIEW' : 'PROCEDURE';
     return objects.filter(item => requested === 'PROCEDURE' ? item.objectType?.toUpperCase() === 'PROCEDURE' : item.objectType?.toUpperCase() === requested).map(item => ({ name: item.name, database, schema: item.schema ?? params.schema, objectType: objectKind(item.objectType), description: item.description }));
   }
@@ -67,7 +66,7 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
     if (!params.table) return params.kind === 'columns' ? [] : null;
     const schema = params.schema ?? context?.schema;
     if (params.kind === 'tableInfo') {
-      const objects = await cachedObjects(profile, database, schema || undefined, config.masterKey);
+      const objects = await cachedObjects(runtimes, profile, database, schema || undefined);
       const exists = objects.some(item => item.name.toUpperCase() === params.table!.toUpperCase()
         && (!schema || item.schema?.toUpperCase() === schema.toUpperCase()));
       if (!exists) return { exists: false, table: params.table, database, schema: schema ?? '', columns: [] };
@@ -77,9 +76,9 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
         ? []
         : { exists: true, table: params.table, database, schema: '', columns: [] };
     }
-    const columns = await listColumns(profile, database, schema, params.table, config.masterKey);
+    const columns = await runtimes.listColumns(profile, database, schema, params.table);
     if (params.kind === 'columns') return columns;
-    const object = await cachedObjects(profile, database, schema, config.masterKey).then(items =>
+    const object = await cachedObjects(runtimes, profile, database, schema).then(items =>
       items.find(item => item.name.toUpperCase() === params.table!.toUpperCase()
         && (!schema || item.schema?.toUpperCase() === schema.toUpperCase())));
     return {
@@ -97,7 +96,7 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
     if (!params.table) return [];
     const requestedName = params.table.trim();
     if (!requestedName) return [];
-    const objects = await cachedObjects(profile, database, params.schema, config.masterKey);
+    const objects = await cachedObjects(runtimes, profile, database, params.schema);
     const effectiveSchema = context?.schema;
     const requestedSchema = params.schema;
     const proposals = objects
@@ -159,11 +158,11 @@ function workspaceEditResponse(edit: { changes: Record<string, Array<{ range: { 
   return { changes: edit.changes };
 }
 
-export function attachLspSocket(socket: WebSocketLike, store: AppStore, config: ApiConfig, userId: string, onClose?: (session: LspSession) => void): LspSession {
+export function attachLspSocket(socket: WebSocketLike, store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, onClose?: (session: LspSession) => void): LspSession {
   const documents = new Map<string, DocumentState>();
   const knownConnectionIds = new Set<string>();
   const core = new NetezzaWebLspCore({
-    requestMetadata: params => requestMetadata(params, documents, store, config, userId),
+    requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId),
     logger: { error: message => console.error(message) },
   });
   const send = (message: unknown): void => { if (socket.readyState === 1) socket.send(JSON.stringify({ jsonrpc: '2.0', ...message as object })); };

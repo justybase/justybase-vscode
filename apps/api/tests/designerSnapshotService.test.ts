@@ -3,10 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DatabaseObjectSnapshot, DesignerSnapshotRequest } from '@justybase/contracts';
-import { closeDuckDbDatabase, closeSqliteDatabase, executeNetezzaQuery } from '../src/netezza';
+import { createApiDatabaseRuntimeRegistry } from '../src/databaseRuntime/registry';
 import { getDesignerSnapshotResponse, DesignerSnapshotUnavailableError } from '../src/designerSnapshotService';
 import { resolveLocalDatabasePath } from '../src/localDatabaseSandbox';
 import type { StoredConnection } from '../src/store';
+
+const runtimes = createApiDatabaseRuntimeRegistry({ masterKey: 'test-master-key' });
 
 function profile(root: string): StoredConnection {
   return {
@@ -74,7 +76,7 @@ describe('designerSnapshotService', () => {
     };
 
     try {
-      const response = await getDesignerSnapshotResponse(connection, request, 'test-master-key');
+      const response = await getDesignerSnapshotResponse(connection, request, runtimes);
       const { snapshot } = response;
       const ordersDefinition = tableDefinition(snapshot);
       expect(snapshot.target).toEqual(expect.objectContaining({ objectName: 'orders', objectType: 'TABLE' }));
@@ -106,7 +108,7 @@ describe('designerSnapshotService', () => {
         ...request,
         objectName: 'order_summary',
         objectType: 'VIEW',
-      }, 'test-master-key');
+      }, runtimes);
       expect(viewResponse.snapshot.objectType).toBe('VIEW');
       expect(viewResponse.snapshot.sourceDdl).toContain('CREATE VIEW order_summary');
       expect(viewResponse.snapshot.definition).toEqual(expect.objectContaining({
@@ -115,7 +117,7 @@ describe('designerSnapshotService', () => {
         columns: expect.arrayContaining([expect.objectContaining({ name: 'status' })]),
       }));
     } finally {
-      closeSqliteDatabase(connection.id);
+      await runtimes.closeConnection(connection.id);
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -139,7 +141,7 @@ describe('designerSnapshotService', () => {
       connectionId: connection.id,
       objectName: 'FACT_SALES',
       objectType: 'TABLE',
-    }, 'test-master-key')).rejects.toBeInstanceOf(DesignerSnapshotUnavailableError);
+    }, runtimes)).rejects.toBeInstanceOf(DesignerSnapshotUnavailableError);
   });
 
   it('loads DuckDB columns, constraints, indexes, source DDL, and a fingerprint when the optional runtime is installed', async () => {
@@ -158,8 +160,7 @@ describe('designerSnapshotService', () => {
       passwordAuthTag: '',
       readOnly: false,
     };
-    const execute = (sql: string) => executeNetezzaQuery(connection, sql, {
-      masterKey: 'test-master-key',
+    const execute = (sql: string) => runtimes.execute(connection, sql, {
       maxRows: 100,
       timeoutSeconds: 30,
       readOnly: false,
@@ -188,7 +189,7 @@ describe('designerSnapshotService', () => {
         schema: 'main',
         objectName: 'orders',
         objectType: 'TABLE',
-      }, 'test-master-key');
+      }, runtimes);
       const ordersDefinition = tableDefinition(response.snapshot);
       expect(response.snapshot.sourceDdl).toContain('CREATE TABLE orders');
       expect(response.snapshot.fingerprint).toMatch(/^[a-f0-9]{64}$/u);
@@ -210,7 +211,7 @@ describe('designerSnapshotService', () => {
         schema: 'main',
         objectName: 'orders_view',
         objectType: 'VIEW',
-      }, 'test-master-key');
+      }, runtimes);
       expect(viewResponse.snapshot.sourceDdl).toContain('CREATE VIEW orders_view');
       expect(viewResponse.snapshot.definition).toEqual(expect.objectContaining({
         kind: 'view',
@@ -218,7 +219,7 @@ describe('designerSnapshotService', () => {
         columns: expect.arrayContaining([expect.objectContaining({ name: 'status' })]),
       }));
     } finally {
-      await closeDuckDbDatabase(connection.id);
+      await runtimes.closeConnection(connection.id);
     }
   });
 });

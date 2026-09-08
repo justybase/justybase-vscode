@@ -1,14 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { createRequire } from 'module';
-import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import type {
     DatabaseCommand,
     DatabaseConnection,
     DatabaseConnectionConfig,
     DatabaseDataReader
 } from '../../contracts/database';
+import { SqliteSession, type SqliteDatabase } from '@justybase/sqlite-runtime';
 
 interface SqliteColumnDefinition {
     name: string;
@@ -21,34 +20,15 @@ interface SqliteExecutionResult {
     recordsAffected: number;
 }
 
-type SqliteModule = typeof import('node:sqlite');
-
 const CURRENT_CATALOG_QUERY = /^SELECT\s+CURRENT_CATALOG\s*;?$/i;
 const CURRENT_SCHEMA_QUERY = /^SELECT\s+CURRENT_SCHEMA\s*;?$/i;
 const CURRENT_CATALOG_AND_SCHEMA_QUERY = /^SELECT\s+CURRENT_CATALOG\s*,\s*CURRENT_SCHEMA\s*;?$/i;
 const CURRENT_SID_QUERY = /^SELECT\s+CURRENT_SID\s*;?$/i;
 const SET_CATALOG_QUERY = /^SET\s+CATALOG\s+(.+?)\s*;?$/i;
 
-type SqliteStatementColumn = ReturnType<StatementSync['columns']>[number];
-
-let _sqliteModule: SqliteModule | undefined;
-
-function loadSqliteModule(): SqliteModule {
-    if (_sqliteModule) {
-        return _sqliteModule;
-    }
-
-    try {
-        const nativeRequire = createRequire(__filename);
-        _sqliteModule = nativeRequire('node:sqlite') as SqliteModule;
-        return _sqliteModule;
-    } catch (error) {
-        throw new Error(
-            'SQLite runtime dependency "node:sqlite" is unavailable. Use a Node.js runtime that includes the built-in sqlite module.',
-            { cause: error }
-        );
-    }
-}
+type SqliteStatementColumn = ReturnType<SqliteDatabase['prepare']>['columns'] extends () => infer T
+    ? T extends readonly (infer C)[] ? C : never
+    : never;
 
 function resolveSqliteDatabaseLocation(config: DatabaseConnectionConfig): string {
     const mode = typeof config.options?.mode === 'string' ? config.options.mode.trim().toLowerCase() : undefined;
@@ -179,7 +159,7 @@ class SqliteDataReader implements DatabaseDataReader {
 
 export class SqliteConnection extends EventEmitter implements DatabaseConnection {
     public _connected = false;
-    private _database?: DatabaseSync;
+    private _session?: SqliteSession;
     private _currentCatalog = 'main';
     private readonly _sessionId = `sqlite-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     private readonly _databaseLocation: string;
@@ -195,9 +175,8 @@ export class SqliteConnection extends EventEmitter implements DatabaseConnection
         }
 
         try {
-            const { DatabaseSync } = loadSqliteModule();
             ensureDatabaseParentDirectory(this._databaseLocation);
-            this._database = new DatabaseSync(this._databaseLocation);
+            this._session = new SqliteSession(this._databaseLocation);
             this._connected = true;
         } catch (error) {
             throw new Error(`Failed to connect to SQLite database: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -205,13 +184,13 @@ export class SqliteConnection extends EventEmitter implements DatabaseConnection
     }
 
     public async close(): Promise<void> {
-        if (!this._database) {
+        if (!this._session) {
             this._connected = false;
             return;
         }
 
-        this._database.close();
-        this._database = undefined;
+        this._session.close();
+        this._session = undefined;
         this._connected = false;
     }
 
@@ -219,11 +198,11 @@ export class SqliteConnection extends EventEmitter implements DatabaseConnection
         return new SqliteCommand(this, sql);
     }
 
-    public getDatabase(): DatabaseSync {
-        if (!this._database) {
+    public getDatabase(): SqliteDatabase {
+        if (!this._session) {
             throw new Error('SQLite connection is not open.');
         }
-        return this._database;
+        return this._session.database;
     }
 
     public getCurrentCatalog(): string {

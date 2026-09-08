@@ -21,8 +21,7 @@ import {
   viewQueryFromSource,
   type CatalogRow,
 } from '@justybase/designer-core';
-import { executeNetezzaQuery } from './netezza';
-import { normalizeDuckDbCatalog } from './duckdb';
+import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import type { StoredConnection } from './store';
 
 export class DesignerSnapshotUnavailableError extends Error {
@@ -54,12 +53,11 @@ async function readRows(
   profile: StoredConnection,
   database: string,
   sql: string,
-  masterKey: string,
+  runtimes: ApiDatabaseRuntimeRegistry,
 ): Promise<Row[]> {
   let columns: QueryColumn[] = [];
   const values: unknown[][] = [];
-  await executeNetezzaQuery(profile, sql, {
-    masterKey,
+  await runtimes.execute(profile, sql, {
     maxRows: 20_000,
     timeoutSeconds: 30,
     readOnly: true,
@@ -90,7 +88,7 @@ function fingerprintTarget(target: DatabaseDesignerTarget): Pick<DatabaseDesigne
 async function loadSqliteViewSnapshot(
   profile: StoredConnection,
   request: DesignerSnapshotRequest,
-  masterKey: string,
+  runtimes: ApiDatabaseRuntimeRegistry,
 ): Promise<DesignerSnapshotResponse> {
   const database = request.database?.trim() || 'main';
   const schema = request.schema?.trim() || database;
@@ -99,17 +97,17 @@ async function loadSqliteViewSnapshot(
     profile,
     database,
     `SELECT name, type, sql FROM ${quoteIdentifier(schema)}.sqlite_master WHERE name = ${sqlLiteral(objectName)} AND type = 'view'`,
-    masterKey,
+    runtimes,
   );
   const object = objectRows[0];
   if (!object) throw new Error(`SQLite view ${schema}.${objectName} was not found.`);
 
-  const tableInfo = await readRows(profile, database, `PRAGMA ${quoteIdentifier(schema)}.table_info(${quoteIdentifier(objectName)})`, masterKey);
+  const tableInfo = await readRows(profile, database, `PRAGMA ${quoteIdentifier(schema)}.table_info(${quoteIdentifier(objectName)})`, runtimes);
   const triggerRows = await readRows(
     profile,
     database,
     `SELECT name, sql FROM ${quoteIdentifier(schema)}.sqlite_master WHERE type = 'trigger' AND tbl_name = ${sqlLiteral(objectName)} ORDER BY name`,
-    masterKey,
+    runtimes,
   );
   const sourceDdl = rowString(object, 'sql') || undefined;
   const definition = {
@@ -142,7 +140,7 @@ async function loadSqliteViewSnapshot(
 async function loadSqliteSnapshot(
   profile: StoredConnection,
   request: DesignerSnapshotRequest,
-  masterKey: string,
+  runtimes: ApiDatabaseRuntimeRegistry,
 ): Promise<DesignerSnapshotResponse> {
   const database = request.database?.trim() || 'main';
   const schema = request.schema?.trim() || database;
@@ -152,20 +150,20 @@ async function loadSqliteSnapshot(
     profile,
     database,
     `SELECT name, type, sql FROM ${quoteIdentifier(catalog)}.sqlite_master WHERE name = ${sqlLiteral(objectName)} AND type = 'table'`,
-    masterKey,
+    runtimes,
   );
   const object = objectRows[0];
   if (!object) throw new Error(`SQLite table ${catalog}.${objectName} was not found.`);
 
-  const tableInfo = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.table_info(${quoteIdentifier(objectName)})`, masterKey);
+  const tableInfo = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.table_info(${quoteIdentifier(objectName)})`, runtimes);
   const columns = sqliteColumnsFromRows(tableInfo);
 
-  const indexRows = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.index_list(${quoteIdentifier(objectName)})`, masterKey);
+  const indexRows = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.index_list(${quoteIdentifier(objectName)})`, runtimes);
   const indexSourceRows = await readRows(
     profile,
     database,
     `SELECT name, sql FROM ${quoteIdentifier(catalog)}.sqlite_master WHERE type = 'index' AND tbl_name = ${sqlLiteral(objectName)}`,
-    masterKey,
+    runtimes,
   );
   const indexSources = new Map(indexSourceRows.map(row => [rowString(row, 'name'), rowString(row, 'sql')]));
   const indexes: DatabaseDesignerIndex[] = [];
@@ -180,7 +178,7 @@ async function loadSqliteSnapshot(
   for (const row of indexRows) {
     const name = rowString(row, 'name');
     if (!name) continue;
-    const indexInfo = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.index_info(${quoteIdentifier(name)})`, masterKey);
+    const indexInfo = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.index_info(${quoteIdentifier(name)})`, runtimes);
     const indexColumns = indexInfo.map(info => ({ expression: rowString(info, 'name') })).filter(column => column.expression.length > 0);
     const unique = rowBoolean(row, 'unique');
     const sourceDdl = indexSources.get(name);
@@ -192,9 +190,9 @@ async function loadSqliteSnapshot(
     if (origin === 'u') constraints.push({ kind: 'unique', name, columns: indexColumns.map(column => column.expression) });
   }
 
-  const foreignKeyState = await readRows(profile, database, 'PRAGMA foreign_keys', masterKey);
+  const foreignKeyState = await readRows(profile, database, 'PRAGMA foreign_keys', runtimes);
   const foreignKeysEnabled = rowBoolean(foreignKeyState[0] ?? {}, 'foreign_keys');
-  const foreignKeyRows = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.foreign_key_list(${quoteIdentifier(objectName)})`, masterKey);
+  const foreignKeyRows = await readRows(profile, database, `PRAGMA ${quoteIdentifier(catalog)}.foreign_key_list(${quoteIdentifier(objectName)})`, runtimes);
   const groupedForeignKeys = new Map<number, Row[]>();
   for (const row of foreignKeyRows) {
     const id = rowNumber(row, 'id');
@@ -223,7 +221,7 @@ async function loadSqliteSnapshot(
     profile,
     database,
     `SELECT name, sql FROM ${quoteIdentifier(catalog)}.sqlite_master WHERE type = 'trigger' AND tbl_name = ${sqlLiteral(objectName)} ORDER BY name`,
-    masterKey,
+    runtimes,
   );
   const triggers = triggerRows.map(row => parseSqliteTrigger(rowString(row, 'name'), rowString(row, 'sql'))).filter(trigger => trigger.name.length > 0);
   const definition = {
@@ -259,9 +257,9 @@ async function loadSqliteSnapshot(
 async function loadDuckDbViewSnapshot(
   profile: StoredConnection,
   request: DesignerSnapshotRequest,
-  masterKey: string,
+  runtimes: ApiDatabaseRuntimeRegistry,
 ): Promise<DesignerSnapshotResponse> {
-  const database = normalizeDuckDbCatalog(request.database?.trim() || profile.database);
+  const database = runtimes.normalizeDatabase(profile, request.database?.trim() || profile.database);
   const schema = request.schema?.trim() || 'main';
   const objectName = required(request.objectName, 'objectName');
   const literalDatabase = sqlLiteral(database);
@@ -273,7 +271,7 @@ async function loadDuckDbViewSnapshot(
     `SELECT view_name, sql
        FROM duckdb_views()
       WHERE database_name = ${literalDatabase} AND schema_name = ${literalSchema} AND view_name = ${literalObject}`,
-    masterKey,
+    runtimes,
   );
   const view = viewRows[0];
   if (!view) throw new Error(`DuckDB view ${schema}.${objectName} was not found.`);
@@ -284,7 +282,7 @@ async function loadDuckDbViewSnapshot(
        FROM information_schema.columns
       WHERE table_catalog = ${literalDatabase} AND table_schema = ${literalSchema} AND table_name = ${literalObject}
       ORDER BY ordinal_position`,
-    masterKey,
+    runtimes,
   );
   const columns = duckDbColumnsFromRows(columnRows, false);
   const sourceDdl = rowString(view, 'sql') || undefined;
@@ -318,9 +316,9 @@ async function loadDuckDbViewSnapshot(
 async function loadDuckDbSnapshot(
   profile: StoredConnection,
   request: DesignerSnapshotRequest,
-  masterKey: string,
+  runtimes: ApiDatabaseRuntimeRegistry,
 ): Promise<DesignerSnapshotResponse> {
-  const database = normalizeDuckDbCatalog(request.database?.trim() || profile.database);
+  const database = runtimes.normalizeDatabase(profile, request.database?.trim() || profile.database);
   const schema = request.schema?.trim() || 'main';
   const objectName = required(request.objectName, 'objectName');
   const literalDatabase = sqlLiteral(database);
@@ -330,7 +328,7 @@ async function loadDuckDbSnapshot(
     profile,
     database,
     `SELECT table_name, sql FROM duckdb_tables() WHERE database_name = ${literalDatabase} AND schema_name = ${literalSchema} AND table_name = ${literalObject}`,
-    masterKey,
+    runtimes,
   );
   const table = tableRows[0];
   if (!table) throw new Error(`DuckDB table ${schema}.${objectName} was not found.`);
@@ -342,7 +340,7 @@ async function loadDuckDbSnapshot(
        FROM information_schema.columns
       WHERE table_catalog = ${literalDatabase} AND table_schema = ${literalSchema} AND table_name = ${literalObject}
       ORDER BY ordinal_position`,
-    masterKey,
+    runtimes,
   );
   const columns = duckDbColumnsFromRows(columnRows);
 
@@ -353,7 +351,7 @@ async function loadDuckDbSnapshot(
        FROM duckdb_constraints()
       WHERE database_name = ${literalDatabase} AND schema_name = ${literalSchema} AND table_name = ${literalObject}
       ORDER BY constraint_index`,
-    masterKey,
+    runtimes,
   );
   const constraints = parseDuckDbConstraints(constraintRows, schema);
 
@@ -364,7 +362,7 @@ async function loadDuckDbSnapshot(
        FROM duckdb_indexes()
       WHERE database_name = ${literalDatabase} AND schema_name = ${literalSchema} AND table_name = ${literalObject}
       ORDER BY index_name`,
-    masterKey,
+    runtimes,
   );
   const indexes = parseDuckDbIndexes(indexRows);
 
@@ -401,16 +399,16 @@ async function loadDuckDbSnapshot(
 export async function getDesignerSnapshotResponse(
   profile: StoredConnection,
   request: DesignerSnapshotRequest,
-  masterKey: string,
+  runtimes: ApiDatabaseRuntimeRegistry,
 ): Promise<DesignerSnapshotResponse> {
   const requestedObjectType = request.objectType?.trim();
   if (requestedObjectType && !['TABLE', 'VIEW'].includes(requestedObjectType.toUpperCase())) {
     throw new DesignerSnapshotUnavailableError('The current provider snapshot adapter supports TABLE and VIEW targets only.');
   }
-  if (profile.dbType === 'sqlite' && requestedObjectType?.toUpperCase() === 'VIEW') return loadSqliteViewSnapshot(profile, request, masterKey);
-  if (profile.dbType === 'sqlite') return loadSqliteSnapshot(profile, request, masterKey);
-  if (profile.dbType === 'duckdb' && requestedObjectType?.toUpperCase() === 'VIEW') return loadDuckDbViewSnapshot(profile, request, masterKey);
-  if (profile.dbType === 'duckdb') return loadDuckDbSnapshot(profile, request, masterKey);
+  if (profile.dbType === 'sqlite' && requestedObjectType?.toUpperCase() === 'VIEW') return loadSqliteViewSnapshot(profile, request, runtimes);
+  if (profile.dbType === 'sqlite') return loadSqliteSnapshot(profile, request, runtimes);
+  if (profile.dbType === 'duckdb' && requestedObjectType?.toUpperCase() === 'VIEW') return loadDuckDbViewSnapshot(profile, request, runtimes);
+  if (profile.dbType === 'duckdb') return loadDuckDbSnapshot(profile, request, runtimes);
   if (profile.dbType !== 'sqlite' && profile.dbType !== 'duckdb') {
     throw new DesignerSnapshotUnavailableError(`Provider-backed designer snapshots are not registered for ${profile.dbType}.`);
   }

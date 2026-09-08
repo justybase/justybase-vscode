@@ -9,6 +9,10 @@ are tracked in the
 describes the intended structure; the automated architecture check determines
 which parts are currently enforced.
 
+The [refactoring plan](REFACTORING_PLAN.md) orders further extraction for
+production VS Code, the existing web/API, and a future Electron adapter.
+It does not introduce a new application or replace the quality backlog.
+
 The current dependency map, contract audit, service proposal and ordered
 migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
 The SQL boundary is now implemented as a platform-neutral Netezza core:
@@ -19,6 +23,17 @@ incremental-cache state around that core while preserving their existing public
 shapes. Public results and wire contracts remain unchanged. This does not create empty
 packages or an Electron application.
 
+Desktop SQL compatibility facades consume named `sql-core` subpaths for the
+parser base/rules, Netezza parser/lexer/identifier patterns and source scanning.
+The package builds a single implementation bundle with public wrappers so
+CommonJS and native ESM consumers share token, lexer and class identity.
+`test:sql-core` exercises built entrypoints as well as source tests; raw package
+source paths are not public exports.
+
+Contract leaf types (`DatabaseKind` and Result Panel selection statistics) no
+longer import their public barrels. Their original exports remain compatible
+while the two former type cycles have been removed.
+
 ## Target ownership
 
 Arrows below mean “imports”; product composition roots select and inject
@@ -26,7 +41,7 @@ implementations. A pure engine never imports an adapter or driver.
 
 ```text
 VS Code adapter / API backend / future Electron backend
-    -> Node database-runtime -> dialect-<kind>-runtime -> driver
+    -> Node database-runtime / dialect-<kind>-runtime -> driver or Node database API
     -> pure SQL / metadata / result engines -> contracts
 Desktop webview / React renderer -> pure engines and contracts
 React renderer -> HTTP client -> API backend
@@ -38,7 +53,7 @@ React renderer -> HTTP client -> API backend
 | Metadata model and pure merge/invalidation rules | future `@justybase/metadata-core` |
 | Result reducer, identity and pure data operations | future `@justybase/result-core` |
 | Execution, cancellation, retry and runtime resource cleanup | `@justybase/database-runtime` |
-| Database-specific driver and Node I/O | future `@justybase/dialect-<kind>-runtime` |
+| Database-specific driver and Node I/O | `@justybase/sqlite-runtime`, `@justybase/duckdb-runtime`, `@justybase/netezza-runtime` |
 | Database-specific SQL grammar and authoring | future `@justybase/dialect-<kind>` |
 | Stable public and transport types | `@justybase/contracts` |
 | Secrets, filesystem, transport, editor integration and lifecycle | product adapter |
@@ -54,6 +69,31 @@ arguments. Existing registries remain at their current compatibility seams;
 new process-global registries combining products and dialects are prohibited.
 Composition-root review enforces that lifetime/ownership rule; an import graph
 alone cannot detect every global singleton.
+
+`@justybase/sqlite-runtime` owns instance-scoped SQLite sessions, streamed query
+execution, cancellation, metadata access and deterministic shutdown. It accepts
+only an absolute path already authorized by its product adapter (or `:memory:`)
+and has no knowledge of API users, storage roots or VS Code. The API adapter
+keeps the per-user filesystem sandbox, rewrites literal `ATTACH` targets through
+that sandbox and injects its SQLite read-only policy. Runtime instances are
+owned by the API runtime registry; closing a profile or server cancels active
+work before closing files.
+
+`@justybase/duckdb-runtime` owns the platform-neutral DuckDB instance/session
+protocol. Its module resolver is injected by the product so the optional native
+package can live in the API deployment or the DuckDB companion extension. The
+runtime distinguishes cached file instances from owned in-memory instances,
+serializes catalog selection with execution, bounds materialization, and drains
+active operations before shutdown. API sandbox and ATTACH authorization remain
+in the API adapter; File SQL view/conversion setup remains in the companion.
+
+`@justybase/netezza-runtime` is the sole production owner of the Netezza driver
+import. It exposes an instance-scoped connection/command/reader lifecycle and
+metadata helpers while accepting resolved credentials from a product adapter.
+The API adapter decrypts secrets and supplies stable profile identities; the
+desktop dialect and MCP composition roots use the exported factory. The
+compatibility exports in `@justybase/database-runtime` re-export this surface
+without importing the driver themselves.
 
 The future Electron main process will host/manage the backend; its React
 renderer will use the same HTTP client as web. Backend startup, authentication,
@@ -74,8 +114,11 @@ Electron APIs must stay in its adapter, never in a shared package.
   transport DTOs. Metadata bridges and WebSocket/HTTP protocol state stay in
   the API product layer.
 - `apps/api` owns authentication, per-user storage, query jobs, WebSockets, and
-  disk-spooled sessions. `apps/web` consumes contracts through REST/LSP and
-  renders Monaco/TanStack views.
+  disk-spooled sessions. Its per-server database runtime registry selects
+  Netezza, SQLite or DuckDB adapters and owns their resource cleanup; secrets
+  remain inside the Netezza adapter rather than generic query options.
+  `apps/web` consumes contracts through REST/LSP and renders Monaco/TanStack
+  views.
 
 ## Shared designer boundary
 
@@ -203,6 +246,23 @@ drivers without relying on a driver-name blacklist.
 Shared packages reject `vscode` and `electron`; Node runtimes may use Node and
 drivers. Companions may import their own implementation, shared contracts and
 shared engines/runtime helpers, but cannot import another companion directly.
+
+`packageDependencies` further restricts cross-package edges inside `shared`.
+Every production package must declare a boundary when this map is enabled;
+adding a package without one fails as `ARCH004`. Package restrictions cannot be
+bypassed by a legacy layer exception. Internal imports within a package remain
+subject to cycle checks.
+
+`browserSources` starts a value-import traversal from web and media sources,
+including worker modules. Every reachable external import must appear in the
+exact `browserExternalImports` list; Node built-ins, VS Code and Electron remain
+forbidden even if listed. Importing a shared Node runtime is also forbidden,
+including through aliases or re-export facades. Explicit type-only references
+are erased for this traversal but remain in the full dependency/cycle graph.
+Mixed type/value imports are traversed. The check does not inspect dependency
+internals in node_modules, so approving a library still requires checking its
+browser entry point; nonliteral loaders and JavaScript assets remain outside
+this TypeScript graph's proof.
 
 Exceptions require exact paths and become errors when stale. Cycle node lists
 and fingerprints remain unchanged in this preparation. Use

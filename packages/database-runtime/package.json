@@ -12,6 +12,6 @@
   "dependencies": {
     "@justybase/contracts": "*",
     "@justybase/designer-core": "*",
-    "@justybase/netezza-driver": "*"
+    "@justybase/netezza-runtime": "*"
   }
 }

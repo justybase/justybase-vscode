@@ -13,7 +13,8 @@ import { getSqlStatementAtPosition, splitSqlStatements } from '@justybase/sql-co
 import { type ApiConfig } from './config';
 import { encryptSecret, verifyPassword } from './security';
 import { AppStore, type StoredConnection } from './store';
-import { closeEmbeddedDatabases, closeDuckDbDatabase, closeSqliteDatabase, executeNetezzaQuery, isProfileReadOnlySql, listColumns, listDatabases, listObjects, listSchemas, normalizeDuckDbCatalog } from './netezza';
+import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
+import { createApiDatabaseRuntimeRegistry } from './databaseRuntime/registry';
 import { formatSqlDocument, invalidateSqlMetadataCache, provideSqlCompletion, provideSqlDiagnostics } from './lsp';
 import { QuerySessionManager } from './querySessions';
 import { getSchemaTree, invalidateSchemaCache, searchSchema } from './schemaService';
@@ -106,11 +107,9 @@ function optionalLocalString(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
-function effectiveDatabase(profile: StoredConnection, requested: string | undefined): string {
-  const value = requested?.trim() || profile.database.trim();
-  if (profile.dbType === 'sqlite') return requested?.trim() || 'main';
-  if (profile.dbType === 'duckdb') return normalizeDuckDbCatalog(value);
-  return value;
+function effectiveDatabase(runtimes: ApiDatabaseRuntimeRegistry, profile: StoredConnection, requested: string | undefined): string {
+  const value = requested?.trim() || (profile.dbType === 'sqlite' ? 'main' : profile.database.trim());
+  return runtimes.normalizeDatabase(profile, value);
 }
 
 function setSessionCookie(reply: FastifyReply, token: string): void {
@@ -475,7 +474,7 @@ function operationPreview(
   const profile = app.store.getConnection(userId, input.connectionId);
   if (!profile) throw new Error('Connection profile not found.');
   if (profile.readOnly) throw new Error('This connection is read-only. Enable write mode for data changes.');
-  const database = effectiveDatabase(profile, input.database);
+  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
   const expiresAt = Date.now() + WRITE_PREVIEW_TTL_MS;
   const statement: PlannedStatement = { index: 0, startOffset: 0, endOffset: input.sql.length, sql: input.sql };
   const previewToken = signPreviewClaims({ userId, connectionId: input.connectionId, database, mode: 'single', statementsDigest: plannedDigest('single', [statement]), expiresAt }, app.apiConfig.masterKey);
@@ -505,13 +504,12 @@ async function executeConfirmedWrite(
   input: { connectionId: string; database: string; sql: string; statementIndex?: number; statementCount?: number; confirmed: boolean },
 ): Promise<QueryWriteResponse> {
   const startedAt = Date.now();
-  const database = effectiveDatabase(profile, input.database);
+  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
   const commandType = statementCommandType(input.sql);
   const statementIndex = input.statementIndex ?? 0;
   const statementCount = input.statementCount ?? 1;
   try {
-    const result = await executeNetezzaQuery(profile, input.sql, {
-      masterKey: app.apiConfig.masterKey,
+    const result = await app.databaseRuntimes.execute(profile, input.sql, {
       maxRows: DEFAULT_ROW_LIMIT,
       timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
       readOnly: false,
@@ -637,7 +635,7 @@ async function assertDesignerSnapshotCurrent(
     objectName: designer.target.objectName,
     objectType: designer.target.objectType,
   };
-  const response = await getDesignerSnapshotResponse(profile, target, app.apiConfig.masterKey);
+  const response = await getDesignerSnapshotResponse(profile, target, app.databaseRuntimes);
   if (response.snapshot.fingerprint !== designer.baseFingerprint) {
     throw new StaleDesignerSnapshotError(designer.baseFingerprint, response.snapshot.fingerprint);
   }
@@ -647,10 +645,10 @@ export async function previewQuery(app: FastifyInstance, userId: string, input: 
   const profile = app.store.getConnection(userId, input.connectionId);
   if (!profile) throw new Error('Connection profile not found.');
   const planned = planStatements(input, profile.dbType);
-  const database = effectiveDatabase(profile, input.database);
+  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
   const statements: QueryPreviewStatement[] = planned.statements.map(statement => {
     const commandType = statementCommandType(statement.sql);
-    const readOnly = isProfileReadOnlySql(profile, statement.sql);
+    const readOnly = app.databaseRuntimes.isReadOnlySql(profile, statement.sql);
     return {
       index: statement.index,
       startOffset: statement.startOffset,
@@ -682,9 +680,9 @@ async function startQuery(app: FastifyInstance, userId: string, input: QueryStar
   if (!profile) throw new Error('Connection profile not found.');
   if (!input.sql.trim()) throw new Error('SQL is required.');
   const planned = planStatements(input, profile.dbType);
-  const containsWrite = planned.statements.some(statement => !isProfileReadOnlySql(profile, statement.sql));
+  const containsWrite = planned.statements.some(statement => !app.databaseRuntimes.isReadOnlySql(profile, statement.sql));
   if (profile.readOnly && containsWrite) throw new Error('This connection is read-only. Enable write mode for DDL or DML.');
-  const database = effectiveDatabase(profile, input.database);
+  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
   if (!profile.readOnly && containsWrite) {
     const claims = typeof input.writePreviewToken === 'string' ? verifyPreviewClaims(input.writePreviewToken, app.apiConfig.masterKey) : undefined;
     if (input.writeConfirmed !== true || !claims) throw new Error('Write confirmation required before executing DML or DDL.');
@@ -743,8 +741,7 @@ async function startQuery(app: FastifyInstance, userId: string, input: QueryStar
         const commandType = statementCommandType(statement.sql);
 
         try {
-          const result = await executeNetezzaQuery(profile, statement.sql, {
-            masterKey: app.apiConfig.masterKey,
+          const result = await app.databaseRuntimes.execute(profile, statement.sql, {
             maxRows: input.maxRows ?? DEFAULT_ROW_LIMIT,
             timeoutSeconds: input.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS,
             readOnly: profile.readOnly,
@@ -868,8 +865,10 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   const localDbRoot = apiConfig.localDbRoot ?? path.join(apiConfig.dataDir, 'local-databases');
   const store = new AppStore(apiConfig.dataDir, localDbRoot);
+  const databaseRuntimes = createApiDatabaseRuntimeRegistry({ masterKey: apiConfig.masterKey });
   app.decorate('store', store);
   app.decorate('apiConfig', apiConfig);
+  app.decorate('databaseRuntimes', databaseRuntimes);
   app.decorate('queryJobs', new Map<string, QueryJob>());
   app.decorate('querySessions', new QuerySessionManager(apiConfig.dataDir));
   app.decorate('lspSessions', new Set<LspSession>());
@@ -948,7 +947,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       await mkdir(safetyDir, { recursive: true });
       const safetyPath = path.join(safetyDir, `pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
       store.backupTo(safetyPath);
-      await closeEmbeddedDatabases();
+      await app.databaseRuntimes.closeAll();
       const restored = store.restoreFrom(uploadPath);
       app.querySessions.clearAll();
       app.queryJobs.clear();
@@ -994,8 +993,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       };
       const updated = store.updateConnection(request.user!.id, request.params.id, input, input.password ? encryptSecret(input.password, apiConfig.masterKey) : undefined);
       if (!updated) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      await closeDuckDbDatabase(request.params.id);
-      closeSqliteDatabase(request.params.id);
+      await app.databaseRuntimes.closeConnection(request.params.id);
       invalidateSchemaCache(request.params.id);
       invalidateSqlMetadataCache(request.params.id);
       for (const session of app.lspSessions) session.invalidateConnection(request.params.id);
@@ -1004,8 +1002,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.delete<{ Params: { id: string } }>('/api/connections/:id', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
     if (!store.deleteConnection(request.user!.id, request.params.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-    await closeDuckDbDatabase(request.params.id);
-    closeSqliteDatabase(request.params.id);
+    await app.databaseRuntimes.closeConnection(request.params.id);
     invalidateSchemaCache(request.params.id);
     invalidateSqlMetadataCache(request.params.id);
     for (const session of app.lspSessions) session.invalidateConnection(request.params.id);
@@ -1013,11 +1010,9 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.post('/api/connections/test', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
     let testProfile: StoredConnection | undefined;
-    let testDbType: StoredConnection['dbType'] | undefined;
     try {
       const body = bodyObject(request.body);
       const dbType = connectionKind(body.dbType);
-      testDbType = dbType;
       const local = dbType !== 'netezza';
       const password = local ? optionalLocalString(body.password, '') : requiredString(body.password, 'password');
       const encrypted = encryptSecret(password, apiConfig.masterKey);
@@ -1037,31 +1032,30 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
         localDbRoot: apiConfig.localDbRoot ?? path.join(apiConfig.dataDir, 'local-databases'),
       };
       testProfile = profile;
-      await executeNetezzaQuery(profile, 'SELECT 1', { masterKey: apiConfig.masterKey, maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined });
+      await app.databaseRuntimes.execute(profile, 'SELECT 1', { maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined });
       return { ok: true };
     } catch (error: unknown) {
       return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' });
     } finally {
-      if (testDbType === 'duckdb' && testProfile) await closeDuckDbDatabase(testProfile.id);
-      if (testDbType === 'sqlite' && testProfile) closeSqliteDatabase(testProfile.id);
+      if (testProfile) await app.databaseRuntimes.closeConnection(testProfile.id);
     }
   });
   app.post<{ Params: { id: string } }>('/api/connections/:id/test', { preHandler: authenticate }, async (request, reply) => {
     const profile = store.getConnection(request.user!.id, request.params.id);
     if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-    try { await executeNetezzaQuery(profile, 'SELECT 1', { masterKey: apiConfig.masterKey, maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined }); return { ok: true }; } catch (error: unknown) { return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' }); }
+    try { await app.databaseRuntimes.execute(profile, 'SELECT 1', { maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined }); return { ok: true }; } catch (error: unknown) { return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' }); }
   });
 
-  app.get('/api/metadata/databases', { preHandler: authenticate }, async (request, reply) => { const id = String((request.query as { connectionId?: string }).connectionId ?? ''); const profile = store.getConnection(request.user!.id, id); if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' }); return listDatabases(profile, apiConfig.masterKey); });
-  app.get('/api/metadata/schemas', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return listSchemas(profile, query.database, apiConfig.masterKey); });
-  app.get('/api/metadata/objects', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return listObjects(profile, query.database, query.schema, apiConfig.masterKey); });
-  app.get('/api/metadata/columns', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string; table?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database || !query.schema || !query.table) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Table scope not found.' }); return listColumns(profile, query.database, query.schema, query.table, apiConfig.masterKey); });
+  app.get('/api/metadata/databases', { preHandler: authenticate }, async (request, reply) => { const id = String((request.query as { connectionId?: string }).connectionId ?? ''); const profile = store.getConnection(request.user!.id, id); if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' }); return app.databaseRuntimes.listDatabases(profile); });
+  app.get('/api/metadata/schemas', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.databaseRuntimes.listSchemas(profile, query.database); });
+  app.get('/api/metadata/objects', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.databaseRuntimes.listObjects(profile, query.database, query.schema); });
+  app.get('/api/metadata/columns', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string; table?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database || !query.schema || !query.table) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Table scope not found.' }); return app.databaseRuntimes.listColumns(profile, query.database, query.schema, query.table); });
   app.get('/api/designer/capabilities', { preHandler: authenticate }, async (request, reply) => {
     try {
       const input = parseDesignerCapabilitiesRequest(request.query);
       const profile = store.getConnection(request.user!.id, input.connectionId);
       if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      return getDesignerCapabilitiesResponse(profile, input);
+      return getDesignerCapabilitiesResponse(profile, input, app.databaseRuntimes);
     } catch (error: unknown) {
       return reply.code(400).send({ code: 'DESIGNER_CAPABILITIES_FAILED', message: error instanceof Error ? error.message : 'Designer capabilities failed.' });
     }
@@ -1071,7 +1065,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const input = parseDesignerCapabilitiesRequest(request.query);
       const profile = store.getConnection(request.user!.id, input.connectionId);
       if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      return await getDesignerSnapshotResponse(profile, input, apiConfig.masterKey);
+      return await getDesignerSnapshotResponse(profile, input, app.databaseRuntimes);
     } catch (error: unknown) {
       const statusCode = error instanceof Error && 'code' in error && error.code === 'DESIGNER_SNAPSHOT_UNAVAILABLE' ? 501 : 400;
       return reply.code(statusCode).send({
@@ -1091,19 +1085,19 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   app.get('/api/schema/tree', { preHandler: authenticate }, async (request, reply) => {
     const query = request.query as { connectionId?: string; parentId?: string };
     if (!query.connectionId) return reply.code(400).send({ code: 'INVALID_REQUEST', message: 'connectionId is required.' });
-    try { return await getSchemaTree(store, apiConfig, request.user!.id, query.connectionId, query.parentId); }
+    try { return await getSchemaTree(store, app.databaseRuntimes, request.user!.id, query.connectionId, query.parentId); }
     catch (error: unknown) { return reply.code(400).send({ code: 'SCHEMA_TREE_FAILED', message: error instanceof Error ? error.message : 'Schema tree failed.' }); }
   });
   app.post('/api/schema/search', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await searchSchema(store, apiConfig, request.user!.id, request.body as import('@justybase/contracts').SchemaSearchRequest); }
+    try { return await searchSchema(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SchemaSearchRequest); }
     catch (error: unknown) { return reply.code(400).send({ code: 'SCHEMA_SEARCH_FAILED', message: error instanceof Error ? error.message : 'Schema search failed.' }); }
   });
   app.post('/api/lsp/completion', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await provideSqlCompletion(store, apiConfig, request.user!.id, request.body as import('@justybase/contracts').SqlCompletionRequest); }
+    try { return await provideSqlCompletion(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlCompletionRequest); }
     catch (error: unknown) { return reply.code(400).send({ code: 'LSP_COMPLETION_FAILED', message: error instanceof Error ? error.message : 'Completion failed.' }); }
   });
   app.post('/api/lsp/diagnostics', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await provideSqlDiagnostics(store, apiConfig, request.user!.id, request.body as import('@justybase/contracts').SqlDiagnosticsRequest); }
+    try { return await provideSqlDiagnostics(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlDiagnosticsRequest); }
     catch (error: unknown) { return reply.code(400).send({ code: 'LSP_DIAGNOSTICS_FAILED', message: error instanceof Error ? error.message : 'Diagnostics failed.' }); }
   });
   app.post('/api/lsp/format', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
@@ -1170,7 +1164,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const input = request.body as QueryEditPreviewRequest;
       const profile = app.store.getConnection(request.user!.id, input.connectionId);
       if (!profile) throw new Error('Connection profile not found.');
-      const database = effectiveDatabase(profile, input.database);
+      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
       const sql = buildUpdateSql({ ...input, database }, profile.dbType);
       return reply.code(200).send(operationPreview(app, request.user!.id, {
         connectionId: input.connectionId,
@@ -1188,7 +1182,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const input = request.body as QueryEditRequest;
       const profile = store.getConnection(request.user!.id, input.connectionId);
       if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      const database = effectiveDatabase(profile, input.database);
+      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
       const sql = buildUpdateSql({ ...input, database }, profile.dbType);
       verifyWriteOperation(app, request.user!.id, profile, {
         connectionId: input.connectionId,
@@ -1212,7 +1206,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const input = request.body as QueryImportPreviewRequest;
       const profile = app.store.getConnection(request.user!.id, input.connectionId);
       if (!profile) throw new Error('Connection profile not found.');
-      const database = effectiveDatabase(profile, input.database);
+      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
       const sql = buildInsertSql({ ...input, database }, profile.dbType);
       return reply.code(200).send(operationPreview(app, request.user!.id, {
         connectionId: input.connectionId,
@@ -1230,7 +1224,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const input = request.body as QueryImportRequest;
       const profile = store.getConnection(request.user!.id, input.connectionId);
       if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      const database = effectiveDatabase(profile, input.database);
+      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
       const sql = buildInsertSql({ ...input, database }, profile.dbType);
       verifyWriteOperation(app, request.user!.id, profile, {
         connectionId: input.connectionId,
@@ -1255,10 +1249,10 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const profile = app.store.getConnection(request.user!.id, fileInput.connectionId);
       if (!profile) throw new Error('Connection profile not found.');
       const targetColumns = fileInput.hasHeader === false
-        ? (await listColumns(profile, effectiveDatabase(profile, fileInput.database), fileInput.schema, fileInput.table, apiConfig.masterKey)).map(column => column.name)
+        ? (await app.databaseRuntimes.listColumns(profile, effectiveDatabase(app.databaseRuntimes, profile, fileInput.database), fileInput.schema, fileInput.table)).map(column => column.name)
         : undefined;
       const input = await materializeFileImport(fileInput, targetColumns);
-      const database = effectiveDatabase(profile, input.database);
+      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
       const sql = buildInsertSql({ ...input, database }, profile.dbType);
       return reply.code(200).send(operationPreview(app, request.user!.id, {
         connectionId: input.connectionId,
@@ -1277,10 +1271,10 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const profile = store.getConnection(request.user!.id, fileInput.connectionId);
       if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
       const targetColumns = fileInput.hasHeader === false
-        ? (await listColumns(profile, effectiveDatabase(profile, fileInput.database), fileInput.schema, fileInput.table, apiConfig.masterKey)).map(column => column.name)
+        ? (await app.databaseRuntimes.listColumns(profile, effectiveDatabase(app.databaseRuntimes, profile, fileInput.database), fileInput.schema, fileInput.table)).map(column => column.name)
         : undefined;
       const input = await materializeFileImport(fileInput, targetColumns);
-      const database = effectiveDatabase(profile, input.database);
+      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
       const sql = buildInsertSql({ ...input, database }, profile.dbType);
       verifyWriteOperation(app, request.user!.id, profile, {
         connectionId: input.connectionId,
@@ -1336,7 +1330,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.get('/api/lsp', { websocket: true, preValidation: authenticate }, (socket, request) => {
     let session: LspSession;
-    session = attachLspSocket(socket, store, apiConfig, request.user!.id, closed => app.lspSessions.delete(closed));
+    session = attachLspSocket(socket, store, app.databaseRuntimes, request.user!.id, closed => app.lspSessions.delete(closed));
     app.lspSessions.add(session);
   });
 
@@ -1347,7 +1341,15 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   }
   const cleanupTimer = setInterval(() => app.querySessions.cleanup(), 60_000);
   cleanupTimer.unref();
-  app.addHook('onClose', async () => { clearInterval(cleanupTimer); app.querySessions.closeAll(); await closeEmbeddedDatabases(); store.close(); });
+  app.addHook('onClose', async () => {
+    clearInterval(cleanupTimer);
+    app.querySessions.closeAll();
+    try {
+      await app.databaseRuntimes.closeAll();
+    } finally {
+      store.close();
+    }
+  });
   return app;
 }
 
@@ -1355,6 +1357,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     store: AppStore;
     apiConfig: ApiConfig;
+    databaseRuntimes: ApiDatabaseRuntimeRegistry;
     queryJobs: Map<string, QueryJob>;
     querySessions: QuerySessionManager;
     lspSessions: Set<LspSession>;

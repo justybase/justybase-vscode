@@ -29,10 +29,36 @@ when comparing revisions; do not commit volatile graph/timing reports.
 | `media` | shared packages, desktop protocol/types, media modules, exact companion designer bridges |
 | `packages/contracts` | its own public types/helpers; existing type cycle is fingerprinted |
 | `packages/sql-core` | Platform-neutral Netezza lexer/parser, semantic validation, authoring and quality rules |
-| Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime/access-file own Node I/O |
-| `apps/api` | contracts, sql-core, database-runtime and API modules |
+| Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime is a compatibility facade, and sqlite/duckdb/netezza-runtime/access-file own Node I/O |
+| `apps/api` | contracts, sql-core, database-runtime, sqlite-runtime, duckdb-runtime, netezza-runtime and API modules |
 | `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
 | `extensions` | own modules, contracts/shared helpers, public core activation API, exact legacy desktop implementation bridges |
+
+## Runtime extraction in R2 (acceptance pending)
+
+The three database-specific Node runtimes now have explicit ownership:
+
+- `@justybase/sqlite-runtime` owns the Node `node:sqlite` session and is used by
+  both the API adapter and the desktop SQLite connection facade.
+- `@justybase/duckdb-runtime` owns the structural DuckDB module resolver,
+  instance ownership, catalog serialization, bounded result streaming and
+  cancellation. The API supplies its sandbox resolver; the DuckDB companion
+  supplies the optional native module and retains File SQL view setup.
+- `@justybase/netezza-runtime` owns the only production import of
+  `@justybase/netezza-driver`, stateful API lifecycle and metadata helpers. The
+  desktop dialect and MCP use its factory, while `@justybase/database-runtime`
+  re-exports compatibility helpers without importing the driver.
+
+All three packages accept resolved product configuration rather than API store
+objects, credentials are decrypted only in the API adapter, and shutdown drains
+active operations in the API managers. Netezza uses a fresh connection per
+execution (including a per-query database override); the manager retains a
+target fingerprint rather than credentials. The future Electron main process can instantiate the same
+runtime packages without importing VS Code or React.
+
+This describes the implementation boundary, not completion of R2. Full
+lifecycle, Extension Host, packaging and live-database acceptance remains
+tracked in `REFACTORING_PLAN.md`.
 
 ## Netezza validation boundary
 
@@ -72,16 +98,12 @@ The existing cycle inventory, identified by its configured anchor, is:
 
 | Anchor | Area |
 | --- | --- |
-| `apps/api/src/netezza.ts` | API execution |
 | `extensions/snowflake/src/snowflakeImportPlanner.ts` | desktop/companion integration |
 | `media/resultPanel/diskBackedGrid.ts` | Result Panel orchestration |
-| `media/resultPanel/hostContracts.ts` | Result Panel types/protocol |
 | `media/visualQueryBuilder/VisualQueryBuilderApp.tsx` | visual builder |
 | `packages/access-file/src/accessFileSession.ts` | Access file runtime |
-| `packages/contracts/src/connectionDetails.ts` | shared contract types |
 | `src/commands/validationCommands.ts` | validation commands |
 | `src/core/resultDataProvider/types.ts` | result storage contracts |
-| `src/dialects/netezza/sql/authoring.ts` | Netezza authoring |
 | `src/export/exportManager.ts` | export |
 | `src/services/copilotService.ts` | Copilot services |
 

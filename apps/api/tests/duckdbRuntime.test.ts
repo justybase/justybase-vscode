@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { closeDuckDbDatabase, executeDuckDbQuery } from '../src/duckdb';
-import type { QueryCallbacks, QueryOptions } from '../src/netezza';
+import { DuckDbApiDatabaseRuntime } from '../src/databaseRuntime/duckDbRuntime';
+import type { ApiQueryOptions, QueryCallbacks } from '../src/databaseRuntime/contracts';
 import type { StoredConnection } from '../src/store';
 
 function createProfile(root: string): StoredConnection {
@@ -23,16 +23,17 @@ function createProfile(root: string): StoredConnection {
   };
 }
 
-const baseOptions: QueryOptions = { masterKey: '', maxRows: 10, timeoutSeconds: 30, readOnly: false };
+const baseOptions: ApiQueryOptions = { maxRows: 10, timeoutSeconds: 30, readOnly: false };
+let runtime: DuckDbApiDatabaseRuntime;
 
-async function run(profile: StoredConnection, sql: string, options: QueryOptions = baseOptions): Promise<{ rows: unknown[][]; result: { totalRows: number; limitReached: boolean } }> {
+async function run(profile: StoredConnection, sql: string, options: ApiQueryOptions = baseOptions): Promise<{ rows: unknown[][]; result: { totalRows: number; limitReached: boolean } }> {
   const rows: unknown[][] = [];
   const callbacks: QueryCallbacks = {
     onColumns: () => undefined,
     onRows: values => rows.push(...values),
     onCommand: () => undefined,
   };
-  const result = await executeDuckDbQuery(profile, sql, options, callbacks);
+  const result = await runtime.execute(profile, sql, options, callbacks);
   return { rows, result };
 }
 
@@ -41,6 +42,7 @@ describe('DuckDB local runtime', () => {
   let connection: StoredConnection;
 
   beforeEach(async () => {
+    runtime = new DuckDbApiDatabaseRuntime();
     root = mkdtempSync(path.join(os.tmpdir(), 'justybase-duckdb-runtime-'));
     connection = createProfile(root);
     await run(connection, "ATTACH ':memory:' AS one");
@@ -50,7 +52,7 @@ describe('DuckDB local runtime', () => {
   });
 
   afterEach(async () => {
-    await closeDuckDbDatabase(connection.id);
+    await runtime.closeAll();
     rmSync(root, { recursive: true, force: true });
   });
 
