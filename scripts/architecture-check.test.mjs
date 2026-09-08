@@ -455,6 +455,96 @@ test('pure engines can use approved portable libraries and other pure packages',
   }
 });
 
+test('package boundaries reject undeclared cross-package imports even in the same layer', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'packages/first-core/src/index.ts', "export { value } from '../../second-core/src';");
+    writeFixture(root, 'packages/second-core/src/index.ts', 'export const value = 1;');
+    const rules = fixtureRules({
+      layers: { shared: { sources: ['packages/*/src'] } },
+      pureSources: ['packages/*-core/src/**'],
+      packageDependencies: { 'packages/first-core': [], 'packages/second-core': [] },
+    });
+    const rejected = analyzeArchitecture(root, rules);
+    assert.equal(rejected.diagnostics.length, 1);
+    assert.equal(rejected.diagnostics[0].code, ARCHITECTURE_CODES.forbiddenDependency);
+    rules.packageDependencies['packages/first-core'].push('packages/second-core');
+    assert.deepEqual(analyzeArchitecture(root, rules).diagnostics, []);
+    writeFixture(root, 'packages/unregistered/src/index.ts', 'export const missing = true;');
+    assert.ok(analyzeArchitecture(root, rules).diagnostics.some(d => d.code === ARCHITECTURE_CODES.invalidConfiguration));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('browser boundaries follow value imports through facades and reject unapproved external modules', () => {
+  const root = createFixture();
+  try {
+    writeJsonFixture(root, 'tsconfig.json', { compilerOptions: { paths: { '@runtime': ['./packages/shared/src/index.ts'] } } });
+    writeFixture(root, 'apps/web/src/index.ts', "export { value } from './facade';");
+    writeFixture(root, 'apps/web/src/facade.ts', "export { value } from '@runtime';");
+    writeFixture(root, 'packages/shared/src/index.ts', "import 'node:fs'; import 'new-database-driver'; export const value = 1;");
+    const result = analyzeArchitecture(root, fixtureRules({ browserSources: ['apps/web/src/**'] }));
+    assert.equal(result.diagnostics.length, 3);
+    assert.ok(result.diagnostics.every(d => d.code === ARCHITECTURE_CODES.forbiddenDependency));
+    assert.ok(result.diagnostics.some(d => d.target === 'packages/shared/src/index.ts'));
+    assert.ok(result.diagnostics.some(d => d.specifier === 'node:fs'));
+    assert.ok(result.diagnostics.some(d => d.specifier === 'new-database-driver'));
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('browser graph ignores erased imports but detects a value import beside a type import', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'src/host.ts', "import 'node:fs'; export interface Host {} export const value = 1;");
+    writeFixture(root, 'media/index.ts', `
+      import type { Host } from '../src/host';
+      import { type Host as Other } from '../src/host';
+      export type { Host } from '../src/host';
+      export { type Host as Third } from '../src/host';
+      type Handle = import('../src/host').Host;
+    `);
+    const rules = fixtureRules({ browserSources: ['media/**'] });
+    assert.deepEqual(analyzeArchitecture(root, rules).diagnostics, []);
+    fs.appendFileSync(path.join(root, 'media/index.ts'), "\nexport { value } from '../src/host';\n");
+    const result = analyzeArchitecture(root, rules);
+    assert.equal(result.diagnostics.length, 1);
+    assert.equal(result.diagnostics[0].specifier, 'node:fs');
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('browser approvals allow portable libraries but cannot approve Node builtins', () => {
+  const root = createFixture();
+  try {
+    writeFixture(root, 'media/index.ts', "import 'react'; void import('fs');");
+    const result = analyzeArchitecture(root, fixtureRules({
+      browserSources: ['media/**'], browserExternalImports: ['react', 'fs'],
+    }));
+    assert.equal(result.diagnostics.length, 1);
+    assert.equal(result.diagnostics[0].specifier, 'fs');
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('invalid browser and package boundary configuration fails closed', () => {
+  const root = createFixture();
+  try {
+    const result = analyzeArchitecture(root, fixtureRules({
+      browserSources: 'media/**', browserExternalImports: [null],
+      packageDependencies: { 'packages/*': ['missing'], 'packages/broken': null },
+    }));
+    assert.equal(result.diagnostics.length, 5);
+    assert.ok(result.diagnostics.every(d => d.code === ARCHITECTURE_CODES.invalidConfiguration));
+  } finally {
+    removeFixture(root);
+  }
+});
+
 test('report CLI emits JSON, preserves the baseline and fails on violations', () => {
   const root = createFixture();
   try {
@@ -465,10 +555,13 @@ test('report CLI emits JSON, preserves the baseline and fails on violations', ()
       [path.join(import.meta.dirname, 'architecture-check.mjs'), '--report'],
       { cwd: root, encoding: 'utf8' });
     const passing = runReport();
+    assert.ifError(passing.error);
     assert.equal(passing.status, 0, passing.stderr);
+    assert.ok(passing.stdout.trim(), `Report CLI returned no JSON (stderr: ${passing.stderr}, signal: ${passing.signal}).`);
     assert.equal(JSON.parse(passing.stdout).reportVersion, 1);
     writeFixture(root, 'apps/web/src/index.ts', "export { value } from '../../../src';");
     const failing = runReport();
+    assert.ifError(failing.error);
     assert.equal(failing.status, 1, failing.stderr);
     assert.equal(JSON.parse(failing.stdout).diagnostics[0].code, ARCHITECTURE_CODES.forbiddenDependency);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'quality/architecture-rules.json'), 'utf8')), rules);

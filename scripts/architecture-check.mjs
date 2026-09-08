@@ -229,6 +229,28 @@ function validateRules(rawRules) {
   else pureExternalExceptions.forEach((exception, index) => validateException(exception, `pureExternalExceptions[${index}]`, errors, { allowGlob: false }));
 
   const cycleExceptions = rawRules.cycleExceptions ?? [];
+  const browserSources = rawRules.browserSources ?? [];
+  const browserExternalImports = rawRules.browserExternalImports ?? [];
+  if (!Array.isArray(browserSources)) errors.push(configError('browserSources must be an array.'));
+  else browserSources.forEach((source, index) => validatePathPattern(source, `browserSources[${index}]`, errors));
+  if (!Array.isArray(browserExternalImports) || browserExternalImports.some(value => !isNonEmptyString(value))) {
+    errors.push(configError('browserExternalImports must contain exact module specifiers.'));
+  }
+  const packageDependencies = rawRules.packageDependencies ?? {};
+  if (!packageDependencies || typeof packageDependencies !== 'object' || Array.isArray(packageDependencies)) {
+    errors.push(configError('packageDependencies must be an object.'));
+  } else {
+    for (const [owner, dependencies] of Object.entries(packageDependencies)) {
+      if (!/^packages\/[^/*]+$/u.test(owner)) errors.push(configError(`Invalid package boundary: ${owner}`));
+      if (!Array.isArray(dependencies)) {
+        errors.push(configError(`packageDependencies.${owner} must be an array.`));
+      } else {
+        for (const dependency of dependencies) {
+          if (!Object.hasOwn(packageDependencies, dependency)) errors.push(configError(`Unknown package dependency ${dependency} in ${owner}.`));
+        }
+      }
+    }
+  }
   if (!Array.isArray(cycleExceptions)) {
     errors.push(configError('cycleExceptions must be an array.'));
   } else {
@@ -290,6 +312,9 @@ function validateRules(rawRules) {
       pureSources,
       pureExternalImports,
       pureExternalExceptions,
+      browserSources,
+      browserExternalImports,
+      packageDependencies,
     },
     errors: [],
   };
@@ -626,7 +651,16 @@ function resolveKnownSpecifier({ root, importer, specifier, compilerOptions, pro
 
 function importReferences(sourceFile) {
   const references = [];
-  const add = (specifier, node, kind) => references.push({ specifier, node, kind });
+  const add = (specifier, node, kind) => {
+    const clause = ts.isImportDeclaration(node) ? node.importClause : undefined;
+    const bindings = clause?.namedBindings;
+    const typeOnly = kind === 'import-type' || node.isTypeOnly === true || clause?.isTypeOnly === true
+      || Boolean(!clause?.name && bindings && ts.isNamedImports(bindings)
+        && bindings.elements.length > 0 && bindings.elements.every(element => element.isTypeOnly))
+      || Boolean(ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)
+        && node.exportClause.elements.length > 0 && node.exportClause.elements.every(element => element.isTypeOnly));
+    references.push({ specifier, node, kind, typeOnly });
+  };
   const visit = node => {
     if (ts.isImportEqualsDeclaration(node)
       && ts.isExternalModuleReference(node.moduleReference)) {
@@ -795,6 +829,14 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
   const uniqueEdges = new Map();
   const matchedExceptions = new Set();
   const matchedPureExternalExceptions = new Set();
+  const runtimeEdges = [];
+  const externalReferences = [];
+  const packageOwner = source => source.startsWith('packages/') ? source.split('/').slice(0, 2).join('/') : undefined;
+  if (Object.keys(rules.packageDependencies).length > 0) {
+    for (const owner of new Set(graphNodes.map(packageOwner).filter(Boolean))) {
+      if (!Object.hasOwn(rules.packageDependencies, owner)) diagnostics.push(configError(`Missing packageDependencies boundary for ${owner}.`));
+    }
+  }
   const isPure = source => rules.pureSources.some(pattern => matchesPathPattern(pattern, source));
   const forbiddenImports = rules.forbiddenImports;
   for (const [file, sourceFile] of sourceFiles) {
@@ -811,6 +853,7 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
         workspacePackages,
       });
       const line = lineNumber(sourceFile, reference.node);
+      if (target.kind === 'external' && !reference.typeOnly) externalReferences.push({ source, specifier: reference.specifier, line });
       if (isPure(source) && target.kind === 'external') {
         const exceptionIndex = rules.pureExternalExceptions.findIndex(exception => exceptionMatches(exception, source, reference.specifier));
         const platform = isBuiltin(reference.specifier) || /^(?:node:|vscode(?:\/|$)|react(?:\/|$)|react-dom(?:\/|$)|electron(?:\/|$))/u.test(reference.specifier);
@@ -863,6 +906,16 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
         kind: reference.kind,
       };
       edges.push(edge);
+      if (!reference.typeOnly) runtimeEdges.push(edge);
+      const sourcePackage = packageOwner(source);
+      const targetPackage = packageOwner(targetRelative);
+      if (sourcePackage && targetPackage && sourcePackage !== targetPackage
+        && Object.hasOwn(rules.packageDependencies, sourcePackage)
+        && !rules.packageDependencies[sourcePackage].includes(targetPackage)) {
+        diagnostics.push(makeDiagnostic(ARCHITECTURE_CODES.forbiddenDependency,
+          `${source}:${line} imports ${targetRelative} outside its package boundary.`,
+          { source, target: targetRelative, line }));
+      }
       const key = edgeKey(edge.source, edge.target);
       if (!uniqueEdges.has(key)) uniqueEdges.set(key, edge);
       const pureToRuntime = isPure(source) && targetLayer === 'shared' && !isPure(targetRelative);
@@ -885,6 +938,36 @@ export function analyzeArchitecture(root = process.cwd(), suppliedRules) {
   }
 
   const graphEdges = [...uniqueEdges.values()].sort((left, right) => edgeKey(left.source, left.target).localeCompare(edgeKey(right.source, right.target)));
+  // Traverse value imports only: a renderer's erased host type does not bundle
+  // the host runtime. The full graph above still checks type dependency cycles.
+  const browserReachable = new Set(graphNodes.filter(source => rules.browserSources.some(pattern => matchesPathPattern(pattern, source))));
+  const outgoing = new Map();
+  for (const edge of runtimeEdges) {
+    if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
+    outgoing.get(edge.source).push(edge);
+  }
+  const pending = [...browserReachable];
+  for (let index = 0; index < pending.length; index += 1) {
+    for (const edge of outgoing.get(pending[index]) ?? []) {
+      if (edge.targetLayer === 'shared' && !isPure(edge.target)) {
+        diagnostics.push(makeDiagnostic(ARCHITECTURE_CODES.forbiddenDependency,
+          `${edge.source}:${edge.line} brings Node runtime ${edge.target} into the browser graph.`,
+          { source: edge.source, target: edge.target, line: edge.line }));
+      }
+      if (!browserReachable.has(edge.target)) {
+        browserReachable.add(edge.target);
+        pending.push(edge.target);
+      }
+    }
+  }
+  for (const reference of externalReferences) {
+    if (!browserReachable.has(reference.source)) continue;
+    const platform = isBuiltin(reference.specifier) || /^(?:node:|vscode(?:\/|$)|electron(?:\/|$))/u.test(reference.specifier);
+    if (platform || !rules.browserExternalImports.includes(reference.specifier)) {
+      diagnostics.push(makeDiagnostic(ARCHITECTURE_CODES.forbiddenDependency,
+        `${reference.source}:${reference.line} imports ${reference.specifier} not approved for the browser graph.`, reference));
+    }
+  }
   const components = stronglyConnectedComponents(graphNodes, graphEdges);
   const cycleDiagnostics = [];
   const matchedCycleExceptions = new Set();

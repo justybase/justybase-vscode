@@ -3,7 +3,7 @@
  * Consumed by TypeScript modules under media/resultPanel/ during Phase 5 migration.
  */
 
-import type { SelectionStatsPayload } from './hostContracts.js';
+import type { SelectionStatsPayload } from './selectionStatsTypes.js';
 
 export type { TanStackCellContext } from '../shared/tanstackShims.js';
 
