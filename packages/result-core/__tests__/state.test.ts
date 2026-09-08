@@ -1,4 +1,5 @@
 import {
+  classifyStreamingChunk,
   createEmptyResultPanelState,
   createResultSetId,
   ensureResultSetId,
@@ -97,6 +98,7 @@ describe('result-core state contract (frozen transitions)', () => {
 
     let state = createEmptyResultPanelState();
     state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceUri });
+    expect(classifyStreamingChunk(state, sourceUri)).toBe('incremental');
 
     state = reduceResultPanelState(state, {
       type: 'append-streaming-chunk',
@@ -112,6 +114,7 @@ describe('result-core state contract (frozen transitions)', () => {
     });
 
     state = reduceResultPanelState(state, { type: 'cancel-execution', sourceId: sourceUri, resultSetIndices: [1] });
+    expect(classifyStreamingChunk(state, sourceUri)).toBe('ignore');
 
     const result = getResultSets(state, sourceUri)[1];
     expect(result?.isCancelled).toBe(true);
