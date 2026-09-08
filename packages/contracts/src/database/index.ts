@@ -6,20 +6,8 @@ import type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnIn
 import { UnsupportedDesignerOperationError } from './designerCapabilities';
 import type { DatabaseDesignerCapabilities, DatabaseDesignerCapability, DatabaseDesignerCapabilityKey, DatabaseDesignerColumn, DatabaseDesignerConstraint, DatabaseDesignerDefinition, DatabaseDesignerDiagnostic, DatabaseDesignerIndex, DatabaseDesignerNativeDefinition, DatabaseDesignerPartition, DatabaseDesignerProvider, DatabaseDesignerRelationalIndex, DatabaseDesignerRequirement, DatabaseDesignerRuntimeContext, DatabaseDesignerTarget, DatabaseDesignerTrigger, DatabaseDesignerTriggerCapability, DatabaseDesignerViewCapability, DatabaseDesignerRoutineCapability, DatabaseObjectSnapshot, DatabaseSchemaChangePlan, DatabaseSchemaChangeStatement, DatabaseViewDesignerDefinition, DatabaseTableDesignerDefinition, DesignerCapabilityReasonCode, DesignerNativeFeature, DesignerOperation, DesignerSupportLevel, DesignerRoutineBodyStyle, DesignerTriggerBodyStyle, DesignerTriggerEvent, DesignerTriggerLevel, DesignerTriggerTiming, DesignerViewReplaceStyle } from './designerCapabilities';
 
-export type DatabaseKind =
-  | 'netezza'
-  | 'oracle'
-  | 'postgresql'
-  | 'vertica'
-  | 'snowflake'
-  | 'sqlite'
-  | 'duckdb'
-  | 'db2'
-  | 'mssql'
-  | 'mysql'
-  | 'clickhouse'
-  | 'access'
-  | (string & {});
+import type { DatabaseKind } from './kind';
+export type { DatabaseKind } from './kind';
 
 export const DEFAULT_DATABASE_KIND: DatabaseKind = 'netezza';
 

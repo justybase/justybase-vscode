@@ -30,6 +30,10 @@ or manual because they require credentials and controlled infrastructure.
 the changed high-risk gate against the pull request base commit. Locally, the
 equivalent is `npm run test:coverage:changed` after fetching `origin/master`.
 
+`test:sql-core` also builds and loads the public package entrypoints through
+CommonJS and native ESM. This catches missing exports and duplicated
+Chevrotain token/parser identities that source-only Jest aliases would hide.
+
 Shared-code migration slices additionally follow the desktop-first comparison
 and companion gates in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
 Capture old/new behavior on the same fixtures before replacing a facade;

@@ -1,2 +1,2 @@
 /** Compatibility facade for the package-owned Netezza lexer. */
-export * from "../../../../packages/sql-core/src/netezza/lexer";
+export * from "@justybase/sql-core/netezza/lexer";

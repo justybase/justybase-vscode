@@ -1,4 +1,4 @@
-import type { DatabaseKind } from './index';
+import type { DatabaseKind } from './kind';
 
 /**
  * A construct can be available in the database while still being unavailable

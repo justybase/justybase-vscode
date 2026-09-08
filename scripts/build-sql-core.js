@@ -10,32 +10,42 @@ fs.rmSync(outputRoot, { recursive: true, force: true });
 fs.mkdirSync(outputRoot, { recursive: true });
 
 const entries = [
-  {
-    source: path.join(packageRoot, 'src/index.ts'),
-    output: path.join(outputRoot, 'index.js'),
-  },
-  {
-    source: path.join(packageRoot, 'src/validation.ts'),
-    output: path.join(outputRoot, 'validation.js'),
-  },
-  {
-    source: path.join(packageRoot, 'src/quality/index.ts'),
-    output: path.join(outputRoot, 'quality/index.js'),
-  },
+  ['root', 'index'],
+  ['validation', 'validation'],
+  ['quality', 'quality/index'],
+  ['baseParser', 'parser/BaseSqlParser'],
+  ['comparisonRules', 'parser/queryClauseComparisonRules'],
+  ['parser', 'netezza/parser'],
+  ['lexer', 'netezza/lexer'],
+  ['identifierPattern', 'netezza/identifierPattern'],
+  ['sourceScan', 'sourceScan'],
 ];
 
-for (const entry of entries) {
-  fs.mkdirSync(path.dirname(entry.output), { recursive: true });
-  esbuild.buildSync({
-    entryPoints: [entry.source],
-    bundle: true,
-    platform: 'neutral',
-    format: 'cjs',
-    target: 'node22',
-    outfile: entry.output,
-    external: ['@justybase/contracts'],
-    sourcemap: true,
-  });
+// All public entries must share Chevrotain tokens and parser classes. Bundling
+// each subpath separately would create distinct instances of those objects.
+esbuild.buildSync({
+  stdin: {
+    contents: entries.map(([name, source]) => `export * as ${name} from ${JSON.stringify(`./src/${source}`)};`).join('\n'),
+    resolveDir: packageRoot,
+    sourcefile: 'package-entries.ts',
+    loader: 'ts',
+  },
+  bundle: true,
+  platform: 'neutral',
+  format: 'cjs',
+  target: 'node22',
+  outfile: path.join(outputRoot, 'shared.js'),
+  external: ['@justybase/contracts'],
+  sourcemap: true,
+});
+const namespaces = require(path.join(outputRoot, 'shared.js'));
+for (const [name, source] of entries) {
+  const output = path.join(outputRoot, `${source}.js`);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  const shared = './' + path.relative(path.dirname(output), path.join(outputRoot, 'shared.js')).split(path.sep).join('/');
+  const exports = Object.keys(namespaces[name]).filter(key => key !== '__esModule');
+  const getters = exports.map(key => `Object.defineProperty(exports, ${JSON.stringify(key)}, { enumerable: true, get: function () { return entry[${JSON.stringify(key)}]; } });`);
+  fs.writeFileSync(output, [`const entry = require(${JSON.stringify(shared)}).${name};`, ...getters, ''].join('\n'));
 }
 
 execFileSync(

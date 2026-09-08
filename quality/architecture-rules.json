@@ -1,5 +1,25 @@
 {
   "version": 1,
+  "packageDependencies": {
+    "packages/contracts": [],
+    "packages/sql-core": ["packages/contracts"],
+    "packages/designer-core": ["packages/contracts"],
+    "packages/database-runtime": ["packages/contracts", "packages/designer-core", "packages/netezza-runtime"],
+    "packages/sqlite-runtime": ["packages/contracts"],
+    "packages/duckdb-runtime": ["packages/contracts"],
+    "packages/netezza-runtime": ["packages/contracts"],
+    "packages/access-file": []
+  },
+  "browserSources": ["media/**", "apps/web/src/**"],
+  "browserExternalImports": [
+    "react", "react/jsx-runtime", "react-dom/client",
+    "@monaco-editor/react", "monaco-editor", "@msgpack/msgpack",
+    "@tanstack/react-query", "@tanstack/react-table", "@tanstack/react-virtual",
+    "@tanstack/table-core", "@tanstack/virtual-core",
+    "@xyflow/react", "@xyflow/react/dist/style.css",
+    "echarts/charts", "echarts/components", "echarts/core", "echarts/renderers",
+    "elkjs/lib/elk.bundled.js"
+  ],
   "pureSources": [
     "packages/contracts/src/**",
     "packages/*-core/src/**"
@@ -84,6 +104,22 @@
     "@justybase/sql-core": "packages/sql-core/src/index.ts"
   },
   "forbiddenImports": [
+    {
+      "layer": "desktop",
+      "specifier": "^@justybase/netezza-driver(?:/|$)"
+    },
+    {
+      "layer": "api",
+      "specifier": "^@justybase/netezza-driver(?:/|$)"
+    },
+    {
+      "layer": "companions",
+      "specifier": "^@justybase/netezza-driver(?:/|$)"
+    },
+    {
+      "source": "packages/database-runtime/src/**",
+      "specifier": "^@justybase/netezza-driver(?:/|$)"
+    },
     {
       "layer": "shared",
       "specifier": "^(?:vscode|electron)(?:/|$)"
@@ -1749,18 +1785,6 @@
   ],
   "cycleExceptions": [
     {
-      "source": "apps/api/src/netezza.ts",
-      "target": "apps/api/src/sqlite.ts",
-      "nodes": [
-        "apps/api/src/netezza.ts",
-        "apps/api/src/sqlite.ts"
-      ],
-      "edgeFingerprint": "b095d5e737a0c4c8cc822bb42d047b71d5212e335bf1ae064aafb9de223b4c30",
-      "reason": "Existing cycle retained as an explicit migration target; any edge or node change must update the cycle deliberately.",
-      "owner": "Architecture owner",
-      "removeWhen": "The strongly connected component anchored at apps/api/src/netezza.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
-    },
-    {
       "source": "extensions/snowflake/src/snowflakeImportPlanner.ts",
       "target": "src/import/dataImporter.ts",
       "nodes": [
@@ -1886,18 +1910,6 @@
       "removeWhen": "The strongly connected component anchored at media/resultPanel/diskBackedGrid.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
-      "source": "media/resultPanel/hostContracts.ts",
-      "target": "media/resultPanel/types.ts",
-      "nodes": [
-        "media/resultPanel/hostContracts.ts",
-        "media/resultPanel/types.ts"
-      ],
-      "edgeFingerprint": "61c406677a95ae0a0379f428418bc3046bbe41efb1006628e41dadd2302d5d2d",
-      "reason": "Existing Result Panel module cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Result Panel architecture owner",
-      "removeWhen": "The strongly connected component anchored at media/resultPanel/hostContracts.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
-    },
-    {
       "source": "media/visualQueryBuilder/VisualQueryBuilderApp.tsx",
       "target": "media/visualQueryBuilder/VisualQueryBuilderSourceNode.tsx",
       "nodes": [
@@ -1926,20 +1938,6 @@
       "reason": "Existing Access file package cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
       "owner": "Access package owner",
       "removeWhen": "The strongly connected component anchored at packages/access-file/src/accessFileSession.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
-    },
-    {
-      "source": "packages/contracts/src/connectionDetails.ts",
-      "target": "packages/contracts/src/database/index.ts",
-      "nodes": [
-        "packages/contracts/src/connectionDetails.ts",
-        "packages/contracts/src/database/advancedFeatures.ts",
-        "packages/contracts/src/database/designerCapabilities.ts",
-        "packages/contracts/src/database/index.ts"
-      ],
-      "edgeFingerprint": "683ebc744430e4524272428df6b103a9c115d53ae906d6146fc5769229369f2a",
-      "reason": "Existing contracts type cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Contracts owner",
-      "removeWhen": "The strongly connected component anchored at packages/contracts/src/connectionDetails.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "src/commands/validationCommands.ts",

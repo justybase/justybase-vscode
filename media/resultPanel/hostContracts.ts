@@ -19,6 +19,8 @@ import type {
     ExploreFilterModel,
     ExplorePivotConfig,
 } from './explore/types.js';
+import type { SelectionStatsPayload } from './selectionStatsTypes.js';
+export type { SelectionStatsPayload } from './selectionStatsTypes.js';
 
 export type ResultPanelExportFormat = 'csv' | 'csv.gz' | 'csv.zst' | 'json' | 'xml' | 'sql' | 'markdown' | 'parquet';
 export type ResultPanelExportRowScope = 'loaded' | 'all';
@@ -39,16 +41,6 @@ export interface ResultPanelHydrationMetricsPayload {
     resultSetCount: number;
     totalRowCount: number;
     executionState: ResultPanelExecutionState;
-}
-
-export interface SelectionStatsPayload {
-    cellCount: number;
-    type: 'numeric' | 'date' | 'text' | 'mixed';
-    count?: number;
-    distinctCount?: number;
-    sum?: number;
-    min?: string | number;
-    max?: string | number;
 }
 
 export interface SelectionStatsCalculatingPayload {

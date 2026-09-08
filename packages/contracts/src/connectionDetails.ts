@@ -1,4 +1,5 @@
-import type { DatabaseConnectionOptions, DatabaseKind } from './database/index';
+import type { DatabaseConnectionOptions } from './database/connectionForm';
+import type { DatabaseKind } from './database/kind';
 
 /**
  * Configuration for a transparent TCP tunnel managed by the desktop core.
