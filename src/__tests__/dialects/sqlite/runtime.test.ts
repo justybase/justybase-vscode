@@ -99,6 +99,35 @@ describe('SqliteConnection runtime', () => {
         fs.rmSync(workspace, { recursive: true, force: true });
     });
 
+    it('reads integers beyond Number.MAX_SAFE_INTEGER without RangeError', async () => {
+        const connection = new SqliteConnection({
+            host: '',
+            database: ':memory:',
+            user: '',
+            password: ''
+        });
+
+        await connection.connect();
+
+        try {
+            await connection.createCommand('CREATE TABLE bigints(id INTEGER PRIMARY KEY);').execute();
+            await connection.createCommand('INSERT INTO bigints(id) VALUES (9007199254740993);').execute();
+
+            // Out-of-range integers are lossless strings instead of crashing
+            // with RangeError; safe values keep their historical number type.
+            expect(await readAllRows(connection, 'SELECT id FROM bigints;')).toEqual([['9007199254740993']]);
+            expect(await readAllRows(connection, 'SELECT id FROM bigints WHERE id = 1;')).toEqual([]);
+
+            await connection.createCommand('INSERT INTO bigints(id) VALUES (42);').execute();
+            expect(await readAllRows(connection, 'SELECT id FROM bigints ORDER BY id;')).toEqual([
+                [42],
+                ['9007199254740993']
+            ]);
+        } finally {
+            await connection.close();
+        }
+    });
+
     it('keeps :memory: mode independent of the database path field', async () => {
         const connection = new SqliteConnection({
             host: '',
