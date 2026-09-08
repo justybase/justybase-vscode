@@ -108,7 +108,7 @@ builds.
 
 ### R2 — Runtime Pilot: SQLite, DuckDB, and the Netezza Boundary
 
-Status: implementation and verification in progress. The web API has an
+Status: closed (2026-09-08). The web API has an
 instance-scoped runtime registry, `@justybase/sqlite-runtime` shares a session
 with the desktop, `@justybase/duckdb-runtime` shares a session with the API
 and the DuckDB/File SQL companion, and `@justybase/netezza-runtime` is the
@@ -137,9 +137,8 @@ DuckDB/Netezza value and cancellation compatibility, lifecycle tests, and no
 imports of product implementations from runtimes. The formal Windows gate
 remains a release-CI task because the current environment is Linux/WSL.
 
-Open before closing R2: full verification of lifecycle and cancellation in
-desktop adapters, and verification of a clean build. Existing extractions do
-not yet constitute acceptance of the phase.
+The three closure gates below were completed on 2026-09-08; see
+"R2 closure evidence" after the progress list.
 
 Verification progress (2026-09-08, Linux):
 
@@ -154,8 +153,9 @@ Verification progress (2026-09-08, Linux):
   runtime availability in Designer comes from the application registry.
 - DuckDB/File SQL integrations: 10 / 20 tests respectively; `verify:duckdb`
   and VSIX packaging for DuckDB and the main extension completed successfully.
-- Extension Host SQLite: the result panel and Table Designer passed outside
-  the sandbox; the sandbox blocked Chromium startup (SIGTRAP).
+- Extension Host SQLite: the result panel and Table Designer passed through
+  `xvfb-run -a` (an earlier sandbox Chromium startup failure no longer
+  occurs).
 - Extension Host Netezza (result panel) and companion activation passed.
 - Quality-tool tests: 42 passed outside the sandbox; inside the sandbox, the
   child-process CLI test ends with EPERM. Documentation and version checks
@@ -178,19 +178,35 @@ Verification progress (2026-09-08, Linux):
   tests, types, lint, architecture, and final desktop/API/web builds all
   passed.
 
-Remaining R2 implementation tasks (do not confuse these with the gates that
-have passed):
+R2 closure evidence (2026-09-08, Linux):
 
-1. Complete serialization, cancellation, and draining in the desktop DuckDB
-   adapter, including File SQL; check a stale command handle against the next
-   command, close during connection/execution, and file cleanup after failed
-   setup.
-2. Verify the public SQLite session and `node:sqlite` initialization in a
-   supported Extension Host; add direct ownership/close tests.
-3. Verify installation and build in an isolated clean checkout without
-   generated `dist/`; successful local builds do not prove this property.
-4. Only after closing the points above, update the R2 status and decide
-   whether to move to R3; check Windows on Windows CI/Extension Host.
+1. Desktop DuckDB/File SQL lifecycle and cancellation are closed. The
+   connection tracks in-flight native executions and only interrupts the
+   session for the command at the head of the queue, so cancelling a stale
+   command handle no longer kills the next command; `close()` invalidates
+   the connection, drains in-flight commands, and only then closes the native
+   session; File SQL removes its conversion temp directory when setup fails.
+   Regression tests (all first reproduced failing/hanging on the previous
+   code): stale-handle cancellation, close during execution, and temp-dir
+   cleanup after failed setup. `test:duckdb:integration` 12/12,
+   `test:file:integration` 21/21, `check-types:duckdb` and lint pass.
+2. The public `SqliteSession` and `node:sqlite` initialization are verified:
+   direct ownership/close tests (`packages/sqlite-runtime/__tests__/session.test.ts`)
+   cover idempotent close, file-handle release, close after execution error,
+   `:memory:` vs file, and `readBigInts` value mode; `test:sqlite-runtime`
+   13/13. The real Extension Host runs the result-panel scenario on SQLite
+   and the Table Designer gate, both through `xvfb-run -a` (exit 0).
+3. A clean checkout without generated `dist/` installs and builds:
+   `npm ci`, `npm install` in `extensions/duckdb`, `npm run build`,
+   `npm run build:all`, `npm run package` (main VSIX), and
+   `npm run package:duckdb` with the CI-style VSIX asset verification
+   (`@duckdb/node-api` + platform binding) all pass; the Extension Host
+   result-panel scenario also passes in the clean checkout.
+
+The formal Windows gate remains a release-CI task on the current
+Linux/WSL environment: `build-main.yml` (windows-latest build/package),
+`duckdb-build.yml` (Windows matrix with per-platform binding verification),
+and `result-panel-regression.yml` (Windows Extension Host).
 
 ### R3 — Shared Result Model and Result Panel
 

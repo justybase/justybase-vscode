@@ -121,6 +121,15 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
     private _currentSchema = 'main';
     private readonly _sessionId = `duckdb-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     private readonly _databaseLocation: { databasePath?: string; useCache: boolean };
+    /**
+     * Native executions in flight, in FIFO order. DuckDB serializes queries on
+     * one connection, so the head entry's command is the command currently
+     * interrupted by `session.interrupt()`. Keyed by execution promise
+     * identity so concurrent executions on the same command object are each
+     * tracked for draining (commands are typically single-flight, but this
+     * must not lose the first promise if reused).
+     */
+    private readonly _executing = new Map<Promise<unknown>, DatabaseCommand>();
 
     public constructor(public readonly config: DatabaseConnectionConfig) {
         super();
@@ -156,10 +165,22 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
 
     public async close(): Promise<void> {
         const session = this._session;
+        // Invalidate first so executions racing close() fail requireSession()
+        // instead of registering after the drain snapshot.
+        this._connected = false;
+        if (session && this._executing.size > 0) {
+            // Drain in-flight commands before closing the native connection so
+            // a pending query cannot hang or corrupt the close.
+            try {
+                await this.cancelActiveCommand();
+            } catch {
+                // Preserve the close path; cancellation failure must not skip draining.
+            }
+            await Promise.allSettled([...this._executing.keys()]);
+        }
         this._session = undefined;
         this._connection = undefined;
         this._instance = undefined;
-        this._connected = false;
         this._currentCatalog = '';
         this._currentSchema = 'main';
         if (session) session.close();
@@ -171,16 +192,30 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
     public getCurrentSchema(): string { return this._currentSchema || getOptionString(this.config, 'schema') || 'main'; }
     public getCurrentSid(): string { return this._sessionId; }
 
-    public async executeSql(sql: string): Promise<DuckDbExecutionResult> {
-        const result = normalizeDuckDbReader(await this.requireSession().runAndReadAll(sql));
+    public async executeSql(sql: string, command?: DatabaseCommand): Promise<DuckDbExecutionResult> {
+        const execution = command
+            ? this.trackExecution(command, this.requireSession().runAndReadAll(sql))
+            : this.requireSession().runAndReadAll(sql);
+        const result = normalizeDuckDbReader(await execution);
         if (isUseStatement(sql)) await this.refreshSessionContext();
         return result;
     }
 
-    public async executeStatement(sql: string): Promise<number> {
-        const result = await this.requireSession().run(sql);
+    public async executeStatement(sql: string, command?: DatabaseCommand): Promise<number> {
+        const execution = command
+            ? this.trackExecution(command, this.requireSession().run(sql))
+            : this.requireSession().run(sql);
+        const result = await execution;
         if (isUseStatement(sql)) await this.refreshSessionContext();
         return Number(result.rowsChanged ?? 0);
+    }
+
+    private trackExecution<T>(command: DatabaseCommand, execution: Promise<T>): Promise<T> {
+        const key = execution as Promise<unknown>;
+        this._executing.set(key, command);
+        return execution.finally(() => {
+            this._executing.delete(key);
+        });
     }
 
     public async setCurrentCatalog(catalog: string): Promise<void> {
@@ -190,7 +225,13 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
         await this.refreshSessionContext();
     }
 
-    public async cancelActiveCommand(): Promise<void> { this._session?.interrupt(); }
+    public async cancelActiveCommand(command?: DatabaseCommand): Promise<void> {
+        if (command) {
+            const head = this._executing.values().next().value as DatabaseCommand | undefined;
+            if (head !== command) return; // Stale handle: never interrupt a newer command.
+        }
+        this._session?.interrupt();
+    }
 
     protected requireConnection(): DuckDbRuntimeConnection { return this.requireSession().nativeConnection; }
     protected requireSession(): DuckDbSession {
@@ -223,12 +264,12 @@ class DuckDbCommand implements DatabaseCommand {
         if (isCompatibilityQuery(sql, CURRENT_SID_QUERY)) return createReader([{ name: 'CURRENT_SID', typeName: 'VARCHAR' }], [[this._connection.getCurrentSid()]]);
         const setCatalogMatch = sql.match(SET_CATALOG_QUERY);
         if (setCatalogMatch) { await this._connection.setCurrentCatalog(setCatalogMatch[1]); return createReader([], []); }
-        const result = await this._connection.executeSql(sql);
+        const result = await this._connection.executeSql(sql, this);
         this._recordsAffected = result.recordsAffected;
         return createReader(result.columns, result.rows);
     }
 
-    public async cancel(): Promise<void> { this._cancelled = true; await this._connection.cancelActiveCommand(); }
+    public async cancel(): Promise<void> { this._cancelled = true; await this._connection.cancelActiveCommand(this); }
 
     public async execute(): Promise<void> {
         if (this._cancelled) throw new Error('Query cancelled.');
@@ -236,6 +277,6 @@ class DuckDbCommand implements DatabaseCommand {
         if (isCompatibilityQuery(sql, CURRENT_CATALOG_AND_SCHEMA_QUERY) || isCompatibilityQuery(sql, CURRENT_CATALOG_QUERY) || isCompatibilityQuery(sql, CURRENT_SCHEMA_QUERY) || isCompatibilityQuery(sql, CURRENT_SID_QUERY)) return;
         const setCatalogMatch = sql.match(SET_CATALOG_QUERY);
         if (setCatalogMatch) { await this._connection.setCurrentCatalog(setCatalogMatch[1]); return; }
-        this._recordsAffected = await this._connection.executeStatement(sql);
+        this._recordsAffected = await this._connection.executeStatement(sql, this);
     }
 }

@@ -46,8 +46,25 @@ export class FileDuckDbConnection extends DuckDbConnection {
         });
     }
 
+    public override async connect(): Promise<void> {
+        try {
+            await super.connect();
+        } catch (error) {
+            // Conversion temp files created during a failed setup must not leak.
+            this._removeTempDir();
+            throw error;
+        }
+    }
+
     public override async close(): Promise<void> {
-        await super.close();
+        try {
+            await super.close();
+        } finally {
+            this._removeTempDir();
+        }
+    }
+
+    private _removeTempDir(): void {
         if (this._tempDir) {
             try {
                 fs.rmSync(this._tempDir, { recursive: true, force: true });
