@@ -25,6 +25,8 @@
 !packages/designer-core/**
 !packages/result-core/
 !packages/result-core/**
+!packages/metadata-core/
+!packages/metadata-core/**
 !apps/
 !apps/**
 
@@ -422,6 +424,5 @@ FodyWeavers.xsd
 # Java Jackcess cross-check artifacts (downloaded jars + compiled classes)
 tools/access-java-verify/lib/
 tools/access-java-verify/classes/
-
 .agents
-.github/skills
+.husky/

@@ -7,18 +7,19 @@ import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import type { AdminRestoreRequest, AdminUserCreateRequest, AdminUserUpdateRequest, ConnectionProfileInput, ConnectionProfileUpdate, DesignerSnapshotRequest, QueryAuditStatus, QueryEditPreviewRequest, QueryEditRequest, QueryEvent, QueryFileImportPreviewRequest, QueryFileImportRequest, QueryImportPreviewRequest, QueryImportRequest, QueryPreviewResponse, QueryPreviewStatement, QueryStartRequest, QueryExecutionMode, QueryWriteResponse, WriteOperationPreviewResponse } from '@justybase/contracts';
-import { StaleDesignerSnapshotError } from '@justybase/database-runtime';
+import type { AdminRestoreRequest, AdminUserCreateRequest, AdminUserUpdateRequest, ConnectionProfileInput, ConnectionProfileUpdate, DesignerSnapshotRequest, ExecutionEvent, QueryAuditStatus, QueryEditPreviewRequest, QueryEditRequest, QueryEvent, QueryFileImportPreviewRequest, QueryFileImportRequest, QueryImportPreviewRequest, QueryImportRequest, QueryPreviewResponse, QueryPreviewStatement, QueryStartRequest, QueryExecutionMode, QueryWriteResponse, WriteOperationPreviewResponse } from '@justybase/contracts';
+import { createExecutionOrchestrator, ExecutionOrchestrator, isConnectionBrokenError, isSafeToRetrySql, StaleDesignerSnapshotError, type ExecutionBackend } from '@justybase/database-runtime';
 import { getSqlStatementAtPosition, splitSqlStatements } from '@justybase/sql-core';
 import { type ApiConfig } from './config';
 import { encryptSecret, verifyPassword } from './security';
 import { AppStore, type StoredConnection } from './store';
 import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import { createApiDatabaseRuntimeRegistry } from './databaseRuntime/registry';
-import { formatSqlDocument, invalidateSqlMetadataCache, provideSqlCompletion, provideSqlDiagnostics } from './lsp';
+import { formatSqlDocument, provideSqlCompletion, provideSqlDiagnostics } from './lsp';
 import { QuerySessionManager } from './querySessions';
-import { getSchemaTree, invalidateSchemaCache, searchSchema } from './schemaService';
+import { getSchemaTree, searchSchema } from './schemaService';
 import { attachLspSocket, type LspSession } from './lspProtocol';
+import { ApiMetadataService } from './metadataCache';
 import { createQueryExportStream } from './queryExport';
 import { loadNetezzaSnippets } from './snippets';
 import { getDesignerCapabilitiesResponse } from './designerService';
@@ -48,7 +49,29 @@ const MAX_ADMIN_RESTORE_BODY_BYTES = Math.ceil(MAX_ADMIN_BACKUP_BYTES / 3) * 4 +
 const MAX_IMPORT_BODY_BYTES = Math.ceil(MAX_IMPORT_FILE_BYTES / 3) * 4 + REQUEST_BODY_OVERHEAD_BYTES;
 
 interface RateLimitBucket { count: number; resetAt: number; }
-const rateLimitBuckets = new Map<string, RateLimitBucket>();
+
+class RateLimiter {
+  private readonly buckets = new Map<string, RateLimitBucket>();
+
+  public check(key: string, max: number, windowMs: number): number | undefined {
+    const now = Date.now();
+    if (this.buckets.size > 1_000) {
+      for (const [bucketKey, bucket] of this.buckets) if (bucket.resetAt <= now) this.buckets.delete(bucketKey);
+    }
+    const existing = this.buckets.get(key);
+    if (!existing || existing.resetAt <= now) {
+      this.buckets.set(key, { count: 1, resetAt: now + windowMs });
+      return undefined;
+    }
+    existing.count += 1;
+    if (existing.count <= max) return undefined;
+    return Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+  }
+
+  public clear(): void {
+    this.buckets.clear();
+  }
+}
 
 interface QueryJob {
   id: string;
@@ -65,6 +88,9 @@ interface QueryJob {
   activeStatementIndex?: number;
   cancelRequested: boolean;
   done: boolean;
+  cleanupTimer?: ReturnType<typeof setTimeout>;
+  settled: Promise<void>;
+  resolveSettled: () => void;
 }
 
 export interface PlannedStatement {
@@ -140,23 +166,8 @@ async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promi
   if (request.user?.role !== 'admin') await reply.code(403).send({ code: 'FORBIDDEN', message: 'Administrator role required.' });
 }
 
-function rateLimit(key: string, max: number, windowMs: number): number | undefined {
-  const now = Date.now();
-  if (rateLimitBuckets.size > 1_000) {
-    for (const [bucketKey, bucket] of rateLimitBuckets) if (bucket.resetAt <= now) rateLimitBuckets.delete(bucketKey);
-  }
-  const existing = rateLimitBuckets.get(key);
-  if (!existing || existing.resetAt <= now) {
-    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
-    return undefined;
-  }
-  existing.count += 1;
-  if (existing.count <= max) return undefined;
-  return Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
-}
-
 async function loginRateLimit(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const retryAfter = rateLimit(`login:${request.ip}`, LOGIN_RATE_LIMIT.max, LOGIN_RATE_LIMIT.windowMs);
+  const retryAfter = request.server.rateLimiter.check(`login:${request.ip}`, LOGIN_RATE_LIMIT.max, LOGIN_RATE_LIMIT.windowMs);
   if (retryAfter !== undefined) {
     reply.header('Retry-After', String(retryAfter));
     await reply.code(429).send({ code: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' });
@@ -164,7 +175,7 @@ async function loginRateLimit(request: FastifyRequest, reply: FastifyReply): Pro
 }
 
 async function queryRateLimit(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const retryAfter = rateLimit(`query:${request.user?.id ?? request.ip}`, QUERY_RATE_LIMIT.max, QUERY_RATE_LIMIT.windowMs);
+  const retryAfter = request.server.rateLimiter.check(`query:${request.user?.id ?? request.ip}`, QUERY_RATE_LIMIT.max, QUERY_RATE_LIMIT.windowMs);
   if (retryAfter !== undefined) {
     reply.header('Retry-After', String(retryAfter));
     await reply.code(429).send({ code: 'RATE_LIMITED', message: 'Too many query requests. Try again later.' });
@@ -184,6 +195,14 @@ function emit(job: QueryJob, event: QueryEvent): void {
   job.events.push(sequenced);
   const payload = JSON.stringify(sequenced);
   for (const socket of job.subscribers) if (socket.readyState === 1) socket.send(payload);
+}
+
+function clearQueryJobs(app: FastifyInstance): void {
+  for (const job of app.queryJobs.values()) {
+    if (job.cleanupTimer !== undefined) clearTimeout(job.cleanupTimer);
+    job.cleanupTimer = undefined;
+  }
+  app.queryJobs.clear();
 }
 
 function statementCommandType(sql: string): string {
@@ -509,19 +528,31 @@ async function executeConfirmedWrite(
   const statementIndex = input.statementIndex ?? 0;
   const statementCount = input.statementCount ?? 1;
   try {
-    const result = await app.databaseRuntimes.execute(profile, input.sql, {
+    const execution = app.executionOrchestrator.start({
+      executionId: randomUUID(),
+      sourceKey: `${userId}:${input.connectionId}:write`,
+      target: profile,
+      database,
+      statements: [{ index: 0, sql: input.sql, originalSql: input.sql, expandedSql: input.sql }],
+      delivery: 'buffered',
+      connectionMode: 'persistent',
       maxRows: DEFAULT_ROW_LIMIT,
       timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
       readOnly: false,
-      database,
-    }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined });
-    const rowsAffected = result.rowsAffected ?? result.totalRows;
+      retryPolicy: 'disabled',
+      continueOnError: false,
+    });
+    const summary = await execution.settled;
+    if (summary.status !== 'success') {
+      throw summary.error?.cause ?? new Error(summary.error?.message ?? 'Write execution failed.');
+    }
+    const result = summary.statements[0];
+    const rowsAffected = result?.rowsAffected ?? result?.totalRows ?? 0;
     const message = `${commandType} completed · ${rowsAffected.toLocaleString()} row(s) affected.`;
     app.store.addHistory(userId, input.connectionId, database, input.sql, 'success', Date.now() - startedAt, rowsAffected);
     recordAudit(app, userId, { connectionId: input.connectionId, database, statementIndex, statementCount, commandType, sql: input.sql, status: 'success', rowsAffected, durationMs: Date.now() - startedAt, confirmed: input.confirmed });
     if (isSchemaMutation(commandType)) {
-      invalidateSchemaCache(input.connectionId);
-      invalidateSqlMetadataCache(input.connectionId);
+      app.metadataService.invalidate(userId, input.connectionId);
       for (const session of app.lspSessions) session.invalidateConnection(input.connectionId);
     }
     return { sql: input.sql, rowsAffected, message };
@@ -693,6 +724,8 @@ async function startQuery(app: FastifyInstance, userId: string, input: QueryStar
   }
 
   const queryId = randomUUID();
+  let resolveJobSettled!: () => void;
+  const jobSettled = new Promise<void>(resolve => { resolveJobSettled = resolve; });
   const job: QueryJob = {
     id: queryId,
     userId,
@@ -706,135 +739,243 @@ async function startQuery(app: FastifyInstance, userId: string, input: QueryStar
     sequence: 0,
     cancelRequested: false,
     done: false,
+    settled: jobSettled,
+    resolveSettled: resolveJobSettled,
   };
   app.queryJobs.set(queryId, job);
-  void (async () => {
-    const startedAt = Date.now();
-    emit(job, { type: 'started', queryId, startedAt, mode: job.mode, statementCount: job.statements.length });
-    let completedStatements = 0;
-    try {
-      for (const statement of job.statements) {
-        job.activeStatementIndex = statement.index;
-        if (job.cancelRequested) {
-          emit(job, { type: 'cancelled', queryId, statementIndex: statement.index, statementCount: job.statements.length, totalRows: 0, scope: 'batch' });
-          emit(job, { type: 'batch-complete', queryId, statementCount: job.statements.length, status: 'cancelled', completedStatements, message: 'Query batch cancelled.' });
-          recordAudit(app, userId, {
-            connectionId: input.connectionId,
-            database,
-            statementIndex: statement.index,
-            statementCount: job.statements.length,
+  const startedAt = Date.now();
+  const statementStates = new Map<number, {
+    sessionId: string;
+    statementStartedAt: number;
+    commandType: string;
+    totalRows: number;
+    terminalized: boolean;
+  }>();
+  let completedStatements = 0;
+  let cleanupScheduled = false;
+
+  const scheduleJobCleanup = (): void => {
+    if (cleanupScheduled) return;
+    cleanupScheduled = true;
+    job.cleanupTimer = setTimeout(() => {
+      job.cleanupTimer = undefined;
+      app.queryJobs.delete(queryId);
+    }, QUERY_JOB_TTL_MS);
+    job.cleanupTimer.unref();
+  };
+
+  const execution = app.executionOrchestrator.start({
+    executionId: queryId,
+    sourceKey: `${userId}:${input.connectionId}`,
+    target: profile,
+    database,
+    statements: planned.statements.map(statement => ({
+      index: statement.index,
+      sql: statement.sql,
+      originalSql: statement.sql,
+      expandedSql: statement.sql,
+    })),
+    delivery: 'streaming',
+    connectionMode: 'persistent',
+    maxRows: input.maxRows ?? DEFAULT_ROW_LIMIT,
+    timeoutSeconds: input.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS,
+    readOnly: profile.readOnly,
+    retryPolicy: 'safe-read-only-on-broken-connection',
+    continueOnError: false,
+  }, {
+    onEvent: async (event: ExecutionEvent): Promise<void> => {
+      switch (event.type) {
+        case 'execution-started':
+          emit(job, { type: 'started', queryId, startedAt, mode: job.mode, statementCount: job.statements.length });
+          return;
+        case 'statement-started': {
+          const statementIndex = event.context.statementIndex;
+          const statement = job.statements[statementIndex];
+          if (!statement) throw new Error(`Execution started unknown statement ${statementIndex}.`);
+          const sessionId = app.querySessions.create(queryId, userId, input.connectionId, [], statementIndex, job.statements.length);
+          const state = {
+            sessionId,
+            statementStartedAt: Date.now(),
             commandType: statementCommandType(statement.sql),
-            sql: statement.sql,
-            status: 'cancelled',
-            durationMs: 0,
-            confirmed: input.writeConfirmed === true,
-          });
-          break;
+            totalRows: 0,
+            terminalized: false,
+          };
+          statementStates.set(statementIndex, state);
+          job.sessionIds.set(statementIndex, sessionId);
+          job.activeStatementIndex = statementIndex;
+          emit(job, { type: 'statement-started', queryId, statementIndex, statementCount: job.statements.length, statementSql: statement.sql });
+          emit(job, { type: 'session', queryId, statementIndex, statementCount: job.statements.length, sessionId, totalRows: 0 });
+          return;
         }
-
-        emit(job, { type: 'statement-started', queryId, statementIndex: statement.index, statementCount: job.statements.length, statementSql: statement.sql });
-        const sessionId = app.querySessions.create(queryId, userId, input.connectionId, [], statement.index, job.statements.length);
-        job.sessionIds.set(statement.index, sessionId);
-        emit(job, { type: 'session', queryId, statementIndex: statement.index, statementCount: job.statements.length, sessionId, totalRows: 0 });
-        let totalRows = 0;
-        const statementStartedAt = Date.now();
-        const commandType = statementCommandType(statement.sql);
-
-        try {
-          const result = await app.databaseRuntimes.execute(profile, statement.sql, {
-            maxRows: input.maxRows ?? DEFAULT_ROW_LIMIT,
-            timeoutSeconds: input.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS,
-            readOnly: profile.readOnly,
-            database,
-          }, {
-            onColumns: columns => {
-              app.querySessions.setColumns(userId, sessionId, columns);
-              emit(job, { type: 'columns', queryId, statementIndex: statement.index, statementCount: job.statements.length, columns });
-            },
-            onRows: rows => {
-              totalRows = app.querySessions.appendRows(userId, sessionId, rows);
-              emit(job, { type: 'progress', queryId, statementIndex: statement.index, statementCount: job.statements.length, totalRows });
-            },
-            onCommand: command => { job.cancel = () => command.cancel(); },
+        case 'columns': {
+          const statementIndex = event.context.statementIndex;
+          const state = statementStates.get(statementIndex);
+          if (!state) throw new Error(`Received columns before statement ${statementIndex} started.`);
+          app.querySessions.setColumns(userId, state.sessionId, event.columns);
+          emit(job, { type: 'columns', queryId, statementIndex, statementCount: job.statements.length, columns: event.columns });
+          return;
+        }
+        case 'rows': {
+          const statementIndex = event.context.statementIndex;
+          const state = statementStates.get(statementIndex);
+          if (!state) throw new Error(`Received rows before statement ${statementIndex} started.`);
+          state.totalRows = app.querySessions.appendRows(userId, state.sessionId, event.rows);
+          emit(job, { type: 'progress', queryId, statementIndex, statementCount: job.statements.length, totalRows: state.totalRows });
+          return;
+        }
+        case 'statement-completed': {
+          const statementIndex = event.context.statementIndex;
+          const statement = job.statements[statementIndex];
+          const state = statementStates.get(statementIndex);
+          if (!statement || !state) throw new Error(`Completed unknown statement ${statementIndex}.`);
+          const result = event.summary;
+          const message = statementMessage(state.commandType, result);
+          state.totalRows = app.querySessions.complete(userId, state.sessionId, {
+            limitReached: result.limitReached,
+            message,
+            ...(result.rowsAffected === undefined ? {} : { rowsAffected: result.rowsAffected }),
           });
-          if (job.cancelRequested) throw new Error('Query cancelled.');
-          totalRows = result.totalRows;
-          const message = statementMessage(commandType, result);
-          totalRows = app.querySessions.complete(userId, sessionId, { rowsAffected: result.rowsAffected, limitReached: result.limitReached, message });
-          emit(job, { type: 'complete', queryId, statementIndex: statement.index, statementCount: job.statements.length, totalRows, limitReached: result.limitReached, rowsAffected: result.rowsAffected, message, commandType });
-          app.store.addHistory(userId, input.connectionId, database, statement.sql, 'success', Date.now() - startedAt, result.rowsAffected ?? totalRows);
+          state.terminalized = true;
+          emit(job, {
+            type: 'complete',
+            queryId,
+            statementIndex,
+            statementCount: job.statements.length,
+            totalRows: state.totalRows,
+            limitReached: result.limitReached,
+            ...(result.rowsAffected === undefined ? {} : { rowsAffected: result.rowsAffected }),
+            ...(message === undefined ? {} : { message }),
+            commandType: state.commandType,
+          });
+          app.store.addHistory(userId, input.connectionId, database, statement.sql, 'success', Date.now() - startedAt, result.rowsAffected ?? state.totalRows);
           recordAudit(app, userId, {
             connectionId: input.connectionId,
             database,
-            statementIndex: statement.index,
+            statementIndex,
             statementCount: job.statements.length,
-            commandType,
+            commandType: state.commandType,
             sql: statement.sql,
             status: 'success',
-            rowsAffected: result.rowsAffected ?? totalRows,
-            durationMs: Date.now() - statementStartedAt,
+            rowsAffected: result.rowsAffected ?? state.totalRows,
+            durationMs: Date.now() - state.statementStartedAt,
             confirmed: input.writeConfirmed === true,
           });
-          if (isSchemaMutation(commandType)) {
-            invalidateSchemaCache(input.connectionId);
-            invalidateSqlMetadataCache(input.connectionId);
+          if (isSchemaMutation(state.commandType)) {
+            app.metadataService.invalidate(userId, input.connectionId);
             for (const session of app.lspSessions) session.invalidateConnection(input.connectionId);
           }
           completedStatements += 1;
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : 'Query failed.';
-          const cancelled = job.cancelRequested || /cancel/i.test(message);
-          app.querySessions.complete(userId, sessionId, { message: cancelled ? 'Query cancelled.' : message });
+          return;
+        }
+        case 'statement-failed': {
+          const statementIndex = event.context.statementIndex;
+          const statement = job.statements[statementIndex];
+          const state = statementStates.get(statementIndex);
+          if (state?.terminalized) return;
+          if (!statement) throw new Error(`Failed unknown statement ${statementIndex}.`);
+          const cancelled = event.failure.kind === 'cancellation';
+          const message = cancelled ? 'Query cancelled.' : event.failure.message;
+          const totalRows = state?.totalRows ?? 0;
+          if (state) {
+            app.querySessions.complete(userId, state.sessionId, { message });
+            state.terminalized = true;
+          }
           if (cancelled) {
-            emit(job, { type: 'cancelled', queryId, statementIndex: statement.index, statementCount: job.statements.length, totalRows, scope: job.mode === 'script' ? 'batch' : 'statement' });
-            emit(job, { type: 'batch-complete', queryId, statementCount: job.statements.length, status: 'cancelled', completedStatements, message: 'Query batch cancelled.' });
-            app.store.addHistory(userId, input.connectionId, database, statement.sql, 'cancelled', Date.now() - startedAt, totalRows);
-            recordAudit(app, userId, {
-              connectionId: input.connectionId,
-              database,
-              statementIndex: statement.index,
-              statementCount: job.statements.length,
-              commandType,
-              sql: statement.sql,
-              status: 'cancelled',
-              rowsAffected: totalRows,
-              durationMs: Date.now() - statementStartedAt,
-              confirmed: input.writeConfirmed === true,
-            });
+            emit(job, { type: 'cancelled', queryId, statementIndex, statementCount: job.statements.length, totalRows, scope: job.mode === 'script' ? 'batch' : 'statement' });
           } else {
-            emit(job, { type: 'error', queryId, statementIndex: statement.index, statementCount: job.statements.length, message });
-            emit(job, { type: 'batch-complete', queryId, statementCount: job.statements.length, status: 'error', completedStatements, message: `Statement ${statement.index + 1} failed; subsequent statements were not executed.` });
-            app.store.addHistory(userId, input.connectionId, database, statement.sql, 'error', Date.now() - startedAt, totalRows);
+            emit(job, { type: 'error', queryId, statementIndex, statementCount: job.statements.length, message });
+          }
+          const status: QueryAuditStatus = cancelled ? 'cancelled' : 'error';
+          app.store.addHistory(userId, input.connectionId, database, statement.sql, status, Date.now() - startedAt, totalRows);
+          recordAudit(app, userId, {
+            connectionId: input.connectionId,
+            database,
+            statementIndex,
+            statementCount: job.statements.length,
+            commandType: state?.commandType ?? statementCommandType(statement.sql),
+            sql: statement.sql,
+            status,
+            rowsAffected: totalRows,
+            durationMs: Date.now() - (state?.statementStartedAt ?? startedAt),
+            confirmed: input.writeConfirmed === true,
+          });
+          return;
+        }
+        case 'execution-terminal': {
+          if (event.summary.status === 'success') return;
+          const statementIndex = job.activeStatementIndex ?? job.statements[0]?.index ?? 0;
+          const statement = job.statements[statementIndex];
+          const state = statementStates.get(statementIndex);
+          const cleanupFailure = event.summary.error?.kind === 'cleanup';
+          if (state?.terminalized && !cleanupFailure) return;
+          const cancelled = event.summary.status === 'cancelled';
+          const message = cancelled ? 'Query cancelled.' : event.summary.error?.message ?? 'Query failed.';
+          const totalRows = state?.totalRows ?? 0;
+          if (state && !state.terminalized) {
+            app.querySessions.complete(userId, state.sessionId, { message });
+            state.terminalized = true;
+          }
+          if (cancelled) {
+            emit(job, { type: 'cancelled', queryId, statementIndex, statementCount: job.statements.length, totalRows, scope: job.mode === 'script' ? 'batch' : 'statement' });
+          } else {
+            emit(job, { type: 'error', queryId, statementIndex, statementCount: job.statements.length, message });
+          }
+          if (statement) {
+            const status: QueryAuditStatus = cancelled ? 'cancelled' : 'error';
+            app.store.addHistory(userId, input.connectionId, database, statement.sql, status, Date.now() - startedAt, totalRows);
             recordAudit(app, userId, {
               connectionId: input.connectionId,
               database,
-              statementIndex: statement.index,
+              statementIndex,
               statementCount: job.statements.length,
-              commandType,
+              commandType: state?.commandType ?? statementCommandType(statement.sql),
               sql: statement.sql,
-              status: 'error',
+              status,
               rowsAffected: totalRows,
-              durationMs: Date.now() - statementStartedAt,
+              durationMs: Date.now() - (state?.statementStartedAt ?? startedAt),
               confirmed: input.writeConfirmed === true,
             });
           }
-          break;
-        } finally {
-          job.cancel = undefined;
+          return;
         }
+        case 'batch-completed': {
+          const status = event.summary.status === 'success' ? 'complete' : event.summary.status;
+          const message = status === 'cancelled'
+            ? 'Query batch cancelled.'
+            : status === 'error'
+              ? `Statement ${(job.activeStatementIndex ?? Math.max(0, completedStatements)) + 1} failed; subsequent statements were not executed.`
+              : undefined;
+          emit(job, {
+            type: 'batch-complete',
+            queryId,
+            statementCount: job.statements.length,
+            status,
+            completedStatements,
+            ...(message === undefined ? {} : { message }),
+          });
+          job.done = true;
+          job.cancel = undefined;
+          job.activeStatementIndex = undefined;
+          job.resolveSettled();
+          scheduleJobCleanup();
+          return;
+        }
+        case 'retrying':
+          app.log.debug({ queryId, statementIndex: event.context.statementIndex, attempt: event.retry.attempt }, 'Retrying a safe read-only query after a broken connection.');
+          return;
+        case 'progress':
+          return;
       }
-      if (completedStatements === job.statements.length) {
-        emit(job, { type: 'batch-complete', queryId, statementCount: job.statements.length, status: 'complete', completedStatements });
-      }
-    } finally {
-      job.done = true;
-      job.cancel = undefined;
-      job.activeStatementIndex = undefined;
-      // Keep the event log for the same window as disk-backed result sessions,
-      // so a reconnect can replay the terminal event instead of leaving the tab running forever.
-      setTimeout(() => app.queryJobs.delete(queryId), QUERY_JOB_TTL_MS).unref();
-    }
-  })();
+    },
+  });
+  job.cancel = () => execution.cancel();
+  void execution.settled.then(() => {
+    job.done = true;
+    job.cancel = undefined;
+    job.activeStatementIndex = undefined;
+    job.resolveSettled();
+    scheduleJobCleanup();
+  });
   return { queryId, statementCount: job.statements.length };
 }
 
@@ -866,9 +1007,25 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   const localDbRoot = apiConfig.localDbRoot ?? path.join(apiConfig.dataDir, 'local-databases');
   const store = new AppStore(apiConfig.dataDir, localDbRoot);
   const databaseRuntimes = createApiDatabaseRuntimeRegistry({ masterKey: apiConfig.masterKey });
+  const executionBackend: ExecutionBackend<StoredConnection> = {
+    execute: (target, sql, options, callbacks) => databaseRuntimes.execute(target, sql, options, callbacks),
+    closeTarget: target => databaseRuntimes.closeConnection(target.id),
+    closeAll: () => databaseRuntimes.closeAll(),
+    isConnectionBrokenError,
+    isSafeToRetrySql,
+  };
+  const executionOrchestrator = createExecutionOrchestrator({ backend: executionBackend, logger: {
+    warn: (message, error) => app.log.warn({ error }, message),
+    error: (message, error) => app.log.error({ error }, message),
+  } });
+  const metadataService = new ApiMetadataService();
+  const rateLimiter = new RateLimiter();
   app.decorate('store', store);
   app.decorate('apiConfig', apiConfig);
   app.decorate('databaseRuntimes', databaseRuntimes);
+  app.decorate('executionOrchestrator', executionOrchestrator);
+  app.decorate('rateLimiter', rateLimiter);
+  app.decorate('metadataService', metadataService);
   app.decorate('queryJobs', new Map<string, QueryJob>());
   app.decorate('querySessions', new QuerySessionManager(apiConfig.dataDir));
   app.decorate('lspSessions', new Set<LspSession>());
@@ -950,11 +1107,10 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       await app.databaseRuntimes.closeAll();
       const restored = store.restoreFrom(uploadPath);
       app.querySessions.clearAll();
-      app.queryJobs.clear();
-      invalidateSchemaCache();
-      invalidateSqlMetadataCache();
+      clearQueryJobs(app);
+      app.metadataService.clear();
       for (const session of app.lspSessions) session.invalidateAll();
-      rateLimitBuckets.clear();
+      app.rateLimiter.clear();
       return reply.code(200).send({
         message: `Backup restored. A safety copy was saved as ${path.basename(safetyPath)}. Sign in again if this session is no longer valid.`,
         ...restored,
@@ -994,8 +1150,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
       const updated = store.updateConnection(request.user!.id, request.params.id, input, input.password ? encryptSecret(input.password, apiConfig.masterKey) : undefined);
       if (!updated) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
       await app.databaseRuntimes.closeConnection(request.params.id);
-      invalidateSchemaCache(request.params.id);
-      invalidateSqlMetadataCache(request.params.id);
+      app.metadataService.invalidate(request.user!.id, request.params.id);
       for (const session of app.lspSessions) session.invalidateConnection(request.params.id);
       return updated;
     } catch (error: unknown) { return reply.code(400).send({ code: 'INVALID_CONNECTION', message: error instanceof Error ? error.message : 'Invalid connection.' }); }
@@ -1003,8 +1158,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   app.delete<{ Params: { id: string } }>('/api/connections/:id', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
     if (!store.deleteConnection(request.user!.id, request.params.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
     await app.databaseRuntimes.closeConnection(request.params.id);
-    invalidateSchemaCache(request.params.id);
-    invalidateSqlMetadataCache(request.params.id);
+    app.metadataService.invalidate(request.user!.id, request.params.id);
     for (const session of app.lspSessions) session.invalidateConnection(request.params.id);
     return { ok: true };
   });
@@ -1046,10 +1200,10 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
     try { await app.databaseRuntimes.execute(profile, 'SELECT 1', { maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined }); return { ok: true }; } catch (error: unknown) { return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' }); }
   });
 
-  app.get('/api/metadata/databases', { preHandler: authenticate }, async (request, reply) => { const id = String((request.query as { connectionId?: string }).connectionId ?? ''); const profile = store.getConnection(request.user!.id, id); if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' }); return app.databaseRuntimes.listDatabases(profile); });
-  app.get('/api/metadata/schemas', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.databaseRuntimes.listSchemas(profile, query.database); });
-  app.get('/api/metadata/objects', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.databaseRuntimes.listObjects(profile, query.database, query.schema); });
-  app.get('/api/metadata/columns', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string; table?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database || !query.schema || !query.table) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Table scope not found.' }); return app.databaseRuntimes.listColumns(profile, query.database, query.schema, query.table); });
+  app.get('/api/metadata/databases', { preHandler: authenticate }, async (request, reply) => { const id = String((request.query as { connectionId?: string }).connectionId ?? ''); const profile = store.getConnection(request.user!.id, id); if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' }); return app.metadataService.listDatabases(app.databaseRuntimes, request.user!.id, profile); });
+  app.get('/api/metadata/schemas', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.metadataService.listSchemas(app.databaseRuntimes, request.user!.id, profile, query.database); });
+  app.get('/api/metadata/objects', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.metadataService.listObjects(app.databaseRuntimes, request.user!.id, profile, query.database, query.schema); });
+  app.get('/api/metadata/columns', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string; table?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database || !query.schema || !query.table) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Table scope not found.' }); return app.metadataService.listColumns(app.databaseRuntimes, request.user!.id, profile, query.database, query.schema, query.table); });
   app.get('/api/designer/capabilities', { preHandler: authenticate }, async (request, reply) => {
     try {
       const input = parseDesignerCapabilitiesRequest(request.query);
@@ -1085,19 +1239,19 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   app.get('/api/schema/tree', { preHandler: authenticate }, async (request, reply) => {
     const query = request.query as { connectionId?: string; parentId?: string };
     if (!query.connectionId) return reply.code(400).send({ code: 'INVALID_REQUEST', message: 'connectionId is required.' });
-    try { return await getSchemaTree(store, app.databaseRuntimes, request.user!.id, query.connectionId, query.parentId); }
+    try { return await getSchemaTree(store, app.databaseRuntimes, request.user!.id, query.connectionId, query.parentId, app.metadataService); }
     catch (error: unknown) { return reply.code(400).send({ code: 'SCHEMA_TREE_FAILED', message: error instanceof Error ? error.message : 'Schema tree failed.' }); }
   });
   app.post('/api/schema/search', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await searchSchema(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SchemaSearchRequest); }
+    try { return await searchSchema(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SchemaSearchRequest, app.metadataService); }
     catch (error: unknown) { return reply.code(400).send({ code: 'SCHEMA_SEARCH_FAILED', message: error instanceof Error ? error.message : 'Schema search failed.' }); }
   });
   app.post('/api/lsp/completion', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await provideSqlCompletion(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlCompletionRequest); }
+    try { return await provideSqlCompletion(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlCompletionRequest, app.metadataService); }
     catch (error: unknown) { return reply.code(400).send({ code: 'LSP_COMPLETION_FAILED', message: error instanceof Error ? error.message : 'Completion failed.' }); }
   });
   app.post('/api/lsp/diagnostics', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await provideSqlDiagnostics(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlDiagnosticsRequest); }
+    try { return await provideSqlDiagnostics(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlDiagnosticsRequest, app.metadataService); }
     catch (error: unknown) { return reply.code(400).send({ code: 'LSP_DIAGNOSTICS_FAILED', message: error instanceof Error ? error.message : 'Diagnostics failed.' }); }
   });
   app.post('/api/lsp/format', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
@@ -1329,8 +1483,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
     });
   });
   app.get('/api/lsp', { websocket: true, preValidation: authenticate }, (socket, request) => {
-    let session: LspSession;
-    session = attachLspSocket(socket, store, app.databaseRuntimes, request.user!.id, closed => app.lspSessions.delete(closed));
+    const session = attachLspSocket(socket, store, app.databaseRuntimes, request.user!.id, closed => app.lspSessions.delete(closed), app.metadataService);
     app.lspSessions.add(session);
   });
 
@@ -1344,9 +1497,12 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   app.addHook('onClose', async () => {
     clearInterval(cleanupTimer);
     app.querySessions.closeAll();
+    app.metadataService.clear();
     try {
-      await app.databaseRuntimes.closeAll();
+      await app.executionOrchestrator.dispose();
     } finally {
+      app.rateLimiter.clear();
+      clearQueryJobs(app);
       store.close();
     }
   });
@@ -1358,6 +1514,9 @@ declare module 'fastify' {
     store: AppStore;
     apiConfig: ApiConfig;
     databaseRuntimes: ApiDatabaseRuntimeRegistry;
+    executionOrchestrator: ExecutionOrchestrator<StoredConnection>;
+    rateLimiter: RateLimiter;
+    metadataService: ApiMetadataService;
     queryJobs: Map<string, QueryJob>;
     querySessions: QuerySessionManager;
     lspSessions: Set<LspSession>;
