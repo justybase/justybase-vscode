@@ -1,6 +1,6 @@
 import type * as Monaco from 'monaco-editor';
 import type { EditorPreferences, SqlLanguageContext } from '@justybase/contracts';
-import { api } from './api';
+import type { ApiClient } from './api';
 
 interface RpcMessage { id?: number; method?: string; result?: unknown; error?: { message?: string }; params?: Record<string, unknown>; }
 interface PendingRequest { resolve(value: unknown): void; reject(reason: unknown): void; }
@@ -14,10 +14,13 @@ interface CoreSignatureHelpLike { signatures: CoreSignatureInformationLike[]; ac
 interface CoreSemanticTokenLike { line: number; character: number; length: number; type: string; modifiers: string[]; }
 interface WebSnippetLike { prefix: string[]; body: string[]; description?: string; }
 
-let cachedSnippets: Promise<WebSnippetLike[]> | null = null;
-function loadSnippets(): Promise<WebSnippetLike[]> {
-  if (!cachedSnippets) cachedSnippets = api.snippets().then(response => response.snippets ?? []).catch(() => []);
-  return cachedSnippets;
+const cachedSnippets = new WeakMap<object, Promise<WebSnippetLike[]>>();
+function loadSnippets(api: ApiClient): Promise<WebSnippetLike[]> {
+  const existing = cachedSnippets.get(api);
+  if (existing) return existing;
+  const loaded = api.snippets().then(response => response.snippets ?? []).catch(() => []);
+  cachedSnippets.set(api, loaded);
+  return loaded;
 }
 
 function lspPosition(position: Monaco.Position): { line: number; character: number } {
@@ -33,11 +36,10 @@ class WebLspClient {
   private readonly getContext: () => SqlLanguageContext;
   private onDiagnostics: ((params: Record<string, unknown>) => void) | undefined;
 
-  public constructor(uri: string, getContext: () => SqlLanguageContext) {
+  public constructor(uri: string, api: ApiClient, getContext: () => SqlLanguageContext) {
     this.uri = uri;
     this.getContext = getContext;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.socket = new WebSocket(`${protocol}//${window.location.host}/api/lsp`);
+    this.socket = api.openWebSocket('/api/lsp');
     this.ready = new Promise<void>((resolve, reject) => {
       this.socket.addEventListener('open', () => {
         void this.request('initialize', { capabilities: {}, initializationOptions: {} }).then(() => {
@@ -126,7 +128,12 @@ class WebLspClient {
     this.pending.clear();
   }
   private syncContext(): void { this.notify('justybase/documentContext', { uri: this.uri, context: this.getContext() }); }
-  private notify(method: string, params: unknown): void { if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ jsonrpc: '2.0', method, params })); }
+  private notify(method: string, params: unknown): void {
+    // WebSocket.OPEN is a static property of the global constructor. The
+    // client also supports injected transports in embedded/Node consumers,
+    // where that global may not exist.
+    if (this.socket.readyState === 1) this.socket.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
+  }
   private request(method: string, params: unknown): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); });
@@ -176,10 +183,10 @@ function monacoSignatureHelp(_monaco: typeof Monaco, help: CoreSignatureHelpLike
   };
 }
 
-export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco, getContext: () => SqlLanguageContext, getPreferences: () => EditorPreferences | null = () => null): void {
+export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco, api: ApiClient, getContext: () => SqlLanguageContext, getPreferences: () => EditorPreferences | null = () => null): void {
   const model = editor.getModel();
   if (!model) return;
-  const client = new WebLspClient(model.uri.toString(), getContext);
+  const client = new WebLspClient(model.uri.toString(), api, getContext);
   const suggestedFixes = new Map<string, string>();
   const markerKey = (code: string, line: number, character: number): string => `${code}:${line}:${character}`;
   const setMarkers = (params: Record<string, unknown>): void => {
@@ -230,7 +237,7 @@ export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCod
     }
   } });
   const snippetDisposable = monaco.languages.registerCompletionItemProvider('sql', { provideCompletionItems: async (completionModel, position) => {
-    const snippets = await loadSnippets();
+    const snippets = await loadSnippets(api);
     const word = completionModel.getWordUntilPosition(position);
     const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
     const prefix = word.word.toLowerCase();

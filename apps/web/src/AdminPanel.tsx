@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import type { AdminUserSummary } from '@justybase/contracts';
-import { api } from './api';
+import { useApiClient } from './api';
 
 export function AdminPanel({ onClose }: { onClose(): void }): ReactElement {
+  const api = useApiClient();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');

@@ -5,7 +5,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterSpec, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
 import { aggregateResultRows, filterResultRows, type ResultColumn, type ResultColumnFilter } from '@justybase/result-core';
-import { api } from './api';
+import { useApiClient } from './api';
+import { readLegacyWorkspaceValue, useWorkspaceStorage, type WorkspaceStorage } from './workspacePersistence';
 import { type ResultState } from './queryState';
 
 interface GridRow { values: unknown[]; }
@@ -39,16 +40,15 @@ interface PivotResult {
 }
 
 function gridStateKey(resultSetId: string): string {
-  return `jwb_grid_v2_${resultSetId}`;
+  return `grid_v2_${resultSetId}`;
 }
 
 function legacyGridStateKey(queryId: string, statementIndex: number): string {
-  return `jwb_grid_${queryId}_${statementIndex}`;
+  return `grid_${queryId}_${statementIndex}`;
 }
 
-function readGridState(key: string, expectedResultSetId: string): SavedGridState | undefined {
+function parseGridState(value: string | null, expectedResultSetId: string): SavedGridState | undefined {
   try {
-    const value = localStorage.getItem(key);
     if (!value) return undefined;
     const parsed = JSON.parse(value) as PersistedGridStateEnvelope;
     if (parsed && typeof parsed === 'object' && parsed.version === 2 && parsed.resultSetId === expectedResultSetId && parsed.state && typeof parsed.state === 'object') return parsed.state;
@@ -58,15 +58,22 @@ function readGridState(key: string, expectedResultSetId: string): SavedGridState
   }
 }
 
-function readLegacyGridState(key: string): SavedGridState | undefined {
+function readGridState(storage: WorkspaceStorage, key: string, expectedResultSetId: string): SavedGridState | undefined {
+  return parseGridState(storage.get(key), expectedResultSetId);
+}
+
+function parseLegacyGridState(value: string | null): SavedGridState | undefined {
   try {
-    const value = localStorage.getItem(key);
     if (!value) return undefined;
     const parsed = JSON.parse(value) as SavedGridState;
     return parsed && typeof parsed === 'object' ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+
+function readLegacyGridState(storage: WorkspaceStorage, key: string): SavedGridState | undefined {
+  return parseLegacyGridState(storage.get(key));
 }
 
 function serialiseValue(value: unknown): unknown {
@@ -163,6 +170,8 @@ function cellAlignment(type?: string): string {
 }
 
 export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: { queryId: string; statementIndex?: number; result: ResultState; onEditRow?(values: unknown[]): void }): ReactElement {
+  const api = useApiClient();
+  const storage = useWorkspaceStorage();
   const [rows, setRows] = useState<unknown[][]>(result.rows);
   const [totalRows, setTotalRows] = useState(result.totalRows);
   const [pageIndex, setPageIndex] = useState(0);
@@ -215,7 +224,10 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setDetailRowIndex(null);
     setShowAggregates(false);
     setGridHydratedKey(null);
-    const saved = readGridState(gridKey, resultSetId) ?? readLegacyGridState(legacyKey);
+    const saved = readGridState(storage, gridKey, resultSetId)
+      ?? readLegacyGridState(storage, legacyKey)
+      ?? parseGridState(readLegacyWorkspaceValue(`jwb_grid_v2_${resultSetId}`), resultSetId)
+      ?? parseLegacyGridState(readLegacyWorkspaceValue(`jwb_grid_${queryId}_${statementIndex}`));
     const defaultOrder = result.columns.map((_, i) => String(i));
     const savedOrder = saved?.columnOrder?.filter(column => defaultOrder.includes(column)) ?? [];
     const mergedOrder = [...savedOrder, ...defaultOrder.filter(column => !savedOrder.includes(column))];
@@ -227,18 +239,18 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setColumnPinning(saved?.columnPinning ?? { left: [], right: [] });
     setColumnOrder(mergedOrder);
     setGridHydratedKey(gridKey);
-  }, [gridKey, legacyKey, resultSetId, result.sessionId, result.columns]);
+  }, [gridKey, legacyKey, resultSetId, result.sessionId, result.columns, storage]);
 
   useEffect(() => {
     if (gridHydratedKey !== gridKey) return;
     try {
       const state: SavedGridState = { pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder };
       const envelope: PersistedGridStateEnvelope = { version: 2, resultSetId, state };
-      localStorage.setItem(gridKey, JSON.stringify(envelope));
+      storage.set(gridKey, JSON.stringify(envelope));
     } catch {
       // A full localStorage should not make the result grid unusable.
     }
-  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder]);
+  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, storage]);
 
   useEffect(() => {
     if (!queryId || !result.sessionId) return;

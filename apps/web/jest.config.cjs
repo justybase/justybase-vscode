@@ -2,7 +2,8 @@ module.exports = {
   rootDir: '.',
   testEnvironment: 'node',
   preset: 'ts-jest',
-  testMatch: ['<rootDir>/src/**/*.test.ts'],
+  testMatch: ['<rootDir>/src/**/*.test.ts', '<rootDir>/src/**/*.test.tsx'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   moduleNameMapper: {
     '^@justybase/contracts$': '<rootDir>/../../packages/contracts/src',
     '^@justybase/designer-core$': '<rootDir>/../../packages/designer-core/src',

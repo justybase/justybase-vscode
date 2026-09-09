@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
-import type { ConnectionProfileSummary, ConnectionProfileUpdate, EditorPreferences, MetadataColumn, MetadataDatabase, QueryEvent, QueryStartRequest, SchemaTreeNode, WebUser } from '@justybase/contracts';
-import { api, connectToQueryEvents, type QueryEventSubscription } from './api';
-import { applyQueryEvent, emptyResult, type ResultState } from './queryState';
+import type { ConnectionProfileSummary, ConnectionProfileUpdate, EditorPreferences, MetadataColumn, MetadataDatabase, SchemaTreeNode, WebUser } from '@justybase/contracts';
+import { ApiClientProvider, createApiClient, useApiClient, type ApiClient, type QueryEventSubscription } from './api';
+import { emptyResult } from './queryState';
 import { registerSqlLanguageFeatures } from './sqlLanguage';
 import { SchemaTree } from './SchemaTree';
 import { ResultGrid } from './ResultGrid';
@@ -16,17 +16,44 @@ import { ExplainPanel } from './ExplainPanel';
 import { AdminPanel } from './AdminPanel';
 import { EditorToolbar, type RunMode } from './EditorToolbar';
 import { useSplitPane } from './useSplitPane';
+import { createWorkspaceStorage, migrateLegacyWorkspace, useWorkspaceStorage, WorkspaceStorageProvider, type WorkspaceStorage } from './workspacePersistence';
+import { canEditActiveResult, workspaceDatabase } from './workspaceConnectionController';
+import { restoreEditorWorkspace, newEditorTab, type EditorTab, type ExecutionInput, type StatementExecutionStatus } from './workspaceDocumentController';
+import { applyEventToEditorTab, clearLiveQueryState, statementStateFor, statementStatusClass, statementStatusLabel } from './workspaceExecutionController';
+import { persistDraft, persistEditorWorkspace, readPersistedNumber, resetPersistedWorkspaceLayout } from './workspacePersistenceController';
 
-export function App(): ReactElement {
+interface PendingQueryStart {
+  readonly tabId: string;
+  cancelRequested: boolean;
+  queryId?: string;
+  settled: Promise<void>;
+  resolveSettled(): void;
+}
+
+function createPendingQueryStart(tabId: string): PendingQueryStart {
+  let resolve: () => void = () => undefined;
+  const settled = new Promise<void>(promiseResolve => { resolve = promiseResolve; });
+  return { tabId, cancelRequested: false, settled, resolveSettled: () => resolve() };
+}
+
+export function App({ apiClient }: { apiClient?: ApiClient } = {}): ReactElement {
+  const defaultClientRef = useRef<ApiClient | undefined>(undefined);
+  if (!defaultClientRef.current) defaultClientRef.current = apiClient ?? createApiClient();
+  return <ApiClientProvider client={apiClient ?? defaultClientRef.current}><AuthenticatedApp /></ApiClientProvider>;
+}
+
+function AuthenticatedApp(): ReactElement {
+  const api = useApiClient();
   const [user, setUser] = useState<WebUser | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => { void api.me().then(response => setUser(response.user)).catch(() => undefined).finally(() => setLoading(false)); }, []);
   if (loading) return <div className="center-message">Loading JustyBase…</div>;
   if (!user) return <Login onLogin={setUser} />;
-  return <Workspace user={user} onLogout={() => { void api.logout().finally(() => setUser(null)); }} />;
+  return <Workspace user={user} onLogout={() => setUser(null)} />;
 }
 
 function Login({ onLogin }: { onLogin(user: WebUser): void }): ReactElement {
+  const api = useApiClient();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -38,133 +65,29 @@ function Login({ onLogin }: { onLogin(user: WebUser): void }): ReactElement {
   return <main className="auth-shell"><form className="card auth-card" onSubmit={event => void submit(event)}><div className="brand">JustyBase</div><h1>Web database editor</h1><p className="muted">Sign in to your self-hosted workspace.</p><label>Username<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" /></label><label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" /></label>{error && <div className="error">{error}</div>}<button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button></form></main>;
 }
 
-interface EditorTab {
-  id: string;
-  title: string;
-  sql: string;
-  dirty: boolean;
-  connectionId?: string;
-  database?: string;
-  schema?: string;
-  results: Record<number, ResultState>;
-  activeStatementIndex: number;
-  queryId?: string;
-  running?: boolean;
-  resultView?: 'grid' | 'explain';
-  source?: SchemaTreeNode;
-  sourceSql?: string;
-  sourceConnectionId?: string;
-  sourceDatabase?: string;
-  statementStates: Record<number, StatementExecutionState>;
-  batchStatus?: 'complete' | 'error' | 'cancelled';
-  batchMessage?: string;
-  batchCompletedStatements?: number;
-  batchStatementCount?: number;
-}
-
-type StatementExecutionStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled' | 'skipped';
-
-interface StatementExecutionState {
-  status: StatementExecutionStatus;
-  sql?: string;
-  message?: string;
-}
-
-interface PersistedEditorTab {
-  id: string;
-  title: string;
-  sql: string;
-  dirty: boolean;
-  connectionId?: string;
-  database?: string;
-  schema?: string;
-}
-
-type ExecutionInput = Pick<QueryStartRequest, 'connectionId' | 'sql' | 'mode' | 'cursorOffset' | 'writeConfirmed' | 'writePreviewToken'> & { database: string };
-
-function newEditorTab(number: number, id = `query-${number}`): EditorTab {
-  return { id, title: `Query ${number}`, sql: 'SELECT *\nFROM ', dirty: false, results: {}, activeStatementIndex: 0, resultView: 'grid', statementStates: {} };
-}
-
-function workspaceDatabase(connection: ConnectionProfileSummary): string {
-  if (connection.dbType === 'sqlite') return 'main';
-  if (connection.dbType === 'duckdb') {
-    if (connection.database === ':memory:') return 'memory';
-    const base = connection.database.replaceAll('\\', '/').split('/').pop() ?? connection.database;
-    return base.replace(/\.(?:duckdb|ddb)$/i, '') || base;
-  }
-  return connection.database;
-}
-
-function normalizeSql(value: string): string { return value.trim().replace(/;\s*$/u, '').replace(/\s+/gu, ' '); }
-
-function canEditActiveResult(tab: EditorTab | undefined, result: ResultState, connection: ConnectionProfileSummary | null): boolean {
-  return Boolean(tab?.source && tab.source.kind === 'object' && tab.source.objectType?.toUpperCase() === 'TABLE'
-    && tab.sourceSql && normalizeSql(tab.sourceSql) === normalizeSql(tab.sql)
-    && tab.sourceConnectionId === connection?.id && tab.sourceDatabase === tab.database
-    && result.status.startsWith('complete') && result.sessionId && result.statementSql
-    && normalizeSql(result.statementSql) === normalizeSql(tab.sourceSql));
-}
-
-function statementStatusLabel(status: StatementExecutionStatus): string {
-  switch (status) {
-    case 'success': return 'Success';
-    case 'error': return 'Failed';
-    case 'cancelled': return 'Cancelled';
-    case 'skipped': return 'Skipped';
-    case 'running': return 'Running';
-    default: return 'Pending';
-  }
-}
-
-function statementStatusClass(status: StatementExecutionStatus): string {
-  return `statement-status statement-status-${status}`;
-}
-
-function statementStateFor(tab: EditorTab, index: number): StatementExecutionState {
-  const explicit = tab.statementStates[index];
-  if (explicit) return explicit;
-  const result = tab.results[index];
-  if (!result) return { status: 'pending' };
-  if (result.status === 'error') return { status: 'error', message: result.message };
-  if (result.status === 'cancelled') return { status: 'cancelled', message: result.message };
-  if (result.status.startsWith('complete')) return { status: 'success', message: result.message };
-  return { status: tab.running ? 'running' : 'pending' };
-}
-
-function restoreEditorWorkspace(): { tabs: EditorTab[]; activeTabId: string } {
-  const fallback = newEditorTab(1);
-  try {
-    const raw = localStorage.getItem('jwb_tabs');
-    if (!raw) {
-      const draft = localStorage.getItem('justybase_current_draft');
-      if (draft) fallback.sql = draft;
-      return { tabs: [fallback], activeTabId: 'query-1' };
-    }
-    const saved = JSON.parse(raw) as { tabs?: PersistedEditorTab[]; activeTabId?: string };
-    const restored = (saved.tabs ?? []).filter(tab => tab && typeof tab.id === 'string' && typeof tab.sql === 'string').map((tab, index) => ({
-      id: tab.id,
-      title: typeof tab.title === 'string' && tab.title.trim() ? tab.title : `Query ${index + 1}`,
-      sql: tab.sql,
-      dirty: tab.dirty === true,
-      connectionId: typeof tab.connectionId === 'string' ? tab.connectionId : undefined,
-      database: typeof tab.database === 'string' ? tab.database : undefined,
-      schema: typeof tab.schema === 'string' ? tab.schema : undefined,
-      results: {},
-      activeStatementIndex: 0,
-      statementStates: {},
-    }));
-    if (restored.length === 0) return { tabs: [fallback], activeTabId: fallback.id };
-    const activeTabId = restored.some(tab => tab.id === saved.activeTabId) ? saved.activeTabId! : restored[0]!.id;
-    return { tabs: restored, activeTabId };
-  } catch {
-    return { tabs: [fallback], activeTabId: fallback.id };
-  }
-}
-
 function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): ReactElement {
+  const storageRef = useRef<{ userId: string; storage: WorkspaceStorage } | undefined>(undefined);
+  const [migrationReadyFor, setMigrationReadyFor] = useState<string | undefined>(undefined);
+  if (!storageRef.current || storageRef.current.userId !== user.id) {
+    const storage = createWorkspaceStorage(user.id);
+    storageRef.current = { userId: user.id, storage };
+  }
+  useEffect(() => {
+    const current = storageRef.current;
+    if (!current || current.userId !== user.id) return;
+    migrateLegacyWorkspace(current.storage);
+    setMigrationReadyFor(user.id);
+  }, [user.id]);
+  const currentStorage = storageRef.current;
+  if (migrationReadyFor !== user.id || !currentStorage || currentStorage.userId !== user.id) return <div className="center-message">Loading workspace…</div>;
+  return <WorkspaceStorageProvider storage={currentStorage.storage}><WorkspaceContent user={user} onLogout={onLogout} /></WorkspaceStorageProvider>;
+}
+
+function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void }): ReactElement {
+  const api = useApiClient();
+  const storage = useWorkspaceStorage();
   const restoredWorkspace = useRef<{ tabs: EditorTab[]; activeTabId: string } | null>(null);
-  if (!restoredWorkspace.current) restoredWorkspace.current = restoreEditorWorkspace();
+  if (!restoredWorkspace.current) restoredWorkspace.current = restoreEditorWorkspace(storage);
   const [connections, setConnections] = useState<ConnectionProfileSummary[]>([]);
   const [selected, setSelected] = useState<ConnectionProfileSummary | null>(null);
   const [editingConnection, setEditingConnection] = useState<ConnectionProfileSummary | null>(null);
@@ -184,18 +107,15 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   const [overwrite, setOverwrite] = useState(false);
 
   // Split pane sizes — persisted in localStorage
-  function getInitial(key: string, fallback: number): number {
-    try { const v = localStorage.getItem(key); return v ? Number(v) : fallback; } catch { return fallback; }
-  }
-  const sidebar = useSplitPane('horizontal', getInitial('jwb_sidebar', 250), 160, 500);
-  const editorSplit = useSplitPane('vertical', getInitial('jwb_editor_pct', 45), 20, 80);
+  const sidebar = useSplitPane('horizontal', readPersistedNumber(storage, 'sidebar', 250), 160, 500);
+  const editorSplit = useSplitPane('vertical', readPersistedNumber(storage, 'editor_pct', 45), 20, 80);
   const [showConnectionForm, setShowConnectionForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [history, setHistory] = useState<Awaited<ReturnType<typeof api.history>>>([]);
+  const [history, setHistory] = useState<Awaited<ReturnType<ApiClient['history']>>>([]);
   const [showAudit, setShowAudit] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [audit, setAudit] = useState<Awaited<ReturnType<typeof api.audit>>>([]);
+  const [audit, setAudit] = useState<Awaited<ReturnType<ApiClient['audit']>>>([]);
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const selectedRef = useRef<ConnectionProfileSummary | null>(null);
   const databaseRef = useRef('');
@@ -203,6 +123,9 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   const subscriptionsRef = useRef(new Map<string, QueryEventSubscription>());
   const preferencesRef = useRef<EditorPreferences | null>(null);
   const activeQueryIdRef = useRef('');
+  const tabsRef = useRef<EditorTab[]>(tabs);
+  const pendingQueryStartsRef = useRef(new Set<PendingQueryStart>());
+  const activeQueryIdsRef = useRef(new Map<string, Set<string>>());
   const savedConnectionIdRef = useRef<string | null>(null);
   const savedDatabaseRef = useRef('');
   const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
@@ -224,10 +147,35 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   const batchExecutedCount = batchStatusCounts.success + batchStatusCounts.error + batchStatusCounts.cancelled;
   const failedStatementIndex = statementIndexes.find(index => statementStateFor(activeTab!, index).status === 'error');
 
-  useEffect(() => () => {
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+
+  const cleanupLiveResources = useCallback(async (clearLiveState = false): Promise<void> => {
+    const pendingStarts = [...pendingQueryStartsRef.current];
+    for (const pendingStart of pendingStarts) pendingStart.cancelRequested = true;
+
+    const queryIds = new Set<string>();
+    for (const tab of tabsRef.current) if (tab.queryId) queryIds.add(tab.queryId);
+    for (const trackedIds of activeQueryIdsRef.current.values()) {
+      for (const queryId of trackedIds) queryIds.add(queryId);
+    }
+    for (const pendingStart of pendingStarts) if (pendingStart.queryId) queryIds.add(pendingStart.queryId);
+
+    const jobs = [...queryIds].map(queryId => api.cancelQuery(queryId).catch(() => undefined));
     for (const subscription of subscriptionsRef.current.values()) subscription.close();
     subscriptionsRef.current.clear();
-  }, []);
+    // A start request is deliberately allowed to finish: aborting it can
+    // hide a server-created job before its id is returned. The runQuery
+    // continuation observes cancelRequested and cancels that returned job.
+    await Promise.all([...jobs, ...pendingStarts.map(pendingStart => pendingStart.settled)]);
+    if (clearLiveState) setTabs(previous => previous.map(clearLiveQueryState));
+  }, [api]);
+
+  useEffect(() => () => { void cleanupLiveResources(); }, [cleanupLiveResources]);
+
+  async function handleLogout(): Promise<void> {
+    await cleanupLiveResources(true);
+    try { await api.logout(); } finally { onLogout(); }
+  }
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   useEffect(() => { preferencesRef.current = preferences; }, [preferences]);
@@ -300,7 +248,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
       // Restore last connection from localStorage
       let conn: ConnectionProfileSummary | undefined;
       try {
-        const savedId = localStorage.getItem('jwb_connection');
+        const savedId = storage.get('connection');
         savedConnectionIdRef.current = savedId;
         if (savedId) conn = items.find(c => c.id === savedId);
       } catch { /* ignore */ }
@@ -311,7 +259,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
     void api.history().then(setHistory).catch(() => undefined);
     // Capture the saved database so the selected-connection reset can preserve it.
     try {
-      const savedDb = localStorage.getItem('jwb_database');
+      const savedDb = storage.get('database');
       savedDatabaseRef.current = savedDb ?? '';
     } catch { /* ignore */ }
   }, []);
@@ -319,18 +267,17 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   useEffect(() => { if (!selected) return; void api.databases(selected.id).then(setDatabases).catch(() => undefined); }, [selected?.id]);
 
   // Persist panel sizes
-  useEffect(() => { try { localStorage.setItem('jwb_sidebar', String(sidebar.size)); } catch { /* ignore */ } }, [sidebar.size]);
-  useEffect(() => { try { localStorage.setItem('jwb_editor_pct', String(editorSplit.size)); } catch { /* ignore */ } }, [editorSplit.size]);
+  useEffect(() => { storage.set('sidebar', String(sidebar.size)); }, [sidebar.size, storage]);
+  useEffect(() => { storage.set('editor_pct', String(editorSplit.size)); }, [editorSplit.size, storage]);
 
   // Persist connection selection
-  useEffect(() => { try { localStorage.setItem('jwb_connection', selected?.id ?? ''); } catch { /* ignore */ } }, [selected?.id]);
-  useEffect(() => { try { localStorage.setItem('jwb_database', database); } catch { /* ignore */ } }, [database]);
+  useEffect(() => { storage.set('connection', selected?.id ?? ''); }, [selected?.id, storage]);
+  useEffect(() => { storage.set('database', database); }, [database, storage]);
   useEffect(() => {
     try {
-      const persistedTabs: PersistedEditorTab[] = tabs.map(tab => ({ id: tab.id, title: tab.title, sql: tab.sql, dirty: tab.dirty, connectionId: tab.connectionId, database: tab.database, schema: tab.schema }));
-      localStorage.setItem('jwb_tabs', JSON.stringify({ tabs: persistedTabs, activeTabId }));
+      persistEditorWorkspace(storage, tabs, activeTabId);
     } catch { /* ignore */ }
-  }, [tabs, activeTabId]);
+  }, [tabs, activeTabId, storage]);
 
   // Stable refs for keyboard shortcuts to avoid re-registering listener on every render
   const handleSaveRef = useRef(handleSave);
@@ -437,58 +384,6 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
     return { connectionId: selected.id, database, sql: mode === 'smart' ? selectedSql : sql, mode: 'script' };
   }
 
-  function applyEventToTab(tabId: string, event: QueryEvent): void {
-    setTabs(previous => previous.map(tab => {
-      if (tab.id !== tabId) return tab;
-      const statementIndex = event.statementIndex ?? tab.activeStatementIndex;
-      const current = tab.results[statementIndex] ?? emptyResult;
-      const nextResult = applyQueryEvent(current, event);
-      const nextStatementStates: Record<number, StatementExecutionState> = { ...tab.statementStates };
-      const statementCount = event.statementCount ?? tab.batchStatementCount;
-      if (event.type === 'started' && event.statementCount !== undefined) {
-        for (let index = 0; index < event.statementCount; index += 1) nextStatementStates[index] = { status: 'pending' };
-      }
-      if (event.statementIndex !== undefined) {
-        const previousState = nextStatementStates[event.statementIndex] ?? { status: 'pending' as const };
-        if (event.type === 'statement-started') nextStatementStates[event.statementIndex] = { status: 'running', sql: event.statementSql };
-        else if (event.type === 'complete') nextStatementStates[event.statementIndex] = { ...previousState, status: 'success', message: event.message };
-        else if (event.type === 'error') nextStatementStates[event.statementIndex] = { ...previousState, status: 'error', message: event.message };
-        else if (event.type === 'cancelled') nextStatementStates[event.statementIndex] = { ...previousState, status: 'cancelled', message: event.scope === 'statement' ? 'Statement cancelled.' : undefined };
-      }
-      let batchStatus = tab.batchStatus;
-      let batchMessage = tab.batchMessage;
-      let batchCompletedStatements = tab.batchCompletedStatements;
-      if (event.type === 'batch-complete') {
-        batchStatus = event.status;
-        batchMessage = event.message;
-        batchCompletedStatements = event.completedStatements;
-        const total = event.statementCount ?? Object.keys(nextStatementStates).length;
-        for (let index = 0; index < total; index += 1) {
-          const state = nextStatementStates[index];
-          if (state?.status === 'pending' || !state) {
-            nextStatementStates[index] = { status: event.status === 'complete' && index < event.completedStatements ? 'success' : 'skipped' };
-          }
-        }
-      }
-      const nextResults = event.type === 'started'
-        ? {}
-        : event.type === 'batch-complete'
-          ? Object.fromEntries(Object.entries(tab.results).map(([index, item]) => [index, { ...item, batchStatus: event.status, lastSequence: event.sequence ?? item.lastSequence }])) as Record<number, ResultState>
-          : { ...tab.results, [statementIndex]: nextResult };
-      return {
-        ...tab,
-        results: nextResults,
-        statementStates: nextStatementStates,
-        batchStatus,
-        batchMessage,
-        batchCompletedStatements,
-        batchStatementCount: statementCount,
-        activeStatementIndex: event.type === 'statement-started' && event.statementIndex !== undefined ? event.statementIndex : tab.activeStatementIndex,
-        running: event.type === 'batch-complete' ? false : tab.running,
-      };
-    }));
-  }
-
   async function runQuery(mode: 'run' | 'smart' | 'batch' = 'run', inputOverride?: ExecutionInput, targetTabId = activeTabId): Promise<{ queryId: string; statementIndex: number; status: 'complete' | 'error' | 'cancelled' }> {
     if (!selected) throw new Error('Select a connection first.');
     const input = inputOverride ?? executionInput(mode);
@@ -496,6 +391,27 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
     const tabId = targetTabId;
     setError('');
     setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, results: {}, activeStatementIndex: 0, queryId: undefined, running: true, statementStates: {}, batchStatus: undefined, batchMessage: undefined, batchCompletedStatements: undefined, batchStatementCount: undefined } : tab));
+    const pendingStart = createPendingQueryStart(tabId);
+    pendingQueryStartsRef.current.add(pendingStart);
+    let pendingStartReleased = false;
+    const releasePendingStart = (): void => {
+      if (pendingStartReleased) return;
+      pendingStartReleased = true;
+      pendingQueryStartsRef.current.delete(pendingStart);
+      pendingStart.resolveSettled();
+    };
+    const trackQueryId = (queryId: string): void => {
+      pendingStart.queryId = queryId;
+      const trackedIds = activeQueryIdsRef.current.get(tabId) ?? new Set<string>();
+      trackedIds.add(queryId);
+      activeQueryIdsRef.current.set(tabId, trackedIds);
+    };
+    const untrackQueryId = (queryId: string): void => {
+      const trackedIds = activeQueryIdsRef.current.get(tabId);
+      if (!trackedIds) return;
+      trackedIds.delete(queryId);
+      if (trackedIds.size === 0) activeQueryIdsRef.current.delete(tabId);
+    };
     try {
       let started: Awaited<ReturnType<typeof api.startQuery>>;
       try {
@@ -503,22 +419,32 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
       } catch (reason: unknown) {
         const message = reason instanceof Error ? reason.message : '';
         if (!message.includes('Write confirmation required')) throw reason;
+        if (pendingStart.cancelRequested) throw new Error('Query cancelled during start.', { cause: reason });
         const preview = await api.previewQuery(input);
+        if (pendingStart.cancelRequested) throw new Error('Query cancelled during start.', { cause: reason });
         const previewText = preview.statements.map(statement => `${statement.index + 1}. ${statement.commandType}: ${statement.sql.trim()}${statement.warnings.length > 0 ? `\n   ${statement.warnings.join(' ')}` : ''}`).join('\n\n');
         if (!window.confirm(`This SQL can modify data or schema. Confirm execution?\n\nDatabase: ${preview.database}\n\n${previewText.slice(0, 2_000)}${previewText.length > 2_000 ? '\n…' : ''}`)) throw new Error('Write execution cancelled.', { cause: reason });
+        if (pendingStart.cancelRequested) throw new Error('Query cancelled during start.', { cause: reason });
         started = await api.startQuery({ ...input, writeConfirmed: true, writePreviewToken: preview.previewToken });
       }
+      trackQueryId(started.queryId);
+      if (pendingStart.cancelRequested) {
+        await api.cancelQuery(started.queryId).catch(() => undefined);
+        untrackQueryId(started.queryId);
+        throw new Error('Query cancelled during start.');
+      }
       setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, queryId: started.queryId } : tab));
-      return await new Promise<{ queryId: string; statementIndex: number; status: 'complete' | 'error' | 'cancelled' }>((resolve, reject) => {
+      const outcome = new Promise<{ queryId: string; statementIndex: number; status: 'complete' | 'error' | 'cancelled' }>((resolve, reject) => {
         let terminalStatus: 'complete' | 'error' | 'cancelled' = 'complete';
         let lastStatementIndex = 0;
-        const subscription = connectToQueryEvents(started.queryId, event => {
+        const subscription = api.connectToQueryEvents(started.queryId, event => {
           if (event.statementIndex !== undefined) lastStatementIndex = event.statementIndex;
-          applyEventToTab(tabId, event);
+          setTabs(previous => previous.map(tab => tab.id === tabId ? applyEventToEditorTab(tab, event) : tab));
           if (event.type === 'error') terminalStatus = 'error';
           if (event.type === 'cancelled') terminalStatus = 'cancelled';
           if (event.type === 'batch-complete') {
             terminalStatus = event.status;
+            untrackQueryId(started.queryId);
             subscription.close();
             subscriptionsRef.current.delete(tabId);
             setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, running: false } : tab));
@@ -534,11 +460,17 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
         });
         subscriptionsRef.current.set(tabId, subscription);
       });
+      // From this point the tab/subscription owns the query id; cleanup will
+      // find it through activeQueryIdsRef even before React commits setTabs.
+      releasePendingStart();
+      return await outcome;
     } catch (reason: unknown) {
       const message = reason instanceof Error ? reason.message : 'Query failed.';
       setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, running: false, results: { 0: { ...emptyResult, status: 'error', message } } } : tab));
       setError(message);
       throw reason;
+    } finally {
+      releasePendingStart();
     }
   }
 
@@ -601,7 +533,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
     if (preferences?.formatOnSave) await editorRef.current?.getAction('editor.action.formatDocument')?.run();
     const savedSql = editorRef.current?.getValue() ?? active.sql;
     try {
-      localStorage.setItem('justybase_current_draft', savedSql);
+      persistDraft(storage, savedSql);
     } catch { /* ignore */ }
     setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, sql: savedSql, dirty: false } : t));
   }
@@ -655,7 +587,16 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
     const tab = tabs.find(item => item.id === id);
     if (!tab || tabs.length === 1) return;
     if (tab.dirty && !window.confirm(`Close modified tab “${tab.title}”?`)) return;
-    if (tab.running && tab.queryId) void api.cancelQuery(tab.queryId);
+    const queryIds = new Set<string>();
+    if (tab.queryId) queryIds.add(tab.queryId);
+    for (const queryId of activeQueryIdsRef.current.get(id) ?? []) queryIds.add(queryId);
+    for (const pendingStart of pendingQueryStartsRef.current) {
+      if (pendingStart.tabId === id) {
+        pendingStart.cancelRequested = true;
+        if (pendingStart.queryId) queryIds.add(pendingStart.queryId);
+      }
+    }
+    for (const queryId of queryIds) void api.cancelQuery(queryId).catch(() => undefined);
     subscriptionsRef.current.get(id)?.close();
     subscriptionsRef.current.delete(id);
     const index = tabs.findIndex(item => item.id === id);
@@ -703,12 +644,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
   function resetLayout(): void {
     sidebar.setSize(250);
     editorSplit.setSize(45);
-    try {
-      localStorage.removeItem('jwb_sidebar');
-      localStorage.removeItem('jwb_editor_pct');
-      localStorage.removeItem('jwb_connection');
-      localStorage.removeItem('jwb_database');
-    } catch { /* ignore */ }
+    try { resetPersistedWorkspaceLayout(storage); } catch { /* ignore */ }
   }
 
   function selectConnection(id: string): void {
@@ -734,7 +670,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
           {user.role === 'admin' && <button className="secondary small" onClick={() => setShowAdmin(true)}>Admin</button>}
           <button className="secondary small" onClick={() => setShowSettings(true)}>⚙ Settings</button>
           <span>{user.username}</span>
-          <button className="secondary small" onClick={onLogout}>Log out</button>
+          <button className="secondary small" onClick={() => void handleLogout()}>Log out</button>
         </div>
       </header>
 
@@ -835,7 +771,7 @@ function Workspace({ user, onLogout }: { user: WebUser; onLogout(): void }): Rea
                 }
               });
               editor.onDidDispose(() => disposable.dispose());
-                  registerSqlLanguageFeatures(editor, monaco, () => ({
+                  registerSqlLanguageFeatures(editor, monaco, api, () => ({
                     connectionId: selectedRef.current?.id,
                     database: databaseRef.current,
                     schema: schemaRef.current,
@@ -972,6 +908,7 @@ function webConnectionKind(value: ConnectionProfileSummary['dbType'] | undefined
 }
 
 function ConnectionForm({ initial, onCreated, onCancel }: { initial?: ConnectionProfileSummary; onCreated(connection: ConnectionProfileSummary): void; onCancel(): void }): ReactElement {
+  const api = useApiClient();
   const [form, setForm] = useState<ConnectionFormState>(() => ({ name: initial?.name ?? '', host: initial?.host ?? '', port: initial?.port ?? 5480, database: initial?.database ?? 'system', user: initial?.user ?? '', password: '', dbType: webConnectionKind(initial?.dbType), readOnly: initial?.readOnly ?? true }));
   const [error, setError] = useState('');
   const [testing, setTesting] = useState(false);
@@ -1023,6 +960,7 @@ function ConnectionForm({ initial, onCreated, onCancel }: { initial?: Connection
 }
 
 function EditorSettings({ value, onSave, onClose, onResetLayout }: { value: EditorPreferences; onSave(value: EditorPreferences): void; onClose(): void; onResetLayout?(): void }): ReactElement {
+  const api = useApiClient();
   const [form, setForm] = useState(value);
   const [ruleText, setRuleText] = useState(() => Object.entries(value.linterRules).map(([code, level]) => `${code}=${level}`).join('\n'));
   const [ruleError, setRuleError] = useState('');
@@ -1085,10 +1023,10 @@ function StatusBar({ connectionName, database, lastQueryTime, overwrite }: { con
   );
 }
 
-function HistoryPanel({ entries, onClose, onOpen }: { entries: Awaited<ReturnType<typeof api.history>>; onClose(): void; onOpen(entry: Awaited<ReturnType<typeof api.history>>[number]): void }): ReactElement {
+function HistoryPanel({ entries, onClose, onOpen }: { entries: Awaited<ReturnType<ApiClient['history']>>; onClose(): void; onOpen(entry: Awaited<ReturnType<ApiClient['history']>>[number]): void }): ReactElement {
   return <div className="modal-backdrop"><section className="modal-card history-card"><div className="section-title">Query history <button className="icon-button" onClick={onClose}>×</button></div>{entries.length === 0 ? <p className="muted">No queries yet.</p> : <div className="history-list">{entries.map(entry => <button className="history-entry" key={entry.id} onClick={() => onOpen(entry)}><span><strong>{entry.status}</strong> · {new Date(entry.createdAt).toLocaleString()} · {entry.rowCount.toLocaleString()} rows</span><code>{entry.sql}</code></button>)}</div>}</section></div>;
 }
 
-function AuditPanel({ entries, onClose }: { entries: Awaited<ReturnType<typeof api.audit>>; onClose(): void }): ReactElement {
+function AuditPanel({ entries, onClose }: { entries: Awaited<ReturnType<ApiClient['audit']>>; onClose(): void }): ReactElement {
   return <div className="modal-backdrop"><section className="modal-card history-card audit-card"><div className="section-title">Execution audit <button className="icon-button" onClick={onClose}>×</button></div>{entries.length === 0 ? <p className="muted">No executed statements yet.</p> : <div className="history-list">{entries.map(entry => <div className="history-entry audit-entry" key={entry.id}><span><strong>{entry.status}</strong> · {entry.commandType} · {new Date(entry.createdAt).toLocaleString()} · {entry.database}</span><code>{entry.sql}</code><small>{entry.rowsAffected === undefined ? '—' : `${entry.rowsAffected.toLocaleString()} row(s) affected`} · {entry.durationMs} ms · {entry.confirmed ? 'confirmed' : 'read-only'}</small></div>)}</div>}</section></div>;
 }
