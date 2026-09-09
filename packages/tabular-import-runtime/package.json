@@ -1,0 +1,29 @@
+{
+  "name": "@justybase/tabular-import-runtime",
+  "private": true,
+  "version": "3.17.14",
+  "description": "Platform-neutral tabular file analysis for companion import planners.",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check-types": "tsc -p tsconfig.json --noEmit",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "@justybase/contracts": "*",
+    "@justybase/database-utils": "*"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "typescript": "^6.0.0"
+  }
+}

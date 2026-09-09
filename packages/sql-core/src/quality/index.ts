@@ -8,3 +8,9 @@ export type {
   QualitySeverityConfig,
   QualityValidationEngine,
 } from "./types";
+export {
+  LintSeverity,
+  findPatternMatches,
+} from './portable';
+export type { LintIssue, LintRule } from './portable';
+export * from './ruleFactory';

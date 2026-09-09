@@ -1,0 +1,49 @@
+{
+  "name": "@justybase/dialect-utils",
+  "private": true,
+  "version": "3.17.14",
+  "description": "Platform-neutral identifier and dialect-trait utilities.",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./identifierUtils": {
+      "types": "./dist/identifierUtils.d.ts",
+      "require": "./dist/identifierUtils.js",
+      "default": "./dist/identifierUtils.js"
+    },
+    "./dialectTraits": {
+      "types": "./dist/dialectTraits.d.ts",
+      "require": "./dist/dialectTraits.js",
+      "default": "./dist/dialectTraits.js"
+    },
+    "./traits/*": {
+      "types": "./dist/traits/*.d.ts",
+      "require": "./dist/traits/*.js",
+      "default": "./dist/traits/*.js"
+    },
+    "./authoring/*": {
+      "types": "./dist/authoring/*.d.ts",
+      "require": "./dist/authoring/*.js",
+      "default": "./dist/authoring/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check-types": "tsc -p tsconfig.json --noEmit",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "@justybase/contracts": "*",
+    "@justybase/sql-core": "*"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "typescript": "^6.0.0"
+  }
+}

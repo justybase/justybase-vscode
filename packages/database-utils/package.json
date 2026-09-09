@@ -1,0 +1,68 @@
+{
+  "name": "@justybase/database-utils",
+  "private": true,
+  "version": "3.17.14",
+  "description": "Platform-neutral database helpers shared by desktop and companion extensions.",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./connectionFormBuilder": {
+      "types": "./dist/connectionFormBuilder.d.ts",
+      "require": "./dist/connectionFormBuilder.js",
+      "default": "./dist/connectionFormBuilder.js"
+    },
+    "./connectionUtils": {
+      "types": "./dist/connectionUtils.d.ts",
+      "require": "./dist/connectionUtils.js",
+      "default": "./dist/connectionUtils.js"
+    },
+    "./metadataProviderFactory": {
+      "types": "./dist/metadataProviderFactory.d.ts",
+      "require": "./dist/metadataProviderFactory.js",
+      "default": "./dist/metadataProviderFactory.js"
+    },
+    "./maintenanceProviderUtils": {
+      "types": "./dist/maintenanceProviderUtils.d.ts",
+      "require": "./dist/maintenanceProviderUtils.js",
+      "default": "./dist/maintenanceProviderUtils.js"
+    },
+    "./query": {
+      "types": "./dist/query.d.ts",
+      "require": "./dist/query.js",
+      "default": "./dist/query.js"
+    },
+    "./importTypeInferenceUtils": {
+      "types": "./dist/importTypeInferenceUtils.d.ts",
+      "require": "./dist/importTypeInferenceUtils.js",
+      "default": "./dist/importTypeInferenceUtils.js"
+    },
+    "./importTypeMapping": {
+      "types": "./dist/importTypeMapping.d.ts",
+      "require": "./dist/importTypeMapping.js",
+      "default": "./dist/importTypeMapping.js"
+    },
+    "./sessionMonitorProviderUtils": {
+      "types": "./dist/sessionMonitorProviderUtils.d.ts",
+      "require": "./dist/sessionMonitorProviderUtils.js",
+      "default": "./dist/sessionMonitorProviderUtils.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check-types": "tsc -p tsconfig.json --noEmit",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "@justybase/contracts": "*"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "typescript": "^6.0.0"
+  }
+}
