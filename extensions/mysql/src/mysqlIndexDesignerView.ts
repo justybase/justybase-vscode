@@ -4,7 +4,7 @@ import type {
     MysqlIndexDesignerInboundMessage,
     MysqlIndexDesignerInitialContext,
     MysqlIndexDesignerOutboundMessage,
-} from '../../../src/contracts/webviews/mysqlIndexDesignerContracts';
+} from '@justybase/contracts';
 import {
     areMysqlIdentifiersEqual,
     buildMysqlCreateIndexSql,

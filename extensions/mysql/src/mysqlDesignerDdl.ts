@@ -1,8 +1,8 @@
 import {
     formatIdentifierForSql,
     formatQualifiedObjectName,
-} from '../../../src/utils/identifierUtils';
-import { assertDesignerOperation } from '../../../src/views/designerOperationGuard';
+} from '@justybase/dialect-utils/identifierUtils';
+import { assertDesignerOperation } from '@justybase/designer-core';
 
 export interface MysqlIndexKeyColumn {
     name: string;

@@ -1,4 +1,4 @@
-import { buildMysqlAlterTableSql } from '../../extensions/mysql/src/mysqlAlterTableDdl.js';
+import { buildMysqlAlterTableSql } from '@justybase/designer-core';
 import type {
     MysqlAlterTableDesign,
     MysqlAlterTableDesignerColumn,

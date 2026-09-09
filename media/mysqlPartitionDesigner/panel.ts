@@ -3,7 +3,7 @@ import {
     buildMysqlAddRangeListPartitionSql,
     buildMysqlCoalescePartitionSql,
     buildMysqlDropPartitionSql,
-} from '../../extensions/mysql/src/mysqlDesignerDdl.js';
+} from '@justybase/designer-core';
 import type {
     MysqlDesignerPartition,
     MysqlPartitionDesignerHostToWebviewMessage,

@@ -4,7 +4,7 @@ import type {
     MysqlAlterTableDesignerInboundMessage,
     MysqlAlterTableDesignerInitialContext,
     MysqlAlterTableDesignerOutboundMessage,
-} from '../../../src/contracts/webviews/mysqlAlterTableDesignerContracts';
+} from '@justybase/contracts';
 import { buildMysqlAlterTableSql } from './mysqlAlterTableDdl';
 import { loadMysqlAlterTableDesignerContext } from './mysqlDesignerOperations';
 import type { MysqlDesignerOperationContext } from './mysqlCommandContext';

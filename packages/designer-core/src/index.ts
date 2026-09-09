@@ -12,6 +12,14 @@ export {
   UnsupportedDesignerOperationError,
 } from './designer';
 
+export { assertDesignerOperation } from './designerOperationGuard';
+
+export * from './db2DesignerDdl';
+export * from './mysqlAlterTableDdl';
+export * from './mysqlDesignerDdl';
+export * from './postgresqlAlterTableDdl';
+export * from './postgresqlIndexDdl';
+
 export {
   duckDbColumnsFromRows,
   parseDuckDbConstraints,

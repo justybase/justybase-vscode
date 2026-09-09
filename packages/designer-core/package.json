@@ -18,7 +18,8 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
-    "@justybase/contracts": "*"
+    "@justybase/contracts": "*",
+    "@justybase/dialect-utils": "*"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

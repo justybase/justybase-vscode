@@ -5,13 +5,13 @@ import type {
 import type {
     PostgresqlAlterTableDesignerColumn,
     PostgresqlAlterTableDesignerInitialContext,
-} from '../../../src/contracts/webviews/postgresqlAlterTableDesignerContracts';
+} from '@justybase/contracts';
 import type {
     PostgresqlExistingIndex,
     PostgresqlIndexDesignerInitialContext,
     PostgresqlIndexPart,
-} from '../../../src/contracts/webviews/postgresqlIndexDesignerContracts';
-import { formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+} from '@justybase/contracts';
+import { formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 import {
     buildAlterTablePropertiesQuery,
     buildColumnMetadataQuery,
