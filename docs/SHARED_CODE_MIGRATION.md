@@ -29,7 +29,7 @@ when comparing revisions; do not commit volatile graph/timing reports.
 | `media` | shared packages, desktop protocol/types, media modules, exact companion designer bridges |
 | `packages/contracts` | its own public types/helpers; existing type cycle is fingerprinted |
 | `packages/sql-core` | Platform-neutral Netezza lexer/parser, semantic validation, authoring and quality rules |
-| Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime is a compatibility facade, and sqlite/duckdb/netezza-runtime/access-file own Node I/O |
+| Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime owns shared execution plus compatibility exports, and sqlite/duckdb/netezza-runtime/access-file own Node I/O |
 | `apps/api` | contracts, sql-core, database-runtime, sqlite-runtime, duckdb-runtime, netezza-runtime and API modules |
 | `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
 | `extensions` | own modules, contracts/shared helpers, public core activation API, exact legacy desktop implementation bridges |
@@ -61,6 +61,23 @@ SQL, direct `SqliteSession` ownership/close tests plus real Extension Host
 SQLite runs, and a clean-checkout build/package verification) is recorded in
 `REFACTORING_PLAN.md` under "R2 closure evidence".
 
+## Execution orchestration in R5 (closed 2026-09-09)
+
+`@justybase/database-runtime/execution` is the canonical lifecycle owner for
+desktop single/batch/stream execution and API query jobs. It consumes additive
+contracts from `@justybase/contracts` and exposes an injected backend port; it
+does not know about VS Code, editors, web sockets, credentials, history or UI
+messages. Product adapters map lifecycle events to their existing protocols.
+
+The shared owner guarantees monotonic event sequence, at most one reconnect,
+one terminal summary, callback retirement, cancellation checks around
+reconnect, and idempotent reverse-order cleanup. Replay safety is stricter than
+read-only authorization and requires no rows to have crossed the delivery
+boundary. Failed streams retain partial row/limit metadata without replaying
+already delivered data. Desktop activation and API server construction own
+their mutable registries and timers; compatibility singletons are forwarding
+facades only.
+
 ## Netezza validation boundary
 
 `@justybase/sql-core/validation` defines the canonical diagnostic, position,
@@ -88,7 +105,8 @@ Required checks for this slice are:
 - `npm run check:architecture` with no new exceptions or cycles.
 
 The complete exception inventory is `quality/architecture-rules.json`, not a
-second manually maintained list. The remaining categories are
+second manually maintained list. The Result Panel orchestration cycle was
+removed in R3. The remaining categories are
 companion-to-desktop services, desktop-to-companion registries and
 media-to-companion DDL. Each exact edge has a reason, accountable maintainer
 role and removal condition. There is no sql-core-to-desktop or SQL LSP facade
@@ -100,7 +118,6 @@ The existing cycle inventory, identified by its configured anchor, is:
 | Anchor | Area |
 | --- | --- |
 | `extensions/snowflake/src/snowflakeImportPlanner.ts` | desktop/companion integration |
-| `media/resultPanel/diskBackedGrid.ts` | Result Panel orchestration |
 | `media/visualQueryBuilder/VisualQueryBuilderApp.tsx` | visual builder |
 | `packages/access-file/src/accessFileSession.ts` | Access file runtime |
 | `src/commands/validationCommands.ts` | validation commands |
@@ -157,20 +174,21 @@ versioning, migration/reset and restart evidence under
 
 ## Contract duplication audit
 
-These are candidates for later canonical ownership, not interchangeable aliases.
-No new exported DTO is needed for this preparation; adding speculative copies
-would enlarge the duplication before mappings have been proven.
+These entries describe canonical ownership or compatibility obligations; they
+are not interchangeable aliases. The result-model and metadata-rule slices now
+have concrete `@justybase/result-core` and `@justybase/metadata-core`
+implementations; the other future packages remain migration targets.
 
 | Concept | Existing definitions | Future canonical definition / compatibility obligation |
 | --- | --- | --- |
-| Query result and columns | `src/types/index.ts`: `QueryResult`, `ResultSet`, `ColumnDefinition`; `apps/web/src/queryState.ts`: `ResultState`; contracts `QueryColumn`, `QueryPageResponse`; public API `ConnectionQueryResult` | Portable result DTO in contracts, state/operations in result-core. Preserve desktop `data` versus API `rows`, column `type`/`scale`, flags, affected rows and storage counts through explicit adapters. |
-| Streaming chunks | `src/core/streaming/StreamingManager.ts`: `StreamingChunk`; `src/contracts/webviews/resultPanelContracts.ts`: append/hydrate messages; contracts `QueryRowsEvent` | Canonical internal chunk contract after first/last, partial/cancelled, total counts and ordering mappings are tested; do not equate callback chunks with wire events. |
-| Query events | `packages/contracts/src/webApi.ts`: `QueryEvent`; desktop execution lifecycle and webview command unions | `QueryEvent` remains canonical for HTTP/WebSocket. A result-core event model needs explicit translation and one terminal event per logical execution. |
-| Source/result identity | `src/state/resultSetIdentity.ts`, `ResultSet.resultSetId`; media `ResultSetScope`/`GridScrollState`; API `queryId`, `statementIndex`, `sessionId` | Future contracts source/result ID types and result-core identity rules. IDs are not tab indices, timestamps, storage-session IDs or interchangeable URI strings; adapters retain URI normalization and legacy fallback. |
+| Query result and columns | `src/types/index.ts`: `QueryResult`, `ResultSet`, `ColumnDefinition`; `apps/web/src/queryState.ts`: `ResultState`; contracts `QueryColumn`, `QueryPageResponse`; public API `ConnectionQueryResult` | Portable result DTO remains in contracts; state, identity, event reduction and pure operations are now owned by `@justybase/result-core`. Preserve desktop `data` versus API `rows`, column `type`/`scale`, flags, affected rows and storage counts through explicit adapters. |
+| Streaming chunks | `src/core/streaming/StreamingManager.ts`: `StreamingChunk`; `src/contracts/webviews/resultPanelContracts.ts`: append/hydrate messages; contracts `QueryRowsEvent` and `ExecutionRowsEvent` | `ExecutionRowsEvent` is canonical only inside the shared execution lifecycle. Callback chunks and product wire events remain explicit adapter boundaries; first/last, partial/cancelled, total counts and ordering mappings are tested. |
+| Query events | `packages/contracts/src/webApi.ts`: `QueryEvent`; `packages/contracts/src/queryExecution.ts`: `ExecutionEvent`; desktop execution lifecycle and webview command unions | `ExecutionEvent` is canonical for internal orchestration and guarantees one terminal summary. `QueryEvent` remains the existing HTTP/WebSocket protocol; result-core receives an explicit adapter mapping. |
+| Source/result identity | `src/state/resultSetIdentity.ts`, `ResultSet.resultSetId`; media `ResultSetScope`/`GridScrollState`; API `queryId`, `statementIndex`, `sessionId` | `@justybase/result-core` owns source, execution, result-set and storage-session identity rules. IDs are not tab indices, timestamps, storage-session IDs or interchangeable URI strings; adapters retain URI normalization and legacy fallback. |
 | SQL diagnostics | `@justybase/sql-core/validation`: `ValidationError`, `ValidationResult`, `Scope`, `StatementBoundary`; contracts `SqlDiagnostic`; desktop quality/LSP mappings | Shared structural validation types are canonical in sql-core; adapters retain only runtime, qualification and transport-specific mappings. Preserve offset and line conventions, rule-code mapping, ranges and suggested fixes. |
-| Metadata columns | parser `ColumnInfo`; contracts `MetadataColumn`; desktop `MetadataColumnItem`; `ColumnDefinition` | Portable metadata column DTO in contracts and model in metadata-core. Preserve `dataType`, keys, qualification, aliases; map `FORMAT_TYPE` and LSP `type` explicitly. SQL025/026 must work through both schema providers. |
+| Metadata columns | parser `ColumnInfo`; contracts `MetadataColumn`; desktop `MetadataColumnItem`; `ColumnDefinition` | Portable metadata column DTO in contracts and metadata rules in `@justybase/metadata-core`. Preserve `dataType`, keys, qualification, aliases; map `FORMAT_TYPE` and LSP `type` explicitly. SQL025/026 must work through both schema providers. |
 | Capabilities and authoring | `packages/contracts/src/database/index.ts`; `src/contracts/database/index.ts`; `src/sql/authoring/types.ts` | contracts owns portable capabilities and validation profiles; desktop authoring keeps only its quality-rule specialization while dialect packages own SQL implementation. |
-| Query/metadata/result services | desktop `StreamingManager`, `MetadataCache`, `ResultStateManager`; API `QuerySessionManager`; web `api.ts` and `queryState.ts` | Small injected service ports below; product adapters retain secrets, I/O, state lifetime and transport. |
+| Query/metadata/result services | shared `ExecutionOrchestrator`; desktop activation-owned `StreamingManager`, `MetadataCache`, `ResultStateManager`; API server-owned execution jobs; web `api.ts` and `queryState.ts` | The orchestrator owns execution state/retry/cleanup through injected ports. Product adapters retain secrets, database acquisition, I/O, state lifetime and transport. |
 
 ## Proposed product service ports
 
@@ -239,9 +257,14 @@ authenticated owner; it is not a raw server filesystem path.
    dependency closure, public exports and diagnostics mappings intact.
 2. Use SQLite and DuckDB as the first dialect packs, splitting pure authoring
    from runtime/driver registration without changing companion registration.
-3. Extract the shared result identity/reducer and pure operations to result-core.
-4. Connect API/web to that model through explicit event/storage adapters.
-5. Extract metadata model and merge/invalidation semantics.
+3. Extracted the shared result identity/reducer and pure operations to
+   `@justybase/result-core`, with desktop and web adapters.
+4. Keep API/web event and storage boundaries explicit; the web query adapter
+   now consumes the shared portable reducer without changing the wire protocol.
+5. Extracted metadata keys, identifier policies, TTL, completeness,
+   merge/invalidation, indexes, and prefetch decisions to
+   `@justybase/metadata-core`; desktop disk/catalog adapters and the API
+   per-server metadata service retain their product-specific ownership.
 6. Migrate companions one at a time with their own activation/runtime evidence.
 7. Only then prepare the Electron composition root.
 
