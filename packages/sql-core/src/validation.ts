@@ -32,6 +32,7 @@ export {
   parseNetezzaSqlStatements,
   sanitizeNetezzaSql,
   type NetezzaSqlLexResult,
+  type MacroReferenceRange,
   type NetezzaSqlParseOptions,
   type NetezzaSqlParseResult,
   type NetezzaSqlParsingRuntime,

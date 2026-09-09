@@ -315,6 +315,7 @@ export class NetezzaSqlSemanticValidator {
       lexResult.errors.length === 0 &&
       actionableParserErrors.length === 0
     ) {
+      this.visitor.setMacroReferenceRanges(parseResult.macroReferenceRanges);
       this.visitor.visit(cst);
       symbolWarnings.push(...this.buildUnusedSymbolWarnings(sql, cst));
     } else {
@@ -512,6 +513,7 @@ export class NetezzaSqlSemanticValidator {
       this.validationProfile,
     );
     this.applyScopeSeedToVisitor(visitor, currentSeed);
+    visitor.setMacroReferenceRanges(parseResult.macroReferenceRanges);
     visitor.visit(parseResult.cst);
 
     return {

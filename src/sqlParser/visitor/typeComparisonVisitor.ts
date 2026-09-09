@@ -30,6 +30,7 @@ export interface TypeComparisonVisitorHost {
   ): CstNode | undefined;
   getScopeBuilder(): ScopeBuilder;
   getSchemaProvider(): SchemaProvider | undefined;
+  hasMacroReferenceInCst(node: CstNode): boolean;
 }
 
 export function validateComparisonExpressionTypes(
@@ -38,6 +39,9 @@ export function validateComparisonExpressionTypes(
 ): void {
   const lhsNode = ctx.additiveExpression?.[0];
   if (!lhsNode) {
+    return;
+  }
+  if (host.hasMacroReferenceInCst(lhsNode)) {
     return;
   }
 
@@ -62,6 +66,9 @@ export function validateComparisonExpressionTypes(
 
     const rhsNode = ctx.comparisonRhs?.[0];
     if (!rhsNode) {
+      continue;
+    }
+    if (host.hasMacroReferenceInCst(rhsNode)) {
       continue;
     }
 

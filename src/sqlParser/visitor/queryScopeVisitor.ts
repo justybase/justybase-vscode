@@ -312,11 +312,12 @@ export function tableSource(
   if (ctx.tableName) {
     tableNameNode = ctx.tableName[0];
     table = host.visitAs<TableInfo>(tableNameNode);
+    const isDynamicTable = host.hasMacroReferenceInCst(tableNameNode);
+    table.isDynamicMacro = table.isDynamicMacro || isDynamicTable;
 
-    const invalidKeywordToken = getInvalidUnquotedKeywordTableIdentifier(
-      host,
-      tableNameNode,
-    );
+    const invalidKeywordToken = isDynamicTable
+      ? undefined
+      : getInvalidUnquotedKeywordTableIdentifier(host, tableNameNode);
     if (invalidKeywordToken) {
       host.addError(
         `Unquoted reserved keyword '${invalidKeywordToken.image.toUpperCase()}' cannot be used as table name. Use "${invalidKeywordToken.image.toUpperCase()}"`,
@@ -327,12 +328,14 @@ export function tableSource(
       hasInvalidKeywordTableName = true;
     }
 
-    const known = scopeBuilder.findTable(table.name);
-    if (known) {
-      host.applyKnownTableInfo(table, known);
+    if (!isDynamicTable) {
+      const known = scopeBuilder.findTable(table.name);
+      if (known) {
+        host.applyKnownTableInfo(table, known);
+      }
     }
 
-    if (table.columns.length === 0 && schemaProvider) {
+    if (!isDynamicTable && table.columns.length === 0 && schemaProvider) {
       const schemaTable = schemaProvider.getTable(
         table.database,
         table.schema,
@@ -416,6 +419,8 @@ export function addTableQualificationWarning(
 ): void {
   if (
     !tableNameNode ||
+    table.isDynamicMacro ||
+    host.hasMacroReferenceInCst(tableNameNode) ||
     table.isCte ||
     table.isTempTable ||
     (table.database && table.schema) ||
@@ -457,6 +462,9 @@ export function addTableQualificationWarningFromQualifiedName(
   nameInfo: { name: string; schema?: string; database?: string },
   qualifiedNameNode: CstNode,
 ): void {
+  if (host.hasMacroReferenceInCst(qualifiedNameNode)) {
+    return;
+  }
   addTableQualificationWarning(
     host,
     {
@@ -492,6 +500,8 @@ export function tableName(
     database: qualifiedName.database,
     isCte: false,
     isTempTable: false,
+    isDynamicMacro:
+      !!qualifiedNameNode && host.hasMacroReferenceInCst(qualifiedNameNode),
     columns: [],
   };
 }

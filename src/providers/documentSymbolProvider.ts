@@ -98,10 +98,10 @@ export class NetezzaDocumentSymbolProvider implements vscode.DocumentSymbolProvi
 
     private collectMacroVariableSymbols(sql: string): OutlineSymbol[] {
         const declarations: MacroDeclaration[] = [];
-        const declarationPattern = /^\s*%let\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/gim;
+        const declarationPattern = /^\s*(?:%let\s+([A-Za-z_][A-Za-z0-9_]*)|declare\s+&([A-Za-z_][A-Za-z0-9_]*))\s*=/gim;
 
         for (const match of sql.matchAll(declarationPattern)) {
-            const name = match[1];
+            const name = match[1] ?? match[2];
             if (!name || match.index === undefined) {
                 continue;
             }

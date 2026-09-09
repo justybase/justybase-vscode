@@ -30,6 +30,8 @@ export interface TableInfo {
   database?: string;
   isCte: boolean;
   isTempTable: boolean;
+  /** True when the relation name contains a script macro reference. */
+  isDynamicMacro?: boolean;
   columns: ColumnInfo[];
   position?: TokenPosition;
 }

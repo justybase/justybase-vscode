@@ -104,6 +104,23 @@ describe("sqlParser/parsingRuntime", () => {
     expect(result.cst).toBeDefined();
   });
 
+  it("accepts DECLARE macro declarations and records their reference offsets", () => {
+    const sql = "DECLARE &TABLE_NAME = 'ORDERS'; SELECT * FROM &TABLE_NAME;";
+    const result = parseSqlStatements({
+      sql,
+      runtime: NETEZZA_SQL_PARSING_RUNTIME,
+    });
+
+    expect(result.lexResult.errors).toHaveLength(0);
+    expect(result.actionableParserErrors).toHaveLength(0);
+    expect(result.macroReferenceRanges).toEqual([
+      {
+        startOffset: sql.lastIndexOf("&TABLE_NAME"),
+        endOffset: sql.lastIndexOf("&TABLE_NAME") + "&TABLE_NAME".length,
+      },
+    ]);
+  });
+
   it("preserves macro references used as relation identifiers", () => {
     const result = parseSqlStatements({
       sql: "SELECT * FROM &table_name;\nSELECT * FROM $table_name;\nSELECT * FROM ${ table_name };",

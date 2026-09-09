@@ -34,6 +34,7 @@ export {
 } from "./parsingRuntime";
 export type {
   SqlParserSession,
+  MacroReferenceRange,
   SqlStatementsParseResult,
 } from "./parsingRuntime";
 export { SqlVisitor } from "./visitor/sqlVisitor";

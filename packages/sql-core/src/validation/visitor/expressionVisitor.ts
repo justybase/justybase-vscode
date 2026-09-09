@@ -263,6 +263,9 @@ export function columnReference(
   const rawTokens = getOrderedReferenceTokens(ctx);
 
   if (rawTokens.length === 0) return;
+  if (rawTokens.some((token) => host.hasMacroReferenceInToken(token))) {
+    return;
+  }
   const procedureScope = host.getProcedureScope();
   if (host.getInProcedureContext() && !host.getInProcedureSqlContext()) {
     if (procedureScope && rawTokens.length >= 1) {
@@ -319,7 +322,10 @@ export function columnReference(
       }
     }
 
-    const visibleTables = host.getScopeBuilder().getAllVisibleTables();
+    const visibleTables = host
+      .getScopeBuilder()
+      .getAllVisibleTables()
+      .filter((table) => !table.isDynamicMacro);
     const tablesWithKnownColumns = visibleTables.filter(
       (t) => t.columns.length > 0,
     );
@@ -334,7 +340,7 @@ export function columnReference(
 
     const currentScopeTables = host.getScopeBuilder().getCurrentScopeTables();
     const currentScopeWithColumns = currentScopeTables.filter(
-      (t) => t.columns.length > 0,
+      (t) => !t.isDynamicMacro && t.columns.length > 0,
     );
     const currentMatches = currentScopeWithColumns.filter((table) =>
       table.columns.some(
@@ -443,7 +449,9 @@ function suggestVisibleColumn(
   const visibleColumns = (table
     ? [table]
     : host.getScopeBuilder().getAllVisibleTables()
-  ).flatMap((visibleTable) => visibleTable.columns);
+  )
+    .filter((visibleTable) => !visibleTable.isDynamicMacro)
+    .flatMap((visibleTable) => visibleTable.columns);
   if (
     visibleColumns.length === 0 ||
     visibleColumns.length > MAX_SQL004_SUGGESTION_COLUMNS
@@ -907,6 +915,9 @@ function resolveColumnDataType(
   if (!table) {
     return undefined;
   }
+  if (table.isDynamicMacro) {
+    return undefined;
+  }
 
   const upperColumn = ref.column.toUpperCase();
   const schemaProvider = host.getSchemaProvider();
@@ -938,6 +949,10 @@ function validateColumnExists(
   token: IToken,
 ): void {
   const upperColumnName = columnName.toUpperCase();
+
+  if (table.isDynamicMacro) {
+    return;
+  }
 
   if (host.getValidationProfile().systemColumns.has(upperColumnName)) {
     return;

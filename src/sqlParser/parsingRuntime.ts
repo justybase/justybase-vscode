@@ -101,6 +101,11 @@ export interface SqlStatementsParseOptions extends SqlParsingRuntimeOptions {
   ignoreParserError?: (error: IRecognitionException) => boolean;
 }
 
+export interface MacroReferenceRange {
+  startOffset: number;
+  endOffset: number;
+}
+
 export interface SqlStatementsParseResult {
   runtime: SqlParsingRuntime;
   lexResult: SqlLexResult;
@@ -108,6 +113,7 @@ export interface SqlStatementsParseResult {
   parserErrors: IRecognitionException[];
   actionableParserErrors: IRecognitionException[];
   usedIsolatedParser: boolean;
+  macroReferenceRanges: readonly MacroReferenceRange[];
 }
 
 function replaceRangeWithSpaces(sql: string, start: number, end: number): string {
@@ -222,7 +228,7 @@ function readMacroDirectiveRange(
   }
 
   const directiveMatch = sql.slice(directiveStart).match(
-    /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+|%do\s*;?|%else\s+%do\b\s*|%end\b\s*)/i,
+    /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|declare\s+&[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+|%do\s*;?|%else\s+%do\b\s*|%end\b\s*)/i,
   );
 
   if (!directiveMatch) {
@@ -276,7 +282,7 @@ function findMacroIfBlockEnd(sql: string, bodyStart: number): number {
         continue;
       }
 
-      const directiveMatch = text.match(/^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%(?:else\s+%do|let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|put\s+|export\b\s*|include\s+|python\s+))/i);
+      const directiveMatch = text.match(/^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|declare\s+&[A-Za-z_][A-Za-z0-9_]*\s*=|%(?:else\s+%do|let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|put\s+|export\b\s*|include\s+|python\s+))/i);
       if (directiveMatch) {
         offset = findDirectiveEnd(sql, directiveStart + directiveMatch[0].length);
         atLineStart = isAtLineStartAfterWhitespace(sql, offset);
@@ -519,12 +525,20 @@ function readNextSignificantChar(sql: string, start: number): string | undefined
 }
 
 function isIdentifierMacroPosition(sql: string, start: number, end: number): boolean {
+  const previousAdjacentChar = sql[start - 1];
+  const nextAdjacentChar = sql[end];
   const previousChar = readPreviousSignificantChar(sql, start);
+  if (previousAdjacentChar !== undefined && /[A-Za-z0-9_$]/.test(previousAdjacentChar)) {
+    return true;
+  }
   if (previousChar === ".") {
     return true;
   }
 
   const nextChar = readNextSignificantChar(sql, end);
+  if (nextAdjacentChar !== undefined && /[A-Za-z0-9_$]/.test(nextAdjacentChar)) {
+    return true;
+  }
   if (nextChar === ".") {
     return true;
   }
@@ -551,8 +565,14 @@ function isIdentifierMacroPosition(sql: string, start: number, end: number): boo
   ]).has(previousWord);
 }
 
-function sanitizeSqlMacroSyntax(sql: string): string {
+interface SanitizedSqlMacroSyntax {
+  sql: string;
+  macroReferenceRanges: MacroReferenceRange[];
+}
+
+function sanitizeSqlMacroSyntaxWithMetadata(sql: string): SanitizedSqlMacroSyntax {
   let sanitized = sanitizeMacroQueryFunctions(sanitizeMacroDirectives(sql));
+  const macroReferenceRanges: MacroReferenceRange[] = [];
   let i = 0;
 
   while (i < sanitized.length) {
@@ -612,6 +632,10 @@ function sanitizeSqlMacroSyntax(sql: string): string {
       const start = i;
       const macroReference = parseMacroReference(sanitized, start);
       if (macroReference) {
+        macroReferenceRanges.push({
+          startOffset: start,
+          endOffset: macroReference.end,
+        });
         sanitized = isIdentifierMacroPosition(sanitized, start, macroReference.end)
           ? replaceRangeWithPaddedText(
             sanitized,
@@ -628,7 +652,7 @@ function sanitizeSqlMacroSyntax(sql: string): string {
     i++;
   }
 
-  return sanitized;
+  return { sql: sanitized, macroReferenceRanges };
 }
 
 interface SqlParsingRuntimeRegistration {
@@ -885,7 +909,8 @@ export function parseSqlStatements(
   options: SqlStatementsParseOptions,
 ): SqlStatementsParseResult {
   const runtime = options.runtime ?? resolveSqlParsingRuntime(options);
-  const sqlForParsing = sanitizeSqlMacroSyntax(options.sql);
+  const sanitizedMacroSyntax = sanitizeSqlMacroSyntaxWithMetadata(options.sql);
+  const sqlForParsing = sanitizedMacroSyntax.sql;
   const lexResult = runtime.SqlLexer.tokenize(sqlForParsing);
   if (lexResult.errors.length > 0) {
     return {
@@ -895,6 +920,7 @@ export function parseSqlStatements(
       parserErrors: [],
       actionableParserErrors: [],
       usedIsolatedParser: false,
+      macroReferenceRanges: sanitizedMacroSyntax.macroReferenceRanges,
     };
   }
 
@@ -926,5 +952,6 @@ export function parseSqlStatements(
     parserErrors,
     actionableParserErrors,
     usedIsolatedParser,
+    macroReferenceRanges: sanitizedMacroSyntax.macroReferenceRanges,
   };
 }
