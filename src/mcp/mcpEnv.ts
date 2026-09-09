@@ -1,5 +1,5 @@
 import { ConnectionDetails } from '../types';
-import { normalizeDatabaseKind } from '../contracts/database';
+import { tryNormalizeDatabaseKind } from '../contracts/database';
 
 /**
  * Connection details are transferred from the VS Code extension host to the
@@ -53,6 +53,12 @@ export function envToConnectionDetails(env: NodeJS.ProcessEnv): ConnectionDetail
         }
     }
 
+    const rawDbType = env[MCP_ENV.DBTYPE]?.trim() || 'netezza';
+    const dbType = tryNormalizeDatabaseKind(rawDbType);
+    if (!dbType) {
+        console.warn(`[netezza-mcp] Unsupported ${MCP_ENV.DBTYPE} '${rawDbType}'; falling back to Netezza.`);
+    }
+
     return {
         name: env[MCP_ENV.CONNECTION_NAME] || undefined,
         host,
@@ -60,7 +66,7 @@ export function envToConnectionDetails(env: NodeJS.ProcessEnv): ConnectionDetail
         database: env[MCP_ENV.DATABASE] || '',
         user: env[MCP_ENV.USER] || '',
         password: env[MCP_ENV.PASSWORD] || undefined,
-        dbType: normalizeDatabaseKind(env[MCP_ENV.DBTYPE] || 'netezza'),
+        dbType: dbType ?? 'netezza',
         options
     };
 }

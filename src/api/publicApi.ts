@@ -110,7 +110,14 @@ async function getActiveConnectionDetails(
         return undefined;
     }
     const details = await connectionManager.getConnection(name);
-    return details ? { name, details, documentUri, documentBound: Boolean(documentConnection) } : undefined;
+    return details
+        ? {
+            name,
+            details,
+            documentUri,
+            documentBound: Boolean(documentConnection),
+        }
+        : undefined;
 }
 
 async function executeActiveConnectionSql(

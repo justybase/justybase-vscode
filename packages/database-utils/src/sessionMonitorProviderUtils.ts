@@ -63,9 +63,16 @@ export async function executeSessionMonitorStatement(
   await services.execute(sql, connectionName);
 }
 
-export function escapeSqlLiteral(value: string): string {
+/** Escape the contents of a SQL string without adding quote characters. */
+export function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''");
 }
+
+/**
+ * Compatibility name retained for session-monitor providers that build the
+ * surrounding SQL quotes themselves.
+ */
+export const escapeSqlLiteral = escapeSqlString;
 
 export function emptySessionMonitorResources(): SessionMonitorResources {
   return {

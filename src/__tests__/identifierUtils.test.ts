@@ -61,6 +61,12 @@ describe('identifierUtils', () => {
         expect(formatIdentifierForSql('"lower_case_name"()')).toBe('"lower_case_name"()');
     });
 
+    it('rejects unknown dialect names instead of applying Netezza quoting', () => {
+        expect(() => formatIdentifierForSql('orders', 'postgress')).toThrow(
+            "Unsupported database kind 'postgress'.",
+        );
+    });
+
     it('formats SQLite identifiers without preserving case via quotes', () => {
         expect(formatIdentifierForSql('sales', 'sqlite')).toBe('sales');
         expect(formatIdentifierForSql('Sales', 'sqlite')).toBe('Sales');

@@ -31,7 +31,8 @@
     ],
     "packages/tabular-import-runtime": [
       "packages/contracts",
-      "packages/database-utils"
+      "packages/database-utils",
+      "packages/dialect-utils"
     ],
     "packages/file-runtime": [
       "packages/contracts"

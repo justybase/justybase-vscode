@@ -2,6 +2,9 @@ import type { ExtensionContext } from 'vscode';
 import type { ConnectionDetails } from '../../types';
 import type { TuningReport } from '../../services/tuning/types';
 import type { DatabaseConnection } from './index';
+import type { DatabaseSessionMonitorServices as SharedDatabaseSessionMonitorServices } from '@justybase/contracts';
+
+export type { DatabaseSessionMonitorServices } from '@justybase/contracts';
 
 /** Native storage-definition metadata retained for dialect-specific DDL. */
 export interface DatabaseTableDefinitionMetadata {
@@ -579,31 +582,36 @@ export interface DatabaseMaintenanceProvider {
 
 export interface DatabaseSessionMonitorProvider {
     getSessions(
-        context: ExtensionContext,
-        connectionManager: unknown,
-        database?: string
+        context: unknown,
+        services: SharedDatabaseSessionMonitorServices,
+        database?: string,
+        connectionName?: string
     ): Promise<Record<string, unknown>[]>;
     getQueries(
-        context: ExtensionContext,
-        connectionManager: unknown,
-        database?: string
+        context: unknown,
+        services: SharedDatabaseSessionMonitorServices,
+        database?: string,
+        connectionName?: string
     ): Promise<Record<string, unknown>[]>;
     getStorage(
-        context: ExtensionContext,
-        connectionManager: unknown
+        context: unknown,
+        services: SharedDatabaseSessionMonitorServices,
+        connectionName?: string
     ): Promise<Record<string, unknown>[]>;
     getResources(
-        context: ExtensionContext,
-        connectionManager: unknown
+        context: unknown,
+        services: SharedDatabaseSessionMonitorServices,
+        connectionName?: string
     ): Promise<{ gra: unknown[]; systemUtil: unknown[]; sysUtilSummary: unknown }>;
     killSession(
-        context: ExtensionContext,
-        connectionManager: unknown,
-        sessionId: number
+        context: unknown,
+        services: SharedDatabaseSessionMonitorServices,
+        sessionId: number,
+        connectionName?: string
     ): Promise<void>;
     killQuery?(
-        context: ExtensionContext,
-        connectionManager: unknown,
+        context: unknown,
+        services: SharedDatabaseSessionMonitorServices,
         queryId: string,
         connectionName?: string
     ): Promise<void>;

@@ -2,7 +2,7 @@
  * Identifier utilities shared across SQL dialects.
  */
 
-import { type DatabaseKind, normalizeDatabaseKind } from '@justybase/contracts';
+import { type DatabaseKind, tryNormalizeDatabaseKind } from '@justybase/contracts';
 import { getDatabaseDialectTraits } from './dialectTraits';
 const SQLITE_RESERVED_KEYWORDS = new Set([
     'ABORT',
@@ -186,7 +186,15 @@ function splitIdentifierSignature(identifier: string): { identifierPart: string;
 }
 
 function normalizeIdentifierKind(kind?: string | DatabaseKind): DatabaseKind | undefined {
-    return kind ? normalizeDatabaseKind(kind) : undefined;
+    if (kind === undefined || kind.trim().length === 0) {
+        return undefined;
+    }
+
+    const normalizedKind = tryNormalizeDatabaseKind(kind);
+    if (!normalizedKind) {
+        throw new Error(`Unsupported database kind '${kind}'.`);
+    }
+    return normalizedKind;
 }
 
 function getIdentifierPattern(kind?: string | DatabaseKind): RegExp {

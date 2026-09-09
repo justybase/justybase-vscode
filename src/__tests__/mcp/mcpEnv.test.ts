@@ -41,7 +41,7 @@ describe('MCP connection env serialization', () => {
         expect(restored?.options).toBeUndefined();
     });
 
-    it('normalizes unknown dbType to netezza', () => {
+    it('falls back to Netezza for an explicitly unknown dbType', () => {
         const env = connectionDetailsToEnv({ host: 'h', database: 'd', user: 'u', dbType: 'unknown' as never });
         expect(envToConnectionDetails(env)?.dbType).toBe('netezza');
     });

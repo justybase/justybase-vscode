@@ -461,10 +461,13 @@ export interface DatabaseSessionMonitorServices {
   ): Promise<T[]>;
   /** Execute a statement without returning rows. */
   execute(sql: string, connectionName?: string): Promise<void>;
-  /** Resolve the selected connection profile when a provider needs metadata. */
+  /**
+   * Resolve non-secret connection metadata when a provider needs it.
+   * Passwords are deliberately not part of this port.
+   */
   getConnectionDetails?(
     connectionName?: string,
-  ): Promise<ConnectionDetails | undefined>;
+  ): Promise<Omit<ConnectionDetails, 'password'> | undefined>;
   /** Execute a query against a database-specific target using the same profile. */
   queryDatabase?<T extends Record<string, unknown>>(
     database: string,

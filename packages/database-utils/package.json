@@ -55,8 +55,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check-types": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --runInBand"
+    "check-types": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@justybase/contracts": "*"
