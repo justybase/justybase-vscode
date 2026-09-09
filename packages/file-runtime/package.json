@@ -1,0 +1,26 @@
+{
+  "name": "@justybase/file-runtime",
+  "private": true,
+  "version": "3.17.14",
+  "description": "Node file-profile helpers shared by the File SQL companion and desktop host.",
+  "license": "Apache-2.0",
+  "main": "./dist/fileConnectionProfileUtils.js",
+  "types": "./dist/fileConnectionProfileUtils.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/fileConnectionProfileUtils.d.ts",
+      "require": "./dist/fileConnectionProfileUtils.js",
+      "default": "./dist/fileConnectionProfileUtils.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@justybase/contracts": "*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.0"
+  }
+}

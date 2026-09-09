@@ -21,6 +21,16 @@
       "require": "./dist/quality/index.js",
       "default": "./dist/quality/index.js"
     },
+    "./authoring": {
+      "types": "./dist/authoring/index.d.ts",
+      "require": "./dist/authoring/index.js",
+      "default": "./dist/authoring/index.js"
+    },
+    "./authoring/*": {
+      "types": "./dist/authoring/*.d.ts",
+      "require": "./dist/authoring/*.js",
+      "default": "./dist/authoring/*.js"
+    },
     "./parser/BaseSqlParser": {
       "types": "./dist/parser/BaseSqlParser.d.ts",
       "require": "./dist/parser/BaseSqlParser.js",
