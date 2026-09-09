@@ -4,6 +4,7 @@ import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-tabl
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterSpec, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
+import { aggregateResultRows, filterResultRows, type ResultColumn, type ResultColumnFilter } from '@justybase/result-core';
 import { api } from './api';
 import { type ResultState } from './queryState';
 
@@ -26,16 +27,38 @@ interface SavedGridState {
   columnOrder?: string[];
 }
 
+interface PersistedGridStateEnvelope {
+  version: 2;
+  resultSetId: string;
+  state: SavedGridState;
+}
+
 interface PivotResult {
   columns: string[];
   rows: unknown[][];
 }
 
-function gridStateKey(queryId: string, statementIndex: number): string {
+function gridStateKey(resultSetId: string): string {
+  return `jwb_grid_v2_${resultSetId}`;
+}
+
+function legacyGridStateKey(queryId: string, statementIndex: number): string {
   return `jwb_grid_${queryId}_${statementIndex}`;
 }
 
-function readGridState(key: string): SavedGridState | undefined {
+function readGridState(key: string, expectedResultSetId: string): SavedGridState | undefined {
+  try {
+    const value = localStorage.getItem(key);
+    if (!value) return undefined;
+    const parsed = JSON.parse(value) as PersistedGridStateEnvelope;
+    if (parsed && typeof parsed === 'object' && parsed.version === 2 && parsed.resultSetId === expectedResultSetId && parsed.state && typeof parsed.state === 'object') return parsed.state;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readLegacyGridState(key: string): SavedGridState | undefined {
   try {
     const value = localStorage.getItem(key);
     if (!value) return undefined;
@@ -168,11 +191,18 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [grouping, setGrouping] = useState(false);
   const requestGeneration = useRef(0);
   const resultGridRef = useRef<HTMLDivElement | null>(null);
-  const gridKey = gridStateKey(queryId, statementIndex);
+  const resultSetId = result.resultSetId ?? `${queryId}::statement-${statementIndex}`;
+  const gridKey = gridStateKey(resultSetId);
+  const legacyKey = legacyGridStateKey(queryId, statementIndex);
 
   const requestFilters = useMemo<QueryColumnFilterSpec[]>(() => columnFilters.flatMap(item => typeof item.value === 'string' && item.value.trim() ? [{ columnIndex: Number(item.id), value: item.value }] : []), [columnFilters]);
   const requestSorting = useMemo<QuerySortSpec[]>(() => sorting.map(item => ({ columnIndex: Number(item.id), desc: item.desc })), [sorting]);
   const hasGridFilter = globalFilter.trim().length > 0 || requestFilters.length > 0;
+  const localFilterColumns = useMemo<ResultColumn[]>(() => result.columns.map((name, index) => ({ name, type: result.columnTypes[index] })), [result.columns, result.columnTypes]);
+  const localFilters = useMemo<ResultColumnFilter[]>(() => requestFilters.map(filter => ({
+    columnIndex: filter.columnIndex,
+    value: { _isConditionFilter: true, logic: 'and', conditions: [{ type: 'contains', value: filter.value }] },
+  })), [requestFilters]);
 
   useEffect(() => {
     setRows(result.rows);
@@ -185,7 +215,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setDetailRowIndex(null);
     setShowAggregates(false);
     setGridHydratedKey(null);
-    const saved = readGridState(gridKey);
+    const saved = readGridState(gridKey, resultSetId) ?? readLegacyGridState(legacyKey);
     const defaultOrder = result.columns.map((_, i) => String(i));
     const savedOrder = saved?.columnOrder?.filter(column => defaultOrder.includes(column)) ?? [];
     const mergedOrder = [...savedOrder, ...defaultOrder.filter(column => !savedOrder.includes(column))];
@@ -197,16 +227,18 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setColumnPinning(saved?.columnPinning ?? { left: [], right: [] });
     setColumnOrder(mergedOrder);
     setGridHydratedKey(gridKey);
-  }, [gridKey, result.sessionId, result.columns]);
+  }, [gridKey, legacyKey, resultSetId, result.sessionId, result.columns]);
 
   useEffect(() => {
     if (gridHydratedKey !== gridKey) return;
     try {
-      localStorage.setItem(gridKey, JSON.stringify({ pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder } satisfies SavedGridState));
+      const state: SavedGridState = { pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder };
+      const envelope: PersistedGridStateEnvelope = { version: 2, resultSetId, state };
+      localStorage.setItem(gridKey, JSON.stringify(envelope));
     } catch {
       // A full localStorage should not make the result grid unusable.
     }
-  }, [gridKey, gridHydratedKey, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder]);
+  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder]);
 
   useEffect(() => {
     if (!queryId || !result.sessionId) return;
@@ -220,11 +252,36 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   }, [queryId, statementIndex, result.sessionId, result.status, pageIndex, pageSize, requestSorting, requestFilters, globalFilter]);
 
   async function loadAggregates(): Promise<void> {
-    if (!queryId || !result.sessionId) return;
+    if (!queryId) return;
     setAggregatesLoading(true);
     try {
-      const response = await api.aggregate(queryId, { statementIndex, globalFilter, columnFilters: requestFilters, functions: ['count', 'sum', 'avg', 'min', 'max'] as QueryAggregateFunction[] });
-      setAggregates(response);
+      if (!result.sessionId) {
+        const filteredRows = filterResultRows(result.rows, localFilterColumns, { globalFilter, columnFilters: localFilters });
+        const functions: QueryAggregateFunction[] = ['count', 'sum', 'avg', 'min', 'max'];
+        const calculated = aggregateResultRows(filteredRows, result.columns
+          .map((name, index) => ({ name, type: result.columnTypes[index] }))
+          .flatMap((column, columnIndex) => functions.map(fn => ({
+            columnIndex,
+            function: fn,
+            dataType: column.type,
+          }))));
+        const values = result.columns.map((_name, columnIndex) => {
+          const entries = calculated.filter(item => item.columnIndex === columnIndex);
+          const valueFor = (fn: QueryAggregateFunction) => entries.find(item => item.function === fn)?.value;
+          return {
+            columnIndex,
+            count: Number(valueFor('count') ?? 0),
+            sum: valueFor('sum'),
+            avg: valueFor('avg'),
+            min: valueFor('min'),
+            max: valueFor('max'),
+          };
+        });
+        setAggregates({ statementIndex, filteredRowCount: filteredRows.length, values });
+      } else {
+        const response = await api.aggregate(queryId, { statementIndex, globalFilter, columnFilters: requestFilters, functions: ['count', 'sum', 'avg', 'min', 'max'] as QueryAggregateFunction[] });
+        setAggregates(response);
+      }
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not calculate aggregates.');
     } finally {
@@ -313,7 +370,10 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
       },
     };
   }), [result.columns, result.columnTypes]);
-  const data = useMemo(() => rows.map(values => ({ values })), [rows]);
+  const displayRows = useMemo(() => result.sessionId
+    ? rows
+    : filterResultRows(result.rows, localFilterColumns, { globalFilter, columnFilters: localFilters }), [result.sessionId, result.rows, rows, localFilterColumns, globalFilter, localFilters]);
+  const data = useMemo(() => displayRows.map(values => ({ values })), [displayRows]);
   const table = useReactTable({
     data,
     columns,
@@ -340,7 +400,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     overscan: 12,
   });
   const selectedRows = table.getSelectedRowModel().rows;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const effectiveTotalRows = result.sessionId ? totalRows : data.length;
+  const totalPages = Math.max(1, Math.ceil(effectiveTotalRows / pageSize));
 
   useEffect(() => {
     const closeMenu = (): void => setContextMenu(null);
@@ -468,6 +529,6 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     })}</tr>; })}</tbody></table></div>
     {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button type="button" onClick={() => copyContext('value')}>Copy value</button><button type="button" onClick={() => copyContext('tsv')}>Copy row as TSV</button><button type="button" onClick={() => copyContext('json')}>Copy row as JSON</button><button type="button" onClick={() => copyContext('markdown')}>Copy row as Markdown</button><button type="button" onClick={() => copyContext('sql')}>Copy SQL INSERT</button><hr /><button type="button" onClick={filterByContextValue}>Filter by this value</button><button type="button" onClick={() => sortByContextValue(false)}>Sort ascending</button><button type="button" onClick={() => sortByContextValue(true)}>Sort descending</button><hr /><button type="button" onClick={() => { setDetailRowIndex(contextMenu.rowIndex); setContextMenu(null); }}>View full row</button>{onEditRow && <button type="button" onClick={() => { const row = contextRow(); if (row) onEditRow(row.values); setContextMenu(null); }}>Edit row…</button>}</div>}
     {detailRowIndex !== null && table.getRowModel().rows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{table.getRowModel().rows[detailRowIndex].original.values.map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, result.columnTypes[index]).text}</dd></div>)}</dl></aside>}
-    <div className="grid-pagination"><span>{totalRows.toLocaleString()} rows · page {pageIndex + 1} / {totalPages}</span><label>Page size<select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageIndex(0); }}><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option></select></label><button className="secondary small" disabled={pageIndex === 0 || loading} onClick={() => setPageIndex(value => value - 1)}>Previous</button><button className="secondary small" disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex(value => value + 1)}>Next</button></div>
+    <div className="grid-pagination"><span>{effectiveTotalRows.toLocaleString()} rows · page {pageIndex + 1} / {totalPages}</span><label>Page size<select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageIndex(0); }}><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option></select></label><button className="secondary small" disabled={pageIndex === 0 || loading} onClick={() => setPageIndex(value => value - 1)}>Previous</button><button className="secondary small" disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex(value => value + 1)}>Next</button></div>
   </section>;
 }

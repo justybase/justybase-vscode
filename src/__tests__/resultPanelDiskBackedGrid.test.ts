@@ -51,7 +51,7 @@ jest.mock('../../media/resultPanel/grid.js', () => ({
     renderGrids: jest.fn(),
 }));
 
-jest.mock('../../media/resultPanel/filter.js', () => ({
+jest.mock('../../media/resultPanel/rowCount.js', () => ({
     updateRowCountInfo: jest.fn(),
 }));
 

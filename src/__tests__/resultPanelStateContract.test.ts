@@ -105,6 +105,11 @@ describe('Result Panel state contract', () => {
         const retainedPin = pinEntryFor(manager, sourceA, 1);
         expect(retainedPin?.[1].resultSetIndex).toBe(1);
         expect(manager.resultsMap.get(sourceB)?.map(result => result.resultSetId)).toContain('b-result-1');
+
+        const coreSource = manager.resultCoreState.sources.get(sourceA);
+        expect(coreSource?.executionId).toEqual(expect.any(String));
+        expect(coreSource?.resultSets[1]?.resultSetId).toBe('a-result-1');
+        expect(coreSource?.activeResultSetId).toBe(coreSource?.resultSets[0]?.resultSetId);
     });
 
     it('shifts pinned and active indices when a result is closed', () => {
@@ -175,6 +180,29 @@ describe('Result Panel state contract', () => {
             },
             'SELECT id FROM stream',
         ).type).toBe('ignore');
+
+        const coreResult = manager.resultCoreState.sources.get(sourceUri)?.resultSets[1];
+        expect(coreResult?.resultSetId).toBe(result?.resultSetId);
+        expect(coreResult?.status).toBe('cancelled');
+        expect(coreResult?.loadedRowCount).toBe(2);
+    });
+
+    it('projects statement and storage-session identity without using a result index', () => {
+        const sourceUri = 'file:///contract-storage.sql';
+        manager.updateResults([{
+            ...dataResult('stored-result', 1),
+            statementIndex: 3,
+            storageSessionId: 'storage-session-1',
+        }], sourceUri);
+
+        const coreResult = manager.resultCoreState.sources.get(sourceUri)?.resultSets[0];
+        expect(coreResult).toMatchObject({
+            resultSetId: 'stored-result',
+            sourceId: sourceUri,
+            statementIndex: 3,
+            storageSessionId: 'storage-session-1',
+        });
+        expect(coreResult?.resultSetId).not.toBe(String(coreResult?.statementIndex));
     });
 
     it('removes source-owned state and selects a surviving source on close', () => {
@@ -195,4 +223,3 @@ describe('Result Panel state contract', () => {
         expect(manager.resultsMap.get(sourceB)?.map(result => result.resultSetId)).toContain('b-result');
     });
 });
-

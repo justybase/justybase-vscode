@@ -1,8 +1,7 @@
 import { decode } from '@msgpack/msgpack';
 import { postHostMessage } from './protocol.js';
 import { clearAllSearchWorkerData } from './searchWorkerBridge.js';
-import { renderGrids } from './grid.js';
-import { updateRowCountInfo } from './filter.js';
+import { updateRowCountInfo } from './rowCount.js';
 import { getGrid, resetEditSession } from './state.js';
 import { getGridWrapperForResultSet, getScrollTarget } from './grid/persistence.js';
 import {
@@ -656,7 +655,7 @@ export function handleDiskBackedActivate(message: Record<string, unknown>): void
     clearAllSearchWorkerData();
     clearDiskBackedPendingRequests();
     resetEditSession();
-    renderGrids();
+    callPanelMethod('refreshResultsGrid');
     updateRowCountInfo(resultSetIndex, totalRows, limitReached === true);
     callPanelMethod('updateEditButtons');
 }

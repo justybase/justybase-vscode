@@ -17,7 +17,12 @@ import {
     type DiskBackedActivateProps,
     type RowCountUpdateProps,
 } from '../core/resultDataProvider/types';
-import { ensureResultSetId } from './resultSetIdentity';
+import { createResultSetId, ensureResultSetId } from './resultSetIdentity';
+import {
+    ResultCoreStateAdapter,
+    resultSetToCoreInput,
+    type ResultCorePinSnapshot,
+} from './resultCoreStateAdapter';
 
 /** SQL truncation length for log entries */
 const SQL_TRUNCATION_LENGTH = 200;
@@ -107,6 +112,8 @@ type OneChunk = {
     totalRowsSoFar: number;
     limitReached: boolean;
     isCancelled?: boolean;
+    fromRow?: number;
+    chunkSequence?: number;
 };
 
 export interface PinnedResultInfo {
@@ -138,6 +145,7 @@ export class ResultStateManager {
     private _executingSources: Set<string> = new Set();
     private _cancelledSources: Set<string> = new Set();
     private _currentExecutionId: Map<string, number> = new Map(); // Track current execution per source
+    private _resultCoreState = new ResultCoreStateAdapter();
     private _limitWarningShown: Set<string> = new Set(); // Track if limit warning was shown for current execution
 
     // Execution logs tracking
@@ -281,6 +289,60 @@ export class ResultStateManager {
         return this._executingSources;
     }
 
+    /** Structural result state shared with the web adapter and lifecycle tests. */
+    public get resultCoreState() {
+        return this._resultCoreState.state;
+    }
+
+    private _coreExecutionId(sourceUri: string): string | undefined {
+        const executionId = this._currentExecutionId.get(sourceUri);
+        return executionId === undefined ? undefined : String(executionId);
+    }
+
+    private _coreResultSetId(resultSet: ResultSet): string {
+        return resultSet.resultSetId ?? `legacy-result-${resultSet.executionTimestamp ?? 0}`;
+    }
+
+    private _syncResultCoreSource(sourceUri: string): void {
+        const resultSets = this._resultsMap.get(sourceUri) ?? [];
+        const pins: ResultCorePinSnapshot[] = Array.from(this._pinnedResults.entries())
+            .map(([resultId, info]) => ({
+                resultId,
+                sourceId: info.sourceUri,
+                resultSetIndex: info.resultSetIndex,
+                timestamp: info.timestamp,
+                label: info.label,
+                automatic: this._autoPinnedResults.has(resultId),
+            }));
+        this._resultCoreState.syncSource(
+            sourceUri,
+            resultSets,
+            pins,
+            this._activeResultSetIndexMap.get(sourceUri) ?? 0,
+            this._executingSources.has(sourceUri),
+            this._coreExecutionId(sourceUri),
+        );
+    }
+
+    private _applyCoreStartExecution(sourceUri: string, executionId: string, logResultSetId: string): ReadonlySet<string> {
+        this._syncResultCoreSource(sourceUri);
+        const next = this._resultCoreState.apply({
+            type: 'start-execution',
+            sourceId: sourceUri,
+            executionId,
+            logResultSetId,
+        });
+        const source = next.sources.get(sourceUri);
+        return new Set(source?.resultSets.filter(resultSet => !resultSet.isLog).map(resultSet => resultSet.resultSetId) ?? []);
+    }
+
+    private _syncResultCoreAfterMutation(sourceUri: string): void {
+        this._syncResultCoreSource(sourceUri);
+        if (this._activeSourceUri === sourceUri && this._resultCoreState.state.activeSourceId !== sourceUri) {
+            this._resultCoreState.apply({ type: 'set-active-source', sourceId: sourceUri });
+        }
+    }
+
     /** Sources whose current execution delivered all rows to the webview. */
     public get streamingCompletedSources(): ReadonlySet<string> {
         return this._streamingCompletedSources;
@@ -351,6 +413,7 @@ export class ResultStateManager {
         }
         const activeIndex = this._activeResultSetIndexMap.get(sourceUri) ?? 0;
         this.touchResultSetAccess(sourceUri, activeIndex);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._onDidChangeState.fire();
         return true;
     }
@@ -367,26 +430,32 @@ export class ResultStateManager {
         this._cancelledSources.delete(sourceUri);
         this._streamingCompletedSources.delete(sourceUri); // Fresh execution, no streaming yet
 
-        // Generate new execution ID
-        const newExecutionId = Date.now();
+        // Generate a monotonic execution identity even when two executions
+        // start in the same millisecond.
+        const previousExecutionId = this._currentExecutionId.get(sourceUri) ?? 0;
+        const newExecutionId = Math.max(Date.now(), previousExecutionId + 1);
         this._currentExecutionId.set(sourceUri, newExecutionId);
         this._limitWarningShown.delete(sourceUri); // Reset warning flag for new execution
 
         const existingResults = this._resultsMap.get(sourceUri) || [];
 
+        for (const resultSet of existingResults) {
+            ensureResultSetId(resultSet);
+        }
+        const existingLog = existingResults.find(resultSet => resultSet.isLog);
+        const logResultSetId = existingLog?.resultSetId ?? createResultSetId();
+        const retainedResultSetIds = this._applyCoreStartExecution(
+            sourceUri,
+            String(newExecutionId),
+            logResultSetId,
+        );
+
         // Remove all unpinned data results from previous executions
         // Keep only: logs and manually pinned results
-        const pinnedIndices = new Set<number>();
-        for (const [id, info] of this._pinnedResults.entries()) {
-            if (info.sourceUri === sourceUri && !this._autoPinnedResults.has(id)) {
-                pinnedIndices.add(info.resultSetIndex);
-            }
-        }
-
         const resultsToRemove: number[] = [];
         existingResults.forEach((rs, index) => {
             // Keep logs and manually pinned results
-            if (!rs.isLog && !pinnedIndices.has(index)) {
+            if (!rs.isLog && !retainedResultSetIds.has(this._coreResultSetId(rs))) {
                 resultsToRemove.push(index);
             }
         });
@@ -444,9 +513,9 @@ export class ResultStateManager {
                 message: 'Execution started...',
                 executionTimestamp: Date.now(),
                 isLog: true,
-                name: 'Logs'
+                name: 'Logs',
+                resultSetId: logResultSetId,
             } as ResultSet;
-            ensureResultSetId(logResultSet);
             existingResults.unshift(logResultSet);
             this._updatePinsOnReorder(sourceUri);
         }
@@ -455,6 +524,7 @@ export class ResultStateManager {
         this._pinnedSources.add(sourceUri);
         this._activeSourceUri = sourceUri;
         this._activeResultSetIndexMap.set(sourceUri, 0);
+        this._syncResultCoreAfterMutation(sourceUri);
 
         // Bump the version so the webview receives executingSources and loading state.
         this._incrementDataVersion(sourceUri);
@@ -482,6 +552,7 @@ export class ResultStateManager {
 
             logResultSet.data.push(row);
             this._incrementDataVersion(sourceUri);
+            this._syncResultCoreAfterMutation(sourceUri);
 
             return {
                 command: 'appendRows',
@@ -556,6 +627,7 @@ export class ResultStateManager {
 
                 logResultSet.data.push(row);
                 this._incrementDataVersion(sourceUri);
+                this._syncResultCoreAfterMutation(sourceUri);
 
                 incrementalUpdate = {
                     command: 'appendRows',
@@ -649,6 +721,7 @@ export class ResultStateManager {
                         const fromRow = logResultSet.data.length;
                         logResultSet.data.push(row);
                         this._incrementDataVersion(sourceUri);
+                        this._syncResultCoreAfterMutation(sourceUri);
 
                         if (status === 'retrying') {
                             entry.startTime = Date.now();
@@ -737,13 +810,22 @@ export class ResultStateManager {
     }
 
     public cancelExecution(sourceUri: string, currentRowCounts?: number[]) {
+        const results = this._resultsMap.get(sourceUri) || [];
+        this._syncResultCoreSource(sourceUri);
+        this._resultCoreState.apply({
+            type: 'cancel-execution',
+            sourceId: sourceUri,
+            executionId: this._coreExecutionId(sourceUri),
+            resultSetIds: results.filter(resultSet => !resultSet.isLog).flatMap(resultSet => resultSet.resultSetId ? [resultSet.resultSetId] : []),
+            resultSetIndices: results.flatMap((resultSet, index) => resultSet.isLog ? [] : [index]),
+            currentRowCounts,
+        });
         if (this._executingSources.has(sourceUri)) {
             this._executingSources.delete(sourceUri);
         }
         this._cancelledSources.add(sourceUri);
         this._onDidCancel.fire(sourceUri);
 
-        const results = this._resultsMap.get(sourceUri) || [];
         results.forEach((rs, index) => {
             rs.isCancelled = true;
             if (currentRowCounts && currentRowCounts[index] !== undefined) {
@@ -760,10 +842,17 @@ export class ResultStateManager {
         });
 
         this._incrementDataVersion(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._onDidChangeState.fire();
     }
 
     public finalizeExecution(sourceUri: string) {
+        this._syncResultCoreSource(sourceUri);
+        this._resultCoreState.apply({
+            type: 'finalize-execution',
+            sourceId: sourceUri,
+            executionId: this._coreExecutionId(sourceUri),
+        });
         this._executingSources.delete(sourceUri);
 
         const results = this._resultsMap.get(sourceUri);
@@ -792,6 +881,7 @@ export class ResultStateManager {
         }
 
         this._incrementDataVersion(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._onDidChangeState.fire();
     }
 
@@ -808,6 +898,7 @@ export class ResultStateManager {
         this._activeSourceUri = sourceUri;
         this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
         this._incrementDataVersion(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._onDidChangeState.fire();
         return true;
     }
@@ -816,6 +907,7 @@ export class ResultStateManager {
         this._executingSources.delete(sourceUri);
         this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
         this._incrementDataVersion(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._onDidChangeState.fire();
     }
 
@@ -909,6 +1001,7 @@ export class ResultStateManager {
         }
 
         this._incrementDataVersion(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._onDidChangeState.fire();
     }
 
@@ -921,6 +1014,14 @@ export class ResultStateManager {
         newResultSets.forEach(rs => {
             if (!rs.executionTimestamp) rs.executionTimestamp = Date.now();
             ensureResultSetId(rs);
+        });
+
+        this._syncResultCoreSource(sourceUri);
+        this._resultCoreState.apply({
+            type: 'update-results',
+            sourceId: sourceUri,
+            executionId: this._coreExecutionId(sourceUri),
+            resultSets: newResultSets.map(resultSet => resultSetToCoreInput(sourceUri, this._coreExecutionId(sourceUri), resultSet)),
         });
 
         const currentResults = this._resultsMap.get(sourceUri) || [];
@@ -1036,6 +1137,7 @@ export class ResultStateManager {
         }
 
         this._pruneResults(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._incrementDataVersion(sourceUri);
         this._onDidChangeState.fire();
     }
@@ -1222,6 +1324,7 @@ export class ResultStateManager {
 
             targetResultSet.storageMode = 'sqlite';
             targetResultSet.diskStoreId = store.id;
+            targetResultSet.storageSessionId = store.id;
             targetResultSet.totalRowCount = totalRowsSoFar;
             targetResultSet.data = [];
             targetResultSet.bufferedBytes = 0;
@@ -1286,6 +1389,7 @@ export class ResultStateManager {
         diskBackedStoreRegistry.dispose(rs.diskStoreId);
         tempFileRegistry.unregister(rs.diskStoreId);
         rs.diskStoreId = undefined;
+        rs.storageSessionId = undefined;
         rs.storageMode = 'memory';
         rs.totalRowCount = undefined;
     }
@@ -1372,8 +1476,45 @@ export class ResultStateManager {
         }
 
         const existingResults = this._resultsMap.get(sourceUri) || [];
+        const isFirstDataChunk = chunk.isFirstChunk && chunk.columns.length > 0;
+        const existingStreamingResult = [...existingResults].reverse().find(resultSet => !resultSet.isLog);
+        const resultSetId = isFirstDataChunk
+            ? createResultSetId()
+            : existingStreamingResult?.resultSetId;
+        let coreResultSetIndex = existingStreamingResult
+            ? existingResults.indexOf(existingStreamingResult)
+            : -1;
 
-        if (chunk.isFirstChunk && chunk.columns.length > 0) {
+        if (isFirstDataChunk || (resultSetId !== undefined && chunk.rows.length > 0)) {
+            const executionId = this._coreExecutionId(sourceUri);
+            this._syncResultCoreSource(sourceUri);
+            const beforeCore = this._resultCoreState.state;
+            const afterCore = this._resultCoreState.apply({
+                type: 'append-streaming-chunk',
+                sourceId: sourceUri,
+                executionId,
+                resultSetId: resultSetId ?? createResultSetId(),
+                chunk: {
+                    columns: chunk.columns,
+                    rows: chunk.rows,
+                    isFirstChunk: chunk.isFirstChunk,
+                    isLastChunk: chunk.isLastChunk,
+                    totalRowsSoFar: chunk.totalRowsSoFar,
+                    limitReached: chunk.limitReached,
+                    isCancelled: chunk.isCancelled,
+                    fromRow: chunk.fromRow,
+                    chunkSequence: chunk.chunkSequence,
+                },
+                autoPin: isFirstDataChunk
+                    ? { timestamp: Date.now() }
+                    : undefined,
+            });
+            if (afterCore === beforeCore) return { type: 'ignore' };
+            const coreResult = afterCore.sources.get(sourceUri)?.resultSets.find(result => result.resultSetId === resultSetId);
+            coreResultSetIndex = coreResult ? afterCore.sources.get(sourceUri)!.resultSets.indexOf(coreResult) : coreResultSetIndex;
+        }
+
+        if (isFirstDataChunk) {
             const directSql = refreshSql ?? sql;
             const editSource = directSql ? detectEditSource(directSql) : null;
             const isEditable = editSource !== null;
@@ -1385,18 +1526,19 @@ export class ResultStateManager {
                 refreshSql: refreshSql ?? sql,
                 limitReached: chunk.limitReached,
                 isCancelled: chunk.isCancelled,
+                lastChunkSequence: chunk.chunkSequence,
                 bufferedBytes: estimateRowsBytes(chunk.rows),
                 isEditable,
                 editSource: editSource ?? undefined,
+                resultSetId,
             };
-            ensureResultSetId(newResultSet);
 
             existingResults.push(newResultSet);
             this._resultsMap.set(sourceUri, existingResults);
 
             const filename = sourceUri.split(/[\\/]/).pop() || sourceUri;
             const resultId = `result_${++this._resultIdCounter}`;
-            const resultSetIndex = existingResults.length - 1;
+            const resultSetIndex = coreResultSetIndex >= 0 ? coreResultSetIndex : existingResults.length - 1;
             this._pinnedResults.set(resultId, {
                 sourceUri,
                 resultSetIndex,
@@ -1422,9 +1564,11 @@ export class ResultStateManager {
                 chunk.limitReached,
             );
             if (migrateResult) {
+                this._syncResultCoreAfterMutation(sourceUri);
                 return migrateResult;
             }
 
+            this._syncResultCoreAfterMutation(sourceUri);
             return {
                 type: 'incremental',
                 props: {
@@ -1445,7 +1589,7 @@ export class ResultStateManager {
                 },
             };
         } else if (chunk.rows.length > 0) {
-            const resultSetIndex = existingResults.length - 1;
+            const resultSetIndex = coreResultSetIndex >= 0 ? coreResultSetIndex : existingResults.length - 1;
             const targetResultSet = existingResults[resultSetIndex];
             if (targetResultSet && !targetResultSet.isLog) {
                 if (targetResultSet.storageMode === 'sqlite' && targetResultSet.diskStoreId) {
@@ -1454,7 +1598,11 @@ export class ResultStateManager {
                     targetResultSet.totalRowCount = chunk.totalRowsSoFar;
                     targetResultSet.limitReached = targetResultSet.limitReached === true || chunk.limitReached === true;
                     targetResultSet.isCancelled = targetResultSet.isCancelled === true || chunk.isCancelled === true;
+                    if (chunk.chunkSequence !== undefined) {
+                        targetResultSet.lastChunkSequence = chunk.chunkSequence;
+                    }
                     this._incrementDataVersion(sourceUri);
+                    this._syncResultCoreAfterMutation(sourceUri);
 
                     return {
                         type: 'rowCountUpdate',
@@ -1473,6 +1621,9 @@ export class ResultStateManager {
                 targetResultSet.bufferedBytes = (targetResultSet.bufferedBytes ?? 0) + estimateRowsBytes(chunk.rows);
                 targetResultSet.limitReached = targetResultSet.limitReached === true || chunk.limitReached === true;
                 targetResultSet.isCancelled = targetResultSet.isCancelled === true || chunk.isCancelled === true;
+                if (chunk.chunkSequence !== undefined) {
+                    targetResultSet.lastChunkSequence = chunk.chunkSequence;
+                }
 
                 const migrateResult = this._tryMigrateResultSetToDisk(
                     sourceUri,
@@ -1482,9 +1633,11 @@ export class ResultStateManager {
                     targetResultSet.limitReached === true,
                 );
                 if (migrateResult) {
+                    this._syncResultCoreAfterMutation(sourceUri);
                     return migrateResult;
                 }
 
+                this._syncResultCoreAfterMutation(sourceUri);
                 return {
                     type: 'incremental',
                     props: {
@@ -1504,6 +1657,8 @@ export class ResultStateManager {
             this._incrementDataVersion(sourceUri);
         }
 
+        this._syncResultCoreAfterMutation(sourceUri);
+
         return { type: 'ignore' };
     }
 
@@ -1513,6 +1668,7 @@ export class ResultStateManager {
         } else {
             this._pinnedSources.add(sourceUri);
         }
+        this._syncResultCoreAfterMutation(sourceUri);
         this._globalStateVersion++;
         this._onDidChangeState.fire();
     }
@@ -1561,6 +1717,7 @@ export class ResultStateManager {
                 label
             });
         }
+        this._syncResultCoreAfterMutation(sourceUri);
         this._globalStateVersion++;
         this._onDidChangeState.fire();
     }
@@ -1570,6 +1727,7 @@ export class ResultStateManager {
         if (pinnedResult) {
             this._activeSourceUri = pinnedResult.sourceUri;
             this._activeResultSetIndexMap.set(pinnedResult.sourceUri, pinnedResult.resultSetIndex);
+            this._syncResultCoreAfterMutation(pinnedResult.sourceUri);
             this._onDidChangeState.fire();
             return pinnedResult.resultSetIndex;
         }
@@ -1577,8 +1735,10 @@ export class ResultStateManager {
     }
 
     public unpinResult(resultId: string) {
+        const sourceUri = this._pinnedResults.get(resultId)?.sourceUri;
         this._pinnedResults.delete(resultId);
         this._autoPinnedResults.delete(resultId);
+        if (sourceUri) this._syncResultCoreAfterMutation(sourceUri);
         this._globalStateVersion++;
         this._onDidChangeState.fire();
     }
@@ -1610,12 +1770,15 @@ export class ResultStateManager {
         this._activeSourceUri = sourceUri;
         this._incrementDataVersion(sourceUri);
         this._pruneResults(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._globalStateVersion++;
         this._onDidChangeState.fire();
         return resultSetIndex;
     }
 
     public closeSource(sourceUri: string) {
+        this._syncResultCoreSource(sourceUri);
+        this._resultCoreState.apply({ type: 'close-source', sourceId: sourceUri });
         const results = this._resultsMap.get(sourceUri);
         if (results) {
             for (const rs of results) {
@@ -1641,6 +1804,9 @@ export class ResultStateManager {
                 const remainingSources = Array.from(this._resultsMap.keys());
                 this._activeSourceUri = remainingSources.length > 0 ? remainingSources[0] : undefined;
             }
+            if (this._activeSourceUri) {
+                this._syncResultCoreAfterMutation(this._activeSourceUri);
+            }
             this._globalStateVersion++;
             this._onDidChangeState.fire();
         }
@@ -1652,6 +1818,9 @@ export class ResultStateManager {
 
         const rs = results[resultSetIndex];
         if (rs) {
+            ensureResultSetId(rs);
+            this._syncResultCoreSource(sourceUri);
+            this._resultCoreState.apply({ type: 'close-result', sourceId: sourceUri, resultSetId: rs.resultSetId });
             this._releaseResultSetResources(rs);
         }
         results.splice(resultSetIndex, 1);
@@ -1679,6 +1848,7 @@ export class ResultStateManager {
 
         this._incrementDataVersion(sourceUri);
         this.markStale(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._globalStateVersion++;
         this._onDidChangeState.fire();
     }
@@ -1715,6 +1885,7 @@ export class ResultStateManager {
         }
 
         this._activeResultSetIndexMap.set(sourceUri, 0);
+        this._syncResultCoreAfterMutation(sourceUri);
         this._incrementDataVersion(sourceUri);
         this.markStale(sourceUri);
         this._globalStateVersion++;
@@ -1731,6 +1902,7 @@ export class ResultStateManager {
                 logResultSet.data.push([timestamp, '--- Logs Cleared ---']);
                 this._incrementDataVersion(sourceUri);
                 this.markStale(sourceUri);
+                this._syncResultCoreAfterMutation(sourceUri);
                 this._onDidChangeState.fire();
             }
         }
@@ -1738,5 +1910,6 @@ export class ResultStateManager {
 
     public setActiveResultSetIndex(sourceUri: string, index: number) {
         this._activeResultSetIndexMap.set(sourceUri, index);
+        this._syncResultCoreAfterMutation(sourceUri);
     }
 }

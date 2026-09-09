@@ -601,7 +601,7 @@ export function setupStreamingMessageHandler(): void {
                 break;
             case 'switchToResultSet':
                 if (typeof message.resultSetIndex === 'number') {
-                    switchToResultSet(message.resultSetIndex);
+                    switchToResultSet(message.resultSetIndex, false, false);
                 }
                 break;
     case 'copySelection':
@@ -824,6 +824,21 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         setActiveGridIndex(0);
     }
 
+    // The host is authoritative for the selected result tab. A cached source
+    // can be older than the host state (for example, it was cached while Logs
+    // was active just before query completion). Applying that stale index here
+    // would send `switchResultSet(0)` back to the host before its hydrate and
+    // permanently replace the restored data-tab selection.
+    const hostActiveResultSetIndex = message.activeResultSetIndex;
+    const switchedResultSets = getResultSets();
+    if (
+        typeof hostActiveResultSetIndex === 'number'
+        && hostActiveResultSetIndex >= 0
+        && hostActiveResultSetIndex < switchedResultSets.length
+    ) {
+        setActiveGridIndex(hostActiveResultSetIndex);
+    }
+
     if (shouldPreserveGridsOnActiveSourceRefresh(sourceUri, activeSource, resultSets)) {
         if (typeof message.activeResultSetIndex === 'number') {
             setActiveGridIndex(message.activeResultSetIndex);
@@ -834,7 +849,7 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
 
         const activeRsIndex = getActiveGridIndex();
         if (activeRsIndex !== previousGridIndex) {
-            switchToResultSet(activeRsIndex);
+            switchToResultSet(activeRsIndex, false, false);
         } else {
             updateControlsVisibility(activeRsIndex);
             syncGlobalFilterInput(activeRsIndex);
@@ -878,7 +893,7 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         autoBottomLogs: true,
         verifyAfterFrame: false,
     });
-    switchToResultSet(activeRsIndex);
+    switchToResultSet(activeRsIndex, false, false);
     syncAnalysisView();
     callPanelMethod('updateEditButtons');
     updateAllRefreshFailureBanners();
@@ -1113,7 +1128,7 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
 
         if (hydratedResultSets.length > 0) {
             if (getActiveGridIndex() >= hydratedResultSets.length) setActiveGridIndex(0);
-            switchToResultSet(getActiveGridIndex(), true);
+            switchToResultSet(getActiveGridIndex(), true, false);
             syncAnalysisView();
 
             const activeSource = data.activeSourceJson
