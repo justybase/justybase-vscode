@@ -26,6 +26,8 @@ describe('query result state', () => {
     expect(applyQueryEvent(state, session)).toBe(state);
     expect(state.statementIndex).toBe(0);
     expect(state.sessionId).toBe('s1');
+    expect(state.storageSessionId).toBe('s1');
+    expect(state.resultSetId).toBe('q2::statement-0');
     expect(state.rowsAffected).toBe(1);
     const second = applyQueryEvent(emptyResult, { type: 'statement-started', queryId: 'q2', statementIndex: 1, statementCount: 2, statementSql: 'SELECT 2', sequence: 5 });
     expect(second.statementIndex).toBe(1);

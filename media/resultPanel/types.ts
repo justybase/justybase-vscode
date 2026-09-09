@@ -143,6 +143,10 @@ export interface ResultSetColumn {
 export interface ResultSet {
     /** Stable identity supplied by the host for persistence across rehydration. */
     resultSetId?: string;
+    /** Statement ordinal inside the execution, when the producer exposes it. */
+    statementIndex?: number;
+    /** Storage-session identity when rows are held outside the in-memory result. */
+    storageSessionId?: string;
     name?: string;
     columns: ResultSetColumn[];
     data: unknown[][];

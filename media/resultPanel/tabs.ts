@@ -334,7 +334,11 @@ function createMenuItem(text: string, onClick: () => void): HTMLDivElement {
     return item;
 }
 
-export function switchToResultSet(index: number, skipScrollRestore = false): void {
+export function switchToResultSet(
+    index: number,
+    skipScrollRestore = false,
+    notifyHost = true,
+): void {
     if (index < 0 || index >= getAllGrids().length) return;
 
     const fromIndex = getActiveGridIndex();
@@ -359,12 +363,16 @@ export function switchToResultSet(index: number, skipScrollRestore = false): voi
     resetEditSession();
     callPanelMethod('updateEditButtons');
 
-    // Notify extension of manual tab switch
-    vscode.postMessage({
-        command: 'switchResultSet',
-        sourceUri: requireActiveSourceUri(),
-        resultSetIndex: index
-    });
+    // Only a user-initiated switch may update the host-owned active index.
+    // Hydration and host instructions must never echo an old cached selection
+    // back through the protocol.
+    if (notifyHost) {
+        vscode.postMessage({
+            command: 'switchResultSet',
+            sourceUri: requireActiveSourceUri(),
+            resultSetIndex: index,
+        });
+    }
 
     updateControlsVisibility(index);
     syncGlobalFilterInput(index);

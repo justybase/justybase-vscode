@@ -1,4 +1,5 @@
-import { formatCellValue, getNumericTypeInfo } from '../utils.js';
+import { getNumericTypeInfo } from '../utils.js';
+import { aggregateResultRows, formatExactAggregationValue, type AggregationFunction } from '@justybase/result-core';
 import {
     getAggregationState,
     setGlobalDragState,
@@ -280,15 +281,6 @@ function reduceNumericMax(values: number[]): number {
     return max;
 }
 
-function calculateMedian(values: number[]): number {
-    const sorted = [...values].sort((a, b) => a - b);
-    const middle = Math.floor(sorted.length / 2);
-    if (sorted.length % 2 === 1) {
-        return sorted[middle];
-    }
-    return (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
 /**
  * Format number with thousand separators and appropriate decimal places
  * Format: ### ###.XXXX (space as thousand separator, dot as decimal)
@@ -355,72 +347,43 @@ function getAggPrecision(agg: ColumnAggregationValue, _typeInfo: AggTypeInfo): n
     return null; // use default from typeInfo
 }
 
+function isSharedAggregationFunction(value: string): value is AggregationFunction {
+    return ['count', 'countDistinct', 'sum', 'avg', 'min', 'max', 'stdev', 'median'].includes(value);
+}
+
+function calculateSharedAggregation(
+    agg: ColumnAggregationValue,
+    rows: GroupableTanStackRow[],
+    col: TanStackColumn,
+    typeInfo: AggTypeInfo,
+): string {
+    const fn = getAggFn(agg);
+    if (!isSharedAggregationFunction(fn)) return '';
+    const precision = getAggPrecision(agg, typeInfo);
+    const values = rows.map(row => row.getValue(col.id));
+    const isCount = fn === 'count' || fn === 'countDistinct';
+    const result = aggregateResultRows(
+        values.map(value => [value]),
+        [{
+            columnIndex: 0,
+            function: fn,
+            precision: isCount ? undefined : precision ?? undefined,
+            dataType: col.columnDef?.dataType,
+            scale: col.columnDef?.scale,
+            numeric: typeInfo.isNumeric || col.columnDef?.inferredNumericKind === 'integer' || col.columnDef?.inferredNumericKind === 'decimal',
+        }],
+    )[0];
+    if (!result || result.value === null) return '';
+    return formatExactAggregationValue(result.value, isCount ? false : typeInfo.hasDecimal, isCount ? null : precision);
+}
+
 function calculateAggregation(
     agg: ColumnAggregationValue,
     rows: GroupableTanStackRow[],
     col: TanStackColumn,
     typeInfo: AggTypeInfo = { isNumeric: true, hasDecimal: true },
 ): string {
-    const fn = getAggFn(agg);
-    const precision = getAggPrecision(agg, typeInfo);
-    const values: number[] = [];
-    rows.forEach((r: GroupableTanStackRow) => {
-        const v = r.getValue(col.id);
-        if (v !== null && v !== undefined && v !== '') {
-            const n = parseFloat(String(v).replace(/,/g, ''));
-            if (!isNaN(n)) values.push(n);
-        }
-    });
-
-    switch (fn) {
-        case 'count':
-            return formatAggregationNumber(rows.filter((r: GroupableTanStackRow) => {
-                const v = r.getValue(col.id);
-                return v !== null && v !== undefined;
-            }).length, false, precision); // count is always integer
-        case 'countDistinct':
-            const s = new Set();
-            rows.forEach((r: GroupableTanStackRow) => {
-                const v = r.getValue(col.id);
-                if (v !== null && v !== undefined) {
-                    s.add(formatCellValue(v, col.columnDef.dataType, col.columnDef.scale, {
-                        columnId: col.id,
-                        inferredNumericKind: col.columnDef.inferredNumericKind,
-                        inferredDateInteger: col.columnDef.inferredDateInteger
-                    }));
-                }
-            });
-            return formatAggregationNumber(s.size, false, precision); // count is always integer
-        case 'sum':
-        case 'avg':
-        case 'min':
-        case 'max':
-        case 'stdev':
-        case 'median':
-            if (values.length === 0) return '';
-            break;
-        default:
-            return '';
-    }
-
-    switch (fn) {
-        case 'sum':
-            return formatAggregationNumber(values.reduce((a, b) => a + b, 0), typeInfo.hasDecimal, precision);
-        case 'avg':
-            return formatAggregationNumber(values.reduce((a, b) => a + b, 0) / values.length, typeInfo.hasDecimal, precision);
-        case 'min':
-            return formatAggregationNumber(reduceNumericMin(values), typeInfo.hasDecimal, precision);
-        case 'max':
-            return formatAggregationNumber(reduceNumericMax(values), typeInfo.hasDecimal, precision);
-        case 'stdev':
-            const mean = values.reduce((a, b) => a + b, 0) / values.length;
-            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-            return formatAggregationNumber(Math.sqrt(variance), typeInfo.hasDecimal, precision);
-        case 'median':
-            return formatAggregationNumber(calculateMedian(values), typeInfo.hasDecimal, precision);
-        default:
-            return '';
-    }
+    return calculateSharedAggregation(agg, rows, col, typeInfo);
 }
 
 export function calculateAggregationForRows(
@@ -428,68 +391,7 @@ export function calculateAggregationForRows(
     rows: GroupableTanStackRow[],
     col: TanStackColumn,
 ): string {
-    const typeInfo = getAggregationColumnTypeInfo(col);
-    const fn = getAggFn(agg);
-    const precision = getAggPrecision(agg, typeInfo);
-    
-    const values: number[] = [];
-    rows.forEach((r: GroupableTanStackRow) => {
-        const v = r.getValue(col.id);
-        if (v !== null && v !== undefined && v !== '') {
-            const n = parseFloat(String(v).replace(/,/g, ''));
-            if (!isNaN(n)) values.push(n);
-        }
-    });
-
-    switch (fn) {
-        case 'count':
-            return formatAggregationNumber(rows.filter((r: GroupableTanStackRow) => {
-                const v = r.getValue(col.id);
-                return v !== null && v !== undefined;
-            }).length, false, precision); // count is always integer
-        case 'countDistinct':
-            const s = new Set();
-            rows.forEach((r: GroupableTanStackRow) => {
-                const v = r.getValue(col.id);
-                if (v !== null && v !== undefined) {
-                    s.add(formatCellValue(v, col.columnDef.dataType, col.columnDef.scale, {
-                        columnId: col.id,
-                        inferredNumericKind: col.columnDef.inferredNumericKind,
-                        inferredDateInteger: col.columnDef.inferredDateInteger
-                    }));
-                }
-            });
-            return formatAggregationNumber(s.size, false, precision); // count is always integer
-        case 'sum':
-        case 'avg':
-        case 'min':
-        case 'max':
-        case 'stdev':
-        case 'median':
-            if (values.length === 0) return '';
-            break;
-        default:
-            return '';
-    }
-
-    switch (fn) {
-        case 'sum':
-            return formatAggregationNumber(values.reduce((a, b) => a + b, 0), typeInfo.hasDecimal, precision);
-        case 'avg':
-            return formatAggregationNumber(values.reduce((a, b) => a + b, 0) / values.length, typeInfo.hasDecimal, precision);
-        case 'min':
-            return formatAggregationNumber(reduceNumericMin(values), typeInfo.hasDecimal, precision);
-        case 'max':
-            return formatAggregationNumber(reduceNumericMax(values), typeInfo.hasDecimal, precision);
-        case 'stdev':
-            const mean = values.reduce((a, b) => a + b, 0) / values.length;
-            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-            return formatAggregationNumber(Math.sqrt(variance), typeInfo.hasDecimal, precision);
-        case 'median':
-            return formatAggregationNumber(calculateMedian(values), typeInfo.hasDecimal, precision);
-        default:
-            return '';
-    }
+    return calculateSharedAggregation(agg, rows, col, getAggregationColumnTypeInfo(col));
 }
 
 export function formatDiskAggregationResult(
@@ -503,21 +405,24 @@ export function formatDiskAggregationResult(
 
     if (rawValue === null || rawValue === undefined) {
         if (fn === 'count' || fn === 'countDistinct') {
-            return formatAggregationNumber(0, false, precision);
+            return formatExactAggregationValue(0, false, null);
         }
         return '';
     }
 
     if (fn === 'count' || fn === 'countDistinct') {
-        const countValue = typeof rawValue === 'number' ? rawValue : Number(rawValue);
-        return formatAggregationNumber(Number.isFinite(countValue) ? countValue : 0, false, precision);
+        const countValue = typeof rawValue === 'number' ? rawValue : String(rawValue);
+        if (typeof countValue === 'number' && !Number.isFinite(countValue)) {
+            return formatExactAggregationValue(0, false, null);
+        }
+        return formatExactAggregationValue(countValue, false, null);
     }
 
-    const numericValue = typeof rawValue === 'number' ? rawValue : Number.parseFloat(String(rawValue));
-    if (!Number.isFinite(numericValue)) {
+    const numericValue = typeof rawValue === 'number' ? rawValue : String(rawValue);
+    if (typeof numericValue === 'number' && !Number.isFinite(numericValue)) {
         return '';
     }
-    return formatAggregationNumber(numericValue, typeInfo.hasDecimal, precision);
+    return formatExactAggregationValue(numericValue, typeInfo.hasDecimal, precision);
 }
 
 export {

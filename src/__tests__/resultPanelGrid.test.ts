@@ -572,6 +572,21 @@ describe('createFilterFn', () => {
         expect(filterFn(rowWith('banana'), '0', cond)).toBe(false);
     });
 
+    it('uses the formatted display value for textual conditions', () => {
+        const utils = require('../../media/resultPanel/utils.js') as {
+            formatCellValue: { mockImplementation: (implementation: (value: unknown) => string | null) => void };
+        };
+        utils.formatCellValue.mockImplementation((value: unknown) => value === 1 ? '1.00' : String(value));
+        const g = require('../../media/resultPanel/grid.js');
+        const accessorFn = (row: { col?: unknown }) => row.col;
+        const filterFn = g.createFilterFn(accessorFn, 'DECIMAL', undefined, 'decimal', false);
+        const contains = { _isConditionFilter: true, conditions: [{ type: 'contains', value: '1.00' }], logic: 'and' };
+        const like = { _isConditionFilter: true, conditions: [{ type: 'like', value: '1.%' }], logic: 'and' };
+
+        expect(filterFn(rowWith(1), '0', contains)).toBe(true);
+        expect(filterFn(rowWith(1), '0', like)).toBe(true);
+    });
+
     it('filters by condition: equals', () => {
         const g = require('../../media/resultPanel/grid.js');
         const { filterFn } = createFilterTest(g);
@@ -607,6 +622,15 @@ describe('createFilterFn', () => {
         expect(filterFn(rowWith(null), '0', emptyCond)).toBe(true);
         expect(filterFn(rowWith('abc'), '0', notEmptyCond)).toBe(true);
         expect(filterFn(rowWith(null), '0', notEmptyCond)).toBe(false);
+    });
+
+    it('filters inferred YYYYMMDD integer dates using date comparisons', () => {
+        const g = require('../../media/resultPanel/grid.js');
+        const accessorFn = (row: { col?: unknown }) => row.col;
+        const filterFn = g.createFilterFn(accessorFn, 'integer', undefined, 'integer', true);
+        const condition = { _isConditionFilter: true, conditions: [{ type: 'greaterThan', value: '2024-01-01' }], logic: 'and' };
+        expect(filterFn(rowWith(20240102), '0', condition)).toBe(true);
+        expect(filterFn(rowWith(20231231), '0', condition)).toBe(false);
     });
 
     it('filters by condition: notContains', () => {
@@ -1132,6 +1156,13 @@ describe('calculateAggregation', () => {
         expect(result).toBe('2'); // only non-null values
     });
 
+    it('keeps count aggregations integral when precision is configured', () => {
+        const g = require('../../media/resultPanel/grid.js');
+        const rows = [row(10), row(null), row(30)];
+        expect(g.calculateAggregation({ fn: 'count', precision: 2 }, rows, col())).toBe('2');
+        expect(g.calculateAggregation({ fn: 'countDistinct', precision: 2 }, rows, col())).toBe('2');
+    });
+
     it('calculates countDistinct', () => {
         const g = require('../../media/resultPanel/grid.js');
         const rows = [row(10), row(20), row(10), row(30)];
@@ -1231,6 +1262,30 @@ describe('calculateAggregationForRows', () => {
         const g = require('../../media/resultPanel/grid.js');
         const rows = [row(10)];
         expect(g.calculateAggregationForRows('unknownFn', rows, col())).toBe('');
+    });
+});
+
+describe('formatDiskAggregationResult', () => {
+    beforeEach(() => {
+        jest.resetModules();
+    });
+
+    it('preserves large integer aggregates received as strings', () => {
+        const g = require('../../media/resultPanel/grid.js');
+        const col = { id: 'amount', columnDef: { dataType: 'BIGINT' } };
+
+        expect(g.formatDiskAggregationResult('max', '9223372036854775807', col))
+            .toBe('9 223 372 036 854 775 807');
+        expect(g.formatDiskAggregationResult('count', '9007199254740993', col))
+            .toBe('9 007 199 254 740 993');
+    });
+
+    it('keeps exact decimal text before applying display precision', () => {
+        const g = require('../../media/resultPanel/grid.js');
+        const col = { id: 'amount', columnDef: { dataType: 'DECIMAL' } };
+
+        expect(g.formatDiskAggregationResult('sum', '123456789012345678.125', col))
+            .toBe('123 456 789 012 345 678.1250');
     });
 });
 

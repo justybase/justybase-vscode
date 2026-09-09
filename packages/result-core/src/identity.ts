@@ -55,10 +55,10 @@ export function createResultSetId(): ResultSetId {
 export function ensureResultSetId<T extends object>(
   resultSet: T & { resultSetId?: ResultSetId },
 ): T & { resultSetId: ResultSetId } {
-  if (!resultSet.resultSetId) {
-    resultSet.resultSetId = createResultSetId();
+  if (resultSet.resultSetId) {
+    return resultSet as T & { resultSetId: ResultSetId };
   }
-  return resultSet as T & { resultSetId: ResultSetId };
+  return { ...resultSet, resultSetId: createResultSetId() } as T & { resultSetId: ResultSetId };
 }
 
 /** True when the id comes from the legacy timestamp-only identity scheme. */

@@ -13,7 +13,7 @@ import {
 import type { ColumnAggregationState } from '../types.js';
 import { asScrollState, getActiveSourceUri, getResultSets, getResultSetAt, type GridScrollState } from '../types.js';
 import { asHtml } from '../dom.js';
-import { getDiskGroupingExpandedKeys } from '../diskGrouping.js';
+import { getDiskGroupingExpandedKeys } from '../diskGroupingState.js';
 
 export interface SavedGridState {
     /** Stable identity copied from the result set when available. */

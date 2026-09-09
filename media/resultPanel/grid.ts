@@ -42,6 +42,7 @@ export {
     getAggregationColumnTypeInfo,
     calculateAggregation,
     calculateAggregationForRows,
+    formatDiskAggregationResult,
     countLeafRows,
 } from './grid/aggregation.js';
 export { createResultSetGrid } from './grid/tableBuilder.js';

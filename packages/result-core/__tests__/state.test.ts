@@ -8,16 +8,19 @@ import {
   isLegacyTimestampIdentity,
   reduceResultPanelState,
   type ResultPanelState,
-  type ResultSetState,
+  type ResultSetInput,
   type StreamingChunk,
 } from '../src';
 
-function dataResult(resultSetId: string, value: number): Omit<ResultSetState, 'isLog'> {
+function dataResult(resultSetId: string, value: number): ResultSetInput {
   return {
     resultSetId,
     columns: [{ name: 'id', type: 'int' }],
     data: [[value]],
     totalRowCount: 1,
+    loadedRowCount: 1,
+    status: 'complete',
+    limitReached: false,
   };
 }
 
@@ -33,118 +36,173 @@ function chunk(rows: unknown[][], totalRowsSoFar: number, overrides: Partial<Str
   };
 }
 
-function pinFor(state: ResultPanelState, sourceId: string, resultSetIndex: number) {
-  return state.pinnedResults.find(pin => pin.sourceId === sourceId && pin.resultSetIndex === resultSetIndex);
+function pinFor(state: ResultPanelState, resultSetId: string) {
+  return state.pinnedResults.find(pin => pin.resultSetId === resultSetId);
 }
 
-describe('result-core state contract (frozen transitions)', () => {
-  it('preserves identity and manually pinned results across source switches and re-execution', () => {
+describe('result-core state contract', () => {
+  it('preserves manually pinned identity across source switches and re-execution', () => {
     const sourceA = 'file:///core-a.sql';
     const sourceB = 'file:///core-b.sql';
+    const executionA = 'execution-a-1';
+    const executionB = 'execution-b-1';
 
     let state = createEmptyResultPanelState();
-    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceA });
-    state = reduceResultPanelState(state, { type: 'update-results', sourceId: sourceA, resultSets: [dataResult('a-result-1', 1), dataResult('a-result-2', 2)] });
+    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceA, executionId: executionA, logResultSetId: 'a-log' });
+    state = reduceResultPanelState(state, {
+      type: 'update-results',
+      sourceId: sourceA,
+      executionId: executionA,
+      resultSets: [dataResult('a-result-1', 1), dataResult('a-result-2', 2)],
+      autoPin: { timestamp: 10 },
+    });
+    state = reduceResultPanelState(state, { type: 'toggle-result-pin', sourceId: sourceA, resultSetId: 'a-result-1', timestamp: 20, label: 'manual' });
+    state = reduceResultPanelState(state, { type: 'toggle-result-pin', sourceId: sourceA, resultSetId: 'a-result-2' });
+    expect(pinFor(state, 'a-result-1')?.automatic).toBe(false);
+    expect(pinFor(state, 'a-result-2')).toBeUndefined();
 
-    // update-results auto-pins the last delivered result; replace it with a manual pin.
-    expect(pinFor(state, sourceA, 2)).toBeDefined();
-    state = reduceResultPanelState(state, { type: 'toggle-result-pin', sourceId: sourceA, resultSetIndex: 2 });
-    expect(pinFor(state, sourceA, 2)).toBeUndefined();
-    state = reduceResultPanelState(state, { type: 'toggle-result-pin', sourceId: sourceA, resultSetIndex: 2, label: 'manual' });
-    expect(pinFor(state, sourceA, 2)?.label).toBe('manual');
-
-    state = reduceResultPanelState(state, { type: 'set-active-result-set-index', sourceId: sourceA, resultSetIndex: 5 });
-    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceB });
-    state = reduceResultPanelState(state, { type: 'update-results', sourceId: sourceB, resultSets: [dataResult('b-result-1', 3)] });
-    expect(state.activeSourceId).toBe(sourceB);
-
+    state = reduceResultPanelState(state, { type: 'set-active-result-set', sourceId: sourceA, resultSetId: 'a-result-2' });
+    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceB, executionId: executionB, logResultSetId: 'b-log' });
+    state = reduceResultPanelState(state, {
+      type: 'update-results',
+      sourceId: sourceB,
+      executionId: executionB,
+      resultSets: [dataResult('b-result-1', 3)],
+      autoPin: { timestamp: 30 },
+    });
     state = reduceResultPanelState(state, { type: 'set-active-source', sourceId: sourceA });
-    expect(getActiveResultSetIndex(state, sourceA)).toBe(5);
+    expect(getActiveResultSetIndex(state, sourceA)).toBe(2);
 
-    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceA });
-    const results = getResultSets(state, sourceA);
-    expect(results[0]?.isLog).toBe(true);
-    expect(results.map(result => result.resultSetId)).not.toContain('a-result-1');
-    expect(results.map(result => result.resultSetId)).not.toContain('a-result-2');
-    expect(getActiveResultSetIndex(state, sourceA)).toBe(1);
-    // The manual pin survives re-execution by source + index.
-    expect(pinFor(state, sourceA, 2)?.label).toBe('manual');
-    // The other source is untouched.
+    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceA, executionId: 'execution-a-2', logResultSetId: 'a-log-2' });
+    expect(getResultSets(state, sourceA).map(result => result.resultSetId)).toEqual(['a-log', 'a-result-1']);
+    expect(pinFor(state, 'a-result-1')?.label).toBe('manual');
     expect(getResultSets(state, sourceB).map(result => result.resultSetId)).toContain('b-result-1');
   });
 
-  it('shifts pinned and active indices when a result is closed', () => {
-    const sourceUri = 'file:///core-close.sql';
+  it('shifts pin indexes while keeping the pinned result identity', () => {
+    const sourceId = 'file:///core-close.sql';
+    let state = reduceResultPanelState(createEmptyResultPanelState(), {
+      type: 'start-execution', sourceId, executionId: 'execution-close', logResultSetId: 'close-log',
+    });
+    state = reduceResultPanelState(state, {
+      type: 'update-results', sourceId, executionId: 'execution-close',
+      resultSets: [dataResult('first', 1), dataResult('second', 2)], autoPin: { timestamp: 1 },
+    });
+    state = reduceResultPanelState(state, { type: 'close-result', sourceId, resultSetId: 'first' });
 
-    let state = createEmptyResultPanelState();
-    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceUri });
-    state = reduceResultPanelState(state, { type: 'update-results', sourceId: sourceUri, resultSets: [dataResult('first', 1), dataResult('second', 2)] });
-    // [log, first, second] with an automatic pin on 'second' (index 2).
-    expect(pinFor(state, sourceUri, 2)).toBeDefined();
-    expect(getActiveResultSetIndex(state, sourceUri)).toBe(3);
-
-    state = reduceResultPanelState(state, { type: 'close-result', sourceId: sourceUri, resultSetIndex: 1 });
-
-    const results = getResultSets(state, sourceUri);
-    expect(results[1]?.resultSetId).toBe('second');
-    expect(getActiveResultSetIndex(state, sourceUri)).toBe(2);
-    // The pin follows the surviving result to its shifted index (2 -> 1).
-    expect(pinFor(state, sourceUri, 1)?.resultSetIndex).toBe(1);
-    expect(pinFor(state, sourceUri, 2)).toBeUndefined();
+    expect(getResultSets(state, sourceId).map(result => result.resultSetId)).toEqual(['close-log', 'second']);
+    expect(pinFor(state, 'second')?.resultSetIndex).toBe(1);
+    expect(getActiveResultSetIndex(state, sourceId)).toBe(1);
   });
 
-  it('keeps partial streaming data marked cancelled and ignores late chunks', () => {
-    const sourceUri = 'file:///core-stream.sql';
-
+  it('removes a closed pin only from the matching source', () => {
+    const sourceA = 'file:///core-shared-id-a.sql';
+    const sourceB = 'file:///core-shared-id-b.sql';
+    const sharedResultSetId = 'shared-result-id';
     let state = createEmptyResultPanelState();
-    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceUri });
-    expect(classifyStreamingChunk(state, sourceUri)).toBe('incremental');
 
     state = reduceResultPanelState(state, {
-      type: 'append-streaming-chunk',
-      sourceId: sourceUri,
-      chunk: chunk([[1], [2]], 2, { isFirstChunk: true }),
+      type: 'start-execution', sourceId: sourceA, executionId: 'execution-shared-a', logResultSetId: 'a-log',
     });
-    expect(getResultSets(state, sourceUri)[1]?.data).toEqual([[1], [2]]);
+    state = reduceResultPanelState(state, {
+      type: 'update-results', sourceId: sourceA, executionId: 'execution-shared-a',
+      resultSets: [dataResult(sharedResultSetId, 1)], autoPin: { timestamp: 1 },
+    });
+    state = reduceResultPanelState(state, {
+      type: 'start-execution', sourceId: sourceB, executionId: 'execution-shared-b', logResultSetId: 'b-log',
+    });
+    state = reduceResultPanelState(state, {
+      type: 'update-results', sourceId: sourceB, executionId: 'execution-shared-b',
+      resultSets: [dataResult(sharedResultSetId, 2)], autoPin: { timestamp: 2 },
+    });
 
     state = reduceResultPanelState(state, {
-      type: 'append-streaming-chunk',
-      sourceId: sourceUri,
-      chunk: chunk([[3]], 3),
+      type: 'close-result', sourceId: sourceA, resultSetId: sharedResultSetId,
     });
 
-    state = reduceResultPanelState(state, { type: 'cancel-execution', sourceId: sourceUri, resultSetIndices: [1] });
-    expect(classifyStreamingChunk(state, sourceUri)).toBe('ignore');
-
-    const result = getResultSets(state, sourceUri)[1];
-    expect(result?.isCancelled).toBe(true);
-    expect(result?.data).toHaveLength(2);
-    expect(result?.totalRowCount).toBe(2);
-    expect(state.sources.get(sourceUri)?.isExecuting).toBe(false);
-
-    const before = state;
-    state = reduceResultPanelState(state, {
-      type: 'append-streaming-chunk',
-      sourceId: sourceUri,
-      chunk: chunk([[4]], 4, { isLastChunk: true }),
-    });
-    expect(state).toBe(before);
-    expect(getResultSets(state, sourceUri)).toHaveLength(3);
+    expect(state.pinnedResults).toEqual([
+      expect.objectContaining({ sourceId: sourceB, resultSetId: sharedResultSetId }),
+    ]);
   });
 
-  it('removes source-owned state and selects a surviving source on close', () => {
+  it('appends every streaming chunk to one result and ignores late delivery after cancel', () => {
+    const sourceId = 'file:///core-stream.sql';
+    const executionId = 'execution-stream';
+    let state = reduceResultPanelState(createEmptyResultPanelState(), {
+      type: 'start-execution', sourceId, executionId, logResultSetId: 'stream-log',
+    });
+    expect(classifyStreamingChunk(state, sourceId)).toBe('incremental');
+
+    state = reduceResultPanelState(state, {
+      type: 'append-streaming-chunk', sourceId, executionId, resultSetId: 'stream-result',
+      chunk: chunk([[1], [2]], 2, { isFirstChunk: true, chunkSequence: 1 }),
+    });
+    state = reduceResultPanelState(state, {
+      type: 'append-streaming-chunk', sourceId, executionId, resultSetId: 'stream-result',
+      chunk: chunk([[3]], 3, { fromRow: 2, chunkSequence: 2 }),
+    });
+    expect(getResultSets(state, sourceId)[1]?.data).toEqual([[1], [2], [3]]);
+
+    const beforeDuplicate = state;
+    state = reduceResultPanelState(state, {
+      type: 'append-streaming-chunk', sourceId, executionId, resultSetId: 'stream-result',
+      chunk: chunk([[3]], 3, { fromRow: 2, chunkSequence: 2 }),
+    });
+    expect(state).toBe(beforeDuplicate);
+
+    state = reduceResultPanelState(state, {
+      type: 'cancel-execution', sourceId, executionId, resultSetIds: ['stream-result'], currentRowCounts: [0, 2],
+    });
+    expect(classifyStreamingChunk(state, sourceId)).toBe('ignore');
+    expect(getResultSets(state, sourceId)[1]?.status).toBe('cancelled');
+    expect(getResultSets(state, sourceId)[1]?.data).toHaveLength(2);
+
+    const beforeLate = state;
+    state = reduceResultPanelState(state, {
+      type: 'append-streaming-chunk', sourceId, executionId, resultSetId: 'stream-result',
+      chunk: chunk([[4]], 4, { isLastChunk: true, fromRow: 2, chunkSequence: 3 }),
+    });
+    expect(state).toBe(beforeLate);
+  });
+
+  it('validates offsets against loaded counts when the adapter has no row buffer', () => {
+    const sourceId = 'file:///core-window.sql';
+    const executionId = 'execution-window';
+    let state = reduceResultPanelState(createEmptyResultPanelState(), {
+      type: 'start-execution', sourceId, executionId, logResultSetId: 'window-log',
+    });
+    state = reduceResultPanelState(state, {
+      type: 'append-streaming-chunk', sourceId, executionId, resultSetId: 'window-result',
+      chunk: chunk([[1], [2]], 2, { isFirstChunk: true, chunkSequence: 1 }),
+    });
+    state = reduceResultPanelState({
+      ...state,
+      sources: new Map(state.sources).set(sourceId, {
+        ...state.sources.get(sourceId)!,
+        resultSets: state.sources.get(sourceId)!.resultSets.map(resultSet => resultSet.resultSetId === 'window-result'
+          ? { ...resultSet, data: [], loadedRowCount: 2, lastChunkSequence: 1 }
+          : resultSet),
+      }),
+    }, {
+      type: 'append-streaming-chunk', sourceId, executionId, resultSetId: 'window-result',
+      chunk: chunk([[3]], 3, { fromRow: 2, chunkSequence: 2 }),
+    });
+    expect(getResultSets(state, sourceId)[1]).toMatchObject({ loadedRowCount: 3, lastChunkSequence: 2 });
+  });
+
+  it('finalizes execution by removing automatic pins and keeps source cleanup isolated', () => {
     const sourceA = 'file:///core-remove-a.sql';
     const sourceB = 'file:///core-remove-b.sql';
-
     let state = createEmptyResultPanelState();
-    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceA });
-    state = reduceResultPanelState(state, { type: 'update-results', sourceId: sourceA, resultSets: [dataResult('a-result', 1)] });
-    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceB });
-    state = reduceResultPanelState(state, { type: 'update-results', sourceId: sourceB, resultSets: [dataResult('b-result', 2)] });
+    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceA, executionId: 'execution-a', logResultSetId: 'a-log' });
+    state = reduceResultPanelState(state, { type: 'update-results', sourceId: sourceA, executionId: 'execution-a', resultSets: [dataResult('a-result', 1)], autoPin: { timestamp: 1 } });
+    state = reduceResultPanelState(state, { type: 'start-execution', sourceId: sourceB, executionId: 'execution-b', logResultSetId: 'b-log' });
+    state = reduceResultPanelState(state, { type: 'update-results', sourceId: sourceB, executionId: 'execution-b', resultSets: [dataResult('b-result', 2)], autoPin: { timestamp: 2 } });
+    state = reduceResultPanelState(state, { type: 'finalize-execution', sourceId: sourceB, executionId: 'execution-b' });
+    expect(pinFor(state, 'b-result')).toBeUndefined();
 
     state = reduceResultPanelState(state, { type: 'set-active-source', sourceId: sourceA });
     state = reduceResultPanelState(state, { type: 'close-source', sourceId: sourceA });
-
     expect(state.sources.has(sourceA)).toBe(false);
     expect(state.pinnedResults.some(pin => pin.sourceId === sourceA)).toBe(false);
     expect(state.activeSourceId).toBe(sourceB);
@@ -153,7 +211,7 @@ describe('result-core state contract (frozen transitions)', () => {
 });
 
 describe('result-core identity', () => {
-  it('mints stable ids with a collision guard and detects legacy ids', () => {
+  it('mints stable ids, detects legacy ids and does not mutate inputs', () => {
     const first = createResultSetId();
     const second = createResultSetId();
     expect(first).toMatch(/^result-set-/u);
@@ -161,7 +219,9 @@ describe('result-core identity', () => {
     expect(isLegacyTimestampIdentity(first)).toBe(false);
     expect(isLegacyTimestampIdentity('1699999999999')).toBe(true);
 
-    const resultSet = ensureResultSetId({ name: 'x' });
+    const input = { name: 'x' };
+    const resultSet = ensureResultSetId(input);
     expect(resultSet.resultSetId).toMatch(/^result-set-/u);
+    expect(input).toEqual({ name: 'x' });
   });
 });

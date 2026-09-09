@@ -1,5 +1,6 @@
 import { queryDiskGroups, DISK_WINDOW_ROWS } from './diskBackedGrid.js';
 import { getGrid } from './state.js';
+import { registerDiskGroupingExpandedKeysProvider } from './diskGroupingState.js';
 import type {
     DiskAggregationResult,
     DiskGroupLevel,
@@ -343,6 +344,8 @@ export function getDiskGroupingExpandedKeys(rsIndex: number): string[] {
     const state = diskGroupingStates.get(rsIndex);
     return state ? [...state.expandedKeys] : [];
 }
+
+registerDiskGroupingExpandedKeysProvider(getDiskGroupingExpandedKeys);
 
 export function restoreDiskGroupingExpandedKeys(rsIndex: number, keys: string[]): void {
     const state = diskGroupingStates.get(rsIndex);

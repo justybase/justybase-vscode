@@ -4,6 +4,7 @@ import {
     parseFilterNumericValue,
     startsWithFilterValueSearch,
 } from '../filterValueSort.js';
+import { evaluateResultCondition, type FilterConditionType } from '@justybase/result-core';
 import {
     formatCellValue,
     getNumericTypeInfo,
@@ -161,23 +162,13 @@ export function createFilterFn(
     inferredNumericKind: 'decimal' | 'integer' | undefined,
     inferredDateInteger: boolean,
 ): (row: TanStackRow, columnId: string, filterValue: ColumnFilterValue) => boolean {
-    const isDateColumn = isTemporalType(dataType);
-
-    const parseDateValue = (value: unknown): number | null => {
-        if (value === null || value === undefined) return null;
-        if (value instanceof Date) return value.getTime();
-        const str = String(value);
-        const parsed = Date.parse(str);
-        return isNaN(parsed) ? null : parsed;
-    };
-
-    const parseFilterDate = (filterValue: string): number | null => {
-        if (!filterValue || filterValue === '') return null;
-        const parsed = Date.parse(filterValue);
-        if (isNaN(parsed)) return null;
-        return parsed;
-    };
-
+    const textualConditionTypes = new Set<FilterConditionType>([
+        'contains',
+        'notContains',
+        'startsWith',
+        'endsWith',
+        'like',
+    ]);
     return (row: TanStackRow, columnId: string, filterValue: ColumnFilterValue) => {
         if (!filterValue) return true;
 
@@ -189,15 +180,19 @@ export function createFilterFn(
                 inferredNumericKind,
                 inferredDateInteger
             }) ?? 'NULL');
-        const parsedNumeric = parseFilterNumericValue(
-            cellValue === null || cellValue === undefined ? 'NULL' : String(cellValue),
-        );
-        const numericValue = parsedNumeric ?? Number.NaN;
-
         if (filterValue && typeof filterValue === 'object' && '_isConditionFilter' in filterValue) {
             const conditionFilter = filterValue as ConditionColumnFilter;
             const { conditions, logic } = conditionFilter;
-            return evaluateConditions(conditions, logic, stringValue, numericValue, isDateColumn, parseDateValue, parseFilterDate);
+            if (conditions.length === 0) return true;
+            const evaluateCondition = (condition: FilterCondition) => evaluateResultCondition(
+                textualConditionTypes.has(condition.type as FilterConditionType) ? stringValue : cellValue,
+                { ...condition, type: condition.type as FilterConditionType },
+                dataType,
+                { inferredDateInteger },
+            );
+            return logic === 'or'
+                ? conditions.some(evaluateCondition)
+                : conditions.every(evaluateCondition);
         }
 
         if (Array.isArray(filterValue)) {

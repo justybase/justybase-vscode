@@ -15,6 +15,7 @@ export default defineConfig({
     alias: {
       '@justybase/contracts': path.join(repositoryRoot, 'packages/contracts/src'),
       '@justybase/designer-core': path.join(repositoryRoot, 'packages/designer-core/src'),
+      '@justybase/result-core': path.join(repositoryRoot, 'packages/result-core/src'),
     },
   },
   server: { port: 5173, proxy: { '/api': { target: 'http://127.0.0.1:3000', ws: true } } },
