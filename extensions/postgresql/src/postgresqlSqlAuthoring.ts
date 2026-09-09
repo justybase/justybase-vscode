@@ -1,4 +1,4 @@
-import { postgresqlCompatibleSqlAuthoring } from "../../../src/shared/sql-authoring/postgresql-compatible";
+import { postgresqlCompatibleSqlAuthoring } from "@justybase/dialect-utils/authoring/postgresql-compatible";
 
 /** PostgreSQL uses the dedicated parser and therefore validates its supported syntax strictly. */
 export const postgresqlSqlAuthoring = {

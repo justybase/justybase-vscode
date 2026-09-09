@@ -3,7 +3,7 @@ import type {
 	DatabaseSqlFunctionSignature,
 	DatabaseSqlTypeSpec,
 	DatabaseSqlValidationProfile,
-} from '../../../../src/sql/authoring/types';
+} from '@justybase/sql-core/authoring/types';
 import {
 	BASE_SQL_BUILTIN_FUNCTIONS,
 	BASE_SQL_COMPLETION_KEYWORDS,
@@ -14,7 +14,7 @@ import {
 	mergeFunctionSignatures,
 	mergeStringSets,
 	mergeUniqueStrings,
-} from '../../../../src/sql/authoring/baseProfiles';
+} from '@justybase/sql-core/authoring/baseProfiles';
 import { db2SqlQualityRules } from './qualityRules';
 
 const DB2_COMPLETION_KEYWORD_OVERLAYS = [

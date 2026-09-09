@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ImportColumnDescriptor, ImportColumnOptions, ImportResult } from '../../../src/import/dataImporter';
-import { createTabularDataImporter } from '../../../src/import/tabularDataImporter';
-import { formatIdentifierForSql } from '../../../src/utils/identifierUtils';
+import type { ImportColumnDescriptor, ImportColumnOptions, ImportResult } from '@justybase/tabular-import-runtime';
+import { createTabularDataImporter } from '@justybase/tabular-import-runtime';
+import { formatIdentifierForSql } from '@justybase/dialect-utils/identifierUtils';
 import {
     buildSnowflakeCopyIntoTableSql,
     formatSnowflakeObjectReference,

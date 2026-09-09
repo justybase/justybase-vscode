@@ -5,12 +5,12 @@ import type {
   DatabaseDialect,
 } from "@justybase/contracts";
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
-import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
+import { createStandardConnectionFields } from "@justybase/database-utils/connectionFormBuilder";
 import { MsSqlConnection } from "./mssqlConnection";
 import { mssqlAdvancedFeatures } from "./mssqlDdlGenerator";
 import { mssqlMetadataProvider } from "./mssqlSchemaProvider";
 import { mssqlSqlAuthoring } from "./mssqlSqlAuthoring";
-import { mssqlDialectTraits } from "../../../src/shared/dialect-traits/mssql";
+import { mssqlDialectTraits } from "@justybase/dialect-utils/traits/mssql";
 
 const mssqlConnectionConstructor =
   MsSqlConnection as unknown as DatabaseConnectionStaticConstructor;

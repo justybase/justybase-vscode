@@ -19,7 +19,7 @@ import {
     getOptionString,
     normalizeCatalogIdentifier,
     stripTrailingSemicolons,
-} from '../../../src/core/connectionUtils';
+} from '@justybase/database-utils/connectionUtils';
 
 interface SnowflakeColumnDefinition {
     name: string;

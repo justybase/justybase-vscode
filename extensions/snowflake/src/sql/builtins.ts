@@ -2,7 +2,7 @@ import {
     BASE_SQL_BUILTIN_FUNCTIONS,
     BASE_SQL_SPECIAL_BUILTIN_VALUES,
     mergeStringSets,
-} from '../../../../src/sql/authoring/baseProfiles';
+} from '@justybase/sql-core/authoring/baseProfiles';
 
 /**
  * Snowflake-specific built-in function overlays

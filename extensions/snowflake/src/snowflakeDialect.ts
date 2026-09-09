@@ -5,8 +5,8 @@ import type {
   DatabaseDialect,
 } from "@justybase/contracts";
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
-import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
-import { snowflakeDialectTraits } from "../../../src/shared/dialect-traits/snowflake";
+import { createStandardConnectionFields } from "@justybase/database-utils/connectionFormBuilder";
+import { snowflakeDialectTraits } from "@justybase/dialect-utils/traits/snowflake";
 import { SnowflakeConnection } from "./snowflakeConnection";
 import { snowflakeAdvancedFeatures } from "./snowflakeDdlGenerator";
 import { snowflakeMetadataProvider } from "./snowflakeSchemaProvider";

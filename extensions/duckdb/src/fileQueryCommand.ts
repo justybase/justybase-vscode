@@ -20,7 +20,7 @@ import {
 import { listXlsxSheetNames } from './xlsxSheets';
 import { listXlsbSheetNames } from './xlsbConversion';
 import { listAccessTableNames } from './accessConversion';
-import { resolveFileSourceConnectionName } from '../../../src/services/fileConnectionProfileService';
+import { resolveFileSourceConnectionName } from '@justybase/file-runtime';
 
 const FILE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFile';
 const FILE_WORKSPACE_QUERY_COMMAND_ID = 'justybase.duckdb.queryFiles';

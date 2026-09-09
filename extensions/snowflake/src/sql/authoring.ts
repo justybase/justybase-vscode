@@ -1,4 +1,4 @@
-import type { DatabaseSqlAuthoring } from '../../../../src/sql/authoring/types';
+import type { DatabaseSqlAuthoring } from '@justybase/sql-core/authoring/types';
 import {
     SNOWFLAKE_COMPLETION_KEYWORDS,
     snowflakeFormatterProfile

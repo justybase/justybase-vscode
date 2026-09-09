@@ -9,7 +9,7 @@ import type {
     DatabaseConnectionConfig,
     DatabaseDataReader
 } from '@justybase/contracts';
-import { getErrorCode, getErrorMessage } from '../../../src/core/connectionUtils';
+import { getErrorCode, getErrorMessage } from '@justybase/database-utils/connectionUtils';
 
 interface Db2ColumnDefinition {
     name: string;

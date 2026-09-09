@@ -1,5 +1,4 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
     emptySessionMonitorResources,
     escapeSqlLiteral,
@@ -8,11 +7,10 @@ import {
     runSessionMonitorQuery,
     toNumber,
     validatePositiveIntegerSessionId
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 export const db2SessionMonitorProvider: DatabaseSessionMonitorProvider = {
-    async getSessions(context, mgr, database) {
-        const connectionManager = mgr as ConnectionManager;
+    async getSessions(context, services, database) {
         const scopedDatabase = normalizeDatabaseFilter(database);
         const whereClause = scopedDatabase
             ? `AND UPPER('${escapeSqlLiteral(scopedDatabase)}') = UPPER(CURRENT SERVER)`
@@ -20,7 +18,7 @@ export const db2SessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     APPLICATION_HANDLE AS "ID",
@@ -43,8 +41,7 @@ export const db2SessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getQueries(context, mgr, database) {
-        const connectionManager = mgr as ConnectionManager;
+    async getQueries(context, services, database) {
         const scopedDatabase = normalizeDatabaseFilter(database);
         const whereClause = scopedDatabase
             ? `AND UPPER('${escapeSqlLiteral(scopedDatabase)}') = UPPER(CURRENT SERVER)`
@@ -52,7 +49,7 @@ export const db2SessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     a.APPLICATION_HANDLE AS "QS_SESSIONID",
@@ -84,11 +81,10 @@ export const db2SessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getStorage(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services) {
         const rows = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     CURRENT SERVER AS "DATABASE",
@@ -117,9 +113,8 @@ export const db2SessionMonitorProvider: DatabaseSessionMonitorProvider = {
         return emptySessionMonitorResources();
     },
 
-    async killSession(context, mgr, sessionId) {
+    async killSession(context, services, sessionId) {
         validatePositiveIntegerSessionId(sessionId, 'Db2');
-        const connectionManager = mgr as ConnectionManager;
-        await executeSessionMonitorStatement(context, connectionManager, `FORCE APPLICATION (${sessionId})`);
+        await executeSessionMonitorStatement(context, services, `FORCE APPLICATION (${sessionId})`);
     }
 };

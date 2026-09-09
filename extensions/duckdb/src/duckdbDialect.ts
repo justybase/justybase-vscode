@@ -5,7 +5,7 @@ import type {
     DatabaseDialect
 } from '@justybase/contracts';
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from '@justybase/contracts';
-import { duckdbDialectTraits } from '../../../src/dialects/duckdb/traits';
+import { duckdbDialectTraits } from '@justybase/dialect-utils/traits/duckdb';
 import { DuckDbConnection } from './duckdbConnection';
 import { duckdbMetadataProvider } from './duckdbSchemaProvider';
 import { duckdbSqlAuthoring } from './duckdbSqlAuthoring';

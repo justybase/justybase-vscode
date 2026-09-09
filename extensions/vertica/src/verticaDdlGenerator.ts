@@ -7,10 +7,10 @@ import type {
     DatabaseDdlKeyInfo,
     DatabaseDdlResult,
 } from '@justybase/contracts';
-import type { ConnectionDetails } from '../../../src/types';
-import { getErrorMessage } from '../../../src/core/connectionUtils';
-import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
-import { formatIdentifierForSql, formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+import type { ConnectionDetails } from '@justybase/contracts';
+import { getErrorMessage } from '@justybase/database-utils/connectionUtils';
+import { executeDatabaseQuery } from '@justybase/database-utils/query';
+import { formatIdentifierForSql, formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 import { VerticaConnection } from './verticaConnection';
 import { verticaImportTypeMapper } from './verticaImportTypeMapper';
 import { verticaCopilotReferenceProvider } from './verticaReferenceProvider';

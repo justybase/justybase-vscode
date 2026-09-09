@@ -1,5 +1,4 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
     emptySessionMonitorResources,
     escapeSqlLiteral,
@@ -8,11 +7,10 @@ import {
     runSessionMonitorQuery,
     toNumber,
     validatePositiveIntegerSessionId
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 export const mysqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-    async getSessions(context, mgr, database) {
-        const connectionManager = mgr as ConnectionManager;
+    async getSessions(context, services, database) {
         const scopedDatabase = normalizeDatabaseFilter(database);
         const whereClause = scopedDatabase
             ? `AND UPPER(COALESCE(DB, DATABASE(), '')) = UPPER('${escapeSqlLiteral(scopedDatabase)}')`
@@ -20,7 +18,7 @@ export const mysqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     ID AS "ID",
@@ -45,8 +43,7 @@ export const mysqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getQueries(context, mgr, database) {
-        const connectionManager = mgr as ConnectionManager;
+    async getQueries(context, services, database) {
         const scopedDatabase = normalizeDatabaseFilter(database);
         const whereClause = scopedDatabase
             ? `AND UPPER(COALESCE(DB, DATABASE(), '')) = UPPER('${escapeSqlLiteral(scopedDatabase)}')`
@@ -54,7 +51,7 @@ export const mysqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     ID AS "QS_SESSIONID",
@@ -86,11 +83,10 @@ export const mysqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getStorage(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services) {
         const rows = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     TABLE_SCHEMA AS "DATABASE",
@@ -119,9 +115,8 @@ export const mysqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         return emptySessionMonitorResources();
     },
 
-    async killSession(context, mgr, sessionId) {
+    async killSession(context, services, sessionId) {
         validatePositiveIntegerSessionId(sessionId, 'MySQL');
-        const connectionManager = mgr as ConnectionManager;
-        await executeSessionMonitorStatement(context, connectionManager, `KILL ${sessionId}`);
+        await executeSessionMonitorStatement(context, services, `KILL ${sessionId}`);
     }
 };

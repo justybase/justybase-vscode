@@ -3,7 +3,7 @@ import type {
     DatabaseImportDataType,
     DatabaseImportTypeMapper
 } from '@justybase/contracts';
-import { ColumnTypeChooser } from '../../../src/dialects/netezza/import/typeMapping';
+import { ColumnTypeChooser } from '@justybase/database-utils/importTypeMapping';
 
 const DEFAULT_VARCHAR_LENGTH = 255;
 const DEFAULT_CHAR_LENGTH = 1;

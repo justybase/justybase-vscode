@@ -14,8 +14,8 @@ import {
     SET_CATALOG_QUERY,
     getOptionString,
     stripTrailingSemicolons
-} from '../../../src/core/connectionUtils';
-import { formatIdentifierForSql } from '../../../src/utils/identifierUtils';
+} from '@justybase/database-utils/connectionUtils';
+import { formatIdentifierForSql } from '@justybase/dialect-utils/identifierUtils';
 import {
     createDuckDbModuleResolver,
     DuckDbSession,

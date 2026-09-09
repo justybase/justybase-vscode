@@ -3,7 +3,7 @@ import type {
     DatabaseImportDataType,
     DatabaseImportTypeMapper,
 } from '@justybase/contracts';
-import { ColumnTypeChooser } from '../../../src/dialects/netezza/import/typeMapping';
+import { ColumnTypeChooser } from '@justybase/database-utils/importTypeMapping';
 
 function positiveInteger(value: number | undefined, fallback: number): number {
     return Number.isFinite(value) && (value ?? 0) > 0 ? Math.floor(value!) : fallback;

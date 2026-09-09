@@ -11,9 +11,9 @@ import type {
     AccessTableDefinition,
     AccessTableSnapshot,
     AccessValue,
-} from '../../../packages/access-file/src';
-import { AccessFileError, AccessFileSession } from '../../../packages/access-file/src';
-import { serializeAccessComplexValue } from '../../../packages/access-file/src/complexValues';
+} from '@justybase/access-file';
+import { AccessFileError, AccessFileSession } from '@justybase/access-file';
+import { serializeAccessComplexValue } from '@justybase/access-file/complexValues';
 import { translateAccessFunctions } from './accessSqlFunctions';
 
 export interface AccessMirrorColumn {

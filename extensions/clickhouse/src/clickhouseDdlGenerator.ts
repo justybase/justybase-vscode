@@ -8,12 +8,12 @@ import type {
     DatabaseDdlResult,
     DatabaseTableDefinitionMetadata,
 } from '@justybase/contracts';
-import type { ConnectionDetails } from '../../../src/types';
-import { activateCoreExtension } from '../../../src/api/companionActivation';
+import type { ConnectionDetails } from '@justybase/contracts';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
 import {
     executeDatabaseQuery,
-} from '../../../src/core/connectionFactory';
-import { formatIdentifierForSql, formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+} from '@justybase/database-utils/query';
+import { formatIdentifierForSql, formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 import {
     buildColumnMetadataQuery,
     buildFindTableSchemaQuery,

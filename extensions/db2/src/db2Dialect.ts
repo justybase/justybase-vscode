@@ -6,12 +6,12 @@ import type {
   DatabaseDialect,
 } from "@justybase/contracts";
 import { getDatabaseDesignerCapabilities } from "@justybase/contracts";
-import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
+import { createStandardConnectionFields } from "@justybase/database-utils/connectionFormBuilder";
 import { Db2Connection } from "./db2Connection";
 import { db2AdvancedFeatures } from "./db2DdlGenerator";
 import { db2MetadataProvider } from "./db2SchemaProvider";
 import { db2SqlAuthoring } from "./db2SqlAuthoring";
-import { db2DialectTraits } from "../../../src/shared/dialect-traits/db2";
+import { db2DialectTraits } from "@justybase/dialect-utils/traits/db2";
 
 const db2ConnectionConstructor =
   Db2Connection as unknown as DatabaseConnectionStaticConstructor;

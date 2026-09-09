@@ -12,8 +12,8 @@ import type {
 import {
   openRecreateTableScript,
   quoteSqlLiteral
-} from '../../../src/core/maintenanceProviderUtils';
-import { formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+} from '@justybase/database-utils/maintenanceProviderUtils';
+import { formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 import {
   buildListPartitionsQuery,
   buildListIndexesDetailedQuery,

@@ -18,7 +18,7 @@ import {
     getOptionString,
     normalizeCatalogIdentifier,
     normalizeCompatibilityIdentifier
-} from '../../../src/core/connectionUtils';
+} from '@justybase/database-utils/connectionUtils';
 
 interface OracleDbTypeDescriptor {
     name?: string;

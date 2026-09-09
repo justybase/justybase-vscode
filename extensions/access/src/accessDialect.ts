@@ -11,7 +11,7 @@ import type {
     DatabaseDialect,
 } from '@justybase/contracts';
 import { createDatabaseCapabilities } from '@justybase/contracts';
-import { accessDialectTraits } from '../../../src/dialects/access/traits';
+import { accessDialectTraits } from '@justybase/dialect-utils/traits/access';
 import { AccessConnection } from './accessConnection';
 import { accessMetadataProvider } from './accessSchemaProvider';
 import { accessSqlAuthoring } from './accessSqlAuthoring';

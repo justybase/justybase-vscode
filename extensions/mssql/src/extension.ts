@@ -1,4 +1,4 @@
-import { activateCoreExtension } from '../../../src/api/companionActivation';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
 import { mssqlDialect } from './mssqlDialect';
 
 export async function activate(): Promise<void> {

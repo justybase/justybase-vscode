@@ -5,12 +5,12 @@ import type {
   DatabaseDialect,
 } from "@justybase/contracts";
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
-import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
+import { createStandardConnectionFields } from "@justybase/database-utils/connectionFormBuilder";
 import { MysqlConnection } from "./mysqlConnection";
 import { mysqlAdvancedFeatures } from "./mysqlDdlGenerator";
 import { mysqlMetadataProvider } from "./mysqlSchemaProvider";
 import { mysqlSqlAuthoring } from "./mysqlSqlAuthoring";
-import { mysqlDialectTraits } from "../../../src/shared/dialect-traits/mysql";
+import { mysqlDialectTraits } from "@justybase/dialect-utils/traits/mysql";
 
 const mysqlConnectionConstructor =
   MysqlConnection as unknown as DatabaseConnectionStaticConstructor;

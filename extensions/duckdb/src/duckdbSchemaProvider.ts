@@ -1,4 +1,4 @@
-import { createDelegatingMetadataProvider } from '../../../src/core/metadataProviderFactory';
+import { createDelegatingMetadataProvider } from '@justybase/database-utils/metadataProviderFactory';
 import {
     buildColumnMetadataQuery,
     buildColumnsWithKeysQuery,

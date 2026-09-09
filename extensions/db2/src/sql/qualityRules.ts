@@ -1,4 +1,4 @@
-import { LintSeverity, type LintRule } from '../../../../src/providers/linterRules';
+import { LintSeverity, type LintRule } from '@justybase/sql-core/quality';
 import {
 	createDeleteFromPattern,
 	createDeleteWithoutWhereRule,
@@ -10,7 +10,7 @@ import {
 	createTopNWithoutOrderByRule,
 	createUpdateSetPattern,
 	createUpdateWithoutWhereRule,
-} from '../../../../src/providers/qualityRuleFactory';
+} from '@justybase/sql-core/quality';
 
 const statementEnd = createStatementEndScanner();
 const identifier = createIdentifierPattern();

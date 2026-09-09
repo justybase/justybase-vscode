@@ -14,7 +14,7 @@ import {
   SET_CATALOG_QUERY,
   getOptionNumber,
   stripTrailingSemicolons,
-} from "../../../src/core/connectionUtils";
+} from "@justybase/database-utils/connectionUtils";
 
 interface MysqlQueryResultSetHeader {
   affectedRows?: number;

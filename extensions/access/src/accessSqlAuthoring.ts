@@ -1,1 +1,1 @@
-export { accessSqlAuthoring } from '../../../src/dialects/access/sql/authoring';
+export { accessSqlAuthoring } from '@justybase/dialect-utils/authoring/access';
