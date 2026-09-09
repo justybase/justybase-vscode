@@ -105,6 +105,7 @@ describe('createJustyBaseLiteApi', () => {
 
     it('registers external dialects so core factories can resolve db2', () => {
         const api = createJustyBaseLiteApi();
+        expect(api.version).toBe(1);
         const connectionConstructor = MockDb2Connection as unknown as DatabaseConnectionStaticConstructor;
         const db2Dialect: DatabaseDialect = {
             kind: 'db2',
@@ -195,10 +196,26 @@ describe('createJustyBaseLiteApi', () => {
                 user: 'db2user',
                 password: 'secret',
                 dbType: 'db2'
-            })
+            }),
+            getDocumentConnection: jest.fn().mockReturnValue(undefined),
+            getConnectionForExecution: jest.fn().mockReturnValue('Db2 DNW'),
         } as unknown as ConnectionManager;
         const api = createJustyBaseLiteApi({} as vscode.ExtensionContext, connectionManager);
         api.registerDatabaseDialect(dialect);
+
+        await expect(api.getActiveConnectionDetails()).resolves.toEqual({
+            name: 'Db2 DNW',
+            details: {
+                name: 'Db2 DNW',
+                host: 'db2.example.test',
+                port: 50000,
+                database: 'SAMPLE',
+                user: 'db2user',
+                password: 'secret',
+                dbType: 'db2',
+            },
+            documentBound: false,
+        });
 
         await api.executeConnectionSql!('CREATE INDEX SALES_IDX ON SALES (ID)', 'Db2 DNW');
         const result = await api.executeConnectionSqlQuery!('SELECT NAME, COUNT FROM SYSCAT.TABLES', 'Db2 DNW');

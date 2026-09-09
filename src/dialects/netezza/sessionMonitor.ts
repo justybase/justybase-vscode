@@ -5,27 +5,11 @@ import type {
 import {
   escapeSqlLiteral,
   executeSessionMonitorStatement,
+  normalizeDatabaseFilter,
   runSessionMonitorQuery,
   toNumber,
+  validatePositiveIntegerSessionId,
 } from "@justybase/database-utils/sessionMonitorProviderUtils";
-
-function normalizeDatabaseFilter(
-  database: string | undefined,
-): string | undefined {
-  if (!database) return undefined;
-  const normalized = database.trim().toUpperCase();
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function validateSessionId(sessionId: number): void {
-  if (
-    !Number.isFinite(sessionId) ||
-    sessionId < 0 ||
-    !Number.isInteger(sessionId)
-  ) {
-    throw new Error(`Invalid session ID: ${sessionId}`);
-  }
-}
 
 async function runWithConcurrencyLimit<T>(
   tasks: Array<() => Promise<T>>,
@@ -119,7 +103,7 @@ async function fetchStorageForDatabase(
     `;
 
   if (!services.queryDatabase) {
-    throw new Error('The session-monitor host does not support database-scoped queries.');
+    return [];
   }
 
   const rows = await services.queryDatabase<Record<string, unknown>>(database, sql, connectionName);
@@ -135,7 +119,7 @@ async function fetchStorageForDatabase(
 
 export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
   async getSessions(context, services, database, connectionName) {
-    const scopedDatabase = normalizeDatabaseFilter(database);
+    const scopedDatabase = normalizeDatabaseFilter(database)?.toUpperCase();
     const whereClause = scopedDatabase
       ? `WHERE DBNAME = '${escapeSqlLiteral(scopedDatabase)}'`
       : "";
@@ -156,7 +140,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
   },
 
   async getQueries(context, services, database, connectionName) {
-    const scopedDatabase = normalizeDatabaseFilter(database);
+    const scopedDatabase = normalizeDatabaseFilter(database)?.toUpperCase();
     const whereClause = scopedDatabase
       ? `WHERE S.DBNAME = '${escapeSqlLiteral(scopedDatabase)}'`
       : "";
@@ -184,6 +168,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
   },
 
   async getStorage(_context, services, connectionName) {
+    if (!services.queryDatabase) return [];
     const details = await services.getConnectionDetails?.(connectionName);
     if (!details) return [];
 
@@ -275,7 +260,7 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
   },
 
   async killSession(context, services, sessionId, connectionName) {
-    validateSessionId(sessionId);
+    validatePositiveIntegerSessionId(sessionId, 'Netezza');
     const sql = `DROP SESSION ${sessionId}`;
     await executeSessionMonitorStatement(context, services, sql, connectionName);
   },

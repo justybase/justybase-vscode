@@ -4,6 +4,13 @@
  */
 
 /**
+ * Escapes single quotes inside a SQL string-value by doubling them (ANSI/ISO).
+ * Unlike {@link escapeSqlLiteral}, this does NOT wrap the result in quotes,
+ * so callers can compose their own quoting (e.g. `N'...'`, backticks).
+ */
+export { escapeSqlString } from '@justybase/database-utils/sessionMonitorProviderUtils';
+
+/**
  * Escapes a SQL identifier (table name, column name, schema name, etc.)
  * Netezza uses double quotes for identifiers
  * 
@@ -39,17 +46,6 @@ export function escapeSqlLiteral(value: string): string {
 
     // Wrap in single quotes
     return `'${escaped}'`;
-}
-
-/**
- * Escapes single quotes inside a SQL string-value by doubling them (ANSI/ISO).
- * Unlike {@link escapeSqlLiteral}, this does NOT wrap the result in quotes,
- * so callers can compose their own quoting (e.g. `N'...'`, backticks).
- * @param value - The raw string value to escape.
- * @returns The escaped string without surrounding quotes.
- */
-export function escapeSqlString(value: string): string {
-    return value.replace(/'/g, "''");
 }
 
 /**

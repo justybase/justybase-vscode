@@ -38,6 +38,7 @@ export class SessionMonitorView {
     private _disposables: vscode.Disposable[] = [];
     private _context: vscode.ExtensionContext;
     private _connectionManager: ConnectionManager;
+    private readonly _sessionMonitorServices: DatabaseSessionMonitorServices;
     private _connectionName: string | undefined;
     private _refreshInterval: NodeJS.Timeout | undefined;
 
@@ -52,6 +53,7 @@ export class SessionMonitorView {
         this._extensionUri = extensionUri;
         this._context = context;
         this._connectionManager = connectionManager;
+        this._sessionMonitorServices = createSessionMonitorServices(context, connectionManager);
         this._connectionName = connectionName;
 
         this._update();
@@ -167,7 +169,7 @@ export class SessionMonitorView {
     }
 
     private _getSessionMonitorServices(): DatabaseSessionMonitorServices {
-        return createSessionMonitorServices(this._context, this._connectionManager);
+        return this._sessionMonitorServices;
     }
 
     private async _killSession(sessionId: number, status?: string, queryId?: string): Promise<void> {

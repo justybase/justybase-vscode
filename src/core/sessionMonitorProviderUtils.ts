@@ -88,11 +88,24 @@ export function createSessionMonitorServices(
     );
   };
 
-  const getConnectionDetails = async (
+  const resolveConnectionDetails = async (
     connectionName?: string,
   ): Promise<ConnectionDetails | undefined> => {
     const targetName = connectionName ?? connectionManager.getActiveConnectionName() ?? undefined;
     return targetName ? connectionManager.getConnection(targetName) : undefined;
+  };
+
+  const getConnectionDetails = async (
+    connectionName?: string,
+  ): Promise<Omit<ConnectionDetails, 'password'> | undefined> => {
+    const details = await resolveConnectionDetails(connectionName);
+    if (!details) {
+      return undefined;
+    }
+
+    const safeDetails = { ...details };
+    delete safeDetails.password;
+    return safeDetails;
   };
 
   const queryDatabase = async <T extends Record<string, unknown>>(
@@ -100,7 +113,7 @@ export function createSessionMonitorServices(
     sql: string,
     connectionName?: string,
   ): Promise<T[]> => {
-    const details = await getConnectionDetails(connectionName);
+    const details = await resolveConnectionDetails(connectionName);
     if (!details) {
       return [];
     }

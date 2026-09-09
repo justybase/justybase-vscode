@@ -16,6 +16,7 @@ jest.mock('../core/queryRunner', () => ({
 }));
 
 import type { ExtensionContext } from 'vscode';
+import type { DatabaseSessionMonitorServices } from '@justybase/contracts';
 import { createSessionMonitorServices } from '../core/sessionMonitorProviderUtils';
 import type { ConnectionManager } from '../core/connectionManager';
 import { runQueryRaw } from '../core/queryRunner';
@@ -120,6 +121,50 @@ describe('netezzaSessionMonitorProvider', () => {
             1000,
             false,
         );
+    });
+
+    it('rejects session zero through the shared positive session-id validation', async () => {
+        await expect(
+            netezzaSessionMonitorProvider.killSession(context, services, 0),
+        ).rejects.toThrow('Invalid Netezza session ID: 0');
+        expect(mockedRunQueryRaw).not.toHaveBeenCalled();
+    });
+
+    it('does not expose the connection password through the service port', async () => {
+        const getConnection = jest.fn().mockResolvedValue({
+            host: 'db.example.test',
+            database: 'analytics',
+            user: 'tester',
+            password: 'secret',
+        });
+        const passwordBearingManager = {
+            getActiveConnectionName: jest.fn().mockReturnValue('test-connection'),
+            getConnection,
+        } as unknown as ConnectionManager;
+        const safeServices = createSessionMonitorServices(context, passwordBearingManager);
+
+        await expect(safeServices.getConnectionDetails?.('test-connection')).resolves.toEqual({
+            host: 'db.example.test',
+            database: 'analytics',
+            user: 'tester',
+        });
+    });
+
+    it('treats database-scoped storage as unavailable when the host omits that optional capability', async () => {
+        const minimalServices = {
+            query: jest.fn(),
+            execute: jest.fn(),
+            getConnectionDetails: jest.fn().mockResolvedValue({
+                host: 'db.example.test',
+                database: 'analytics',
+                user: 'tester',
+            }),
+        } as unknown as DatabaseSessionMonitorServices;
+
+        await expect(
+            netezzaSessionMonitorProvider.getStorage(context, minimalServices),
+        ).resolves.toEqual([]);
+        expect(minimalServices.query).not.toHaveBeenCalled();
     });
 });
 

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { DatabaseKind } from '../contracts/database';
-import { normalizeDatabaseKind } from '../contracts/database';
+import { DEFAULT_DATABASE_KIND, tryNormalizeDatabaseKind } from '../contracts/database';
 
 const DIALECT_ICON_PATHS: Readonly<Partial<Record<DatabaseKind, readonly string[]>>> = {
     netezza: ['netezza_icon64.png'],
@@ -21,8 +21,10 @@ const DIALECT_ICON_PATHS: Readonly<Partial<Record<DatabaseKind, readonly string[
 const DEFAULT_ICON_PATH: readonly string[] = ['icon.svg'];
 
 export function getDialectIconSegments(kind?: string | DatabaseKind): readonly string[] {
-    const normalizedKind = normalizeDatabaseKind(kind);
-    return DIALECT_ICON_PATHS[normalizedKind] ?? DEFAULT_ICON_PATH;
+  const normalizedKind: DatabaseKind | undefined = kind === undefined
+        ? DEFAULT_DATABASE_KIND
+        : tryNormalizeDatabaseKind(kind) ?? DEFAULT_DATABASE_KIND;
+  return (normalizedKind && DIALECT_ICON_PATHS[normalizedKind]) ?? DEFAULT_ICON_PATH;
 }
 
 export function getDialectIconUri(extensionUri: vscode.Uri, kind?: string | DatabaseKind): vscode.Uri {

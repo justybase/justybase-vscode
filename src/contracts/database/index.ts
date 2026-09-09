@@ -26,6 +26,8 @@ export {
   getDatabaseDesignerCapabilities,
   getDesignerCapability,
   resolveDatabaseDesignerCapabilities,
+  normalizeDatabaseKind,
+  tryNormalizeDatabaseKind,
 } from "@justybase/contracts";
 export { UnsupportedDesignerOperationError } from "@justybase/contracts";
 
@@ -117,61 +119,6 @@ export type {
   DesignerTriggerTiming,
   DesignerViewReplaceStyle,
 } from "@justybase/contracts";
-
-const DATABASE_KIND_ALIASES: Readonly<Record<string, DatabaseKindType>> = {
-  netezza: "netezza",
-  netezzasql: "netezza",
-  nps: "netezza",
-  oracle: "oracle",
-  postgres: "postgresql",
-  postgresql: "postgresql",
-  vertica: "vertica",
-  verticadb: "vertica",
-  snowflake: "snowflake",
-  sqlite: "sqlite",
-  sqlite3: "sqlite",
-  duckdb: "duckdb",
-  "duck db": "duckdb",
-  "duck-db": "duckdb",
-  duck_db: "duckdb",
-  file: "file",
-  files: "file",
-  "file sql": "file",
-  xlsx: "file",
-  xlsb: "file",
-  csv: "file",
-  parquet: "file",
-  avro: "file",
-  db2: "db2",
-  db2luw: "db2",
-  ibmdb2: "db2",
-  mssql: "mssql",
-  sqlserver: "mssql",
-  "sql server": "mssql",
-  mysql: "mysql",
-  clickhouse: "clickhouse",
-  "click-house": "clickhouse",
-  access: "access",
-  mdb: "access",
-  accdb: "access",
-  msaccess: "access",
-  "ms access": "access",
-};
-
-export function normalizeDatabaseKind(value?: string): DatabaseKindType {
-  return tryNormalizeDatabaseKind(value) ?? "netezza";
-}
-
-export function tryNormalizeDatabaseKind(
-  value?: string,
-): DatabaseKindType | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const normalizedValue = value.trim().toLowerCase();
-  return DATABASE_KIND_ALIASES[normalizedValue];
-}
 
 export interface DatabaseDialect {
   kind: DatabaseKindType;

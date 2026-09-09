@@ -165,7 +165,7 @@ async function createConnectionFromDetails(
         );
     }
 
-    // Keep direct DDL generation usable with a version 1 core that predates
+    // Keep direct DDL generation usable with an older core that predates
     // the optional connected-profile API. Tunneled profiles must go through
     // core so their loopback listener and SecretStorage token are managed.
     const connection = new PostgreSqlConnection({

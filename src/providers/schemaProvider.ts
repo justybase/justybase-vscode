@@ -3,7 +3,7 @@ import * as path from 'path';
 import { DatabaseKind } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
-import { normalizeDatabaseKind, tryNormalizeDatabaseKind } from '../contracts/database';
+import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
 import type { DocumentParseSession } from '../sqlParser/documentParseSession';
@@ -183,7 +183,7 @@ export function generateAutoTableNameFromDbInfo(
 
     // Flat file dialects (SQLite, Microsoft Access) have no database/schema
     // hierarchy, so qualified three-part targets would be rejected downstream.
-    if (kind && FLAT_FILE_DIALECTS.has(normalizeDatabaseKind(kind))) {
+    if (kind && FLAT_FILE_DIALECTS.has(tryNormalizeDatabaseKind(kind) ?? '')) {
         return generatedTableName;
     }
 

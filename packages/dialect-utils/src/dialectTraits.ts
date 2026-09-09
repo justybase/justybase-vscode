@@ -2,7 +2,7 @@ import {
   DEFAULT_DATABASE_KIND,
   DatabaseDialectTraits,
   DatabaseKind,
-  normalizeDatabaseKind,
+  tryNormalizeDatabaseKind,
 } from "@justybase/contracts";
 import { db2DialectTraits } from "./traits/db2";
 import { duckdbDialectTraits } from "./traits/duckdb";
@@ -38,9 +38,15 @@ const DIALECT_TRAITS_BY_KIND: Readonly<
 export function getDatabaseDialectTraits(
   kind?: string | DatabaseKind,
 ): DatabaseDialectTraits {
-  const normalizedKind = kind
-    ? normalizeDatabaseKind(kind)
-    : DEFAULT_DATABASE_KIND;
+  if (kind === undefined || kind.trim().length === 0) {
+    return DIALECT_TRAITS_BY_KIND[DEFAULT_DATABASE_KIND];
+  }
+
+  const normalizedKind = tryNormalizeDatabaseKind(kind);
+  if (!normalizedKind || !DIALECT_TRAITS_BY_KIND[normalizedKind]) {
+    throw new Error(`Unsupported database kind '${kind}'.`);
+  }
+
   return DIALECT_TRAITS_BY_KIND[normalizedKind];
 }
 

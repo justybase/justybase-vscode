@@ -30,6 +30,8 @@ const DATABASE_KIND_ALIASES: Readonly<Record<string, DatabaseKind>> = {
   file: 'file',
   files: 'file',
   'file sql': 'file',
+  // File extensions are accepted here only as aliases at the File SQL
+  // adapter boundary; they are not additional database dialects.
   xlsx: 'file',
   xlsb: 'file',
   csv: 'file',
@@ -62,7 +64,15 @@ export function tryNormalizeDatabaseKind(
 }
 
 export function normalizeDatabaseKind(value?: string): DatabaseKind {
-  return tryNormalizeDatabaseKind(value) ?? DEFAULT_DATABASE_KIND;
+  if (value === undefined || value.trim().length === 0) {
+    return DEFAULT_DATABASE_KIND;
+  }
+
+  const normalizedKind = tryNormalizeDatabaseKind(value);
+  if (!normalizedKind) {
+    throw new Error(`Unsupported database kind '${value}'.`);
+  }
+  return normalizedKind;
 }
 
 export const SUPPORTED_DATABASE_KINDS = [
