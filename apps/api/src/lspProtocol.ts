@@ -1,7 +1,9 @@
 import type { SqlLanguageContext } from '@justybase/contracts';
 import { NetezzaWebLspCore, type CoreCompletionItem, type CoreDiagnostic, type WebLspContext, type WebLspMetadataRequestParams } from './sqlCoreLsp';
 import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
-import type { AppStore, StoredConnection } from './store';
+import type { AppStore } from './store';
+import { ApiMetadataService } from './metadataCache';
+import { STALE_TTL_MULTIPLIER } from '@justybase/metadata-core';
 
 interface WebSocketLike {
   readyState: number;
@@ -12,29 +14,9 @@ interface WebSocketLike {
 interface RpcRequest { jsonrpc?: string; id?: number | string; method?: string; params?: Record<string, unknown>; }
 interface DocumentState { text: string; version: number; context: SqlLanguageContext; }
 
-const OBJECT_CACHE_TTL_MS = 5 * 60 * 1000;
-const objectCache = new Map<string, { expiresAt: number; value: Awaited<ReturnType<ApiDatabaseRuntimeRegistry['listObjects']>> }>();
-
 export interface LspSession {
   invalidateConnection(connectionId: string): void;
   invalidateAll(): void;
-}
-
-async function cachedObjects(runtimes: ApiDatabaseRuntimeRegistry, profile: StoredConnection, database: string, schema: string | undefined): Promise<Awaited<ReturnType<ApiDatabaseRuntimeRegistry['listObjects']>>> {
-  const key = `${profile.id}|${database.toUpperCase()}|${(schema ?? '').toUpperCase()}`;
-  const cached = objectCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await runtimes.listObjects(profile, database, schema);
-  objectCache.set(key, { expiresAt: Date.now() + OBJECT_CACHE_TTL_MS, value });
-  return value;
-}
-
-export function invalidateLspObjectCache(connectionId?: string): void {
-  if (!connectionId) {
-    objectCache.clear();
-    return;
-  }
-  for (const key of objectCache.keys()) if (key.startsWith(`${connectionId}|`)) objectCache.delete(key);
 }
 
 function contextFor(context: SqlLanguageContext | undefined): WebLspContext {
@@ -46,7 +28,14 @@ function objectKind(value: string | undefined): 'table' | 'view' | 'procedure' {
   return normalized === 'VIEW' ? 'view' : normalized === 'PROCEDURE' ? 'procedure' : 'table';
 }
 
-export async function requestMetadata(params: WebLspMetadataRequestParams, documents: Map<string, DocumentState>, store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string): Promise<unknown> {
+export async function requestMetadata(
+  params: WebLspMetadataRequestParams,
+  documents: Map<string, DocumentState>,
+  store: AppStore,
+  runtimes: ApiDatabaseRuntimeRegistry,
+  userId: string,
+  metadataService = new ApiMetadataService(),
+): Promise<unknown> {
   const document = documents.get(params.documentUri);
   const context = document?.context;
   if (params.kind === 'context') return contextFor(context);
@@ -54,11 +43,15 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
   const profile = connectionId ? store.getConnection(userId, connectionId) : undefined;
   if (!profile) return [];
   const database = params.database ?? context?.database;
-  if (params.kind === 'databases') return runtimes.listDatabases(profile);
+  if (params.kind === 'databases') return metadataService.listDatabases(runtimes, userId, profile);
   if (!database) return [];
-  if (params.kind === 'schemas') return runtimes.listSchemas(profile, database);
+  if (params.kind === 'schemas') return metadataService.listSchemas(runtimes, userId, profile, database);
   if (params.kind === 'tables' || params.kind === 'views' || params.kind === 'procedures') {
-    const objects = await cachedObjects(runtimes, profile, database, params.schema);
+    const objects = await metadataService.listObjects(runtimes, userId, profile, database, params.schema, {
+      ttlMs: metadataService.lspTtlMs,
+      staleTtlMs: metadataService.lspTtlMs * STALE_TTL_MULTIPLIER,
+      staleOnError: false,
+    });
     const requested = params.kind === 'tables' ? 'TABLE' : params.kind === 'views' ? 'VIEW' : 'PROCEDURE';
     return objects.filter(item => requested === 'PROCEDURE' ? item.objectType?.toUpperCase() === 'PROCEDURE' : item.objectType?.toUpperCase() === requested).map(item => ({ name: item.name, database, schema: item.schema ?? params.schema, objectType: objectKind(item.objectType), description: item.description }));
   }
@@ -66,7 +59,11 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
     if (!params.table) return params.kind === 'columns' ? [] : null;
     const schema = params.schema ?? context?.schema;
     if (params.kind === 'tableInfo') {
-      const objects = await cachedObjects(runtimes, profile, database, schema || undefined);
+      const objects = await metadataService.listObjects(runtimes, userId, profile, database, schema || undefined, {
+        ttlMs: metadataService.lspTtlMs,
+        staleTtlMs: metadataService.lspTtlMs * STALE_TTL_MULTIPLIER,
+        staleOnError: false,
+      });
       const exists = objects.some(item => item.name.toUpperCase() === params.table!.toUpperCase()
         && (!schema || item.schema?.toUpperCase() === schema.toUpperCase()));
       if (!exists) return { exists: false, table: params.table, database, schema: schema ?? '', columns: [] };
@@ -76,9 +73,17 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
         ? []
         : { exists: true, table: params.table, database, schema: '', columns: [] };
     }
-    const columns = await runtimes.listColumns(profile, database, schema, params.table);
+    const columns = await metadataService.listColumns(runtimes, userId, profile, database, schema, params.table, {
+      ttlMs: metadataService.lspTtlMs,
+      staleTtlMs: metadataService.lspTtlMs * STALE_TTL_MULTIPLIER,
+      staleOnError: false,
+    });
     if (params.kind === 'columns') return columns;
-    const object = await cachedObjects(runtimes, profile, database, schema).then(items =>
+    const object = await metadataService.listObjects(runtimes, userId, profile, database, schema, {
+      ttlMs: metadataService.lspTtlMs,
+      staleTtlMs: metadataService.lspTtlMs * STALE_TTL_MULTIPLIER,
+      staleOnError: false,
+    }).then(items =>
       items.find(item => item.name.toUpperCase() === params.table!.toUpperCase()
         && (!schema || item.schema?.toUpperCase() === schema.toUpperCase())));
     return {
@@ -96,7 +101,11 @@ export async function requestMetadata(params: WebLspMetadataRequestParams, docum
     if (!params.table) return [];
     const requestedName = params.table.trim();
     if (!requestedName) return [];
-    const objects = await cachedObjects(runtimes, profile, database, params.schema);
+    const objects = await metadataService.listObjects(runtimes, userId, profile, database, params.schema, {
+      ttlMs: metadataService.lspTtlMs,
+      staleTtlMs: metadataService.lspTtlMs * STALE_TTL_MULTIPLIER,
+      staleOnError: false,
+    });
     const effectiveSchema = context?.schema;
     const requestedSchema = params.schema;
     const proposals = objects
@@ -158,11 +167,18 @@ function workspaceEditResponse(edit: { changes: Record<string, Array<{ range: { 
   return { changes: edit.changes };
 }
 
-export function attachLspSocket(socket: WebSocketLike, store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, onClose?: (session: LspSession) => void): LspSession {
+export function attachLspSocket(
+  socket: WebSocketLike,
+  store: AppStore,
+  runtimes: ApiDatabaseRuntimeRegistry,
+  userId: string,
+  onClose?: (session: LspSession) => void,
+  metadataService = new ApiMetadataService(),
+): LspSession {
   const documents = new Map<string, DocumentState>();
   const knownConnectionIds = new Set<string>();
   const core = new NetezzaWebLspCore({
-    requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId),
+    requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId, metadataService),
     logger: { error: message => console.error(message) },
   });
   const send = (message: unknown): void => { if (socket.readyState === 1) socket.send(JSON.stringify({ jsonrpc: '2.0', ...message as object })); };
@@ -183,12 +199,10 @@ export function attachLspSocket(socket: WebSocketLike, store: AppStore, runtimes
   const session: LspSession = {
     invalidateConnection: connectionId => {
       core.clearConnection(connectionId);
-      invalidateLspObjectCache(connectionId);
     },
     invalidateAll: () => {
       for (const connectionId of knownConnectionIds) {
         core.clearConnection(connectionId);
-        invalidateLspObjectCache(connectionId);
       }
     },
   };

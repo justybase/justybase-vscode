@@ -4,6 +4,7 @@
     "packages/contracts": [],
     "packages/sql-core": ["packages/contracts"],
     "packages/designer-core": ["packages/contracts"],
+    "packages/metadata-core": [],
     "packages/database-runtime": ["packages/contracts", "packages/designer-core", "packages/netezza-runtime"],
     "packages/sqlite-runtime": ["packages/contracts"],
     "packages/duckdb-runtime": ["packages/contracts"],
@@ -102,6 +103,8 @@
     ]
   },
   "workspaceEntryPoints": {
+    "@justybase/metadata-core": "packages/metadata-core/src/index.ts",
+    "@justybase/result-core": "packages/result-core/src/index.ts",
     "@justybase/sql-core": "packages/sql-core/src/index.ts"
   },
   "forbiddenImports": [
@@ -1888,27 +1891,6 @@
       "reason": "Existing desktop/companion integration cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
       "owner": "Companion architecture owner",
       "removeWhen": "The strongly connected component anchored at extensions/snowflake/src/snowflakeImportPlanner.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
-    },
-    {
-      "source": "media/resultPanel/diskBackedGrid.ts",
-      "target": "media/resultPanel/filter.ts",
-      "nodes": [
-        "media/resultPanel/diskBackedGrid.ts",
-        "media/resultPanel/diskGrouping.ts",
-        "media/resultPanel/filter.ts",
-        "media/resultPanel/formatting.ts",
-        "media/resultPanel/grid.ts",
-        "media/resultPanel/grid/aggregation.ts",
-        "media/resultPanel/grid/alternateViews.ts",
-        "media/resultPanel/grid/orchestration.ts",
-        "media/resultPanel/grid/persistence.ts",
-        "media/resultPanel/grid/sizing.ts",
-        "media/resultPanel/grid/tableBuilder.ts"
-      ],
-      "edgeFingerprint": "b161bff4b9b74b85ac4f2fff6042eb649d15539295db995339596587a6a37729",
-      "reason": "Existing Result Panel module cycle retained as a fingerprinted migration target; new edges in this component are blocked.",
-      "owner": "Result Panel architecture owner",
-      "removeWhen": "The strongly connected component anchored at media/resultPanel/diskBackedGrid.ts is broken by its owning migration slice; remove this entry after the affected product gates pass."
     },
     {
       "source": "media/visualQueryBuilder/VisualQueryBuilderApp.tsx",

@@ -1023,9 +1023,9 @@ function normalizeIdentifierText(text: string): string {
 function collectMacroDocumentSymbols(sql: string): CoreDocumentSymbol[] {
   const source = maskSqlCommentsAndStrings(sql);
   const declarations = new Map<string, { name: string; start: number; references: IdentifierOccurrence[] }>();
-  const declarationPattern = /%let\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/gi;
+  const declarationPattern = /(?:%let\s+([A-Za-z_][A-Za-z0-9_]*)|declare\s+&([A-Za-z_][A-Za-z0-9_]*))\s*=/gi;
   for (const match of source.matchAll(declarationPattern)) {
-    const name = match[1];
+    const name = match[1] ?? match[2];
     if (!name || match.index === undefined) continue;
     const start = match.index + match[0].toUpperCase().indexOf(name.toUpperCase());
     declarations.set(name.toUpperCase(), { name, start, references: [] });

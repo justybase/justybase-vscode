@@ -1,5 +1,6 @@
 import { getSqlStatementAtPosition, NetezzaWebLspCore, splitSqlStatements } from '../src/sqlCoreLsp';
-import { invalidateSqlMetadataCache, provideSqlCompletion } from '../src/lsp';
+import { provideSqlCompletion } from '../src/lsp';
+import { ApiMetadataService } from '../src/metadataCache';
 import type { ApiDatabaseRuntimeRegistry } from '../src/databaseRuntime/contracts';
 import type { AppStore } from '../src/store';
 
@@ -11,11 +12,12 @@ const runtimes = {
   listObjects,
   listSchemas: jest.fn(),
 } as unknown as ApiDatabaseRuntimeRegistry;
+const metadataService = new ApiMetadataService();
 
 describe('shared Netezza web SQL core', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    invalidateSqlMetadataCache();
+    metadataService.clear();
   });
 
   it('routes HTTP completion through the shared Netezza authoring core', async () => {
@@ -65,12 +67,12 @@ describe('shared Netezza web SQL core', () => {
       databaseKind: 'netezza' as const,
     };
 
-    await provideSqlCompletion(store, runtimes, 'user-1', request);
-    await provideSqlCompletion(store, runtimes, 'user-1', request);
+    await provideSqlCompletion(store, runtimes, 'user-1', request, metadataService);
+    await provideSqlCompletion(store, runtimes, 'user-1', request, metadataService);
     expect(listObjects).toHaveBeenCalledTimes(1);
 
-    invalidateSqlMetadataCache('connection-1');
-    await provideSqlCompletion(store, runtimes, 'user-1', request);
+    metadataService.invalidate('user-1', 'connection-1');
+    await provideSqlCompletion(store, runtimes, 'user-1', request, metadataService);
     expect(listObjects).toHaveBeenCalledTimes(2);
   });
 

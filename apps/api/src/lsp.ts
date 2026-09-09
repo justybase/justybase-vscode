@@ -1,37 +1,31 @@
 import type { SqlCompletionItem, SqlCompletionRequest, SqlCompletionResponse, SqlDiagnostic, SqlDiagnosticsRequest, SqlDiagnosticsResponse, SqlFormatRequest, SqlFormatResponse, SqlLanguageContext } from '@justybase/contracts';
 import { NetezzaWebLspCore, type CoreDiagnostic } from './sqlCoreLsp';
-import { invalidateLspObjectCache, requestMetadata } from './lspProtocol';
+import { requestMetadata } from './lspProtocol';
 import type { ApiConfig } from './config';
 import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import type { AppStore, StoredConnection } from './store';
-
-const CACHE_TTL_MS = 5 * 60 * 1000;
+import { ApiMetadataService } from './metadataCache';
 
 interface HttpDocumentState { text: string; version: number; context: SqlLanguageContext; }
 interface HttpCoreCacheEntry {
   connectionId?: string;
-  expiresAt: number;
   documentUri: string;
   documents: Map<string, HttpDocumentState>;
   core: NetezzaWebLspCore;
-}
-
-const httpCoreCache = new Map<string, HttpCoreCacheEntry>();
-
-export function invalidateSqlMetadataCache(connectionId?: string): void {
-  if (!connectionId) { httpCoreCache.clear(); invalidateLspObjectCache(); return; }
-  for (const [key, entry] of httpCoreCache) {
-    if (entry.connectionId === connectionId) httpCoreCache.delete(key);
-  }
-  invalidateLspObjectCache(connectionId);
 }
 
 function getProfile(store: AppStore, userId: string, connectionId: string | undefined): StoredConnection | undefined {
   return connectionId ? store.getConnection(userId, connectionId) : undefined;
 }
 
-export async function provideSqlCompletion(store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, request: SqlCompletionRequest): Promise<SqlCompletionResponse> {
-  const entry = getHttpCore(store, runtimes, userId, request);
+export async function provideSqlCompletion(
+  store: AppStore,
+  runtimes: ApiDatabaseRuntimeRegistry,
+  userId: string,
+  request: SqlCompletionRequest,
+  metadataService = new ApiMetadataService(),
+): Promise<SqlCompletionResponse> {
+  const entry = getHttpCore(store, runtimes, userId, request, metadataService);
   const position = positionAt(request.sql, request.offset);
   const items = await entry.core.completion(entry.documentUri, entry.documents.get(entry.documentUri)?.version ?? 1, request.sql, position);
   return { items: items.map(toHttpCompletionItem) };
@@ -42,6 +36,7 @@ function getHttpCore(
   runtimes: ApiDatabaseRuntimeRegistry,
   userId: string,
   request: SqlCompletionRequest,
+  metadataService: ApiMetadataService,
 ): HttpCoreCacheEntry {
   const context: SqlLanguageContext = {
     connectionId: request.connectionId,
@@ -49,26 +44,28 @@ function getHttpCore(
     schema: request.schema,
     databaseKind: request.databaseKind ?? 'netezza',
   };
-  const key = [userId, context.connectionId, context.database, context.schema]
-    .map(value => value?.toUpperCase() ?? '-')
-    .join('|');
-  const now = Date.now();
-  let entry = httpCoreCache.get(key);
-  if (!entry || entry.expiresAt <= now) {
-    const documentUri = `http://justybase.invalid/${encodeURIComponent(userId)}/completion/${encodeURIComponent(key)}`;
-    const documents = new Map<string, HttpDocumentState>();
-    const core = new NetezzaWebLspCore({
-      requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId),
-    });
-    entry = {
-      connectionId: context.connectionId,
-      expiresAt: now + CACHE_TTL_MS,
-      documentUri,
-      documents,
-      core,
-    };
-    httpCoreCache.set(key, entry);
-  }
+  const connectionId = context.connectionId ?? '-';
+  const keyParts = [context.database, context.schema];
+  const entry = metadataService.getOrCreateContext(
+    userId,
+    { id: connectionId, dbType: context.databaseKind },
+    'lsp-core',
+    keyParts,
+    () => {
+      const key = [userId, connectionId, context.database ?? '-', context.schema ?? '-'].map(value => encodeURIComponent(value)).join('|');
+      const documentUri = `http://justybase.invalid/${encodeURIComponent(userId)}/completion/${key}`;
+      const documents = new Map<string, HttpDocumentState>();
+      const core = new NetezzaWebLspCore({
+        requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId, metadataService),
+      });
+      return {
+        connectionId: context.connectionId,
+        documentUri,
+        documents,
+        core,
+      };
+    },
+  );
   const previous = entry.documents.get(entry.documentUri);
   entry.documents.set(entry.documentUri, {
     text: request.sql,
@@ -82,7 +79,6 @@ function getHttpCore(
     databaseKind: context.databaseKind,
     netezzaSchemasEnabled: true,
   });
-  entry.expiresAt = now + CACHE_TTL_MS;
   return entry;
 }
 
@@ -177,6 +173,7 @@ async function provideNetezzaDiagnostics(
   runtimes: ApiDatabaseRuntimeRegistry,
   userId: string,
   request: SqlDiagnosticsRequest,
+  metadataService: ApiMetadataService,
 ): Promise<SqlDiagnostic[]> {
   const documentUri = `http://justybase.invalid/${encodeURIComponent(userId)}/lsp-diagnostics`;
   const documents = new Map([[documentUri, {
@@ -190,7 +187,7 @@ async function provideNetezzaDiagnostics(
     },
   }]]);
   const core = new NetezzaWebLspCore({
-    requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId),
+    requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId, metadataService),
   });
   core.setContext(documentUri, {
     connectionName: request.connectionId,
@@ -204,11 +201,17 @@ async function provideNetezzaDiagnostics(
   return diagnostics.map(item => mapCoreDiagnostic(request.sql, item, state));
 }
 
-export async function provideSqlDiagnostics(store: AppStore, runtimes: ApiDatabaseRuntimeRegistry, userId: string, request: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse> {
+export async function provideSqlDiagnostics(
+  store: AppStore,
+  runtimes: ApiDatabaseRuntimeRegistry,
+  userId: string,
+  request: SqlDiagnosticsRequest,
+  metadataService = new ApiMetadataService(),
+): Promise<SqlDiagnosticsResponse> {
   const sql = request.sql;
   const diagnostics = request.databaseKind && request.databaseKind !== 'netezza'
     ? legacyDelimiterDiagnostics(sql, scanLegacyDelimiters(sql))
-    : await provideNetezzaDiagnostics(store, runtimes, userId, request);
+    : await provideNetezzaDiagnostics(store, runtimes, userId, request, metadataService);
   const profile = getProfile(store, userId, request.connectionId);
   if (profile?.readOnly && sql.trim() && !runtimes.isReadOnlySql(profile, sql)) diagnostics.push(diagnostic(sql, 'This connection is read-only; the statement may be rejected.', 'warning', 0, 'WEB004'));
   return { diagnostics };

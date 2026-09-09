@@ -6,6 +6,13 @@ import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server';
 import { resolveLocalDatabasePath } from '../src/localDatabaseSandbox';
 
+async function waitForQueryJob(app: FastifyInstance, queryId: string): Promise<NonNullable<ReturnType<FastifyInstance['queryJobs']['get']>>> {
+  const job = app.queryJobs.get(queryId);
+  if (!job) throw new Error(`Query ${queryId} was not registered.`);
+  await job.settled;
+  return job;
+}
+
 describe('web API authentication and connection profiles', () => {
   let app: FastifyInstance;
   let dataDir: string;
@@ -373,10 +380,49 @@ describe('web API authentication and connection profiles', () => {
       const started = await app.inject({ method: 'POST', url: '/api/query', headers: { cookie, 'x-justybase-csrf': csrf }, payload: { connectionId, database: 'main', sql: 'SELECT 42 AS ANSWER', mode: 'single' } });
       expect(started.statusCode).toBe(202);
       const queryId = String(started.json().queryId);
-      for (let attempt = 0; attempt < 50 && !app.queryJobs.get(queryId)?.done; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      const job = await waitForQueryJob(app, queryId);
+      expect(job.events.map(event => event.type)).toEqual([
+        'started',
+        'statement-started',
+        'session',
+        'columns',
+        'progress',
+        'complete',
+        'batch-complete',
+      ]);
+      expect(job.events.filter(event => event.type === 'batch-complete')).toHaveLength(1);
+      expect(job.events.map(event => event.sequence)).toEqual(job.events.map((_event, index) => index + 1));
       const page = await app.inject({ method: 'POST', url: `/api/query/${queryId}/page`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { limit: 10 } });
       expect(page.statusCode).toBe(200);
       expect(page.json().rows).toEqual([[42]]);
+
+      const batchStarted = await app.inject({ method: 'POST', url: '/api/query', headers: { cookie, 'x-justybase-csrf': csrf }, payload: { connectionId, database: 'main', sql: 'SELECT 1 AS FIRST_VALUE; SELECT 2 AS SECOND_VALUE;', mode: 'script' } });
+      expect(batchStarted.statusCode).toBe(202);
+      const batchJob = await waitForQueryJob(app, String(batchStarted.json().queryId));
+      expect(batchJob.events.map(event => event.type)).toEqual([
+        'started',
+        'statement-started',
+        'session',
+        'columns',
+        'progress',
+        'complete',
+        'statement-started',
+        'session',
+        'columns',
+        'progress',
+        'complete',
+        'batch-complete',
+      ]);
+      expect(batchJob.events.filter(event => event.type === 'batch-complete')).toHaveLength(1);
+      const secondPage = await app.inject({ method: 'POST', url: `/api/query/${batchStarted.json().queryId}/page`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { statementIndex: 1, limit: 10 } });
+      expect(secondPage.statusCode).toBe(200);
+      expect(secondPage.json().rows).toEqual([[2]]);
+
+      const failed = await app.inject({ method: 'POST', url: '/api/query', headers: { cookie, 'x-justybase-csrf': csrf }, payload: { connectionId, database: 'main', sql: 'SELECT * FROM missing_table', mode: 'single' } });
+      expect(failed.statusCode).toBe(202);
+      const failedJob = await waitForQueryJob(app, String(failed.json().queryId));
+      expect(failedJob.events.filter(event => event.type === 'error')).toHaveLength(1);
+      expect(failedJob.events.filter(event => event.type === 'batch-complete')).toHaveLength(1);
     } finally {
       await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf } });
     }
@@ -480,7 +526,7 @@ describe('web API authentication and connection profiles', () => {
       const started = await app.inject({ method: 'POST', url: '/api/query', headers: { cookie, 'x-justybase-csrf': csrf }, payload: { connectionId, database: 'memory', sql: 'SELECT 7 AS ANSWER', mode: 'single' } });
       expect(started.statusCode).toBe(202);
       const queryId = String(started.json().queryId);
-      for (let attempt = 0; attempt < 50 && !app.queryJobs.get(queryId)?.done; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+      await waitForQueryJob(app, queryId);
       const page = await app.inject({ method: 'POST', url: `/api/query/${queryId}/page`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { limit: 10 } });
       expect(page.statusCode).toBe(200);
       expect(page.json().rows).toEqual([[7]]);
