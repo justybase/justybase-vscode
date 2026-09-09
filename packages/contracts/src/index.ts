@@ -13,7 +13,36 @@ export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnIn
 
 export type { ConnectionDetails, DatabaseTunnelConfig, NamedConnectionDetails } from './connectionDetails';
 
-export type { DatabaseQueryCallbacks, DatabaseQueryCommand, DatabaseQueryOptions, DatabaseQueryResult } from './queryExecution';
+export type {
+  Awaitable,
+  DatabaseQueryCallbacks,
+  DatabaseQueryCommand,
+  DatabaseQueryOptions,
+  DatabaseQueryResult,
+  ExecutionBatchCompletedEvent,
+  ExecutionColumnsEvent,
+  ExecutionConnectionMode,
+  ExecutionContext,
+  ExecutionDelivery,
+  ExecutionEvent,
+  ExecutionFailure,
+  ExecutionPhase,
+  ExecutionProgressEvent,
+  ExecutionRequest,
+  ExecutionRetryPolicy,
+  ExecutionRetryingEvent,
+  ExecutionRetryingEventEnvelope,
+  ExecutionRowsEvent,
+  ExecutionStartedEvent,
+  ExecutionStatement,
+  ExecutionStatementCompletedEvent,
+  ExecutionStatementFailedEvent,
+  ExecutionStatementStartedEvent,
+  ExecutionStatementSummary,
+  ExecutionSummary,
+  ExecutionTerminalStatus,
+  ExecutionTerminalEvent,
+} from './queryExecution';
 
 export type { TuningReport, TuningRecommendation, TuningEvidence, TuningSeverity, TuningRisk, TuningEvidenceSource, TuningReportMetadata } from './tuning/types';
 export { clampConfidence, buildTuningSummary, createTuningReport } from './tuning/types';
