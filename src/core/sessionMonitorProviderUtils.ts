@@ -1,101 +1,124 @@
-import type { ExtensionContext } from "vscode";
-import type { ConnectionManager } from "./connectionManager";
-import { queryResultToRows, runQueryRaw } from "./queryRunner";
-export { escapeSqlString as escapeSqlLiteral } from "../utils/sqlUtils";
+import type { ExtensionContext } from 'vscode';
+import type {
+  ConnectionDetails,
+  DatabaseSessionMonitorServices,
+} from '@justybase/contracts';
+import { createConnectedDatabaseConnectionFromDetails } from './connectionFactory';
+import type { ConnectionManager } from './connectionManager';
+import { queryResultToRows, runQueryRaw } from './queryRunner';
+import type { NzConnection } from './nzConnectionFactory';
 
-export interface SessionMonitorResources {
-  gra: unknown[];
-  systemUtil: unknown[];
-  sysUtilSummary: unknown;
-}
+export {
+  emptySessionMonitorResources,
+  escapeSqlLiteral,
+  executeSessionMonitorStatement,
+  normalizeDatabaseFilter,
+  runSessionMonitorQuery,
+  toNumber,
+  validatePositiveIntegerSessionId,
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
+export type { SessionMonitorResources } from '@justybase/database-utils/sessionMonitorProviderUtils';
 
-export function normalizeDatabaseFilter(
-  database: string | undefined,
-): string | undefined {
-  const normalized = database?.trim();
-  return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-export function toNumber(value: unknown): number {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-
-  if (typeof value === "bigint") {
-    const converted = Number(value);
-    return Number.isFinite(converted) ? converted : 0;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  return 0;
-}
-
-export function validatePositiveIntegerSessionId(
-  sessionId: number,
-  dialectLabel = "database",
-): void {
-  if (
-    !Number.isFinite(sessionId) ||
-    sessionId <= 0 ||
-    !Number.isInteger(sessionId)
-  ) {
-    throw new Error(`Invalid ${dialectLabel} session ID: ${sessionId}`);
-  }
-}
-
-export async function runSessionMonitorQuery<T extends Record<string, unknown>>(
-  context: unknown,
-  connectionManager: ConnectionManager,
+async function executeQueryRows(
+  connection: NzConnection,
   sql: string,
-  rowLimit = 1000,
-  connectionName?: string,
-): Promise<T[]> {
-  const result = await runQueryRaw(
-    context as ExtensionContext,
-    sql,
-    true,
-    connectionManager,
-    connectionName,
-    undefined,
-    undefined,
-    undefined,
-    rowLimit,
-    false,
-  );
-  if (!result?.data) {
-    return [];
+): Promise<Record<string, unknown>[]> {
+  const command = connection.createCommand(sql);
+  command.commandTimeout = 90;
+  const reader = await command.executeReader();
+  const rows: Record<string, unknown>[] = [];
+
+  try {
+    while (await reader.read()) {
+      const row: Record<string, unknown> = {};
+      for (let index = 0; index < reader.fieldCount; index++) {
+        row[reader.getName(index)] = reader.getValue(index);
+      }
+      rows.push(row);
+    }
+    return rows;
+  } finally {
+    await reader.close();
   }
-  return queryResultToRows<T>(result);
 }
 
-export async function executeSessionMonitorStatement(
-  context: unknown,
+/**
+ * Adapts the desktop query runner to the platform-neutral session-monitor port.
+ * Companion extensions receive only this port and never the desktop manager.
+ */
+export function createSessionMonitorServices(
+  context: ExtensionContext,
   connectionManager: ConnectionManager,
-  sql: string,
-  connectionName?: string,
-): Promise<void> {
-  await runQueryRaw(
-    context as ExtensionContext,
-    sql,
-    true,
-    connectionManager,
-    connectionName,
-    undefined,
-    undefined,
-    undefined,
-    1,
-    false,
-  );
-}
-
-export function emptySessionMonitorResources(): SessionMonitorResources {
-  return {
-    gra: [],
-    systemUtil: [],
-    sysUtilSummary: null,
+): DatabaseSessionMonitorServices {
+  const query = async <T extends Record<string, unknown>>(
+    sql: string,
+    rowLimit = 1000,
+    connectionName?: string,
+  ): Promise<T[]> => {
+    const result = await runQueryRaw(
+      context,
+      sql,
+      true,
+      connectionManager,
+      connectionName,
+      undefined,
+      undefined,
+      undefined,
+      rowLimit,
+      false,
+    );
+    return result?.data ? queryResultToRows<T>(result) : [];
   };
+
+  const execute = async (
+    sql: string,
+    connectionName?: string,
+  ): Promise<void> => {
+    await runQueryRaw(
+      context,
+      sql,
+      true,
+      connectionManager,
+      connectionName,
+      undefined,
+      undefined,
+      undefined,
+      1,
+      false,
+    );
+  };
+
+  const getConnectionDetails = async (
+    connectionName?: string,
+  ): Promise<ConnectionDetails | undefined> => {
+    const targetName = connectionName ?? connectionManager.getActiveConnectionName() ?? undefined;
+    return targetName ? connectionManager.getConnection(targetName) : undefined;
+  };
+
+  const queryDatabase = async <T extends Record<string, unknown>>(
+    database: string,
+    sql: string,
+    connectionName?: string,
+  ): Promise<T[]> => {
+    const details = await getConnectionDetails(connectionName);
+    if (!details) {
+      return [];
+    }
+
+    const connection = await createConnectedDatabaseConnectionFromDetails({
+      ...details,
+      database,
+    }) as NzConnection;
+    try {
+      return await executeQueryRows(connection, sql) as T[];
+    } finally {
+      try {
+        await connection.close();
+      } catch {
+        // The query result is already available; cleanup failures are non-fatal here.
+      }
+    }
+  };
+
+  return { query, execute, getConnectionDetails, queryDatabase };
 }
