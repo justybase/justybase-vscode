@@ -452,39 +452,60 @@ export interface DatabaseMaintenanceProvider {
   ): Promise<void>;
 }
 
+export interface DatabaseSessionMonitorServices {
+  /** Execute a read-only query and return normalized object rows. */
+  query<T extends Record<string, unknown>>(
+    sql: string,
+    rowLimit?: number,
+    connectionName?: string,
+  ): Promise<T[]>;
+  /** Execute a statement without returning rows. */
+  execute(sql: string, connectionName?: string): Promise<void>;
+  /** Resolve the selected connection profile when a provider needs metadata. */
+  getConnectionDetails?(
+    connectionName?: string,
+  ): Promise<ConnectionDetails | undefined>;
+  /** Execute a query against a database-specific target using the same profile. */
+  queryDatabase?<T extends Record<string, unknown>>(
+    database: string,
+    sql: string,
+    connectionName?: string,
+  ): Promise<T[]>;
+}
+
 export interface DatabaseSessionMonitorProvider {
   getSessions(
     context: unknown,
-    connectionManager: unknown,
+    services: DatabaseSessionMonitorServices,
     database?: string,
     connectionName?: string
   ): Promise<Record<string, unknown>[]>;
   getQueries(
     context: unknown,
-    connectionManager: unknown,
+    services: DatabaseSessionMonitorServices,
     database?: string,
     connectionName?: string
   ): Promise<Record<string, unknown>[]>;
   getStorage(
     context: unknown,
-    connectionManager: unknown,
+    services: DatabaseSessionMonitorServices,
     connectionName?: string
   ): Promise<Record<string, unknown>[]>;
   getResources(
     context: unknown,
-    connectionManager: unknown,
+    services: DatabaseSessionMonitorServices,
     connectionName?: string
   ): Promise<{ gra: unknown[]; systemUtil: unknown[]; sysUtilSummary: unknown }>;
   killSession(
     context: unknown,
-    connectionManager: unknown,
+    services: DatabaseSessionMonitorServices,
     sessionId: number,
     connectionName?: string
   ): Promise<void>;
   /** Native query termination for systems whose identifier is not numeric. */
   killQuery?(
     context: unknown,
-    connectionManager: unknown,
+    services: DatabaseSessionMonitorServices,
     queryId: string,
     connectionName?: string
   ): Promise<void>;
