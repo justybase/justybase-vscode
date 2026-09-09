@@ -272,6 +272,13 @@
         ],
         "description": "SAS-like macro variable declaration using the @SET alias"
     },
+    "Macro DECLARE": {
+        "prefix": "nzmacrodeclare",
+        "body": [
+            "DECLARE &${1:variable_name} = ${2:value};"
+        ],
+        "description": "Script macro variable declaration using DECLARE"
+    },
     "Macro SQL": {
         "prefix": "nzmacrosql",
         "body": [

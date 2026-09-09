@@ -31,6 +31,18 @@ describe("package-owned Netezza parser", () => {
     expect(parseNetezzaSqlStatements({ sql }).lexResult.errors).toEqual([]);
   });
 
+  it("accepts DECLARE macro declarations and leaves procedural declarations intact", () => {
+    const sql = "DECLARE &TABLE_NAME = 'ORDERS'; SELECT * FROM &TABLE_NAME;";
+    const result = parseNetezzaSqlStatements({ sql });
+
+    expect(result.lexResult.errors).toEqual([]);
+    expect(result.actionableParserErrors).toEqual([]);
+    expect(result.macroReferenceRanges).toHaveLength(1);
+    expect(sanitizeNetezzaSql("DECLARE value INTEGER;")).toBe(
+      "DECLARE value INTEGER;",
+    );
+  });
+
   it.each([
     ["%put", "%put 😀;\nSELECT 1;", "SELECT 1;"],
     ["%include", "%include '😀.sql';\nSELECT 1;", "SELECT 1;"],

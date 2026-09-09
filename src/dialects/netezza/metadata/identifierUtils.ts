@@ -7,6 +7,7 @@
  */
 
 import { NETEZZA_UNQUOTED_IDENTIFIER_PATTERN } from '../identifierPattern';
+import { netezzaMetadataIdentifierPolicy } from '@justybase/metadata-core';
 
 export type NetezzaIdentifierSource = 'user' | 'catalog';
 
@@ -36,7 +37,7 @@ export function createNetezzaUserIdentifier(
 ): NetezzaIdentifier {
     const exactValue = unquoteNetezzaIdentifier(value);
     return {
-        value: quoted ? exactValue : exactValue.toUpperCase(),
+        value: netezzaMetadataIdentifierPolicy.normalizeUser(exactValue, quoted),
         source: 'user',
         quoted,
     };

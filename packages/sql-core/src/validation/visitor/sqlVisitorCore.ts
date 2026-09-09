@@ -31,6 +31,8 @@ import {
 } from "../identifierUtils";
 import { ProcedureScopeBuilder } from "../procedureScopeBuilder";
 import { NETEZZA_SQL_VALIDATION_PROFILE } from "../netezzaProfile";
+import { getOrderedCstTokens } from "../referenceTokenCollector";
+import type { MacroReferenceRange } from "../../parser/runtime";
 
 // Base visitor class from Chevrotain - lazily initialized
 type BaseCstVisitorConstructor = ReturnType<
@@ -106,16 +108,25 @@ export class SqlVisitor
   private embeddedSelectDepth = 0;
   /** CTEs have their own duplicate-output diagnostic after explicit column aliases are applied. */
   private duplicateOutputWarningSuppressionDepth = 0;
+  private macroReferenceRanges: readonly MacroReferenceRange[] = [];
 
   constructor(
     schemaProvider?: SchemaProvider,
     validationProfile: DatabaseSqlValidationProfile = NETEZZA_SQL_VALIDATION_PROFILE,
+    macroReferenceRanges: readonly MacroReferenceRange[] = [],
   ) {
     super();
     this.scopeBuilder = new ScopeBuilder();
     this.schemaProvider = schemaProvider;
     this.validationProfile = validationProfile;
+    this.macroReferenceRanges = macroReferenceRanges;
     this.validateVisitor();
+  }
+
+  setMacroReferenceRanges(
+    ranges: readonly MacroReferenceRange[],
+  ): void {
+    this.macroReferenceRanges = ranges;
   }
 
   seedScriptCreatedProcedures(procedureNames: readonly string[]): void {
@@ -183,6 +194,31 @@ export class SqlVisitor
 
   getSchemaProvider(): SchemaProvider | undefined {
     return this.schemaProvider;
+  }
+
+  hasMacroReferenceInCst(node: CstNode): boolean {
+    const tokens = getOrderedCstTokens(node);
+    const firstToken = tokens[0];
+    const lastToken = tokens[tokens.length - 1];
+    if (!firstToken || !lastToken || firstToken.startOffset === undefined) {
+      return false;
+    }
+    const endOffset =
+      (lastToken.startOffset ?? firstToken.startOffset) +
+      (lastToken.image?.length ?? 0);
+    return this.macroReferenceRanges.some(
+      (range) =>
+        range.startOffset < endOffset && range.endOffset > firstToken.startOffset!,
+    );
+  }
+
+  hasMacroReferenceInToken(token: IToken): boolean {
+    const startOffset = token.startOffset;
+    if (startOffset === undefined) return false;
+    const endOffset = startOffset + (token.image?.length ?? 0);
+    return this.macroReferenceRanges.some(
+      (range) => range.startOffset < endOffset && range.endOffset > startOffset,
+    );
   }
 
   getInProcedureContext(): boolean {
@@ -330,6 +366,9 @@ export class SqlVisitor
   }
 
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void {
+    if (table.isDynamicMacro || this.hasMacroReferenceInCst(tableNameNode)) {
+      return;
+    }
     if (!this.schemaProvider) return;
 
     const matchesScriptTable = this.scriptCreatedTables.some((knownTable) => {

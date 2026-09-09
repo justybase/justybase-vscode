@@ -58,6 +58,7 @@ export function toNetezzaParseResult(
     parserErrors: parseResult.parserErrors,
     actionableParserErrors: parseResult.actionableParserErrors,
     usedIsolatedParser: parseResult.usedIsolatedParser,
+    macroReferenceRanges: parseResult.macroReferenceRanges,
   };
 }
 

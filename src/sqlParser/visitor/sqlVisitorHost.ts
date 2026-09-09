@@ -40,6 +40,8 @@ export interface SqlVisitorHost {
   getValidationProfile(): DatabaseSqlValidationProfile;
   getProcedureScope(): ProcedureScopeBuilder | null;
   getProcedureTopLevelSelect(): boolean;
+  hasMacroReferenceInCst(node: CstNode): boolean;
+  hasMacroReferenceInToken(token: IToken): boolean;
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void;
   validateBooleanContext(
     expressionNode: CstNode,

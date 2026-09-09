@@ -81,4 +81,45 @@ describe("NetezzaSqlSemanticValidator", () => {
     new NetezzaSqlSemanticValidator(provider).validate("SELECT * FROM ORDERS");
     expect(calls).toContain("called");
   });
+
+  it("does not validate schema objects or types hidden behind DECLARE macros", () => {
+    const provider: SchemaProvider = {
+      getTable: (_database, _schema, name) =>
+        name.toUpperCase() === "ORDERS"
+          ? {
+              name: "ORDERS",
+              database: "DB",
+              schema: "PUBLIC",
+              isCte: false,
+              isTempTable: false,
+              columns: [
+                { name: "STATUS", dataType: "VARCHAR(20)" },
+                { name: "ORDER_ID", dataType: "INTEGER" },
+              ],
+            }
+          : undefined,
+      tableExists: (_database, _schema, name) => name.toUpperCase() === "ORDERS",
+    };
+
+    const result = new NetezzaSqlSemanticValidator(provider).validate(`
+DECLARE &TABLE_NAME = 'ORDERS';
+DECLARE &SUFFIX = '2026';
+DECLARE &SEARCHED = 'ACTIVE';
+SELECT NAME_&SUFFIX FROM DB.PUBLIC.ORDERS WHERE STATUS = &SEARCHED;
+SELECT * FROM DB.PUBLIC.&TABLE_NAME;
+CREATE TABLE STAGE_&SUFFIX (ID INT4);
+`);
+
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.map((warning) => warning.code)).not.toContain("SQL025");
+    expect(result.warnings.map((warning) => warning.code)).not.toContain("SQL026");
+  });
+
+  it("continues validating static references next to DECLARE macros", () => {
+    const result = new NetezzaSqlSemanticValidator(schema).validate(
+      "DECLARE &TABLE_NAME = 'ORDERS'; SELECT MISSING FROM DB.PUBLIC.ORDERS;",
+    );
+
+    expect(result.errors.map((error) => error.code)).toContain("SQL004");
+  });
 });

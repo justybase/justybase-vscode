@@ -19,6 +19,11 @@ export interface NetezzaSqlParseOptions {
   readonly ignoreParserError?: (error: IRecognitionException) => boolean;
 }
 
+export interface MacroReferenceRange {
+  readonly startOffset: number;
+  readonly endOffset: number;
+}
+
 export interface NetezzaSqlParseResult {
   readonly runtime: NetezzaSqlParsingRuntime;
   readonly lexResult: NetezzaSqlLexResult;
@@ -26,6 +31,7 @@ export interface NetezzaSqlParseResult {
   readonly parserErrors: IRecognitionException[];
   readonly actionableParserErrors: IRecognitionException[];
   readonly usedIsolatedParser: boolean;
+  readonly macroReferenceRanges: readonly MacroReferenceRange[];
 }
 
 export const NETEZZA_SQL_PARSING_RUNTIME: NetezzaSqlParsingRuntime = {
@@ -123,7 +129,7 @@ function readMacroDirectiveRange(
   }
 
   const directiveMatch = sql.slice(directiveStart).match(
-    /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+|%do\s*;?|%else\s+%do\b\s*|%end\b\s*)/iu,
+    /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|declare\s+&[A-Za-z_][A-Za-z0-9_]*\s*=|%put\s+|%export\b\s*|%include\s+|%python\s+|%do\s*;?|%else\s+%do\b\s*|%end\b\s*)/iu,
   );
   if (!directiveMatch) return undefined;
 
@@ -173,7 +179,7 @@ function findMacroIfBlockEnd(sql: string, bodyStart: number): number {
       }
 
       const directiveMatch = text.match(
-        /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|%(?:else\s+%do|let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|put\s+|export\b\s*|include\s+|python\s+))/iu,
+        /^(?:@set\s+[A-Za-z_][A-Za-z0-9_]*\s*=|declare\s+&[A-Za-z_][A-Za-z0-9_]*\s*=|%(?:else\s+%do|let\s+[A-Za-z_][A-Za-z0-9_]*\s*=|put\s+|export\b\s*|include\s+|python\s+))/iu,
       );
       if (directiveMatch) {
         offset = findDirectiveEnd(sql, directiveStart + directiveMatch[0].length);
@@ -358,8 +364,14 @@ function readNextSignificantChar(sql: string, start: number): string | undefined
 }
 
 function isIdentifierMacroPosition(sql: string, start: number, end: number): boolean {
-  if (readPreviousSignificantChar(sql, start) === ".") return true;
-  if (readNextSignificantChar(sql, end) === ".") return true;
+  const previousAdjacentChar = sql[start - 1];
+  const nextAdjacentChar = sql[end];
+  const previousChar = readPreviousSignificantChar(sql, start);
+  if (previousAdjacentChar !== undefined && /[A-Za-z0-9_$]/u.test(previousAdjacentChar)) return true;
+  if (previousChar === ".") return true;
+  const nextChar = readNextSignificantChar(sql, end);
+  if (nextAdjacentChar !== undefined && /[A-Za-z0-9_$]/u.test(nextAdjacentChar)) return true;
+  if (nextChar === ".") return true;
   const previousWord = readPreviousWord(sql, start);
   return previousWord !== undefined && new Set([
     "CALL", "EXEC", "EXECUTE", "FROM", "GROOM", "INTO", "JOIN", "MERGE", "ON",
@@ -367,8 +379,14 @@ function isIdentifierMacroPosition(sql: string, start: number, end: number): boo
   ]).has(previousWord);
 }
 
-function sanitizeSqlMacroSyntax(sql: string): string {
+interface SanitizedSqlMacroSyntax {
+  sql: string;
+  macroReferenceRanges: MacroReferenceRange[];
+}
+
+function sanitizeSqlMacroSyntaxWithMetadata(sql: string): SanitizedSqlMacroSyntax {
   let sanitized = sanitizeMacroQueryFunctions(sanitizeMacroDirectives(sql));
+  const macroReferenceRanges: MacroReferenceRange[] = [];
   let index = 0;
 
   while (index < sanitized.length) {
@@ -395,6 +413,10 @@ function sanitizeSqlMacroSyntax(sql: string): string {
       const start = index;
       const macroReference = parseMacroReference(sanitized, start);
       if (macroReference) {
+        macroReferenceRanges.push({
+          startOffset: start,
+          endOffset: macroReference.end,
+        });
         sanitized = isIdentifierMacroPosition(sanitized, start, macroReference.end)
           ? replaceRangeWithPaddedText(sanitized, start, macroReference.end, macroReference.name)
           : replaceRangeWithLiteral(sanitized, start, macroReference.end);
@@ -405,7 +427,11 @@ function sanitizeSqlMacroSyntax(sql: string): string {
     index += 1;
   }
 
-  return sanitized;
+  return { sql: sanitized, macroReferenceRanges };
+}
+
+function sanitizeSqlMacroSyntax(sql: string): string {
+  return sanitizeSqlMacroSyntaxWithMetadata(sql).sql;
 }
 
 /**
@@ -422,7 +448,8 @@ let activeParserSessions = 0;
 export function parseNetezzaSqlStatements(
   options: NetezzaSqlParseOptions,
 ): NetezzaSqlParseResult {
-  const lexResult = SqlLexer.tokenize(sanitizeNetezzaSql(options.sql));
+  const sanitizedMacroSyntax = sanitizeSqlMacroSyntaxWithMetadata(options.sql);
+  const lexResult = SqlLexer.tokenize(sanitizedMacroSyntax.sql);
   if (lexResult.errors.length > 0) {
     return {
       runtime: NETEZZA_SQL_PARSING_RUNTIME,
@@ -430,6 +457,7 @@ export function parseNetezzaSqlStatements(
       parserErrors: [],
       actionableParserErrors: [],
       usedIsolatedParser: false,
+      macroReferenceRanges: sanitizedMacroSyntax.macroReferenceRanges,
     };
   }
 
@@ -455,5 +483,6 @@ export function parseNetezzaSqlStatements(
     parserErrors,
     actionableParserErrors: parserErrors.filter((error) => !ignoreParserError(error)),
     usedIsolatedParser,
+    macroReferenceRanges: sanitizedMacroSyntax.macroReferenceRanges,
   };
 }

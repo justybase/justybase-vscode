@@ -22,10 +22,18 @@ export function insertStatement(
   const schemaProvider = host.getSchemaProvider();
   if (ctx.tableName) {
     const table = host.visitAs<TableInfo>(ctx.tableName[0]);
+    table.isDynamicMacro =
+      table.isDynamicMacro || host.hasMacroReferenceInCst(ctx.tableName[0]);
     addTableQualificationWarning(host, table, ctx.tableName[0]);
 
     const isQualified = !!(table.database || table.schema);
-    if (isQualified && !table.isTempTable && !table.isCte && schemaProvider) {
+    if (
+      isQualified &&
+      !table.isDynamicMacro &&
+      !table.isTempTable &&
+      !table.isCte &&
+      schemaProvider
+    ) {
       host.validateTableExists(table, ctx.tableName[0]);
 
       if (ctx.Identifier && ctx.Identifier.length > 0) {
@@ -170,13 +178,17 @@ export function updateStatement(
   if (ctx.tableName) {
     tableNameNode = ctx.tableName[0];
     table = host.visitAs<TableInfo>(tableNameNode);
+    table.isDynamicMacro =
+      table.isDynamicMacro || host.hasMacroReferenceInCst(tableNameNode);
 
-    const known = scopeBuilder.findTable(table.name);
-    if (known) {
-      host.applyKnownTableInfo(table, known);
+    if (!table.isDynamicMacro) {
+      const known = scopeBuilder.findTable(table.name);
+      if (known) {
+        host.applyKnownTableInfo(table, known);
+      }
     }
 
-    if (table.columns.length === 0 && schemaProvider) {
+    if (!table.isDynamicMacro && table.columns.length === 0 && schemaProvider) {
       const schemaTable = schemaProvider.getTable(
         table.database,
         table.schema,
@@ -272,13 +284,17 @@ export function deleteStatement(
   if (ctx.tableName) {
     tableNameNode = ctx.tableName[0];
     table = host.visitAs<TableInfo>(tableNameNode);
+    table.isDynamicMacro =
+      table.isDynamicMacro || host.hasMacroReferenceInCst(tableNameNode);
 
-    const known = scopeBuilder.findTable(table.name);
-    if (known) {
-      host.applyKnownTableInfo(table, known);
+    if (!table.isDynamicMacro) {
+      const known = scopeBuilder.findTable(table.name);
+      if (known) {
+        host.applyKnownTableInfo(table, known);
+      }
     }
 
-    if (table.columns.length === 0 && schemaProvider) {
+    if (!table.isDynamicMacro && table.columns.length === 0 && schemaProvider) {
       const schemaTable = schemaProvider.getTable(
         table.database,
         table.schema,

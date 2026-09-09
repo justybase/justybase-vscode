@@ -22,6 +22,7 @@ export interface DdlVisitorHost {
   removeScriptCreatedTable(table: TableInfo): void;
   getInProcedureContext(): boolean;
   getSchemaProvider(): SchemaProvider | undefined;
+  hasMacroReferenceInCst(node: CstNode): boolean;
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void;
   isDropTargetTableLike(): boolean;
   setDropTargetIsTableLike(value: boolean): void;
@@ -62,12 +63,15 @@ export function createTableStatement(
   }
 
   if (nameInfo) {
+    const isDynamicMacro =
+      !!ctx.qualifiedName && host.hasMacroReferenceInCst(ctx.qualifiedName[0]);
     createdTable = {
       name: nameInfo.name || "",
       schema: nameInfo.schema,
       database: nameInfo.database,
       isCte: false,
       isTempTable: isTemp,
+      isDynamicMacro,
       columns: [],
     };
 
@@ -100,7 +104,7 @@ export function createTableStatement(
     host.visit(ctx.organizeClause[0]);
   }
 
-  if (createdTable) {
+  if (createdTable && !createdTable.isDynamicMacro) {
     host.getScopeBuilder().addTable(createdTable);
     if (!host.getInProcedureContext()) {
       host.addScriptCreatedTable(createdTable);
@@ -126,6 +130,7 @@ export function createExternalTableStatement(
       database: nameInfo.database,
       isCte: false,
       isTempTable: false,
+      isDynamicMacro: host.hasMacroReferenceInCst(ctx.qualifiedName[0]),
       columns: [],
     };
   }
@@ -148,7 +153,7 @@ export function createExternalTableStatement(
     host.visit(ctx.withStatement[0]);
   }
 
-  if (createdTable) {
+  if (createdTable && !createdTable.isDynamicMacro) {
     host.getScopeBuilder().addTable(createdTable);
     if (!host.getInProcedureContext()) {
       host.addScriptCreatedTable(createdTable);
@@ -200,13 +205,15 @@ export function dropTarget(
       schema: nameInfo.schema,
       isCte: false,
       isTempTable: false,
+      isDynamicMacro:
+        host.hasMacroReferenceInCst(ctx.qualifiedName[0] as CstNode),
       columns: [],
     };
     const isQualified = !!(nameInfo.database || nameInfo.schema);
-    if (isQualified && host.getSchemaProvider()) {
+    if (isQualified && !table.isDynamicMacro && host.getSchemaProvider()) {
       host.validateTableExists(table, ctx.qualifiedName[0] as CstNode);
     }
-    if (!host.getInProcedureContext()) {
+    if (!host.getInProcedureContext() && !table.isDynamicMacro) {
       host.removeScriptCreatedTable(table);
       host.getScopeBuilder().removeTable(table);
     }
@@ -237,9 +244,11 @@ export function alterTableStatement(
       schema: nameInfo.schema,
       isCte: false,
       isTempTable: false,
+      isDynamicMacro:
+        host.hasMacroReferenceInCst(ctx.qualifiedName[0] as CstNode),
       columns: [],
     };
-    if (isQualified) {
+    if (isQualified && !table.isDynamicMacro) {
       host.validateTableExists(table, ctx.qualifiedName[0] as CstNode);
     }
     oldTable = table;
@@ -261,6 +270,8 @@ export function alterTableStatement(
       schema: nameInfo.schema,
       isCte: false,
       isTempTable: false,
+      isDynamicMacro:
+        host.hasMacroReferenceInCst(ctx.qualifiedName[0] as CstNode),
       columns: [],
     };
   }

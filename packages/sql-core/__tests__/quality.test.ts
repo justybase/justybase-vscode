@@ -31,6 +31,16 @@ describe("Netezza sql-core quality", () => {
     expect(engine.analyzeQualityRulesOnly('SELECT "MixedCase" FROM t').issues.some((issue) => issue.ruleId === "NZ017")).toBe(true);
   });
 
+  it("does not scan DECLARE values as SQL quality rules", () => {
+    const validator = new NetezzaSqlSemanticValidator();
+    const engine = new QualityEngineCore(validator, netezzaSqlQualityRules);
+    const result = engine.analyzeQualityRulesOnly(
+      "DECLARE &QUERY_TEXT = 'SELECT * FROM t ORDER BY id'; SELECT * FROM t ORDER BY id;",
+    );
+
+    expect(result.issues.filter((issue) => issue.ruleId === "NZ006")).toHaveLength(1);
+  });
+
   it("publishes the complete procedure rule inventory with on-demand flags", () => {
     const ids = netezzaProcedureQualityRules.map((rule) => rule.id);
     expect(ids).toEqual(expect.arrayContaining([
