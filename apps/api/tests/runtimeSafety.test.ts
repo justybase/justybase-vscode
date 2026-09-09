@@ -16,4 +16,15 @@ describe('web runtime safety', () => {
     expect(config.host).toBe('0.0.0.0');
     expect(config.port).toBe(4321);
   });
+
+  it('normalizes valid web origins and rejects malformed CORS configuration', () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      JUSTYBASE_WEB_ORIGINS: ' https://WEB.example.test/ , http://localhost:5173 ',
+    });
+    expect(config.webOrigins).toEqual(['https://web.example.test', 'http://localhost:5173']);
+
+    expect(() => loadConfig({ NODE_ENV: 'test', JUSTYBASE_WEB_ORIGINS: 'web.example.test' })).toThrow('JUSTYBASE_WEB_ORIGINS');
+    expect(() => loadConfig({ NODE_ENV: 'test', JUSTYBASE_WEB_ORIGINS: 'https://web.example.test/app' })).toThrow('without a path');
+  });
 });

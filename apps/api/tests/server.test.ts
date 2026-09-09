@@ -27,6 +27,7 @@ describe('web API authentication and connection profiles', () => {
       masterKey: 'test-master-key',
       adminUsername: 'admin',
       adminPassword: 'admin-password',
+      webOrigins: ['https://web.example.test'],
     });
   });
 
@@ -56,6 +57,101 @@ describe('web API authentication and connection profiles', () => {
     const connections = await app.inject({ method: 'GET', url: '/api/connections', headers: { cookie } });
     expect(connections.statusCode).toBe(200);
     expect(connections.json()).toEqual([]);
+  });
+
+  it('handles credentialed CORS preflight and remote CSRF bootstrap', async () => {
+    const origin = 'https://web.example.test';
+    const preflight = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/query',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type,x-justybase-csrf',
+      },
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers['access-control-allow-origin']).toBe(origin);
+    expect(preflight.headers['access-control-allow-credentials']).toBe('true');
+    expect(preflight.headers['access-control-allow-headers']).toContain('X-JustyBase-CSRF');
+
+    const csrf = await app.inject({ method: 'GET', url: '/api/auth/csrf', headers: { origin } });
+    expect(csrf.statusCode).toBe(200);
+    expect(csrf.headers['access-control-allow-origin']).toBe(origin);
+    expect(csrf.headers['access-control-expose-headers']).toContain('X-JustyBase-CSRF');
+    expect(csrf.json().csrfToken).toBe(csrf.headers['x-justybase-csrf']);
+
+    const remoteLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin },
+      payload: { username: 'admin', password: 'admin-password' },
+    });
+    const remoteSetCookies = Array.isArray(remoteLogin.headers['set-cookie'])
+      ? remoteLogin.headers['set-cookie']
+      : [String(remoteLogin.headers['set-cookie'])];
+    expect(remoteSetCookies).toEqual(expect.arrayContaining([
+      expect.stringContaining('Secure; SameSite=None'),
+    ]));
+
+    const disallowed = await app.inject({ method: 'GET', url: '/healthz', headers: { origin: 'https://not-allowed.example.test' } });
+    expect(disallowed.statusCode).toBe(200);
+    expect(disallowed.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('allows insecure cookies for an explicitly configured HTTP development origin', async () => {
+    const httpDataDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-api-http-cookies-'));
+    const httpApp = await buildServer({
+      host: '127.0.0.1',
+      port: 0,
+      dataDir: httpDataDir,
+      webDistDir: path.join(httpDataDir, 'missing-web'),
+      masterKey: 'test-master-key',
+      adminUsername: 'admin',
+      adminPassword: 'admin-password',
+      webOrigins: ['http://web.example.test'],
+    });
+
+    try {
+      const login = await httpApp.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: { origin: 'http://web.example.test' },
+        payload: { username: 'admin', password: 'admin-password' },
+      });
+      expect(login.statusCode).toBe(200);
+      const setCookies = Array.isArray(login.headers['set-cookie']) ? login.headers['set-cookie'] : [String(login.headers['set-cookie'])];
+      expect(setCookies).toEqual(expect.arrayContaining([
+        expect.stringContaining('SameSite=Lax'),
+      ]));
+      expect(setCookies.some(value => value.includes('Secure'))).toBe(false);
+    } finally {
+      await httpApp.close();
+      rmSync(httpDataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects disallowed WebSocket origins before cookie authentication', async () => {
+    await expect(app.injectWS('/api/ws', { headers: { origin: 'https://not-allowed.example.test' } })).rejects.toThrow('403');
+  });
+
+  it('returns route rejections for missing write bodies', async () => {
+    const user = app.store.findUserByUsername('admin');
+    if (!user) throw new Error('Admin fixture was not created.');
+    const sessionToken = `missing-body-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const csrf = 'missing-body-csrf';
+    app.store.createSession(user.id, sessionToken, Date.now() + 60_000);
+    const headers = { cookie: `justybase_session=${sessionToken}; justybase_csrf=${csrf}`, 'x-justybase-csrf': csrf };
+
+    for (const [url, code] of [
+      ['/api/query/edit', 'EDIT_REJECTED'],
+      ['/api/query/import', 'IMPORT_REJECTED'],
+      ['/api/query/import-file', 'FILE_IMPORT_REJECTED'],
+    ] as const) {
+      const response = await app.inject({ method: 'POST', url, headers });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual(expect.objectContaining({ code }));
+    }
   });
 
   it('serves capability-aware designer state for a connection target', async () => {
