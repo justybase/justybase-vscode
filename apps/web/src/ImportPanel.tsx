@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import type { QueryFileImportFormat, SchemaTreeNode } from '@justybase/contracts';
-import { api } from './api';
+import { useApiClient } from './api';
 
 interface ImportPanelProps {
   connectionId: string;
@@ -31,6 +31,7 @@ function readBase64(file: File): Promise<string> {
 }
 
 export function ImportPanel({ connectionId, target, database, onClose, onCompleted }: ImportPanelProps): ReactElement {
+  const api = useApiClient();
   const [file, setFile] = useState<File | null>(null);
   const [hasHeader, setHasHeader] = useState(true);
   const [delimiter, setDelimiter] = useState(',');

@@ -3,7 +3,7 @@
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "jest"],
+    "types": ["vite/client", "jest", "@testing-library/jest-dom"],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -20,6 +20,8 @@
     "paths": {
       "@justybase/contracts": ["../../packages/contracts/src"],
       "@justybase/designer-core": ["../../packages/designer-core/src"],
+      "@justybase/dialect-utils": ["../../packages/dialect-utils/src"],
+      "@justybase/sql-core": ["../../packages/sql-core/src"],
       "@justybase/result-core": ["../../packages/result-core/src"]
     }
   },

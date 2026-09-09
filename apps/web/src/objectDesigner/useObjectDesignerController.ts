@@ -11,7 +11,7 @@ import type {
   QueryPreviewResponse,
   SchemaTreeNode,
 } from '@justybase/contracts';
-import { api, connectToQueryEvents, type QueryEventSubscription } from '../api';
+import { useApiClient, type QueryEventSubscription } from '../api';
 import { qualifySchemaNode } from '../SchemaTree';
 import {
   buildObjectDesignerSql,
@@ -42,6 +42,7 @@ export function useObjectDesignerController({
   target,
   onApplied,
 }: ObjectDesignerControllerProps) {
+  const api = useApiClient();
   const [activeTab, setActiveTab] = useState<DesignerTab>('overview');
   const [context, setContext] = useState<DesignerCapabilitiesResponse | null>(null);
   const [snapshot, setSnapshot] = useState<DatabaseObjectSnapshot | null>(null);
@@ -426,7 +427,7 @@ export function useObjectDesignerController({
         ...(snapshot ? { designer: { target: snapshot.target, baseFingerprint: snapshot.fingerprint } } : {}),
       });
       subscriptionRef.current?.close();
-      subscriptionRef.current = connectToQueryEvents(started.queryId, handleQueryEvent, reason => {
+      subscriptionRef.current = api.connectToQueryEvents(started.queryId, handleQueryEvent, reason => {
         setApplying(false);
         setError(reason.message);
       });

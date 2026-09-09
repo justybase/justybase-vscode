@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { api } from './api';
+import { useApiClient } from './api';
 import type { ResultState } from './queryState';
 
 function display(value: unknown): string {
@@ -10,6 +10,7 @@ function display(value: unknown): string {
 }
 
 export function ExplainPanel({ queryId, statementIndex, result }: { queryId: string; statementIndex: number; result: ResultState }): ReactElement {
+  const api = useApiClient();
   const [rows, setRows] = useState<unknown[][]>(result.rows);
   const [columns, setColumns] = useState(result.columns);
   const [loading, setLoading] = useState(false);

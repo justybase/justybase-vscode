@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import type { SchemaTreeNode } from '@justybase/contracts';
-import { api } from './api';
+import { useApiClient } from './api';
 
 interface EditRowPanelProps {
   connectionId: string;
@@ -42,6 +42,7 @@ export function valueFromInput(value: string, original: unknown, type?: string):
 }
 
 export function EditRowPanel({ connectionId, database, target, columns, columnTypes, values, onClose, onCompleted }: EditRowPanelProps): ReactElement {
+  const api = useApiClient();
   const [formValues, setFormValues] = useState<Record<string, string>>(() => Object.fromEntries(columns.map((column, index) => [column, inputValue(values[index])] )));
   const [keyColumns, setKeyColumns] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement, DragEvent } from 'react';
 import type { DatabaseKind, SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
-import { api } from './api';
+import { useApiClient } from './api';
+import { readLegacyWorkspaceValue, useWorkspaceStorage } from './workspacePersistence';
 
 const ROOT = '__root__';
 
@@ -235,6 +236,8 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   onOpenQuery?(sql: string, title: string, node: SchemaTreeNode): void;
   onImport?(node: SchemaTreeNode): void;
 }): ReactElement {
+  const api = useApiClient();
+  const storage = useWorkspaceStorage();
   const [children, setChildren] = useState<Record<string, SchemaTreeNode[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
@@ -259,11 +262,11 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
     return () => { document.removeEventListener('click', closeMenu); document.removeEventListener('keydown', handleKeyDown); };
   }, []);
 
-  const storageKey = `jwb_schema_${connectionId}`;
+  const storageKey = `schema_${connectionId}`;
   useEffect(() => {
     setStorageReadyKey(null);
     try {
-      const stored = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as { favorites?: SchemaTreeNode[]; recent?: SchemaTreeNode[] };
+      const stored = JSON.parse(storage.get(storageKey) ?? readLegacyWorkspaceValue(`jwb_schema_${connectionId}`) ?? '{}') as { favorites?: SchemaTreeNode[]; recent?: SchemaTreeNode[] };
       setFavorites(Array.isArray(stored.favorites) ? stored.favorites.filter(node => node?.kind === 'object') : []);
       setRecentObjects(Array.isArray(stored.recent) ? stored.recent.filter(node => node?.kind === 'object') : []);
     } catch {
@@ -274,8 +277,8 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   }, [storageKey]);
   useEffect(() => {
     if (storageReadyKey !== storageKey) return;
-    try { localStorage.setItem(storageKey, JSON.stringify({ favorites, recent: recentObjects })); } catch { /* ignore storage quota errors */ }
-  }, [favorites, recentObjects, storageKey, storageReadyKey]);
+    storage.set(storageKey, JSON.stringify({ favorites, recent: recentObjects }));
+  }, [favorites, recentObjects, storage, storageKey, storageReadyKey]);
 
   const loadFn = useCallback(async (parentId: string): Promise<SchemaTreeNode[]> => {
     setLoading(prev => ({ ...prev, [parentId]: true }));
