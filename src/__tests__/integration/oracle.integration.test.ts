@@ -28,6 +28,7 @@ import type {
 	DatabaseMaintenanceTarget,
 } from '../../contracts/database';
 import type { ConnectionManager } from '../../core/connectionManager';
+import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
 import { LspCompletionEngine, type CompletionMetadataProvider } from '../../server/completionEngine';
 import type { MetadataColumnItem, MetadataObjectItem } from '../../lsp/protocol';
 import { SqlQualityEngine } from '../../providers/sqlQualityEngine';
@@ -1122,7 +1123,10 @@ describeIfConfigured('oracle integration', () => {
 
 			const storage = await provider!.getStorage(
 				{} as ExtensionContext,
-				createMockConnectionManager(config!),
+				createSessionMonitorServices(
+					{} as ExtensionContext,
+					createMockConnectionManager(config!),
+				),
 			);
 
 			expect(Array.isArray(storage)).toBe(true);

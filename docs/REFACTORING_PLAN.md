@@ -362,6 +362,12 @@ Closure evidence:
 
 ### R6 — Companions Independent of Core Internals
 
+Status: closed (2026-09-09). All ten optional companions now build against
+portable contracts, shared packages, and the public core activation API. Their
+production source graph has no edge into `src`; the activation helper is owned
+by `@justybase/vscode-companion-adapter`; and the seven designer webviews use
+pure DDL builders from `@justybase/designer-core`.
+
 1. Replace `src` imports with contracts, packages, or public core services.
 2. Separate pure dialect knowledge, runtime, and activation; do not migrate
    all parsers to a universal implementation.
@@ -374,6 +380,33 @@ Closure evidence:
 
 Companion acceptance: no imports of core implementation, activation, packaging,
 integrations, and explicitly described live-environment gaps.
+
+Closure evidence (2026-09-09, Linux):
+
+- `@justybase/contracts` owns the companion API v1 surface, database service
+  ports, advanced-feature contracts, and designer webview DTOs. Desktop
+  facades remain only for compatibility; companions consume the public
+  contracts and service ports.
+- `@justybase/vscode-companion-adapter` owns VS Code activation and API v1
+  validation. All ten companion activation paths use it, preserving extension
+  identifiers, dialect registration, declared commands, and optional API
+  behavior.
+- `@justybase/database-utils`, `@justybase/dialect-utils`,
+  `@justybase/file-runtime`, and `@justybase/tabular-import-runtime` own the
+  extracted neutral helpers and runtime pieces. `@justybase/designer-core`
+  owns the Db2, MySQL, and PostgreSQL pure DDL builders used by both desktop
+  webviews and companions.
+- Session-monitor providers receive injected service ports; no companion
+  provider imports the desktop connection manager or desktop helper modules.
+  Maintenance DDL lookup is host-provided, so a separately bundled companion
+  never consults a private desktop registry.
+- `npm run check:architecture` passes with no new cycle and with the
+  companion-boundary negative check enabled. The exact remaining desktop
+  registry edges are fingerprinted exceptions; no `extensions/*` production
+  edge targets `src/*`.
+- `npm run build:companions`, all ten `verify:<dialect>` packaging paths, and
+  the companion activation/register smoke pass. The full deterministic root
+  suite passes serially: 545 suites, 9,621 tests, one snapshot.
 
 ### R7 — Current API and React
 

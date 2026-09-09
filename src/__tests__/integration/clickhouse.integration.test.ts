@@ -10,6 +10,7 @@ import type {
 } from '../../contracts/database';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import type { ConnectionManager } from '../../core/connectionManager';
+import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
 import { importDataToClickHouse } from '../../import/clickhouseImporter';
 import { ClickHouseConnection } from '../../../extensions/clickhouse/src/clickhouseConnection';
 import { clickhouseAdvancedFeatures } from '../../../extensions/clickhouse/src/clickhouseDdlGenerator';
@@ -436,10 +437,11 @@ describeIfConfigured('clickhouse integration', () => {
                 dbType: 'clickhouse',
             }),
         } as unknown as ConnectionManager;
+        const services = createSessionMonitorServices(context, manager);
 
-        const sessions = await provider!.getSessions(context, manager, database);
-        const queries = await provider!.getQueries(context, manager, database);
-        const storage = await provider!.getStorage(context, manager);
+        const sessions = await provider!.getSessions(context, services, database);
+        const queries = await provider!.getQueries(context, services, database);
+        const storage = await provider!.getStorage(context, services);
         expect(Array.isArray(sessions)).toBe(true);
         expect(Array.isArray(queries)).toBe(true);
         expect(Array.isArray(storage)).toBe(true);

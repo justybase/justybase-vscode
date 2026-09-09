@@ -10,6 +10,7 @@ import type {
 	DatabaseMaintenanceTarget,
 } from '../../contracts/database';
 import type { ConnectionManager } from '../../core/connectionManager';
+import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
 import type { ConnectionDetails } from '../../types';
 import {
     cancelReaderExecution,
@@ -342,7 +343,10 @@ describeIfConfigured('vertica integration', () => {
 
 			const storage = await provider!.getStorage(
 				{} as ExtensionContext,
-				createMockConnectionManager(config!),
+				createSessionMonitorServices(
+					{} as ExtensionContext,
+					createMockConnectionManager(config!),
+				),
 			);
 
 			expect(Array.isArray(storage)).toBe(true);

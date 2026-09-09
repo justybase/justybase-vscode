@@ -10,6 +10,7 @@ import {
 } from "../../../extensions/mysql/src/mysqlExplainParser";
 import { MysqlTuningAdvisor } from "../../../extensions/mysql/src/mysqlTuningAdvisor";
 import { registerDatabaseDialect } from "../../core/factories/databaseDialectRegistry";
+import { createSessionMonitorServices } from "../../core/sessionMonitorProviderUtils";
 import type { DatabaseConnectionConfig } from "../../contracts/database";
 import {
   cancelReaderExecution,
@@ -575,10 +576,11 @@ describeIfConfigured("mysql integration", () => {
           dbType: "mysql",
         }),
       } as unknown as import("../../core/connectionManager").ConnectionManager;
+      const services = createSessionMonitorServices(mockContext, mockManager);
 
       const sessions = await provider!.getSessions(
         mockContext,
-        mockManager,
+        services,
         config!.database,
       );
 
@@ -601,10 +603,11 @@ describeIfConfigured("mysql integration", () => {
           dbType: "mysql",
         }),
       } as unknown as import("../../core/connectionManager").ConnectionManager;
+      const services = createSessionMonitorServices(mockContext, mockManager);
 
       const queries = await provider!.getQueries(
         mockContext,
-        mockManager,
+        services,
         config!.database,
       );
 
@@ -623,8 +626,9 @@ describeIfConfigured("mysql integration", () => {
           dbType: "mysql",
         }),
       } as unknown as import("../../core/connectionManager").ConnectionManager;
+      const services = createSessionMonitorServices(mockContext, mockManager);
 
-      const storage = await provider!.getStorage(mockContext, mockManager);
+      const storage = await provider!.getStorage(mockContext, services);
 
       expect(Array.isArray(storage)).toBe(true);
       expect(storage.length).toBeGreaterThanOrEqual(0);

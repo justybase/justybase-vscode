@@ -22,6 +22,7 @@ import type {
 	DatabaseMaintenanceTarget,
 } from '../../contracts/database';
 import type { ConnectionManager } from '../../core/connectionManager';
+import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
 import type { ConnectionDetails, ResultSet } from '../../types';
 import type { MetadataColumnItem, MetadataObjectItem } from '../../lsp/protocol';
 import { LspCompletionEngine, type CompletionMetadataProvider } from '../../server/completionEngine';
@@ -425,7 +426,10 @@ describeIfConfigured('mssql integration', () => {
 
 			const storage = await provider!.getStorage(
 				{} as ExtensionContext,
-				createMockConnectionManager(config!),
+				createSessionMonitorServices(
+					{} as ExtensionContext,
+					createMockConnectionManager(config!),
+				),
 			);
 
 			expect(Array.isArray(storage)).toBe(true);

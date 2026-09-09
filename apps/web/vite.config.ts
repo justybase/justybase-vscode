@@ -15,6 +15,8 @@ export default defineConfig({
     alias: {
       '@justybase/contracts': path.join(repositoryRoot, 'packages/contracts/src'),
       '@justybase/designer-core': path.join(repositoryRoot, 'packages/designer-core/src'),
+      '@justybase/dialect-utils': path.join(repositoryRoot, 'packages/dialect-utils/src'),
+      '@justybase/sql-core': path.join(repositoryRoot, 'packages/sql-core/src'),
       '@justybase/result-core': path.join(repositoryRoot, 'packages/result-core/src'),
     },
   },

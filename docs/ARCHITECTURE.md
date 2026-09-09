@@ -249,10 +249,11 @@ alias resolution never silently falls back to a less strict configuration.
 The direction table is intentionally stricter than the current runtime graph.
 Existing integration bridges are listed as individual `source`/`target`
 exceptions with a `reason`, `owner` and `removeWhen`; there is no `desktop ↔ companions`
-layer-wide allowance. The remaining exceptions cover companion adapters that
-still consume desktop services, desktop registries that load optional companion
-providers, and the small media-to-companion designer bridges. These are
-migration targets, not permission to add another bridge without review.
+layer-wide allowance. The remaining exceptions cover desktop registries that
+still load optional companion providers. Companion production code has no
+edge into `src`, and the migrated designer webviews consume pure
+`designer-core` DDL. These exact entries are migration targets, not permission
+to add another bridge without review.
 
 `ARCH001` reports a forbidden direction or platform import,
 `ARCH002` reports an unresolved internal import, `ARCH003` reports a new or
