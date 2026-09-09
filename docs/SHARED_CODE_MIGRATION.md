@@ -106,20 +106,20 @@ Required checks for this slice are:
 
 The complete exception inventory is `quality/architecture-rules.json`, not a
 second manually maintained list. The Result Panel orchestration cycle was
-removed in R3. The remaining categories are
-companion-to-desktop services, desktop-to-companion registries and
-media-to-companion DDL. Each exact edge has a reason, accountable maintainer
-role and removal condition. There is no sql-core-to-desktop or SQL LSP facade
-exception. Removing an edge requires removing its stale exception in the same
-slice.
+removed in R3. The remaining categories are desktop-to-companion registries.
+Companion production code no longer has an edge into `src`, and migrated
+webviews no longer import companion DDL. Each remaining exact edge has a
+reason, accountable maintainer role and removal condition. There is no
+sql-core-to-desktop or SQL LSP facade exception. Removing an edge requires
+removing its stale exception in the same slice.
 
 The existing cycle inventory, identified by its configured anchor, is:
 
 | Anchor | Area |
 | --- | --- |
-| `extensions/snowflake/src/snowflakeImportPlanner.ts` | desktop/companion integration |
 | `media/visualQueryBuilder/VisualQueryBuilderApp.tsx` | visual builder |
 | `packages/access-file/src/accessFileSession.ts` | Access file runtime |
+| `src/commands/schema/types.ts` | desktop core migration target |
 | `src/commands/validationCommands.ts` | validation commands |
 | `src/core/resultDataProvider/types.ts` | result storage contracts |
 | `src/export/exportManager.ts` | export |
@@ -136,11 +136,12 @@ and cannot prove absence of dependencies hidden behind nonliteral loaders.
 ## Companion public entry points and compatibility
 
 Core activation returns `JustyBaseLiteApi` v1 from `src/api/publicApi.ts`.
-`src/api/companionActivation.ts` exposes `activateCoreExtension()` and
-`CORE_EXTENSION_ID`; it activates the core and validates version/registration
-methods. Existing imports of this helper are recorded bridges, not permission
-to add arbitrary `src` imports. New companions should resolve the public core
-exports through VS Code activation and consume portable types from contracts.
+The VS Code-specific `activateCoreExtension()` adapter and
+`CORE_EXTENSION_ID` now live in `packages/vscode-companion-adapter`; it
+activates the core and validates version/registration methods. Companions
+consume this adapter and portable types from `@justybase/contracts`; they do
+not import a desktop `src` implementation. The enforced companion boundary is
+`npm run check:companion-boundaries`, included in `npm run check:architecture`.
 
 | Public API members | Responsibility |
 | --- | --- |
@@ -154,8 +155,8 @@ exports through VS Code activation and consume portable types from contracts.
 The public `@justybase/contracts` barrel exports database connections,
 capabilities, dialect traits, authoring and advanced-feature types. A desktop
 implementation imported directly by an addon is technical debt even if exported
-by its source module. The architecture report's companion-to-desktop edges
-provide the full list of such entry points and their consumers.
+by its source module. The architecture report's exact desktop-to-companion
+edges provide the full list of remaining registry consumers.
 
 Keep v1 signatures, optionality, activation behavior and
 `registerDatabaseDialect` semantics unchanged. Contracts evolve additively:

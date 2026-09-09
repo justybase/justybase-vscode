@@ -701,6 +701,7 @@ function lineNumber(sourceFile, node) {
 function forbiddenImportRuleMatches(rule, source, layer, specifier) {
   if (rule.layer && rule.layer !== layer) return false;
   if (rule.source && !matchesPathPattern(rule.source, source)) return false;
+  if (rule.excludeSource && matchesPathPattern(rule.excludeSource, source)) return false;
   return new RegExp(rule.specifier, 'u').test(specifier);
 }
 

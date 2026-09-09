@@ -16,6 +16,7 @@ jest.mock('../core/queryRunner', () => ({
 }));
 
 import type { ExtensionContext } from 'vscode';
+import { createSessionMonitorServices } from '../core/sessionMonitorProviderUtils';
 import type { ConnectionManager } from '../core/connectionManager';
 import { runQueryRaw } from '../core/queryRunner';
 import { duckdbSessionMonitorProvider } from '../../extensions/duckdb/src/duckdbSessionMonitorProvider';
@@ -91,6 +92,7 @@ describe('partial dialect session monitor wiring', () => {
 describe('netezzaSessionMonitorProvider', () => {
     const context = createMockContext();
     const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+    const services = createSessionMonitorServices(context, connectionManager);
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -101,7 +103,7 @@ describe('netezzaSessionMonitorProvider', () => {
 
         await netezzaSessionMonitorProvider.getSessions(
             context,
-            connectionManager,
+            services,
             'JUST_DATA',
             'NetezzaWarehouse',
         );
@@ -124,6 +126,7 @@ describe('netezzaSessionMonitorProvider', () => {
 describe('mysqlSessionMonitorProvider', () => {
     const context = createMockContext();
     const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+    const services = createSessionMonitorServices(context, connectionManager);
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -132,7 +135,7 @@ describe('mysqlSessionMonitorProvider', () => {
     it('queries INFORMATION_SCHEMA.PROCESSLIST for sessions with optional database filtering', async () => {
         mockRows([{ ID: 12, PID: 12, USERNAME: 'app', DBNAME: 'sales', STATUS: 'Sending data' }]);
 
-        const sessions = await mysqlSessionMonitorProvider.getSessions(context, connectionManager, 'sales');
+        const sessions = await mysqlSessionMonitorProvider.getSessions(context, services, 'sales');
 
         expect(sessions[0]).toMatchObject({ ID: 12, USERNAME: 'app', DBNAME: 'sales' });
         expect(lastSql()).toContain('FROM information_schema.PROCESSLIST');
@@ -142,7 +145,7 @@ describe('mysqlSessionMonitorProvider', () => {
     it('normalizes numeric storage fields', async () => {
         mockRows([{ DATABASE: 'sales', SCHEMA: 'sales', ALLOC_MB: '12.5', USED_MB: '11.25', AVG_SKEW: '0', TABLE_COUNT: '4' }]);
 
-        const storage = await mysqlSessionMonitorProvider.getStorage(context, connectionManager);
+        const storage = await mysqlSessionMonitorProvider.getStorage(context, services);
 
         expect(storage[0]).toMatchObject({
             ALLOC_MB: 12.5,
@@ -155,13 +158,13 @@ describe('mysqlSessionMonitorProvider', () => {
     it('kills valid sessions with KILL', async () => {
         mockedRunQueryRaw.mockResolvedValue(undefined as never);
 
-        await mysqlSessionMonitorProvider.killSession(context, connectionManager, 42);
+        await mysqlSessionMonitorProvider.killSession(context, services, 42);
 
         expect(lastSql()).toContain('KILL 42');
     });
 
     it('rejects invalid session IDs', async () => {
-        await expect(mysqlSessionMonitorProvider.killSession(context, connectionManager, 0)).rejects.toThrow(
+        await expect(mysqlSessionMonitorProvider.killSession(context, services, 0)).rejects.toThrow(
             'Invalid MySQL session ID: 0'
         );
     });
@@ -170,6 +173,7 @@ describe('mysqlSessionMonitorProvider', () => {
 describe('clickhouseSessionMonitorProvider', () => {
     const context = createMockContext();
     const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+    const services = createSessionMonitorServices(context, connectionManager);
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -180,7 +184,7 @@ describe('clickhouseSessionMonitorProvider', () => {
 
         const queries = await clickhouseSessionMonitorProvider.getQueries(
             context,
-            connectionManager,
+            services,
             'analytics',
             'ClickHouse',
         );
@@ -195,7 +199,7 @@ describe('clickhouseSessionMonitorProvider', () => {
 
         await clickhouseSessionMonitorProvider.killQuery!(
             context,
-            connectionManager,
+            services,
             "query-'42",
             'ClickHouse',
         );
@@ -206,7 +210,7 @@ describe('clickhouseSessionMonitorProvider', () => {
     it('rejects an empty query_id before executing SQL', async () => {
         await expect(clickhouseSessionMonitorProvider.killQuery!(
             context,
-            connectionManager,
+            services,
             '   ',
         )).rejects.toThrow('query_id cannot be empty');
         expect(mockedRunQueryRaw).not.toHaveBeenCalled();
@@ -216,6 +220,7 @@ describe('clickhouseSessionMonitorProvider', () => {
 describe('mssqlSessionMonitorProvider', () => {
     const context = createMockContext();
     const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+    const services = createSessionMonitorServices(context, connectionManager);
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -224,7 +229,7 @@ describe('mssqlSessionMonitorProvider', () => {
     it('queries dm_exec_requests for active SQL Server requests', async () => {
         mockRows([{ QS_SESSIONID: 77, QS_SQL: 'SELECT 1', QS_ESTMEM: '256', USERNAME: 'sa' }]);
 
-        const queries = await mssqlSessionMonitorProvider.getQueries(context, connectionManager, 'master');
+        const queries = await mssqlSessionMonitorProvider.getQueries(context, services, 'master');
 
         expect(queries[0]).toMatchObject({ QS_SESSIONID: 77, USERNAME: 'sa', QS_ESTMEM: '256' });
         expect(lastSql()).toContain('FROM sys.dm_exec_requests r');
@@ -234,7 +239,7 @@ describe('mssqlSessionMonitorProvider', () => {
     it('normalizes SQL Server storage fields', async () => {
         mockRows([{ DATABASE: 'master', SCHEMA: 'dbo', ALLOC_MB: '64', USED_MB: '48.5', AVG_SKEW: '0', TABLE_COUNT: '3' }]);
 
-        const storage = await mssqlSessionMonitorProvider.getStorage(context, connectionManager);
+        const storage = await mssqlSessionMonitorProvider.getStorage(context, services);
 
         expect(storage[0]).toMatchObject({
             ALLOC_MB: 64,
@@ -247,13 +252,13 @@ describe('mssqlSessionMonitorProvider', () => {
     it('kills valid SQL Server sessions with KILL', async () => {
         mockedRunQueryRaw.mockResolvedValue(undefined as never);
 
-        await mssqlSessionMonitorProvider.killSession(context, connectionManager, 88);
+        await mssqlSessionMonitorProvider.killSession(context, services, 88);
 
         expect(lastSql()).toContain('KILL 88;');
     });
 
     it('rejects invalid session IDs', async () => {
-        await expect(mssqlSessionMonitorProvider.killSession(context, connectionManager, -1)).rejects.toThrow(
+        await expect(mssqlSessionMonitorProvider.killSession(context, services, -1)).rejects.toThrow(
             'Invalid MS SQL Server session ID: -1'
         );
     });
@@ -262,6 +267,7 @@ describe('mssqlSessionMonitorProvider', () => {
 describe('oracleSessionMonitorProvider', () => {
     const context = createMockContext();
     const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+    const services = createSessionMonitorServices(context, connectionManager);
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -270,7 +276,7 @@ describe('oracleSessionMonitorProvider', () => {
     it('queries V$SESSION and V$SQL for Oracle sessions', async () => {
         mockRows([{ ID: 21, PID: 21, USERNAME: 'HR', DBNAME: 'ORCL', STATUS: 'ACTIVE' }]);
 
-        const sessions = await oracleSessionMonitorProvider.getSessions(context, connectionManager);
+        const sessions = await oracleSessionMonitorProvider.getSessions(context, services);
 
         expect(sessions[0]).toMatchObject({ ID: 21, USERNAME: 'HR', DBNAME: 'ORCL' });
         expect(lastSql()).toContain('FROM V$SESSION s');
@@ -280,7 +286,7 @@ describe('oracleSessionMonitorProvider', () => {
     it('normalizes Oracle storage fields', async () => {
         mockRows([{ DATABASE: 'ORCL', SCHEMA: 'HR', ALLOC_MB: '8.75', USED_MB: '8.75', AVG_SKEW: '0', TABLE_COUNT: '2' }]);
 
-        const storage = await oracleSessionMonitorProvider.getStorage(context, connectionManager);
+        const storage = await oracleSessionMonitorProvider.getStorage(context, services);
 
         expect(storage[0]).toMatchObject({
             ALLOC_MB: 8.75,
@@ -293,7 +299,7 @@ describe('oracleSessionMonitorProvider', () => {
     it('builds ALTER SYSTEM KILL SESSION blocks for Oracle session termination', async () => {
         mockedRunQueryRaw.mockResolvedValue(undefined as never);
 
-        await oracleSessionMonitorProvider.killSession(context, connectionManager, 15);
+        await oracleSessionMonitorProvider.killSession(context, services, 15);
 
         expect(lastSql()).toContain('ALTER SYSTEM KILL SESSION');
         expect(lastSql()).toContain('v_sid CONSTANT NUMBER := 15');
@@ -301,7 +307,7 @@ describe('oracleSessionMonitorProvider', () => {
     });
 
     it('rejects invalid session IDs', async () => {
-        await expect(oracleSessionMonitorProvider.killSession(context, connectionManager, 0)).rejects.toThrow(
+        await expect(oracleSessionMonitorProvider.killSession(context, services, 0)).rejects.toThrow(
             'Invalid Oracle session ID: 0'
         );
     });
@@ -310,6 +316,7 @@ describe('oracleSessionMonitorProvider', () => {
 describe('db2SessionMonitorProvider', () => {
     const context = createMockContext();
     const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+    const services = createSessionMonitorServices(context, connectionManager);
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -318,7 +325,7 @@ describe('db2SessionMonitorProvider', () => {
     it('queries MON_GET_CONNECTION for Db2 sessions', async () => {
         mockRows([{ ID: 31, PID: 31, USERNAME: 'DB2INST1', DBNAME: 'SAMPLE', STATUS: 'CONNECTED' }]);
 
-        const sessions = await db2SessionMonitorProvider.getSessions(context, connectionManager, 'SAMPLE');
+        const sessions = await db2SessionMonitorProvider.getSessions(context, services, 'SAMPLE');
 
         expect(sessions[0]).toMatchObject({ ID: 31, USERNAME: 'DB2INST1', DBNAME: 'SAMPLE' });
         expect(lastSql()).toContain('FROM TABLE(MON_GET_CONNECTION(NULL, -2))');
@@ -328,7 +335,7 @@ describe('db2SessionMonitorProvider', () => {
     it('queries MON_GET_ACTIVITY for Db2 running SQL', async () => {
         mockRows([{ QS_SESSIONID: 31, QS_SQL: 'SELECT * FROM STAFF', USERNAME: 'DB2INST1' }]);
 
-        const queries = await db2SessionMonitorProvider.getQueries(context, connectionManager, 'SAMPLE');
+        const queries = await db2SessionMonitorProvider.getQueries(context, services, 'SAMPLE');
 
         expect(queries[0]).toMatchObject({ QS_SESSIONID: 31, USERNAME: 'DB2INST1' });
         expect(lastSql()).toContain('FROM TABLE(MON_GET_ACTIVITY(NULL, -2)) AS a');
@@ -337,13 +344,13 @@ describe('db2SessionMonitorProvider', () => {
     it('kills valid Db2 sessions with FORCE APPLICATION', async () => {
         mockedRunQueryRaw.mockResolvedValue(undefined as never);
 
-        await db2SessionMonitorProvider.killSession(context, connectionManager, 512);
+        await db2SessionMonitorProvider.killSession(context, services, 512);
 
         expect(lastSql()).toContain('FORCE APPLICATION (512)');
     });
 
     it('rejects invalid session IDs', async () => {
-        await expect(db2SessionMonitorProvider.killSession(context, connectionManager, -2)).rejects.toThrow(
+        await expect(db2SessionMonitorProvider.killSession(context, services, -2)).rejects.toThrow(
             'Invalid Db2 session ID: -2'
         );
     });
@@ -361,8 +368,9 @@ describe('duckdbSessionMonitorProvider', () => {
             database: ':memory:',
             user: 'duck-user'
         }) as unknown as ConnectionManager;
+        const services = createSessionMonitorServices(context, connectionManager);
 
-        const sessions = await duckdbSessionMonitorProvider.getSessions(context, connectionManager, 'analytics');
+        const sessions = await duckdbSessionMonitorProvider.getSessions(context, services, 'analytics');
 
         expect(sessions).toHaveLength(1);
         expect(sessions[0]).toMatchObject({
@@ -377,15 +385,17 @@ describe('duckdbSessionMonitorProvider', () => {
 
     it('returns no active query rows for embedded DuckDB monitor snapshots', async () => {
         const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+        const services = createSessionMonitorServices(context, connectionManager);
 
-        await expect(duckdbSessionMonitorProvider.getQueries(context, connectionManager)).resolves.toEqual([]);
+        await expect(duckdbSessionMonitorProvider.getQueries(context, services)).resolves.toEqual([]);
     });
 
     it('normalizes DuckDB storage fields from pragma_database_size()', async () => {
         const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+        const services = createSessionMonitorServices(context, connectionManager);
         mockRows([{ DATABASE: 'memory', SCHEMA: 'main', ALLOC_MB: '4', USED_MB: '3.5', AVG_SKEW: '0', TABLE_COUNT: '2' }]);
 
-        const storage = await duckdbSessionMonitorProvider.getStorage(context, connectionManager);
+        const storage = await duckdbSessionMonitorProvider.getStorage(context, services);
 
         expect(storage[0]).toMatchObject({
             ALLOC_MB: 4,
@@ -398,9 +408,10 @@ describe('duckdbSessionMonitorProvider', () => {
 
     it('maps DuckDB memory resources into systemUtil rows', async () => {
         const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+        const services = createSessionMonitorServices(context, connectionManager);
         mockRows([{ TAG: 'BASE_TABLE', MEMORY_USAGE_BYTES: '2048', TEMPORARY_STORAGE_BYTES: '64' }]);
 
-        const resources = await duckdbSessionMonitorProvider.getResources(context, connectionManager);
+        const resources = await duckdbSessionMonitorProvider.getResources(context, services);
 
         expect(resources.gra).toEqual([]);
         expect(resources.sysUtilSummary).toBeNull();
@@ -414,8 +425,9 @@ describe('duckdbSessionMonitorProvider', () => {
 
     it('reports unsupported session termination explicitly', async () => {
         const connectionManager = createMockConnectionManager() as unknown as ConnectionManager;
+        const services = createSessionMonitorServices(context, connectionManager);
 
-        await expect(duckdbSessionMonitorProvider.killSession(context, connectionManager, 1)).rejects.toThrow(
+        await expect(duckdbSessionMonitorProvider.killSession(context, services, 1)).rejects.toThrow(
             'DuckDB embedded sessions cannot be terminated from the session monitor.'
         );
     });

@@ -332,7 +332,11 @@ describe('SessionMonitorView', () => {
 
         expect(mockSessionMonitorProvider.killSession).toHaveBeenCalledWith(
           expect.anything(),
-          mockConnectionManager,
+          expect.objectContaining({
+            query: expect.any(Function),
+            execute: expect.any(Function),
+            getConnectionDetails: expect.any(Function),
+          }),
           456,
           undefined
         );

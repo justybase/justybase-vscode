@@ -18,12 +18,15 @@ import type {
     DatabaseConnection,
     DatabaseMaintenanceServices,
     DatabaseMaintenanceTarget,
-    DatabaseSessionMonitorProvider
+    DatabaseSessionMonitorProvider,
+    DatabaseSessionMonitorServices,
 } from '../../contracts/database';
 import type { ExtensionContext } from 'vscode';
 import { netezzaDialect } from '../../dialects/netezza';
 import { netezzaMetadataProvider } from '../../dialects/netezza/metadata/provider';
 import { netezzaSessionMonitorProvider } from '../../dialects/netezza/sessionMonitor';
+import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
+import type { ConnectionManager } from '../../core/connectionManager';
 import { NetezzaTuningAdvisor } from '../../dialects/netezza/tuning/netezzaTuningAdvisor';
 import {
     buildNetezzaLiveConnectionDetails,
@@ -421,29 +424,33 @@ describeIfFixture('Netezza advanced features live contract', () => {
         const context = {} as ExtensionContext;
         const manager = createNetezzaLiveConnectionManager();
         const provider = netezzaSessionMonitorProvider as DatabaseSessionMonitorProvider & {
-            getSessions: (context: ExtensionContext, manager: unknown, database?: string, connectionName?: string) => Promise<Record<string, unknown>[]>;
-            getQueries: (context: ExtensionContext, manager: unknown, database?: string, connectionName?: string) => Promise<Record<string, unknown>[]>;
-            getStorage: (context: ExtensionContext, manager: unknown, connectionName?: string) => Promise<Record<string, unknown>[]>;
-            getResources: (context: ExtensionContext, manager: unknown, connectionName?: string) => Promise<{ gra: unknown[]; systemUtil: unknown[]; sysUtilSummary: unknown }>;
-            killSession: (context: ExtensionContext, manager: unknown, sessionId: number, connectionName?: string) => Promise<void>;
+            getSessions: (context: ExtensionContext, services: DatabaseSessionMonitorServices, database?: string, connectionName?: string) => Promise<Record<string, unknown>[]>;
+            getQueries: (context: ExtensionContext, services: DatabaseSessionMonitorServices, database?: string, connectionName?: string) => Promise<Record<string, unknown>[]>;
+            getStorage: (context: ExtensionContext, services: DatabaseSessionMonitorServices, connectionName?: string) => Promise<Record<string, unknown>[]>;
+            getResources: (context: ExtensionContext, services: DatabaseSessionMonitorServices, connectionName?: string) => Promise<{ gra: unknown[]; systemUtil: unknown[]; sysUtilSummary: unknown }>;
+            killSession: (context: ExtensionContext, services: DatabaseSessionMonitorServices, sessionId: number, connectionName?: string) => Promise<void>;
         };
+        const services = createSessionMonitorServices(
+            context,
+            manager as unknown as ConnectionManager,
+        );
 
-        const sessions = await provider.getSessions(context, manager, buildNetezzaLiveConnectionDetails().database, 'netezza-live-test');
+        const sessions = await provider.getSessions(context, services, buildNetezzaLiveConnectionDetails().database, 'netezza-live-test');
         expect(sessions.some(session => String(session.DBNAME ?? '').toUpperCase() === buildNetezzaLiveDetails().database.toUpperCase())).toBe(true);
 
-        const queries = await provider.getQueries(context, manager, buildNetezzaLiveDetails().database, 'netezza-live-test');
+        const queries = await provider.getQueries(context, services, buildNetezzaLiveDetails().database, 'netezza-live-test');
         expect(Array.isArray(queries)).toBe(true);
 
-        const storage = await provider.getStorage(context, manager, 'netezza-live-test');
+        const storage = await provider.getStorage(context, services, 'netezza-live-test');
         expect(Array.isArray(storage)).toBe(true);
         expect(storage.every(row => typeof row.DATABASE === 'string' && typeof row.TABLE_COUNT === 'number')).toBe(true);
 
-        const resources = await provider.getResources(context, manager, 'netezza-live-test');
+        const resources = await provider.getResources(context, services, 'netezza-live-test');
         expect(Array.isArray(resources.gra)).toBe(true);
         expect(Array.isArray(resources.systemUtil)).toBe(true);
         expect(resources).toHaveProperty('sysUtilSummary');
 
-        await expect(provider.killSession(context, manager, -1, 'netezza-live-test')).rejects.toThrow(/Invalid session ID/);
+        await expect(provider.killSession(context, services, -1, 'netezza-live-test')).rejects.toThrow(/Invalid session ID/);
     }, 180000);
 
     itIfSessionKill('kills a disposable victim session through the session monitor provider', async () => {
@@ -453,10 +460,14 @@ describeIfFixture('Netezza advanced features live contract', () => {
             const sessionId = await currentNetezzaSessionId(victim);
             const manager = createNetezzaLiveConnectionManager();
             const provider = netezzaSessionMonitorProvider as DatabaseSessionMonitorProvider & {
-                killSession: (context: ExtensionContext, manager: unknown, sessionId: number, connectionName?: string) => Promise<void>;
+                killSession: (context: ExtensionContext, services: DatabaseSessionMonitorServices, sessionId: number, connectionName?: string) => Promise<void>;
             };
+            const services = createSessionMonitorServices(
+                {} as ExtensionContext,
+                manager as unknown as ConnectionManager,
+            );
 
-            await provider.killSession({} as ExtensionContext, manager, sessionId, 'netezza-live-test');
+            await provider.killSession({} as ExtensionContext, services, sessionId, 'netezza-live-test');
             await expect(readScalar(victim, 'SELECT 42')).rejects.toThrow();
         } finally {
             await victim.close().catch(() => undefined);

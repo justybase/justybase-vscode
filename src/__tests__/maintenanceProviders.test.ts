@@ -174,7 +174,7 @@ describe('mysqlMaintenanceProvider', () => {
                 ddlCode: 'CREATE TABLE analytics.sales (id INT);'
             })
         } as unknown as DatabaseDdlProvider;
-        jest.spyOn(connectionFactory, 'getRequiredDatabaseDdlProvider').mockReturnValue(ddlProvider);
+        services.getDdlProvider.mockReturnValue(ddlProvider);
 
         await mysqlMaintenanceProvider.recreateTable!(target, services);
 
@@ -189,7 +189,7 @@ describe('mysqlMaintenanceProvider', () => {
                 error: 'DDL generation failed'
             })
         } as unknown as DatabaseDdlProvider;
-        jest.spyOn(connectionFactory, 'getRequiredDatabaseDdlProvider').mockReturnValue(ddlProvider);
+        services.getDdlProvider.mockReturnValue(ddlProvider);
 
         await expect(mysqlMaintenanceProvider.recreateTable!(target, services)).rejects.toThrow('DDL generation failed');
     });

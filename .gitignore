@@ -27,6 +27,16 @@
 !packages/result-core/**
 !packages/metadata-core/
 !packages/metadata-core/**
+!packages/database-utils/
+!packages/database-utils/**
+!packages/dialect-utils/
+!packages/dialect-utils/**
+!packages/file-runtime/
+!packages/file-runtime/**
+!packages/tabular-import-runtime/
+!packages/tabular-import-runtime/**
+!packages/vscode-companion-adapter/
+!packages/vscode-companion-adapter/**
 !apps/
 !apps/**
 

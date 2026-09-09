@@ -14,6 +14,7 @@ import { ensureBuiltInDialectsRegistered } from '../../dialects';
 import { importDataToPostgreSql } from '../../import/postgresqlImporter';
 import type { ConnectionManager } from '../../core/connectionManager';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
+import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
 import type {
     DatabaseConnectionConfig,
     DatabaseMaintenanceServices,
@@ -434,8 +435,9 @@ describeIfConfigured('postgres integration', () => {
             getActiveConnectionName: () => 'test-postgres-conn',
             getConnection: async () => toConnectionDetails(config!),
         } as unknown as ConnectionManager;
+        const services = createSessionMonitorServices(mockContext, mockManager);
 
-        const sessions = await provider!.getSessions(mockContext, mockManager, config!.database);
+        const sessions = await provider!.getSessions(mockContext, services, config!.database);
 
         expect(Array.isArray(sessions)).toBe(true);
         expect(sessions.length).toBeGreaterThan(0);
@@ -451,7 +453,7 @@ describeIfConfigured('postgres integration', () => {
             sleepPromise = runningQueryConnection.createCommand('SELECT pg_sleep(2)').execute();
             await wait(250);
 
-            const queries = await provider!.getQueries(mockContext, mockManager, config!.database);
+            const queries = await provider!.getQueries(mockContext, services, config!.database);
             expect(Array.isArray(queries)).toBe(true);
             expect(queries.length).toBeGreaterThan(0);
             expect(
@@ -464,13 +466,13 @@ describeIfConfigured('postgres integration', () => {
             await runningQueryConnection.close();
         }
 
-        const storage = await provider!.getStorage(mockContext, mockManager);
+        const storage = await provider!.getStorage(mockContext, services);
         expect(Array.isArray(storage)).toBe(true);
         expect(storage.length).toBeGreaterThanOrEqual(1);
         expect(storage[0]).toHaveProperty('DATABASE');
         expect(storage[0]).toHaveProperty('USED_MB');
 
-        const resources = await provider!.getResources(mockContext, mockManager);
+        const resources = await provider!.getResources(mockContext, services);
         expect(resources).toHaveProperty('gra');
         expect(resources).toHaveProperty('systemUtil');
         expect(Array.isArray(resources.gra)).toBe(true);

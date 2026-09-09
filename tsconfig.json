@@ -12,6 +12,14 @@
     "paths": {
       "@justybase/contracts": ["./packages/contracts/src"],
       "@justybase/contracts/*": ["./packages/contracts/src/*"],
+      "@justybase/database-utils": ["./packages/database-utils/src"],
+      "@justybase/database-utils/*": ["./packages/database-utils/src/*"],
+      "@justybase/tabular-import-runtime": ["./packages/tabular-import-runtime/src"],
+      "@justybase/tabular-import-runtime/*": ["./packages/tabular-import-runtime/src/*"],
+      "@justybase/file-runtime": ["./packages/file-runtime/src"],
+      "@justybase/file-runtime/*": ["./packages/file-runtime/src/*"],
+      "@justybase/dialect-utils": ["./packages/dialect-utils/src"],
+      "@justybase/dialect-utils/*": ["./packages/dialect-utils/src/*"],
       "@justybase/designer-core": ["./packages/designer-core/src"],
       "@justybase/designer-core/*": ["./packages/designer-core/src/*"],
       "@justybase/duckdb-runtime": ["./packages/duckdb-runtime/src"],
@@ -26,6 +34,8 @@
       "@justybase/sql-core/*": ["./packages/sql-core/src/*"],
       "@justybase/sqlite-runtime": ["./packages/sqlite-runtime/src"],
       "@justybase/sqlite-runtime/*": ["./packages/sqlite-runtime/src/*"],
+      "@justybase/vscode-companion-adapter": ["./packages/vscode-companion-adapter/src"],
+      "@justybase/vscode-companion-adapter/*": ["./packages/vscode-companion-adapter/src/*"],
       "@core/*": ["./src/core/*"],
       "@metadata/*": ["./src/metadata/*"],
       "@types/*": ["./src/types/*"]
