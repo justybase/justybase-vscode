@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -7,39 +7,32 @@ import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import type { AdminRestoreRequest, AdminUserCreateRequest, AdminUserUpdateRequest, ConnectionProfileInput, ConnectionProfileUpdate, DesignerSnapshotRequest, ExecutionEvent, QueryAuditStatus, QueryEditPreviewRequest, QueryEditRequest, QueryEvent, QueryFileImportPreviewRequest, QueryFileImportRequest, QueryImportPreviewRequest, QueryImportRequest, QueryPreviewResponse, QueryPreviewStatement, QueryStartRequest, QueryExecutionMode, QueryWriteResponse, WriteOperationPreviewResponse } from '@justybase/contracts';
-import { createExecutionOrchestrator, ExecutionOrchestrator, isConnectionBrokenError, isSafeToRetrySql, StaleDesignerSnapshotError, type ExecutionBackend } from '@justybase/database-runtime';
-import { getSqlStatementAtPosition, splitSqlStatements } from '@justybase/sql-core';
+import type { AdminRestoreRequest, QueryPreviewResponse, QueryStartRequest } from '@justybase/contracts';
+import { createExecutionOrchestrator, ExecutionOrchestrator, isConnectionBrokenError, isSafeToRetrySql, type ExecutionBackend } from '@justybase/database-runtime';
 import { type ApiConfig } from './config';
-import { encryptSecret, verifyPassword } from './security';
+import { createApiApplicationContext, type ApiApplicationContext } from './applicationContext';
 import { AppStore, type StoredConnection } from './store';
 import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import { createApiDatabaseRuntimeRegistry } from './databaseRuntime/registry';
-import { formatSqlDocument, provideSqlCompletion, provideSqlDiagnostics } from './lsp';
 import { QuerySessionManager } from './querySessions';
-import { getSchemaTree, searchSchema } from './schemaService';
-import { attachLspSocket, type LspSession } from './lspProtocol';
+import type { LspSession } from './lspProtocol';
 import { ApiMetadataService } from './metadataCache';
-import { createQueryExportStream } from './queryExport';
-import { loadNetezzaSnippets } from './snippets';
-import { getDesignerCapabilitiesResponse } from './designerService';
-import { DesignerSnapshotUnavailableError, getDesignerSnapshotResponse } from './designerSnapshotService';
-import {
-  parseDesignerCapabilitiesRequest,
-  parseQueryAggregateRequest,
-  parseQueryExportRequest,
-  parseQueryGroupRequest,
-  parseQueryPageRequest,
-  parseQueryStartRequest,
-  RequestValidationError,
-} from './requestValidation';
+import { createApiQueryUseCases, type QueryJob, type QueryUseCaseContext } from './queryUseCases';
+import { registerAuthAdminRoutes } from './routes/authAdminRoutes';
+import { registerConnectionRoutes } from './routes/connectionRoutes';
+import { registerMetadataRoutes } from './routes/metadataRoutes';
+import { registerDesignerRoutes } from './routes/designerRoutes';
+import { registerLspRoutes } from './routes/lspRoutes';
+import { registerResultRoutes } from './routes/resultRoutes';
+import { registerQueryRoutes } from './routes/queryRoutes';
+import { RequestValidationError } from './requestValidation';
+
+// Compatibility export retained for API consumers that use the pure planner.
+export { planStatements } from './queryUseCases';
+export type { PlannedStatement } from './queryUseCases';
 
 const SESSION_COOKIE = 'justybase_session';
 const CSRF_COOKIE = 'justybase_csrf';
-const DEFAULT_ROW_LIMIT = 200_000;
-const DEFAULT_TIMEOUT_SECONDS = 1_800;
-const QUERY_JOB_TTL_MS = 60 * 60 * 1000;
-const WRITE_PREVIEW_TTL_MS = 5 * 60 * 1000;
 const LOGIN_RATE_LIMIT = { max: 10, windowMs: 60_000 };
 const QUERY_RATE_LIMIT = { max: 120, windowMs: 60_000 };
 const MAX_ADMIN_BACKUP_BYTES = 100 * 1024 * 1024;
@@ -73,35 +66,6 @@ class RateLimiter {
   }
 }
 
-interface QueryJob {
-  id: string;
-  userId: string;
-  connectionId: string;
-  database: string;
-  mode: QueryExecutionMode;
-  statements: PlannedStatement[];
-  events: QueryEvent[];
-  subscribers: Set<{ send(data: string): void; readyState: number }>;
-  cancel?: () => Promise<void>;
-  sessionIds: Map<number, string>;
-  sequence: number;
-  activeStatementIndex?: number;
-  cancelRequested: boolean;
-  done: boolean;
-  cleanupTimer?: ReturnType<typeof setTimeout>;
-  settled: Promise<void>;
-  resolveSettled: () => void;
-}
-
-export interface PlannedStatement {
-  index: number;
-  startOffset: number;
-  endOffset: number;
-  sql: string;
-}
-
-interface LoginBody { username?: string; password?: string; }
-
 function bodyObject(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new RequestValidationError('request body must be a JSON object.');
@@ -125,22 +89,67 @@ function requiredString(value: unknown, field: string): string {
   return value.trim();
 }
 
-function connectionKind(value: unknown): 'netezza' | 'sqlite' | 'duckdb' {
-  return value === 'sqlite' || value === 'duckdb' ? value : 'netezza';
+type CookieSameSite = 'lax' | 'none';
+interface CookieSettings {
+  sameSite: CookieSameSite;
+  secure: boolean;
 }
 
-function optionalLocalString(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+function cookieSettingsForRequest(request: FastifyRequest, origins: readonly string[]): CookieSettings {
+  const origin = request.headers.origin;
+  const crossOrigin = typeof origin === 'string' && origins.includes(origin);
+  // The configured browser origin also identifies the public scheme. This is
+  // important behind a TLS-terminating reverse proxy, where Fastify may see
+  // the internal HTTP hop unless trustProxy is enabled.
+  const secureTransport = request.protocol === 'https'
+    || (crossOrigin && typeof origin === 'string' && origin.startsWith('https://'));
+  return {
+    sameSite: crossOrigin && secureTransport ? 'none' : 'lax',
+    // An explicitly configured HTTP development origin must not receive a
+    // Secure cookie: browsers reject it before the session can be used. Keep
+    // the historical production default for same-origin deployments, where
+    // production is expected to run behind HTTPS.
+    secure: secureTransport || (process.env.NODE_ENV === 'production' && !crossOrigin),
+  };
 }
 
-function effectiveDatabase(runtimes: ApiDatabaseRuntimeRegistry, profile: StoredConnection, requested: string | undefined): string {
-  const value = requested?.trim() || (profile.dbType === 'sqlite' ? 'main' : profile.database.trim());
-  return runtimes.normalizeDatabase(profile, value);
+function setCsrfCookie(reply: FastifyReply, settings: CookieSettings = { sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }): string {
+  const token = randomBytes(24).toString('base64url');
+  reply.setCookie(CSRF_COOKIE, token, {
+    httpOnly: false,
+    sameSite: settings.sameSite,
+    secure: settings.secure,
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7,
+  });
+  // The header is useful to separately hosted frontends, which cannot read
+  // this cookie because it belongs to the API origin.
+  reply.header('x-justybase-csrf', token);
+  return token;
 }
 
-function setSessionCookie(reply: FastifyReply, token: string): void {
-  reply.setCookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 });
-  reply.setCookie(CSRF_COOKIE, randomBytes(24).toString('base64url'), { httpOnly: false, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 });
+function setSessionCookie(reply: FastifyReply, token: string, settings: CookieSettings = { sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }): void {
+  reply.setCookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: settings.sameSite, secure: settings.secure, path: '/', maxAge: 60 * 60 * 24 * 7 });
+  setCsrfCookie(reply, settings);
+}
+
+function registerCors(app: FastifyInstance, origins: readonly string[]): void {
+  const allowedOrigins = new Set(origins);
+  if (allowedOrigins.size === 0) return;
+
+  app.addHook('onRequest', async (request, reply) => {
+    const origin = request.headers.origin;
+    if (typeof origin !== 'string' || !allowedOrigins.has(origin)) return;
+
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Credentials', 'true');
+    reply.header('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, X-JustyBase-CSRF');
+    reply.header('Access-Control-Expose-Headers', 'Content-Disposition, X-JustyBase-CSRF');
+    reply.header('Vary', 'Origin');
+
+    if (request.method === 'OPTIONS') return reply.code(204).send();
+  });
 }
 
 async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -190,794 +199,97 @@ function decodeBase64Upload(value: unknown, field: string, maxBytes: number): Bu
   return content;
 }
 
-function emit(job: QueryJob, event: QueryEvent): void {
-  const sequenced: QueryEvent = { ...event, sequence: ++job.sequence };
-  job.events.push(sequenced);
-  const payload = JSON.stringify(sequenced);
-  for (const socket of job.subscribers) if (socket.readyState === 1) socket.send(payload);
-}
-
-function clearQueryJobs(app: FastifyInstance): void {
-  for (const job of app.queryJobs.values()) {
-    if (job.cleanupTimer !== undefined) clearTimeout(job.cleanupTimer);
-    job.cleanupTimer = undefined;
-  }
-  app.queryJobs.clear();
-}
-
-function statementCommandType(sql: string): string {
-  return /^\s*(?:--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/\s*)*([A-Za-z]+)/.exec(sql)?.[1]?.toUpperCase() ?? 'SQL';
-}
-
-function isSchemaMutation(commandType: string): boolean {
-  return /^(CREATE|ALTER|DROP|TRUNCATE|COMMENT|RENAME|GRANT|REVOKE|GROOM|ATTACH|DETACH)$/i.test(commandType);
-}
-
-function plannedDigest(mode: QueryExecutionMode, statements: PlannedStatement[]): string {
-  return createHash('sha256').update(JSON.stringify({ mode, statements: statements.map(statement => ({ index: statement.index, startOffset: statement.startOffset, endOffset: statement.endOffset, sql: statement.sql })) })).digest('hex');
-}
-
-function designerTargetDigest(target: NonNullable<QueryStartRequest['designer']>['target']): string {
-  const normalized = {
-    connectionId: target.connectionId,
-    database: target.database,
-    schema: target.schema,
-    objectName: target.objectName,
-    objectType: target.objectType,
-  };
-  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
-}
-
-interface WritePreviewClaims {
-  userId: string;
-  connectionId: string;
-  database: string;
-  mode: QueryExecutionMode;
-  statementsDigest: string;
-  designerFingerprint?: string;
-  designerTargetDigest?: string;
-  cursorOffset?: number;
-  expiresAt: number;
-}
-
-function signPreviewClaims(claims: WritePreviewClaims, masterKey: string): string {
-  const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');
-  const signature = createHmac('sha256', masterKey).update(payload).digest('base64url');
-  return `${payload}.${signature}`;
-}
-
-function verifyPreviewClaims(token: string, masterKey: string): WritePreviewClaims | undefined {
-  const [payload, signature] = token.split('.', 2);
-  if (!payload || !signature) return undefined;
-  const expected = createHmac('sha256', masterKey).update(payload).digest();
-  const received = Buffer.from(signature, 'base64url');
-  if (expected.length !== received.length || !timingSafeEqual(expected, received)) return undefined;
+async function createAdminBackup(app: FastifyInstance): Promise<{ data: Buffer; fileName: string }> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'justybase-web-backup-'));
+  const backupPath = path.join(tempDir, 'justybase.sqlite');
   try {
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as WritePreviewClaims;
-    return typeof claims.userId === 'string' && typeof claims.connectionId === 'string' && typeof claims.database === 'string'
-      && (claims.mode === 'single' || claims.mode === 'script' || claims.mode === 'explain')
-      && typeof claims.statementsDigest === 'string' && (claims.cursorOffset === undefined || (typeof claims.cursorOffset === 'number' && Number.isFinite(claims.cursorOffset)))
-      && (claims.designerFingerprint === undefined || typeof claims.designerFingerprint === 'string')
-      && (claims.designerTargetDigest === undefined || typeof claims.designerTargetDigest === 'string')
-      && typeof claims.expiresAt === 'number' && claims.expiresAt > Date.now()
-      ? claims
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function statementWarnings(commandType: string, readOnly: boolean): string[] {
-  if (readOnly) return [];
-  if (/^(DROP|TRUNCATE)$/i.test(commandType)) return ['Destructive operation: objects or rows may be removed.'];
-  if (/^(DELETE|UPDATE|MERGE)$/i.test(commandType)) return ['Data-changing operation: verify the target and filter before execution.'];
-  if (/^(CREATE|ALTER|COMMENT|RENAME|GRANT|REVOKE|GROOM)$/i.test(commandType)) return ['Schema, permissions, or storage metadata may change.'];
-  if (/^(INSERT|CALL|EXEC|EXECUTE|COPY|GENERATE)$/i.test(commandType)) return ['The statement may write data or invoke a procedure with side effects.'];
-  return ['This statement is not classified as read-only and requires confirmation.'];
-}
-
-function quoteWriteIdentifier(value: string, field: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.includes('\u0000')) throw new Error(`${field} is required.`);
-  return `"${trimmed.replace(/"/g, '""')}"`;
-}
-
-function quoteWriteTarget(database: string | undefined, schema: string, table: string, dbType: StoredConnection['dbType'] = 'netezza'): string {
-  if (dbType === 'sqlite') {
-    const catalog = database?.trim() || schema.trim();
-    return `${quoteWriteIdentifier(catalog, 'database')}.${quoteWriteIdentifier(table, 'table')}`;
-  }
-  return [database, schema, table].filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-    .map((part, index) => quoteWriteIdentifier(part, index === 0 && database ? 'database' : index === 1 || !database ? 'schema' : 'table'))
-    .join('.');
-}
-
-function sqlWriteLiteral(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL';
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  return `'${text.replace(/\u0000/g, '').replace(/'/g, "''")}'`;
-}
-
-function sqlWritePredicate(column: string, value: unknown, field: string): string {
-  const identifier = quoteWriteIdentifier(column, field);
-  return value === null || value === undefined ? `${identifier} IS NULL` : `${identifier} = ${sqlWriteLiteral(value)}`;
-}
-
-function sortedWriteEntries(values: Record<string, unknown>, field: string): Array<[string, unknown]> {
-  if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error(`${field} is required.`);
-  const entries = Object.entries(values).filter(([key]) => key.trim().length > 0).sort(([left], [right]) => left.localeCompare(right));
-  if (entries.length === 0) throw new Error(`${field} must contain at least one column.`);
-  return entries;
-}
-
-function buildUpdateSql(input: QueryEditPreviewRequest, dbType: StoredConnection['dbType'] = 'netezza'): string {
-  const target = quoteWriteTarget(input.database, input.schema, input.table, dbType);
-  const changes = sortedWriteEntries(input.changes, 'changes');
-  const keys = sortedWriteEntries(input.key, 'key');
-  const setClause = changes.map(([column, value]) => `${quoteWriteIdentifier(column, 'column')} = ${sqlWriteLiteral(value)}`).join(', ');
-  const whereClause = keys.map(([column, value]) => sqlWritePredicate(column, value, 'key column')).join(' AND ');
-  return `UPDATE ${target} SET ${setClause} WHERE ${whereClause};`;
-}
-
-function buildInsertSql(input: QueryImportPreviewRequest, dbType: StoredConnection['dbType'] = 'netezza'): string {
-  if (!Array.isArray(input.columns) || input.columns.length === 0) throw new Error('At least one import column is required.');
-  if (!Array.isArray(input.rows) || input.rows.length === 0) throw new Error('At least one import row is required.');
-  if (input.rows.length > 10_000) throw new Error('Imports are limited to 10,000 rows per operation.');
-  const columns = input.columns.map(column => quoteWriteIdentifier(column, 'column'));
-  const rows = input.rows.map(row => {
-    if (!Array.isArray(row) || row.length !== input.columns.length) throw new Error('Every import row must match the column count.');
-    return `(${row.map(sqlWriteLiteral).join(', ')})`;
-  });
-  if (rows.length === 0) throw new Error('At least one import row is required.');
-  const target = quoteWriteTarget(input.database, input.schema, input.table, dbType);
-  return `INSERT INTO ${target} (${columns.join(', ')}) VALUES\n  ${rows.join(',\n  ')};`;
-}
-
-interface SpreadsheetReader {
-  open(filePath: string): Promise<void>;
-  read(): Promise<boolean> | boolean;
-  close(): Promise<void>;
-  _currentRow?: unknown[];
-  /** Internal selection cursor exposed by the package's reader contract. */
-  _currentSheetIndex?: number;
-  getSheetNames?: () => string[];
-  _initSheet?: (index: number) => Promise<void> | void;
-}
-
-interface SpreadsheetTasksModule {
-  ReaderFactory?: { create(filePath: string): SpreadsheetReader };
-}
-
-function parseCsvImport(text: string, delimiter: string): unknown[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let quoted = false;
-  const source = text.replace(/^\uFEFF/, '');
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-    const next = source[index + 1];
-    if (quoted) {
-      if (character === '"' && next === '"') {
-        field += '"';
-        index += 1;
-      } else if (character === '"') {
-        quoted = false;
-      } else {
-        field += character;
-      }
-      continue;
-    }
-    if (character === '"' && field.length === 0) {
-      quoted = true;
-    } else if (character === delimiter) {
-      row.push(field);
-      field = '';
-    } else if (character === '\n' || character === '\r') {
-      if (character === '\r' && next === '\n') index += 1;
-      row.push(field);
-      if (row.some(value => value.length > 0)) rows.push(row);
-      row = [];
-      field = '';
-    } else {
-      field += character;
-    }
-  }
-  if (quoted) throw new Error('CSV contains an unterminated quoted field.');
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    if (row.some(value => value.length > 0)) rows.push(row);
-  }
-  return rows;
-}
-
-function importColumnNames(header: unknown[] | undefined, width: number, targetColumns?: string[]): string[] {
-  const used = new Set<string>();
-  return Array.from({ length: width }, (_, index) => {
-    const original = header?.[index] ?? targetColumns?.[index];
-    const base = String(original ?? '').trim() || `column_${index + 1}`;
-    let name = base;
-    let suffix = 2;
-    while (used.has(name.toLowerCase())) {
-      name = `${base}_${suffix}`;
-      suffix += 1;
-    }
-    used.add(name.toLowerCase());
-    return name;
-  });
-}
-
-async function readSpreadsheetImport(filePath: string, sheetName?: string): Promise<unknown[][]> {
-  let spreadsheet: SpreadsheetTasksModule;
-  try {
-    spreadsheet = require('@justybase/spreadsheet-tasks') as SpreadsheetTasksModule;
-  } catch (error: unknown) {
-    throw new Error(`Spreadsheet import is unavailable: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const factory = spreadsheet.ReaderFactory;
-  if (!factory) throw new Error('Spreadsheet import is unavailable in this installation.');
-  const reader = factory.create(filePath);
-  try {
-    await reader.open(filePath);
-    if (sheetName) {
-      const sheets = reader.getSheetNames?.() ?? [];
-      const sheetIndex = sheets.indexOf(sheetName);
-      if (sheetIndex < 0) throw new Error(`Worksheet "${sheetName}" was not found.`);
-      if (!reader._initSheet) throw new Error('This spreadsheet reader cannot select a worksheet.');
-      await reader._initSheet(sheetIndex);
-      // spreadsheet-tasks initializes the cursor to sheet 0 on the first
-      // read(). Keep the selected sheet index in sync with the initialized
-      // reader so the first read cannot silently switch worksheets.
-      reader._currentSheetIndex = sheetIndex;
-    }
-    const rows: unknown[][] = [];
-    while (await reader.read()) {
-      const values = reader._currentRow;
-      if (Array.isArray(values)) rows.push([...values]);
-      if (rows.length > 10_000) throw new Error('Imports are limited to 10,000 rows per operation.');
-    }
-    return rows;
-  } finally {
-    await reader.close().catch(() => undefined);
-  }
-}
-
-async function materializeFileImport(input: QueryFileImportPreviewRequest, targetColumns?: string[]): Promise<QueryImportPreviewRequest> {
-  if (typeof input.fileName !== 'string' || input.fileName.trim().length === 0) throw new Error('fileName is required.');
-  if (input.format !== 'csv' && input.format !== 'xlsx' && input.format !== 'xlsb') throw new Error('format must be csv, xlsx, or xlsb.');
-  const expectedExtension = ({ csv: 'csv', xlsx: 'xlsx', xlsb: 'xlsb' } as const)[input.format];
-  const actualExtension = path.extname(path.basename(input.fileName)).slice(1).toLowerCase();
-  if (actualExtension !== expectedExtension) throw new Error(`fileName must use the .${expectedExtension} extension for ${input.format} imports.`);
-  if (input.hasHeader !== undefined && typeof input.hasHeader !== 'boolean') throw new Error('hasHeader must be a boolean.');
-  if (typeof input.contentBase64 !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(input.contentBase64)) throw new Error('contentBase64 is invalid.');
-  const content = Buffer.from(input.contentBase64, 'base64');
-  if (content.length === 0) throw new Error('The import file is empty.');
-  if (content.length > MAX_IMPORT_FILE_BYTES) throw new Error('Import files are limited to 25 MB.');
-  const extension = expectedExtension;
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'justybase-web-import-'));
-  const tempPath = path.join(tempDir, `upload.${extension}`);
-  try {
-    await writeFile(tempPath, content, { mode: 0o600 });
-    const rawRows = input.format === 'csv'
-      ? parseCsvImport(content.toString('utf8'), typeof input.delimiter === 'string' && input.delimiter.length === 1 ? input.delimiter : ',')
-      : await readSpreadsheetImport(tempPath, input.sheetName);
-    if (rawRows.length === 0) throw new Error('The import file does not contain any rows.');
-    const width = rawRows.reduce((maximum, row) => Math.max(maximum, row.length), 0);
-    if (width === 0) throw new Error('The import file does not contain any columns.');
-    const hasHeader = input.hasHeader !== false;
-    const header = hasHeader ? rawRows[0] : undefined;
-    const dataRows = (hasHeader ? rawRows.slice(1) : rawRows).map(row => Array.from({ length: width }, (_, index) => row[index] ?? null));
-    if (dataRows.length === 0) throw new Error('The import file contains a header but no data rows.');
-    if (!hasHeader && (!targetColumns || targetColumns.length < width)) throw new Error('A headerless import must fit the target table columns.');
+    app.store.backupTo(backupPath);
     return {
-      connectionId: input.connectionId,
-      database: input.database,
-      schema: input.schema,
-      table: input.table,
-      columns: importColumnNames(header, width, hasHeader ? undefined : targetColumns),
-      rows: dataRows,
+      data: await readFile(backupPath),
+      fileName: `justybase-backup-${new Date().toISOString().slice(0, 10)}.sqlite`,
     };
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-function operationPreview(
-  app: FastifyInstance,
-  userId: string,
-  input: { connectionId: string; database?: string; sql: string; rowCount: number; warnings: string[]; dbType?: StoredConnection['dbType'] },
-): WriteOperationPreviewResponse {
-  const profile = app.store.getConnection(userId, input.connectionId);
-  if (!profile) throw new Error('Connection profile not found.');
-  if (profile.readOnly) throw new Error('This connection is read-only. Enable write mode for data changes.');
-  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-  const expiresAt = Date.now() + WRITE_PREVIEW_TTL_MS;
-  const statement: PlannedStatement = { index: 0, startOffset: 0, endOffset: input.sql.length, sql: input.sql };
-  const previewToken = signPreviewClaims({ userId, connectionId: input.connectionId, database, mode: 'single', statementsDigest: plannedDigest('single', [statement]), expiresAt }, app.apiConfig.masterKey);
-  return { sql: input.sql, previewToken, expiresAt, warnings: input.warnings, rowCount: input.rowCount };
-}
-
-function verifyWriteOperation(
-  app: FastifyInstance,
-  userId: string,
-  profile: ReturnType<FastifyInstance['store']['getConnection']>,
-  input: { connectionId: string; database: string; sql: string; writeConfirmed: boolean; writePreviewToken: string; dbType?: StoredConnection['dbType'] },
-): void {
-  if (!profile) throw new Error('Connection profile not found.');
-  if (profile.readOnly) throw new Error('This connection is read-only. Enable write mode for data changes.');
-  const claims = verifyPreviewClaims(input.writePreviewToken, app.apiConfig.masterKey);
-  if (!input.writeConfirmed || !claims) throw new Error('Write confirmation required before executing the operation.');
-  const statement: PlannedStatement = { index: 0, startOffset: 0, endOffset: input.sql.length, sql: input.sql };
-  if (claims.userId !== userId || claims.connectionId !== input.connectionId || claims.database !== input.database || claims.mode !== 'single' || claims.statementsDigest !== plannedDigest('single', [statement])) {
-    throw new Error('Write preview is stale. Preview the exact operation again before execution.');
-  }
-}
-
-async function executeConfirmedWrite(
-  app: FastifyInstance,
-  userId: string,
-  profile: NonNullable<ReturnType<FastifyInstance['store']['getConnection']>>,
-  input: { connectionId: string; database: string; sql: string; statementIndex?: number; statementCount?: number; confirmed: boolean },
-): Promise<QueryWriteResponse> {
-  const startedAt = Date.now();
-  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-  const commandType = statementCommandType(input.sql);
-  const statementIndex = input.statementIndex ?? 0;
-  const statementCount = input.statementCount ?? 1;
+async function restoreAdminBackup(app: FastifyInstance, input: AdminRestoreRequest): Promise<Record<string, unknown>> {
+  let tempDir: string | undefined;
   try {
-    const execution = app.executionOrchestrator.start({
-      executionId: randomUUID(),
-      sourceKey: `${userId}:${input.connectionId}:write`,
-      target: profile,
-      database,
-      statements: [{ index: 0, sql: input.sql, originalSql: input.sql, expandedSql: input.sql }],
-      delivery: 'buffered',
-      connectionMode: 'persistent',
-      maxRows: DEFAULT_ROW_LIMIT,
-      timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-      readOnly: false,
-      retryPolicy: 'disabled',
-      continueOnError: false,
-    });
-    const summary = await execution.settled;
-    if (summary.status !== 'success') {
-      throw summary.error?.cause ?? new Error(summary.error?.message ?? 'Write execution failed.');
-    }
-    const result = summary.statements[0];
-    const rowsAffected = result?.rowsAffected ?? result?.totalRows ?? 0;
-    const message = `${commandType} completed · ${rowsAffected.toLocaleString()} row(s) affected.`;
-    app.store.addHistory(userId, input.connectionId, database, input.sql, 'success', Date.now() - startedAt, rowsAffected);
-    recordAudit(app, userId, { connectionId: input.connectionId, database, statementIndex, statementCount, commandType, sql: input.sql, status: 'success', rowsAffected, durationMs: Date.now() - startedAt, confirmed: input.confirmed });
-    if (isSchemaMutation(commandType)) {
-      app.metadataService.invalidate(userId, input.connectionId);
-      for (const session of app.lspSessions) session.invalidateConnection(input.connectionId);
-    }
-    return { sql: input.sql, rowsAffected, message };
-  } catch (error: unknown) {
-    recordAudit(app, userId, { connectionId: input.connectionId, database, statementIndex, statementCount, commandType, sql: input.sql, status: 'error', rowsAffected: 0, durationMs: Date.now() - startedAt, confirmed: input.confirmed });
-    throw error;
-  }
-}
+    if (input.restoreConfirmed !== true) throw new Error('Restore confirmation is required.');
+    if (typeof input.fileName !== 'string' || input.fileName.trim().length === 0) throw new Error('fileName is required.');
+    if ([...app.queryJobs.values()].some(job => !job.done)) throw new Error('Wait for running queries to finish before restoring a backup.');
+    const content = decodeBase64Upload(input.contentBase64, 'contentBase64', MAX_ADMIN_BACKUP_BYTES);
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'justybase-web-restore-'));
+    const uploadPath = path.join(tempDir, 'restore.sqlite');
+    await writeFile(uploadPath, content, { mode: 0o600 });
 
-function recordAudit(
-  app: FastifyInstance,
-  userId: string,
-  entry: {
-    connectionId: string;
-    database: string;
-    statementIndex: number;
-    statementCount: number;
-    commandType: string;
-    sql: string;
-    status: QueryAuditStatus;
-    rowsAffected?: number;
-    durationMs: number;
-    confirmed: boolean;
-  },
-): void {
-  try {
-    app.store.addAudit(userId, { ...entry, createdAt: new Date().toISOString() });
-  } catch (error: unknown) {
-    app.log.warn({ error }, 'Could not persist query audit entry.');
-  }
-}
-
-function statementMessage(commandType: string, result: { totalRows: number; limitReached: boolean; rowsAffected?: number }): string | undefined {
-  if (result.limitReached) return `Row limit reached (${result.totalRows.toLocaleString()} rows).`;
-  if (!['SELECT', 'WITH', 'VALUES', 'PRAGMA', 'EXPLAIN', 'SHOW', 'DESCRIBE', 'DESC'].includes(commandType)) {
-    return result.rowsAffected !== undefined
-      ? `${commandType} completed · ${result.rowsAffected.toLocaleString()} row(s) affected.`
-      : `${commandType} completed.`;
-  }
-  return undefined;
-}
-
-function hasExecutableSql(sql: string): boolean {
-  let remaining = sql.trim();
-  while (remaining) {
-    if (remaining.startsWith('--')) {
-      const newline = remaining.search(/[\r\n]/);
-      remaining = newline < 0 ? '' : remaining.slice(newline).trimStart();
-      continue;
-    }
-    if (remaining.startsWith('/*')) {
-      const end = remaining.indexOf('*/', 2);
-      remaining = end < 0 ? '' : remaining.slice(end + 2).trimStart();
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-function explainSql(sql: string, dbType: StoredConnection['dbType']): string {
-  if (dbType === 'duckdb') return `EXPLAIN ${sql.trim()}`;
-  if (dbType === 'sqlite' && /^(?:SELECT|WITH)\b/i.test(sql.trim())) return `EXPLAIN QUERY PLAN ${sql.trim()}`;
-  if (dbType === 'sqlite') return `EXPLAIN ${sql.trim()}`;
-  return `EXPLAIN VERBOSE ${sql.trim()}`;
-}
-
-export function planStatements(input: QueryStartRequest, dbType: StoredConnection['dbType'] = 'netezza'): { mode: QueryExecutionMode; statements: PlannedStatement[] } {
-  const requestedMode = input.mode ?? 'single';
-  if (requestedMode !== 'single' && requestedMode !== 'script' && requestedMode !== 'explain') throw new Error('mode must be single, script, or explain.');
-  if (input.cursorOffset !== undefined && (!Number.isInteger(input.cursorOffset) || input.cursorOffset < 0 || input.cursorOffset > input.sql.length)) throw new Error('cursorOffset must be a valid SQL character offset.');
-  const mode: QueryExecutionMode = requestedMode;
-  if (mode === 'script') {
-    const statements = splitSqlStatements(input.sql).filter(statement => hasExecutableSql(statement.sql)).map((statement, index) => ({
-      index,
-      startOffset: statement.startOffset,
-      endOffset: statement.endOffset,
-      sql: statement.sql,
-    }));
-    if (statements.length === 0) throw new Error('SQL script does not contain an executable statement.');
-    return { mode, statements };
-  }
-
-  if (typeof input.cursorOffset === 'number' && Number.isFinite(input.cursorOffset)) {
-    const statement = getSqlStatementAtPosition(input.sql, input.cursorOffset);
-    if (statement && hasExecutableSql(statement.sql)) {
-      const sql = mode === 'explain' ? explainSql(statement.sql, dbType) : statement.sql;
-      return { mode, statements: [{ index: 0, startOffset: statement.start, endOffset: statement.end, sql }] };
-    }
-  }
-
-  const sql = input.sql.trim();
-  if (!hasExecutableSql(sql)) throw new Error('SQL is required.');
-  return { mode, statements: [{ index: 0, startOffset: input.sql.indexOf(sql), endOffset: input.sql.indexOf(sql) + sql.length, sql: mode === 'explain' ? explainSql(sql, dbType) : sql }] };
-}
-
-async function assertDesignerSnapshotCurrent(
-  app: FastifyInstance,
-  profile: StoredConnection,
-  input: QueryStartRequest,
-): Promise<void> {
-  const designer = input.designer;
-  if (!designer) return;
-  if (designer.target.connectionId && designer.target.connectionId !== input.connectionId) {
-    throw new Error('Designer target does not belong to the selected connection.');
-  }
-  const target: DesignerSnapshotRequest = {
-    connectionId: input.connectionId,
-    database: designer.target.database ?? input.database,
-    schema: designer.target.schema,
-    objectName: designer.target.objectName,
-    objectType: designer.target.objectType,
-  };
-  const response = await getDesignerSnapshotResponse(profile, target, app.databaseRuntimes);
-  if (response.snapshot.fingerprint !== designer.baseFingerprint) {
-    throw new StaleDesignerSnapshotError(designer.baseFingerprint, response.snapshot.fingerprint);
-  }
-}
-
-export async function previewQuery(app: FastifyInstance, userId: string, input: QueryStartRequest): Promise<QueryPreviewResponse> {
-  const profile = app.store.getConnection(userId, input.connectionId);
-  if (!profile) throw new Error('Connection profile not found.');
-  const planned = planStatements(input, profile.dbType);
-  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-  const statements: QueryPreviewStatement[] = planned.statements.map(statement => {
-    const commandType = statementCommandType(statement.sql);
-    const readOnly = app.databaseRuntimes.isReadOnlySql(profile, statement.sql);
+    const safetyDir = path.join(app.apiConfig.dataDir, 'backups');
+    await mkdir(safetyDir, { recursive: true });
+    const safetyPath = path.join(safetyDir, `pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
+    app.store.backupTo(safetyPath);
+    await app.databaseRuntimes.closeAll();
+    const restored = app.store.restoreFrom(uploadPath);
+    app.querySessions.clearAll();
+    clearQueryJobs(app.queryJobs);
+    app.metadataService.clear();
+    for (const session of app.lspSessions) session.invalidateAll();
+    app.rateLimiter.clear();
     return {
-      index: statement.index,
-      startOffset: statement.startOffset,
-      endOffset: statement.endOffset,
-      sql: statement.sql,
-      commandType,
-      readOnly,
-      warnings: statementWarnings(commandType, readOnly),
+      message: `Backup restored. A safety copy was saved as ${path.basename(safetyPath)}. Sign in again if this session is no longer valid.`,
+      ...restored,
     };
-  });
-  const containsWrite = statements.some(statement => !statement.readOnly);
-  if (containsWrite) await assertDesignerSnapshotCurrent(app, profile, input);
-  const expiresAt = Date.now() + WRITE_PREVIEW_TTL_MS;
-  const previewToken = signPreviewClaims({
-    userId,
-    connectionId: input.connectionId,
-    database,
-    mode: planned.mode,
-    cursorOffset: input.cursorOffset,
-    statementsDigest: plannedDigest(planned.mode, planned.statements),
-    ...(input.designer ? { designerFingerprint: input.designer.baseFingerprint, designerTargetDigest: designerTargetDigest(input.designer.target) } : {}),
-    expiresAt,
-  }, app.apiConfig.masterKey);
-  return { database, readOnly: profile.readOnly, containsWrite, previewToken, expiresAt, statements };
-}
-
-async function startQuery(app: FastifyInstance, userId: string, input: QueryStartRequest): Promise<{ queryId: string; statementCount: number }> {
-  const profile = app.store.getConnection(userId, input.connectionId);
-  if (!profile) throw new Error('Connection profile not found.');
-  if (!input.sql.trim()) throw new Error('SQL is required.');
-  const planned = planStatements(input, profile.dbType);
-  const containsWrite = planned.statements.some(statement => !app.databaseRuntimes.isReadOnlySql(profile, statement.sql));
-  if (profile.readOnly && containsWrite) throw new Error('This connection is read-only. Enable write mode for DDL or DML.');
-  const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-  if (!profile.readOnly && containsWrite) {
-    const claims = typeof input.writePreviewToken === 'string' ? verifyPreviewClaims(input.writePreviewToken, app.apiConfig.masterKey) : undefined;
-    if (input.writeConfirmed !== true || !claims) throw new Error('Write confirmation required before executing DML or DDL.');
-    if (claims.userId !== userId || claims.connectionId !== input.connectionId || claims.database !== database || claims.mode !== planned.mode || claims.cursorOffset !== input.cursorOffset || claims.statementsDigest !== plannedDigest(planned.mode, planned.statements) || claims.designerFingerprint !== input.designer?.baseFingerprint || claims.designerTargetDigest !== (input.designer ? designerTargetDigest(input.designer.target) : undefined)) {
-      throw new Error('Write preview is stale. Preview the exact SQL again before execution.');
-    }
-    await assertDesignerSnapshotCurrent(app, profile, input);
+  } finally {
+    if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
-
-  const queryId = randomUUID();
-  let resolveJobSettled!: () => void;
-  const jobSettled = new Promise<void>(resolve => { resolveJobSettled = resolve; });
-  const job: QueryJob = {
-    id: queryId,
-    userId,
-    connectionId: input.connectionId,
-    database,
-    mode: planned.mode,
-    statements: planned.statements,
-    events: [],
-    subscribers: new Set(),
-    sessionIds: new Map(),
-    sequence: 0,
-    cancelRequested: false,
-    done: false,
-    settled: jobSettled,
-    resolveSettled: resolveJobSettled,
-  };
-  app.queryJobs.set(queryId, job);
-  const startedAt = Date.now();
-  const statementStates = new Map<number, {
-    sessionId: string;
-    statementStartedAt: number;
-    commandType: string;
-    totalRows: number;
-    terminalized: boolean;
-  }>();
-  let completedStatements = 0;
-  let cleanupScheduled = false;
-
-  const scheduleJobCleanup = (): void => {
-    if (cleanupScheduled) return;
-    cleanupScheduled = true;
-    job.cleanupTimer = setTimeout(() => {
-      job.cleanupTimer = undefined;
-      app.queryJobs.delete(queryId);
-    }, QUERY_JOB_TTL_MS);
-    job.cleanupTimer.unref();
-  };
-
-  const execution = app.executionOrchestrator.start({
-    executionId: queryId,
-    sourceKey: `${userId}:${input.connectionId}`,
-    target: profile,
-    database,
-    statements: planned.statements.map(statement => ({
-      index: statement.index,
-      sql: statement.sql,
-      originalSql: statement.sql,
-      expandedSql: statement.sql,
-    })),
-    delivery: 'streaming',
-    connectionMode: 'persistent',
-    maxRows: input.maxRows ?? DEFAULT_ROW_LIMIT,
-    timeoutSeconds: input.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS,
-    readOnly: profile.readOnly,
-    retryPolicy: 'safe-read-only-on-broken-connection',
-    continueOnError: false,
-  }, {
-    onEvent: async (event: ExecutionEvent): Promise<void> => {
-      switch (event.type) {
-        case 'execution-started':
-          emit(job, { type: 'started', queryId, startedAt, mode: job.mode, statementCount: job.statements.length });
-          return;
-        case 'statement-started': {
-          const statementIndex = event.context.statementIndex;
-          const statement = job.statements[statementIndex];
-          if (!statement) throw new Error(`Execution started unknown statement ${statementIndex}.`);
-          const sessionId = app.querySessions.create(queryId, userId, input.connectionId, [], statementIndex, job.statements.length);
-          const state = {
-            sessionId,
-            statementStartedAt: Date.now(),
-            commandType: statementCommandType(statement.sql),
-            totalRows: 0,
-            terminalized: false,
-          };
-          statementStates.set(statementIndex, state);
-          job.sessionIds.set(statementIndex, sessionId);
-          job.activeStatementIndex = statementIndex;
-          emit(job, { type: 'statement-started', queryId, statementIndex, statementCount: job.statements.length, statementSql: statement.sql });
-          emit(job, { type: 'session', queryId, statementIndex, statementCount: job.statements.length, sessionId, totalRows: 0 });
-          return;
-        }
-        case 'columns': {
-          const statementIndex = event.context.statementIndex;
-          const state = statementStates.get(statementIndex);
-          if (!state) throw new Error(`Received columns before statement ${statementIndex} started.`);
-          app.querySessions.setColumns(userId, state.sessionId, event.columns);
-          emit(job, { type: 'columns', queryId, statementIndex, statementCount: job.statements.length, columns: event.columns });
-          return;
-        }
-        case 'rows': {
-          const statementIndex = event.context.statementIndex;
-          const state = statementStates.get(statementIndex);
-          if (!state) throw new Error(`Received rows before statement ${statementIndex} started.`);
-          state.totalRows = app.querySessions.appendRows(userId, state.sessionId, event.rows);
-          emit(job, { type: 'progress', queryId, statementIndex, statementCount: job.statements.length, totalRows: state.totalRows });
-          return;
-        }
-        case 'statement-completed': {
-          const statementIndex = event.context.statementIndex;
-          const statement = job.statements[statementIndex];
-          const state = statementStates.get(statementIndex);
-          if (!statement || !state) throw new Error(`Completed unknown statement ${statementIndex}.`);
-          const result = event.summary;
-          const message = statementMessage(state.commandType, result);
-          state.totalRows = app.querySessions.complete(userId, state.sessionId, {
-            limitReached: result.limitReached,
-            message,
-            ...(result.rowsAffected === undefined ? {} : { rowsAffected: result.rowsAffected }),
-          });
-          state.terminalized = true;
-          emit(job, {
-            type: 'complete',
-            queryId,
-            statementIndex,
-            statementCount: job.statements.length,
-            totalRows: state.totalRows,
-            limitReached: result.limitReached,
-            ...(result.rowsAffected === undefined ? {} : { rowsAffected: result.rowsAffected }),
-            ...(message === undefined ? {} : { message }),
-            commandType: state.commandType,
-          });
-          app.store.addHistory(userId, input.connectionId, database, statement.sql, 'success', Date.now() - startedAt, result.rowsAffected ?? state.totalRows);
-          recordAudit(app, userId, {
-            connectionId: input.connectionId,
-            database,
-            statementIndex,
-            statementCount: job.statements.length,
-            commandType: state.commandType,
-            sql: statement.sql,
-            status: 'success',
-            rowsAffected: result.rowsAffected ?? state.totalRows,
-            durationMs: Date.now() - state.statementStartedAt,
-            confirmed: input.writeConfirmed === true,
-          });
-          if (isSchemaMutation(state.commandType)) {
-            app.metadataService.invalidate(userId, input.connectionId);
-            for (const session of app.lspSessions) session.invalidateConnection(input.connectionId);
-          }
-          completedStatements += 1;
-          return;
-        }
-        case 'statement-failed': {
-          const statementIndex = event.context.statementIndex;
-          const statement = job.statements[statementIndex];
-          const state = statementStates.get(statementIndex);
-          if (state?.terminalized) return;
-          if (!statement) throw new Error(`Failed unknown statement ${statementIndex}.`);
-          const cancelled = event.failure.kind === 'cancellation';
-          const message = cancelled ? 'Query cancelled.' : event.failure.message;
-          const totalRows = state?.totalRows ?? 0;
-          if (state) {
-            app.querySessions.complete(userId, state.sessionId, { message });
-            state.terminalized = true;
-          }
-          if (cancelled) {
-            emit(job, { type: 'cancelled', queryId, statementIndex, statementCount: job.statements.length, totalRows, scope: job.mode === 'script' ? 'batch' : 'statement' });
-          } else {
-            emit(job, { type: 'error', queryId, statementIndex, statementCount: job.statements.length, message });
-          }
-          const status: QueryAuditStatus = cancelled ? 'cancelled' : 'error';
-          app.store.addHistory(userId, input.connectionId, database, statement.sql, status, Date.now() - startedAt, totalRows);
-          recordAudit(app, userId, {
-            connectionId: input.connectionId,
-            database,
-            statementIndex,
-            statementCount: job.statements.length,
-            commandType: state?.commandType ?? statementCommandType(statement.sql),
-            sql: statement.sql,
-            status,
-            rowsAffected: totalRows,
-            durationMs: Date.now() - (state?.statementStartedAt ?? startedAt),
-            confirmed: input.writeConfirmed === true,
-          });
-          return;
-        }
-        case 'execution-terminal': {
-          if (event.summary.status === 'success') return;
-          const statementIndex = job.activeStatementIndex ?? job.statements[0]?.index ?? 0;
-          const statement = job.statements[statementIndex];
-          const state = statementStates.get(statementIndex);
-          const cleanupFailure = event.summary.error?.kind === 'cleanup';
-          if (state?.terminalized && !cleanupFailure) return;
-          const cancelled = event.summary.status === 'cancelled';
-          const message = cancelled ? 'Query cancelled.' : event.summary.error?.message ?? 'Query failed.';
-          const totalRows = state?.totalRows ?? 0;
-          if (state && !state.terminalized) {
-            app.querySessions.complete(userId, state.sessionId, { message });
-            state.terminalized = true;
-          }
-          if (cancelled) {
-            emit(job, { type: 'cancelled', queryId, statementIndex, statementCount: job.statements.length, totalRows, scope: job.mode === 'script' ? 'batch' : 'statement' });
-          } else {
-            emit(job, { type: 'error', queryId, statementIndex, statementCount: job.statements.length, message });
-          }
-          if (statement) {
-            const status: QueryAuditStatus = cancelled ? 'cancelled' : 'error';
-            app.store.addHistory(userId, input.connectionId, database, statement.sql, status, Date.now() - startedAt, totalRows);
-            recordAudit(app, userId, {
-              connectionId: input.connectionId,
-              database,
-              statementIndex,
-              statementCount: job.statements.length,
-              commandType: state?.commandType ?? statementCommandType(statement.sql),
-              sql: statement.sql,
-              status,
-              rowsAffected: totalRows,
-              durationMs: Date.now() - (state?.statementStartedAt ?? startedAt),
-              confirmed: input.writeConfirmed === true,
-            });
-          }
-          return;
-        }
-        case 'batch-completed': {
-          const status = event.summary.status === 'success' ? 'complete' : event.summary.status;
-          const message = status === 'cancelled'
-            ? 'Query batch cancelled.'
-            : status === 'error'
-              ? `Statement ${(job.activeStatementIndex ?? Math.max(0, completedStatements)) + 1} failed; subsequent statements were not executed.`
-              : undefined;
-          emit(job, {
-            type: 'batch-complete',
-            queryId,
-            statementCount: job.statements.length,
-            status,
-            completedStatements,
-            ...(message === undefined ? {} : { message }),
-          });
-          job.done = true;
-          job.cancel = undefined;
-          job.activeStatementIndex = undefined;
-          job.resolveSettled();
-          scheduleJobCleanup();
-          return;
-        }
-        case 'retrying':
-          app.log.debug({ queryId, statementIndex: event.context.statementIndex, attempt: event.retry.attempt }, 'Retrying a safe read-only query after a broken connection.');
-          return;
-        case 'progress':
-          return;
-      }
-    },
-  });
-  job.cancel = () => execution.cancel();
-  void execution.settled.then(() => {
-    job.done = true;
-    job.cancel = undefined;
-    job.activeStatementIndex = undefined;
-    job.resolveSettled();
-    scheduleJobCleanup();
-  });
-  return { queryId, statementCount: job.statements.length };
 }
+
+function clearQueryJobs(queryJobs: Map<string, QueryJob>): void {
+  for (const job of queryJobs.values()) {
+    if (job.cleanupTimer !== undefined) clearTimeout(job.cleanupTimer);
+    job.cleanupTimer = undefined;
+  }
+  queryJobs.clear();
+}
+
+async function disposeQueryJobs(queryJobs: Map<string, QueryJob>): Promise<void> {
+  const jobs = [...queryJobs.values()];
+  await Promise.allSettled(jobs.map(async job => {
+    if (!job.done && job.cancel) await job.cancel();
+    await job.settled;
+  }));
+  for (const job of jobs) {
+    for (const subscriber of job.subscribers) subscriber.close?.();
+    job.subscribers.clear();
+  }
+  clearQueryJobs(queryJobs);
+}
+
+function queryUseCaseContextForApp(app: FastifyInstance): QueryUseCaseContext {
+  return {
+    config: app.apiConfig,
+    store: app.store,
+    databaseRuntimes: app.databaseRuntimes,
+    executionOrchestrator: app.executionOrchestrator,
+    metadataService: app.metadataService,
+    queryJobs: app.queryJobs,
+    querySessions: app.querySessions,
+    lspSessions: app.lspSessions,
+    log: {
+      debug: (bindings, message) => app.log.debug(bindings, message),
+      warn: (bindings, message) => app.log.warn(bindings, message),
+    },
+  };
+}
+
+/**
+ * Compatibility facade for callers that used the former server-level
+ * previewQuery export. HTTP routes use the composed use-case object directly.
+ */
+export async function previewQuery(app: FastifyInstance, userId: string, input: QueryStartRequest): Promise<QueryPreviewResponse> {
+  return createApiQueryUseCases(queryUseCaseContextForApp(app)).previewQuery(userId, input);
+}
+
 
 export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance> {
   const app = fastify({ logger: true });
@@ -1020,214 +332,80 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   } });
   const metadataService = new ApiMetadataService();
   const rateLimiter = new RateLimiter();
-  app.decorate('store', store);
-  app.decorate('apiConfig', apiConfig);
-  app.decorate('databaseRuntimes', databaseRuntimes);
-  app.decorate('executionOrchestrator', executionOrchestrator);
+  const queryJobs = new Map<string, QueryJob>();
+  const querySessions = new QuerySessionManager(apiConfig.dataDir);
+  const lspSessions = new Set<LspSession>();
+  const apiContext = createApiApplicationContext<QueryJob>({
+    config: apiConfig,
+    store,
+    databaseRuntimes,
+    executionOrchestrator,
+    rateLimiter,
+    metadataService,
+    queryJobs,
+    querySessions,
+    lspSessions,
+    disposeJobs: () => disposeQueryJobs(queryJobs),
+    closeLspSessions: () => {
+      for (const session of lspSessions) session.close?.();
+      lspSessions.clear();
+    },
+  });
+  const queryUseCases = createApiQueryUseCases({
+    config: apiContext.config,
+    store: apiContext.store,
+    databaseRuntimes: apiContext.databaseRuntimes,
+    executionOrchestrator: apiContext.executionOrchestrator,
+    metadataService: apiContext.metadataService,
+    queryJobs: apiContext.queryJobs,
+    querySessions: apiContext.querySessions,
+    lspSessions: apiContext.lspSessions,
+    log: {
+      debug: (bindings, message) => app.log.debug(bindings, message),
+      warn: (bindings, message) => app.log.warn(bindings, message),
+    },
+  });
+  app.decorate('apiContext', apiContext);
+  // Keep these decorations as a compatibility facade for route handlers and
+  // existing integrations while the route groups migrate to apiContext.
+  app.decorate('store', apiContext.store);
+  app.decorate('apiConfig', apiContext.config);
+  app.decorate('databaseRuntimes', apiContext.databaseRuntimes);
+  app.decorate('executionOrchestrator', apiContext.executionOrchestrator);
   app.decorate('rateLimiter', rateLimiter);
-  app.decorate('metadataService', metadataService);
-  app.decorate('queryJobs', new Map<string, QueryJob>());
-  app.decorate('querySessions', new QuerySessionManager(apiConfig.dataDir));
-  app.decorate('lspSessions', new Set<LspSession>());
+  app.decorate('metadataService', apiContext.metadataService);
+  app.decorate('queryJobs', apiContext.queryJobs);
+  app.decorate('querySessions', apiContext.querySessions);
+  app.decorate('lspSessions', apiContext.lspSessions);
   app.decorateRequest('user', null);
   app.decorateRequest('sessionId', null);
   await app.register(cookie);
   await app.register(websocket);
+  registerCors(app, apiConfig.webOrigins ?? []);
+  const webOrigins = apiConfig.webOrigins ?? [];
 
   if (apiConfig.adminUsername && apiConfig.adminPassword && store.countUsers() === 0) store.createUser(apiConfig.adminUsername, apiConfig.adminPassword, 'admin');
 
   app.get('/healthz', async () => ({ status: 'ok' }));
-  app.post('/api/auth/login', { preHandler: loginRateLimit }, async (request, reply) => {
-    const body = bodyObject(request.body) as LoginBody;
-    const username = requiredString(body.username, 'username');
-    const password = requiredString(body.password, 'password');
-    const row = store.findUserByUsername(username);
-    if (!row || !verifyPassword(password, row.password_hash)) return reply.code(401).send({ code: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' });
-    const token = randomBytes(32).toString('base64url');
-    store.createSession(row.id, token, Date.now() + 7 * 24 * 60 * 60 * 1000);
-    setSessionCookie(reply, token);
-    return { user: { id: row.id, username: row.username, role: row.role } };
-  });
-  app.post('/api/auth/logout', async (request, reply) => { const token = request.cookies[SESSION_COOKIE]; if (token) store.deleteSession(token); reply.clearCookie(SESSION_COOKIE, { path: '/' }); return { ok: true }; });
-  app.get('/api/auth/me', { preHandler: authenticate }, async request => ({ user: request.user }));
-  app.get('/api/admin/users', { preHandler: [authenticate, requireAdmin] }, async () => store.listUsers());
-  app.post('/api/admin/users', { preHandler: [authenticate, requireAdmin, validateCsrf] }, async (request, reply) => {
-    try {
-      const input = request.body as AdminUserCreateRequest;
-      const username = requiredString(input.username, 'username');
-      const password = requiredString(input.password, 'password');
-      if (password.length < 8) throw new Error('password must contain at least 8 characters.');
-      const role = input.role === 'admin' ? 'admin' : 'user';
-      const created = store.createUser(username, password, role);
-      return reply.code(201).send(store.listUsers().find(user => user.id === created.id));
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'INVALID_USER', message: error instanceof Error ? error.message : 'Invalid user.' });
-    }
-  });
-  app.patch<{ Params: { id: string } }>('/api/admin/users/:id', { preHandler: [authenticate, requireAdmin, validateCsrf] }, async (request, reply) => {
-    try {
-      const input = request.body as AdminUserUpdateRequest;
-      if (input.password !== undefined && input.password.length < 8) throw new Error('password must contain at least 8 characters.');
-      const updated = store.updateUser(request.params.id, input);
-      if (!updated) return reply.code(404).send({ code: 'NOT_FOUND', message: 'User not found.' });
-      return updated;
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'INVALID_USER', message: error instanceof Error ? error.message : 'Invalid user update.' });
-    }
-  });
-  app.get('/api/admin/backup', { preHandler: [authenticate, requireAdmin] }, async (_request, reply) => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'justybase-web-backup-'));
-    const backupPath = path.join(tempDir, 'justybase.sqlite');
-    try {
-      store.backupTo(backupPath);
-      const data = await readFile(backupPath);
-      reply.header('Content-Type', 'application/octet-stream');
-      reply.header('Content-Disposition', `attachment; filename="justybase-backup-${new Date().toISOString().slice(0, 10)}.sqlite"`);
-      return reply.send(data);
-    } finally {
-      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
-    }
-  });
-  app.post('/api/admin/restore', { bodyLimit: MAX_ADMIN_RESTORE_BODY_BYTES, preHandler: [authenticate, requireAdmin, validateCsrf] }, async (request, reply) => {
-    let tempDir: string | undefined;
-    try {
-      const input = request.body as AdminRestoreRequest;
-      if (input.restoreConfirmed !== true) throw new Error('Restore confirmation is required.');
-      if (typeof input.fileName !== 'string' || input.fileName.trim().length === 0) throw new Error('fileName is required.');
-      if ([...app.queryJobs.values()].some(job => !job.done)) throw new Error('Wait for running queries to finish before restoring a backup.');
-      const content = decodeBase64Upload(input.contentBase64, 'contentBase64', MAX_ADMIN_BACKUP_BYTES);
-      tempDir = await mkdtemp(path.join(os.tmpdir(), 'justybase-web-restore-'));
-      const uploadPath = path.join(tempDir, 'restore.sqlite');
-      await writeFile(uploadPath, content, { mode: 0o600 });
-
-      const safetyDir = path.join(apiConfig.dataDir, 'backups');
-      await mkdir(safetyDir, { recursive: true });
-      const safetyPath = path.join(safetyDir, `pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
-      store.backupTo(safetyPath);
-      await app.databaseRuntimes.closeAll();
-      const restored = store.restoreFrom(uploadPath);
-      app.querySessions.clearAll();
-      clearQueryJobs(app);
-      app.metadataService.clear();
-      for (const session of app.lspSessions) session.invalidateAll();
-      app.rateLimiter.clear();
-      return reply.code(200).send({
-        message: `Backup restored. A safety copy was saved as ${path.basename(safetyPath)}. Sign in again if this session is no longer valid.`,
-        ...restored,
-      });
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'RESTORE_REJECTED', message: error instanceof Error ? error.message : 'Backup restore failed.' });
-    } finally {
-      if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
-    }
+  registerAuthAdminRoutes(app, {
+    authenticate,
+    validateCsrf,
+    requireAdmin,
+    loginRateLimit,
+    sessionCookie: SESSION_COOKIE,
+    setSessionCookie: (reply, token, request) => setSessionCookie(reply, token, cookieSettingsForRequest(request, webOrigins)),
+    issueCsrfToken: (reply, request) => setCsrfCookie(reply, cookieSettingsForRequest(request, webOrigins)),
+    bodyObject,
+    requiredString,
+    restoreBodyLimit: MAX_ADMIN_RESTORE_BODY_BYTES,
+    backup: () => createAdminBackup(app),
+    restore: (server, input) => restoreAdminBackup(server, input),
   });
 
-  app.get('/api/connections', { preHandler: authenticate }, async request => store.listConnections(request.user!.id));
-  app.post('/api/connections', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try {
-      const body = bodyObject(request.body);
-      const dbType = connectionKind(body.dbType);
-      const local = dbType !== 'netezza';
-      const input: ConnectionProfileInput = { name: requiredString(body.name, 'name'), host: local ? optionalLocalString(body.host, 'local') : requiredString(body.host, 'host'), port: typeof body.port === 'number' ? body.port : local ? 0 : undefined, database: requiredString(body.database, 'database'), user: local ? optionalLocalString(body.user, 'local') : requiredString(body.user, 'user'), password: local ? optionalLocalString(body.password, '') : requiredString(body.password, 'password'), dbType, readOnly: body.readOnly !== false };
-      return reply.code(201).send(store.createConnection(request.user!.id, input, encryptSecret(input.password, apiConfig.masterKey)));
-    } catch (error: unknown) { return reply.code(400).send({ code: 'INVALID_CONNECTION', message: error instanceof Error ? error.message : 'Invalid connection.' }); }
-  });
-  app.put<{ Params: { id: string } }>('/api/connections/:id', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try {
-      const body = bodyObject(request.body);
-      const dbType = connectionKind(body.dbType);
-      const local = dbType !== 'netezza';
-      const input: ConnectionProfileUpdate = {
-        name: requiredString(body.name, 'name'),
-        host: local ? optionalLocalString(body.host, 'local') : requiredString(body.host, 'host'),
-        port: typeof body.port === 'number' ? body.port : local ? 0 : undefined,
-        database: requiredString(body.database, 'database'),
-        user: local ? optionalLocalString(body.user, 'local') : requiredString(body.user, 'user'),
-        password: typeof body.password === 'string' && body.password.length > 0 ? body.password : undefined,
-        dbType,
-        readOnly: body.readOnly !== false,
-      };
-      const updated = store.updateConnection(request.user!.id, request.params.id, input, input.password ? encryptSecret(input.password, apiConfig.masterKey) : undefined);
-      if (!updated) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      await app.databaseRuntimes.closeConnection(request.params.id);
-      app.metadataService.invalidate(request.user!.id, request.params.id);
-      for (const session of app.lspSessions) session.invalidateConnection(request.params.id);
-      return updated;
-    } catch (error: unknown) { return reply.code(400).send({ code: 'INVALID_CONNECTION', message: error instanceof Error ? error.message : 'Invalid connection.' }); }
-  });
-  app.delete<{ Params: { id: string } }>('/api/connections/:id', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    if (!store.deleteConnection(request.user!.id, request.params.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-    await app.databaseRuntimes.closeConnection(request.params.id);
-    app.metadataService.invalidate(request.user!.id, request.params.id);
-    for (const session of app.lspSessions) session.invalidateConnection(request.params.id);
-    return { ok: true };
-  });
-  app.post('/api/connections/test', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    let testProfile: StoredConnection | undefined;
-    try {
-      const body = bodyObject(request.body);
-      const dbType = connectionKind(body.dbType);
-      const local = dbType !== 'netezza';
-      const password = local ? optionalLocalString(body.password, '') : requiredString(body.password, 'password');
-      const encrypted = encryptSecret(password, apiConfig.masterKey);
-      const profile: StoredConnection = {
-        id: `test-${randomUUID()}`,
-        name: requiredString(body.name, 'name'),
-        host: local ? optionalLocalString(body.host, 'local') : requiredString(body.host, 'host'),
-        port: typeof body.port === 'number' ? body.port : local ? 0 : 5480,
-        database: requiredString(body.database, 'database'),
-        user: local ? optionalLocalString(body.user, 'local') : requiredString(body.user, 'user'),
-        dbType,
-        passwordCiphertext: encrypted.ciphertext,
-        passwordIv: encrypted.iv,
-        passwordAuthTag: encrypted.authTag,
-        readOnly: true,
-        userId: request.user!.id,
-        localDbRoot: apiConfig.localDbRoot ?? path.join(apiConfig.dataDir, 'local-databases'),
-      };
-      testProfile = profile;
-      await app.databaseRuntimes.execute(profile, 'SELECT 1', { maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined });
-      return { ok: true };
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' });
-    } finally {
-      if (testProfile) await app.databaseRuntimes.closeConnection(testProfile.id);
-    }
-  });
-  app.post<{ Params: { id: string } }>('/api/connections/:id/test', { preHandler: authenticate }, async (request, reply) => {
-    const profile = store.getConnection(request.user!.id, request.params.id);
-    if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-    try { await app.databaseRuntimes.execute(profile, 'SELECT 1', { maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined }); return { ok: true }; } catch (error: unknown) { return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' }); }
-  });
+  registerConnectionRoutes(app, { authenticate, validateCsrf, bodyObject, requiredString });
 
-  app.get('/api/metadata/databases', { preHandler: authenticate }, async (request, reply) => { const id = String((request.query as { connectionId?: string }).connectionId ?? ''); const profile = store.getConnection(request.user!.id, id); if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' }); return app.metadataService.listDatabases(app.databaseRuntimes, request.user!.id, profile); });
-  app.get('/api/metadata/schemas', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.metadataService.listSchemas(app.databaseRuntimes, request.user!.id, profile, query.database); });
-  app.get('/api/metadata/objects', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection or database not found.' }); return app.metadataService.listObjects(app.databaseRuntimes, request.user!.id, profile, query.database, query.schema); });
-  app.get('/api/metadata/columns', { preHandler: authenticate }, async (request, reply) => { const query = request.query as { connectionId?: string; database?: string; schema?: string; table?: string }; const profile = store.getConnection(request.user!.id, String(query.connectionId ?? '')); if (!profile || !query.database || !query.schema || !query.table) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Table scope not found.' }); return app.metadataService.listColumns(app.databaseRuntimes, request.user!.id, profile, query.database, query.schema, query.table); });
-  app.get('/api/designer/capabilities', { preHandler: authenticate }, async (request, reply) => {
-    try {
-      const input = parseDesignerCapabilitiesRequest(request.query);
-      const profile = store.getConnection(request.user!.id, input.connectionId);
-      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      return getDesignerCapabilitiesResponse(profile, input, app.databaseRuntimes);
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'DESIGNER_CAPABILITIES_FAILED', message: error instanceof Error ? error.message : 'Designer capabilities failed.' });
-    }
-  });
-  app.get('/api/designer/snapshot', { preHandler: authenticate }, async (request, reply) => {
-    try {
-      const input = parseDesignerCapabilitiesRequest(request.query);
-      const profile = store.getConnection(request.user!.id, input.connectionId);
-      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      return await getDesignerSnapshotResponse(profile, input, app.databaseRuntimes);
-    } catch (error: unknown) {
-      const statusCode = error instanceof Error && 'code' in error && error.code === 'DESIGNER_SNAPSHOT_UNAVAILABLE' ? 501 : 400;
-      return reply.code(statusCode).send({
-        code: error instanceof DesignerSnapshotUnavailableError ? error.code : 'DESIGNER_SNAPSHOT_FAILED',
-        message: error instanceof Error ? error.message : 'Designer snapshot failed.',
-      });
-    }
-  });
+  registerMetadataRoutes(app, { authenticate, validateCsrf });
+  registerDesignerRoutes(app, { authenticate });
 
   app.get('/api/history', { preHandler: authenticate }, async request => store.listHistory(request.user!.id));
   app.get('/api/audit', { preHandler: authenticate }, async request => {
@@ -1236,255 +414,21 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   });
   app.get('/api/preferences/editor', { preHandler: authenticate }, async request => store.getEditorPreferences(request.user!.id));
   app.patch('/api/preferences/editor', { preHandler: [authenticate, validateCsrf] }, async request => store.updateEditorPreferences(request.user!.id, request.body as import('@justybase/contracts').EditorPreferencesPatch));
-  app.get('/api/schema/tree', { preHandler: authenticate }, async (request, reply) => {
-    const query = request.query as { connectionId?: string; parentId?: string };
-    if (!query.connectionId) return reply.code(400).send({ code: 'INVALID_REQUEST', message: 'connectionId is required.' });
-    try { return await getSchemaTree(store, app.databaseRuntimes, request.user!.id, query.connectionId, query.parentId, app.metadataService); }
-    catch (error: unknown) { return reply.code(400).send({ code: 'SCHEMA_TREE_FAILED', message: error instanceof Error ? error.message : 'Schema tree failed.' }); }
-  });
-  app.post('/api/schema/search', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await searchSchema(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SchemaSearchRequest, app.metadataService); }
-    catch (error: unknown) { return reply.code(400).send({ code: 'SCHEMA_SEARCH_FAILED', message: error instanceof Error ? error.message : 'Schema search failed.' }); }
-  });
-  app.post('/api/lsp/completion', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await provideSqlCompletion(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlCompletionRequest, app.metadataService); }
-    catch (error: unknown) { return reply.code(400).send({ code: 'LSP_COMPLETION_FAILED', message: error instanceof Error ? error.message : 'Completion failed.' }); }
-  });
-  app.post('/api/lsp/diagnostics', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await provideSqlDiagnostics(store, app.databaseRuntimes, request.user!.id, request.body as import('@justybase/contracts').SqlDiagnosticsRequest, app.metadataService); }
-    catch (error: unknown) { return reply.code(400).send({ code: 'LSP_DIAGNOSTICS_FAILED', message: error instanceof Error ? error.message : 'Diagnostics failed.' }); }
-  });
-  app.post('/api/lsp/format', { preHandler: [authenticate, validateCsrf] }, async (request, reply) => {
-    try { return await formatSqlDocument(store, apiConfig, request.user!.id, request.body as import('@justybase/contracts').SqlFormatRequest); }
-    catch (error: unknown) { return reply.code(400).send({ code: 'LSP_FORMAT_FAILED', message: error instanceof Error ? error.message : 'Formatting failed.' }); }
-  });
-  app.get('/api/lsp/snippets', { preHandler: authenticate }, async () => ({ snippets: loadNetezzaSnippets() }));
-  app.post<{ Params: { id: string } }>('/api/query/:id/page', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    const job = app.queryJobs.get(request.params.id);
-    const input = parseQueryPageRequest(request.body);
-    const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
-    const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
-    if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
-    try { return app.querySessions.page(request.user!.id, sessionId, input); }
-    catch (error: unknown) { return reply.code(410).send({ code: 'RESULT_EXPIRED', message: error instanceof Error ? error.message : 'Query result expired.' }); }
-  });
-  app.post<{ Params: { id: string } }>('/api/query/:id/aggregate', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    const job = app.queryJobs.get(request.params.id);
-    const input = parseQueryAggregateRequest(request.body);
-    const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
-    const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
-    if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
-    try { return app.querySessions.aggregate(request.user!.id, sessionId, input); }
-    catch (error: unknown) { return reply.code(410).send({ code: 'RESULT_EXPIRED', message: error instanceof Error ? error.message : 'Query result expired.' }); }
-  });
-  app.post<{ Params: { id: string } }>('/api/query/:id/group', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    const job = app.queryJobs.get(request.params.id);
-    const input = parseQueryGroupRequest(request.body);
-    const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
-    const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
-    if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
-    try { return app.querySessions.group(request.user!.id, sessionId, input); }
-    catch (error: unknown) { return reply.code(410).send({ code: 'RESULT_EXPIRED', message: error instanceof Error ? error.message : 'Query result grouping failed.' }); }
-  });
-  app.post<{ Params: { id: string } }>('/api/query/:id/export', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    const job = app.queryJobs.get(request.params.id);
-    const input = parseQueryExportRequest(request.body);
-    const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
-    const sessionId = job?.sessionIds.get(statementIndex) ?? app.querySessions.querySessionId(request.user!.id, request.params.id, statementIndex);
-    if (!sessionId || (job && job.userId !== request.user!.id)) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
-    try {
-      const exported = createQueryExportStream(app.querySessions, request.user!.id, sessionId, input);
-      const fileName = (typeof input.fileName === 'string' && input.fileName.trim() ? input.fileName.trim().replace(/[^A-Za-z0-9._-]/g, '_') : `justybase-query-${request.params.id}`).replace(/\.+$/, '') || `justybase-query-${request.params.id}`;
-      reply.header('Content-Type', exported.contentType);
-      reply.header('Content-Disposition', `attachment; filename="${fileName}.${exported.extension}"`);
-      return reply.send(exported.stream);
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'EXPORT_FAILED', message: error instanceof Error ? error.message : 'Query export failed.' });
-    }
-  });
-  app.post('/api/query/preview', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      return reply.code(200).send(await previewQuery(app, request.user!.id, parseQueryStartRequest(request.body)));
-    } catch (error: unknown) {
-      const statusCode = error instanceof StaleDesignerSnapshotError ? 409 : error instanceof DesignerSnapshotUnavailableError ? 501 : 400;
-      return reply.code(statusCode).send({
-        code: error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_PREVIEW_REJECTED',
-        message: error instanceof Error ? error.message : 'Query preview rejected.',
-      });
-    }
-  });
-  app.post('/api/query/edit/preview', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      const input = request.body as QueryEditPreviewRequest;
-      const profile = app.store.getConnection(request.user!.id, input.connectionId);
-      if (!profile) throw new Error('Connection profile not found.');
-      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-      const sql = buildUpdateSql({ ...input, database }, profile.dbType);
-      return reply.code(200).send(operationPreview(app, request.user!.id, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        rowCount: 1,
-        warnings: ['The selected row will be updated. Verify the key columns and new values before execution.'],
-      }));
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'EDIT_PREVIEW_REJECTED', message: error instanceof Error ? error.message : 'Edit preview rejected.' });
-    }
-  });
-  app.post('/api/query/edit', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      const input = request.body as QueryEditRequest;
-      const profile = store.getConnection(request.user!.id, input.connectionId);
-      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-      const sql = buildUpdateSql({ ...input, database }, profile.dbType);
-      verifyWriteOperation(app, request.user!.id, profile, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        writeConfirmed: input.writeConfirmed,
-        writePreviewToken: input.writePreviewToken,
-      });
-      return reply.code(200).send(await executeConfirmedWrite(app, request.user!.id, profile, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        confirmed: input.writeConfirmed,
-      }));
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'EDIT_REJECTED', message: error instanceof Error ? error.message : 'Edit rejected.' });
-    }
-  });
-  app.post('/api/query/import/preview', { bodyLimit: MAX_IMPORT_BODY_BYTES, preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      const input = request.body as QueryImportPreviewRequest;
-      const profile = app.store.getConnection(request.user!.id, input.connectionId);
-      if (!profile) throw new Error('Connection profile not found.');
-      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-      const sql = buildInsertSql({ ...input, database }, profile.dbType);
-      return reply.code(200).send(operationPreview(app, request.user!.id, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        rowCount: input.rows.length,
-        warnings: [`${input.rows.length.toLocaleString()} row(s) will be inserted. Verify the target table and column mapping before execution.`],
-      }));
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'IMPORT_PREVIEW_REJECTED', message: error instanceof Error ? error.message : 'Import preview rejected.' });
-    }
-  });
-  app.post('/api/query/import', { bodyLimit: MAX_IMPORT_BODY_BYTES, preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      const input = request.body as QueryImportRequest;
-      const profile = store.getConnection(request.user!.id, input.connectionId);
-      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-      const sql = buildInsertSql({ ...input, database }, profile.dbType);
-      verifyWriteOperation(app, request.user!.id, profile, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        writeConfirmed: input.writeConfirmed,
-        writePreviewToken: input.writePreviewToken,
-      });
-      return reply.code(200).send(await executeConfirmedWrite(app, request.user!.id, profile, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        confirmed: input.writeConfirmed,
-      }));
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'IMPORT_REJECTED', message: error instanceof Error ? error.message : 'Import rejected.' });
-    }
-  });
-  app.post('/api/query/import-file/preview', { bodyLimit: MAX_IMPORT_BODY_BYTES, preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      const fileInput = request.body as QueryFileImportPreviewRequest;
-      const profile = app.store.getConnection(request.user!.id, fileInput.connectionId);
-      if (!profile) throw new Error('Connection profile not found.');
-      const targetColumns = fileInput.hasHeader === false
-        ? (await app.databaseRuntimes.listColumns(profile, effectiveDatabase(app.databaseRuntimes, profile, fileInput.database), fileInput.schema, fileInput.table)).map(column => column.name)
-        : undefined;
-      const input = await materializeFileImport(fileInput, targetColumns);
-      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-      const sql = buildInsertSql({ ...input, database }, profile.dbType);
-      return reply.code(200).send(operationPreview(app, request.user!.id, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        rowCount: input.rows.length,
-        warnings: [`${input.rows.length.toLocaleString()} row(s) from ${fileInput.fileName.trim()} will be inserted. Verify the target table and column mapping before execution.`],
-      }));
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'FILE_IMPORT_PREVIEW_REJECTED', message: error instanceof Error ? error.message : 'File import preview rejected.' });
-    }
-  });
-  app.post('/api/query/import-file', { bodyLimit: MAX_IMPORT_BODY_BYTES, preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      const fileInput = request.body as QueryFileImportRequest;
-      const profile = store.getConnection(request.user!.id, fileInput.connectionId);
-      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
-      const targetColumns = fileInput.hasHeader === false
-        ? (await app.databaseRuntimes.listColumns(profile, effectiveDatabase(app.databaseRuntimes, profile, fileInput.database), fileInput.schema, fileInput.table)).map(column => column.name)
-        : undefined;
-      const input = await materializeFileImport(fileInput, targetColumns);
-      const database = effectiveDatabase(app.databaseRuntimes, profile, input.database);
-      const sql = buildInsertSql({ ...input, database }, profile.dbType);
-      verifyWriteOperation(app, request.user!.id, profile, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        writeConfirmed: fileInput.writeConfirmed,
-        writePreviewToken: fileInput.writePreviewToken,
-      });
-      return reply.code(200).send(await executeConfirmedWrite(app, request.user!.id, profile, {
-        connectionId: input.connectionId,
-        database,
-        sql,
-        confirmed: fileInput.writeConfirmed,
-      }));
-    } catch (error: unknown) {
-      return reply.code(400).send({ code: 'FILE_IMPORT_REJECTED', message: error instanceof Error ? error.message : 'File import rejected.' });
-    }
-  });
-  app.post('/api/query', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    try {
-      const started = await startQuery(app, request.user!.id, parseQueryStartRequest(request.body));
-      return reply.code(202).send(started);
-    } catch (error: unknown) {
-      const statusCode = error instanceof StaleDesignerSnapshotError ? 409 : error instanceof DesignerSnapshotUnavailableError ? 501 : 400;
-      return reply.code(statusCode).send({
-        code: error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_REJECTED',
-        message: error instanceof Error ? error.message : 'Query rejected.',
-      });
-    }
-  });
-  app.post<{ Params: { id: string } }>('/api/query/:id/cancel', { preHandler: [authenticate, queryRateLimit, validateCsrf] }, async (request, reply) => {
-    const job = app.queryJobs.get(request.params.id);
-    if (!job || job.userId !== request.user!.id) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query not found.' });
-    if (!job.done) {
-      job.cancelRequested = true;
-      if (job.cancel) await job.cancel();
-    }
-    return { ok: true };
-  });
-  app.get('/api/ws', { websocket: true, preValidation: authenticate }, (socket, request) => {
-    socket.on('message', (raw: Buffer) => {
-      let message: { type?: string; queryId?: string; afterSequence?: number };
-      try { message = JSON.parse(raw.toString()) as { type?: string; queryId?: string; afterSequence?: number }; }
-      catch { socket.close(1003, 'Malformed JSON payload.'); return; }
-      if (message.type !== 'subscribe' || !message.queryId) return;
-      const job = app.queryJobs.get(message.queryId);
-      if (!job || job.userId !== request.user!.id) { socket.close(4404, 'Query result stream not found.'); return; }
-      job.subscribers.add(socket);
-      const afterSequence = Number.isFinite(message.afterSequence) ? message.afterSequence ?? 0 : 0;
-      for (const event of job.events) if ((event.sequence ?? 0) > afterSequence && socket.readyState === 1) socket.send(JSON.stringify(event));
-      socket.once('close', () => job.subscribers.delete(socket));
-    });
-  });
-  app.get('/api/lsp', { websocket: true, preValidation: authenticate }, (socket, request) => {
-    const session = attachLspSocket(socket, store, app.databaseRuntimes, request.user!.id, closed => app.lspSessions.delete(closed), app.metadataService);
-    app.lspSessions.add(session);
+  registerLspRoutes(app, { authenticate, validateCsrf });
+  registerResultRoutes(app, { authenticate, queryRateLimit, validateCsrf });
+  registerQueryRoutes(app, {
+    authenticate,
+    queryRateLimit,
+    validateCsrf,
+    importBodyLimit: MAX_IMPORT_BODY_BYTES,
+    previewQuery: queryUseCases.previewQuery,
+    startQuery: queryUseCases.startQuery,
+    editPreview: queryUseCases.editPreview,
+    edit: queryUseCases.edit,
+    importPreview: queryUseCases.importPreview,
+    importRows: queryUseCases.importRows,
+    importFilePreview: queryUseCases.importFilePreview,
+    importFile: queryUseCases.importFile,
   });
 
   const webRoot = path.resolve(apiConfig.webDistDir);
@@ -1496,21 +440,14 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   cleanupTimer.unref();
   app.addHook('onClose', async () => {
     clearInterval(cleanupTimer);
-    app.querySessions.closeAll();
-    app.metadataService.clear();
-    try {
-      await app.executionOrchestrator.dispose();
-    } finally {
-      app.rateLimiter.clear();
-      clearQueryJobs(app);
-      store.close();
-    }
+    await app.apiContext.dispose();
   });
   return app;
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
+    apiContext: ApiApplicationContext<QueryJob>;
     store: AppStore;
     apiConfig: ApiConfig;
     databaseRuntimes: ApiDatabaseRuntimeRegistry;

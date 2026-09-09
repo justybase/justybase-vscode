@@ -8,6 +8,7 @@ import { STALE_TTL_MULTIPLIER } from '@justybase/metadata-core';
 interface WebSocketLike {
   readyState: number;
   send(payload: string): void;
+  close?(): void;
   on(event: 'message' | 'close', handler: (payload: Buffer) => void): void;
 }
 
@@ -17,6 +18,7 @@ interface DocumentState { text: string; version: number; context: SqlLanguageCon
 export interface LspSession {
   invalidateConnection(connectionId: string): void;
   invalidateAll(): void;
+  close?(): void;
 }
 
 function contextFor(context: SqlLanguageContext | undefined): WebLspContext {
@@ -205,6 +207,7 @@ export function attachLspSocket(
         core.clearConnection(connectionId);
       }
     },
+    close: () => socket.close?.(),
   };
 
   socket.on('message', raw => {
