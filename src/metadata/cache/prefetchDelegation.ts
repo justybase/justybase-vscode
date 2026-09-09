@@ -9,6 +9,7 @@ import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
 import { Logger } from '../../utils/logger';
 import type { MetadataStore } from './MetadataStore';
 import type { ConnectionPrefetchOptions } from './MetadataPrefetchTarget';
+import { isFresh } from '@justybase/metadata-core';
 
 export interface PrefetchDelegationDeps {
   prefetcher: CachePrefetcher;
@@ -68,7 +69,7 @@ export function isConnectionPrefetchFresh(
   if (timestamp === undefined) {
     return false;
   }
-  return Date.now() - timestamp < deps.store.cacheTtl;
+  return isFresh(timestamp, Date.now(), deps.store.cacheTtl);
 }
 
 export function getLastPrefetchAttemptTime(

@@ -23,6 +23,7 @@
     "@justybase/contracts": "*",
     "@justybase/designer-core": "*",
     "@justybase/duckdb-runtime": "*",
+    "@justybase/metadata-core": "*",
     "@justybase/netezza-runtime": "*",
     "@justybase/sqlite-runtime": "*",
     "@justybase/spreadsheet-tasks": "*",
