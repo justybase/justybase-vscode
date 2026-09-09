@@ -21,8 +21,10 @@ only their resolved values and generated SQL remain.
 
 ## Declare and reference variables
 
-`%LET` and `@SET` are equivalent declaration forms. The value can be a literal
-or the result of another macro. The following sample combines both forms:
+`%LET`, `@SET`, and `DECLARE &NAME = ...` are declaration forms. The value can
+be a literal or the result of another macro. `DECLARE` uses the ampersand in
+the declaration name to distinguish script variables from procedural
+`DECLARE` statements. The following sample combines the existing forms:
 
 <!-- live-sample: let-and-set -->
 ```sql
@@ -33,6 +35,29 @@ SELECT
   &run_report AS run_report,
   COUNT(*) AS row_count
 FROM &dim_table;
+```
+
+`DECLARE` values keep their SQL literal quotes in expression positions and
+remove only their outer quotes when the value supplies an identifier. This
+allows both scalar and dynamic-name usage:
+
+```sql
+DECLARE &SEARCHED = 'ACTIVE';
+DECLARE &SUFFIX = '2026';
+
+SELECT NAME_&SUFFIX
+FROM ORDERS
+WHERE STATUS = &SEARCHED;
+```
+
+The same rule applies to dynamic table names and DDL:
+
+```sql
+DECLARE &TABLE_NAME = 'ORDERS';
+DECLARE &LIMIT_CNT = 50;
+
+SELECT * FROM &TABLE_NAME LIMIT &LIMIT_CNT;
+CREATE TABLE STAGE_&SUFFIX (ID INT4);
 ```
 
 The same variable can be written with an ampersand, a dollar sign, or a braced
@@ -495,7 +520,8 @@ query result, branch, and log event.
 
 In a Netezza SQL file, typing `%` offers snippets for `%LET`, `%IF`, `%ELSE`,
 `%END`, `%DO`, `%INCLUDE`, `%SQL`, `%SQLLIST`, `%EVAL`, `%PYTHON`, `%EXPORT`,
-and `%PUT`. Typing `@` offers the `@SET` declaration. Inside `%EXPORT`, completion
+and `%PUT`. The `nzmacrodeclare` snippet inserts a `DECLARE &NAME = value;`
+declaration, while typing `@` offers the `@SET` declaration. Inside `%EXPORT`, completion
 offers `format`, `file`, `sheet`, `query`, `overwrite`, and `update`, including
 format and boolean values. Typing `%E` narrows the directive list to `%ELSE`,
 `%END`, `%EVAL`, and `%EXPORT`; the completion range replaces only the letters

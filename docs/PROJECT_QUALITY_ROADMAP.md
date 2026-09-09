@@ -1,6 +1,6 @@
 # Project Quality Improvement Roadmap
 
-Last audited: 2026-09-03
+Last audited: 2026-09-09
 
 Baseline commit: `05f1ad8`
 
@@ -54,9 +54,11 @@ also concentrate orchestration and UI state: Result Panel bootstrap and host
 view code exceed 3,000 lines, while schema, metadata prefetch, filters, and grid
 construction exceed 2,000 lines.
 
-The dependency-boundary check currently protects only three shared-package
-roots from importing `vscode`. It does not detect cycles or enforce the full
-desktop/shared/API/web dependency direction.
+The repository-wide dependency check now protects the seven configured layers,
+resolves workspace and alias imports, rejects forbidden platform dependencies,
+and fingerprints strongly connected components. The current graph still has
+documented legacy exceptions, but a new cycle or changed exception fails the
+gate.
 
 ## Definition of done by risk
 
@@ -91,7 +93,7 @@ high-risk change merged without multi-layer evidence.
 
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
-| CQ01 | P0 | XL | Result Panel owner | planned | Decompose Result Panel bootstrap, host messaging, persistence, filtering, selection, and rendering into bounded modules. Preserve existing facades and cycle constraints. Each extraction lands with behavior-parity tests; no new module combines UI rendering, transport, and persistence. |
+| CQ01 | P0 | XL | Result Panel owner | done | Decomposed Result Panel state/identity, host coordination, messaging, persistence, row-count/grouping dependencies, filtering, aggregation, and rendering boundaries while preserving facades and behavior. Added platform-neutral `@justybase/result-core`, a desktop synchronization adapter, and a web query/grid adapter; shared operations preserve NULL, decimal, large-number, filtering, grouping, streaming, cancellation, and legacy-identity behavior. Removed the migrated Result Panel cycle. Evidence: `packages/result-core/`, `src/state/resultCoreStateAdapter.ts`, `src/state/resultStateManager.ts`, `media/resultPanel/rowCount.ts`, `media/resultPanel/diskGroupingState.ts`, `media/resultPanel/grid/persistence.ts`, `apps/web/src/queryState.ts`, `apps/web/src/ResultGrid.tsx`, `src/__tests__/resultPanelStateContract.test.ts`, `src/__tests__/resultPanelView.scroll.test.ts`, `src/__tests__/resultPanelGrid.test.ts`, `scripts/extensionHost/extensionHost.js`, `test-harness/tests/table-rendering.spec.ts`, `quality/architecture-rules.json`. Verified 2026-09-09 with `npm run verify:pr`, `npm run test:extension-host`, `npm run test:extension-host:designer`, and 19/19 Playwright tests. Windows CI remains the platform-specific follow-up. |
 | CQ02 | P1 | XL | Desktop/API owners | planned | Split the largest host view, schema, metadata-prefetch, API server, and React application coordinators by responsibility. Files above 800 lines trigger design review; generated data and declarative catalogs are exempt. |
 | CQ03 | P0 | L | Architecture owner | done | Extended `check:architecture` into a fail-closed TypeScript Compiler API graph check with seven configured layers, workspace/alias/`.js` resolution, exact path exceptions, unresolved-import diagnostics, and fingerprinted SCC detection. Evidence: `quality/architecture-rules.json`, `scripts/architecture-check.mjs`, `scripts/architecture-check.test.mjs`, and `docs/ARCHITECTURE.md`. Verified 2026-09-06: `npm run test:quality-tools`, `npm run check:architecture`, `npm run check-types`, `npm run verify:pr`, and `npm run docs:check` pass. |
 | CQ04 | P0 | L | Webview protocol owner | done | Replaced Result Panel catch-all messages with exhaustive host/webview unions and runtime validation at both untrusted boundaries. Compile-time command sync and negative rejection paths are covered. Evidence: `media/resultPanel/hostContracts.ts`, `media/resultPanel/protocol.ts`, `src/contracts/webviews/resultPanelRuntime.ts`, `src/__tests__/resultPanelProtocol.test.ts`, `src/__tests__/resultPanelView.scroll.test.ts`. Verified 2026-08-31. |
@@ -106,18 +108,28 @@ adds pure-package import checks, exact exceptions with removal conditions and
 the read-only `architecture:report` inventory. The first SQL validation slice
 now has package-owned Netezza parser and semantic validation, a reversible
 compatibility boundary and a parity harness. Legacy validation remains for
-non-Netezza dialects. CQ01/CQ02 and subsequent runtime migrations remain
-separate work, ordered in the [refactoring plan](REFACTORING_PLAN.md).
+non-Netezza dialects. CQ01 is complete for the Result Panel slice; CQ02 and
+subsequent runtime migrations remain separate work, ordered in the
+[refactoring plan](REFACTORING_PLAN.md).
 
-R2 runtime extraction is being verified as a separate vertical slice: SQLite,
-DuckDB and Netezza have instance-scoped Node runtime packages, API adapters use
-the registry, desktop SQLite/DuckDB facades share the runtime sessions, and the
+R2 runtime extraction is accepted as a separate vertical slice: SQLite, DuckDB
+and Netezza have instance-scoped Node runtime packages, API adapters use the
+registry, desktop SQLite/DuckDB facades share the runtime sessions, and the
 Netezza driver is imported only by `@justybase/netezza-runtime`. Evidence is in
-the three package manifests/sources, API runtime tests, DuckDB/File SQL
-integration suites and the architecture package-boundary gate. R2 is not yet
-accepted: full lifecycle, packaging and Extension Host gates remain to be
-verified, including live Netezza. Windows Extension Host requires its matching
-environment; the Linux environment does not provide evidence for Windows.
+the three package manifests/sources, API/runtime tests, DuckDB/File SQL
+integration suites, packaging checks and the architecture package-boundary
+gate. The formal Windows Extension Host and live-Netezza checks remain
+environment-specific release evidence; the Linux environment does not provide
+evidence for Windows.
+
+The R4 metadata-rule slice is implemented as a concrete
+`@justybase/metadata-core` package. Desktop cache, prefetch, index, identifier,
+completeness, disk-restart, and both schema-provider paths use the shared rules;
+the API metadata service is server-instance/owner/connection scoped and
+generation guarded. Its Linux verification is recorded in
+[`REFACTORING_PLAN.md`](REFACTORING_PLAN.md); Windows and live-database gates
+remain environment-specific follow-up evidence. CQ02 remains `planned` because
+the broader schema/API coordinator decomposition is not yet complete.
 
 Architecture completion means zero new cycles, no `vscode` dependency in shared
 packages, no untyped high-traffic webview command, and no state migration that
@@ -129,10 +141,10 @@ silently applies data belonging to another result identity.
 | --- | --- | --- | --- | --- | --- |
 | TQ01 | P0 | M | Test infrastructure owner | done | Fixed the unit network guard so blocked sockets emit an asynchronous error and database-driver timeout cleanup runs. The complete suite now terminates naturally without forced exit. Evidence: `src/__tests__/unitNetworkGuard.setup.ts`, `src/__tests__/metadataDiskCompress.test.ts`, `npm run test:validate`. Verified 2026-08-31. |
 | TQ02 | P0 | L | Test maintainer | planned | Raise coverage first in migration, activation, views, commands, editors, imports, and exports. Reach the changed-code gate before increasing global thresholds toward 80% lines/70% branches. |
-| TQ03 | P0 | XL | UI owners | in-progress | Result Panel now has an executable host-state contract covering stable identity, pinned/index transitions, source removal, streaming cancellation, late-chunk rejection, and active-source recovery. Evidence: `src/__tests__/resultPanelStateContract.test.ts`, `docs/RESULT_PANEL_REGRESSION.md`. Extend the same contract to the remaining stateful panels. Verified 2026-08-31. |
+| TQ03 | P0 | XL | UI owners | in-progress | Result Panel now has an executable host/state contract and deep scroll/browser/Extension Host evidence covering stable identity, pinned/index transitions, source removal, streaming cancellation, late-chunk rejection, active-source recovery, filtering, grouping, hidden-view recovery, and stream ordering. Evidence: `src/__tests__/resultPanelStateContract.test.ts`, `src/__tests__/resultPanelView.scroll.test.ts`, `docs/RESULT_PANEL_REGRESSION.md`, `scripts/extensionHost/extensionHost.js`, `test-harness/tests/table-rendering.spec.ts`. Verified 2026-09-09. Extend the same contract to the remaining stateful panels. |
 | TQ04 | P0 | L | Web owner | planned | Add jsdom and Testing Library coverage for React tabs, editor preferences, connection dialogs, schema navigation, result-grid state, errors, cancellation, and reload restoration. The current three reducer tests are insufficient for the shipped surface. |
 | TQ05 | P0 | L | Browser/host test owner | planned | Put high-traffic webviews, not only smoke rendering, under Playwright or Extension Host CI. Replace fixed waits with observable readiness where possible and retain sanitized failure snapshots/traces. |
-| TQ06 | P0 | XL | Execution owner | done | Desktop reconnect replay is limited to one proven call-free read-only statement before any streamed chunk. The shared retry classifier scans quoted identifiers while ignoring comments/literals, and cancellation survives reconnect cleanup without replay. Result transport carries stable identity, row offsets, and monotonic sequence; duplicate/delayed chunks and repeated terminal completion are ignored, while gaps/out-of-order delivery recover through one authoritative hydrate. Disk-backed activation preserves the same result identity and rejects delayed messages from inactive sources. Evidence: `src/core/queryRetrySafety.ts`, `src/core/batchQueryExecutor.ts`, `src/core/queryBatchExecutor.ts`, `media/resultPanel/streamingSequence.ts`, `media/resultPanel/messages.ts`, `media/resultPanel/diskBackedGrid.ts`, `src/core/resultDataProvider/types.ts`, `src/__tests__/batchQueryExecutor.test.ts`, `src/__tests__/singleQueryExecutor.test.ts`, `src/__tests__/streamingSequence.test.ts`, `src/__tests__/resultPanelHydrateDedup.test.ts`, `src/__tests__/resultPanelDiskBackedGrid.test.ts`, `scripts/extensionHost/extensionHost.js`, `.github/workflows/result-panel-regression.yml`. Verified 2026-09-03. |
+| TQ06 | P0 | XL | Execution owner | done | Shared instance-owned orchestration now governs desktop single/batch/stream and API execution with monotonic events, exactly one terminal summary, bounded safe reconnect, cancellation checks around reconnect, partial-progress retention and idempotent LIFO cleanup. Desktop activation owns its coordinator/streaming maps and timers; API construction owns jobs, rate limiting and cleanup timers. Replay remains limited to one proven call-free read-only statement before any row delivery. Result transport separately preserves stable identity, row offsets and monotonic sequence; duplicate/delayed chunks and repeated terminal completion are ignored, while gaps recover through authoritative hydrate. Evidence: `packages/contracts/src/queryExecution.ts`, `packages/database-runtime/src/execution.ts`, `packages/database-runtime/src/retrySafety.ts`, `src/core/execution/desktopExecutionBackend.ts`, `src/core/batchQueryExecutor.ts`, `src/core/singleQueryExecutor.ts`, `apps/api/src/server.ts`, `packages/database-runtime/__tests__/execution.test.ts`, `src/__tests__/desktopExecutionBackend.test.ts`, `src/__tests__/batchQueryExecutor.test.ts`, `src/__tests__/singleQueryExecutor.test.ts`, `media/resultPanel/streamingSequence.ts`, `scripts/extensionHost/extensionHost.js`. Verified 2026-09-09. |
 | TQ07 | P1 | L | Metadata owner | done | Restart, corrupt metadata/columns, stale TTL, committed DDL invalidation, same-process prefetch deduplication, two-writer fence ordering, lock expiry, v2-column-to-v3 rewrite, future/legacy isolation, fingerprint changes, external refresh, and host↔LSP invalidation are covered. Evidence: `src/__tests__/metadataCache.diskPersistence.test.ts`, `src/__tests__/metadataDiskStorage.test.ts`, `src/__tests__/metadataDiskLock.test.ts`, `src/__tests__/tableDdlSynchronizer.test.ts`, `src/__tests__/metadataHostLspCoherence.test.ts`, `src/__tests__/integration/metadataCacheRestart.integration.test.ts`. Verified 2026-09-01. |
 | TQ08 | P1 | XL | Data movement owner | planned | Add import/export/migration round trips for nulls, Unicode, large integers, decimals, timestamps/time zones, duplicate headers, empty files, cancellation, partial failure, and temporary-resource cleanup. |
 | TQ09 | P1 | XL | Dialect owners | planned | Build a reusable dialect contract for connection, metadata, completion, diagnostics, quoting, cancellation, read-only behavior, DDL, and import/export. Run local/container databases on PRs and controlled credentialed systems on schedules. |

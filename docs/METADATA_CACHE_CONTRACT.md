@@ -2,6 +2,23 @@
 
 Maintainer reference for cache layers, write semantics, TTL, events, and host↔LSP synchronization.
 
+## Shared rule ownership
+
+`@justybase/metadata-core` is the platform-neutral rule layer. It provides the
+encoded key codec, dialect-supplied identifier policies, fresh/stale/expired
+TTL classification, snapshot completeness, full-snapshot and refreshed-type
+merge operations, lookup-index construction, prefetch planning, scoped
+invalidation matching, and generation guards. It has no VS Code, database
+driver, filesystem, timer, logger, or transport dependency.
+
+The desktop `MetadataCache` remains the stateful adapter around VS Code,
+catalog SQL, progress events, lazy column hydration, and disk persistence. The
+API uses one `ApiMetadataService` owned by each `buildServer` instance. API
+cache keys contain namespace, authenticated owner, connection, layer, and
+encoded metadata parts; invalidation is scoped to owner+connection and a
+generation check rejects late responses. A second server instance therefore
+cannot observe another instance's metadata cache.
+
 ## Cache layers and keys
 
 | Layer | Key format | Write semantics |
@@ -16,6 +33,13 @@ Maintainer reference for cache layers, write semantics, TTL, events, and host↔
 | `objectLookup` / `objectsByType` | derived | Invalidated on `setTables` / `invalidateSchema`; rebuilt lazily |
 
 Connection names are passed through as provided by callers (some lookup methods normalize to uppercase).
+
+API keys use the shared tagged codec rather than uppercasing the complete key.
+Netezza user identifiers use the dialect policy (unquoted names fold to upper
+case; quoted names remain exact), while catalog values are preserved. SQLite,
+DuckDB, and other case-sensitive adapters retain the spelling supplied by the
+caller. Empty schema segments remain explicit, so `DB..TABLE` cannot collide
+with `DB.SCHEMA.TABLE`.
 
 For Netezza, catalog-derived database names use an exact, encoded cache-key
 part (`@NZEX@...`). This prevents distinct catalog objects such as `JUST_DATA`
@@ -65,6 +89,8 @@ Skipping step 2 removes all TABLE entries for that schema key.
 - `cacheTtl` — configured via `cacheTTL` (default 12 hours).
 - `staleTtl` — `2 × cacheTtl`; entries may still be served until stale window ends, then evicted on read.
 - **Prefetch freshness** (`isConnectionPrefetchFresh`) uses `cacheTtl` only, not `staleTtl`.
+- Pure TTL decisions receive an explicit timestamp; `Date.now()` remains in
+  the desktop/API adapters that own scheduling and I/O.
 - `currentSchema` uses the same TTL/stale window as `schema`.
 - **Full-refresh column sessions** are controlled by
   `justybase.metadata.fullRefreshColumnConnections` (default `1`, maximum `8`).
@@ -269,6 +295,9 @@ npm run test:metadata-cache:integration
 Tests simulate: populate cache → `dispose` (disk write) → new `MetadataCache` → `initialize()` → column/object-list access without `runQueryRaw` (TABLE, PROCEDURE, SEQUENCE, SYNONYM, MATERIALIZED VIEW, SYSTEM VIEW, schemas).
 
 Key files:
+
+- `packages/metadata-core/__tests__/rules.test.ts`
+- `apps/api/tests/metadataCache.test.ts`
 
 - `src/__tests__/integration/metadataCacheRestart.integration.test.ts`
 - `src/__tests__/fixtures/metadataCacheRestartFixture.ts`

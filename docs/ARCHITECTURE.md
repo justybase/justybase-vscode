@@ -50,8 +50,8 @@ React renderer -> HTTP client -> API backend
 | Logic | Target owner |
 | --- | --- |
 | Parser, linter, completion and SQL scope | `@justybase/sql-core` |
-| Metadata model and pure merge/invalidation rules | future `@justybase/metadata-core` |
-| Result reducer, identity and pure data operations | future `@justybase/result-core` |
+| Metadata model and pure merge/invalidation rules | `@justybase/metadata-core` |
+| Result reducer, identity and pure data operations | `@justybase/result-core` |
 | Execution, cancellation, retry and runtime resource cleanup | `@justybase/database-runtime` |
 | Database-specific driver and Node I/O | `@justybase/sqlite-runtime`, `@justybase/duckdb-runtime`, `@justybase/netezza-runtime` |
 | Database-specific SQL grammar and authoring | future `@justybase/dialect-<kind>` |
@@ -60,9 +60,9 @@ React renderer -> HTTP client -> API backend
 | DOM/TanStack webviews and React components | separate desktop and React renderers |
 
 These are ownership decisions, not a claim that every future engine already
-exists. `designer-core` already owns pure designer logic; `access-file` is a
-Node file runtime. `sql-core` is platform-neutral and does not bundle desktop
-sources. The API LSP adapter owns metadata bridging and transport composition;
+exists. `designer-core`, `result-core`, and `metadata-core` already own pure
+designer, result, and metadata rules; `access-file` is a Node file runtime.
+`sql-core` is platform-neutral and does not bundle desktop sources. The API LSP adapter owns metadata bridging and transport composition;
 the desktop adapter owns VS Code integration and stateful cache orchestration.
 Pure engines receive schema providers, dialect profiles and other services as
 arguments. Existing registries remain at their current compatibility seams;
@@ -120,6 +120,17 @@ Electron APIs must stay in its adapter, never in a shared package.
   `apps/web` consumes contracts through REST/LSP and renders Monaco/TanStack
   views.
 
+`@justybase/metadata-core` owns platform-neutral metadata keys, identifier
+policies, TTL classification, snapshot completeness, object-type merging,
+lookup-index construction, prefetch decisions, and generation rules. Desktop
+keeps VS Code cache layers, catalog queries, progress, disk formats, and
+hydration in its adapter. The API creates one `ApiMetadataService` per server
+instance; its keys include the authenticated owner and connection identity, and
+generation checks prevent an invalidated request from repopulating the cache.
+Netezza user identifiers fold according to Netezza rules, while catalog values
+remain exact. Other dialects use case-preserving keys unless their adapter
+provides a different policy.
+
 ## Shared designer boundary
 
 `packages/designer-core` is the browser-safe, platform-neutral home for
@@ -147,14 +158,20 @@ desktop, API, and web consumers.
 The desktop result panel has a host state machine and a webview state machine.
 The host streams rows (`appendRows`), sends authoritative hydrates, and keeps
 disk-backed rows in SQLite when thresholds are exceeded. The webview owns grid
-rendering, filtering, virtualization, and scroll persistence.
+rendering, virtualization and presentation persistence. The platform-neutral
+`@justybase/result-core` owns identity, structural state transitions and pure
+filter/aggregation operations; `src/state/resultCoreStateAdapter.ts` bridges
+the desktop resource-owning manager, while the web query adapter consumes the
+same portable event reducer. Storage, transport, DOM and VS Code lifecycle
+remain product-specific.
 
 Every result now receives a stable `resultSetId`. Execution timestamps remain
 useful metadata and are retained for backwards compatibility, but they are not
 an identity: Logs can move to index zero, pinned results can shift indices, and
-two executions can share a millisecond. Grid state therefore writes keys in
-`source:index:resultSetId` form, reads legacy timestamp keys, and stores the ID
-in cached scroll state.
+two executions can share a millisecond. Desktop grid state stores the stable ID
+alongside the source/index projection and reads the legacy timestamp fallback;
+the web grid uses a versioned `resultSetId` envelope with the legacy key as a
+read fallback. Cached scroll state also carries the ID.
 
 The real Extension Host bridge exposes a bounded diagnostic snapshot. The
 `scrollResult` action drives production virtualization; the snapshot reports
@@ -164,11 +181,20 @@ SQL or row values in sanitized CI artifacts.
 
 ## Desktop execution lifecycle
 
-`src/core/queryRetrySafety.ts` owns conservative replay classification for
-single, sequential-batch, and streaming desktop execution.
-`src/core/batchQueryExecutor.ts` owns the logical batch lifecycle. A reconnect
-keeps the original execution ID and may emit `retrying`, but the lifecycle
-emits exactly one terminal status: `success`, `error`, or `cancelled`.
+`@justybase/database-runtime/execution` owns the product-neutral single/batch/
+stream lifecycle: monotonic event order, statement attempts, cancellation,
+timeout, reconnect eligibility, terminal state and resource cleanup. Desktop
+code imports this narrow subpath so execution does not pull the runtime's
+legacy Netezza compatibility facade into the desktop dependency graph.
+
+`src/core/execution/desktopExecutionBackend.ts` is the VS Code adapter. It owns
+connection acquisition, notices, timing and the structural bridge to the
+activation-owned `StreamingManager`; history, macros and UI callbacks remain
+in the single/batch product adapters. `src/core/batchQueryExecutor.ts` no longer
+owns a parallel lifecycle. A reconnect keeps the original execution ID and may
+emit `retrying`, while the shared lifecycle emits exactly one terminal status:
+`success`, `error`, or `cancelled`, followed by the compatibility
+`batch-completed` event carrying the same summary.
 
 Automatic replay after a broken persistent connection is deliberately
 conservative. It is limited to one allow-listed, call-free read-only statement
@@ -180,7 +206,15 @@ partial rows remain visible and the failure is terminal to prevent duplicates.
 The execution-generation guard is checked around chunk delivery so a retired
 execution cannot update a replacement owner. Every cancellation path invokes
 statement-failure cleanup before leaving the batch so transaction-scoped
-metadata state cannot survive a terminated execution.
+metadata state cannot survive a terminated execution. Resources registered by
+an execution are released once in reverse registration order; cleanup errors
+are retained in the summary and do not replace an earlier database cause.
+
+`StreamingManager` and `QueryExecutionCoordinator` are created during
+extension activation. Compatibility exports delegate to those instances; maps
+and timers are disposed on deactivation. The API similarly owns one
+orchestrator, rate limiter and query-job registry per `buildServer` instance
+and drains them when the server closes.
 
 ## Dependency direction
 
@@ -226,8 +260,9 @@ changed strongly connected component, and `ARCH004` reports invalid or stale
 configuration. Existing cycles are represented by exact node lists and a
 SHA-256 fingerprint of their internal edges in `cycleExceptions`. A new edge
 inside one of those components changes the fingerprint and fails the check;
-new components fail as well. This preserves the Result Panel cycle guard while
-leaving the planned decomposition work to its owning CQ item.
+new components fail as well. The migrated Result Panel orchestration cycle has
+been removed. The remaining exceptions are unrelated, exact migration targets
+and continue to be guarded by their fingerprints.
 
 The regression suite in
 [`scripts/architecture-check.test.mjs`](../scripts/architecture-check.test.mjs)

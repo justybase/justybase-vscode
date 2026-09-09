@@ -2,6 +2,32 @@
 
 This document defines the behavioral contract for query execution in JustyBaseLite-netezza. It serves as the single source of truth for how queries flow through the system, what the result shapes look like, and how cancellation, retries, and streaming work.
 
+## Shared lifecycle owner
+
+`@justybase/database-runtime/execution` is the canonical orchestration layer.
+It receives an `ExecutionRequest` plus an injected backend and owns execution
+identity, statement attempts, timeout/cancellation, reconnect policy, event
+sequence, resource cleanup and the terminal summary. Editor state, history,
+authorization, credentials and transport messages remain in product adapters.
+
+The ordered lifecycle is:
+
+```text
+execution-started
+  → statement-started
+  → columns / rows / progress (zero or more)
+  → statement-completed | statement-failed
+  → retrying + statement-started ... (at most once when eligible)
+  → execution-terminal
+  → batch-completed
+```
+
+Every event has a sequence number increasing within one execution. Exactly one
+`execution-terminal` and one compatibility `batch-completed` event are emitted,
+both with the same immutable summary. A detached observer receives no later
+callbacks but does not cancel execution or release its results. A failed or
+cancelled statement may carry partial row/limit progress.
+
 ## Execution Modes
 
 ### 1. Single Query (`singleQueryExecutor.ts`)
@@ -18,13 +44,15 @@ runQueryRaw
   → resolveQueryVariables (${var..} substitution)
   → resolveConnectionName
   → clear stale document cancellation flag (document-bound execution only)
-  → getConnectionForDocument (persistent or new)
-  → streamingManager.executeAndFetch
+  → shared ExecutionOrchestrator
+    → desktop backend acquires a persistent or transient connection
+    → streamingManager.executeAndFetch
   → log to history
   → return QueryResult
 ```
 
-**Retry logic:** On `isConnectionBrokenError`, a persistent execution retries
+**Retry logic:** On `isConnectionBrokenError`, the shared owner retries a
+persistent execution
 once only when both the original and fully expanded SQL contain one
 allow-listed, call-free read-only statement. Writes, executable macros,
 function/sequence expressions, multi-statement payloads, and ambiguous SQL fail
@@ -39,17 +67,17 @@ without replay and report that the database outcome may be unknown.
 **Flow:**
 ```
 for each query:
-  → queryStartCallback (UI: "executing query N/M")
-  → streamingManager.executeAndFetch
-  → queryEndCallback (success/error/cancelled)
+  → shared statement-started → queryStartCallback
+  → desktop backend → streamingManager.executeAndFetch
+  → shared statement-completed/failed → queryEndCallback
   → logQueryToHistoryAsync
   → resultCallback (partial results to UI)
 ```
 
 **Key behaviors:**
 - Cancellation is checked before each statement and after each execution
-- On a broken connection, `handleBatchRetry` reconnects and resumes from the
-  failed statement index only for one proven read-only statement
+- On a broken connection, the shared orchestrator reconnects and repeats only
+  the failed statement, and only for one proven safe read-only statement
 - Cancellation observed during reconnect cleanup is terminal: the persistent
   connection is not replayed, and the execution emits one `cancelled` status.
 - `yieldAfterStatement` pauses briefly after every 5th fast statement to prevent UI starvation
@@ -65,7 +93,11 @@ for each query:
 
 ## StreamingManager (`StreamingManager.ts`)
 
-Singleton exported from `queryCancellation.ts`, implemented in `src/core/streaming/StreamingManager.ts`. Manages command lifecycle, cancellation, and data delivery.
+An instance is created during extension activation and exposed through the
+compatibility facade in `queryCancellation.ts`. It manages driver command
+lifecycle, low-level cancellation and row delivery; it does not own the logical
+execution lifecycle. Deactivation disposes command maps, pending-abort state and
+cleanup timers.
 
 ### Command Registration
 
@@ -186,7 +218,7 @@ Column type resolution follows this priority:
 
 **Conditions for retry:**
 - Error matches `isConnectionBrokenError` (TCP reset, ECONNRESET, etc.)
-- Not already a retry attempt (`_isRetry === false`)
+- No prior reconnect attempt in the logical execution
 - Document has a persistent connection (`keepConnectionOpen`)
 - Original and expanded SQL resolve to one conservatively allow-listed
   read-only statement
@@ -194,9 +226,10 @@ Column type resolution follows this priority:
 
 **Retry flow:**
 1. Close the persistent connection (`closeDocumentPersistentConnection`)
-2. Re-execute from the failed statement index (batch) or from scratch (single)
-3. `queryEndCallback` receives `'retrying'` using the original execution ID
-4. The retried execution emits exactly one terminal status; cancellation before
+2. Re-execute only the failed statement (which is the sole statement for single)
+3. Emit `retrying` using the original execution ID, then a new
+   `statement-started` attempt
+4. The logical execution emits exactly one terminal status; cancellation before
    replay produces `cancelled` and no second database execution
 
 Writes, DDL, calls, executable macros, function/sequence expressions,
@@ -210,6 +243,23 @@ The dialect-neutral allow-list treats PostgreSQL positional parameters (`$n`),
 JSON path operators (`#>`/`#>>`), and compact leading line comments as inert
 syntax. A standalone `#` and an inline compact `--text` remain ambiguous and
 therefore suppress automatic retry.
+
+## Resource and error ownership
+
+- Each execution owns a resource scope. Readers, commands, timers or other
+  adapter resources registered there are disposed once in reverse order.
+- Backend cleanup runs after the scope on success, error, cancellation and
+  timeout. Repeated cancellation/disposal is idempotent.
+- Cleanup failures are retained in `cleanupErrors`. They turn an otherwise
+  successful execution into an error but do not replace an earlier database
+  failure or its `cause`.
+- Late driver callbacks are ignored after cancellation, terminal transition or
+  observer detachment; late command handles are cancelled best-effort.
+- Persistent reconnect closes only the target connection. Transient execution
+  closes only the connection lease it acquired; there is no execution-ID based
+  fallback that can close an unrelated connection.
+- Mutable registries are instance-owned. Two orchestrators, extension
+  activations or API server instances cannot cancel or dispose one another.
 
 Desktop Result Panel append messages carry the stable result-set identity, an
 authoritative row offset, and a monotonic chunk sequence. Duplicate or delayed

@@ -212,6 +212,10 @@ and `result-panel-regression.yml` (Windows Extension Host).
 
 Related: CQ01, CQ04, CQ05.
 
+Status: implementation complete on Linux (2026-09-09). The formal Windows
+build/package and Extension Host checks remain release-CI evidence because this
+workspace is Linux/WSL; they are not represented as locally passed.
+
 1. Extract result-core: stable identity and pure state transitions.
 2. Distinguish source, execution, result set, and storage session; index and
    timestamp are not new identities. Preserve `resultSetId` and the legacy
@@ -230,9 +234,37 @@ Presentation state must not persist entire results as UI state.
 Acceptance: two consumers of the shared model, a state and scroll matrix, and
 no cycles in the migrated orchestration.
 
+R3 implementation evidence (2026-09-09, Linux):
+
+- `packages/result-core` now owns stable identity, the pure result-panel state
+  reducer, portable query-event reduction, exact filtering and aggregation.
+  `src/state/resultCoreStateAdapter.ts` bridges the desktop
+  `ResultStateManager`; `apps/web/src/queryState.ts` and `apps/web/src/ResultGrid.tsx`
+  are the second consumer path.
+- Desktop and web persisted grid state use versioned envelopes keyed by
+  `resultSetId`, retain the legacy fallback, and do not persist result rows as
+  presentation state. Result identity keeps source, execution, result-set and
+  storage-session roles distinct.
+- The Result Panel graph extraction removed the migrated orchestration cycle;
+  `npm run check:architecture` passes with the remaining unrelated cycles
+  still represented by exact configured exceptions.
+- Pure reducer/operation tests, desktop state/scroll/grid tests, web tests and
+  the real UI boundaries pass: `npm run test:result-core` (2 suites/15 tests),
+  focused desktop Result Panel suites (171 tests plus 55 scroll assertions),
+  `npm run test:web` (3 suites/22 tests), the SQLite Extension Host result-panel
+  and designer gates, and Playwright `table-rendering.spec.ts` (19/19).
+- `npm run verify:pr`, `npm run build`, `npm run build:all`,
+  `npm run check-types`, `npm run lint:extended:check`, and the full coverage
+  suite pass. The coverage run reports 544 suites/9,604 tests and remains above
+  all configured thresholds.
+
 ### R4 — Metadata Rules
 
 Related: CQ02, CQ06.
+
+Status: implementation complete on Linux (2026-09-09). Windows and live
+database checks remain environment-specific evidence and are not represented
+as locally passed.
 
 1. Extract metadata-core: keys, merging, completeness, indexes, and
    invalidation.
@@ -249,6 +281,30 @@ Related: CQ02, CQ06.
 
 Acceptance: shared desktop/API rules, cache restart, VIEW refresh preserving
 TABLE, and SQL025/026 working through both adapters.
+
+R4 implementation evidence (2026-09-09, Linux):
+
+- `packages/metadata-core` owns tagged/encoded keys, dialect identifier
+  policies, TTL classification, completeness, object-type merge, indexes,
+  prefetch planning, scoped invalidation, and generation guards. Its focused
+  suite passes 12 tests, including `DB..TABLE`, quoted/unquoted Netezza
+  collisions, exact TTL boundaries, refreshed-record precedence, partial
+  columns, and per-scope invalidation.
+- Desktop adapters delegate stale TTL, prefetch freshness, table-like merge,
+  deferred index rebuild, snapshot completeness, and Netezza user identifier
+  folding to the shared rules. Existing v1/v2/v3 disk payloads and lazy column
+  restoration remain in the desktop disk adapter without a format change.
+- API metadata state is owned by `buildServer` through one
+  `ApiMetadataService`; keys include owner and connection, non-Netezza case is
+  preserved, Netezza quoted names remain distinct, and generation checks block
+  late invalidated responses. Schema tree, REST metadata, HTTP LSP completion,
+  diagnostics, and WebSocket LSP all use that service.
+- Verification passed: `npm run check:architecture`, root `npx tsc --noEmit`,
+  metadata-core type/build/tests, the focused metadata suites (242 tests),
+  `npm run test:metadata-cache:integration` (19 tests), prefetch/column suites
+  (90 tests), and the complete API workspace suite (89 tests). Existing
+  restart, VIEW-preserving merge, `FORMAT_TYPE`/LSP `type` propagation, and
+  SQL025/SQL026 tests remain green.
 
 ### R5 — Execution Orchestration and Resources
 
@@ -270,6 +326,39 @@ Related: CQ02, CQ06, and the execution contract.
 
 Acceptance: one terminal execution status, no stale callbacks, a preserved
 retry contract, cleanup, and isolation between two backend instances.
+
+Status: completed 2026-09-09.
+
+Closure evidence:
+
+- `@justybase/contracts` defines the additive request, statement, context,
+  lifecycle-event, failure and summary model. Events have a monotonic sequence;
+  failed/cancelled statements may retain partial row and limit progress.
+- `@justybase/database-runtime/execution` owns the instance-scoped execution
+  map, phase transitions, one terminal summary, timeout/cancellation, one safe
+  reconnect attempt, callback retirement and LIFO resource cleanup. Backend
+  methods are bound to their instance, and disposing one orchestrator cannot
+  affect another.
+- Desktop single, sequential-batch and streaming paths use the same
+  orchestrator through `DesktopExecutionBackend`. The adapter retains VS Code,
+  history, macros, notices and connection acquisition; the runtime retains
+  ordering, retry and terminal-state decisions. The API uses an application-
+  owned orchestrator and maps its events to the existing HTTP/WebSocket wire
+  protocol without changing that protocol.
+- Read-only classification and replay safety remain separate. Replay requires
+  a broken persistent connection, no delivered rows, the explicit retry
+  policy, and one unambiguous call-free read-only statement. Cancellation
+  observed before, during or immediately after reconnect prevents replay.
+- `StreamingManager` and the desktop execution coordinator are activation-
+  owned instances behind compatibility facades. Their maps and cleanup timers
+  are disposed during deactivation. API rate limiting, execution jobs and
+  cleanup timers are server-instance state and are drained on close.
+- Focused verification covers event order, exactly-once terminal emission,
+  observer failure/detachment, timeout, cancellation races, partial streaming
+  failure, safe/unsafe retry, cleanup failures and order, persistent/transient
+  connections, disposal and two-instance isolation. Architecture passes
+  without widening the fingerprinted desktop/companion cycle: desktop imports
+  the narrow execution subpath and the adapter uses a structural chunk port.
 
 ### R6 — Companions Independent of Core Internals
 
