@@ -68,3 +68,28 @@ export type {
   MetadataObject,
   MetadataSchema,
 };
+
+export {
+  ExecutionCancelledError,
+  ExecutionBackendError,
+  ExecutionDisposedError,
+  ExecutionOrchestrator,
+  ExecutionResourceScope,
+  ExecutionTimeoutError,
+  createExecutionId,
+  createExecutionOrchestrator,
+  isConnectionBrokenError,
+} from './execution';
+export { isSafeToRetrySql } from './retrySafety';
+export type {
+  ExecutionBackend,
+  ExecutionBackendFailureMetadata,
+  ExecutionBackendContext,
+  ExecutionHandle,
+  ExecutionLogger,
+  ExecutionObserver,
+  ExecutionOrchestratorOptions,
+  ExecutionResource,
+  ExecutionScheduler,
+  ExecutionSnapshot,
+} from './execution';
