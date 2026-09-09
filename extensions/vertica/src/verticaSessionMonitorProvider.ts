@@ -1,20 +1,18 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
     emptySessionMonitorResources,
     escapeSqlLiteral,
     executeSessionMonitorStatement,
     runSessionMonitorQuery,
     toNumber,
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 function toSessionId(value: unknown): string {
     return typeof value === 'string' ? value : String(value ?? '');
 }
 
 export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-    async getSessions(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getSessions(context, services) {
         const sql = `
             SELECT
                 SESSION_ID AS "ID",
@@ -35,13 +33,12 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         `;
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             sql,
         );
     },
 
-    async getQueries(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getQueries(context, services) {
         const sql = `
             SELECT
                 SESSION_ID AS "QS_SESSIONID",
@@ -69,13 +66,12 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         `;
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             sql,
         );
     },
 
-    async getStorage(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services) {
         const sql = `
             SELECT
                 CURRENT_DATABASE() AS "DATABASE",
@@ -91,7 +87,7 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         `;
         const rows = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             sql,
         );
         return rows.map((row) => ({
@@ -107,13 +103,12 @@ export const verticaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         return emptySessionMonitorResources();
     },
 
-    async killSession(context, mgr, sessionId) {
-        const connectionManager = mgr as ConnectionManager;
+    async killSession(context, services, sessionId) {
         const normalizedSessionId = toSessionId(sessionId).trim();
         if (!normalizedSessionId) {
             throw new Error('Invalid Vertica session ID.');
         }
         const sql = `SELECT CLOSE_SESSION('${escapeSqlLiteral(normalizedSessionId)}');`;
-        await executeSessionMonitorStatement(context, connectionManager, sql);
+        await executeSessionMonitorStatement(context, services, sql);
     },
 };

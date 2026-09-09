@@ -1,4 +1,4 @@
-import { createDelegatingMetadataProvider } from '../../../src/core/metadataProviderFactory';
+import { createDelegatingMetadataProvider } from '@justybase/database-utils/metadataProviderFactory';
 import {
     SNOWFLAKE_DEFAULT_COLUMN_OBJECT_TYPES,
     SNOWFLAKE_DEFAULT_OBJECT_TYPES,

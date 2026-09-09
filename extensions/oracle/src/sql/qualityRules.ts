@@ -1,4 +1,4 @@
-import { LintSeverity, type LintRule } from '../../../../src/providers/linterRules';
+import { LintSeverity, type LintRule } from '@justybase/sql-core/quality';
 import {
     createDeleteFromPattern,
     createDeleteWithoutWhereRule,
@@ -8,7 +8,7 @@ import {
     createStatementEndScanner,
     createUpdateSetPattern,
     createUpdateWithoutWhereRule,
-} from '../../../../src/providers/qualityRuleFactory';
+} from '@justybase/sql-core/quality';
 
 const statementEnd = createStatementEndScanner({ oracleQQuote: true });
 const identifier = createIdentifierPattern();

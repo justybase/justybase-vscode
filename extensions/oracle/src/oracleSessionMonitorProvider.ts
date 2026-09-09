@@ -1,19 +1,17 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
     emptySessionMonitorResources,
     executeSessionMonitorStatement,
     runSessionMonitorQuery,
     toNumber,
     validatePositiveIntegerSessionId
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 export const oracleSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-    async getSessions(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getSessions(context, services) {
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     s.SID AS "ID",
@@ -37,11 +35,10 @@ export const oracleSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getQueries(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getQueries(context, services) {
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     s.SID AS "QS_SESSIONID",
@@ -74,14 +71,13 @@ export const oracleSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getStorage(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services) {
         let rows: Record<string, unknown>[];
 
         try {
             rows = await runSessionMonitorQuery<Record<string, unknown>>(
                 context,
-                connectionManager,
+                services,
                 `
                     SELECT
                         NVL(SYS_CONTEXT('USERENV', 'CON_NAME'), SYS_CONTEXT('USERENV', 'DB_NAME')) AS "DATABASE",
@@ -106,7 +102,7 @@ export const oracleSessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
             rows = await runSessionMonitorQuery<Record<string, unknown>>(
                 context,
-                connectionManager,
+                services,
                 `
                     SELECT
                         NVL(SYS_CONTEXT('USERENV', 'CON_NAME'), SYS_CONTEXT('USERENV', 'DB_NAME')) AS "DATABASE",
@@ -136,12 +132,11 @@ export const oracleSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         return emptySessionMonitorResources();
     },
 
-    async killSession(context, mgr, sessionId) {
+    async killSession(context, services, sessionId) {
         validatePositiveIntegerSessionId(sessionId, 'Oracle');
-        const connectionManager = mgr as ConnectionManager;
         await executeSessionMonitorStatement(
             context,
-            connectionManager,
+            services,
             `
                 DECLARE
                     v_sid CONSTANT NUMBER := ${sessionId};

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { duckdbDialect } from './duckdbDialect';
 import { fileDialect } from './fileDialect';
 import { registerFileQueryCommand } from './fileQueryCommand';
-import { activateCoreExtension } from '../../../src/api/companionActivation';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const api = await activateCoreExtension();

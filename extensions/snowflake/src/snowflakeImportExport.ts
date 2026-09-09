@@ -1,4 +1,4 @@
-import { formatIdentifierForSql, formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+import { formatIdentifierForSql, formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 
 export interface SnowflakeStageLocation {
     stageName: string;

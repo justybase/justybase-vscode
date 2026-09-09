@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { DatabaseMaintenanceProvider } from '@justybase/contracts';
-import { openRecreateTableScript } from '../../../src/core/maintenanceProviderUtils';
-import { formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+import { openRecreateTableScript } from '@justybase/database-utils/maintenanceProviderUtils';
+import { formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 
 function getDuckDbQualifiedTableName(target: Parameters<NonNullable<DatabaseMaintenanceProvider['vacuumTable']>>[0]): string {
     return formatQualifiedObjectName(undefined, target.schemaName, target.tableName, 'duckdb');

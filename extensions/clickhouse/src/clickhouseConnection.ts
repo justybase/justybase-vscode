@@ -16,7 +16,7 @@ import {
     getOptionNumber,
     getOptionString,
     stripTrailingSemicolons,
-} from '../../../src/core/connectionUtils';
+} from '@justybase/database-utils/connectionUtils';
 
 type ClickHouseRow = Row<unknown, 'JSONCompactEachRowWithNamesAndTypes'>;
 type ClickHouseRowStream = AsyncIterable<ReadonlyArray<ClickHouseRow>>;

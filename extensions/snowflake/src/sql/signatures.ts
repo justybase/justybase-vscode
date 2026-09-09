@@ -1,5 +1,5 @@
-import { BASE_SQL_FUNCTION_SIGNATURES, mergeFunctionSignatures } from '../../../../src/sql/authoring/baseProfiles';
-import type { DatabaseSqlFunctionSignature } from '../../../../src/sql/authoring/types';
+import { BASE_SQL_FUNCTION_SIGNATURES, mergeFunctionSignatures } from '@justybase/sql-core/authoring/baseProfiles';
+import type { DatabaseSqlFunctionSignature } from '@justybase/sql-core/authoring/types';
 
 /**
  * Snowflake-specific function signature overlays

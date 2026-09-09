@@ -1,4 +1,4 @@
-import { createDelegatingMetadataProvider } from '../../../src/core/metadataProviderFactory';
+import { createDelegatingMetadataProvider } from '@justybase/database-utils/metadataProviderFactory';
 import {
     CLICKHOUSE_DEFAULT_COLUMN_OBJECT_TYPES,
     CLICKHOUSE_DEFAULT_OBJECT_TYPES,

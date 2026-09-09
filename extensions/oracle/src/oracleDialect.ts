@@ -6,12 +6,12 @@ import {
   DatabaseConnectionStaticConstructor,
   DatabaseDialect,
 } from "@justybase/contracts";
-import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
+import { createStandardConnectionFields } from "@justybase/database-utils/connectionFormBuilder";
 import { OracleConnection } from "./oracleConnection";
 import { oracleAdvancedFeatures } from "./oracleDdlGenerator";
 import { oracleMetadataProvider } from "./oracleSchemaProvider";
 import { oracleSqlAuthoring } from "./oracleSqlAuthoring";
-import { oracleDialectTraits } from "../../../src/shared/dialect-traits/oracle";
+import { oracleDialectTraits } from "@justybase/dialect-utils/traits/oracle";
 
 const oracleConnectionConstructor =
   OracleConnection as unknown as DatabaseConnectionStaticConstructor;

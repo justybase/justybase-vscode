@@ -1,5 +1,4 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
     emptySessionMonitorResources,
     escapeSqlLiteral,
@@ -8,11 +7,10 @@ import {
     runSessionMonitorQuery,
     toNumber,
     validatePositiveIntegerSessionId
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 export const mssqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-    async getSessions(context, mgr, database) {
-        const connectionManager = mgr as ConnectionManager;
+    async getSessions(context, services, database) {
         const scopedDatabase = normalizeDatabaseFilter(database);
         const whereClause = scopedDatabase
             ? `AND UPPER(COALESCE(DB_NAME(COALESCE(r.database_id, s.database_id)), '')) = UPPER('${escapeSqlLiteral(scopedDatabase)}')`
@@ -20,7 +18,7 @@ export const mssqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     s.session_id AS [ID],
@@ -46,8 +44,7 @@ export const mssqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getQueries(context, mgr, database) {
-        const connectionManager = mgr as ConnectionManager;
+    async getQueries(context, services, database) {
         const scopedDatabase = normalizeDatabaseFilter(database);
         const whereClause = scopedDatabase
             ? `AND UPPER(COALESCE(DB_NAME(r.database_id), '')) = UPPER('${escapeSqlLiteral(scopedDatabase)}')`
@@ -55,7 +52,7 @@ export const mssqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     r.session_id AS [QS_SESSIONID],
@@ -87,11 +84,10 @@ export const mssqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         );
     },
 
-    async getStorage(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services) {
         const rows = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     DB_NAME() AS [DATABASE],
@@ -123,9 +119,8 @@ export const mssqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         return emptySessionMonitorResources();
     },
 
-    async killSession(context, mgr, sessionId) {
+    async killSession(context, services, sessionId) {
         validatePositiveIntegerSessionId(sessionId, 'MS SQL Server');
-        const connectionManager = mgr as ConnectionManager;
-        await executeSessionMonitorStatement(context, connectionManager, `KILL ${sessionId};`);
+        await executeSessionMonitorStatement(context, services, `KILL ${sessionId};`);
     }
 };

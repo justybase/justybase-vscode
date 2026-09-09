@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { activateCoreExtension } from '../../../src/api/companionActivation';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
 import { isPostgresqlMaintenanceApi } from './postgresqlCommandContext';
 import { registerPostgresqlDesignerCommands } from './postgresqlDesignerCommands';
 import { postgresqlDialect } from './postgresqlDialect';

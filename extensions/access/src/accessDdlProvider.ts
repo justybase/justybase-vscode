@@ -16,8 +16,8 @@ import type {
     DatabaseDdlKeyInfo,
     DatabaseDdlResult,
 } from '@justybase/contracts';
-import type { ConnectionDetails } from '../../../src/types';
-import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
+import type { ConnectionDetails } from '@justybase/contracts';
+import { executeDatabaseQuery } from '@justybase/database-utils/query';
 import { AccessConnection } from './accessConnection';
 
 interface TableColumnRow {

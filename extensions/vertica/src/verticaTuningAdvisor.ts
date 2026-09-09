@@ -4,7 +4,7 @@ import {
     createTuningReport,
     type TuningRecommendation,
     type TuningReport,
-} from '../../../src/services/tuning/types';
+} from '@justybase/contracts';
 
 function addRecommendation(output: TuningRecommendation[], recommendation: TuningRecommendation): void {
     output.push(recommendation);

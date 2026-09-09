@@ -3,12 +3,12 @@ import type {
     ConnectionQueryResult,
     ConnectionSummary,
     JustyBaseLiteApi,
-} from '../../../src/api/publicApi';
+} from '@justybase/contracts';
 import type {
     DatabaseMaintenanceServices,
     DatabaseMaintenanceTarget,
 } from '@justybase/contracts';
-import { formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+import { formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 
 export interface MysqlSchemaItemData {
     label: string;

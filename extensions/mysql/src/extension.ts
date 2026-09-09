@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { activateCoreExtension } from '../../../src/api/companionActivation';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
 import { isMysqlMaintenanceApi } from './mysqlCommandContext';
 import { registerMysqlDesignerCommands } from './mysqlDesignerCommands';
 import { mysqlDialect } from './mysqlDialect';

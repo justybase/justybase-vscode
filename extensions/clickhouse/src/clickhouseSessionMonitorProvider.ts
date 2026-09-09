@@ -1,5 +1,4 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
     emptySessionMonitorResources,
     escapeSqlLiteral,
@@ -8,7 +7,7 @@ import {
     runSessionMonitorQuery,
     toNumber,
     validatePositiveIntegerSessionId,
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 function databaseFilter(database: string | undefined, column = 'database'): string {
     const normalized = normalizeDatabaseFilter(database);
@@ -38,11 +37,10 @@ const SESSION_ID_EXPRESSION = 'toUInt64(1 + cityHash64(query_id) % 9000000000000
  * usable without pretending ClickHouse has numeric PIDs.
  */
 export const clickhouseSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-    async getSessions(context, mgr, database, connectionName) {
-        const connectionManager = mgr as ConnectionManager;
+    async getSessions(context, services, database, connectionName) {
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     ${SESSION_ID_EXPRESSION} AS "ID",
@@ -69,11 +67,10 @@ export const clickhouseSessionMonitorProvider: DatabaseSessionMonitorProvider = 
         );
     },
 
-    async getQueries(context, mgr, database, connectionName) {
-        const connectionManager = mgr as ConnectionManager;
+    async getQueries(context, services, database, connectionName) {
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     ${SESSION_ID_EXPRESSION} AS "QS_SESSIONID",
@@ -107,11 +104,10 @@ export const clickhouseSessionMonitorProvider: DatabaseSessionMonitorProvider = 
         );
     },
 
-    async getStorage(context, mgr, connectionName) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services, connectionName) {
         const rows = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     database AS "DATABASE",
@@ -141,22 +137,20 @@ export const clickhouseSessionMonitorProvider: DatabaseSessionMonitorProvider = 
         return emptySessionMonitorResources();
     },
 
-    async killSession(context, mgr, sessionId, connectionName) {
+    async killSession(context, services, sessionId, connectionName) {
         validatePositiveIntegerSessionId(sessionId, 'ClickHouse');
-        const connectionManager = mgr as ConnectionManager;
         await executeSessionMonitorStatement(
             context,
-            connectionManager,
+            services,
             `KILL QUERY WHERE ${SESSION_ID_EXPRESSION} = toUInt64(${sessionId}) SYNC`,
             connectionName,
         );
     },
 
-    async killQuery(context, mgr, queryId, connectionName) {
-        const connectionManager = mgr as ConnectionManager;
+    async killQuery(context, services, queryId, connectionName) {
         await executeSessionMonitorStatement(
             context,
-            connectionManager,
+            services,
             `KILL QUERY WHERE query_id = ${queryIdLiteral(queryId)} SYNC`,
             connectionName,
         );

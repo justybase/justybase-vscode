@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { activateCoreExtension } from '../../../src/api/companionActivation';
-import { formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
+import { formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 import { clickhouseDialect } from './clickhouseDialect';
 
 interface ClickHouseSchemaItem {

@@ -1,5 +1,5 @@
 import type { DatabaseTuningAdvisor, DatabaseTuningAdvisorInput } from '@justybase/contracts';
-import type { TuningReport } from '../../../src/services/tuning/types';
+import type { TuningReport } from '@justybase/contracts';
 import { analyzeSnowflakeExplainPlan } from './snowflakeQueryProfile';
 
 export class SnowflakeTuningAdvisor implements DatabaseTuningAdvisor {

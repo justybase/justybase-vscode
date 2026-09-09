@@ -1,5 +1,5 @@
 import type { DatabaseColumnLookupParams, DatabaseSourceSearchQueryOptions } from '@justybase/contracts';
-import { normalizeCatalogIdentifier } from '../../../src/core/connectionUtils';
+import { normalizeCatalogIdentifier } from '@justybase/database-utils/connectionUtils';
 
 const SNOWFLAKE_DEFAULT_OBJECT_TYPES = [
     'TABLE',

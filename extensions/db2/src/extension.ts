@@ -36,7 +36,7 @@ import { registerDb2PartitionCommands } from './db2PartitionCommands';
 import { registerDb2IndexCommands } from './db2IndexCommands';
 import { registerDb2DesignerCommands } from './db2DesignerCommands';
 import { isDb2MaintenanceApi } from './db2CommandContext';
-import { activateCoreExtension } from '../../../src/api/companionActivation';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const api = await activateCoreExtension();

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { DatabaseMaintenanceProvider } from '@justybase/contracts';
-import { openRecreateTableScript } from '../../../src/core/maintenanceProviderUtils';
+import { openRecreateTableScript } from '@justybase/database-utils/maintenanceProviderUtils';
 
 function getMsSqlQualifiedTableName(target: Parameters<NonNullable<DatabaseMaintenanceProvider['generateStatistics']>>[0]): string {
     const quoteIdentifier = (value: string): string => `[${value.replace(/]/g, ']]')}]`;

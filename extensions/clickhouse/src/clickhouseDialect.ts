@@ -5,8 +5,8 @@ import type {
     DatabaseDialect,
 } from '@justybase/contracts';
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from '@justybase/contracts';
-import { createStandardConnectionFields } from '../../../src/core/connectionFormBuilder';
-import { clickhouseDialectTraits } from '../../../src/shared/dialect-traits/clickhouse';
+import { createStandardConnectionFields } from '@justybase/database-utils/connectionFormBuilder';
+import { clickhouseDialectTraits } from '@justybase/dialect-utils/traits/clickhouse';
 import { ClickHouseConnection } from './clickhouseConnection';
 import { clickhouseAdvancedFeatures } from './clickhouseDdlGenerator';
 import { clickhouseMetadataProvider } from './clickhouseSchemaProvider';

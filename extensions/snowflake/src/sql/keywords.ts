@@ -3,7 +3,7 @@ import {
   BASE_SQL_FORMATTER_PROFILE,
   extendFormatterProfile,
   mergeUniqueStrings
-} from '../../../../src/sql/authoring/baseProfiles';
+} from '@justybase/sql-core/authoring/baseProfiles';
 
 /**
  * Snowflake-specific SQL completion keyword overlays

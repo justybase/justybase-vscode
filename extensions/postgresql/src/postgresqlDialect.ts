@@ -5,11 +5,11 @@ import type {
   DatabaseDialect,
 } from "@justybase/contracts";
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
-import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
+import { createStandardConnectionFields } from "@justybase/database-utils/connectionFormBuilder";
 import { PostgreSqlConnection } from "./postgresqlConnection";
 import { postgresqlAdvancedFeatures } from "./postgresqlDdlGenerator";
 import { postgresqlMetadataProvider } from "./postgresqlSchemaProvider";
-import { postgresqlCompatibleDialectTraits as postgresqlDialectTraits } from "../../../src/shared/dialect-traits/postgresql-compatible";
+import { postgresqlCompatibleDialectTraits as postgresqlDialectTraits } from "@justybase/dialect-utils/traits/postgresql-compatible";
 import { postgresqlSqlAuthoring } from "./postgresqlSqlAuthoring";
 
 const postgresqlConnectionConstructor =

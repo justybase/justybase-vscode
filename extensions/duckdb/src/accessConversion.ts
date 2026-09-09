@@ -15,9 +15,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import { AccessFileSession } from '../../../packages/access-file/src';
-import { serializeAccessComplexValue } from '../../../packages/access-file/src/complexValues';
-import type { AccessValue } from '../../../packages/access-file/src/types';
+import { AccessFileSession } from '@justybase/access-file';
+import { serializeAccessComplexValue } from '@justybase/access-file/complexValues';
+import type { AccessValue } from '@justybase/access-file/types';
 
 /** Jackcess naming convention for hidden complex flat tables. */
 const COMPLEX_FLAT_TABLE_PATTERN = /^f_[0-9a-f]{32}_/i;

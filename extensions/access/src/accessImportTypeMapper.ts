@@ -3,7 +3,7 @@ import type {
     DatabaseImportDataType,
     DatabaseImportTypeMapper,
 } from '@justybase/contracts';
-import { ColumnTypeChooser } from '../../../src/dialects/netezza/import/typeMapping';
+import { ColumnTypeChooser } from '@justybase/database-utils/importTypeMapping';
 
 function normalizeType(type: string): string {
     return type.trim().toUpperCase();

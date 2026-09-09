@@ -5,8 +5,8 @@ import type {
   DatabaseDialect,
 } from "@justybase/contracts";
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from "@justybase/contracts";
-import { createStandardConnectionFields } from "../../../src/core/connectionFormBuilder";
-import { verticaDialectTraits } from "../../../src/shared/dialect-traits/vertica";
+import { createStandardConnectionFields } from "@justybase/database-utils/connectionFormBuilder";
+import { verticaDialectTraits } from "@justybase/dialect-utils/traits/vertica";
 import { VerticaConnection } from "./verticaConnection";
 import { verticaAdvancedFeatures } from "./verticaDdlGenerator";
 import { verticaMaintenanceProvider } from "./verticaMaintenanceProvider";

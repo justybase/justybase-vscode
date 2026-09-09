@@ -3,7 +3,7 @@ import {
     createTuningReport,
     type TuningRecommendation,
     type TuningReport,
-} from '../../../src/services/tuning/types';
+} from '@justybase/contracts';
 
 export interface SnowflakeProfileNode {
     operation: string;

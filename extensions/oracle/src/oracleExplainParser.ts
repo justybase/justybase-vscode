@@ -1,4 +1,4 @@
-import { clampConfidence } from '../../../src/services/tuning/types';
+import { clampConfidence } from '@justybase/contracts';
 
 export interface OracleExplainNode {
     id: number;

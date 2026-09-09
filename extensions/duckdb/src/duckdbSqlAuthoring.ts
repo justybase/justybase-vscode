@@ -1,1 +1,1 @@
-export { duckdbSqlAuthoring } from '../../../src/dialects/duckdb/sql/authoring';
+export { duckdbSqlAuthoring } from '@justybase/dialect-utils/authoring/duckdb/authoring';

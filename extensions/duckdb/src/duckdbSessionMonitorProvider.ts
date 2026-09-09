@@ -1,28 +1,30 @@
-import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
+import type {
+    DatabaseSessionMonitorProvider,
+    DatabaseSessionMonitorServices,
+} from '@justybase/contracts';
 import {
     emptySessionMonitorResources,
     normalizeDatabaseFilter,
     runSessionMonitorQuery,
     toNumber
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 function formatTimestamp(value: Date): string {
     return value.toISOString().slice(0, 19).replace('T', ' ');
 }
 
 async function resolveConnectionDetails(
-    connectionManager: ConnectionManager
+    services: DatabaseSessionMonitorServices,
+    connectionName?: string,
 ): Promise<{ databaseName: string; userName: string }> {
-    const activeConnectionName = connectionManager.getActiveConnectionName();
-    if (!activeConnectionName) {
+    const details = await services.getConnectionDetails?.(connectionName);
+    if (!details) {
         return {
             databaseName: 'DuckDB',
             userName: 'duckdb'
         };
     }
 
-    const details = await connectionManager.getConnection(activeConnectionName);
     return {
         databaseName: normalizeDatabaseFilter(details?.database) ?? 'DuckDB',
         userName: normalizeDatabaseFilter(details?.user) ?? 'duckdb'
@@ -30,9 +32,8 @@ async function resolveConnectionDetails(
 }
 
 export const duckdbSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-    async getSessions(_context, mgr, database) {
-        const connectionManager = mgr as ConnectionManager;
-        const details = await resolveConnectionDetails(connectionManager);
+    async getSessions(_context, services, database, connectionName) {
+        const details = await resolveConnectionDetails(services, connectionName);
         const databaseName = normalizeDatabaseFilter(database) ?? details.databaseName;
 
         return [
@@ -57,11 +58,10 @@ export const duckdbSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         return [];
     },
 
-    async getStorage(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services, connectionName) {
         const rows = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     database_name AS "DATABASE",
@@ -71,7 +71,9 @@ export const duckdbSessionMonitorProvider: DatabaseSessionMonitorProvider = {
                     0 AS "AVG_SKEW",
                     (SELECT COUNT(*) FROM duckdb_tables() WHERE NOT internal) AS "TABLE_COUNT"
                 FROM pragma_database_size()
-            `
+            `,
+            1000,
+            connectionName,
         );
 
         return rows.map((row) => ({
@@ -83,11 +85,10 @@ export const duckdbSessionMonitorProvider: DatabaseSessionMonitorProvider = {
         }));
     },
 
-    async getResources(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getResources(context, services, connectionName) {
         const systemUtil = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             `
                 SELECT
                     tag AS "TAG",
@@ -95,7 +96,9 @@ export const duckdbSessionMonitorProvider: DatabaseSessionMonitorProvider = {
                     temporary_storage_bytes AS "TEMPORARY_STORAGE_BYTES"
                 FROM duckdb_memory()
                 ORDER BY memory_usage_bytes DESC
-            `
+            `,
+            1000,
+            connectionName,
         );
 
         if (systemUtil.length === 0) {

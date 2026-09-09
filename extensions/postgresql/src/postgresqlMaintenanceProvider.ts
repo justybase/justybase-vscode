@@ -12,7 +12,7 @@ import type {
 import {
   formatIdentifierForSql,
   formatQualifiedObjectName
-} from '../../../src/utils/identifierUtils';
+} from '@justybase/dialect-utils/identifierUtils';
 import {
   buildListPartitionsQuery,
   buildListIndexesQuery,

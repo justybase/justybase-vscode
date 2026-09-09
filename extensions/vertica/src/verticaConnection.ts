@@ -16,8 +16,8 @@ import {
     getOptionString,
     normalizeCatalogIdentifier,
     stripTrailingSemicolons,
-} from '../../../src/core/connectionUtils';
-import { formatIdentifierForSql } from '../../../src/utils/identifierUtils';
+} from '@justybase/database-utils/connectionUtils';
+import { formatIdentifierForSql } from '@justybase/dialect-utils/identifierUtils';
 
 interface VerticaClientConfig {
     host: string;

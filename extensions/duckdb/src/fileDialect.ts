@@ -13,10 +13,10 @@ import type {
     DatabaseDialect
 } from '@justybase/contracts';
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from '@justybase/contracts';
-import { duckdbDialectTraits } from '../../../src/dialects/duckdb/traits';
+import { duckdbDialectTraits } from '@justybase/dialect-utils/traits/duckdb';
 import { FileDuckDbConnection } from './fileConnection';
 import { duckdbMetadataProvider } from './duckdbSchemaProvider';
-import { fileSqlAuthoring } from '../../../src/dialects/file/sql/authoring';
+import { fileSqlAuthoring } from '@justybase/dialect-utils/authoring/file';
 
 const fileConnectionConstructor = FileDuckDbConnection as unknown as DatabaseConnectionStaticConstructor;
 

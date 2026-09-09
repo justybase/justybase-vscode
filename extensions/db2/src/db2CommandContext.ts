@@ -8,7 +8,7 @@ import type {
   ConnectionQueryResult,
   ConnectionSummary,
   JustyBaseLiteApi
-} from '../../../src/api/publicApi';
+} from '@justybase/contracts';
 import { db2MaintenanceProvider } from './db2MaintenanceProvider';
 import { formatDb2QualifiedName } from './db2DesignerDdl';
 

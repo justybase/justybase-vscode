@@ -4,7 +4,7 @@ import {
     createTuningReport,
     type TuningRecommendation,
     type TuningReport,
-} from '../../../src/services/tuning/types';
+} from '@justybase/contracts';
 import { isDuckDbExplainJson, parseDuckDbExplainJson, flattenNodes, type DuckDbExplainNode } from './duckdbExplainParser';
 
 interface RuleContext {

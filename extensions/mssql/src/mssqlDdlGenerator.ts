@@ -7,9 +7,9 @@ import type {
     DatabaseDdlKeyInfo,
     DatabaseDdlResult
 } from '@justybase/contracts';
-import type { ConnectionDetails } from '../../../src/types';
-import { activateCoreExtension } from '../../../src/api/companionActivation';
-import { executeDatabaseQuery } from '../../../src/core/connectionFactory';
+import type { ConnectionDetails } from '@justybase/contracts';
+import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
+import { executeDatabaseQuery } from '@justybase/database-utils/query';
 import { MsSqlConnection } from './mssqlConnection';
 
 function escapeSqlLiteral(value: string): string {

@@ -17,14 +17,14 @@ import {
     type AccessTableSnapshot,
     type AccessValue,
     type AccessFileFormat,
-} from '../../../packages/access-file/src';
+} from '@justybase/access-file';
 import {
     AccessDuckDbMirror,
     type AccessMirrorColumn,
 } from './accessDuckDbMirror';
-import { writeAccessSnapshotChanges, applyDdlSql } from '../../../packages/access-file/src';
-import { JetPageChannel } from '../../../packages/access-file/src/jet/JetPageChannel';
-import { jetLayoutFor } from '../../../packages/access-file/src/jet/JetLayout';
+import { writeAccessSnapshotChanges, applyDdlSql } from '@justybase/access-file';
+import { JetPageChannel } from '@justybase/access-file/jet/JetPageChannel';
+import { jetLayoutFor } from '@justybase/access-file/jet/JetLayout';
 
 const CURRENT_CATALOG_QUERY = /^SELECT\s+CURRENT_CATALOG\s*;?$/i;
 const CURRENT_SCHEMA_QUERY = /^SELECT\s+CURRENT_SCHEMA\s*;?$/i;

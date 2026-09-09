@@ -1,5 +1,4 @@
 import type { DatabaseSessionMonitorProvider } from '@justybase/contracts';
-import { ConnectionManager } from '../../../src/core/connectionManager';
 import {
   emptySessionMonitorResources,
   escapeSqlLiteral,
@@ -8,11 +7,10 @@ import {
   runSessionMonitorQuery,
   toNumber,
   validatePositiveIntegerSessionId,
-} from '../../../src/core/sessionMonitorProviderUtils';
+} from '@justybase/database-utils/sessionMonitorProviderUtils';
 
 export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-  async getSessions(context, mgr, database) {
-    const connectionManager = mgr as ConnectionManager;
+  async getSessions(context, services, database) {
     const scopedDatabase = normalizeDatabaseFilter(database);
         const whereClause = scopedDatabase
             ? `WHERE upper(datname) = upper('${escapeSqlLiteral(scopedDatabase)}')`
@@ -37,13 +35,12 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
         `;
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             sql,
         );
     },
 
-    async getQueries(context, mgr, database) {
-      const connectionManager = mgr as ConnectionManager;
+    async getQueries(context, services, database) {
       const scopedDatabase = normalizeDatabaseFilter(database);
       let whereClause = `WHERE state = 'active' AND query IS NOT NULL AND query != ''`;
       if (scopedDatabase) {
@@ -77,13 +74,12 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
         `;
         return runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             sql,
         );
     },
 
-    async getStorage(context, mgr) {
-        const connectionManager = mgr as ConnectionManager;
+    async getStorage(context, services) {
         const sql = `
             SELECT 
                 datname AS "DATABASE",
@@ -98,7 +94,7 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
         `;
         const rows = await runSessionMonitorQuery<Record<string, unknown>>(
             context,
-            connectionManager,
+            services,
             sql,
         );
         return rows.map(r => ({
@@ -116,10 +112,9 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
         return emptySessionMonitorResources();
     },
 
-    async killSession(context, mgr, sessionId) {
+    async killSession(context, services, sessionId) {
       validatePositiveIntegerSessionId(sessionId, 'PostgreSQL');
-      const connectionManager = mgr as ConnectionManager;
       const sql = `SELECT pg_terminate_backend(${sessionId});`;
-      await executeSessionMonitorStatement(context, connectionManager, sql);
+      await executeSessionMonitorStatement(context, services, sql);
     }
 };
