@@ -4359,7 +4359,7 @@
     "build:metadata-core": "npm run build --workspace @justybase/metadata-core",
     "build:designer-core": "npm run build:contracts && npm run build --workspace @justybase/designer-core",
     "build:sql-core": "npm run build:contracts && npm run build --workspace @justybase/sql-core",
-    "build:database-runtime": "npm run build:contracts && npm run build --workspace @justybase/database-runtime",
+    "build:database-runtime": "npm run build:designer-core && npm run build:netezza-runtime && npm run build --workspace @justybase/database-runtime",
     "build:runtime": "npm run build:designer-core && npm run build:netezza-runtime && npm run build --workspace @justybase/database-runtime",
     "build:sqlite-runtime": "npm run build:contracts && npm run build --workspace @justybase/sqlite-runtime",
     "build:duckdb-runtime": "npm run build:contracts && npm run build --workspace @justybase/duckdb-runtime",
