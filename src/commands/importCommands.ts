@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
-import { normalizeDatabaseKind } from '../contracts/database';
+import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { ConnectionManager, type ConnectionDetails as ManagedConnectionDetails } from '../core/connectionManager';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import type { ImportColumnOptions } from '../import/dataImporter';
@@ -88,7 +88,7 @@ export async function generateAutoTableName(
 
                 // Flat file dialects (SQLite, Microsoft Access) have no database/schema
                 // hierarchy, so qualified three-part targets would be rejected downstream.
-                if (FLAT_IMPORT_DIALECTS.has(normalizeDatabaseKind(dbType))) {
+                if (FLAT_IMPORT_DIALECTS.has(tryNormalizeDatabaseKind(dbType) ?? '')) {
                     return generatedTableName;
                 }
 

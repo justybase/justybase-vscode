@@ -4,8 +4,15 @@ import { snowflakeImportWizardAdapter } from '../import/wizard/adapters/Snowflak
 import { verticaImportWizardAdapter } from '../import/wizard/adapters/VerticaImportWizardAdapter';
 import { accessImportWizardAdapter } from '../import/wizard/adapters/AccessImportWizardAdapter';
 import { accessBatchImportConfig } from '../import/accessImporter';
+import { getImportWizardAdapter } from '../import/wizard/adapters';
 
 describe('import wizard adapters', () => {
+    it('rejects misspelled database kinds instead of selecting the Netezza adapter', () => {
+        expect(() => getImportWizardAdapter('postgress')).toThrow(
+            "Unsupported database kind 'postgress'.",
+        );
+    });
+
     it('maps Access source types and builds direct INSERT previews', () => {
         expect(accessImportWizardAdapter.mapInferredType('VARCHAR(80)')).toBe('TEXT(255)');
         expect(accessImportWizardAdapter.mapInferredType('BIGINT')).toBe('INTEGER');

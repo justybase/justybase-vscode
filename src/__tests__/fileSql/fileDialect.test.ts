@@ -14,6 +14,12 @@ describe('file dialect (Excel/Access/CSV/Parquet/Avro via DuckDB)', () => {
         expect(tryNormalizeDatabaseKind('avro')).toBe('file');
     });
 
+    it('rejects unknown database kind names instead of defaulting to Netezza', () => {
+        expect(() => normalizeDatabaseKind('postgress')).toThrow(
+            "Unsupported database kind 'postgress'.",
+        );
+    });
+
     it('exposes the file stub for the login panel', () => {
         expect(fileDialectStub.kind).toBe('file');
         expect(fileDialectStub.displayName).toContain('DuckDB');

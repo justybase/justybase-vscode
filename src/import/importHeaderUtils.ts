@@ -1,12 +1,17 @@
 import type { DatabaseKind } from '../contracts/database';
-import { normalizeDatabaseKind } from '../contracts/database';
+import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
 
 const PRESERVE_CASE_IMPORT_KINDS = new Set<DatabaseKind>(['mysql', 'sqlite']);
 const LOWER_CASE_IMPORT_KINDS = new Set<DatabaseKind>(['postgresql', 'duckdb']);
 
 function normalizeImportKind(kind?: string | DatabaseKind): DatabaseKind | undefined {
-    return kind ? normalizeDatabaseKind(kind) : undefined;
+    if (kind === undefined || kind.trim().length === 0) return undefined;
+    const normalizedKind = tryNormalizeDatabaseKind(kind);
+    if (!normalizedKind) {
+        throw new Error(`Unsupported database kind '${kind}'.`);
+    }
+    return normalizedKind;
 }
 
 function sanitizeHeaderToken(value: string): string {
