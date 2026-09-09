@@ -1,10 +1,1 @@
-import { createDatabaseDialectTraits } from "../../contracts/database";
-
-export const db2DialectTraits = createDatabaseDialectTraits({
-  qualification: {
-    threePartNamePrefix: "location",
-  },
-  completion: {
-    singleDotPathNamespace: "schema",
-  },
-});
+export { db2DialectTraits } from '@justybase/dialect-utils/traits/db2';

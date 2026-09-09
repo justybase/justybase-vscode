@@ -11,8 +11,12 @@ import type {
     SessionMonitorSession,
     SessionMonitorStorageInfo
 } from '../contracts/webviews';
-import type { DatabaseSessionMonitorProvider } from '../contracts/database';
+import type {
+    DatabaseSessionMonitorProvider,
+    DatabaseSessionMonitorServices,
+} from '../contracts/database';
 import { ConnectionManager } from '../core/connectionManager';
+import { createSessionMonitorServices } from '../core/sessionMonitorProviderUtils';
 import { compatibilityStateKeys, getMementoValue, updateMementoValue } from '../compatibility/state';
 
 type AlertSettings = SessionMonitorAlertSettings;
@@ -162,6 +166,10 @@ export class SessionMonitorView {
         return undefined;
     }
 
+    private _getSessionMonitorServices(): DatabaseSessionMonitorServices {
+        return createSessionMonitorServices(this._context, this._connectionManager);
+    }
+
     private async _killSession(sessionId: number, status?: string, queryId?: string): Promise<void> {
         try {
             const statusHint = status ? ` (status: ${status})` : '';
@@ -179,10 +187,11 @@ export class SessionMonitorView {
 
             const provider = await this._getProvider();
             if (provider) {
+                const services = this._getSessionMonitorServices();
                 if (queryId && provider.killQuery) {
-                    await provider.killQuery(this._context, this._connectionManager, queryId, this._connectionName);
+                    await provider.killQuery(this._context, services, queryId, this._connectionName);
                 } else {
-                    await provider.killSession(this._context, this._connectionManager, sessionId, this._connectionName);
+                    await provider.killSession(this._context, services, sessionId, this._connectionName);
                 }
                 vscode.window.showInformationMessage(`${queryId ? 'Query' : 'Session'} ${queryId || sessionId} terminated successfully.`);
                 // Refresh data
@@ -392,9 +401,10 @@ export class SessionMonitorView {
         if (!provider) return [];
         const scopedDatabase = await this._resolveScopedDatabase();
         try {
+            const services = this._getSessionMonitorServices();
             return await provider.getSessions(
                 this._context,
-                this._connectionManager,
+                services,
                 scopedDatabase,
                 this._connectionName,
             ) as SessionMonitorSession[];
@@ -410,9 +420,10 @@ export class SessionMonitorView {
         if (!provider) return [];
         const scopedDatabase = await this._resolveScopedDatabase();
         try {
+            const services = this._getSessionMonitorServices();
             return await provider.getQueries(
                 this._context,
-                this._connectionManager,
+                services,
                 scopedDatabase,
                 this._connectionName,
             ) as SessionMonitorQuery[];
@@ -427,9 +438,10 @@ export class SessionMonitorView {
         const provider = await this._getProvider();
         if (!provider) return [];
         try {
+            const services = this._getSessionMonitorServices();
             return await provider.getStorage(
                 this._context,
-                this._connectionManager,
+                services,
                 this._connectionName,
             ) as SessionMonitorStorageInfo[];
         } catch (e: unknown) {
@@ -443,9 +455,10 @@ export class SessionMonitorView {
         const provider = await this._getProvider();
         if (!provider) return { gra: [], systemUtil: [], sysUtilSummary: null };
         try {
+            const services = this._getSessionMonitorServices();
             return await provider.getResources(
                 this._context,
-                this._connectionManager,
+                services,
                 this._connectionName,
             ) as SessionMonitorResources;
         } catch (e: unknown) {

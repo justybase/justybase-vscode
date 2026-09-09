@@ -1,6 +1,14 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { DatabaseDialect } from '../contracts/database';
+import type {
+    ConnectionQueryResult,
+    ConnectionSummary,
+    JustyBaseLiteApi,
+    OpenFileSqlSessionOptions,
+    OpenFileSqlWorkspaceSessionOptions,
+    SavedConnectionSummary,
+} from '@justybase/contracts';
+import type { ConnectionDetails } from '@justybase/contracts';
 import { ensureBuiltInDialectsRegistered } from '../dialects';
 import {
     listRegisteredDatabaseDialects,
@@ -10,87 +18,16 @@ import {
     createConnectedDatabaseConnectionFromDetails,
 } from '../core/connectionFactory';
 import type { ConnectionManager } from '../core/connectionManager';
-import type { ConnectionDetails } from '../types';
 import { ensurePersistentConnectionReadyForQuery } from '../core/connectionReadiness';
 
-export interface OpenFileSqlSessionOptions {
-    /** Optional initial SQL content of the opened document. */
-    content?: string;
-    /** Save the connection profile under this name (defaults to a generated name). */
-    connectionName?: string;
-    /** Update an existing single-file profile when it points at the same source. */
-    updateExisting?: boolean;
-}
-
-export interface OpenFileSqlWorkspaceSessionOptions {
-    /** Optional initial SQL content of the opened document. */
-    content?: string;
-    /** Save the workspace profile under this name. */
-    connectionName?: string;
-}
-
-export interface SavedConnectionSummary {
-    name: string;
-    details: Omit<ConnectionDetails, 'password'>;
-}
-
-export interface ConnectionSummary {
-    name: string;
-    database: string;
-    databaseKind: string;
-}
-
-export interface ConnectionQueryResult {
-    columns: string[];
-    rows: unknown[][];
-}
-
-export interface JustyBaseLiteApi {
-    readonly version: 1;
-    registerDatabaseDialect(dialect: DatabaseDialect): DatabaseDialect;
-    listRegisteredDatabaseDialects(): readonly DatabaseDialect[];
-    /** Create a connected profile through core, including an optional TCP tunnel. */
-    createConnectedDatabaseConnectionFromDetails?(
-        details: ConnectionDetails,
-        databaseOverride?: string,
-    ): Promise<import('../contracts/database').DatabaseConnection>;
-    /**
-     * Save (or reuse) a connection profile and open a SQL editor bound to it.
-     * Used by companion extensions such as DuckDB + Files ("Query file with SQL").
-     */
-    openFileSqlSession(details: ConnectionDetails, options?: OpenFileSqlSessionOptions): Promise<void>;
-    /** Save (or reuse) a read-only File SQL profile containing multiple files. */
-    openFileSqlWorkspaceSession(
-        filePaths: readonly string[],
-        options?: OpenFileSqlWorkspaceSessionOptions,
-    ): Promise<void>;
-    /** List saved connection profiles without exposing passwords. */
-    listSavedConnections(): Promise<readonly SavedConnectionSummary[]>;
-    /** Metadata for a named profile, without credentials. */
-    getConnectionSummary?(connectionName: string): Promise<ConnectionSummary | undefined>;
-    /** Details of the active connection (document-bound first, else active). */
-    getActiveConnectionDetails(): Promise<{
-        name: string;
-        details: ConnectionDetails;
-        documentUri?: string;
-        documentBound: boolean;
-    } | undefined>;
-    /** Execute SQL on the active editor's persistent connection. */
-    executeActiveConnectionSql(sql: string, documentUri?: string): Promise<void>;
-    /**
-     * Execute SQL on the active editor's persistent connection and return the
-     * full result set. Used by companion extensions for client-side write-back
-     * (e.g. XLSB edits through @justybase/spreadsheet-tasks XlsbUpdater).
-     */
-    executeActiveConnectionSqlQuery?(sql: string, documentUri?: string): Promise<{
-        columns: string[];
-        rows: unknown[][];
-    }>;
-    /** Execute SQL using a named profile without exposing its credentials. */
-    executeConnectionSql?(sql: string, connectionName: string): Promise<void>;
-    /** Execute a query using a named profile without exposing its credentials. */
-    executeConnectionSqlQuery?(sql: string, connectionName: string): Promise<ConnectionQueryResult>;
-}
+export type {
+    ConnectionQueryResult,
+    ConnectionSummary,
+    JustyBaseLiteApi,
+    OpenFileSqlSessionOptions,
+    OpenFileSqlWorkspaceSessionOptions,
+    SavedConnectionSummary,
+} from '@justybase/contracts';
 
 export function createJustyBaseLiteApi(
     context?: vscode.ExtensionContext,

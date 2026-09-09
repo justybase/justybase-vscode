@@ -1,27 +1,13 @@
-import { runQueryRaw, queryResultToRows } from "../../core/queryRunner";
-import { NzConnection } from "../../core/nzConnectionFactory";
-import { createConnectedDatabaseConnectionFromDetails } from "../../core/connectionFactory";
-import type { DatabaseSessionMonitorProvider } from "../../contracts/database";
 import type {
-  ConnectionManager,
-  ConnectionDetails,
-} from "../../core/connectionManager";
-import { escapeSqlString as escapeSqlLiteral } from "../../utils/sqlUtils";
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-  if (typeof value === "bigint") {
-    const converted = Number(value);
-    return Number.isFinite(converted) ? converted : 0;
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
+  DatabaseSessionMonitorProvider,
+  DatabaseSessionMonitorServices,
+} from "@justybase/contracts";
+import {
+  escapeSqlLiteral,
+  executeSessionMonitorStatement,
+  runSessionMonitorQuery,
+  toNumber,
+} from "@justybase/database-utils/sessionMonitorProviderUtils";
 
 function normalizeDatabaseFilter(
   database: string | undefined,
@@ -38,29 +24,6 @@ function validateSessionId(sessionId: number): void {
     !Number.isInteger(sessionId)
   ) {
     throw new Error(`Invalid session ID: ${sessionId}`);
-  }
-}
-
-async function executeQueryRows(
-  connection: NzConnection,
-  sql: string,
-): Promise<Record<string, unknown>[]> {
-  const command = connection.createCommand(sql);
-  command.commandTimeout = 90;
-  const reader = await command.executeReader();
-  const rows: Record<string, unknown>[] = [];
-
-  try {
-    while (await reader.read()) {
-      const row: Record<string, unknown> = {};
-      for (let index = 0; index < reader.fieldCount; index++) {
-        row[reader.getName(index)] = reader.getValue(index);
-      }
-      rows.push(row);
-    }
-    return rows;
-  } finally {
-    await reader.close();
   }
 }
 
@@ -100,9 +63,8 @@ async function runWithConcurrencyLimit<T>(
 }
 
 async function fetchStorageDatabases(
-  context: unknown,
-  connectionManager: ConnectionManager,
-  connectionName: string,
+  services: DatabaseSessionMonitorServices,
+  connectionName: string | undefined,
   fallbackDatabase: string,
 ): Promise<string[]> {
   const databases = new Set<string>();
@@ -113,28 +75,13 @@ async function fetchStorageDatabases(
     `;
 
   try {
-    const result = await runQueryRaw(
-      context,
-      sql,
-      true,
-      connectionManager,
-      connectionName,
-      undefined,
-      undefined,
-      undefined,
-      1000,
-      false,
-    );
-
-    if (result && result.data) {
-      const rows = queryResultToRows<{ DATABASE: string }>(result);
-      for (const row of rows) {
-        const normalized = String(row.DATABASE || "")
-          .trim()
-          .toUpperCase();
-        if (normalized) {
-          databases.add(normalized);
-        }
+    const rows = await services.query<{ DATABASE: string }>(sql, 1000, connectionName);
+    for (const row of rows) {
+      const normalized = String(row.DATABASE || "")
+        .trim()
+        .toUpperCase();
+      if (normalized) {
+        databases.add(normalized);
       }
     }
   } catch (e: unknown) {
@@ -155,8 +102,9 @@ async function fetchStorageDatabases(
 }
 
 async function fetchStorageForDatabase(
-  details: ConnectionDetails,
+  services: DatabaseSessionMonitorServices,
   database: string,
+  connectionName: string | undefined,
 ): Promise<Record<string, unknown>[]> {
   const escapedDatabase = database.replace(/'/g, "''");
   const sql = `
@@ -170,36 +118,23 @@ async function fetchStorageForDatabase(
         GROUP BY TS.SCHEMA
     `;
 
-  const connection = await createConnectedDatabaseConnectionFromDetails({
-    ...details,
-    database,
-  }) as NzConnection;
-
-  try {
-    const rows = await executeQueryRows(connection, sql);
-    return rows.map((row) => ({
-      DATABASE: String(row.DATABASE || database),
-      SCHEMA: String(row.SCHEMA || ""),
-      ALLOC_MB: toNumber(row.ALLOC_MB),
-      USED_MB: toNumber(row.USED_MB),
-      AVG_SKEW: toNumber(row.AVG_SKEW),
-      TABLE_COUNT: toNumber(row.TABLE_COUNT),
-    }));
-  } finally {
-    try {
-      await connection.close();
-    } catch (closeError: unknown) {
-      console.warn(
-        `[netezzaSessionMonitor] Failed closing storage connection for ${database}:`,
-        closeError,
-      );
-    }
+  if (!services.queryDatabase) {
+    throw new Error('The session-monitor host does not support database-scoped queries.');
   }
+
+  const rows = await services.queryDatabase<Record<string, unknown>>(database, sql, connectionName);
+  return rows.map((row) => ({
+    DATABASE: String(row.DATABASE || database),
+    SCHEMA: String(row.SCHEMA || ""),
+    ALLOC_MB: toNumber(row.ALLOC_MB),
+    USED_MB: toNumber(row.USED_MB),
+    AVG_SKEW: toNumber(row.AVG_SKEW),
+    TABLE_COUNT: toNumber(row.TABLE_COUNT),
+  }));
 }
 
 export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
-  async getSessions(context, mgr, database, connectionName) {
-    const connectionManager = mgr as ConnectionManager;
+  async getSessions(context, services, database, connectionName) {
     const scopedDatabase = normalizeDatabaseFilter(database);
     const whereClause = scopedDatabase
       ? `WHERE DBNAME = '${escapeSqlLiteral(scopedDatabase)}'`
@@ -211,26 +146,16 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
             ${whereClause}
             ORDER BY CONNTIME DESC
         `;
-    const result = await runQueryRaw(
+    return runSessionMonitorQuery<Record<string, unknown>>(
       context,
+      services,
       sql,
-      true,
-      connectionManager,
-      connectionName,
-      undefined,
-      undefined,
-      undefined,
       1000,
-      false,
+      connectionName,
     );
-    if (!result || !result.data) {
-      return [];
-    }
-    return queryResultToRows<Record<string, unknown>>(result);
   },
 
-  async getQueries(context, mgr, database, connectionName) {
-    const connectionManager = mgr as ConnectionManager;
+  async getQueries(context, services, database, connectionName) {
     const scopedDatabase = normalizeDatabaseFilter(database);
     const whereClause = scopedDatabase
       ? `WHERE S.DBNAME = '${escapeSqlLiteral(scopedDatabase)}'`
@@ -249,41 +174,27 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
             ORDER BY Q.QS_TSTART DESC
             LIMIT 1000
         `;
-    const result = await runQueryRaw(
+    return runSessionMonitorQuery<Record<string, unknown>>(
       context,
+      services,
       sql,
-      true,
-      connectionManager,
-      connectionName,
-      undefined,
-      undefined,
-      undefined,
       1000,
-      false,
+      connectionName,
     );
-    if (!result || !result.data) {
-      return [];
-    }
-    return queryResultToRows<Record<string, unknown>>(result);
   },
 
-  async getStorage(context, mgr, connectionName) {
-    const connectionManager = mgr as ConnectionManager;
-    const targetConnectionName = connectionName ?? connectionManager.getActiveConnectionName();
-    if (!targetConnectionName) return [];
-
-    const details = await connectionManager.getConnection(targetConnectionName);
+  async getStorage(_context, services, connectionName) {
+    const details = await services.getConnectionDetails?.(connectionName);
     if (!details) return [];
 
     const databases = await fetchStorageDatabases(
-      context,
-      connectionManager,
-      targetConnectionName,
+      services,
+      connectionName,
       details.database,
     );
     const tasks = databases.map((db) => async () => {
       try {
-        return await fetchStorageForDatabase(details, db);
+        return await fetchStorageForDatabase(services, db, connectionName);
       } catch (databaseError: unknown) {
         console.warn(
           `[netezzaSessionMonitor] Failed storage fetch for database ${db}:`,
@@ -311,55 +222,39 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
     return storageRows;
   },
 
-  async getResources(context, mgr, connectionName) {
-    const connectionManager = mgr as ConnectionManager;
+  async getResources(context, services, connectionName) {
     let graData: unknown[] = [];
     let sysUtil: unknown[] = [];
     let sysUtilSummary: unknown = null;
 
     try {
-      const graResult = await runQueryRaw(
+      graData = await runSessionMonitorQuery<Record<string, unknown>>(
         context,
+        services,
         `SELECT * FROM _V_SCHED_GRA_EXT LIMIT 50`,
-        true,
-        connectionManager,
-        connectionName,
-        undefined,
-        undefined,
-        undefined,
         1000,
-        false,
+        connectionName,
       );
-      if (graResult && graResult.data) {
-        graData = queryResultToRows<Record<string, unknown>>(graResult);
-      }
     } catch (e: unknown) {
       console.warn("[_V_SCHED_GRA_EXT not available]:", e);
     }
 
     try {
-      const sysResult = await runQueryRaw(
+      sysUtil = await runSessionMonitorQuery<Record<string, unknown>>(
         context,
+        services,
         `SELECT * FROM _V_SYSTEM_UTIL ORDER BY 1 DESC LIMIT 50`,
-        true,
-        connectionManager,
-        connectionName,
-        undefined,
-        undefined,
-        undefined,
         1000,
-        false,
+        connectionName,
       );
-      if (sysResult && sysResult.data) {
-        sysUtil = queryResultToRows<Record<string, unknown>>(sysResult);
-      }
     } catch (e: unknown) {
       console.warn("[_V_SYSTEM_UTIL not available]:", e);
     }
 
     try {
-      const summaryResult = await runQueryRaw(
+      const parsed = await runSessionMonitorQuery<Record<string, unknown>>(
         context,
+        services,
         `SELECT 
                     ROUND(AVG(HOST_CPU) * 100, 1) AS AVG_HOST_CPU_PCT,
                     ROUND(AVG(SPU_CPU) * 100, 1) AS AVG_SPU_CPU_PCT,
@@ -368,15 +263,10 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
                     ROUND(AVG(HOST_FABRIC) * 100, 1) AS AVG_FABRIC_PCT,
                     COUNT(*) AS SAMPLE_COUNT
                 FROM _V_SYSTEM_UTIL`,
-        true,
-        connectionManager,
+        1000,
         connectionName,
       );
-      if (summaryResult && summaryResult.data) {
-        const parsed =
-          queryResultToRows<Record<string, unknown>>(summaryResult);
-        sysUtilSummary = parsed.length > 0 ? parsed[0] : null;
-      }
+      sysUtilSummary = parsed.length > 0 ? parsed[0] : null;
     } catch (e: unknown) {
       console.warn("[_V_SYSTEM_UTIL summary not available]:", e);
     }
@@ -384,10 +274,9 @@ export const netezzaSessionMonitorProvider: DatabaseSessionMonitorProvider = {
     return { gra: graData, systemUtil: sysUtil, sysUtilSummary };
   },
 
-  async killSession(context, mgr, sessionId, connectionName) {
+  async killSession(context, services, sessionId, connectionName) {
     validateSessionId(sessionId);
-    const connectionManager = mgr as ConnectionManager;
     const sql = `DROP SESSION ${sessionId}`;
-    await runQueryRaw(context, sql, true, connectionManager, connectionName);
+    await executeSessionMonitorStatement(context, services, sql, connectionName);
   },
 };
