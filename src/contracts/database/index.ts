@@ -78,6 +78,7 @@ export type {
   DatabaseAttachPartitionOptions,
   DatabaseIndexInfo,
   DatabaseCreateIndexOptions,
+  DatabaseSessionMonitorServices,
   DatabaseSessionMonitorProvider,
   DatabaseCopilotReferenceProvider,
   DatabaseReferenceTopic,

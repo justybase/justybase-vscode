@@ -1,5 +1,5 @@
 export type { DatabaseKind, DatabaseCapabilities, DatabaseDialect, DatabaseSqlAuthoring, DatabaseSqlFunctionSignature, DatabaseSqlValidationProfile, DatabaseSqlTypeSpec, DatabaseSqlLintIssue, DatabaseSqlQualityRule, DatabaseSqlFormatterProfile, DatabaseSqlParsingProfile, DatabaseSqlStaticAssetProfile } from './database';
-export { DEFAULT_DATABASE_KIND, DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, createDatabaseCapabilities, createDatabaseDialectTraits } from './database';
+export { DEFAULT_DATABASE_KIND, DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, createDatabaseCapabilities, createDatabaseDialectTraits, normalizeDatabaseKind, tryNormalizeDatabaseKind } from './database';
 export type { DatabaseConnection, DatabaseCommand, DatabaseDataReader } from './database';
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor } from './database';
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue } from './database';
@@ -8,10 +8,19 @@ export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualifica
 export type { DatabaseDesignerCapabilities, DatabaseDesignerCapability, DatabaseDesignerCapabilityKey, DatabaseDesignerColumn, DatabaseDesignerConstraint, DatabaseDesignerDefinition, DatabaseDesignerDiagnostic, DatabaseDesignerIndex, DatabaseDesignerNativeDefinition, DatabaseDesignerPartition, DatabaseDesignerProvider, DatabaseDesignerRelationalIndex, DatabaseDesignerRequirement, DatabaseDesignerRuntimeContext, DatabaseDesignerTarget, DatabaseDesignerTrigger, DatabaseDesignerTriggerCapability, DatabaseDesignerViewCapability, DatabaseDesignerRoutineCapability, DatabaseObjectSnapshot, DatabaseSchemaChangePlan, DatabaseSchemaChangeStatement, DatabaseViewDesignerDefinition, DatabaseTableDesignerDefinition, DesignerCapabilityReasonCode, DesignerNativeFeature, DesignerOperation, DesignerSupportLevel, DesignerRoutineBodyStyle, DesignerTriggerBodyStyle, DesignerTriggerEvent, DesignerTriggerLevel, DesignerTriggerTiming, DesignerViewReplaceStyle } from './database';
 export { UnsupportedDesignerOperationError } from './database';
 export { DATABASE_DESIGNER_CAPABILITY_MANIFESTS, DESIGNER_CAPABILITY_KEYS, DESIGNER_OPERATIONS, getDatabaseDesignerCapabilities, getDesignerCapability, resolveDatabaseDesignerCapabilities } from './database';
+export type * from './webviews';
 
-export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic } from './database';
+export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorServices, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic } from './database';
 
 export type { ConnectionDetails, DatabaseTunnelConfig, NamedConnectionDetails } from './connectionDetails';
+export type {
+  ConnectionQueryResult,
+  ConnectionSummary,
+  JustyBaseLiteApi,
+  OpenFileSqlSessionOptions,
+  OpenFileSqlWorkspaceSessionOptions,
+  SavedConnectionSummary,
+} from './companionApi';
 
 export type {
   Awaitable,
