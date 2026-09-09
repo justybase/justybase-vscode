@@ -71,10 +71,21 @@ import { TableDdlSynchronizer } from './metadata/tableDdlSynchronizer';
 import { metadataSessionSweeper } from './metadata/metadataSessionSweeper';
 import { setMetadataQueryConcurrencyLimit } from './metadata/metadataQueryLimiter';
 import { configureDatabaseTunnelRuntime } from './core/connectionFactory';
+import {
+    createQueryExecutionCoordinator,
+    setDefaultQueryExecutionCoordinator,
+    type QueryExecutionCoordinator,
+} from './commands/query/queryExecutionGate';
+import {
+    createStreamingManager,
+    disposeDefaultStreamingManager,
+    setDefaultStreamingManager,
+} from './core/queryCancellation';
 
 let isExtensionShuttingDown = false;
 let deferredFeatureScheduler: DeferredFeatureScheduler | undefined;
 let databaseTunnelManager: import('./core/databaseTunnel').DatabaseTunnelManager | undefined;
+let queryExecutionCoordinator: QueryExecutionCoordinator | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<JustyBaseLiteApi> {
     isExtensionShuttingDown = false;
@@ -106,6 +117,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
 
     const coreActivation = activateCoreServices(context, logger);
     databaseTunnelManager = coreActivation.databaseTunnelManager;
+    queryExecutionCoordinator = createQueryExecutionCoordinator();
+    setDefaultQueryExecutionCoordinator(queryExecutionCoordinator);
+    const activationStreamingManager = createStreamingManager();
+    setDefaultStreamingManager(activationStreamingManager);
+    context.subscriptions.push({
+        dispose: () => queryExecutionCoordinator?.dispose(),
+    });
+    context.subscriptions.push({
+        dispose: () => { void activationStreamingManager.dispose(); },
+    });
     const { services, metadataCacheInit } = coreActivation;
     const { connectionManager, metadataCache, schemaProvider } = services;
     const tableDdlSynchronizer = new TableDdlSynchronizer(
@@ -413,6 +434,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
 export async function deactivate() {
     logWithFallback('info', 'Netezza extension: Deactivating...');
     isExtensionShuttingDown = true;
+    queryExecutionCoordinator?.dispose();
+    queryExecutionCoordinator = undefined;
     deferredFeatureScheduler?.dispose();
     deferredFeatureScheduler = undefined;
     await stopSqlLanguageClient();
@@ -422,6 +445,12 @@ export async function deactivate() {
         await cancelAllRunningQueries();
     } catch (e) {
         logWithFallback('error', 'Error cancelling queries on deactivate:', e);
+    } finally {
+        try {
+            await disposeDefaultStreamingManager();
+        } catch (e) {
+            logWithFallback('error', 'Error disposing the streaming manager on deactivate:', e);
+        }
     }
 
     try {

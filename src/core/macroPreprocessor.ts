@@ -19,6 +19,7 @@ import {
     readMacroQueryFunctionAt,
     readMacroReferenceAt,
     readTriviaOrQuotedText,
+    resolveMacroReferenceValue,
     skipDirectiveTrailingWhitespace,
     throwMacroError,
     unwrapResolvedScalarExportValue,
@@ -311,10 +312,38 @@ export class MacroPreprocessor {
                 }
             }
 
+            // Scan mode must record a reference at the point it occurs. A
+            // later declaration in the same script cannot provide a default
+            // for an earlier reference, even though final substitution runs
+            // after directive collection.
+            if (!state.replaceVariables) {
+                const trivia = readTriviaOrQuotedText(script, offset);
+                if (trivia) {
+                    remaining += trivia.text;
+                    offset = trivia.end;
+                    allowChainedDirective = false;
+                    for (const triviaChar of trivia.text) {
+                        atLineStart = updateLineStartState(atLineStart, triviaChar);
+                    }
+                    continue;
+                }
+
+                const reference = readMacroReferenceAt(script, offset);
+                if (reference) {
+                    if (state.environment.get(reference.name) === undefined) {
+                        state.unresolved.add(normalizeVariableName(reference.name));
+                    }
+                    remaining += reference.text;
+                    offset = reference.end;
+                    allowChainedDirective = false;
+                    continue;
+                }
+            }
+
             const char = script[offset];
             remaining += char;
             offset++;
-            allowChainedDirective = false;
+            allowChainedDirective = char === ';';
             atLineStart = updateLineStartState(atLineStart, char);
         }
 
@@ -583,10 +612,36 @@ export class MacroPreprocessor {
                 }
             }
 
+            // Keep async scan mode source-ordered for the same reason as the
+            // synchronous path above.
+            if (!state.replaceVariables) {
+                const trivia = readTriviaOrQuotedText(script, offset);
+                if (trivia) {
+                    remaining += trivia.text;
+                    offset = trivia.end;
+                    allowChainedDirective = false;
+                    for (const triviaChar of trivia.text) {
+                        atLineStart = updateLineStartState(atLineStart, triviaChar);
+                    }
+                    continue;
+                }
+
+                const reference = readMacroReferenceAt(script, offset);
+                if (reference) {
+                    if (state.environment.get(reference.name) === undefined) {
+                        state.unresolved.add(normalizeVariableName(reference.name));
+                    }
+                    remaining += reference.text;
+                    offset = reference.end;
+                    allowChainedDirective = false;
+                    continue;
+                }
+            }
+
             const char = script[offset];
             remaining += char;
             offset++;
-            allowChainedDirective = false;
+            allowChainedDirective = char === ';';
             atLineStart = updateLineStartState(atLineStart, char);
         }
 
@@ -872,7 +927,9 @@ export class MacroPreprocessor {
                     options.unresolved.add(normalizeVariableName(reference.name));
                     result += reference.text;
                 } else {
-                    result += options.replaceVariables ? value : reference.text;
+                    result += options.replaceVariables
+                        ? resolveMacroReferenceValue(text, reference.start, reference.end, value)
+                        : reference.text;
                 }
                 i = reference.end;
                 continue;
@@ -947,7 +1004,9 @@ export class MacroPreprocessor {
                     options.unresolved.add(normalizeVariableName(reference.name));
                     result += reference.text;
                 } else {
-                    result += options.replaceVariables ? value : reference.text;
+                    result += options.replaceVariables
+                        ? resolveMacroReferenceValue(text, reference.start, reference.end, value)
+                        : reference.text;
                 }
                 i = reference.end;
                 continue;

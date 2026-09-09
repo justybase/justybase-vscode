@@ -94,6 +94,8 @@ export interface RegisteredCommandHandle {
 export class StreamingManager {
     private executingCommands = new Map<string, ExecutingCommandEntry>();
     private pendingAborts = new Set<string>();
+    private staleCleanupTimers = new Set<ReturnType<typeof setTimeout>>();
+    private disposed = false;
 
     /**
      * Register a command for cancellation tracking and return a handle
@@ -107,6 +109,9 @@ export class StreamingManager {
      * so the batch-query loop can detect it before the next iteration.
      */
     registerCommand(documentUri: string, cmd: NzCommand, sessionId?: string): RegisteredCommandHandle {
+        if (this.disposed) {
+            throw new Error('Streaming manager has been disposed.');
+        }
         const normalizedKey = normalizeUriKey(documentUri);
         const existing = this.executingCommands.get(normalizedKey);
         if (existing) {
@@ -163,6 +168,9 @@ export class StreamingManager {
      * storing is unconditional).
      */
     abortQuery(documentUri: string, reason?: string): boolean {
+        if (this.disposed) {
+            return false;
+        }
         const normalizedKey = normalizeUriKey(documentUri);
         const entry = this.executingCommands.get(normalizedKey);
         if (entry) {
@@ -199,6 +207,34 @@ export class StreamingManager {
     }
 
     /**
+     * Stop commands owned by this manager and release its registry state.
+     * The underlying reader cleanup remains owned by the active execution;
+     * aborting the command is the same cancellation signal used by the normal
+     * user path and is therefore safe to repeat.
+     */
+    async dispose(): Promise<void> {
+        if (this.disposed) {
+            return;
+        }
+        this.disposed = true;
+        const entries = [...this.executingCommands.values()];
+        for (const entry of entries) {
+            entry.controller.abort('Streaming manager disposed');
+        }
+        await Promise.allSettled(entries.map(async entry => {
+            try {
+                await entry.command.cancel();
+            } catch (error: unknown) {
+                logWithFallback('warn', '[StreamingManager] Failed to cancel a command during disposal:', error);
+            }
+        }));
+        this.executingCommands.clear();
+        this.pendingAborts.clear();
+        for (const timer of this.staleCleanupTimers) clearTimeout(timer);
+        this.staleCleanupTimers.clear();
+    }
+
+    /**
      * Check if a query is currently active for the given document URI
      */
     isActive(documentUri: string): boolean {
@@ -232,12 +268,15 @@ export class StreamingManager {
     private scheduleStaleCleanup(normalizedKey: string, controller: AbortController): void {
         const onAbort = () => {
             controller.signal.removeEventListener('abort', onAbort);
-            setTimeout(() => {
+            const timer = setTimeout(() => {
+                this.staleCleanupTimers.delete(timer);
                 const current = this.executingCommands.get(normalizedKey);
                 if (current && current.controller === controller) {
                     this.executingCommands.delete(normalizedKey);
                 }
-            }, STALE_ABORT_CLEANUP_MS).unref?.();
+            }, STALE_ABORT_CLEANUP_MS);
+            timer.unref?.();
+            this.staleCleanupTimers.add(timer);
         };
         controller.signal.addEventListener('abort', onAbort, { once: true });
     }

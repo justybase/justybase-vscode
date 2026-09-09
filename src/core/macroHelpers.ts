@@ -68,9 +68,11 @@ export function readDirectiveAt(script: string, offset: number): MacroDirective 
         };
     }
 
-    const declarationMatch = text.match(/^(?:@SET\s+([A-Za-z0-9_]+)|%let\s+([A-Za-z_][A-Za-z0-9_]*))\s*=/i);
+    const declarationMatch = text.match(
+        /^(?:@SET\s+([A-Za-z0-9_]+)|%let\s+([A-Za-z_][A-Za-z0-9_]*)|DECLARE\s+&([A-Za-z_][A-Za-z0-9_]*))\s*=/i,
+    );
     if (declarationMatch) {
-        const name = declarationMatch[1] || declarationMatch[2];
+        const name = declarationMatch[1] || declarationMatch[2] || declarationMatch[3];
         if (!name) {
             return undefined;
         }
@@ -535,6 +537,86 @@ export function readDirectivePayload(
 export function unquoteVariableValue(value: string): string {
     const qm = value.match(/^'(.*)'$/s) || value.match(/^"(.*)"$/s);
     return qm ? qm[1] : value;
+}
+
+const IDENTIFIER_MACRO_CONTEXT_KEYWORDS = new Set([
+    'ALTER',
+    'CALL',
+    'CREATE',
+    'DROP',
+    'EXEC',
+    'EXECUTE',
+    'FROM',
+    'GROOM',
+    'INTO',
+    'JOIN',
+    'MERGE',
+    'ON',
+    'PROCEDURE',
+    'SEQUENCE',
+    'STATISTICS',
+    'TABLE',
+    'TRUNCATE',
+    'UPDATE',
+    'USING',
+    'VIEW',
+]);
+
+function readPreviousWord(text: string, start: number): string | undefined {
+    let index = start - 1;
+    while (index >= 0 && /\s/.test(text[index] ?? '')) index--;
+    if (index < 0 || !/[A-Za-z_]/.test(text[index] ?? '')) return undefined;
+
+    const end = index + 1;
+    while (index >= 0 && /[A-Za-z0-9_]/.test(text[index] ?? '')) index--;
+    return text.slice(index + 1, end).toUpperCase();
+}
+
+function readPreviousSignificantChar(text: string, start: number): string | undefined {
+    let index = start - 1;
+    while (index >= 0 && /\s/.test(text[index] ?? '')) index--;
+    return index >= 0 ? text[index] : undefined;
+}
+
+function readNextSignificantChar(text: string, start: number): string | undefined {
+    let index = start;
+    while (index < text.length && /\s/.test(text[index] ?? '')) index++;
+    return index < text.length ? text[index] : undefined;
+}
+
+function readAdjacentChar(text: string, offset: number): string | undefined {
+    return offset >= 0 && offset < text.length ? text[offset] : undefined;
+}
+
+function isIdentifierCharacter(character: string | undefined): boolean {
+    return character !== undefined && /[A-Za-z0-9_$]/.test(character);
+}
+
+/**
+ * Resolve a macro value without changing SQL literal semantics. A quoted
+ * declaration value remains quoted in expression/literal positions, but its
+ * outer quotes are removed when the reference supplies an identifier or an
+ * identifier fragment.
+ */
+export function resolveMacroReferenceValue(
+    text: string,
+    start: number,
+    end: number,
+    value: string,
+): string {
+    const previousAdjacentChar = readAdjacentChar(text, start - 1);
+    const nextAdjacentChar = readAdjacentChar(text, end);
+    const previousChar = readPreviousSignificantChar(text, start);
+    const nextChar = readNextSignificantChar(text, end);
+    const previousWord = readPreviousWord(text, start);
+    const isIdentifierPosition =
+        previousChar === '.'
+        || nextChar === '.'
+        || isIdentifierCharacter(previousAdjacentChar)
+        || isIdentifierCharacter(nextAdjacentChar)
+        || (previousWord !== undefined && IDENTIFIER_MACRO_CONTEXT_KEYWORDS.has(previousWord));
+
+    return isIdentifierPosition ? unquoteVariableValue(value) : value;
 }
 
 export function skipHorizontalWhitespace(script: string, offset: number): number {

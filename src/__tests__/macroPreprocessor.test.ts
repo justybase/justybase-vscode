@@ -4,6 +4,40 @@ import {
 } from '../core/macroPreprocessor';
 
 describe('core/macroPreprocessor', () => {
+    it('processes DECLARE variables in expression and identifier contexts', () => {
+        const result = new MacroPreprocessor().processScriptSync(`
+declare &some_var = 'test';
+SELECT &some_var;
+declare &searched = 'ACTIVE';
+SELECT * FROM ORDERS WHERE STATUS = &searched;
+declare &table_name = 'ORDERS';
+declare &suffix = '2026';
+SELECT NAME_&suffix FROM &table_name;
+CREATE TABLE STAGE_&suffix (ID INT4);
+`);
+
+        expect(result.sql.replace(/\s+/g, ' ').trim()).toBe(
+            "SELECT 'test'; SELECT * FROM ORDERS WHERE STATUS = 'ACTIVE'; SELECT NAME_2026 FROM ORDERS; CREATE TABLE STAGE_2026 (ID INT4);",
+        );
+        expect(result.variables).toEqual({
+            SOME_VAR: "'test'",
+            SEARCHED: "'ACTIVE'",
+            TABLE_NAME: "'ORDERS'",
+            SUFFIX: "'2026'",
+        });
+        expect(result.unresolvedVariables).toEqual([]);
+    });
+
+    it('keeps DECLARE values in source order and supports same-line SQL', () => {
+        const result = new MacroPreprocessor().processScriptSync(
+            "declare &limit_cnt = 50; SELECT * FROM ORDERS LIMIT &limit_cnt; declare &offset_cnt = 10; SELECT * FROM ORDERS OFFSET &offset_cnt;",
+        );
+
+        expect(result.sql.replace(/\s+/g, ' ').trim()).toBe(
+            'SELECT * FROM ORDERS LIMIT 50;SELECT * FROM ORDERS OFFSET 10;',
+        );
+    });
+
     it('processes %let declarations and resolves all supported reference forms', () => {
         const result = new MacroPreprocessor().processScriptSync(`
 %LET points_cutoff = 20;

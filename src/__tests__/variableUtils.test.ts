@@ -246,6 +246,14 @@ WHERE id = $ID`;
             expect(result.unresolvedVars).toEqual([]);
         });
 
+        it('should parse DECLARE values and preserve their SQL literal context', () => {
+            const sql = "DECLARE &status = 'ACTIVE'; DECLARE &table = 'ORDERS'; SELECT * FROM &table WHERE STATUS = &status";
+            const result = processVariables(sql);
+
+            expect(result.processedSql).toBe("SELECT * FROM ORDERS WHERE STATUS = 'ACTIVE'");
+            expect(result.unresolvedVars).toEqual([]);
+        });
+
         it('should parse %let with whitespace variations and same-line SQL', () => {
             const result = parseSetVariables('  %let   status_code   =   ACTIVE  ; SELECT * FROM t WHERE status = &status_code');
             expect(result.sql).toBe('SELECT * FROM t WHERE status = &status_code');

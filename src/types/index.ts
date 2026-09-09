@@ -70,6 +70,10 @@ export type { DiskQuerySpec } from '../core/resultDataProvider/types';
 export type ResultSet = QueryResult & {
   /** Stable identity used for state/scroll persistence across tab reordering. */
   resultSetId?: string;
+  /** Statement ordinal inside the execution, when the producer exposes it. */
+  statementIndex?: number;
+  /** Storage-session identity when rows are held outside the in-memory result. */
+  storageSessionId?: string;
   /** Present when rows live in SqliteResultStore instead of data[][]. */
   diskStoreId?: string;
   /** Authoritative count when disk-backed; data.length may be 0 or window-only in webview. */
@@ -87,6 +91,8 @@ export type ResultSet = QueryResult & {
   diskQueryCountSpecKey?: string;
   /** Rows already streamed to the webview during an in-flight large result. */
   webviewStreamedRows?: number;
+  /** Last accepted transport chunk sequence for duplicate/out-of-order rejection. */
+  lastChunkSequence?: number;
   /** Approximate bytes held by the in-memory row buffer before SQLite spill. */
   bufferedBytes?: number;
 };

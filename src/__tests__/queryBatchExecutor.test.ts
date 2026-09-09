@@ -524,6 +524,21 @@ describe("queryBatchExecutor", () => {
             expect(result).toBe("SELECT 42");
         });
 
+        it("executes DECLARE script variables in expression, limit, and identifier contexts", async () => {
+            const result = await prepareQueryForExecution(`
+DECLARE &some_var = 'test';
+DECLARE &limit_cnt = 100;
+DECLARE &table_name = 'ORDERS';
+DECLARE &suffix = '2026';
+SELECT &some_var, NAME_&suffix
+FROM &table_name
+LIMIT &limit_cnt;`, {});
+
+            expect(result.replace(/\s+/g, " ").trim()).toBe(
+                "SELECT 'test', NAME_2026 FROM ORDERS LIMIT 100;",
+            );
+        });
+
         it("should emit %PUT messages through the log callback", async () => {
             const logCallback = jest.fn();
 
