@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import { createExecutionId, ExecutionOrchestrator } from '@justybase/database-runtime/execution';
+import type { ExecutionBackend } from '@justybase/database-runtime/execution';
+import type { ExecutionEvent } from '@justybase/contracts';
 import { ConnectionManager } from "./connectionManager";
 import {
   collectQueryVariableValues,
@@ -119,13 +122,6 @@ class ExecutedSqlError extends Error {
     this.expandedSql = expandedSql;
     this.hadExecutableMacro = hadExecutableMacro;
   }
-}
-
-function isSafeExecutedSqlRetry(originalSql: string, error: unknown): boolean {
-  return error instanceof ExecutedSqlError
-    && !error.hadExecutableMacro
-    && isSafeToRetryAfterBrokenConnection(originalSql)
-    && isSafeToRetryAfterBrokenConnection(error.expandedSql);
 }
 
 export function isRunQueryRawOptions(
@@ -299,74 +295,6 @@ export async function runQueryRaw(
     let activeError: unknown = error;
     const durationMs = Date.now() - queryStartTime;
     const isCancelled = isCancellationError(error);
-    if (
-      isConnectionTimeoutError(error)
-      && !isCancelled
-      && documentUri
-      && keepConnectionOpen
-      && isSafeExecutedSqlRetry(queryToExecute, error)
-    ) {
-      assertExecutionCurrent(isExecutionCurrent);
-      logOutput(
-        logger,
-        "Netezza connection timeout detected. Resetting the tab connection and retrying once...",
-      );
-      await connManager.closeDocumentPersistentConnection(documentUri);
-      assertExecutionCurrent(isExecutionCurrent);
-
-      try {
-        const result = await executeRawQuery(
-          connManager,
-          resolvedConnectionName,
-          keepConnectionOpen,
-          documentUri,
-          queryToExecute,
-          maxRows,
-          logger,
-          promptValues,
-          timeoutSeconds,
-          false,
-          onSessionId,
-          metadataContext,
-          trackMetadataSession,
-          metadataQueueWaitMs,
-          connectionOverride,
-          metadataSession,
-          isExecutionCurrent,
-          onMetadataExecutionComplete,
-        );
-        assertExecutionCurrent(isExecutionCurrent);
-
-        const retryDurationMs = Date.now() - queryStartTime;
-        await logQueryToHistory(
-          context,
-          connManager,
-          resolvedConnectionName,
-          query,
-          isUserQuery,
-          documentUri,
-          'success',
-          retryDurationMs,
-          result.rowsAffected,
-        );
-        return result;
-      } catch (retryError: unknown) {
-        assertExecutionCurrent(isExecutionCurrent);
-        activeError = retryError;
-        logOutput(
-          logger,
-          `Netezza connection retry failed: ${(retryError as { message?: string }).message || String(retryError)}`,
-        );
-      }
-    } else if (
-      isConnectionTimeoutError(error)
-      && !isCancelled
-      && documentUri
-      && keepConnectionOpen
-      && error instanceof ExecutedSqlError
-    ) {
-      activeError = createRetrySafetyError(error, false);
-    }
 
     // Silent auxiliary queries (refresh, All rows): wait and retry once when connection is still busy.
     if (
@@ -513,45 +441,19 @@ export async function executeRawQuery(
   onMetadataExecutionComplete?: (timing: MetadataQueryTiming) => void,
 ): Promise<QueryResult> {
   assertExecutionCurrent(isExecutionCurrent);
-  try {
-    const result = await executeRawQueryOnce(
-      connManager,
-      resolvedConnectionName,
-      keepConnectionOpen,
-      documentUri,
-      queryToExecute,
-      maxRows,
-      logger,
-      macroValues,
-      timeoutSeconds,
-      onSessionId,
-      metadataContext,
-      trackMetadataSession,
-      metadataQueueWaitMs,
-      connectionOverride,
-      metadataSession,
-      isExecutionCurrent,
-      onMetadataExecutionComplete,
-    );
-    assertExecutionCurrent(isExecutionCurrent);
-    return result;
-  } catch (error: unknown) {
-    assertExecutionCurrent(isExecutionCurrent);
-    const brokenPersistentConnection =
-      !isRetryAttempt
-      && !isCancellationError(error)
-      && keepConnectionOpen
-      && documentUri
-      && isConnectionBrokenError(error);
-    if (brokenPersistentConnection && isSafeExecutedSqlRetry(queryToExecute, error)) {
-      logOutput(
-        logger,
-        "Connection was closed by server. Reconnecting and retrying...",
-      );
-      await connManager.closeDocumentPersistentConnection(documentUri);
-      assertExecutionCurrent(isExecutionCurrent);
+  const { queryTimeout, rowLimit } = getQueryConfig();
+  const target: {
+    result?: QueryResult;
+    retrying: boolean;
+    lastFailureBroken: boolean;
+  } = {
+    retrying: false,
+    lastFailureBroken: false,
+  };
+  const backend: ExecutionBackend<typeof target> = {
+    execute: async (_target, _sql, _options, callbacks, _resources, backendContext) => {
       try {
-        return await executeRawQuery(
+        const result = await executeRawQueryOnce(
           connManager,
           resolvedConnectionName,
           keepConnectionOpen,
@@ -561,7 +463,6 @@ export async function executeRawQuery(
           logger,
           macroValues,
           timeoutSeconds,
-          true,
           onSessionId,
           metadataContext,
           trackMetadataSession,
@@ -571,19 +472,94 @@ export async function executeRawQuery(
           isExecutionCurrent,
           onMetadataExecutionComplete,
         );
-      } catch (retryError: unknown) {
-        assertExecutionCurrent(isExecutionCurrent);
-        const retryErrObj = retryError as { message?: string };
-        const retryErrorMessage = `Error (after reconnect attempt): ${retryErrObj.message || String(retryError)}`;
-        logOutput(logger, retryErrorMessage);
-        throw new Error(retryErrorMessage, { cause: retryError });
+        target.result = result;
+        callbacks.onColumns(result.columns);
+        if (result.data.length > 0) callbacks.onRows(result.data, result.data.length);
+        return {
+          totalRows: result.data.length,
+          limitReached: result.limitReached ?? false,
+          ...(result.rowsAffected === undefined ? {} : { rowsAffected: result.rowsAffected }),
+        };
+      } catch (error: unknown) {
+        if (error instanceof ExecutedSqlError && backendContext) {
+          backendContext.statement.expandedSql = error.expandedSql;
+          if (error.hadExecutableMacro) {
+            backendContext.request.retryPolicy = 'disabled';
+            target.lastFailureBroken = !isCancellationError(error)
+              && (isConnectionBrokenError(error) || isConnectionTimeoutError(error));
+          }
+        }
+        throw error;
       }
-    }
-    if (brokenPersistentConnection && error instanceof ExecutedSqlError) {
-      throw createRetrySafetyError(error, false);
-    }
-    throw error;
+    },
+    reconnect: async () => {
+      if (!documentUri) return;
+      assertExecutionCurrent(isExecutionCurrent);
+      await connManager.closeDocumentPersistentConnection(documentUri);
+      assertExecutionCurrent(isExecutionCurrent);
+    },
+    cancel: async () => {
+      if (documentUri) streamingManager.abortQuery(documentUri, 'Query cancelled');
+    },
+    isCancellationRequested: () => documentUri !== undefined && streamingManager.isAborted(documentUri),
+  };
+  const orchestrator = new ExecutionOrchestrator({
+    backend,
+    isConnectionBrokenError: error => {
+      target.lastFailureBroken = !isCancellationError(error)
+        && (isConnectionBrokenError(error) || isConnectionTimeoutError(error));
+      return target.lastFailureBroken;
+    },
+    isSafeToRetrySql: isSafeToRetryAfterBrokenConnection,
+  });
+  const statement = {
+    index: 0,
+    sql: queryToExecute,
+    originalSql: queryToExecute,
+    expandedSql: queryToExecute,
+  };
+  const execution = orchestrator.start({
+    executionId: createExecutionId('desktop-single'),
+    sourceKey: documentUri ?? `connection:${resolvedConnectionName}`,
+    target,
+    statements: [statement],
+    delivery: 'buffered',
+    connectionMode: documentUri && keepConnectionOpen && !connectionOverride ? 'persistent' : 'transient',
+    maxRows: maxRows ?? rowLimit,
+    timeoutSeconds: timeoutSeconds ?? queryTimeout,
+    readOnly: false,
+    retryPolicy: isRetryAttempt ? 'disabled' : 'safe-read-only-on-broken-connection',
+    continueOnError: false,
+  }, {
+    onEvent: (event: ExecutionEvent) => {
+      if (event.type !== 'retrying') return;
+      target.retrying = true;
+      logOutput(logger, 'Connection was closed by server. Reconnecting and retrying...');
+    },
+  });
+  const summary = await execution.settled;
+  assertExecutionCurrent(isExecutionCurrent);
+  if (summary.status === 'success' && target.result) return target.result;
+
+  const failure = summary.error?.cause ?? new Error(summary.error?.message ?? 'Query execution failed.');
+  if (summary.status === 'cancelled' || isCancellationError(failure)) {
+    throw failure instanceof Error ? failure : new Error('Query cancelled', { cause: failure });
   }
+  if (target.retrying) {
+    const message = `Error (after reconnect attempt): ${summary.error?.message ?? String(failure)}`;
+    logOutput(logger, message);
+    throw new Error(message, { cause: failure });
+  }
+  if (
+    target.lastFailureBroken
+    && documentUri
+    && keepConnectionOpen
+    && !connectionOverride
+    && failure instanceof ExecutedSqlError
+  ) {
+    throw createRetrySafetyError(failure, false);
+  }
+  throw failure instanceof Error ? failure : new Error(String(failure), { cause: failure });
 }
 
 async function executeRawQueryOnce(

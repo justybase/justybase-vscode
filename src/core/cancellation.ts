@@ -150,6 +150,7 @@ export function isCancellationError(error: unknown): boolean {
             || code === 'REQUEST_CANCELED'
             || code === 'REQUEST_CANCELLED'
             || code === 'ERR_ABORTED'
+            || code === 'EXECUTION_CANCELLED'
             || code === 'CANCELED'
             || code === 'CANCELLED'
             || name === 'ABORTERROR'

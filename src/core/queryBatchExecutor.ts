@@ -865,12 +865,12 @@ export async function handleBatchError(
             false,
         )
     ) {
-        throw new Error(`Connection is busy. Use the popup actions to resolve.`);
+        throw new Error(`Connection is busy. Use the popup actions to resolve.`, { cause: error });
     }
 
     const errorMessage = `Error: ${errObj.message || String(error)}`;
     logBatch(outputChannel, logCallback, errorMessage);
-    throw new Error(errorMessage);
+    throw new Error(errorMessage, { cause: error });
 }
 
 /**

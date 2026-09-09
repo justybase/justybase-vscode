@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'node:crypto';
 
 import { normalizeUriKey } from '../../core/queryRunnerUtils';
 import type { ResultPanelView } from '../../views/resultPanelView';
@@ -48,15 +49,9 @@ interface ActiveExecution {
     startedAt: number;
     phase: QueryExecutionPhase;
     recovery?: QueryExecutionRecovery;
+    recoveryError?: unknown;
     retired: boolean;
 }
-
-const runningSources = new Map<string, ActiveExecution>();
-const acquisitionLocks = new Map<string, Promise<void>>();
-let documentKeys = new WeakMap<vscode.TextDocument, string>();
-let retiredDocuments = new WeakSet<vscode.TextDocument>();
-let nextDocumentKey = 0;
-let nextExecutionId = 0;
 
 function describeSource(sourceUri: string): string {
     if (sourceUri.startsWith('untitled:')) {
@@ -66,20 +61,6 @@ function describeSource(sourceUri: string): string {
     const normalized = sourceUri.replace(/\\/g, '/');
     const filename = normalized.split('/').pop();
     return filename || 'this SQL tab';
-}
-
-function getSourceKey(sourceUri: string, document?: vscode.TextDocument): string {
-    const uriKey = normalizeUriKey(sourceUri);
-    if (!document) {
-        return uriKey;
-    }
-
-    let documentKey = documentKeys.get(document);
-    if (!documentKey) {
-        documentKey = `${uriKey}#document-${++nextDocumentKey}`;
-        documentKeys.set(document, documentKey);
-    }
-    return documentKey;
 }
 
 function getPhaseDescription(phase: QueryExecutionPhase): string {
@@ -98,342 +79,437 @@ function getElapsedDescription(startedAt: number): string {
     return elapsedSeconds > 0 ? ` (${elapsedSeconds}s)` : '';
 }
 
-function isCurrent(entry: ActiveExecution): boolean {
-    return !entry.retired && runningSources.get(entry.sourceKey)?.executionId === entry.executionId;
-}
+/**
+ * Instance-owned desktop execution coordination.
+ *
+ * Query commands still use the small exported facade below, but mutable
+ * leases, acquisition locks, and document identities belong to this object.
+ * This makes activation and tests able to create isolated coordinators without
+ * sharing an execution gate accidentally.
+ */
+export class QueryExecutionCoordinator {
+    private readonly runningSources = new Map<string, ActiveExecution>();
+    private readonly acquisitionLocks = new Map<string, Promise<void>>();
+    private documentKeys = new WeakMap<vscode.TextDocument, string>();
+    private retiredDocuments = new WeakSet<vscode.TextDocument>();
+    private nextDocumentKey = 0;
+    private nextExecutionId = 0;
+    private disposed = false;
 
-function retire(entry: ActiveExecution): void {
-    entry.retired = true;
-    const current = runningSources.get(entry.sourceKey);
-    if (current?.executionId === entry.executionId) {
-        runningSources.delete(entry.sourceKey);
+    private getSourceKey(sourceUri: string, document?: vscode.TextDocument): string {
+        const uriKey = normalizeUriKey(sourceUri);
+        if (!document) {
+            return uriKey;
+        }
+
+        let documentKey = this.documentKeys.get(document);
+        if (!documentKey) {
+            documentKey = `${uriKey}#document-${++this.nextDocumentKey}`;
+            this.documentKeys.set(document, documentKey);
+        }
+        return documentKey;
     }
-}
 
-async function withAcquisitionLock<T>(sourceKey: string, callback: () => Promise<T>): Promise<T> {
-    const previous = acquisitionLocks.get(sourceKey) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>(resolve => {
-        release = resolve;
-    });
-    const tail = previous.then(() => current);
-    acquisitionLocks.set(sourceKey, tail);
+    private isCurrent(entry: ActiveExecution): boolean {
+        return !entry.retired && this.runningSources.get(entry.sourceKey)?.executionId === entry.executionId;
+    }
 
-    await previous;
-    try {
-        return await callback();
-    } finally {
-        release();
-        if (acquisitionLocks.get(sourceKey) === tail) {
-            acquisitionLocks.delete(sourceKey);
+    private retire(entry: ActiveExecution): void {
+        entry.retired = true;
+        const current = this.runningSources.get(entry.sourceKey);
+        if (current?.executionId === entry.executionId) {
+            this.runningSources.delete(entry.sourceKey);
         }
     }
-}
 
-async function forceRecover(entry: ActiveExecution, useDropSession: boolean): Promise<boolean> {
-    if (!isCurrent(entry)) {
-        return true;
-    }
-    entry.phase = 'cancelling';
-    try {
-        await entry.recovery?.requestCancel?.();
+    private async withAcquisitionLock<T>(sourceKey: string, callback: () => Promise<T>): Promise<T> {
+        const previous = this.acquisitionLocks.get(sourceKey) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>(resolve => {
+            release = resolve;
+        });
+        const tail = previous.then(() => current);
+        this.acquisitionLocks.set(sourceKey, tail);
 
-        // If cancellation already finished the old lease, DROP SESSION is no
-        // longer needed. The connection reset and abort cleanup below are still
-        // mandatory before granting the retry.
-        if (useDropSession && isCurrent(entry)) {
-            const sessionId = entry.recovery?.getSessionId?.();
-            if (!sessionId || !(await entry.recovery?.dropSession?.(sessionId))) {
-                return false;
+        await previous;
+        try {
+            return await callback();
+        } finally {
+            release();
+            if (this.acquisitionLocks.get(sourceKey) === tail) {
+                this.acquisitionLocks.delete(sourceKey);
             }
         }
+    }
 
-        // A forced retry must never share a connection with a possibly-live command.
-        if (!entry.recovery?.resetConnection || !(await entry.recovery.resetConnection())) {
-            return false;
+    private async forceRecover(entry: ActiveExecution, useDropSession: boolean): Promise<boolean> {
+        if (!this.isCurrent(entry)) {
+            return true;
         }
-
-        entry.recovery?.clearCancellation?.();
-        if (isCurrent(entry)) {
-            retire(entry);
-        }
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function openFreshConnection(entry: ActiveExecution): Promise<boolean> {
-    if (!isCurrent(entry)) {
-        return true;
-    }
-    entry.phase = 'cancelling';
-    try {
-        await entry.recovery?.requestCancel?.();
-        if (!(await entry.recovery?.openFreshConnection?.())) {
-            return false;
-        }
-
-        entry.recovery?.clearCancellation?.();
-        if (isCurrent(entry)) {
-            retire(entry);
-        }
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function offerFreshConnection(entry: ActiveExecution, reason: string): Promise<boolean> {
-    if (!entry.recovery?.openFreshConnection) {
-        void vscode.window.showErrorMessage(`${reason} Reconnect this tab manually before retrying.`);
-        return false;
-    }
-
-    const selected = await vscode.window.showWarningMessage(
-        `${reason} Open a fresh connection for this tab and retry? The previous session may continue until the server cleans it up.`,
-        'Open new connection & retry',
-        'Keep Waiting',
-    );
-    if (!isCurrent(entry)) {
-        return false;
-    }
-    if (selected !== 'Open new connection & retry') {
-        return false;
-    }
-
-    const confirmed = await vscode.window.showWarningMessage(
-        'The old SQL session will be abandoned because it could not be terminated. Open a new connection for this tab and retry?',
-        { modal: true },
-        'Open new connection & retry',
-    );
-    if (!isCurrent(entry)) {
-        return false;
-    }
-    if (confirmed !== 'Open new connection & retry') {
-        return false;
-    }
-
-    const recovered = await openFreshConnection(entry);
-    if (!recovered) {
-        void vscode.window.showErrorMessage('Could not open a fresh connection. The previous execution remains protected.');
-    }
-    return recovered;
-}
-
-async function offerDropSessionAfterForceFailure(entry: ActiveExecution): Promise<boolean> {
-    const sessionId = entry.recovery?.getSessionId?.();
-    if (!sessionId || !entry.recovery?.dropSession) {
-        return offerFreshConnection(
-            entry,
-            'Could not reset the previous SQL execution safely and no session is available to drop.',
-        );
-    }
-
-    const selected = await vscode.window.showWarningMessage(
-        'Force unlock could not reset the previous SQL execution safely. Try DROP SESSION before retrying?',
-        'Drop session & retry',
-        'Keep Waiting',
-    );
-    if (!isCurrent(entry)) {
-        return false;
-    }
-    if (selected !== 'Drop session & retry') {
-        return false;
-    }
-
-    if (await forceRecover(entry, true)) {
-        return true;
-    }
-
-    return offerFreshConnection(
-        entry,
-        'DROP SESSION did not terminate the previous SQL session.',
-    );
-}
-
-async function resolveDuplicate(
-    entry: ActiveExecution,
-    sourceUri: string,
-    resultPanelProvider: Pick<ResultPanelView, 'log' | 'getActiveSource'>,
-): Promise<boolean> {
-    const sessionId = entry.recovery?.getSessionId?.();
-    const forcedRecoveryAllowed = entry.recovery?.allowForcedRecovery !== false
-        && typeof entry.recovery?.resetConnection === 'function';
-    const actions = forcedRecoveryAllowed
-        ? ['Keep Waiting', 'Force unlock & retry']
-        : ['Keep Waiting', 'Cancel current operation'];
-    if (forcedRecoveryAllowed && sessionId && entry.recovery?.dropSession) {
-        actions.splice(1, 0, 'Drop session & retry');
-    }
-
-    const unavailableSuffix = !forcedRecoveryAllowed && entry.recovery?.forcedRecoveryUnavailableMessage
-        ? ` ${entry.recovery.forcedRecoveryUnavailableMessage}`
-        : '';
-    const message = `SQL execution ${getPhaseDescription(entry.phase)} for ${describeSource(sourceUri)}${getElapsedDescription(entry.startedAt)}.${unavailableSuffix}`;
-    if (resultPanelProvider.getActiveSource() === sourceUri) {
-        resultPanelProvider.log(sourceUri, message);
-    }
-
-    const selected = await vscode.window.showWarningMessage(message, ...actions);
-    if (!isCurrent(entry)) {
-        return false;
-    }
-    if (selected === 'Cancel current operation') {
         entry.phase = 'cancelling';
-        await entry.recovery?.requestCancel?.();
-        return false;
+        try {
+            await entry.recovery?.requestCancel?.();
+
+            // If cancellation already finished the old lease, DROP SESSION is
+            // no longer needed. The connection reset and abort cleanup below
+            // are still mandatory before granting the retry.
+            if (useDropSession && this.isCurrent(entry)) {
+                const sessionId = entry.recovery?.getSessionId?.();
+                if (!sessionId || !(await entry.recovery?.dropSession?.(sessionId))) {
+                    return false;
+                }
+            }
+
+            // A forced retry must never share a connection with a possibly-live command.
+            if (!entry.recovery?.resetConnection || !(await entry.recovery.resetConnection())) {
+                return false;
+            }
+
+            entry.recovery?.clearCancellation?.();
+            if (this.isCurrent(entry)) {
+                this.retire(entry);
+            }
+            return true;
+        } catch (error: unknown) {
+            entry.recoveryError = error;
+            return false;
+        }
     }
-    if (selected === 'Drop session & retry') {
-        const recovered = await forceRecover(entry, true);
+
+    private async openFreshConnection(entry: ActiveExecution): Promise<boolean> {
+        if (!this.isCurrent(entry)) {
+            return true;
+        }
+        entry.phase = 'cancelling';
+        try {
+            await entry.recovery?.requestCancel?.();
+            if (!(await entry.recovery?.openFreshConnection?.())) {
+                return false;
+            }
+
+            entry.recovery?.clearCancellation?.();
+            if (this.isCurrent(entry)) {
+                this.retire(entry);
+            }
+            return true;
+        } catch (error: unknown) {
+            entry.recoveryError = error;
+            return false;
+        }
+    }
+
+    private async offerFreshConnection(entry: ActiveExecution, reason: string): Promise<boolean> {
+        if (!entry.recovery?.openFreshConnection) {
+            void vscode.window.showErrorMessage(`${reason} Reconnect this tab manually before retrying.`);
+            return false;
+        }
+
+        const selected = await vscode.window.showWarningMessage(
+            `${reason} Open a fresh connection for this tab and retry? The previous session may continue until the server cleans it up.`,
+            'Open new connection & retry',
+            'Keep Waiting',
+        );
+        if (!this.isCurrent(entry)) {
+            return false;
+        }
+        if (selected !== 'Open new connection & retry') {
+            return false;
+        }
+
+        const confirmed = await vscode.window.showWarningMessage(
+            'The old SQL session will be abandoned because it could not be terminated. Open a new connection for this tab and retry?',
+            { modal: true },
+            'Open new connection & retry',
+        );
+        if (!this.isCurrent(entry)) {
+            return false;
+        }
+        if (confirmed !== 'Open new connection & retry') {
+            return false;
+        }
+
+        const recovered = await this.openFreshConnection(entry);
         if (!recovered) {
-            return offerFreshConnection(
-                entry,
-                'DROP SESSION did not terminate the previous SQL session.',
-            );
+            void vscode.window.showErrorMessage('Could not open a fresh connection. The previous execution remains protected.');
         }
         return recovered;
     }
 
-    if (selected !== 'Force unlock & retry') {
-        return false;
+    private async offerDropSessionAfterForceFailure(entry: ActiveExecution): Promise<boolean> {
+        const sessionId = entry.recovery?.getSessionId?.();
+        if (!sessionId || !entry.recovery?.dropSession) {
+            return this.offerFreshConnection(
+                entry,
+                'Could not reset the previous SQL execution safely and no session is available to drop.',
+            );
+        }
+
+        const selected = await vscode.window.showWarningMessage(
+            'Force unlock could not reset the previous SQL execution safely. Try DROP SESSION before retrying?',
+            'Drop session & retry',
+            'Keep Waiting',
+        );
+        if (!this.isCurrent(entry)) {
+            return false;
+        }
+        if (selected !== 'Drop session & retry') {
+            return false;
+        }
+
+        if (await this.forceRecover(entry, true)) {
+            return true;
+        }
+
+        return this.offerFreshConnection(
+            entry,
+            'DROP SESSION did not terminate the previous SQL session.',
+        );
     }
 
-    const confirmed = await vscode.window.showWarningMessage(
-        'Force unlock will cancel the previous operation and reset this tab connection before retrying. Continue?',
-        { modal: true },
-        'Force unlock & retry',
-    );
-    if (!isCurrent(entry)) {
-        return false;
-    }
-    if (confirmed !== 'Force unlock & retry') {
-        return false;
-    }
+    private async resolveDuplicate(
+        entry: ActiveExecution,
+        sourceUri: string,
+        resultPanelProvider: Pick<ResultPanelView, 'log' | 'getActiveSource'>,
+    ): Promise<boolean> {
+        const sessionId = entry.recovery?.getSessionId?.();
+        const forcedRecoveryAllowed = entry.recovery?.allowForcedRecovery !== false
+            && typeof entry.recovery?.resetConnection === 'function';
+        const actions = forcedRecoveryAllowed
+            ? ['Keep Waiting', 'Force unlock & retry']
+            : ['Keep Waiting', 'Cancel current operation'];
+        if (forcedRecoveryAllowed && sessionId && entry.recovery?.dropSession) {
+            actions.splice(1, 0, 'Drop session & retry');
+        }
 
-    const recovered = await forceRecover(entry, false);
-    if (!recovered) {
-        return offerDropSessionAfterForceFailure(entry);
-    }
-    return recovered;
-}
+        const unavailableSuffix = !forcedRecoveryAllowed && entry.recovery?.forcedRecoveryUnavailableMessage
+            ? ` ${entry.recovery.forcedRecoveryUnavailableMessage}`
+            : '';
+        const message = `SQL execution ${getPhaseDescription(entry.phase)} for ${describeSource(sourceUri)}${getElapsedDescription(entry.startedAt)}.${unavailableSuffix}`;
+        if (resultPanelProvider.getActiveSource() === sourceUri) {
+            resultPanelProvider.log(sourceUri, message);
+        }
 
-function createLease(entry: ActiveExecution): QueryExecutionLease {
-    return {
-        executionId: entry.executionId,
-        sourceUri: entry.sourceUri,
-        sourceKey: entry.sourceKey,
-        origin: entry.origin,
-        isCurrent: () => isCurrent(entry),
-        markRunning: () => {
-            if (isCurrent(entry)) {
-                entry.phase = 'running';
+        const selected = await vscode.window.showWarningMessage(message, ...actions);
+        if (!this.isCurrent(entry)) {
+            return false;
+        }
+        if (selected === 'Cancel current operation') {
+            entry.phase = 'cancelling';
+            await entry.recovery?.requestCancel?.();
+            return false;
+        }
+        if (selected === 'Drop session & retry') {
+            const recovered = await this.forceRecover(entry, true);
+            if (!recovered) {
+                return this.offerFreshConnection(
+                    entry,
+                    'DROP SESSION did not terminate the previous SQL session.',
+                );
             }
-        },
-        markCancelling: () => {
-            if (isCurrent(entry)) {
+            return recovered;
+        }
+
+        if (selected !== 'Force unlock & retry') {
+            return false;
+        }
+
+        const confirmed = await vscode.window.showWarningMessage(
+            'Force unlock will cancel the previous operation and reset this tab connection before retrying. Continue?',
+            { modal: true },
+            'Force unlock & retry',
+        );
+        if (!this.isCurrent(entry)) {
+            return false;
+        }
+        if (confirmed !== 'Force unlock & retry') {
+            return false;
+        }
+
+        const recovered = await this.forceRecover(entry, false);
+        if (!recovered) {
+            return this.offerDropSessionAfterForceFailure(entry);
+        }
+        return recovered;
+    }
+
+    private createLease(entry: ActiveExecution): QueryExecutionLease {
+        return {
+            executionId: entry.executionId,
+            sourceUri: entry.sourceUri,
+            sourceKey: entry.sourceKey,
+            origin: entry.origin,
+            isCurrent: () => this.isCurrent(entry),
+            markRunning: () => {
+                if (this.isCurrent(entry)) {
+                    entry.phase = 'running';
+                }
+            },
+            markCancelling: () => {
+                if (this.isCurrent(entry)) {
+                    entry.phase = 'cancelling';
+                }
+            },
+            setRecovery: recovery => {
+                if (this.isCurrent(entry)) {
+                    entry.recovery = recovery;
+                }
+            },
+            dispose: () => this.retire(entry),
+        };
+    }
+
+    /**
+     * Acquires the per-document query lease. A TextDocument identity is deliberately
+     * part of the key: VS Code can reuse textual untitled URIs after a tab closes.
+     */
+    public async tryAcquire(
+        sourceUri: string,
+        resultPanelProvider: Pick<ResultPanelView, 'log' | 'getActiveSource'>,
+        options: QueryExecutionAcquireOptions = {},
+    ): Promise<QueryExecutionLease | undefined> {
+        if (this.disposed) {
+            return undefined;
+        }
+        const sourceKey = this.getSourceKey(sourceUri, options.document);
+        return this.withAcquisitionLock(sourceKey, async () => {
+            if (this.disposed || (options.document && this.retiredDocuments.has(options.document))) {
+                return undefined;
+            }
+
+            while (true) {
+                const existing = this.runningSources.get(sourceKey);
+                if (!existing || !this.isCurrent(existing)) {
+                    break;
+                }
+                if (!(await this.resolveDuplicate(existing, sourceUri, resultPanelProvider))) {
+                    return undefined;
+                }
+            }
+
+            if (this.disposed || (options.document && this.retiredDocuments.has(options.document))) {
+                return undefined;
+            }
+
+            const entry: ActiveExecution = {
+                executionId: `query-execution-${++this.nextExecutionId}-${randomUUID()}`,
+                sourceUri,
+                sourceKey,
+                origin: options.origin ?? 'Run Query',
+                startedAt: Date.now(),
+                phase: 'preparing',
+                recovery: options.recovery,
+                retired: false,
+            };
+            this.runningSources.set(sourceKey, entry);
+            return this.createLease(entry);
+        });
+    }
+
+    /** Mark a closed document's lease stale so a new document reusing its URI cannot inherit it. */
+    public retireForDocument(document: vscode.TextDocument): void {
+        this.retiredDocuments.add(document);
+        const sourceUri = document.uri.toString();
+        const documentKey = this.documentKeys.get(document);
+        const entries = documentKey
+            ? [this.runningSources.get(documentKey)]
+            : [this.runningSources.get(normalizeUriKey(sourceUri))];
+        for (const entry of entries) {
+            if (!entry || !this.isCurrent(entry)) continue;
+            entry.phase = 'cancelling';
+            this.retire(entry);
+            void Promise.resolve(entry.recovery?.requestCancel?.()).catch(() => undefined);
+        }
+    }
+
+    /** Restore a document identity reopened by VS Code's language-mode lifecycle. */
+    public restoreForReopenedDocument(document: vscode.TextDocument): void {
+        this.retiredDocuments.delete(document);
+    }
+
+    public isRunning(sourceUri: string): boolean {
+        const normalizedUri = normalizeUriKey(sourceUri);
+        return Array.from(this.runningSources.values()).some(entry =>
+            this.isCurrent(entry) && normalizeUriKey(entry.sourceUri) === normalizedUri,
+        );
+    }
+
+    public markCancelling(sourceUri: string): void {
+        const normalizedUri = normalizeUriKey(sourceUri);
+        for (const entry of this.runningSources.values()) {
+            if (this.isCurrent(entry) && normalizeUriKey(entry.sourceUri) === normalizedUri) {
                 entry.phase = 'cancelling';
             }
-        },
-        setRecovery: recovery => {
-            if (isCurrent(entry)) {
-                entry.recovery = recovery;
-            }
-        },
-        dispose: () => retire(entry),
-    };
+        }
+    }
+
+    /** Cancel and retire all leases during extension shutdown. */
+    public dispose(): void {
+        if (this.disposed) {
+            return;
+        }
+        this.disposed = true;
+        const active = [...this.runningSources.values()];
+        this.runningSources.clear();
+        this.acquisitionLocks.clear();
+        for (const entry of active) {
+            entry.retired = true;
+            entry.phase = 'cancelling';
+            void Promise.resolve(entry.recovery?.requestCancel?.()).catch(() => undefined);
+        }
+    }
+
+    /** Test-only reset; production callers should dispose an activation instance. */
+    public clearForTests(): void {
+        this.runningSources.clear();
+        this.acquisitionLocks.clear();
+        this.documentKeys = new WeakMap<vscode.TextDocument, string>();
+        this.retiredDocuments = new WeakSet<vscode.TextDocument>();
+        this.nextDocumentKey = 0;
+        this.nextExecutionId = 0;
+        this.disposed = false;
+    }
 }
 
-/**
- * Acquires the per-document query lease. A TextDocument identity is deliberately
- * part of the key: VS Code can reuse textual untitled URIs after a tab closes.
- */
+let defaultCoordinator = new QueryExecutionCoordinator();
+
+/** Create the coordinator owned by one extension activation. */
+export function createQueryExecutionCoordinator(): QueryExecutionCoordinator {
+    return new QueryExecutionCoordinator();
+}
+
+/** Install an activation-owned coordinator behind the legacy command facade. */
+export function setDefaultQueryExecutionCoordinator(coordinator: QueryExecutionCoordinator): void {
+    const previous = defaultCoordinator;
+    defaultCoordinator = coordinator;
+    if (previous !== coordinator) previous.dispose();
+}
+
 export async function tryAcquireQueryExecution(
     sourceUri: string,
     resultPanelProvider: Pick<ResultPanelView, 'log' | 'getActiveSource'>,
     options: QueryExecutionAcquireOptions = {},
 ): Promise<QueryExecutionLease | undefined> {
-    const sourceKey = getSourceKey(sourceUri, options.document);
-    return withAcquisitionLock(sourceKey, async () => {
-        if (options.document && retiredDocuments.has(options.document)) {
-            return undefined;
-        }
-
-        while (true) {
-            const existing = runningSources.get(sourceKey);
-            if (!existing || !isCurrent(existing)) {
-                break;
-            }
-            if (!(await resolveDuplicate(existing, sourceUri, resultPanelProvider))) {
-                return undefined;
-            }
-        }
-
-        if (options.document && retiredDocuments.has(options.document)) {
-            return undefined;
-        }
-
-        const entry: ActiveExecution = {
-            executionId: `query-execution-${++nextExecutionId}`,
-            sourceUri,
-            sourceKey,
-            origin: options.origin ?? 'Run Query',
-            startedAt: Date.now(),
-            phase: 'preparing',
-            recovery: options.recovery,
-            retired: false,
-        };
-        runningSources.set(sourceKey, entry);
-        return createLease(entry);
-    });
+    return defaultCoordinator.tryAcquire(sourceUri, resultPanelProvider, options);
 }
 
 /** Mark a closed document's lease stale so a new document reusing its URI cannot inherit it. */
 export function retireQueryExecutionForDocument(document: vscode.TextDocument): void {
-    retiredDocuments.add(document);
-    const sourceUri = document.uri.toString();
-    const sourceKey = getSourceKey(sourceUri, document);
-    const entry = runningSources.get(sourceKey);
-    if (!entry || !isCurrent(entry)) {
-        return;
-    }
-
-    entry.phase = 'cancelling';
-    retire(entry);
-    void entry.recovery?.requestCancel?.();
+    defaultCoordinator.retireForDocument(document);
 }
 
-/**
- * Restore a document identity reopened by VS Code's language-mode lifecycle.
- * A genuinely reopened editor receives a new TextDocument identity, so deleting
- * that new object from the WeakSet cannot revive a delayed command from the
- * document that was actually closed.
- */
+/** Restore a document identity reopened by VS Code's language-mode lifecycle. */
 export function restoreQueryExecutionForReopenedDocument(document: vscode.TextDocument): void {
-    retiredDocuments.delete(document);
+    defaultCoordinator.restoreForReopenedDocument(document);
 }
 
 export function isQueryExecutionRunning(sourceUri: string): boolean {
-    const normalizedUri = normalizeUriKey(sourceUri);
-    return Array.from(runningSources.values()).some(entry =>
-        isCurrent(entry) && normalizeUriKey(entry.sourceUri) === normalizedUri,
-    );
+    return defaultCoordinator.isRunning(sourceUri);
 }
 
 export function markQueryExecutionCancelling(sourceUri: string): void {
-    const normalizedUri = normalizeUriKey(sourceUri);
-    for (const entry of runningSources.values()) {
-        if (isCurrent(entry) && normalizeUriKey(entry.sourceUri) === normalizedUri) {
-            entry.phase = 'cancelling';
-        }
-    }
+    defaultCoordinator.markCancelling(sourceUri);
 }
 
 export function clearQueryExecutionGateForTests(): void {
-    runningSources.clear();
-    acquisitionLocks.clear();
-    documentKeys = new WeakMap<vscode.TextDocument, string>();
-    retiredDocuments = new WeakSet<vscode.TextDocument>();
-    nextDocumentKey = 0;
-    nextExecutionId = 0;
+    defaultCoordinator.clearForTests();
 }

@@ -131,6 +131,20 @@ describe("StreamingManager", () => {
       expect(manager.isAborted(docUri1)).toBe(true);
       expect(manager.isAborted(docUri2)).toBe(false);
     });
+
+    it("should cancel owned commands once and reject new registrations after disposal", async () => {
+      const docUri = "file:///test/dispose.sql";
+      const command = new MockNzCommand();
+      manager.registerCommand(docUri, command);
+
+      await manager.dispose();
+      await manager.dispose();
+
+      expect(command.cancelled).toBe(true);
+      expect(manager.isActive(docUri)).toBe(false);
+      expect(manager.abortQuery(docUri)).toBe(false);
+      expect(() => manager.registerCommand(docUri, new MockNzCommand())).toThrow('disposed');
+    });
   });
 
   describe("Cancellation", () => {

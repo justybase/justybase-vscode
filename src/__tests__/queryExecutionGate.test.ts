@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import {
     clearQueryExecutionGateForTests,
+    QueryExecutionCoordinator,
     isQueryExecutionRunning,
     restoreQueryExecutionForReopenedDocument,
     retireQueryExecutionForDocument,
@@ -57,6 +58,22 @@ describe('queryExecutionGate', () => {
         expect(requestCancel).toHaveBeenCalledTimes(1);
 
         secondLease?.dispose();
+    });
+
+    it('retires a URI-owned lease when the close notification has no matching document identity', async () => {
+        const sourceUri = 'file:///query-without-document.sql';
+        const requestCancel = jest.fn().mockResolvedValue(undefined);
+        const coordinator = new QueryExecutionCoordinator();
+        const lease = await coordinator.tryAcquire(sourceUri, provider, {
+            recovery: { requestCancel },
+        });
+
+        coordinator.retireForDocument(createDocument(sourceUri));
+
+        expect(lease?.isCurrent()).toBe(false);
+        expect(coordinator.isRunning(sourceUri)).toBe(false);
+        expect(requestCancel).toHaveBeenCalledTimes(1);
+        lease?.dispose();
     });
 
     it('allows execution after VS Code reopens the same document for a language-mode change', async () => {
@@ -388,5 +405,24 @@ describe('queryExecutionGate', () => {
         );
 
         firstLease?.dispose();
+    });
+
+    it('keeps two coordinator instances isolated', async () => {
+        const first = new QueryExecutionCoordinator();
+        const second = new QueryExecutionCoordinator();
+
+        const firstLease = await first.tryAcquire('file:///first.sql', provider);
+        const secondLease = await second.tryAcquire('file:///first.sql', provider);
+
+        expect(firstLease).toBeDefined();
+        expect(secondLease).toBeDefined();
+        expect(firstLease?.executionId).not.toBe(secondLease?.executionId);
+        expect(first.isRunning('file:///first.sql')).toBe(true);
+        expect(second.isRunning('file:///first.sql')).toBe(true);
+
+        firstLease?.dispose();
+        expect(first.isRunning('file:///first.sql')).toBe(false);
+        expect(second.isRunning('file:///first.sql')).toBe(true);
+        secondLease?.dispose();
     });
 });

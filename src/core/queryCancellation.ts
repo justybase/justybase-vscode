@@ -3,9 +3,82 @@ import { Logger } from "../utils/logger";
 import { StreamingManager } from "./streaming";
 import { cancelCommandAndCloseReader } from './cancellation';
 
-// Shared StreamingManager instance for handling query streaming
-// All query execution and cancellation goes through this manager
-export const streamingManager = new StreamingManager();
+// The exported object is a compatibility facade. Its mutable command and
+// abort maps live in the activation-owned StreamingManager instance selected
+// below, so separate activations/tests can use isolated managers.
+let defaultStreamingManager = new StreamingManager();
+
+export function createStreamingManager(): StreamingManager {
+    return new StreamingManager();
+}
+
+export function setDefaultStreamingManager(manager: StreamingManager): void {
+    const previous = defaultStreamingManager;
+    defaultStreamingManager = manager;
+    void previous.dispose().catch(error => {
+        Logger.getInstance().warn(`[queryCancellation] Previous streaming manager disposal failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    });
+}
+
+export async function disposeDefaultStreamingManager(): Promise<void> {
+    await defaultStreamingManager.dispose();
+}
+
+class StreamingManagerFacade {
+    public registerCommand(...args: Parameters<StreamingManager['registerCommand']>): ReturnType<StreamingManager['registerCommand']> {
+        return defaultStreamingManager.registerCommand(...args);
+    }
+
+    public unregisterCommand(...args: Parameters<StreamingManager['unregisterCommand']>): ReturnType<StreamingManager['unregisterCommand']> {
+        return defaultStreamingManager.unregisterCommand(...args);
+    }
+
+    public abortQuery(...args: Parameters<StreamingManager['abortQuery']>): ReturnType<StreamingManager['abortQuery']> {
+        return defaultStreamingManager.abortQuery(...args);
+    }
+
+    public isAborted(...args: Parameters<StreamingManager['isAborted']>): ReturnType<StreamingManager['isAborted']> {
+        return defaultStreamingManager.isAborted(...args);
+    }
+
+    public clearAborted(...args: Parameters<StreamingManager['clearAborted']>): ReturnType<StreamingManager['clearAborted']> {
+        return defaultStreamingManager.clearAborted(...args);
+    }
+
+    public isActive(...args: Parameters<StreamingManager['isActive']>): ReturnType<StreamingManager['isActive']> {
+        return defaultStreamingManager.isActive(...args);
+    }
+
+    public getCommand(...args: Parameters<StreamingManager['getCommand']>): ReturnType<StreamingManager['getCommand']> {
+        return defaultStreamingManager.getCommand(...args);
+    }
+
+    public getSignal(...args: Parameters<StreamingManager['getSignal']>): ReturnType<StreamingManager['getSignal']> {
+        return defaultStreamingManager.getSignal(...args);
+    }
+
+    public getActiveUris(...args: Parameters<StreamingManager['getActiveUris']>): ReturnType<StreamingManager['getActiveUris']> {
+        return defaultStreamingManager.getActiveUris(...args);
+    }
+
+    public consumeRestAndCancel(...args: Parameters<StreamingManager['consumeRestAndCancel']>): ReturnType<StreamingManager['consumeRestAndCancel']> {
+        return defaultStreamingManager.consumeRestAndCancel(...args);
+    }
+
+    public executeAndFetch(...args: Parameters<StreamingManager['executeAndFetch']>): ReturnType<StreamingManager['executeAndFetch']> {
+        return defaultStreamingManager.executeAndFetch(...args);
+    }
+
+    public executeWithStreaming(...args: Parameters<StreamingManager['executeWithStreaming']>): ReturnType<StreamingManager['executeWithStreaming']> {
+        return defaultStreamingManager.executeWithStreaming(...args);
+    }
+
+    public dispose(): Promise<void> {
+        return defaultStreamingManager.dispose();
+    }
+}
+
+export const streamingManager = new StreamingManagerFacade();
 
 // ---------------------------------------------------------------------------
 // Cancel functions

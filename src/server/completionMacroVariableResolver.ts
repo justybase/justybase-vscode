@@ -79,11 +79,52 @@ export function handleMacroVariableCompletion(params: {
     return setItems;
   }
 
+  const declareItems = buildDeclareCompletions(params.linePrefix, params.position);
+  if (declareItems !== undefined) {
+    return declareItems;
+  }
+
   if (!referenceContext) {
     return undefined;
   }
 
   return undefined;
+}
+
+function buildDeclareCompletions(
+  linePrefix: string,
+  position: Position,
+): CompletionItem[] | undefined {
+  const match = linePrefix.match(/\bdeclare(?:\s+&?[A-Za-z_]*)?$/i);
+  if (!match || match.index === undefined || !/\s/.test(match[0])) {
+    return undefined;
+  }
+
+  const keywordEnd = match[0].search(/\s/);
+  let variableStart = match.index + keywordEnd;
+  while (/\s/.test(linePrefix[variableStart] ?? "")) {
+    variableStart += 1;
+  }
+  const range = Range.create(
+    position.line,
+    variableStart,
+    position.line,
+    position.character,
+  );
+
+  return [{
+    label: "DECLARE &variable = value;",
+    kind: CompletionItemKind.Snippet,
+    detail: "Inline SQL variable declaration",
+    documentation:
+      "Declares an execution-scoped SQL variable. The DECLARE directive is stripped before execution.",
+    insertTextFormat: InsertTextFormat.Snippet,
+    textEdit: {
+      range,
+      newText: "&${1:variable_name} = ${2:value};",
+    },
+    sortText: "0_declare",
+  }];
 }
 
 function buildPercentMacroCompletions(
@@ -627,17 +668,17 @@ function collectMacroVariableDeclarationsBefore(
 ): MacroVariableDeclaration[] {
   const declarations = new Map<string, MacroVariableDeclaration>();
   const beforeCursor = documentText.substring(0, cursorOffset);
-  const declarationPattern = /^\s*(?:%let|@set)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(?:;|$)/gim;
+  const declarationPattern = /(?:^|\n)\s*(?:%let|@set)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(?:;|$)|(?:^|\n)\s*declare\s+&([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(?:;|$)/gim;
 
   for (const match of beforeCursor.matchAll(declarationPattern)) {
-    const name = match[1];
+    const name = match[1] ?? match[3];
     if (!name) {
       continue;
     }
 
     declarations.set(name.toUpperCase(), {
       name,
-      value: (match[2] ?? "").trim(),
+      value: (match[2] ?? match[4] ?? "").trim(),
     });
   }
 

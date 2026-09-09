@@ -3,6 +3,7 @@ import {
     MacroPreprocessor,
     type MacroPreprocessResult,
 } from './macroPreprocessor';
+import { resolveMacroReferenceValue } from './macroHelpers';
 
 /**
  * SQL Variable Utilities
@@ -235,7 +236,8 @@ export interface ParseSetResult {
 }
 
 /**
- * Parse lines like `@SET NAME = value` and `%let NAME = value;` (case-insensitive).
+ * Parse lines like `@SET NAME = value`, `%let NAME = value;`, and
+ * `DECLARE &NAME = value;` (case-insensitive).
  * Removes those lines from SQL and returns execution-scoped defaults.
  * 
  * @param sql - The SQL string to parse
@@ -291,8 +293,11 @@ export function replaceVariablesInSql(sql: string, values: Record<string, string
     const normalizedValues = normalizeVariableValues(values)
 
     // First replace ${VAR_NAME} format
-    let result = sql.replace(/\$\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g, (_match: string, name: string) => {
-        return normalizedValues[normalizeVariableName(name)] ?? '';
+    let result = sql.replace(/\$\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g, (match: string, name: string, offset: number, fullText: string) => {
+        const value = normalizedValues[normalizeVariableName(name)];
+        return value === undefined
+            ? ''
+            : resolveMacroReferenceValue(fullText, offset, offset + match.length, value);
     });
 
     // Then replace $VAR_NAME format (must start with letter or underscore)
@@ -308,13 +313,19 @@ export function replaceVariablesInSql(sql: string, values: Record<string, string
                 return match
             }
 
-            return normalizedValues[normalizeVariableName(name)] ?? match
+            const value = normalizedValues[normalizeVariableName(name)];
+            return value === undefined
+                ? match
+                : resolveMacroReferenceValue(fullText, offset, offset + match.length, value);
         }
     )
 
     // Then replace &VAR_NAME format (SAS-style macro variable reference)
-    result = result.replace(/&([A-Za-z_][A-Za-z0-9_]*)/g, (match: string, name: string) => {
-        return normalizedValues[normalizeVariableName(name)] ?? match
+    result = result.replace(/&([A-Za-z_][A-Za-z0-9_]*)/g, (match: string, name: string, offset: number, fullText: string) => {
+        const value = normalizedValues[normalizeVariableName(name)];
+        return value === undefined
+            ? match
+            : resolveMacroReferenceValue(fullText, offset, offset + match.length, value);
     })
 
     // Finally replace {VAR_NAME} format (without dollar sign)
@@ -325,7 +336,10 @@ export function replaceVariablesInSql(sql: string, values: Record<string, string
                 return match
             }
 
-            return normalizedValues[normalizeVariableName(name)] ?? ''
+            const value = normalizedValues[normalizeVariableName(name)];
+            return value === undefined
+                ? ''
+                : resolveMacroReferenceValue(fullText, offset, offset + match.length, value);
         }
     )
 
