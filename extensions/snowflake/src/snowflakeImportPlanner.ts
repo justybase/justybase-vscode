@@ -261,7 +261,7 @@ export async function planSnowflakeStageImport(
         throw new Error('Target table name is required.');
     }
 
-    const importer = createTabularDataImporter(sourceFile, normalizedTargetTable);
+    const importer = createTabularDataImporter(sourceFile);
     await importer.analyzeDataTypes();
     importer.applyColumnOptions(columnOptions);
 

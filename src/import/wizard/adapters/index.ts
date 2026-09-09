@@ -1,4 +1,4 @@
-import { normalizeDatabaseKind, type DatabaseKind } from '../../../contracts/database';
+import { DEFAULT_DATABASE_KIND, tryNormalizeDatabaseKind, type DatabaseKind } from '../../../contracts/database';
 import type { DatabaseImportWizardAdapter } from './DatabaseImportWizardAdapter';
 import { db2ImportWizardAdapter } from './Db2ImportWizardAdapter';
 import { duckDbImportWizardAdapter } from './DuckDbImportWizardAdapter';
@@ -29,5 +29,11 @@ const IMPORT_WIZARD_ADAPTERS: Readonly<Record<DatabaseKind, DatabaseImportWizard
 };
 
 export function getImportWizardAdapter(kind?: string | DatabaseKind): DatabaseImportWizardAdapter {
-    return IMPORT_WIZARD_ADAPTERS[normalizeDatabaseKind(kind)];
+    const normalizedKind = kind === undefined || kind.trim().length === 0
+        ? DEFAULT_DATABASE_KIND
+        : tryNormalizeDatabaseKind(kind);
+    if (!normalizedKind) {
+        throw new Error(`Unsupported database kind '${kind}'.`);
+    }
+    return IMPORT_WIZARD_ADAPTERS[normalizedKind];
 }

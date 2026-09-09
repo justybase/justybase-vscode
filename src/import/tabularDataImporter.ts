@@ -1,5 +1,5 @@
 import type { DatabaseKind } from '../contracts/database';
-import { normalizeDatabaseKind } from '../contracts/database';
+import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../utils/identifierUtils';
 import {
     ImportColumnDescriptor,
@@ -17,7 +17,12 @@ export interface TabularDataImporterOptions {
 }
 
 function normalizeKind(kind?: string | DatabaseKind): DatabaseKind | undefined {
-    return kind ? normalizeDatabaseKind(kind) : undefined;
+    if (kind === undefined || kind.trim().length === 0) return undefined;
+    const normalizedKind = tryNormalizeDatabaseKind(kind);
+    if (!normalizedKind) {
+        throw new Error(`Unsupported database kind '${kind}'.`);
+    }
+    return normalizedKind;
 }
 
 function normalizeSelectedColumnIndexes(indexes: readonly number[], totalColumns: number): number[] {

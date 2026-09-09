@@ -1,4 +1,3 @@
-import { normalizeDatabaseKind } from "../../contracts/database";
 import { ImportPreviewService } from "./ImportPreviewService";
 import { ImportValidationService } from "./ImportValidationService";
 import { ImportWizardSession } from "./ImportWizardSession";
@@ -37,7 +36,7 @@ export class ImportWizardService {
     options: ImportWizardSessionOptions,
   ): Promise<ImportWizardState> {
     const adapter = getImportWizardAdapter(
-      normalizeDatabaseKind(options.connectionDetails.dbType),
+      options.connectionDetails.dbType,
     );
     const session = new ImportWizardSession(
       options,

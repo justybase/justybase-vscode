@@ -49,6 +49,7 @@
         "package": "node ../../scripts/package-optional-vsix.js package"
     },
     "dependencies": {
+        "@justybase/spreadsheet-tasks": "2.1.1",
         "snowflake-sdk": "^2.3.5"
     },
     "preview": true
