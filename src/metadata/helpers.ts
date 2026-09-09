@@ -4,6 +4,7 @@
  */
 
 import type { TableMetadata } from './types';
+import { mergeObjectType } from '@justybase/metadata-core';
 import {
     createNetezzaUserIdentifier,
     isNetezzaQuotedIdentifier,
@@ -243,39 +244,17 @@ export function mergeTableLikeObjectsForSchema(
     targetType: string
 ): TableMetadata[] {
     const normalizedTargetType = targetType.toUpperCase();
-    const merged = new Map<string, TableMetadata>();
-
-    const buildMergeKey = (table: TableMetadata): string | undefined => {
-        const label = extractLabel(table) || table.OBJNAME || table.TABLENAME;
-        if (!label) {
-            return undefined;
-        }
-
-        const objectType = inferCachedTableLikeType(table);
-        const schemaName = typeof table.SCHEMA === 'string' ? table.SCHEMA.toUpperCase() : '';
-        return `${objectType}|${schemaName}|${label.toUpperCase()}`;
-    };
-
-    for (const table of existingTables ?? []) {
-        const objectType = inferCachedTableLikeType(table);
-        if (objectType === normalizedTargetType) {
-            continue;
-        }
-
-        const mergeKey = buildMergeKey(table);
-        if (mergeKey) {
-            merged.set(mergeKey, table);
-        }
-    }
-
-    for (const table of updatedTables) {
-        const mergeKey = buildMergeKey(table);
-        if (mergeKey) {
-            merged.set(mergeKey, table);
-        }
-    }
-
-    return Array.from(merged.values()).sort((left, right) => {
+    return mergeObjectType(existingTables ?? [], updatedTables, {
+        objectType: normalizedTargetType,
+        getObjectType: table => inferCachedTableLikeType(table),
+        normalizeObjectType: value => value.toUpperCase(),
+        getIdentity: table => {
+            const label = extractLabel(table) || table.OBJNAME || table.TABLENAME;
+            if (!label) return undefined;
+            const schemaName = typeof table.SCHEMA === 'string' ? table.SCHEMA.toUpperCase() : '';
+            return `${inferCachedTableLikeType(table)}|${schemaName}|${label.toUpperCase()}`;
+        },
+        sort: (left, right) => {
         const leftType = inferCachedTableLikeType(left);
         const rightType = inferCachedTableLikeType(right);
         if (leftType !== rightType) {
@@ -291,6 +270,7 @@ export function mergeTableLikeObjectsForSchema(
         const leftLabel = extractLabel(left) || left.OBJNAME || left.TABLENAME || '';
         const rightLabel = extractLabel(right) || right.OBJNAME || right.TABLENAME || '';
         return leftLabel.localeCompare(rightLabel);
+        },
     });
 }
 

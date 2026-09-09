@@ -81,6 +81,7 @@ import {
     mergeNetezzaColumnsWithKeysRows,
 } from '../dialects/netezza/metadata/columnsWithKeys';
 import { Logger } from '../utils/logger';
+import { createMetadataPrefetchPlan } from '@justybase/metadata-core';
 import type {
     MetadataQueryContext,
     MetadataQueryKind,
@@ -1858,7 +1859,16 @@ export class CachePrefetcher {
         const isInProgress = this.connectionPrefetchInProgress.has(connectionName);
         const lastPrefetchTime = this.connectionPrefetchTriggered.get(connectionName);
         const cacheTTL = this.cache.getCacheTTL();
-        const isPrefetchStale = lastPrefetchTime !== undefined && Date.now() - lastPrefetchTime >= cacheTTL;
+        const snapshotComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
+            ?? this.cache.hasTableCacheForConnection(connectionName);
+        const plan = createMetadataPrefetchPlan({
+            lastPrefetchAt: lastPrefetchTime,
+            now: Date.now(),
+            cacheTtl: cacheTTL,
+            snapshotComplete,
+            force: options?.manual === true,
+        });
+        const isPrefetchStale = plan.stale;
 
         if (isInProgress) {
             return;
@@ -1868,16 +1878,12 @@ export class CachePrefetcher {
             return;
         }
 
-        if (lastPrefetchTime !== undefined && !isPrefetchStale) {
+        if (plan.skip) {
             // Data in RAM is fresh — skip only when the complete snapshot is
             // still available. Checking only for a table layer is insufficient:
             // a partial checkpoint recovery can retain tables while a column
             // layer is missing, and that refresh must not be silently skipped.
-            const snapshotComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
-                ?? this.cache.hasTableCacheForConnection(connectionName);
-            if (snapshotComplete) {
-                return;
-            }
+            return;
         }
 
         // Mark in-progress BEFORE any await: concurrent triggerConnectionPrefetch

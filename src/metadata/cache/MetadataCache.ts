@@ -35,6 +35,7 @@ import {
   extractLabel,
   isNetezzaExactCachePart,
   parseDbSchemaCacheKey,
+  inferCachedTableLikeType,
 } from '../helpers';
 import { createNetezzaUserIdentifier } from '../../dialects/netezza/metadata/identifierUtils';
 import type { CacheStatsSnapshot, CacheLayer } from '../cacheStats';
@@ -77,6 +78,7 @@ import {
   startDiskWatcherAfterInit,
 } from './diskLifecycle';
 import * as prefetchDelegation from './prefetchDelegation';
+import { evaluateCompleteness } from '@justybase/metadata-core';
 
 export type { CacheStatsSnapshot, CacheLayer } from '../cacheStats';
 export type { PerKeyEntry, CacheType, DatabaseMetadata } from '../types';
@@ -1245,18 +1247,44 @@ export class MetadataCache implements MetadataPrefetchTarget {
   ): MetadataSnapshotCompletenessReport {
     const missingStages = this.getSnapshotMissingStages(connectionName);
     const maxReportedMissingColumnKeys = 100;
-
-    const allMissingColumnKeys = this.getMissingColumnLayerKeys(connectionName);
+    const columnLayers = this.getColumnLayerCompleteness(connectionName);
+    const report = evaluateCompleteness({
+      databaseLoaded: !missingStages.includes('databases'),
+      schemaLoaded: !missingStages.includes('schemas'),
+      objectsLoaded: !missingStages.includes('objects'),
+      proceduresLoaded: !missingStages.includes('procedures'),
+      // Type groups are optional for the historical full-snapshot contract.
+      typeGroupsLoaded: true,
+      expectedColumnKeys: columnLayers.expectedColumnKeys,
+      loadedColumnKeys: columnLayers.loadedColumnKeys,
+    });
+    const stageNames: Record<string, string> = {
+      database: 'databases',
+      schema: 'schemas',
+      objects: 'objects',
+      procedures: 'procedures',
+    };
+    const allMissingColumnKeys = report.missingColumnKeys;
 
     return {
-      complete: missingStages.length === 0 && allMissingColumnKeys.length === 0,
-      missingStages,
+      complete: report.complete,
+      missingStages: report.missingStages.map(stage => stageNames[stage] ?? stage),
       missingColumnKeys: allMissingColumnKeys.slice(0, maxReportedMissingColumnKeys),
       missingColumnCount: allMissingColumnKeys.length,
     };
   }
 
   getMissingColumnLayerKeys(connectionName: string): string[] {
+    return this.getColumnLayerCompleteness(connectionName).missingColumnKeys;
+  }
+
+  private getColumnLayerCompleteness(connectionName: string): {
+    expectedColumnKeys: string[];
+    loadedColumnKeys: ReadonlySet<string>;
+    missingColumnKeys: string[];
+  } {
+    const expectedColumnKeys = new Set<string>();
+    const loadedColumnKeys = new Set<string>();
     const missingColumnKeys = new Set<string>();
     const prefix = `${connectionName}|`;
     for (const [fullKey, entry] of this._store.tableCache) {
@@ -1272,7 +1300,11 @@ export class MetadataCache implements MetadataPrefetchTarget {
       }
 
       for (const table of entry.data) {
-        const objType = String(table.objType ?? table.TYPE ?? '').toUpperCase();
+        const objType = String(
+          table.objType
+            ?? table.TYPE
+            ?? inferCachedTableLikeType(table),
+        ).toUpperCase();
         if (
           objType !== 'TABLE'
           && objType !== 'VIEW'
@@ -1295,17 +1327,24 @@ export class MetadataCache implements MetadataPrefetchTarget {
             ? { preserveCase: true }
             : undefined,
         );
+        expectedColumnKeys.add(columnKey);
         const columnsLoadedInMemory = this._store.columnCache.has(`${connectionName}|${columnKey}`);
         // Column files are intentionally hydrated lazily after the metadata
         // manifest. A database-level file alone is not enough, though: it may
         // predate a newly discovered table. Require the exact persisted layer.
         const columnsAvailableOnDisk = this.hasColumnLayerOnDisk(connectionName, columnKey);
-        if (!columnsLoadedInMemory && !columnsAvailableOnDisk) {
+        if (columnsLoadedInMemory || columnsAvailableOnDisk) {
+          loadedColumnKeys.add(columnKey);
+        } else {
           missingColumnKeys.add(columnKey);
         }
       }
     }
-    return [...missingColumnKeys];
+    return {
+      expectedColumnKeys: [...expectedColumnKeys],
+      loadedColumnKeys,
+      missingColumnKeys: [...missingColumnKeys],
+    };
   }
 
   removeTableObjectByColumnKey(connectionName: string, columnKey: string): boolean {

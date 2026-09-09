@@ -200,6 +200,29 @@ describe("MetadataCache", () => {
       });
     });
 
+    it("treats legacy kind-only table rows as column-bearing after restart", () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
+      } as never);
+      const databaseKey = buildNetezzaCacheDatabasePart("JUST_DATA");
+      const schemaLayer = buildDbSchemaCacheKey(databaseKey, "ADMIN");
+      const aggregateLayer = buildDbSchemaCacheKey(databaseKey);
+      const columnLayer = buildColumnCacheKey(databaseKey, "ADMIN", "LEGACY_TABLE", { preserveCase: true });
+
+      netezzaCache.setDatabases("conn1", [{ DATABASE: "JUST_DATA", label: "JUST_DATA", kind: 9 }]);
+      netezzaCache.setSchemas("conn1", databaseKey, [{ SCHEMA: "ADMIN", label: "ADMIN", kind: 19 }]);
+      netezzaCache.setTables(
+        "conn1",
+        schemaLayer,
+        [{ OBJNAME: "LEGACY_TABLE", SCHEMA: "ADMIN", label: "LEGACY_TABLE", kind: 6 }],
+        new Map(),
+      );
+      netezzaCache.setProcedures("conn1", aggregateLayer, []);
+      netezzaCache.setColumns("conn1", columnLayer, []);
+
+      expect(netezzaCache.verifyCompleteSnapshot("conn1")).toBe(true);
+    });
+
     it("treats an explicit empty column layer as a complete negative cache", () => {
       const netezzaCache = new MetadataCache(mockContext, {
         getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),

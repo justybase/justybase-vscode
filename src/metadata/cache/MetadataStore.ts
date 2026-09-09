@@ -12,6 +12,11 @@ import type {
   SchemaMetadata,
   TableMetadata,
 } from '../types';
+import {
+  computeStaleTtl as computeCoreStaleTtl,
+  isServable,
+  STALE_TTL_MULTIPLIER as CORE_STALE_TTL_MULTIPLIER,
+} from '@justybase/metadata-core';
 
 /** Default cache TTL in hours */
 export const DEFAULT_CACHE_TTL_HOURS = 12;
@@ -21,10 +26,10 @@ export const DEFAULT_CACHE_TTL_HOURS = 12;
  * CACHE_TTL * STALE_TTL_MULTIPLIER is still served from RAM (stale-while-revalidate)
  * while a background refresh is triggered.
  */
-export const STALE_TTL_MULTIPLIER = 2;
+export const STALE_TTL_MULTIPLIER = CORE_STALE_TTL_MULTIPLIER;
 
 export function computeStaleTtl(cacheTtl: number): number {
-  return cacheTtl * STALE_TTL_MULTIPLIER;
+  return computeCoreStaleTtl(cacheTtl);
 }
 
 /**
@@ -73,8 +78,12 @@ export class MetadataStore {
   /**
    * Entries remain servable until staleTtl elapses (stale-while-revalidate).
    */
-  isEntryValid(timestamp: number): boolean {
-    return Date.now() - timestamp < this.staleTtl;
+  isEntryValid(timestamp: number, now = Date.now()): boolean {
+    return isServable(timestamp, now, this.cacheTtl, this.staleTtl);
+  }
+
+  isEntryFresh(timestamp: number, now = Date.now()): boolean {
+    return now - timestamp < this.cacheTtl;
   }
 
   getTotalEntryCount(): number {

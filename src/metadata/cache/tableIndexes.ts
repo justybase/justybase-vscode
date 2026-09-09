@@ -3,6 +3,7 @@
  */
 
 import { Logger } from '../../utils/logger';
+import { buildObjectIndexes, type MetadataObjectLike } from '@justybase/metadata-core';
 import type { CacheStatsTracker } from '../cacheStats';
 import {
   extractLabel,
@@ -332,6 +333,19 @@ export function rebuildTableIndexesForConnection(
 ): void {
   const rebuildStartMs = Date.now();
   const prefix = `${connectionName}|`;
+  const candidates: Array<MetadataObjectLike & { qualifiedKey: string; nameOnlyKey: string }> = [];
+
+  for (const key of store.objectLookupIndex.keys()) {
+    if (key.split('|')[0]?.toUpperCase() === connectionName.toUpperCase()) {
+      store.objectLookupIndex.delete(key);
+    }
+  }
+  for (const key of store.tableNameOnlyIndex.keys()) {
+    if (key.split('|')[0]?.toUpperCase() === connectionName.toUpperCase()) {
+      store.tableNameOnlyIndex.delete(key);
+    }
+  }
+
   for (const [fullKey, entry] of store.tableCache) {
     if (!fullKey.startsWith(prefix)) {
       continue;
@@ -346,15 +360,54 @@ export function rebuildTableIndexesForConnection(
     const preserveCatalogIdentity = isNetezzaExactCachePart(layerKey);
     const idMapEntry = store.tableIdMap.get(fullKey);
     const idMap = idMapEntry?.data ?? new Map<string, number>();
-    addTableIndexes(
-      store,
-      connectionName,
-      dbName,
-      schemaName || undefined,
-      entry.data,
-      idMap,
-      preserveCatalogIdentity,
-    );
+    for (const item of entry.data) {
+      const cachedInfo = buildCachedObjectInfo(
+        dbName,
+        schemaName || undefined,
+        item,
+        idMap,
+        preserveCatalogIdentity,
+      );
+      if (!cachedInfo) continue;
+      const qualifiedKey = preserveCatalogIdentity
+        ? `${connectionName.toUpperCase()}|${dbName}.${cachedInfo.schema}.${cachedInfo.name}`
+        : `${connectionName}|${dbName}.${cachedInfo.schema}.${cachedInfo.name}`.toUpperCase();
+      const nameOnlyKey = preserveCatalogIdentity
+        ? `${connectionName.toUpperCase()}|${dbName}..${cachedInfo.name}`
+        : `${connectionName}|${dbName}..${cachedInfo.name}`.toUpperCase();
+      candidates.push({
+        name: cachedInfo.name,
+        database: dbName,
+        schema: cachedInfo.schema,
+        objectType: cachedInfo.objType,
+        objectId: cachedInfo.objId,
+        qualifiedKey,
+        nameOnlyKey,
+      });
+    }
+  }
+
+  const indexes = buildObjectIndexes(candidates, {
+    getQualifiedKey: value => value.qualifiedKey,
+    getNameOnlyKey: value => value.nameOnlyKey,
+  });
+  for (const [key, entry] of indexes.byQualifiedName) {
+    if (typeof entry.objectId !== 'number') continue;
+    store.objectLookupIndex.set(key, {
+      objId: entry.objectId,
+      objType: entry.objectType ?? 'TABLE',
+      schema: entry.schema ?? '',
+      name: entry.name,
+    });
+  }
+  for (const [key, entry] of indexes.byName) {
+    if (typeof entry.objectId !== 'number') continue;
+    store.tableNameOnlyIndex.set(key, {
+      objId: entry.objectId,
+      objType: entry.objectType ?? 'TABLE',
+      schema: entry.schema ?? '',
+      name: entry.name,
+    });
   }
   deferredIndexConnections.delete(connectionName);
   Logger.getInstance().debug(
