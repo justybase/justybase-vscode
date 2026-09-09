@@ -1,4 +1,4 @@
-import { buildPostgresqlAlterTableSql } from '../../extensions/postgresql/src/postgresqlAlterTableDdl.js';
+import { buildPostgresqlAlterTableSql } from '@justybase/designer-core';
 import type {
     PostgresqlAlterTableDesign,
     PostgresqlAlterTableDesignerColumn,

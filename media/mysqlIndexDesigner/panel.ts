@@ -1,7 +1,7 @@
 import {
     buildMysqlCreateIndexSql,
     type MysqlIndexKeyColumn,
-} from '../../extensions/mysql/src/mysqlDesignerDdl.js';
+} from '@justybase/designer-core';
 import type {
     MysqlDesignerColumn,
     MysqlIndexDesign,

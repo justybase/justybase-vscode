@@ -3,7 +3,7 @@ import type {
     DatabaseMaintenanceServices,
     DatabaseMaintenanceTarget
 } from '@justybase/contracts';
-import type { Db2DesignerColumn } from '../../../src/contracts/webviews/db2IndexDesignerContracts';
+import type { Db2DesignerColumn } from '@justybase/contracts';
 import type {
     Db2DesignerPartition,
     Db2PartitionDesignerInboundMessage,
@@ -11,7 +11,7 @@ import type {
     Db2PartitionDesignerOutboundMessage,
     Db2PartitionRangeDesign,
     Db2PartitionOperationRequest
-} from '../../../src/contracts/webviews/db2PartitionDesignerContracts';
+} from '@justybase/contracts';
 import {
     buildColumnMetadataQuery,
     buildListPartitionsQuery,

@@ -4,7 +4,7 @@ import type {
     PostgresqlIndexDesignerInboundMessage,
     PostgresqlIndexDesignerInitialContext,
     PostgresqlIndexDesignerOutboundMessage,
-} from '../../../src/contracts/webviews/postgresqlIndexDesignerContracts';
+} from '@justybase/contracts';
 import {
     buildPostgresqlCreateIndexSql,
     buildPostgresqlDropIndexSql,

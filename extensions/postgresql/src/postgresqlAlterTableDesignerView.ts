@@ -4,7 +4,7 @@ import type {
     PostgresqlAlterTableDesignerInboundMessage,
     PostgresqlAlterTableDesignerInitialContext,
     PostgresqlAlterTableDesignerOutboundMessage,
-} from '../../../src/contracts/webviews/postgresqlAlterTableDesignerContracts';
+} from '@justybase/contracts';
 import { buildPostgresqlAlterTableSql } from './postgresqlAlterTableDdl';
 import { loadPostgresqlAlterTableDesignerContext } from './postgresqlDesignerOperations';
 import type { PostgresqlDesignerOperationContext } from './postgresqlCommandContext';

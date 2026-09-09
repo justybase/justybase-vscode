@@ -6,18 +6,18 @@ import type {
     MysqlDesignerColumn,
     MysqlDesignerExistingIndex,
     MysqlIndexDesignerInitialContext,
-} from '../../../src/contracts/webviews/mysqlIndexDesignerContracts';
+} from '@justybase/contracts';
 import type {
     MysqlAlterTableDesignerColumn,
     MysqlAlterTableDesignerInitialContext,
-} from '../../../src/contracts/webviews/mysqlAlterTableDesignerContracts';
+} from '@justybase/contracts';
 import type {
     MysqlDesignerPartition,
     MysqlPartitionCapabilities,
     MysqlPartitionDesignerInitialContext,
     MysqlPartitionMethod,
-} from '../../../src/contracts/webviews/mysqlPartitionDesignerContracts';
-import { formatQualifiedObjectName } from '../../../src/utils/identifierUtils';
+} from '@justybase/contracts';
+import { formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 import { charsetFromCollation } from './mysqlAlterTableDdl';
 import {
     buildAlterTablePropertiesQuery,

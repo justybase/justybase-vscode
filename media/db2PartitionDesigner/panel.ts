@@ -5,7 +5,7 @@ import {
     buildDb2DropPartitionSql,
     buildDb2SetIntegritySql,
     type Db2PartitionRangeOptions
-} from '../../extensions/db2/src/db2DesignerDdl.js';
+} from '@justybase/designer-core';
 import type {
     Db2DesignerPartition,
     Db2PartitionDesignerHostToWebviewMessage,

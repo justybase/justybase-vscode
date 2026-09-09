@@ -4,7 +4,7 @@ import type {
     MysqlPartitionDesignerInitialContext,
     MysqlPartitionDesignerOutboundMessage,
     MysqlPartitionOperationRequest,
-} from '../../../src/contracts/webviews/mysqlPartitionDesignerContracts';
+} from '@justybase/contracts';
 import {
     buildMysqlAddHashKeyPartitionSql,
     buildMysqlAddRangeListPartitionSql,

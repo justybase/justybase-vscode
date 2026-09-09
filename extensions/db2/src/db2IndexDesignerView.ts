@@ -11,7 +11,7 @@ import type {
     Db2IndexDesignerInboundMessage,
     Db2IndexDesignerInitialContext,
     Db2IndexDesignerOutboundMessage
-} from '../../../src/contracts/webviews/db2IndexDesignerContracts';
+} from '@justybase/contracts';
 import { buildColumnMetadataQuery, buildListTablespacesQuery } from './db2SystemQueries';
 import {
     areDb2IdentifiersEqual,

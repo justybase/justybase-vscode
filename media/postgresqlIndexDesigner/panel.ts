@@ -1,7 +1,7 @@
 import {
     buildPostgresqlCreateIndexSql,
     POSTGRESQL_INDEX_METHODS,
-} from '../../extensions/postgresql/src/postgresqlIndexDdl.js';
+} from '@justybase/designer-core';
 import type {
     PostgresqlAlterTableDesignerColumn,
     PostgresqlIndexDesign,

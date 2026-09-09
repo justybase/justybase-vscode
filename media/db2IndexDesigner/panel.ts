@@ -3,7 +3,7 @@ import {
     buildDb2CreateIndexSql,
     type Db2CreateIndexDdlOptions,
     type Db2IndexKeyColumn
-} from '../../extensions/db2/src/db2DesignerDdl.js';
+} from '@justybase/designer-core';
 import type {
     Db2DesignerColumn,
     Db2IndexDesign,
