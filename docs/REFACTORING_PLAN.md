@@ -412,6 +412,11 @@ Closure evidence (2026-09-09, Linux):
 
 Related: CQ02, CQ06.
 
+Status: implementation complete on Linux (2026-09-10). The route groups,
+instance-owned API context, shutdown path, user-scoped React workspace, and
+configurable API client are migrated while preserving the existing HTTP,
+WebSocket, cookie-authentication, and CSRF contracts.
+
 1. Split routes into auth/admin, connections, queries, results/export,
    metadata, designer, and LSP. Preserve authorization and validation hooks.
 2. Extract use cases, instance composition, and backend shutdown.
@@ -424,6 +429,27 @@ Related: CQ02, CQ06.
 
 Acceptance: compatible web functionality, configurable host, and no mutable
 state shared between API instances.
+
+R7 implementation evidence (2026-09-10, Linux):
+
+- `apps/api/src/routes/` owns auth/admin, connections, queries, results/export,
+  metadata, designer, and LSP transport. `queryUseCases.ts` owns query,
+  edit, and import planning/execution behind an explicit dependency context;
+  `applicationContext.ts` composes per-server stores, runtimes, jobs,
+  sessions, metadata, rate limiting, and idempotent shutdown; `main.ts` drains
+  the Fastify server on SIGINT/SIGTERM.
+- `apps/web/src/api.ts` exposes a client factory with injectable HTTP and
+  WebSocket origins and CSRF adapter while retaining cookie credentials.
+  Workspace documents, execution transitions, connection rules, and
+  persistence are covered by focused controllers; persisted keys are scoped
+  to the authenticated user and legacy keys migrate without overwriting or
+  deleting an unverified copy.
+- Regression evidence: the full `npm run verify:pr` gate passed on Linux,
+  including 546 root suites / 9,632 tests, API 18 suites / 97 tests, web 9
+  suites / 45 tests, type checks, architecture, lint, coverage, and final
+  desktop/API/web builds. The real Playwright `table-rendering.spec.ts` gate
+  also passed (19/19). Live database and Windows-specific gates remain
+  environment-specific and were not represented as locally passed.
 
 ### R8 — Closure
 

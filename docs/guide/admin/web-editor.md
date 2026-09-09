@@ -26,11 +26,26 @@ npm run start --workspace @justybase/web-api
 
 The default listener is local at `http://127.0.0.1:3000`. For development, build the API, run it in watch mode, and run the Vite frontend in a second terminal. Use `apps/api/.env.example` as a starting point; keep `.env` out of source control.
 
+The browser client uses same-origin `/api` and WebSocket URLs by default. When
+the frontend is built separately from the API, configure the client at Vite
+build time with `VITE_API_HTTP_BASE_URL` (for example,
+`https://api.example.test`). `VITE_API_WEBSOCKET_BASE_URL` is optional; when
+omitted, the client derives `wss://api.example.test` (or `ws://` for an HTTP
+development URL). When supplied, it is the origin and the client adds
+`/api/ws` and `/api/lsp` paths.
+For this separate-origin setup, set `JUSTYBASE_WEB_ORIGINS` on the API to the
+exact frontend origin (or comma-separated origins). It enables credentialed
+CORS and remote CSRF bootstrap; do not use `*`. Use HTTPS/WSS for the
+deployment because cross-site cookies require `SameSite=None; Secure`.
+HTTP origins remain useful for same-site local development and receive
+`SameSite=Lax` cookies.
+
 ## Required configuration
 
 - `JUSTYBASE_MASTER_KEY` must remain stable for a data directory. It encrypts saved connection passwords. Rotating it without a migration makes existing ciphertext unreadable.
 - `JUSTYBASE_DATA_DIR` should point to persistent, access-controlled storage. It contains the application SQLite store, backups, local databases, and query sessions.
 - `JUSTYBASE_ADMIN_USER` and `JUSTYBASE_ADMIN_PASSWORD` create/bootstrap the initial administrator. Change the bootstrap password policy before exposing the service.
+- `JUSTYBASE_WEB_ORIGINS` is required when the frontend is hosted on another origin; use exact origins, comma-separated when needed.
 - Configure host/port and web distribution through the API config when deploying behind a reverse proxy.
 
 ## User workflow
