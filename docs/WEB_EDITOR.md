@@ -46,6 +46,20 @@ npm run dev --workspace @justybase/web
 
 The frontend uses Vite's proxy to reach the API on port `3000`.
 
+For a separately hosted frontend, set `VITE_API_HTTP_BASE_URL` when building
+it. `VITE_API_WEBSOCKET_BASE_URL` is optional: when omitted, the client derives
+the `ws:`/`wss:` origin from the HTTP base URL. If both are omitted, the client
+uses same-origin `/api` and WebSocket URLs. The WebSocket setting is an origin
+and the client appends `/api/ws` and `/api/lsp`.
+
+The API must also be configured with the exact frontend origin(s), separated
+by commas, in `JUSTYBASE_WEB_ORIGINS` (for example,
+`JUSTYBASE_WEB_ORIGINS=https://editor.example.test`). This enables
+credentialed CORS and the remote CSRF-token bootstrap; wildcard origins are
+not supported. Separately hosted cross-site deployments must use HTTPS/WSS
+because the session and CSRF cookies then use `SameSite=None; Secure`; HTTP is
+supported for same-site local development with `SameSite=Lax`.
+
 ## Current scope
 
 The web editor includes:

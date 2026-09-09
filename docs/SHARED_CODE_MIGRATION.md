@@ -166,6 +166,24 @@ a separate compatibility design, not an automatic declaration of “additive”.
 Keep facades until every consumer of that slice has migrated. Never serialize
 driver objects, VS Code handles or credentials into a new shared result type.
 
+The v1 `getActiveConnectionDetails` method retains its historical
+credential-bearing `ConnectionDetails` result for compatibility with already
+published companions. New shared DTOs must continue to omit credentials; a
+credential-free replacement requires a coordinated major-version rollout for
+the core extension and all companions.
+
+### Tabular import ownership
+
+`@justybase/tabular-import-runtime` currently owns the platform-neutral
+analysis, descriptor, sampling, and row-reading behavior used by the Snowflake
+planner. The desktop importer remains the compatibility/product implementation
+for Netezza and the other companion import paths, while the API keeps its
+request/upload and database-execution-specific import path. These consumers
+are intentionally staged rather than presented as a completed whole-repository
+migration. A future consolidation must first compare CSV/XLSX/XLSB quoting,
+header, type-inference, limits, and error behavior, then migrate consumers and
+remove the old paths with the corresponding product gates.
+
 Result webview messages and API `QueryEvent` are distinct existing protocols.
 No field rename, required stable-ID retrofit or shared transport switch occurs
 here. Preserve legacy timestamp identity fallback, row offsets, chunk sequence
