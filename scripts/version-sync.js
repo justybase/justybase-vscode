@@ -21,6 +21,14 @@ const paths = {
   coreLock: path.join(coreDir, "package-lock.json"),
 };
 
+const independentWorkspacePackages = [
+  {
+    id: "access-file",
+    directory: path.join(repoRoot, "packages/access-file"),
+    packageJson: path.join(repoRoot, "packages/access-file/package.json"),
+  },
+];
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -262,7 +270,36 @@ function describeManagedTargets(options = {}) {
   ].join(", ");
 }
 
+function validateIndependentWorkspaceVersions(coreLock) {
+  const mismatches = [];
+  for (const workspace of independentWorkspacePackages) {
+    if (!fs.existsSync(workspace.packageJson)) {
+      continue;
+    }
+
+    const packageJson = readJson(workspace.packageJson);
+    const lockVersion = coreLock.packages?.[`packages/${workspace.id}`]?.version;
+    if (!isValidSemver(packageJson.version)) {
+      mismatches.push(`${workspace.id} package.json=${packageJson.version ?? "missing"} (invalid semver)`);
+    }
+    if (packageJson.version !== lockVersion) {
+      mismatches.push(
+        `${workspace.id} package.json=${packageJson.version ?? "missing"} `
+        + `!= root package-lock.json packages["packages/${workspace.id}" ]=${lockVersion ?? "missing"}`,
+      );
+    }
+  }
+
+  if (mismatches.length > 0) {
+    fail(
+      `Independent workspace version mismatch. These packages are intentionally not synchronized with core: ${mismatches.join(", ")}.`,
+    );
+  }
+}
+
 function validateVersions(options = {}) {
+  const coreLock = readJson(paths.coreLock);
+  validateIndependentWorkspaceVersions(coreLock);
   const entries = getVersionEntries(options);
   const mismatches = [];
   const expected = entries[0][1];

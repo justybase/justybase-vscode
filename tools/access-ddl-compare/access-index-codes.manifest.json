@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/justybase/JustyBase.UCanAccessCs.git",
+    "ref": "8fcf4a6e7ac485c315a204e51c383c57df09ee11"
+  },
+  "resourceRoot": "src/UCanAccess.File/Resources",
+  "sources": [
+    {
+      "name": "CODES_GEN_LEG",
+      "file": "index_codes_genleg.txt",
+      "sha256": "edacb4fe29105fd5c7f848f982b3fb2fc3dea495c478b74450efb848ca99ee8b"
+    },
+    {
+      "name": "CODES_EXT_GEN_LEG",
+      "file": "index_codes_ext_genleg.txt",
+      "sha256": "79e3099bdb37df7e8f3c8d073821938c45dc1456a8ed81a8c3437be68f93781f"
+    },
+    {
+      "name": "CODES_GEN",
+      "file": "index_codes_gen.txt",
+      "sha256": "3b3ebcba04b64b7bbd0aee8b583068a17b4cba99f2f3d08eddac8fe9cab6f7ec"
+    },
+    {
+      "name": "CODES_EXT_GEN",
+      "file": "index_codes_ext_gen.txt",
+      "sha256": "9c768af76f7756c54d1e2938263b0979a9d89c7285c044ba17de148284b197f7"
+    },
+    {
+      "name": "CODES_GEN_97",
+      "file": "index_codes_gen_97.txt",
+      "sha256": "cd1ebfedfa42c52a6ee2dc3f1d0ce3769681828aad80c2ef7ed3b73c632dbaef"
+    },
+    {
+      "name": "MAPPINGS_EXT_GEN_97",
+      "file": "index_mappings_ext_gen_97.txt",
+      "sha256": "2fe6f9e2f33f51a343a5bb9e81ee72fe42531a6cba08131826139f87e9c7c432"
+    }
+  ],
+  "generated": {
+    "file": "packages/access-file/src/jet/JetIndexCodesData.ts",
+    "sha256": "ddaa72e745e044c73ae75eddfbeebc53b6382ea27cf2aa4217646eb5c56cdcbd",
+    "bytes": 1696650
+  }
+}
