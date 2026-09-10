@@ -1,1 +1,12 @@
-export * from '@justybase/contracts';
+export type {
+    PostgresqlDesignerColumn,
+    PostgresqlIndexMethod,
+    PostgresqlIndexPart,
+    PostgresqlExistingIndex,
+    PostgresqlIndexDesign,
+    PostgresqlIndexDesignerInitialContext,
+    PostgresqlIndexDesignerWebviewToHostMessage,
+    PostgresqlIndexDesignerHostToWebviewMessage,
+    PostgresqlIndexDesignerInboundMessage,
+    PostgresqlIndexDesignerOutboundMessage,
+} from '@justybase/contracts';
