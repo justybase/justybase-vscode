@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
-import { tryNormalizeDatabaseKind } from '../contracts/database';
+import { tryNormalizeDatabaseKind, type DatabaseStageWorkflowProvider } from '../contracts/database';
 import { ConnectionManager, type ConnectionDetails as ManagedConnectionDetails } from '../core/connectionManager';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import type { ImportColumnOptions } from '../import/dataImporter';
@@ -26,7 +26,7 @@ import type { DatabaseKind } from '../contracts/database';
 import type { AliasInfo } from '../providers/types';
 import { ImportWizardView } from '../views/importWizardView';
 import { presentAccessError } from '../utils/accessErrorHandling';
-import { getRequiredDatabaseStageWorkflowProvider } from '../core/connectionFactory';
+import { getDatabaseStageWorkflowProvider } from '../core/connectionFactory';
 
 export interface ImportCommandsDependencies {
     context: vscode.ExtensionContext;
@@ -435,6 +435,16 @@ async function ensureSnowflakeConnection(
     }
 
     return connectionName;
+}
+
+function getSnowflakeStageWorkflowProvider(): DatabaseStageWorkflowProvider | undefined {
+    const provider = getDatabaseStageWorkflowProvider('snowflake');
+    if (!provider) {
+        vscode.window.showErrorMessage(
+            'Snowflake stage workflows are unavailable. Install and activate the Snowflake companion extension, then try again.',
+        );
+    }
+    return provider;
 }
 
 async function openSnowflakeWorkflowDocument(
@@ -1124,6 +1134,11 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 return;
             }
 
+            const stageWorkflowProvider = getSnowflakeStageWorkflowProvider();
+            if (!stageWorkflowProvider) {
+                return;
+            }
+
             const targetTable = await promptSnowflakeTargetTable();
             if (!targetTable) {
                 return;
@@ -1139,8 +1154,6 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 placeHolder: 'MY_CSV_FORMAT',
                 validateInput: () => null,
             });
-            const stageWorkflowProvider = getRequiredDatabaseStageWorkflowProvider('snowflake');
-
             const sql = stageWorkflowProvider.buildCopyIntoTableSql({
                 tableName: targetTable.trim(),
                 stage,
@@ -1177,6 +1190,11 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 return;
             }
 
+            const stageWorkflowProvider = getSnowflakeStageWorkflowProvider();
+            if (!stageWorkflowProvider) {
+                return;
+            }
+
             const targetTable = await promptSnowflakeTargetTable();
             if (!targetTable) {
                 return;
@@ -1192,8 +1210,6 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 placeHolder: 'MY_CSV_FORMAT',
                 validateInput: () => null,
             });
-            const stageWorkflowProvider = getRequiredDatabaseStageWorkflowProvider('snowflake');
-
             const sql = stageWorkflowProvider.buildCopyIntoStageSql({
                 tableName: targetTable.trim(),
                 stage,

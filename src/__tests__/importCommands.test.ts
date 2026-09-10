@@ -17,6 +17,7 @@ import { importDataToNetezza } from '../import/dataImporter';
 import { importClipboardDataToDb2, importDataToDb2 } from '../import/db2Importer';
 import { importClipboardDataToPostgreSql, importDataToPostgreSql } from '../import/postgresqlImporter';
 import { ImportWizardView } from '../views/importWizardView';
+import { getDatabaseStageWorkflowProvider } from '../core/connectionFactory';
 
 // Mock vscode module
 jest.mock('vscode', () => ({
@@ -71,6 +72,10 @@ jest.mock('../views/importWizardView', () => ({
     ImportWizardView: {
         createOrShow: jest.fn(),
     },
+}));
+
+jest.mock('../core/connectionFactory', () => ({
+    getDatabaseStageWorkflowProvider: jest.fn(),
 }));
 
 // Mock queryRunner
@@ -174,6 +179,7 @@ describe('commands/importCommands', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        (getDatabaseStageWorkflowProvider as jest.Mock).mockReturnValue(undefined);
         (vscode.window.withProgress as jest.Mock).mockImplementation(async (_options, callback) => {
             return callback({ report: jest.fn() }, { isCancellationRequested: false });
         });
@@ -401,6 +407,38 @@ describe('commands/importCommands', () => {
             disposables.forEach((d) => {
                 expect(d).toHaveProperty('dispose');
             });
+        });
+
+        it.each([
+            'netezza.snowflake.prepareStageImport',
+            'netezza.snowflake.prepareStageExport',
+        ])('should handle an unavailable Snowflake stage provider for %s', async (commandId) => {
+            const getConnectionDatabaseKind = jest.fn().mockReturnValue('snowflake');
+            const connectionManager = createImportConnectionManager(
+                { dbType: 'snowflake' },
+                {
+                    getConnectionForExecution: jest.fn().mockReturnValue('snowflake-connection'),
+                    getConnectionDatabaseKind,
+                },
+            );
+            const deps: ImportCommandsDependencies = {
+                context: mockContext,
+                connectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            };
+
+            registerImportCommands(deps);
+            const commandCallback = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                ([registeredCommand]) => registeredCommand === commandId,
+            )?.[1] as (() => Promise<void>) | undefined;
+
+            await expect(commandCallback?.()).resolves.toBeUndefined();
+            expect(getDatabaseStageWorkflowProvider).toHaveBeenCalledWith('snowflake');
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+                'Snowflake stage workflows are unavailable. Install and activate the Snowflake companion extension, then try again.',
+            );
+            expect(vscode.window.showInputBox).not.toHaveBeenCalled();
         });
     });
 
