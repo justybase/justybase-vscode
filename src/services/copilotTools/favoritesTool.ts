@@ -7,7 +7,7 @@ export interface IFavoritesToolParameters {
 }
 
 export class FavoritesTool implements vscode.LanguageModelTool<IFavoritesToolParameters> {
-    constructor(private copilotService: CopilotService) { }
+    constructor(private copilotService: CopilotToolService) { }
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IFavoritesToolParameters>,
@@ -55,4 +55,4 @@ export class FavoritesTool implements vscode.LanguageModelTool<IFavoritesToolPar
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

@@ -4,26 +4,23 @@
 
 import * as vscode from "vscode";
 import { isSqlLanguageClientRunning } from "../activation/lspRegistration";
-import { getDatabaseSqlAuthoring } from "../core/connectionFactory";
-import { SqlValidator } from "../sqlParser";
-import { SqlCoreBackedValidator } from "../sqlParser/sqlCoreBackedValidator";
-import type { SqlValidationService } from "../sqlParser";
-import { createMetadataCacheSchemaProvider } from "../sqlParser/metadataCacheAdapter";
 import { getLogger } from "../utils/logger";
 import type { MetadataCache } from "../metadataCache";
 import type { ConnectionManager } from "../core/connectionManager";
-import type { SchemaProvider } from "../sqlParser/schemaProvider";
 import { isSqlAuthoringLanguageId } from "../utils/sqlLanguage";
 import type { LintIssue } from "../providers/linterRules";
+import {
+  createDesktopSqlValidatorForDocument,
+  getDesktopSqlAuthoringForDocument,
+  getDesktopSqlValidationContext,
+  getInitializedDesktopSqlValidator,
+  initializeDesktopSqlValidator,
+  type SqlValidationContext,
+} from "../sqlParser/desktopValidationContext";
+import type { SchemaProvider } from "../sqlParser/schemaProvider";
+import type { SqlValidationService } from "../sqlParser/validationService";
 
-interface SqlValidationContext {
-  metadataCache: MetadataCache;
-  connectionManager: ConnectionManager;
-}
-
-// Global validator instance (will be initialized with dependencies)
-let validatorInstance: SqlValidationService | undefined;
-let validationContext: SqlValidationContext | undefined;
+export type { SqlValidationContext } from "../sqlParser/desktopValidationContext";
 
 /**
  * Initialize the SQL validator with metadata cache for column validation
@@ -32,61 +29,23 @@ export function initializeSqlValidator(
   metadataCache: MetadataCache,
   connectionManager: ConnectionManager,
 ): void {
-  validationContext = { metadataCache, connectionManager };
-  validatorInstance = createSqlValidatorForDocument();
+  initializeDesktopSqlValidator(metadataCache, connectionManager);
   getLogger().info("SQL validator initialized with metadata cache");
 }
 
 export function getSqlValidationContext(): SqlValidationContext | undefined {
-  return validationContext;
+  return getDesktopSqlValidationContext();
 }
 
 export function getSqlAuthoringForDocument(documentUri?: string) {
-  const databaseKind =
-    validationContext?.connectionManager?.getExecutionDatabaseKind?.(
-      documentUri,
-    );
-  return getDatabaseSqlAuthoring(databaseKind);
+  return getDesktopSqlAuthoringForDocument(documentUri);
 }
 
 export function createSqlValidatorForDocument(
   documentUri?: string,
   schemaProvider?: SchemaProvider,
 ): SqlValidationService {
-  const authoring = getSqlAuthoringForDocument(documentUri);
-  const databaseKind =
-    validationContext?.connectionManager?.getExecutionDatabaseKind?.(
-      documentUri,
-    );
-  // Keep every non-Netezza authoring profile on its established validator
-  // until its dialect pack is migrated. Netezza is the first native semantic
-  // sql-core consumer and still presents the same desktop facade.
-  const Validator = !databaseKind || databaseKind === "netezza"
-    ? SqlCoreBackedValidator
-    : SqlValidator;
-
-  if (schemaProvider) {
-    return new Validator(schemaProvider, authoring.validation);
-  }
-
-  if (!validationContext) {
-    return new Validator(undefined, authoring.validation);
-  }
-
-  const connectionName =
-    validationContext.connectionManager.resolveConnectionName?.(documentUri);
-  if (!connectionName) {
-    return new Validator(undefined, authoring.validation);
-  }
-
-  const resolvedSchemaProvider = createMetadataCacheSchemaProvider(
-    validationContext.metadataCache,
-    validationContext.connectionManager,
-    connectionName,
-    documentUri,
-  );
-
-  return new Validator(resolvedSchemaProvider, authoring.validation);
+  return createDesktopSqlValidatorForDocument(documentUri, schemaProvider);
 }
 
 /**
@@ -96,11 +55,7 @@ export function createSqlValidatorForDocument(
 export function getInitializedSqlValidator(
   documentUri?: string,
 ): SqlValidationService | undefined {
-  if (documentUri && validationContext) {
-    return createSqlValidatorForDocument(documentUri);
-  }
-
-  return validatorInstance;
+  return getInitializedDesktopSqlValidator(documentUri);
 }
 
 function countLintIssuesBySeverity(issues: LintIssue[]): {

@@ -3,7 +3,7 @@
  * JustyBase.UCanAccessCs / Jackcess).
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import type { JetLayout } from './JetLayout';
 import { JET_PAGE_TYPES } from './JetLayout';
 import {
@@ -11,9 +11,8 @@ import {
     JetIndexEntry,
     JetIndexNodeEntry,
 } from './JetIndexEntry';
-import type { JetIndexData } from './JetIndexData';
-import { INVALID_INDEX_PAGE_NUMBER } from './JetIndexData';
-import type { JetIndexDataPage, JetIndexPageCacheLike } from './JetIndexPageCacheTypes';
+import { INVALID_INDEX_PAGE_NUMBER } from './JetIndexConstants';
+import type { JetIndexDataLike, JetIndexDataPage, JetIndexPageCacheLike } from './JetIndexPageCacheTypes';
 
 export class JetIndexDataPageModel {
     public isLeaf = false;
@@ -139,12 +138,12 @@ interface MutableCachePage extends JetIndexDataPage {
 }
 
 export class JetIndexPageCache implements JetIndexPageCacheLike {
-    private readonly _indexData: JetIndexData;
+    private readonly _indexData: JetIndexDataLike;
     private _rootPage: MutableCachePage | null = null;
     private readonly _dataPages = new Map<number, MutableCachePage>();
     private readonly _modifiedPages: MutableCachePage[] = [];
 
-    public constructor(indexData: JetIndexData) {
+    public constructor(indexData: JetIndexDataLike) {
         this._indexData = indexData;
     }
 

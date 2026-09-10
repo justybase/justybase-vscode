@@ -5,7 +5,7 @@ export interface IGetSqlDiagnosticsToolParameters {
 }
 
 export class GetSqlDiagnosticsTool implements vscode.LanguageModelTool<IGetSqlDiagnosticsToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IGetSqlDiagnosticsToolParameters>,
@@ -39,4 +39,4 @@ export class GetSqlDiagnosticsTool implements vscode.LanguageModelTool<IGetSqlDi
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

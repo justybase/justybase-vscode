@@ -12,7 +12,7 @@
  * Index pages are updated alongside row mutations when a table has indexes.
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import type { AccessValue } from '../types';
 import { DELETED_ROW_MASK, JET_PAGE_TYPES, OFFSET_MASK, OVERFLOW_ROW_MASK } from './JetLayout';
 import type { JetLayout } from './JetLayout';
@@ -29,24 +29,9 @@ import { JetIndexData } from './JetIndexData';
 import type { JetPendingChange } from './JetIndexData';
 import { JetRowId } from './JetIndexEntry';
 import { JetTextSortOrder } from './JetTextSortOrder';
+import type { JetColumn } from './JetTableTypes';
 
-export interface JetColumn {
-    readonly name: string;
-    readonly type: number;
-    readonly columnNumber: number;
-    readonly variable: boolean;
-    readonly variableIndex: number;
-    readonly fixedOffset: number;
-    readonly size: number;
-    readonly precision: number;
-    readonly scale: number;
-    readonly autoLong: boolean;
-    readonly autoUuid: boolean;
-    /** raw sort-order value from the column definition (text columns only) */
-    readonly sortOrder?: number;
-    /** sort-order version byte (Jet4 stores 4 bytes: value + version at +2/+3) */
-    readonly sortOrderVersion?: number;
-}
+export type { JetColumn } from './JetTableTypes';
 
 export interface JetRowLocation {
     readonly pageNumber: number;

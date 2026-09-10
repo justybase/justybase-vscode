@@ -33,7 +33,7 @@ import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
 import { logWithFallback } from '../utils/logger';
 import { normalizeUriKey } from './uriUtils';
-import type { MetadataCache } from '../metadataCache';
+import type { ConnectionManagerMetadataCache } from './connectionManagerPorts';
 
 export type ConnectionDetails = NamedConnectionDetails;
 
@@ -385,7 +385,7 @@ export class ConnectionManager {
     private _connectionsFullyLoaded = false;
     private _missingDocumentConnectionWarnings = new Set<string>();
 
-    private _metadataCache?: MetadataCache;
+    private _metadataCache?: ConnectionManagerMetadataCache;
 
     // Promise that resolves when connections are loaded from Secrets API
     private _loadingPromise: Promise<void>;
@@ -518,11 +518,11 @@ export class ConnectionManager {
         );
     }
 
-    setMetadataCache(metadataCache: MetadataCache): void {
+    setMetadataCache(metadataCache: ConnectionManagerMetadataCache): void {
         this._metadataCache = metadataCache;
     }
 
-    getMetadataCache(): MetadataCache | undefined {
+    getMetadataCache(): ConnectionManagerMetadataCache | undefined {
         return this._metadataCache;
     }
 

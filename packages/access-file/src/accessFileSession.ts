@@ -30,6 +30,9 @@ import type {
     AccessVersion,
 } from './types';
 import { ACCESS_COMPLEX_KIND } from './types';
+import { AccessFileError, AccessFileReadOnlyError } from './accessErrors';
+
+export { AccessFileError, AccessFileReadOnlyError } from './accessErrors';
 
 const ACCESS_HEADER_SIZE = 21;
 const ACCESS_VERSION_OFFSET = 20;
@@ -58,20 +61,6 @@ const ATTACHMENT_COLUMN_NAMES = new Set([
     'FileTimeStamp',
     'FileFlags',
 ]);
-
-export class AccessFileError extends Error {
-    public constructor(message: string, options?: ErrorOptions) {
-        super(message, options);
-        this.name = 'AccessFileError';
-    }
-}
-
-export class AccessFileReadOnlyError extends AccessFileError {
-    public constructor(filePath: string) {
-        super(`Microsoft Access file is read-only: ${filePath}`);
-        this.name = 'AccessFileReadOnlyError';
-    }
-}
 
 export function detectAccessFileFormat(buffer: Uint8Array, filePath = 'database'): AccessFileFormat {
     if (buffer.byteLength < ACCESS_HEADER_SIZE) {

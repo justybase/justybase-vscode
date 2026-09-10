@@ -21,9 +21,9 @@ import {
 } from "../sqlParser/validationConfig";
 import { getExtensionDocumentParseSession } from "../core/extensionDocumentParseSession";
 import {
-  getInitializedSqlValidator,
-  getSqlValidationContext,
-} from "../commands/validationCommands";
+  getInitializedDesktopSqlValidator,
+  getDesktopSqlValidationContext,
+} from "../sqlParser/desktopValidationContext";
 import { SqlQualityEngine } from "./sqlQualityEngine";
 import { runValidationPipeline } from "../sqlParser/validationPipeline";
 import {
@@ -57,6 +57,8 @@ export class SqlLinterProvider {
   private readonly parseSession: DocumentParseSession;
   private readonly validationSession: DocumentValidationSession;
   private readonly columnMetadataWarnedConnections = new Set<string>();
+  private activationTimer: ReturnType<typeof setTimeout> | undefined;
+  private disposed = false;
 
   constructor(parseSession: DocumentParseSession = getExtensionDocumentParseSession()) {
     this.parseSession = parseSession;
@@ -69,10 +71,14 @@ export class SqlLinterProvider {
    * Activate the linter
    */
   public activate(context: vscode.ExtensionContext): void {
+    if (this.disposed) {
+      return;
+    }
+
     // Add diagnostic collection to disposables
     context.subscriptions.push(this.diagnosticCollection);
 
-    const validationContext = getSqlValidationContext();
+    const validationContext = getDesktopSqlValidationContext();
     const relintDocument = (documentUri: string) => {
       const document = vscode.workspace.textDocuments.find(
         (doc) => doc.uri.toString() === documentUri,
@@ -141,7 +147,11 @@ export class SqlLinterProvider {
     context.subscriptions.push(...this.disposables);
 
     // Lint all currently open SQL documents (deferred to avoid blocking activation)
-    setTimeout(() => {
+    this.activationTimer = setTimeout(() => {
+      this.activationTimer = undefined;
+      if (this.disposed) {
+        return;
+      }
       this.lintAllOpenDocuments();
     }, 100);
   }
@@ -301,6 +311,10 @@ export class SqlLinterProvider {
   }
 
   private scheduleLint(document: vscode.TextDocument): void {
+    if (this.disposed) {
+      return;
+    }
+
     const key = document.uri.toString();
     const existing = this.lintTimers.get(key);
     if (existing) {
@@ -337,7 +351,7 @@ export class SqlLinterProvider {
       return [];
     }
 
-    const validationContext = getSqlValidationContext();
+    const validationContext = getDesktopSqlValidationContext();
     const databaseKind =
       validationContext?.connectionManager.getExecutionDatabaseKind(
         documentUri,
@@ -370,7 +384,7 @@ export class SqlLinterProvider {
         );
       }
     }
-    const validator = getInitializedSqlValidator(documentUri) ?? this.validator;
+    const validator = getInitializedDesktopSqlValidator(documentUri) ?? this.validator;
     const qualityEngine = new SqlQualityEngine(
       validator,
       getDatabaseSqlAuthoring(databaseKind).qualityRules,
@@ -471,7 +485,7 @@ export class SqlLinterProvider {
     rulesConfig: Record<string, RuleSeverityConfig> = {},
   ): string {
     const rulesFingerprint = this.buildRulesFingerprint(rulesConfig);
-    const validationContext = getSqlValidationContext();
+    const validationContext = getDesktopSqlValidationContext();
     const documentUri = uri.toString();
     const connectionFingerprint =
       validationContext?.connectionManager.getConnectionForExecution(
@@ -523,6 +537,14 @@ export class SqlLinterProvider {
    * Dispose of the linter
    */
   public dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    if (this.activationTimer) {
+      clearTimeout(this.activationTimer);
+      this.activationTimer = undefined;
+    }
     this.diagnosticCollection.dispose();
     for (const timer of this.lintTimers.values()) {
       clearTimeout(timer);

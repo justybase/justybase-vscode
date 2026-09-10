@@ -15,7 +15,7 @@
  * (row, page) reference followed by a chunk.
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import { LONG_VALUE_TYPES, OFFSET_MASK } from './JetLayout';
 import type { JetPageChannel } from './JetPageChannel';
 

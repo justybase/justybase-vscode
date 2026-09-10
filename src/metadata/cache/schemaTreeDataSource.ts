@@ -9,7 +9,7 @@ import {
   isNetezzaExactCachePart,
 } from '../helpers';
 import type { ColumnMetadata, TableMetadata } from '../types';
-import type { MetadataCache } from './MetadataCache';
+import type { MetadataCachePort } from './metadataCachePort';
 import { mergeAndSetTables } from './tableLikeMerge';
 
 /** Above this count, skip loading entire per-DB column files from disk (use per-table fetch). */
@@ -65,7 +65,7 @@ export function buildSchemaCacheKey(
  * Read table-like objects for a schema-specific or all-schemas (DB..) scope.
  */
 export function getTablesForScope(
-  cache: MetadataCache,
+  cache: MetadataCachePort,
   connectionName: string,
   dbName: string,
   schemaName?: string,
@@ -91,7 +91,7 @@ export function getTablesForScope(
  * Explorer refresh: merge one object type into the schema cache key.
  */
 export function refreshTableLikeTypeForSchema(
-  cache: MetadataCache,
+  cache: MetadataCachePort,
   connectionName: string,
   dbName: string,
   schemaName: string | undefined,
@@ -162,7 +162,7 @@ export function normalizeColumnCacheEntry(
 
 /** Ensure column layers are loaded from disk (when enabled) and return cached columns. */
 export async function getColumnsForTableObject(
-  cache: MetadataCache,
+  cache: MetadataCachePort,
   connectionName: string,
   dbName: string,
   schemaName: string | undefined,
@@ -177,7 +177,7 @@ export async function getColumnsForTableObject(
  * Write column metadata for a table object into the cache.
  */
 export function setColumnsForTableObject(
-  cache: MetadataCache,
+  cache: MetadataCachePort,
   connectionName: string,
   dbName: string,
   schemaName: string | undefined,

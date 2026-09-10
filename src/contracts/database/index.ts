@@ -75,6 +75,7 @@ export type {
   DatabaseMaintenanceProvider,
   DatabaseMaintenanceTarget,
   DatabaseMaintenanceServices,
+  DatabaseRecreateTableResult,
   DatabasePartitionInfo,
   DatabaseCreatePartitionOptions,
   DatabaseAttachPartitionOptions,

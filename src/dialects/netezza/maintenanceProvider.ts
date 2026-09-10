@@ -189,19 +189,20 @@ export const netezzaMaintenanceProvider: DatabaseMaintenanceProvider = {
             return;
         }
 
+        if (!services.generateRecreateTableScript) {
+            throw new Error('The host does not provide recreate-table script generation.');
+        }
+
         try {
             const result = await services.executeWithProgress(
                 `Generating Recreate Script for ${target.tableName}...`,
-                async () => {
-                    const { generateRecreateTableScript } = await import('../../schema/tableRecreator');
-                    return generateRecreateTableScript(
-                        connectionDetails,
-                        target.databaseName,
-                        target.schemaName,
-                        target.tableName,
-                        newNameInput || undefined
-                    );
-                }
+                () => services.generateRecreateTableScript!(
+                    connectionDetails,
+                    target.databaseName,
+                    target.schemaName,
+                    target.tableName,
+                    newNameInput || undefined,
+                ),
             );
 
             if (!result.success || !result.sqlScript) {

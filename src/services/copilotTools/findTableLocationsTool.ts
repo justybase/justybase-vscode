@@ -6,7 +6,7 @@ export interface IFindTableLocationsToolParameters {
 }
 
 export class FindTableLocationsTool implements vscode.LanguageModelTool<IFindTableLocationsToolParameters> {
-    constructor(private copilotService: CopilotService) { }
+    constructor(private copilotService: CopilotToolService) { }
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IFindTableLocationsToolParameters>,
@@ -54,4 +54,4 @@ export class FindTableLocationsTool implements vscode.LanguageModelTool<IFindTab
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { VisualQueryBuilderTable } from './hostContracts.js';
-import type { VisualQueryBuilderFlowNode } from './VisualQueryBuilderApp.js';
+import type { VisualQueryBuilderFlowNode } from './types.js';
 
 function SourceGlyph(): ReactElement {
     return (

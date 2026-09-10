@@ -10,7 +10,7 @@ import {
 } from '../columnRowMapping';
 import { loadColumnsWithKeysRows } from '../columnMetadataService';
 import { buildNetezzaCacheDatabasePart } from '../helpers';
-import type { MetadataCache } from './MetadataCache';
+import type { MetadataCachePort } from './metadataCachePort';
 
 export interface TableColumnWarmupTarget {
     database: string;
@@ -43,7 +43,7 @@ async function readRowsFromConnection<T extends object>(
 
 /** Load one table's columns from Netezza catalog into columnCache (tree-ready format). */
 export async function warmTableColumnsFromCatalog(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     target: TableColumnWarmupTarget,
     readRows: CatalogRowReader,
@@ -75,6 +75,7 @@ export async function warmTableColumnsFromCatalog(
             },
             isNetezza ? 'netezza' : databaseKind,
             (sql) => readRows(sql),
+            provider,
         ) as RawColumnRowWithKeys[];
         const columnKey = buildColumnCacheKey(
             cacheDatabase,

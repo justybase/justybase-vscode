@@ -8,7 +8,7 @@ export interface IDependenciesToolParameters {
 }
 
 export class DependenciesTool implements vscode.LanguageModelTool<IDependenciesToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IDependenciesToolParameters>,
@@ -51,4 +51,4 @@ export class DependenciesTool implements vscode.LanguageModelTool<IDependenciesT
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

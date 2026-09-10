@@ -6,7 +6,7 @@ export interface IProceduresToolParameters {
 }
 
 export class ProceduresTool implements vscode.LanguageModelTool<IProceduresToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IProceduresToolParameters>,
@@ -39,4 +39,4 @@ export class ProceduresTool implements vscode.LanguageModelTool<IProceduresToolP
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

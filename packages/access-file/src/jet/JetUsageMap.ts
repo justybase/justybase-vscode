@@ -12,10 +12,10 @@
  * (mdb-reader and Jackcess enumerate table pages through it).
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import { JET_PAGE_TYPES, OFFSET_MASK } from './JetLayout';
 import type { JetLayout } from './JetLayout';
-import type { JetPageChannel } from './JetPageChannel';
+import type { JetPageChannelLike } from './JetPageChannelTypes';
 
 const MAP_TYPE_INLINE = 0x00;
 const MAP_TYPE_REFERENCE = 0x01;
@@ -35,7 +35,7 @@ function rowEndFor(page: Buffer, layout: JetLayout, rowNum: number): number {
 }
 
 interface MapContext {
-    readonly channel: JetPageChannel;
+    readonly channel: JetPageChannelLike;
     readonly layout: JetLayout;
     /** page that holds the map declaration row */
     readonly tablePageNum: number;
@@ -62,7 +62,7 @@ export class JetUsageMap {
      * given table-definition page (4 bytes: row number + page number).
      */
     public static read(
-        channel: JetPageChannel,
+        channel: JetPageChannelLike,
         defPage: Buffer,
         position: number,
     ): JetUsageMap {
@@ -84,7 +84,7 @@ export class JetUsageMap {
     }
 
     /** Reads the global usage map (always at page 1, row 0). */
-    public static readGlobal(channel: JetPageChannel): JetUsageMap {
+    public static readGlobal(channel: JetPageChannelLike): JetUsageMap {
         const map = new JetUsageMap({
             channel,
             layout: channel.layout,

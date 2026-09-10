@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ConnectionManager } from '../core/connectionManager';
+import type { MetadataConnectionManager } from '../core/connectionManagerPorts';
 import {
     createConnectedDatabaseConnectionFromDetails,
     resolveConnectionDatabaseKind,
@@ -26,7 +26,7 @@ class MetadataSessionSweeper {
     private readonly registry = new Map<string, Map<string, SessionRecord>>();
     private timer: ReturnType<typeof setInterval> | undefined;
     private sweepInProgress = false;
-    private connectionManager: ConnectionManager | undefined;
+    private connectionManager: MetadataConnectionManager | undefined;
 
     /** @internal Test / diagnostics */
     hasSession(connectionName: string, sessionId: string): boolean {
@@ -70,7 +70,7 @@ class MetadataSessionSweeper {
         }
     }
 
-    start(connectionManager: ConnectionManager): void {
+    start(connectionManager: MetadataConnectionManager): void {
         if (this.timer || this.connectionManager) {
             return;
         }
@@ -123,7 +123,7 @@ class MetadataSessionSweeper {
     }
 
     private async processStaleSessions(
-        connManager: ConnectionManager,
+        connManager: MetadataConnectionManager,
         connectionName: string,
         sessions: Map<string, SessionRecord>,
         staleIds: string[],

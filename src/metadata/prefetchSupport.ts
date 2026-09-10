@@ -1,6 +1,6 @@
 import type { DatabaseKind } from '../contracts/database';
 import { tryNormalizeDatabaseKind } from '../contracts/database';
-import type { ConnectionManager } from '../core/connectionManager';
+import type { MetadataConnectionManager } from '../core/connectionManagerPorts';
 
 export function supportsLegacyMetadataPrefetch(kind?: string | DatabaseKind): boolean {
     if (!kind) {
@@ -12,8 +12,8 @@ export function supportsLegacyMetadataPrefetch(kind?: string | DatabaseKind): bo
 
 /** Resolve the prefetch policy from the persisted profile when available. */
 export function supportsLegacyMetadataPrefetchForConnection(
-    connectionManager: Pick<ConnectionManager, 'getConnectionDatabaseKind'>
-        & Partial<Pick<ConnectionManager, 'getConnectionMetadata'>>
+    connectionManager: Pick<MetadataConnectionManager, 'getConnectionDatabaseKind'>
+        & Partial<Pick<MetadataConnectionManager, 'getConnectionMetadata'>>
         | undefined,
     connectionName: string,
 ): boolean {

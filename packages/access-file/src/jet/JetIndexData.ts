@@ -3,7 +3,7 @@
  * JustyBase.UCanAccessCs / Jackcess).
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import type { AccessValue } from '../types';
 import {
     JetBooleanColumnDescriptor,
@@ -25,16 +25,17 @@ import {
     byteCodeCompare,
 } from './JetIndexEntry';
 import type { JetLayout } from './JetLayout';
-import type { JetTable } from './JetTable';
 import { JetUsageMap } from './JetUsageMap';
 import { JetIndexPageCache } from './JetIndexPageCache';
+import { INVALID_INDEX_PAGE_NUMBER } from './JetIndexConstants';
 import { JetIndexPosition } from './JetIndexPageCacheTypes';
 import type { JetIndexDataPage } from './JetIndexPageCacheTypes';
+import type { JetColumn, JetIndexTableLike } from './JetTableTypes';
 
 export const INDEX_MAX_COLUMNS = 10;
 export const INDEX_COLUMN_UNUSED = -1;
 export const INDEX_MAGIC_NUMBER = 1923;
-export const INVALID_INDEX_PAGE_NUMBER = 0;
+export { INVALID_INDEX_PAGE_NUMBER } from './JetIndexConstants';
 
 export const UNIQUE_INDEX_FLAG = 0x01;
 export const IGNORE_NULLS_INDEX_FLAG = 0x02;
@@ -66,10 +67,10 @@ export class JetIndexData {
     private _uniqueEntryCount: number;
     private _initialized = false;
     private readonly _pageCache: JetIndexPageCache;
-    private readonly _table: JetTable;
+    private readonly _table: JetIndexTableLike;
 
     private constructor(
-        table: JetTable,
+        table: JetIndexTableLike,
         number: number,
         uniqueEntryCount: number,
         uniqueEntryCountOffset: number,
@@ -81,19 +82,19 @@ export class JetIndexData {
         this._pageCache = new JetIndexPageCache(this);
     }
 
-    public get table(): JetTable {
+    public get table(): JetIndexTableLike {
         return this._table;
     }
 
     /** Creates an IndexData for the given table, reading the unique-entry count from the table-definition buffer. */
-    public static create(table: JetTable, tableBuffer: Buffer, number: number, layout: JetLayout): JetIndexData {
+    public static create(table: JetIndexTableLike, tableBuffer: Buffer, number: number, layout: JetLayout): JetIndexData {
         const uniqueEntryCountOffset = layout.offsetIndexDefBlock + number * layout.sizeIndexDefinition + 4;
         const uniqueEntryCount = tableBuffer.readUInt32LE(uniqueEntryCountOffset);
         return new JetIndexData(table, number, uniqueEntryCount, uniqueEntryCountOffset);
     }
 
     public static read(
-        table: JetTable,
+        table: JetIndexTableLike,
         tableBuffer: Buffer,
         number: number,
         layout: JetLayout,
@@ -351,7 +352,7 @@ export class JetIndexData {
     }
 }
 
-function readIndexOwnedPages(table: JetTable, tableBuffer: Buffer, position: { value: number }): JetUsageMap {
+function readIndexOwnedPages(table: JetIndexTableLike, tableBuffer: Buffer, position: { value: number }): JetUsageMap {
     // the usage map declaration is 4 bytes: row number (1) + page number (3)
     const map = JetUsageMap.read(table.channel, tableBuffer, position.value);
     position.value += 4;
@@ -414,7 +415,7 @@ function calcMaxPageEntrySize(layout: JetLayout): number {
     return Math.min(pageDataSize, entryMaskSize);
 }
 
-function createColumnDescriptor(table: JetTable, column: JetTable['columns'][number], flags: number): JetColumnDescriptor {
+function createColumnDescriptor(table: JetIndexTableLike, column: JetColumn, flags: number): JetColumnDescriptor {
     switch (column.type) {
         case 0x02:
             return new JetByteColumnDescriptor(column, flags);

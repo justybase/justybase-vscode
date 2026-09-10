@@ -5,7 +5,7 @@ export interface INetezzaReferenceToolParameters {
 }
 
 export class NetezzaReferenceTool implements vscode.LanguageModelTool<INetezzaReferenceToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<INetezzaReferenceToolParameters>,
@@ -38,4 +38,4 @@ export class NetezzaReferenceTool implements vscode.LanguageModelTool<INetezzaRe
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

@@ -10,6 +10,9 @@ import type {
   DatabaseTunnelConfig,
 } from "@justybase/contracts";
 
+export type { ColumnDefinition } from './columnDefinition';
+import type { ColumnDefinition } from './columnDefinition';
+
 export type {
   DatabaseCapabilities,
   DatabaseCommand,
@@ -96,12 +99,6 @@ export type ResultSet = QueryResult & {
   /** Approximate bytes held by the in-memory row buffer before SQLite spill. */
   bufferedBytes?: number;
 };
-
-export interface ColumnDefinition {
-  name: string;
-  type?: string;
-  scale?: number;
-}
 
 export interface ConnectionDetails {
   name?: string;

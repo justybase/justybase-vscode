@@ -9,7 +9,7 @@ import type {
   MetadataPrefetchProgress,
   MetadataPrefetchRefreshDetails,
 } from '../prefetch';
-import type { ConnectionManager } from '../../core/connectionManager';
+import type { MetadataConnectionManager } from '../../core/connectionManagerPorts';
 import { searchMetadataIndex, type SearchIndexOptions } from '../searchIndex';
 import {
   PerKeyEntry,
@@ -136,7 +136,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
 
   constructor(
     context: vscode.ExtensionContext,
-    private readonly _connectionManager?: ConnectionManager,
+    private readonly _connectionManager?: MetadataConnectionManager,
   ) {
     const config = getExtensionConfiguration();
     const ttlHours =

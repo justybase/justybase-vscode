@@ -6,7 +6,7 @@ export interface IColumnsToolParameters {
 }
 
 export class ColumnsTool implements vscode.LanguageModelTool<IColumnsToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IColumnsToolParameters>,
@@ -49,4 +49,4 @@ export class ColumnsTool implements vscode.LanguageModelTool<IColumnsToolParamet
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

@@ -4,6 +4,7 @@
  */
 
 import type { JetIndexEntry } from './JetIndexEntry';
+import type { JetIndexTableLike } from './JetTableTypes';
 
 export interface JetIndexDataPage {
     readonly pageNumber: number;
@@ -20,6 +21,12 @@ export interface JetIndexPageCacheLike {
     findCacheDataPage(entry: JetIndexEntry): JetIndexDataPage;
     getCacheDataPage(pageNumber: number): JetIndexDataPage | null;
     write(): void;
+}
+
+export interface JetIndexDataLike {
+    readonly table: JetIndexTableLike;
+    readonly maxPageEntrySize: number;
+    addOwnedPage(pageNumber: number): void;
 }
 
 export class JetIndexPosition {

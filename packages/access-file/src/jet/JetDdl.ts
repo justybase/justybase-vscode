@@ -7,7 +7,7 @@
  * Jet 4 / ACCDB files.
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import type { AccessValue } from '../types';
 import { JET_PAGE_TYPES } from './JetLayout';
 import type { JetLayout } from './JetLayout';

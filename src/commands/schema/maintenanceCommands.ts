@@ -10,6 +10,7 @@ import type {
 } from '../../contracts/database';
 import { getDatabaseMaintenanceProvider, getRequiredDatabaseDdlProvider } from '../../core/connectionFactory';
 import { runQuery, runQueryRaw, queryResultToRows } from '../../core/queryRunner';
+import { generateRecreateTableScript } from '../../schema/tableRecreator';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getFullName, executeWithProgress } from './helpers';
 
@@ -100,6 +101,7 @@ function createMaintenanceServices(deps: SchemaCommandsDependencies): DatabaseMa
     getDdlProvider(kind) {
       return getRequiredDatabaseDdlProvider(kind);
     },
+    generateRecreateTableScript,
     async openSqlDocument(content: string, language = 'sql'): Promise<void> {
       const document = await vscode.workspace.openTextDocument({
         content,

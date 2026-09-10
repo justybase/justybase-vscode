@@ -3,7 +3,7 @@ import type { Writable } from 'stream';
 import * as vscode from 'vscode';
 import { ResultSet } from '../types';
 import { validateExportPath } from './exportUtils';
-import type { ExportFormattingMetadata } from './exportManager';
+import type { ExportFormattingMetadata } from './exportTypes';
 import { formatResultValueForDisplay } from '../results/resultValueFormatter';
 import { createCsvFileWriter, type CsvCompression } from './csvStream';
 import { iterateResultRows } from '../core/resultDataProvider/resultDataReader';

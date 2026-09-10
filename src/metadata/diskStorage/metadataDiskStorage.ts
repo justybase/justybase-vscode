@@ -6,8 +6,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { gunzip } from 'zlib';
 import { promisify } from 'util';
-import type { ConnectionManager } from '../../core/connectionManager';
-import type { MetadataCache } from '../../metadataCache';
+import type { MetadataConnectionManager } from '../../core/connectionManagerPorts';
+import type { MetadataCachePort } from '../cache/metadataCachePort';
 import { Logger } from '../../utils/logger';
 import { compressJsonToGzip } from './metadataDiskCompress';
 import { yieldToEventLoop } from '../hydrateScheduler';
@@ -68,7 +68,7 @@ const SAVE_LOCK_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_ATTEMPTS = 3;
 
 interface PendingSaveState {
-    metadataCache: MetadataCache;
+    metadataCache: MetadataCachePort;
     prefetchTimestamps: Map<string, number>;
     completeness: Map<string, boolean>;
 }
@@ -102,7 +102,7 @@ export class MetadataDiskStorage {
 
     constructor(
         private readonly storageDir: string,
-        private readonly connectionManager?: ConnectionManager,
+        private readonly connectionManager?: MetadataConnectionManager,
     ) {
         this.lock = new MetadataDiskLock(getCacheV3Dir(storageDir));
         this.ensureDirectory();
@@ -724,7 +724,7 @@ export class MetadataDiskStorage {
     }
 
     scheduleSave(
-        metadataCache: MetadataCache,
+        metadataCache: MetadataCachePort,
         connectionName: string,
         prefetchCompletedAt: number,
         options?: MetadataDiskSaveOptions,
@@ -837,7 +837,7 @@ export class MetadataDiskStorage {
     }
 
     async saveConnection(
-        metadataCache: MetadataCache,
+        metadataCache: MetadataCachePort,
         connectionName: string,
         prefetchCompletedAt: number,
         options?: MetadataDiskSaveOptions,
@@ -870,7 +870,7 @@ export class MetadataDiskStorage {
     }
 
     private async saveConnectionV2(
-        metadataCache: MetadataCache,
+        metadataCache: MetadataCachePort,
         connectionName: string,
         fingerprint: string,
         prefetchCompletedAt: number,
@@ -1012,7 +1012,7 @@ export class MetadataDiskStorage {
     }
 
     async saveAll(
-        metadataCache: MetadataCache,
+        metadataCache: MetadataCachePort,
         prefetchTimestamps: Map<string, number>,
     ): Promise<void> {
         if (this.sessionDisabled) {

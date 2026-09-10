@@ -2,7 +2,7 @@
  * Convert between in-memory MetadataCache maps and SerializedCache JSON.
  */
 
-import type { MetadataCache } from '../../metadataCache';
+import type { MetadataCachePort } from '../cache/metadataCachePort';
 import {
     buildIdLookupKey,
     extractLabel,
@@ -98,7 +98,7 @@ function layerMapToRecord<T>(
 }
 
 function serializeConnectionMetadataLayers(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     connectionFingerprint: string,
     prefetchCompletedAt: number,
@@ -140,7 +140,7 @@ function serializeConnectionMetadataLayers(
 }
 
 function serializeColumnLayersForConnection(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
 ): Record<string, SerializedLayerEntry<ColumnMetadata>> {
     return layerMapToRecord(
@@ -152,7 +152,7 @@ function serializeColumnLayersForConnection(
 }
 
 export function serializeConnectionMetadataFromCache(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     connectionFingerprint: string,
     prefetchCompletedAt: number,
@@ -170,7 +170,7 @@ export function serializeConnectionMetadataFromCache(
 }
 
 export function serializeColumnsByDatabase(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
 ): Map<string, SerializedColumnFile> {
     const columnLayers = serializeColumnLayersForConnection(cache, connectionName);
@@ -211,7 +211,7 @@ export function mergeMetadataWithColumnFiles(
 }
 
 export function serializeConnectionFromCache(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     connectionFingerprint: string,
     prefetchCompletedAt: number,
@@ -240,7 +240,7 @@ export function serializeConnectionFromCache(
 }
 
 function serializeTypeGroups(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
 ): Record<string, SerializedStringLayerEntry> {
     const result: Record<string, SerializedStringLayerEntry> = {};
@@ -299,7 +299,7 @@ export interface HydrateMetadataOptions {
 }
 
 function isHydrateStillValid(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     options?: HydrateMetadataOptions,
 ): boolean {
     if (options?.cacheGeneration === undefined) {
@@ -309,7 +309,7 @@ function isHydrateStillValid(
 }
 
 export function hydrateConnectionMetadataIntoCache(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     data: SerializedConnectionMetadata,
     options?: HydrateMetadataOptions,
@@ -349,7 +349,7 @@ export function hydrateConnectionMetadataIntoCache(
 }
 
 export async function hydrateConnectionMetadataChunked(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     data: SerializedConnectionMetadata,
     options?: HydrateMetadataOptions,
@@ -430,7 +430,7 @@ export async function hydrateConnectionMetadataChunked(
 }
 
 export function hydrateColumnsFromDatabase(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     columnFile: SerializedColumnFile,
 ): void {
@@ -441,7 +441,7 @@ export function hydrateColumnsFromDatabase(
 }
 
 export function hydrateConnectionIntoCache(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     data: SerializedConnectionCache,
 ): void {
@@ -452,7 +452,7 @@ export function hydrateConnectionIntoCache(
     }
 }
 
-export function collectConnectionNamesFromCache(cache: MetadataCache): string[] {
+export function collectConnectionNamesFromCache(cache: MetadataCachePort): string[] {
     const names = new Set<string>();
     for (const key of cache.getAllCacheKeys()) {
         const parsed = parseCacheKey(key);

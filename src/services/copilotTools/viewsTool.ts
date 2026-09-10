@@ -6,7 +6,7 @@ export interface IViewsToolParameters {
 }
 
 export class ViewsTool implements vscode.LanguageModelTool<IViewsToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IViewsToolParameters>,
@@ -39,4 +39,4 @@ export class ViewsTool implements vscode.LanguageModelTool<IViewsToolParameters>
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

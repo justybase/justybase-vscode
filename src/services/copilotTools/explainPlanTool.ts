@@ -8,7 +8,7 @@ export interface IExplainPlanToolParameters {
 }
 
 export class ExplainPlanTool implements vscode.LanguageModelTool<IExplainPlanToolParameters> {
-    constructor(private copilotService: CopilotService) { }
+    constructor(private copilotService: CopilotToolService) { }
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IExplainPlanToolParameters>,
@@ -51,4 +51,4 @@ export class ExplainPlanTool implements vscode.LanguageModelTool<IExplainPlanToo
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

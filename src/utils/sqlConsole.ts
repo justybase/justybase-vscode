@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../core/connectionManager';
 import { QueryHistoryManager } from '../core/queryHistoryManager';
 import { normalizeUriKey } from '../core/queryRunnerUtils';
-import { SchemaItemData } from '../commands/schema/types';
+import type { SchemaItemData } from '../commands/schema/itemTypes';
 
 export const SQL_CONSOLE_HISTORY_TAG = 'console';
 export const SQL_CONSOLE_HEADER_PREFIX = '-- SQL Console |';

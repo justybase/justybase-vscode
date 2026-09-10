@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { buildIdLookupKey, extractLabel, inferCachedTableLikeType } from '../helpers';
 import type { TableMetadata } from '../types';
-import type { MetadataCache } from './MetadataCache';
+import type { MetadataCachePort } from './metadataCachePort';
 import { buildSchemaCacheKey } from './schemaTreeDataSource';
 import { normalizeCompletionDescription } from '../../utils/completionDescriptionUtils';
 
@@ -135,7 +135,7 @@ export function toTableMetadata(row: {
 
 /** Upsert one catalog table without replacing unrelated objects in the schema layer. */
 export function upsertTableObject(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     database: string,
     schema: string | undefined,
@@ -175,7 +175,7 @@ export function upsertTableObject(
 
 /** Remove one table identity without invalidating the rest of the schema layer. */
 export function removeTableObject(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     database: string,
     schema: string | undefined,
@@ -196,7 +196,7 @@ export function removeTableObject(
 
 /** Replace one object type across a database while preserving every other cached type. */
 export function replaceTableObjectTypeForDatabase(
-    cache: MetadataCache,
+    cache: MetadataCachePort,
     connectionName: string,
     database: string,
     objectType: string,
