@@ -16,9 +16,16 @@ precision/scale and primary key must match the original Access file.
 Requires the .NET SDK (net10.0 or newer).
 
 ```bash
-tools/access-ddl-compare/bootstrap.sh   # clones JustyBase.UCanAccessCs into tools/access-ddl-compare/.clone/
+tools/access-ddl-compare/bootstrap.sh   # clones the pinned JustyBase.UCanAccessCs commit into .clone/
+node scripts/generate-index-codes.cjs --check
 dotnet build tools/access-ddl-compare   # restore + build (NuGet: JustyBase.NetezzaSqlParser, Microsoft.Data.Sqlite)
 ```
+
+The pinned reference and the six source-file checksums are recorded in
+`access-index-codes.manifest.json`. The generator refuses an unpinned or
+modified checkout. Use `node scripts/generate-index-codes.cjs --write` only
+when intentionally updating the reference data; review the printed checksum
+and update the manifest in the same change, then rerun `--check`.
 
 ## Usage
 

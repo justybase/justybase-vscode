@@ -9,6 +9,12 @@ import { assertLintRatchet, lintSummary, sha256 } from './quality-gate.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const artifactRoot = path.join(root, 'artifacts', 'quality');
 const baseline = JSON.parse(fs.readFileSync(path.join(root, 'quality', 'quality-baseline.json'), 'utf8'));
+const generatedRegistry = JSON.parse(fs.readFileSync(path.join(root, 'quality', 'generated-files.json'), 'utf8'));
+const generatedMetricExclusions = new Set(
+  (generatedRegistry.files ?? [])
+    .filter(file => file.metricsExcluded === true)
+    .map(file => file.path),
+);
 const requiredCollectors = ['testCoverage', 'lint', 'audit', 'docs', 'commit', 'gitStatus'];
 
 function readJsonIfPresent(file) {
@@ -31,7 +37,8 @@ function sourceFiles(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
     if (entry.isDirectory()) output.push(...sourceFiles(file));
-    else if (/\.tsx?$/u.test(entry.name) && !/(?:\.d\.ts|\.test\.|\/__tests__\/)/u.test(file)) output.push(file);
+    else if (/\.tsx?$/u.test(entry.name) && !/(?:\.d\.ts|\.test\.|\/__tests__\/)/u.test(file)
+      && !generatedMetricExclusions.has(relative(file))) output.push(file);
   }
   return output;
 }

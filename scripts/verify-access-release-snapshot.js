@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 const requiredFiles = [
@@ -13,6 +14,8 @@ const requiredFiles = [
   'extensions/access/src/accessConnection.ts',
   'extensions/access/src/accessDuckDbMirror.ts',
   'packages/access-file/src/jet/JetWriter.ts',
+  'packages/access-file/src/jet/JetIndexCodesData.ts',
+  'tools/access-ddl-compare/access-index-codes.manifest.json',
   'packages/access-file/package.json',
   'packages/access-file/NOTICE',
   'packages/access-file/src/accessFileSession.ts',
@@ -48,6 +51,15 @@ const forbiddenPaths = [
 const stalePaths = forbiddenPaths.filter(relative => fs.existsSync(path.join(root, relative)));
 if (stalePaths.length > 0) {
   throw new Error(`Access snapshot contains removed bridge paths: ${stalePaths.join(', ')}`);
+}
+
+const generatedCheck = spawnSync(
+  process.execPath,
+  [path.join(root, 'scripts', 'generate-index-codes.cjs'), '--check'],
+  { cwd: root, stdio: 'inherit' },
+);
+if (generatedCheck.status !== 0) {
+  throw new Error('Access index-code generated data is not reproducible from the pinned source manifest.');
 }
 
 console.log(`Access native release snapshot parity passed (${requiredFiles.length} required files).`);

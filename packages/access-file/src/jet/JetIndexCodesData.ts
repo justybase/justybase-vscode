@@ -1,11 +1,13 @@
+/* istanbul ignore file */
 /**
+ * @generated
  * GENERATED FILE — do not edit by hand.
  *
  * Index code tables ported from the Jackcess project (Apache-2.0):
  * https://github.com/spannm/jackcess (Resources/index_codes_*.txt),
  * mirrored through JustyBase.UCanAccessCs.
  *
- * Regenerate with: node scripts/generate-index-codes.cjs
+ * Regenerate with: node scripts/generate-index-codes.cjs --write
  */
 
 export const CODES_GEN_LEG: readonly string[] = [

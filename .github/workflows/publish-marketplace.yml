@@ -264,6 +264,9 @@ jobs:
         working-directory: extensions/clickhouse
         run: npm ci
 
+      - name: Bootstrap pinned Access index-code reference
+        run: tools/access-ddl-compare/bootstrap.sh
+
       - name: Verify Access release snapshot parity
         run: node scripts/verify-access-release-snapshot.js
 

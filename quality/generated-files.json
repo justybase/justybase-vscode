@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "path": "packages/access-file/src/jet/JetIndexCodesData.ts",
+      "generator": "node scripts/generate-index-codes.cjs --check",
+      "coverageExcluded": true,
+      "metricsExcluded": true,
+      "owner": "Access package owner"
+    }
+  ]
+}

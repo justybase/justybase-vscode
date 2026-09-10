@@ -96,6 +96,7 @@ module.exports = {
     "!src/__tests__/**",
     "packages/sql-core/src/**/*.ts",
     "!packages/sql-core/src/**/*.d.ts",
+    "!packages/access-file/src/jet/JetIndexCodesData.ts",
   ],
   coverageDirectory: "coverage",
   coverageReporters: ["text-summary", "json-summary", "lcov"],
