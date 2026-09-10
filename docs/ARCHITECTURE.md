@@ -247,13 +247,13 @@ alias resolution never silently falls back to a less strict configuration.
 | `companions` | `extensions/*/src` | `contracts`, `shared`, `companions` |
 
 The direction table is intentionally stricter than the current runtime graph.
-Existing integration bridges are listed as individual `source`/`target`
-exceptions with a `reason`, `owner` and `removeWhen`; there is no `desktop ↔ companions`
-layer-wide allowance. The remaining exceptions cover desktop registries that
-still load optional companion providers. Companion production code has no
-edge into `src`, and the migrated designer webviews consume pure
-`designer-core` DDL. These exact entries are migration targets, not permission
-to add another bridge without review.
+There is no layer-wide `desktop ↔ companions` allowance, and the current
+configuration has no desktop-to-companion direction exceptions. Companion
+production code has no edge into `src`; optional capabilities are reached
+through the contracts in `DatabaseAdvancedFeatures` and provider lookup in
+`src/core/connectionFactory.ts`. The migrated designer webviews consume pure
+`designer-core` DDL. Any future integration bridge must be reviewed as an
+explicit, exact exception rather than added as a general allowance.
 
 `ARCH001` reports a forbidden direction or platform import,
 `ARCH002` reports an unresolved internal import, `ARCH003` reports a new or
@@ -262,8 +262,10 @@ configuration. Existing cycles are represented by exact node lists and a
 SHA-256 fingerprint of their internal edges in `cycleExceptions`. A new edge
 inside one of those components changes the fingerprint and fails the check;
 new components fail as well. The migrated Result Panel orchestration cycle has
-been removed. The remaining exceptions are unrelated, exact migration targets
-and continue to be guarded by their fingerprints.
+been removed. The remaining configured cycle entries are exact fingerprints
+for pre-existing components; the R8 authoring extraction intentionally changed
+the largest component's fingerprint by removing optional-companion authoring
+edges, and the new fingerprint is recorded explicitly.
 
 The regression suite in
 [`scripts/architecture-check.test.mjs`](../scripts/architecture-check.test.mjs)
@@ -301,7 +303,8 @@ browser entry point; nonliteral loaders and JavaScript assets remain outside
 this TypeScript graph's proof.
 
 Exceptions require exact paths and become errors when stale. Cycle node lists
-and fingerprints remain unchanged in this preparation. Use
+and fingerprints are updated only when an intentional migration changes the
+graph; the R8 authoring extraction is one such recorded change. Use
 `npm run architecture:report --silent` for JSON containing the current edge
 map, layer counts, complete cycle list, exceptions and diagnostics. It returns
 a failure exit code on violations and never rewrites the baseline. The same

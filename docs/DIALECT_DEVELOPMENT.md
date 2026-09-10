@@ -125,15 +125,26 @@ const DIALECT_TRAITS_BY_KIND = {
 
 Also update `SUPPORTED_DATABASE_KINDS` and aliases in `src/contracts/database/index.ts` when introducing a new kind.
 
-## 5. Add SQL authoring in core
+## 5. Add SQL authoring in the shared authoring package
 
-SQL authoring is loaded eagerly from core so formatter, validator, completion, and the LSP keep working before optional extensions activate.
+SQL authoring is loaded eagerly from core so formatter, validator, completion, and the LSP keep working before optional extensions activate. Pure authoring for optional dialects is kept in `@justybase/dialect-utils`; this prevents core from importing a companion runtime while allowing all products to use the same implementation.
 
-For every new dialect, add a core-owned authoring module:
+For a built-in dialect, add a core-owned authoring module:
 
 ```text
 src/dialects/<dialect>/sql/authoring.ts
 ```
+
+For an optional dialect, add the platform-neutral implementation under:
+
+```text
+packages/dialect-utils/src/authoring/<dialect>.ts
+```
+
+If the authoring module has substantial keyword, signature, or quality-rule
+data, keep those leaf modules below the same directory. The extension-side
+`src/sql/authoring.ts` (or `*SqlAuthoring.ts`) should be a thin re-export for
+source compatibility only.
 
 Then register it in:
 
