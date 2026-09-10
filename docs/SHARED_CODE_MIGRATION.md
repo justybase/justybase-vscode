@@ -153,10 +153,12 @@ not import a desktop `src` implementation. The enforced companion boundary is
 | `executeConnectionSql`, `executeConnectionSqlQuery` (optional) | named-profile execution |
 
 The public `@justybase/contracts` barrel exports database connections,
-capabilities, dialect traits, authoring and advanced-feature types. A desktop
-implementation imported directly by an addon is technical debt even if exported
-by its source module. The architecture report's exact desktop-to-companion
-edges provide the full list of remaining registry consumers.
+capabilities, dialect traits, authoring, import, and advanced-feature provider
+types. A desktop implementation imported directly by an addon is technical
+debt even if exported by its source module. Dialect packages own provider
+implementations; desktop owns capability lookup and orchestration, while
+companions register their dialect object and retain database I/O, secrets, and
+resource lifetime.
 
 Keep v1 signatures, optionality, activation behavior and
 `registerDatabaseDialect` semantics unchanged. Contracts evolve additively:
@@ -206,7 +208,7 @@ implementations; the other future packages remain migration targets.
 | Source/result identity | `src/state/resultSetIdentity.ts`, `ResultSet.resultSetId`; media `ResultSetScope`/`GridScrollState`; API `queryId`, `statementIndex`, `sessionId` | `@justybase/result-core` owns source, execution, result-set and storage-session identity rules. IDs are not tab indices, timestamps, storage-session IDs or interchangeable URI strings; adapters retain URI normalization and legacy fallback. |
 | SQL diagnostics | `@justybase/sql-core/validation`: `ValidationError`, `ValidationResult`, `Scope`, `StatementBoundary`; contracts `SqlDiagnostic`; desktop quality/LSP mappings | Shared structural validation types are canonical in sql-core; adapters retain only runtime, qualification and transport-specific mappings. Preserve offset and line conventions, rule-code mapping, ranges and suggested fixes. |
 | Metadata columns | parser `ColumnInfo`; contracts `MetadataColumn`; desktop `MetadataColumnItem`; `ColumnDefinition` | Portable metadata column DTO in contracts and metadata rules in `@justybase/metadata-core`. Preserve `dataType`, keys, qualification, aliases; map `FORMAT_TYPE` and LSP `type` explicitly. SQL025/026 must work through both schema providers. |
-| Capabilities and authoring | `packages/contracts/src/database/index.ts`; `src/contracts/database/index.ts`; `src/sql/authoring/types.ts` | contracts owns portable capabilities and validation profiles; desktop authoring keeps only its quality-rule specialization while dialect packages own SQL implementation. |
+| Capabilities and authoring | `packages/contracts/src/database/index.ts`; `packages/contracts/src/database/advancedFeatures.ts`; `packages/dialect-utils/src/authoring/*`; `src/core/sqlAuthoringRegistry.ts`; `src/contracts/database/index.ts` | contracts owns portable capabilities, provider contracts, and validation profiles; `@justybase/dialect-utils` owns pure optional-dialect authoring; desktop owns registry lookup/orchestration; dialect packages own runtime providers; extension authoring files remain compatibility facades. |
 | Query/metadata/result services | shared `ExecutionOrchestrator`; desktop activation-owned `StreamingManager`, `MetadataCache`, `ResultStateManager`; API server-owned execution jobs; web `api.ts` and `queryState.ts` | The orchestrator owns execution state/retry/cleanup through injected ports. Product adapters retain secrets, database acquisition, I/O, state lifetime and transport. |
 
 ## Proposed product service ports

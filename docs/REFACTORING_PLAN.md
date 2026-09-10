@@ -467,6 +467,42 @@ R7 implementation evidence (2026-09-10, Linux):
 Acceptance: a new product does not require imports from VS Code internals;
 existing products use real shared implementations.
 
+R8 implementation evidence (2026-09-10, Linux):
+
+- Optional-dialect SQL authoring for ClickHouse, Db2, MSSQL, MySQL, Oracle,
+  PostgreSQL, Snowflake, and Vertica now lives in the platform-neutral
+  `@justybase/dialect-utils` package. The extension files remain compatibility
+  facades, while `src/core/sqlAuthoringRegistry.ts` consumes the shared
+  implementations directly.
+- Explain, query-profile, stage-workflow, and import-wizard contracts are
+  additive members of `DatabaseAdvancedFeatures`. The desktop composition root
+  resolves providers through `src/core/connectionFactory.ts`; runtime
+  implementations stay in the owning dialect packages. Snowflake's staged
+  import/export and wizard planner use the provider seam without changing the
+  public companion API v1.
+- The 23 stale desktop-to-companion layer exceptions were removed. The graph
+  still guards seven pre-existing cycles; the largest cycle fingerprint changed
+  only because its old optional-companion authoring edges were removed and the
+  exact new fingerprint was recorded in `quality/architecture-rules.json`.
+- Access index-code data is reproducible from the pinned
+  `JustyBase.UCanAccessCs` commit and six source checksums. The generator has a
+  deterministic `--check` gate, the generated file is registered as excluded
+  generated data for hand-written size/coverage metrics, and Access keeps its
+  independent workspace version policy.
+- Public entry points remain explicit: `@justybase/contracts` owns portable
+  contracts, `src/core/connectionFactory.ts` owns provider lookup and required
+  capability errors, dialect packages own database I/O, and adapters own
+  activation, secrets, transport, and resource lifetime.
+
+Final verification (2026-09-10, Linux) passed with `npm run test:quality-tools`
+(44/44), `npm run check:architecture`, `npm run check-types`, `npm run lint`,
+`npm run lint:extended:check` (62 accepted baseline warnings, 0 errors),
+`npm run test:fast` (540 suites, 8,172 tests), `npm run build:companions`,
+`npm run build`, `npm run docs:check`, and `npm run version:check`. The focused
+Snowflake/import/provider tests and all eight affected companion type checks
+also passed. Live database, Windows, and Extension Host gates remain
+environment-specific and were not represented as locally passed.
+
 ## Compatibility and Verification
 
 Public companion APIs, wire messages, and HTTP preserve their meaning. The
