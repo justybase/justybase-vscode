@@ -1,4 +1,5 @@
 import { clampConfidence } from '@justybase/contracts';
+import type { DatabaseExplainOptions, DatabaseExplainProvider } from '@justybase/contracts';
 
 export interface MysqlExplainNode {
     id: number;
@@ -964,3 +965,19 @@ export function buildMysqlExplainQuery(
 
     return `EXPLAIN FORMAT=JSON ${statement}`;
 }
+
+export const mysqlExplainProvider: DatabaseExplainProvider = {
+    buildQuery(sql: string, options: DatabaseExplainOptions = {}): string {
+        return buildMysqlExplainQuery(sql, {
+            analyze: options.analyze ?? false,
+            verbose: options.verbose ?? false,
+        });
+    },
+    normalizeOutput(output: string): string {
+        if (!isMysqlExplainJson(output) && !isMysqlExplainText(output)) {
+            return output;
+        }
+
+        return renderMysqlExplainPlan(parseMysqlExplainPlan(output));
+    },
+};

@@ -46,6 +46,7 @@ import { registerSaveAccessFileAsConnectionCommand } from './saveAccessFileAsCon
 import { createConnectionQuickPickItems } from '../utils/connectionQuickPick';
 import { tryAcquireQueryExecution } from './query/queryExecutionGate';
 import { createQueryExecutionRecovery } from './query/queryExecutionRecovery';
+import { getRequiredDatabaseQueryProfileProvider } from '../core/connectionFactory';
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -498,15 +499,11 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
             }
 
             try {
-                const {
-                    buildSnowflakeRecentQueryHistoryQuery,
-                    buildSnowflakeQueryOperatorStatsQuery,
-                    renderSnowflakeQueryProfileMarkdown,
-                } = await import('../../extensions/snowflake/src/snowflakeQueryProfile');
+                const queryProfileProvider = getRequiredDatabaseQueryProfileProvider('snowflake');
 
                 const historyResult = await runQueryRaw({
                     context,
-                    query: buildSnowflakeRecentQueryHistoryQuery(15),
+                    query: queryProfileProvider.buildRecentQueryHistoryQuery(15),
                     silent: true,
                     connectionManager,
                     connectionName,
@@ -542,7 +539,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
 
                 const profileResult = await runQueryRaw({
                     context,
-                    query: buildSnowflakeQueryOperatorStatsQuery(`'${selected.label.replace(/'/g, "''")}'`),
+                    query: queryProfileProvider.buildQueryOperatorStatsQuery(`'${selected.label.replace(/'/g, "''")}'`),
                     silent: true,
                     connectionManager,
                     connectionName,
@@ -550,7 +547,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                 });
                 const profileRows = queryResultToRows<Record<string, unknown>>(profileResult);
                 const markdown = [
-                    renderSnowflakeQueryProfileMarkdown(profileRows),
+                    queryProfileProvider.renderQueryProfileMarkdown(profileRows),
                     '',
                     '## Query Text',
                     '',

@@ -15,6 +15,7 @@ import { sqliteImportTypeMapper } from './importTypeMapper';
 import { sqliteMaintenanceProvider } from './maintenanceProvider';
 import { sqliteTuningAdvisor } from './tuningAdvisor';
 import { sqliteCopilotReferenceProvider } from './copilotReferenceProvider';
+import { normalizeSqliteExplainPlan } from './explainParser';
 
 type SqliteMasterType = 'table' | 'view' | 'index' | 'trigger';
 
@@ -170,6 +171,12 @@ function buildConstraintClauses(keysInfo: Map<string, DatabaseDdlKeyInfo>): stri
 }
 
 export const sqliteAdvancedFeatures: DatabaseAdvancedFeatures = {
+    explain: {
+        buildQuery(sql: string): string {
+            return `EXPLAIN QUERY PLAN ${sql.trim()}`;
+        },
+        normalizeOutput: normalizeSqliteExplainPlan,
+    },
     importTypeMapper: sqliteImportTypeMapper,
     tuningAdvisor: sqliteTuningAdvisor,
     maintenance: sqliteMaintenanceProvider,

@@ -1,6 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ImportColumnDescriptor, ImportColumnOptions, ImportResult } from '@justybase/tabular-import-runtime';
+import type {
+    DatabaseImportWizardInput,
+    DatabaseImportWizardProvider,
+    ImportColumnDescriptor,
+    ImportColumnOptions,
+    ImportResult,
+} from '@justybase/contracts';
 import { createTabularDataImporter } from '@justybase/tabular-import-runtime';
 import { formatIdentifierForSql } from '@justybase/dialect-utils/identifierUtils';
 import {
@@ -370,3 +376,58 @@ export function createSnowflakeClipboardImportResult(targetTable: string): Impor
         },
     };
 }
+
+function createProviderPlanColumns(
+    columns: readonly ImportColumnDescriptor[],
+): SnowflakePlannedImportColumn[] {
+    return columns.map((column) => ({
+        sourceColumn: column.columnName,
+        targetColumn: column.columnName,
+        sourceType: column.dataType,
+        snowflakeType: mapImportTypeToSnowflake(column.dataType),
+    }));
+}
+
+function createProviderInputColumns(input: DatabaseImportWizardInput): SnowflakePlannedImportColumn[] {
+    return createProviderPlanColumns(input.columns);
+}
+
+export const snowflakeImportWizardProvider: DatabaseImportWizardProvider = {
+    mode: 'workflow',
+    mapInferredType: mapImportTypeToSnowflake,
+    buildCreateTableSql(input: DatabaseImportWizardInput): string {
+        return buildCreateTableSql(input.targetTable.trim(), createProviderInputColumns(input));
+    },
+    buildLoadSql(input: DatabaseImportWizardInput): string | undefined {
+        const sourceFormat = path.extname(input.filePath.trim()).toLowerCase();
+        if (!DIRECT_STAGE_LOAD_EXTENSIONS.has(sourceFormat)) {
+            return undefined;
+        }
+
+        const stage = buildDefaultStageLocation(input.filePath);
+        return buildSnowflakeCopyIntoTableSql({
+            tableName: input.targetTable.trim(),
+            columns: input.columns.map((column) => column.columnName),
+            stage,
+            inlineFileFormat: buildInlineCsvFileFormat(input.detectedDelimiter),
+            onError: 'ABORT_STATEMENT',
+        });
+    },
+    buildExecutionPlan(input: DatabaseImportWizardInput) {
+        const sourceFile = input.filePath.trim();
+        const sourceFormat = path.extname(sourceFile).toLowerCase();
+        const stage = buildDefaultStageLocation(sourceFile);
+        const loadSql = this.buildLoadSql?.(input);
+        return {
+            mode: 'workflow' as const,
+            createTableSql: this.buildCreateTableSql(input),
+            loadSql,
+            warnings: buildWorkflowWarnings(sourceFormat),
+            nextSteps: buildWorkflowNextSteps(stage, Boolean(loadSql)),
+        };
+    },
+    createResult(input): Promise<ImportResult> {
+        return createSnowflakeStagedImportResult(input.filePath, input.targetTable, input.columnOptions);
+    },
+    createClipboardResult: createSnowflakeClipboardImportResult,
+};

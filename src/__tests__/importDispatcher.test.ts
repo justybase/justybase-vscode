@@ -17,6 +17,8 @@ import {
     importDataForConnection,
     resolveImportDialect
 } from '../import/importDispatcher';
+import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
+import { snowflakeDialect } from '../../extensions/snowflake/src/snowflakeDialect';
 
 jest.mock('../import/clipboardImporter', () => ({
     importClipboardDataToNetezza: jest.fn().mockResolvedValue({ success: true, message: 'netezza-clipboard' })
@@ -83,6 +85,7 @@ describe('importDispatcher', () => {
     let tempDir: string;
 
     beforeAll(() => {
+        registerDatabaseDialect(snowflakeDialect);
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'snowflake-import-dispatcher-'));
     });
 

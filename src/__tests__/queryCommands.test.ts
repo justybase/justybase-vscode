@@ -18,6 +18,8 @@ import {
     clearQueryExecutionGateForTests,
     retireQueryExecutionForDocument,
 } from '../commands/query/queryExecutionGate';
+import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
+import { mysqlDialect } from '../../extensions/mysql/src/mysqlDialect';
 
 // Mock vscode module
 jest.mock('vscode', () => ({
@@ -111,6 +113,10 @@ describe('commands/queryCommands', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let mockResultPanelProvider: any;
     const mockGlobalStateStore: Record<string, unknown> = {};
+
+    beforeAll(() => {
+        registerDatabaseDialect(mysqlDialect);
+    });
 
     beforeEach(() => {
         jest.clearAllMocks();

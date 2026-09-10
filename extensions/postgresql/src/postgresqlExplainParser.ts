@@ -1,4 +1,5 @@
 import { clampConfidence } from '@justybase/contracts';
+import type { DatabaseExplainOptions, DatabaseExplainProvider } from '@justybase/contracts';
 
 export interface PostgreSqlExplainNode {
     id: number;
@@ -207,3 +208,19 @@ export function buildPostgreSqlExplainQuery(
 
     return `EXPLAIN (${flags.join(', ')}) ${sql.trim()}`;
 }
+
+export const postgresqlExplainProvider: DatabaseExplainProvider = {
+    buildQuery(sql: string, options: DatabaseExplainOptions = {}): string {
+        return buildPostgreSqlExplainQuery(sql, {
+            analyze: options.analyze ?? false,
+            verbose: options.verbose ?? false,
+        });
+    },
+    normalizeOutput(output: string): string {
+        if (!isPostgreSqlExplainJson(output)) {
+            return output;
+        }
+
+        return renderPostgreSqlExplainPlan(parsePostgreSqlExplainJson(output));
+    },
+};

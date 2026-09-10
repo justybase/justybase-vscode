@@ -17,6 +17,7 @@ import { postgresqlMaintenanceProvider } from './postgresqlMaintenanceProvider';
 import { postgresqlCopilotReferenceProvider } from './postgresqlReferenceProvider';
 import { postgresqlSessionMonitorProvider } from './postgresqlSessionMonitorProvider';
 import { postgresqlTuningAdvisor } from './postgresqlTuningAdvisor';
+import { postgresqlExplainProvider } from './postgresqlExplainParser';
 import {
     buildDdlColumnsQuery,
     buildFindTableSchemaQuery,
@@ -289,6 +290,7 @@ async function generateSequenceDdl(
 }
 
 export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
+    explain: postgresqlExplainProvider,
     importTypeMapper: postgresqlImportTypeMapper,
     tuningAdvisor: postgresqlTuningAdvisor,
     maintenance: postgresqlMaintenanceProvider,

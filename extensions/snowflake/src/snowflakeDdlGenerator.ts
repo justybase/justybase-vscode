@@ -15,6 +15,9 @@ import { buildColumnMetadataQuery } from './snowflakeSystemQueries';
 import { snowflakeImportTypeMapper } from './snowflakeImportTypeMapper';
 import { snowflakeCopilotReferenceProvider } from './snowflakeReferenceProvider';
 import { snowflakeTuningAdvisor } from './snowflakeTuningAdvisor';
+import { snowflakeExplainProvider, snowflakeQueryProfileProvider } from './snowflakeQueryProfile';
+import { snowflakeStageWorkflowProvider } from './snowflakeImportExport';
+import { snowflakeImportWizardProvider } from './snowflakeImportPlanner';
 
 interface DdlRow {
     DDL?: string | null;
@@ -115,6 +118,10 @@ function buildTableDdlFromCache(
 }
 
 export const snowflakeAdvancedFeatures: DatabaseAdvancedFeatures = {
+    explain: snowflakeExplainProvider,
+    queryProfile: snowflakeQueryProfileProvider,
+    stageWorkflow: snowflakeStageWorkflowProvider,
+    importWizard: snowflakeImportWizardProvider,
     ddl: {
         quoteNameIfNeeded(name: string): string {
             return formatIdentifierForSql(name, 'snowflake');

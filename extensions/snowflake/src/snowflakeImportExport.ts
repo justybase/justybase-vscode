@@ -1,50 +1,16 @@
 import { formatIdentifierForSql, formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
+import type {
+    DatabaseCopyIntoStageOptions,
+    DatabaseCopyIntoTableOptions,
+    DatabaseInlineFileFormatOptions,
+    DatabaseStageLocation,
+    DatabaseStageWorkflowProvider,
+} from '@justybase/contracts';
 
-export interface SnowflakeStageLocation {
-    stageName: string;
-    stagePath?: string;
-}
-
-export interface SnowflakeCopyIntoTableOptions {
-    database?: string;
-    schema?: string;
-    tableName: string;
-    columns?: readonly string[];
-    stage: SnowflakeStageLocation;
-    fileFormatName?: string;
-    inlineFileFormat?: SnowflakeInlineFileFormatOptions;
-    pattern?: string;
-    onError?: 'ABORT_STATEMENT' | 'CONTINUE' | 'SKIP_FILE' | 'SKIP_FILE_1' | 'SKIP_FILE_10';
-    matchByColumnName?: 'CASE_SENSITIVE' | 'CASE_INSENSITIVE' | 'NONE';
-    purge?: boolean;
-}
-
-export interface SnowflakeCopyIntoStageOptions {
-    database?: string;
-    schema?: string;
-    tableName: string;
-    stage: SnowflakeStageLocation;
-    fileFormatName?: string;
-    inlineFileFormat?: SnowflakeInlineFileFormatOptions;
-    header?: boolean;
-    overwrite?: boolean;
-    single?: boolean;
-    maxFileSize?: number;
-}
-
-export interface SnowflakeInlineFileFormatOptions {
-    type?: 'CSV' | 'JSON' | 'AVRO' | 'ORC' | 'PARQUET' | 'XML';
-    fieldDelimiter?: string;
-    skipHeader?: number;
-    parseHeader?: boolean;
-    fieldOptionallyEnclosedBy?: string;
-    trimSpace?: boolean;
-    skipBlankLines?: boolean;
-    emptyFieldAsNull?: boolean;
-    nullIf?: readonly string[];
-    encoding?: string;
-    compression?: 'AUTO' | 'GZIP' | 'BZ2' | 'BROTLI' | 'ZSTD' | 'DEFLATE' | 'RAW_DEFLATE' | 'NONE';
-}
+export type SnowflakeStageLocation = DatabaseStageLocation;
+export type SnowflakeCopyIntoTableOptions = DatabaseCopyIntoTableOptions;
+export type SnowflakeCopyIntoStageOptions = DatabaseCopyIntoStageOptions;
+export type SnowflakeInlineFileFormatOptions = DatabaseInlineFileFormatOptions;
 
 function normalizeStageReference(stage: SnowflakeStageLocation): string {
     const normalizedStageName = stage.stageName.trim();
@@ -249,3 +215,10 @@ export function buildSnowflakeStageUsageGuide(stage: SnowflakeStageLocation): st
         '```',
     ].join('\n');
 }
+
+export const snowflakeStageWorkflowProvider: DatabaseStageWorkflowProvider = {
+    buildCopyIntoTableSql: buildSnowflakeCopyIntoTableSql,
+    buildCopyIntoStageSql: buildSnowflakeCopyIntoStageSql,
+    buildCreateStageTemplate: buildSnowflakeCreateStageTemplate,
+    buildStageUsageGuide: buildSnowflakeStageUsageGuide,
+};

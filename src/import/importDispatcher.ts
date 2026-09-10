@@ -1,5 +1,6 @@
 import type { ConnectionDetails } from '../types';
 import type { ImportColumnOptions, ImportResult, ProgressCallback } from './dataImporter';
+import { getRequiredDatabaseImportWizardProvider } from '../core/connectionFactory';
 
 export type SupportedImportDialect =
     | 'netezza'
@@ -250,12 +251,19 @@ export async function importDataForConnection(
             );
         }
         case 'snowflake': {
-            const { createSnowflakeStagedImportResult } = await import('../../extensions/snowflake/src/snowflakeImportPlanner');
-            return createSnowflakeStagedImportResult(
-                normalizedFilePath,
-                normalizedTargetTable,
-                columnOptions
-            );
+            try {
+                const provider = getRequiredDatabaseImportWizardProvider('snowflake');
+                if (!provider.createResult) {
+                    return buildValidationError('Snowflake import provider does not expose staged import execution.');
+                }
+                return provider.createResult({
+                    filePath: normalizedFilePath,
+                    targetTable: normalizedTargetTable,
+                    columnOptions,
+                });
+            } catch (error) {
+                return buildValidationError(error instanceof Error ? error.message : String(error));
+            }
         }
         case 'access': {
             const { importDataToAccess } = await import('./accessImporter');
@@ -396,8 +404,15 @@ export async function importClipboardDataForConnection(
             );
         }
         case 'snowflake': {
-            const { createSnowflakeClipboardImportResult } = await import('../../extensions/snowflake/src/snowflakeImportPlanner');
-            return createSnowflakeClipboardImportResult(normalizedTargetTable);
+            try {
+                const provider = getRequiredDatabaseImportWizardProvider('snowflake');
+                if (!provider.createClipboardResult) {
+                    return buildValidationError('Snowflake import provider does not expose clipboard guidance.');
+                }
+                return provider.createClipboardResult(normalizedTargetTable);
+            } catch (error) {
+                return buildValidationError(error instanceof Error ? error.message : String(error));
+            }
         }
         case 'access': {
             const { importClipboardDataToAccess } = await import('./accessImporter');

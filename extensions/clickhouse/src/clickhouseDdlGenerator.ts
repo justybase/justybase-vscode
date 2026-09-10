@@ -25,6 +25,7 @@ import {
 import { clickhouseMaintenanceProvider } from './clickhouseMaintenanceProvider';
 import { clickhouseSessionMonitorProvider } from './clickhouseSessionMonitorProvider';
 import { clickhouseImportTypeMapper } from './clickhouseImportTypeMapper';
+import { clickhouseExplainProvider } from './clickhouseExplainParser';
 import { ClickHouseConnection } from './clickhouseConnection';
 
 type Row = Record<string, unknown>;
@@ -535,6 +536,7 @@ async function generateBatchDdl(options: DatabaseBatchDDLOptions): Promise<Datab
 }
 
 export const clickhouseAdvancedFeatures: DatabaseAdvancedFeatures = {
+    explain: clickhouseExplainProvider,
     importTypeMapper: clickhouseImportTypeMapper,
     maintenance: clickhouseMaintenanceProvider,
     sessionMonitor: clickhouseSessionMonitorProvider,

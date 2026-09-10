@@ -5,6 +5,12 @@ import { verticaImportWizardAdapter } from '../import/wizard/adapters/VerticaImp
 import { accessImportWizardAdapter } from '../import/wizard/adapters/AccessImportWizardAdapter';
 import { accessBatchImportConfig } from '../import/accessImporter';
 import { getImportWizardAdapter } from '../import/wizard/adapters';
+import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
+import { snowflakeDialect } from '../../extensions/snowflake/src/snowflakeDialect';
+
+beforeAll(() => {
+    registerDatabaseDialect(snowflakeDialect);
+});
 
 describe('import wizard adapters', () => {
     it('rejects misspelled database kinds instead of selecting the Netezza adapter', () => {

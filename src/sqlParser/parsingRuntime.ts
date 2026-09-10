@@ -20,21 +20,21 @@ import {
   createSqlParserInstance as createOracleSqlParserInstance,
   getSqlParserInstance as getOracleSqlParserInstance,
 } from "../dialects/oracle/sql/parser";
-import { oracleSqlAuthoring } from "../../extensions/oracle/src/sql/authoring";
-import { db2SqlAuthoring } from "../../extensions/db2/src/sql/authoring";
+import { oracleSqlAuthoring } from "@justybase/dialect-utils/authoring/oracle";
+import { db2SqlAuthoring } from "@justybase/dialect-utils/authoring/db2";
 import { SqlLexer as db2SqlLexer } from "../dialects/db2/sql/lexer";
 import {
   createSqlParserInstance as createDb2SqlParserInstance,
   getSqlParserInstance as getDb2SqlParserInstance,
 } from "../dialects/db2/sql/parser";
-import { mssqlSqlAuthoring } from "../../extensions/mssql/src/sql/authoring";
+import { mssqlSqlAuthoring } from "@justybase/dialect-utils/authoring/mssql";
 import { SqlLexer as mssqlSqlLexer } from "../dialects/mssql/sql/lexer";
 import {
   createSqlParserInstance as createMsSqlSqlParserInstance,
   getSqlParserInstance as getMsSqlSqlParserInstance,
 } from "../dialects/mssql/sql/parser";
-import { mysqlSqlAuthoring } from "../../extensions/mysql/src/sql/authoring";
-import { postgresqlSqlAuthoring } from "../../extensions/postgresql/src/postgresqlSqlAuthoring";
+import { mysqlSqlAuthoring } from "@justybase/dialect-utils/authoring/mysql";
+import { postgresqlSqlAuthoring } from "@justybase/dialect-utils/authoring/postgresql";
 import { SqlLexer as postgresqlSqlLexer } from "../dialects/postgresql/sql/lexer";
 import {
   createSqlParserInstance as createPostgresqlSqlParserInstance,
@@ -53,7 +53,7 @@ import {
   getSqlParserInstance as getDuckDbSqlParserInstance,
 } from "../dialects/duckdb/sql/parser";
 import { sqliteSqlAuthoring } from "../dialects/sqlite/sql/authoring";
-import { clickhouseSqlAuthoring } from "../../extensions/clickhouse/src/sql/authoring";
+import { clickhouseSqlAuthoring } from "@justybase/dialect-utils/authoring/clickhouse";
 import { SqlLexer as clickhouseSqlLexer } from "../dialects/clickhouse/sql/lexer";
 import {
   createSqlParserInstance as createClickHouseSqlParserInstance,
