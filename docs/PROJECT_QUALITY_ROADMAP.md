@@ -57,7 +57,7 @@ construction exceed 2,000 lines.
 The repository-wide dependency check now protects the seven configured layers,
 resolves workspace and alias imports, rejects forbidden platform dependencies,
 and fingerprints strongly connected components. The current graph contains
-1,367 production files and 4,490 resolved internal edges, with zero configured
+1,367 production files and 4,492 resolved internal edges, with zero configured
 layer/import exceptions and zero cycle exceptions. A new forbidden edge or
 cycle fails the gate.
 
@@ -120,9 +120,9 @@ registry, desktop SQLite/DuckDB facades share the runtime sessions, and the
 Netezza driver is imported only by `@justybase/netezza-runtime`. Evidence is in
 the three package manifests/sources, API/runtime tests, DuckDB/File SQL
 integration suites, packaging checks and the architecture package-boundary
-gate. The formal Windows Extension Host and live-Netezza checks remain
-environment-specific release evidence; the Linux environment does not provide
-evidence for Windows.
+gate. The live Netezza integration gate now passes on Linux (13 suites, 153
+tests); Windows Extension Host and Remote-WSL checks remain environment-
+specific release evidence.
 
 The R4 metadata-rule slice is implemented as a concrete
 `@justybase/metadata-core` package. Desktop cache, prefetch, index, identifier,

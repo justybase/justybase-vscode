@@ -4,6 +4,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import * as http from 'http';
 import { randomUUID } from 'crypto';
 import { CatalogIntrospection } from '../core/catalogIntrospection';
+import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
+import { netezzaDialect } from '../dialects/netezza';
 import { envToConnectionDetails, MCP_ENV } from './mcpEnv';
 import { createNetezzaMcpServer } from './mcpServerCore';
 
@@ -144,6 +146,10 @@ async function main(): Promise<void> {
         console.error('[netezza-mcp] The MCP server can only be started for a Netezza connection.');
         process.exit(1);
     }
+
+    // The standalone MCP bundle does not execute the VS Code composition
+    // root, so register the one dialect required by the DDL generator here.
+    registerDatabaseDialect(netezzaDialect);
 
     const introspection = new CatalogIntrospection({
         getConnectionDetails: async () => details
