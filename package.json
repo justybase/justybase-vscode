@@ -4535,7 +4535,7 @@
     "check-types:media": "tsc --project tsconfig.media.json --noEmit",
     "check-types:media:strict": "tsc --project tsconfig.media.json --noEmit",
     "check-types:db2": "node ./node_modules/typescript/bin/tsc --project extensions/db2/tsconfig.json --noEmit",
-    "check-types:duckdb": "npm run build:duckdb-runtime && node scripts/run-optional-extension-task.js duckdb check-types",
+    "check-types:duckdb": "npm run build:access-file && npm run build:duckdb-runtime && node scripts/run-optional-extension-task.js duckdb check-types",
     "check-types:oracle": "node scripts/run-optional-extension-task.js oracle check-types",
     "check-types:postgresql": "node scripts/run-optional-extension-task.js postgresql check-types",
     "check-types:vertica": "node scripts/run-optional-extension-task.js vertica check-types",
