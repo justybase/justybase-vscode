@@ -1,8 +1,15 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { canonicalizeResource, renderGeneratedFile, sha256Text } = require('./generate-index-codes.cjs');
+const {
+  canonicalizeResource,
+  normalizeLineEndings,
+  renderGeneratedFile,
+  sha256File,
+  sha256Text,
+} = require('./generate-index-codes.cjs');
 
 const root = path.resolve(__dirname, '..');
 
@@ -34,4 +41,17 @@ test('Access index-code rendering is deterministic and explicitly generated', ()
     sha256Text(canonicalizeResource('A\r\nB\n\n')),
     sha256Text('A\nB'),
   );
+});
+
+test('generated output checksums tolerate Windows line endings', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-access-index-codes-'));
+  const outputPath = path.join(tempDir, 'generated.ts');
+  const rendered = renderGeneratedFile([{ name: 'FIRST', lines: ['A', 'B'] }]);
+
+  try {
+    fs.writeFileSync(outputPath, rendered.replace(/\n/g, '\r\n'), 'utf8');
+    assert.equal(sha256File(outputPath), sha256Text(normalizeLineEndings(rendered)));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });

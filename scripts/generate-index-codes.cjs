@@ -23,8 +23,12 @@ function readJson(filePath) {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function normalizeLineEndings(text) {
+    return text.replace(/\r\n?/g, '\n');
+}
+
 function canonicalizeResource(text) {
-    return text.replace(/\r\n?/g, '\n').replace(/\n+$/g, '');
+    return normalizeLineEndings(text).replace(/\n+$/g, '');
 }
 
 function sha256Text(text) {
@@ -32,7 +36,7 @@ function sha256Text(text) {
 }
 
 function sha256File(filePath) {
-    return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+    return sha256Text(normalizeLineEndings(fs.readFileSync(filePath, 'utf8')));
 }
 
 function fail(message) {
@@ -187,6 +191,8 @@ if (require.main === module) {
 
 module.exports = {
     canonicalizeResource,
+    normalizeLineEndings,
     renderGeneratedFile,
+    sha256File,
     sha256Text,
 };

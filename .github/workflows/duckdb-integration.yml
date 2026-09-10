@@ -26,6 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Bootstrap pinned Access index-code reference
+        run: tools/access-ddl-compare/bootstrap.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
