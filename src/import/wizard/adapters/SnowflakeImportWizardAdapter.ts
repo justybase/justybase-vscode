@@ -1,15 +1,5 @@
-import * as path from 'node:path';
-import type { SnowflakePlannedImportColumn } from '../../../../extensions/snowflake/src/snowflakeImportPlanner';
-import {
-    buildCreateTableSql,
-    buildDefaultStageLocation,
-    buildInlineCsvFileFormat,
-    buildWorkflowNextSteps,
-    buildWorkflowWarnings,
-    createSnowflakeStagedImportResult,
-    mapImportTypeToSnowflake,
-} from '../../../../extensions/snowflake/src/snowflakeImportPlanner';
-import { buildSnowflakeCopyIntoTableSql } from '../../../../extensions/snowflake/src/snowflakeImportExport';
+import { getRequiredDatabaseImportWizardProvider } from '../../../core/connectionFactory';
+import type { DatabaseImportWizardInput } from '../../../contracts/database';
 import type {
     CreateTablePreviewInput,
     ImportExecutionInput,
@@ -17,12 +7,8 @@ import type {
 } from './DatabaseImportWizardAdapter';
 import {
     BaseImportWizardAdapter,
-    getBaseImportTypeName,
     type ImportWizardValidationIssue,
-    normalizeImportTypeName,
 } from './DatabaseImportWizardAdapter';
-
-const DIRECT_STAGE_LOAD_EXTENSIONS = new Set(['.csv', '.txt']);
 
 export class SnowflakeImportWizardAdapter extends BaseImportWizardAdapter {
     public readonly kind = 'snowflake' as const;
@@ -32,17 +18,7 @@ export class SnowflakeImportWizardAdapter extends BaseImportWizardAdapter {
     }
 
     public mapInferredType(typeName: string): string {
-        const normalized = normalizeImportTypeName(typeName);
-        const baseType = getBaseImportTypeName(normalized);
-
-        if (baseType === 'DATETIME') {
-            return 'TIMESTAMP_NTZ';
-        }
-        if (baseType === 'NVARCHAR') {
-            return normalized.replace(/^NVARCHAR/i, 'VARCHAR');
-        }
-
-        return mapImportTypeToSnowflake(normalized);
+        return getRequiredDatabaseImportWizardProvider(this.kind).mapInferredType(typeName);
     }
 
     public validateTypeOverride(typeName: string): ImportWizardValidationIssue[] {
@@ -55,46 +31,46 @@ export class SnowflakeImportWizardAdapter extends BaseImportWizardAdapter {
     }
 
     public buildCreateTableSql(input: CreateTablePreviewInput): string {
-        const columns: SnowflakePlannedImportColumn[] = input.columns.map((column) => ({
-            sourceColumn: column.columnName,
-            targetColumn: column.columnName,
-            sourceType: column.dataType,
-            snowflakeType: mapImportTypeToSnowflake(column.dataType),
-        }));
-        return buildCreateTableSql(input.targetTable, columns);
+        return getRequiredDatabaseImportWizardProvider(this.kind).buildCreateTableSql(
+            this.toProviderInput(input),
+        );
     }
 
     public buildLoadSql(input: LoadSqlPreviewInput): string | undefined {
-        const sourceFormat = path.extname(input.filePath).toLowerCase();
-        if (!DIRECT_STAGE_LOAD_EXTENSIONS.has(sourceFormat)) {
-            return undefined;
-        }
-
-        const stage = buildDefaultStageLocation(input.filePath);
-        return buildSnowflakeCopyIntoTableSql({
-            tableName: input.targetTable,
-            columns: input.columns.map((column) => column.columnName),
-            stage,
-            inlineFileFormat: buildInlineCsvFileFormat(input.detectedDelimiter),
-            onError: 'ABORT_STATEMENT',
-        });
+        return getRequiredDatabaseImportWizardProvider(this.kind).buildLoadSql?.(
+            this.toProviderInput(input),
+        );
     }
 
     public buildExecutionPlan(input: LoadSqlPreviewInput) {
-        const sourceFormat = path.extname(input.filePath).toLowerCase();
-        const loadSql = this.buildLoadSql(input);
-        const stage = buildDefaultStageLocation(input.filePath);
-        return {
-            mode: this.getExecutionMode(),
-            createTableSql: this.buildCreateTableSql(input),
-            loadSql,
-            warnings: buildWorkflowWarnings(sourceFormat),
-            nextSteps: buildWorkflowNextSteps(stage, Boolean(loadSql)),
-        };
+        return getRequiredDatabaseImportWizardProvider(this.kind).buildExecutionPlan(
+            this.toProviderInput(input),
+        );
     }
 
     public async execute(input: ImportExecutionInput) {
-        return createSnowflakeStagedImportResult(input.filePath, input.targetTable, input.columnOptions);
+        const provider = getRequiredDatabaseImportWizardProvider(this.kind);
+        if (provider.createResult) {
+            return provider.createResult({
+                filePath: input.filePath,
+                targetTable: input.targetTable,
+                columnOptions: input.columnOptions,
+            });
+        }
+
+        return super.execute(input);
+    }
+
+    private toProviderInput(input: CreateTablePreviewInput): DatabaseImportWizardInput {
+        const loadInput = input as LoadSqlPreviewInput;
+        return {
+            filePath: input.filePath,
+            targetTable: input.targetTable,
+            columns: input.columns,
+            columnOptions: input.columnOptions,
+            detectedDelimiter: loadInput.detectedDelimiter,
+            decimalDelimiter: loadInput.decimalDelimiter,
+        };
     }
 }
 

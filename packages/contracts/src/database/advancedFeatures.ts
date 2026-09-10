@@ -2,6 +2,11 @@ import type { TuningReport } from '../tuning/types';
 import type { ConnectionDetails } from '../connectionDetails';
 import type { DatabaseConnection } from './connection';
 import type { DatabaseDesignerProvider } from './designerCapabilities';
+import type {
+  ImportColumnDescriptor,
+  ImportColumnOptions,
+  ImportResult,
+} from '../import';
 
 export interface DatabaseDdlColumnInfo {
   name: string;
@@ -520,6 +525,121 @@ export interface DatabaseCopilotReferenceProvider {
   getReference(topic?: DatabaseReferenceTopic): string;
 }
 
+export interface DatabaseExplainOptions {
+  verbose?: boolean;
+  analyze?: boolean;
+}
+
+/** Builds and optionally normalizes a dialect-specific EXPLAIN statement. */
+export interface DatabaseExplainProvider {
+  buildQuery(sql: string, options?: DatabaseExplainOptions): string;
+  normalizeOutput?(output: string): string;
+}
+
+/** Query-history and operator-profile SQL/rendering owned by a dialect. */
+export interface DatabaseQueryProfileProvider {
+  buildRecentQueryHistoryQuery(limit?: number): string;
+  buildQueryOperatorStatsQuery(queryIdExpression: string): string;
+  renderQueryProfileMarkdown(rows: readonly Record<string, unknown>[]): string;
+}
+
+export interface DatabaseStageLocation {
+  stageName: string;
+  stagePath?: string;
+}
+
+export interface DatabaseInlineFileFormatOptions {
+  type?: 'CSV' | 'JSON' | 'AVRO' | 'ORC' | 'PARQUET' | 'XML';
+  fieldDelimiter?: string;
+  skipHeader?: number;
+  parseHeader?: boolean;
+  fieldOptionallyEnclosedBy?: string;
+  trimSpace?: boolean;
+  skipBlankLines?: boolean;
+  emptyFieldAsNull?: boolean;
+  nullIf?: readonly string[];
+  encoding?: string;
+  compression?:
+    | 'AUTO'
+    | 'GZIP'
+    | 'BZ2'
+    | 'BROTLI'
+    | 'ZSTD'
+    | 'DEFLATE'
+    | 'RAW_DEFLATE'
+    | 'NONE';
+}
+
+export interface DatabaseCopyIntoTableOptions {
+  database?: string;
+  schema?: string;
+  tableName: string;
+  columns?: readonly string[];
+  stage: DatabaseStageLocation;
+  fileFormatName?: string;
+  inlineFileFormat?: DatabaseInlineFileFormatOptions;
+  pattern?: string;
+  onError?:
+    | 'ABORT_STATEMENT'
+    | 'CONTINUE'
+    | 'SKIP_FILE'
+    | 'SKIP_FILE_1'
+    | 'SKIP_FILE_10';
+  matchByColumnName?: 'CASE_SENSITIVE' | 'CASE_INSENSITIVE' | 'NONE';
+  purge?: boolean;
+}
+
+export interface DatabaseCopyIntoStageOptions {
+  database?: string;
+  schema?: string;
+  tableName: string;
+  stage: DatabaseStageLocation;
+  fileFormatName?: string;
+  inlineFileFormat?: DatabaseInlineFileFormatOptions;
+  header?: boolean;
+  overwrite?: boolean;
+  single?: boolean;
+  maxFileSize?: number;
+}
+
+export interface DatabaseStageWorkflowProvider {
+  buildCopyIntoTableSql(options: DatabaseCopyIntoTableOptions): string;
+  buildCopyIntoStageSql(options: DatabaseCopyIntoStageOptions): string;
+  buildCreateStageTemplate(stage: DatabaseStageLocation, url?: string): string;
+  buildStageUsageGuide(stage: DatabaseStageLocation): string;
+}
+
+export interface DatabaseImportWizardInput {
+  filePath: string;
+  targetTable: string;
+  columns: readonly ImportColumnDescriptor[];
+  columnOptions?: ImportColumnOptions;
+  detectedDelimiter?: string;
+  decimalDelimiter?: string;
+}
+
+export interface DatabaseImportExecutionPlan {
+  mode: 'direct' | 'workflow' | 'unsupported';
+  createTableSql: string;
+  loadSql?: string;
+  warnings: string[];
+  nextSteps?: string[];
+}
+
+export interface DatabaseImportWizardProvider {
+  readonly mode: DatabaseImportExecutionPlan['mode'];
+  mapInferredType(typeName: string): string;
+  buildCreateTableSql(input: DatabaseImportWizardInput): string;
+  buildLoadSql?(input: DatabaseImportWizardInput): string | undefined;
+  buildExecutionPlan(input: DatabaseImportWizardInput): DatabaseImportExecutionPlan;
+  createResult?(input: {
+    filePath: string;
+    targetTable: string;
+    columnOptions?: ImportColumnOptions;
+  }): Promise<ImportResult>;
+  createClipboardResult?(targetTable: string): ImportResult;
+}
+
 export interface DatabaseAdvancedFeatures {
   ddl?: DatabaseDdlProvider;
   /** Capability-aware object loading, validation, and change-plan generation. */
@@ -529,4 +649,8 @@ export interface DatabaseAdvancedFeatures {
   maintenance?: DatabaseMaintenanceProvider;
   copilotReferenceProvider?: DatabaseCopilotReferenceProvider;
   sessionMonitor?: DatabaseSessionMonitorProvider;
+  explain?: DatabaseExplainProvider;
+  queryProfile?: DatabaseQueryProfileProvider;
+  stageWorkflow?: DatabaseStageWorkflowProvider;
+  importWizard?: DatabaseImportWizardProvider;
 }

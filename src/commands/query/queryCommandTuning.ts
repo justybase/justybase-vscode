@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from '../../core/connectionManager';
-import { getDatabaseDialect, getRequiredDatabaseDdlProvider, getRequiredDatabaseTuningAdvisor } from '../../core/connectionFactory';
+import {
+    getDatabaseDialect,
+    getDatabaseExplainProvider,
+    getRequiredDatabaseDdlProvider,
+    getRequiredDatabaseTuningAdvisor,
+} from '../../core/connectionFactory';
 import { runExplainQuery, runQueryRaw, queryResultToRows } from '../../core/queryRunner';
 import { assertExecutionCurrent, type ExecutionCurrentCheck } from '../../core/executionGuard';
 import { SqlParser } from '../../sql/sqlParser';
@@ -119,35 +124,9 @@ async function buildExplainSqlForDialect(
     options: { verbose: boolean; analyze?: boolean },
 ): Promise<string> {
     const strippedSql = stripExplainPrefix(sql);
-    if (databaseKind === 'postgresql') {
-        const { buildPostgreSqlExplainQuery } =
-            await import('../../../extensions/postgresql/src/postgresqlExplainParser');
-        return buildPostgreSqlExplainQuery(strippedSql, {
-            analyze: options.analyze ?? false,
-            verbose: options.verbose,
-        });
-    }
-
-    if (databaseKind === 'mysql') {
-        const { buildMysqlExplainQuery } = await import('../../../extensions/mysql/src/mysqlExplainParser');
-        return buildMysqlExplainQuery(strippedSql, {
-            analyze: options.analyze ?? false,
-            verbose: options.verbose,
-        });
-    }
-
-    if (databaseKind === 'snowflake') {
-        const { buildSnowflakeExplainQuery } = await import('../../../extensions/snowflake/src/snowflakeQueryProfile');
-        return buildSnowflakeExplainQuery(strippedSql);
-    }
-
-    if (databaseKind === 'sqlite') {
-        return `EXPLAIN QUERY PLAN ${strippedSql}`;
-    }
-
-    if (databaseKind === 'clickhouse') {
-        const { buildClickHouseExplainQuery } = await import('../../../extensions/clickhouse/src/clickhouseExplainParser');
-        return buildClickHouseExplainQuery(strippedSql, options);
+    const provider = getDatabaseExplainProvider(databaseKind);
+    if (provider) {
+        return provider.buildQuery(strippedSql, options);
     }
 
     return options.verbose ? `EXPLAIN VERBOSE ${strippedSql}` : `EXPLAIN ${strippedSql}`;
@@ -157,47 +136,9 @@ async function normalizeExplainOutputForDisplay(
     explainOutput: string,
     databaseKind: string | undefined,
 ): Promise<string> {
-    if (databaseKind === 'postgresql') {
-        const { isPostgreSqlExplainJson, parsePostgreSqlExplainJson, renderPostgreSqlExplainPlan } =
-            await import('../../../extensions/postgresql/src/postgresqlExplainParser');
-
-        if (!isPostgreSqlExplainJson(explainOutput)) {
-            return explainOutput;
-        }
-
-        return renderPostgreSqlExplainPlan(parsePostgreSqlExplainJson(explainOutput));
-    }
-
-    if (databaseKind === 'mysql') {
-        const { isMysqlExplainJson, isMysqlExplainText, parseMysqlExplainPlan, renderMysqlExplainPlan } =
-            await import('../../../extensions/mysql/src/mysqlExplainParser');
-
-        if (!isMysqlExplainJson(explainOutput) && !isMysqlExplainText(explainOutput)) {
-            return explainOutput;
-        }
-
-        return renderMysqlExplainPlan(parseMysqlExplainPlan(explainOutput));
-    }
-
-    if (databaseKind === 'snowflake') {
-        const { isSnowflakeExplainJson, parseSnowflakeExplainJson, renderSnowflakeExplainPlan } =
-            await import('../../../extensions/snowflake/src/snowflakeQueryProfile');
-
-        if (!isSnowflakeExplainJson(explainOutput)) {
-            return explainOutput;
-        }
-
-        return renderSnowflakeExplainPlan(parseSnowflakeExplainJson(explainOutput));
-    }
-
-    if (databaseKind === 'sqlite') {
-        const { normalizeSqliteExplainPlan } = await import('../../dialects/sqlite/explainParser');
-        return normalizeSqliteExplainPlan(explainOutput);
-    }
-
-    if (databaseKind === 'clickhouse') {
-        const { normalizeClickHouseExplainOutput } = await import('../../../extensions/clickhouse/src/clickhouseExplainParser');
-        return normalizeClickHouseExplainOutput(explainOutput);
+    const provider = getDatabaseExplainProvider(databaseKind);
+    if (provider?.normalizeOutput) {
+        return provider.normalizeOutput(explainOutput);
     }
 
     return explainOutput;

@@ -4,6 +4,7 @@ import {
     type TuningRecommendation,
     type TuningReport,
 } from '@justybase/contracts';
+import type { DatabaseExplainProvider, DatabaseQueryProfileProvider } from '@justybase/contracts';
 
 export interface SnowflakeProfileNode {
     operation: string;
@@ -242,6 +243,23 @@ export function renderSnowflakeQueryProfileMarkdown(rows: readonly Record<string
 
     return lines.join('\n');
 }
+
+export const snowflakeExplainProvider: DatabaseExplainProvider = {
+    buildQuery: buildSnowflakeExplainQuery,
+    normalizeOutput(output: string): string {
+        if (!isSnowflakeExplainJson(output)) {
+            return output;
+        }
+
+        return renderSnowflakeExplainPlan(parseSnowflakeExplainJson(output));
+    },
+};
+
+export const snowflakeQueryProfileProvider: DatabaseQueryProfileProvider = {
+    buildRecentQueryHistoryQuery: buildSnowflakeRecentQueryHistoryQuery,
+    buildQueryOperatorStatsQuery: buildSnowflakeQueryOperatorStatsQuery,
+    renderQueryProfileMarkdown: renderSnowflakeQueryProfileMarkdown,
+};
 
 export function analyzeSnowflakeExplainPlan(explainPlanText: string, sql: string): TuningReport {
     if (!isSnowflakeExplainJson(explainPlanText)) {

@@ -26,6 +26,7 @@ import type { DatabaseKind } from '../contracts/database';
 import type { AliasInfo } from '../providers/types';
 import { ImportWizardView } from '../views/importWizardView';
 import { presentAccessError } from '../utils/accessErrorHandling';
+import { getRequiredDatabaseStageWorkflowProvider } from '../core/connectionFactory';
 
 export interface ImportCommandsDependencies {
     context: vscode.ExtensionContext;
@@ -1138,10 +1139,9 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 placeHolder: 'MY_CSV_FORMAT',
                 validateInput: () => null,
             });
-            const { buildSnowflakeCopyIntoTableSql, buildSnowflakeStageUsageGuide } =
-                await import('../../extensions/snowflake/src/snowflakeImportExport');
+            const stageWorkflowProvider = getRequiredDatabaseStageWorkflowProvider('snowflake');
 
-            const sql = buildSnowflakeCopyIntoTableSql({
+            const sql = stageWorkflowProvider.buildCopyIntoTableSql({
                 tableName: targetTable.trim(),
                 stage,
                 fileFormatName: fileFormatName?.trim() || undefined,
@@ -1149,7 +1149,7 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 matchByColumnName: 'CASE_INSENSITIVE',
             });
             const guide = [
-                buildSnowflakeStageUsageGuide(stage),
+                stageWorkflowProvider.buildStageUsageGuide(stage),
                 '',
                 '## Selected Target',
                 '',
@@ -1192,10 +1192,9 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 placeHolder: 'MY_CSV_FORMAT',
                 validateInput: () => null,
             });
-            const { buildSnowflakeCopyIntoStageSql, buildSnowflakeStageUsageGuide } =
-                await import('../../extensions/snowflake/src/snowflakeImportExport');
+            const stageWorkflowProvider = getRequiredDatabaseStageWorkflowProvider('snowflake');
 
-            const sql = buildSnowflakeCopyIntoStageSql({
+            const sql = stageWorkflowProvider.buildCopyIntoStageSql({
                 tableName: targetTable.trim(),
                 stage,
                 fileFormatName: fileFormatName?.trim() || undefined,
@@ -1204,7 +1203,7 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 single: false,
             });
             const guide = [
-                buildSnowflakeStageUsageGuide(stage),
+                stageWorkflowProvider.buildStageUsageGuide(stage),
                 '',
                 '## Selected Source',
                 '',

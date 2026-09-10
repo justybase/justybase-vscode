@@ -7,6 +7,10 @@ import {
   DatabaseCopilotReferenceProvider,
   DatabaseDdlProvider,
   DatabaseDialect,
+  DatabaseExplainProvider,
+  DatabaseQueryProfileProvider,
+  DatabaseStageWorkflowProvider,
+  DatabaseImportWizardProvider,
   DatabaseImportTypeMapper,
   DatabaseMaintenanceProvider,
   DatabaseMetadataProvider,
@@ -265,6 +269,82 @@ export function getDatabaseAdvancedFeatures(
   kind?: string | DatabaseKind,
 ): DatabaseAdvancedFeatures | undefined {
   return getDatabaseDialect(kind).advancedFeatures;
+}
+
+export function getDatabaseExplainProvider(
+  kind?: string | DatabaseKind,
+): DatabaseExplainProvider | undefined {
+  return getDatabaseAdvancedFeatures(kind)?.explain;
+}
+
+export function getRequiredDatabaseExplainProvider(
+  kind?: string | DatabaseKind,
+): DatabaseExplainProvider {
+  const provider = getDatabaseExplainProvider(kind);
+  if (!provider) {
+    const dialect = getDatabaseDialect(kind);
+    throw new Error(
+      `Database dialect "${dialect.displayName}" does not provide EXPLAIN features.`,
+    );
+  }
+  return provider;
+}
+
+export function getDatabaseQueryProfileProvider(
+  kind?: string | DatabaseKind,
+): DatabaseQueryProfileProvider | undefined {
+  return getDatabaseAdvancedFeatures(kind)?.queryProfile;
+}
+
+export function getRequiredDatabaseQueryProfileProvider(
+  kind?: string | DatabaseKind,
+): DatabaseQueryProfileProvider {
+  const provider = getDatabaseQueryProfileProvider(kind);
+  if (!provider) {
+    const dialect = getDatabaseDialect(kind);
+    throw new Error(
+      `Database dialect "${dialect.displayName}" does not provide query profile features.`,
+    );
+  }
+  return provider;
+}
+
+export function getDatabaseStageWorkflowProvider(
+  kind?: string | DatabaseKind,
+): DatabaseStageWorkflowProvider | undefined {
+  return getDatabaseAdvancedFeatures(kind)?.stageWorkflow;
+}
+
+export function getRequiredDatabaseStageWorkflowProvider(
+  kind?: string | DatabaseKind,
+): DatabaseStageWorkflowProvider {
+  const provider = getDatabaseStageWorkflowProvider(kind);
+  if (!provider) {
+    const dialect = getDatabaseDialect(kind);
+    throw new Error(
+      `Database dialect "${dialect.displayName}" does not provide stage workflow features.`,
+    );
+  }
+  return provider;
+}
+
+export function getDatabaseImportWizardProvider(
+  kind?: string | DatabaseKind,
+): DatabaseImportWizardProvider | undefined {
+  return getDatabaseAdvancedFeatures(kind)?.importWizard;
+}
+
+export function getRequiredDatabaseImportWizardProvider(
+  kind?: string | DatabaseKind,
+): DatabaseImportWizardProvider {
+  const provider = getDatabaseImportWizardProvider(kind);
+  if (!provider) {
+    const dialect = getDatabaseDialect(kind);
+    throw new Error(
+      `Database dialect "${dialect.displayName}" does not provide import wizard features.`,
+    );
+  }
+  return provider;
 }
 
 export function getDatabaseDdlProvider(

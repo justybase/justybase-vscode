@@ -1,3 +1,5 @@
+import type { DatabaseExplainOptions, DatabaseExplainProvider } from '@justybase/contracts';
+
 export interface ClickHouseExplainOptions {
     verbose?: boolean;
 }
@@ -15,3 +17,10 @@ export function normalizeClickHouseExplainOutput(text: string): string {
 export function isClickHouseExplainOutput(text: string): boolean {
     return /(?:EXPLAIN|PLAN|ReadFrom|Expression|Aggregating|Sorting)/i.test(text);
 }
+
+export const clickhouseExplainProvider: DatabaseExplainProvider = {
+    buildQuery(sql: string, options: DatabaseExplainOptions = {}): string {
+        return buildClickHouseExplainQuery(sql, options);
+    },
+    normalizeOutput: normalizeClickHouseExplainOutput,
+};

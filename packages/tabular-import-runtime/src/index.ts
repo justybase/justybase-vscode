@@ -2,60 +2,24 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import type { DatabaseKind } from '@justybase/contracts';
+import type {
+  DatabaseKind,
+  ImportColumnDescriptor,
+  ImportColumnOptions,
+  ProgressCallback,
+} from '@justybase/contracts';
 import { tryNormalizeDatabaseKind } from '@justybase/contracts';
 import { applyGeneratedIdentifierCase } from '@justybase/dialect-utils';
 import { headerForcesTextImportType, ColumnTypeChooser } from '@justybase/database-utils';
 
-export interface ImportColumnOptions {
-  selectedColumnIndexes?: number[];
-  forcedColumnTypes?: Record<number, string>;
-  columnNameOverrides?: Record<number, string>;
-  appendToExistingTable?: boolean;
-}
-
-export interface ImportColumnDescriptor {
-  sourceIndex: number;
-  columnName: string;
-  dataType: string;
-}
-
-export type ProgressCallback = (
-  message: string,
-  increment?: number,
-  logToOutput?: boolean,
-) => void;
-
-export interface SnowflakeWorkflowDetails {
-  workflowMarkdown: string;
-  createTableSql?: string;
-  copyIntoSql?: string;
-  warnings?: string[];
-  nextSteps?: string[];
-  stageName?: string;
-  stagePath?: string;
-  sourceFormat?: string;
-}
-
-export interface ImportResultDetails {
-  sourceFile?: string;
-  targetTable?: string;
-  fileSize?: number;
-  format?: string;
-  rowsProcessed?: number;
-  rowsInserted?: number;
-  processingTime?: string;
-  columns?: number;
-  detectedDelimiter?: string;
-  warnings?: string[];
-  snowflakeWorkflow?: SnowflakeWorkflowDetails;
-}
-
-export interface ImportResult<TDetails extends ImportResultDetails = ImportResultDetails> {
-  success: boolean;
-  message: string;
-  details?: TDetails;
-}
+export type {
+  ImportColumnDescriptor,
+  ImportColumnOptions,
+  ImportResult,
+  ImportResultDetails,
+  ProgressCallback,
+  SnowflakeWorkflowDetails,
+} from '@justybase/contracts';
 
 export interface TabularDataImporterOptions {
   kind?: string | DatabaseKind;

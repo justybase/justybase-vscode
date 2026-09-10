@@ -20,6 +20,12 @@ import {
   destroyNetezzaImportStream,
   registerNetezzaImportStream,
 } from "./netezzaVirtualImport";
+import type {
+  ImportColumnDescriptor,
+  ImportColumnOptions,
+  ImportResult,
+  ProgressCallback,
+} from '@justybase/contracts';
 
 // Helper to unblock event loop
 const delay = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -65,58 +71,12 @@ export interface ImportOptions {
   maxErrors?: number;
 }
 
-export interface ImportColumnOptions {
-  selectedColumnIndexes?: number[];
-  forcedColumnTypes?: Record<number, string>;
-  columnNameOverrides?: Record<number, string>;
-  /** Insert into an already existing target table instead of creating it. */
-  appendToExistingTable?: boolean;
-}
-
-export interface ImportColumnDescriptor {
-  sourceIndex: number;
-  columnName: string;
-  dataType: string;
-}
-
-/**
- * Import result
- */
-export interface ImportResult {
-  success: boolean;
-  message: string;
-  details?: {
-    sourceFile?: string;
-    targetTable?: string;
-    fileSize?: number;
-    format?: string;
-    rowsProcessed?: number;
-    rowsInserted?: number;
-    processingTime?: string;
-    columns?: number;
-    detectedDelimiter?: string;
-    warnings?: string[];
-    snowflakeWorkflow?: {
-      workflowMarkdown: string;
-      createTableSql?: string;
-      copyIntoSql?: string;
-      warnings?: string[];
-      nextSteps?: string[];
-      stageName?: string;
-      stagePath?: string;
-      sourceFormat?: string;
-    };
-  };
-}
-
-/**
- * Progress callback function type
- */
-export type ProgressCallback = (
-  message: string,
-  increment?: number,
-  logToOutput?: boolean,
-) => void;
+export type {
+  ImportColumnDescriptor,
+  ImportColumnOptions,
+  ImportResult,
+  ProgressCallback,
+} from '@justybase/contracts';
 
 export interface NetezzaImportProgressData {
   bytesSent?: number;

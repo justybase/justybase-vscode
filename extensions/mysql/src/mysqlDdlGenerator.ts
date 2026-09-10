@@ -407,8 +407,10 @@ import { mysqlMaintenanceProvider } from './mysqlMaintenanceProvider';
 import { mysqlCopilotReferenceProvider } from './mysqlReferenceProvider';
 import { mysqlSessionMonitorProvider } from './mysqlSessionMonitorProvider';
 import { mysqlTuningAdvisor } from './mysqlTuningAdvisor';
+import { mysqlExplainProvider } from './mysqlExplainParser';
 
 export const mysqlAdvancedFeatures: DatabaseAdvancedFeatures = {
+    explain: mysqlExplainProvider,
     importTypeMapper: mysqlImportTypeMapper,
     maintenance: mysqlMaintenanceProvider,
     copilotReferenceProvider: mysqlCopilotReferenceProvider,

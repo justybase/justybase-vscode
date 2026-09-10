@@ -7,16 +7,16 @@ import type { DatabaseSqlAuthoring } from "../sql/authoring/types";
 import { netezzaSqlAuthoring } from "../dialects/netezza/sql/authoring";
 import { sqliteSqlAuthoring } from "../dialects/sqlite/sql/authoring";
 import { duckdbSqlAuthoring } from "../dialects/duckdb/sql/authoring";
-import { postgresqlSqlAuthoring } from "../../extensions/postgresql/src/postgresqlSqlAuthoring";
-import { db2SqlAuthoring } from "../../extensions/db2/src/sql/authoring";
-import { mssqlSqlAuthoring } from "../../extensions/mssql/src/sql/authoring";
-import { mysqlSqlAuthoring } from "../../extensions/mysql/src/sql/authoring";
-import { oracleSqlAuthoring } from "../../extensions/oracle/src/sql/authoring";
-import { snowflakeSqlAuthoring } from "../../extensions/snowflake/src/sql/authoring";
-import { verticaSqlAuthoring } from "../../extensions/vertica/src/sql/authoring";
+import { postgresqlSqlAuthoring } from "@justybase/dialect-utils/authoring/postgresql";
+import { db2SqlAuthoring } from "@justybase/dialect-utils/authoring/db2";
+import { mssqlSqlAuthoring } from "@justybase/dialect-utils/authoring/mssql";
+import { mysqlSqlAuthoring } from "@justybase/dialect-utils/authoring/mysql";
+import { oracleSqlAuthoring } from "@justybase/dialect-utils/authoring/oracle";
+import { snowflakeSqlAuthoring } from "@justybase/dialect-utils/authoring/snowflake";
+import { verticaSqlAuthoring } from "@justybase/dialect-utils/authoring/vertica";
 import { accessSqlAuthoring } from "../dialects/access/sql/authoring";
 import { fileSqlAuthoring } from "../dialects/file/sql/authoring";
-import { clickhouseSqlAuthoring } from "../../extensions/clickhouse/src/sql/authoring";
+import { clickhouseSqlAuthoring } from "@justybase/dialect-utils/authoring/clickhouse";
 
 const SQL_AUTHORING_BY_KIND = new Map<DatabaseKind, DatabaseSqlAuthoring>([
   ["netezza", netezzaSqlAuthoring],
