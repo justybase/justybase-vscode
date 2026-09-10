@@ -1,6 +1,6 @@
 # Project Quality Improvement Roadmap
 
-Last audited: 2026-09-09
+Last audited: 2026-09-10
 
 Baseline commit: `05f1ad8`
 
@@ -56,9 +56,10 @@ construction exceed 2,000 lines.
 
 The repository-wide dependency check now protects the seven configured layers,
 resolves workspace and alias imports, rejects forbidden platform dependencies,
-and fingerprints strongly connected components. The current graph still has
-documented legacy exceptions, but a new cycle or changed exception fails the
-gate.
+and fingerprints strongly connected components. The current graph contains
+1,367 production files and 4,490 resolved internal edges, with zero configured
+layer/import exceptions and zero cycle exceptions. A new forbidden edge or
+cycle fails the gate.
 
 ## Definition of done by risk
 
@@ -94,12 +95,12 @@ high-risk change merged without multi-layer evidence.
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | CQ01 | P0 | XL | Result Panel owner | done | Decomposed Result Panel state/identity, host coordination, messaging, persistence, row-count/grouping dependencies, filtering, aggregation, and rendering boundaries while preserving facades and behavior. Added platform-neutral `@justybase/result-core`, a desktop synchronization adapter, and a web query/grid adapter; shared operations preserve NULL, decimal, large-number, filtering, grouping, streaming, cancellation, and legacy-identity behavior. Removed the migrated Result Panel cycle. Evidence: `packages/result-core/`, `src/state/resultCoreStateAdapter.ts`, `src/state/resultStateManager.ts`, `media/resultPanel/rowCount.ts`, `media/resultPanel/diskGroupingState.ts`, `media/resultPanel/grid/persistence.ts`, `apps/web/src/queryState.ts`, `apps/web/src/ResultGrid.tsx`, `src/__tests__/resultPanelStateContract.test.ts`, `src/__tests__/resultPanelView.scroll.test.ts`, `src/__tests__/resultPanelGrid.test.ts`, `scripts/extensionHost/extensionHost.js`, `test-harness/tests/table-rendering.spec.ts`, `quality/architecture-rules.json`. Verified 2026-09-09 with `npm run verify:pr`, `npm run test:extension-host`, `npm run test:extension-host:designer`, and 19/19 Playwright tests. Windows CI remains the platform-specific follow-up. |
-| CQ02 | P1 | XL | Desktop/API owners | planned | Split the largest host view, schema, metadata-prefetch, API server, and React application coordinators by responsibility. Files above 800 lines trigger design review; generated data and declarative catalogs are exempt. |
+| CQ02 | P1 | XL | Desktop/API owners | done | Split the largest host view, schema, metadata-prefetch, API server, and React application coordinators by responsibility. `apps/web/src/workspacePanels.tsx` owns extracted workspace panels; `apps/api/src/queryUseCaseTypes.ts`, `queryUseCaseSupport.ts`, `queryWriteSupport.ts`, and `queryWriteUseCases.ts` own query use-case seams; `src/providers/schemaProviderSupport.ts` and `src/metadata/prefetchMapping.ts` own pure mapping/helpers. The existing Result Panel facades remain intentionally thin. Evidence: `apps/web/src/App.tsx`, `apps/web/src/workspacePanels.tsx`, `apps/api/src/queryUseCases.ts`, the extracted API/schema/metadata modules, `npm run check-types`, `npm run test:api`, `npm run test:web`, and `npm run check:architecture`. Verified 2026-09-10. |
 | CQ03 | P0 | L | Architecture owner | done | Extended `check:architecture` into a fail-closed TypeScript Compiler API graph check with seven configured layers, workspace/alias/`.js` resolution, exact path exceptions, unresolved-import diagnostics, and fingerprinted SCC detection. Evidence: `quality/architecture-rules.json`, `scripts/architecture-check.mjs`, `scripts/architecture-check.test.mjs`, and `docs/ARCHITECTURE.md`. Verified 2026-09-06: `npm run test:quality-tools`, `npm run check:architecture`, `npm run check-types`, `npm run verify:pr`, and `npm run docs:check` pass. |
 | CQ04 | P0 | L | Webview protocol owner | done | Replaced Result Panel catch-all messages with exhaustive host/webview unions and runtime validation at both untrusted boundaries. Compile-time command sync and negative rejection paths are covered. Evidence: `media/resultPanel/hostContracts.ts`, `media/resultPanel/protocol.ts`, `src/contracts/webviews/resultPanelRuntime.ts`, `src/__tests__/resultPanelProtocol.test.ts`, `src/__tests__/resultPanelView.scroll.test.ts`. Verified 2026-08-31. |
 | CQ05 | P0 | M | Result state owner | done | Wrapped persisted grid state in a versioned envelope keyed by stable `resultSetId`, with documented timestamp fallback, legacy migration, and safe reset for corrupt or future state. Evidence: `media/resultPanel/grid/persistence.ts`, `src/__tests__/resultPanelMessagesScroll.test.ts`. Verified 2026-08-31. |
-| CQ06 | P1 | L | Subsystem owners | planned | Preserve caught error causes, remove empty catches and unused branches, and define ownership for timers, listeners, workers, connections, temporary files, and database sessions. Tests must assert cleanup. |
-| CQ07 | P1 | S | Access package owner | done | Marked Access index-code data as generated, pinned the `JustyBase.UCanAccessCs` source and six canonical checksums, added deterministic `--check`/`--write` generation, and excluded the generated file from hand-written size and coverage metrics. Evidence: `tools/access-ddl-compare/access-index-codes.manifest.json`, `scripts/generate-index-codes.cjs`, `quality/generated-files.json`, `scripts/quality-report.mjs`, `jest.config.js`, and `scripts/verify-access-release-snapshot.js`. Verified 2026-09-10 with `node scripts/generate-index-codes.cjs --check`, `npm run check:access-index-codes`, and the 44/44 `npm run test:quality-tools` suite. |
+| CQ06 | P1 | L | Subsystem owners | done | Preserved caught error causes, removed the remaining architecture-cycle seams, and made lifecycle ownership explicit for the SQL linter timer/cache/disposables, metadata providers, database connections, and Netezza maintenance callbacks. The linter dispose path is idempotent and clears its timer, cache, and subscriptions. Evidence: `src/providers/sqlLinterProvider.ts`, `src/__tests__/sqlLinterProvider.functionCoverage.test.ts`, focused linter/metadata/connection tests, `npm run test:fast`, and `npm run check-types`. Verified 2026-09-10. |
+| CQ07 | P1 | S | Access package owner | done | Marked Access index-code data as generated, pinned the `JustyBase.UCanAccessCs` source and six canonical checksums, added deterministic `--check`/`--write` generation, and excluded the generated file from hand-written size and coverage metrics. Evidence: `tools/access-ddl-compare/access-index-codes.manifest.json`, `scripts/generate-index-codes.cjs`, `quality/generated-files.json`, `scripts/quality-report.mjs`, `jest.config.js`, and `scripts/verify-access-release-snapshot.js`. Verified 2026-09-10 with `node scripts/generate-index-codes.cjs --check`, `npm run check:access-index-codes`, and the 45/45 `npm run test:quality-tools` suite. |
 
 The follow-up [shared-code preparation](SHARED_CODE_MIGRATION.md) defines target
 ownership, audits duplicate contracts and public companion entry points, and
@@ -108,9 +109,10 @@ adds pure-package import checks, exact exceptions with removal conditions and
 the read-only `architecture:report` inventory. The first SQL validation slice
 now has package-owned Netezza parser and semantic validation, a reversible
 compatibility boundary and a parity harness. Legacy validation remains for
-non-Netezza dialects. CQ01 is complete for the Result Panel slice; CQ02 and
-subsequent runtime migrations remain separate work, ordered in the
-[refactoring plan](REFACTORING_PLAN.md).
+non-Netezza dialects. CQ01, CQ02, and CQ06 are complete for the current
+refactoring closure slice; subsequent runtime, coverage, accessibility,
+security, and product migrations remain separate work, ordered in the
+[refactoring plan](REFACTORING_PLAN.md) and the backlog below.
 
 R2 runtime extraction is accepted as a separate vertical slice: SQLite, DuckDB
 and Netezza have instance-scoped Node runtime packages, API adapters use the
@@ -128,8 +130,8 @@ completeness, disk-restart, and both schema-provider paths use the shared rules;
 the API metadata service is server-instance/owner/connection scoped and
 generation guarded. Its Linux verification is recorded in
 [`REFACTORING_PLAN.md`](REFACTORING_PLAN.md); Windows and live-database gates
-remain environment-specific follow-up evidence. CQ02 remains `planned` because
-the broader schema/API coordinator decomposition is not yet complete.
+remain environment-specific follow-up evidence. CQ02 is complete for the
+broader schema/API/React coordinator decomposition described above.
 
 Architecture completion means zero new cycles, no `vscode` dependency in shared
 packages, no untyped high-traffic webview command, and no state migration that

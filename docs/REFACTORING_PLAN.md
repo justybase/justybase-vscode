@@ -42,6 +42,20 @@ backlog. Statuses and completion evidence remain in the
   explaining the cause and collecting reliable results before production
   migration.
 
+## Current closure status (2026-09-10)
+
+The planned refactoring closure slice is implemented on Linux. CQ02 is closed
+for the host view, API query use-cases, React workspace, schema provider, and
+metadata-prefetch coordinator extractions; CQ06 is closed for the reviewed
+resource/lifecycle seams, including explicit SQL-linter timer/cache/disposable
+ownership. The architecture graph is clean: `exceptions` and
+`cycleExceptions` are empty, and `npm run check:architecture` reports 1,367
+production files, 4,490 resolved internal edges, and zero cycles.
+
+The remaining items in the quality roadmap are separate product, coverage,
+accessibility, security, live-database, and platform-specific follow-up work;
+they are not silently promoted to complete by this closure.
+
 ## Target Boundaries
 
 | Layer | Responsibility | Constraints |
@@ -246,8 +260,8 @@ R3 implementation evidence (2026-09-09, Linux):
   presentation state. Result identity keeps source, execution, result-set and
   storage-session roles distinct.
 - The Result Panel graph extraction removed the migrated orchestration cycle;
-  `npm run check:architecture` passes with the remaining unrelated cycles
-  still represented by exact configured exceptions.
+  `npm run check:architecture` now passes with no configured layer/import or
+  cycle exceptions.
 - Pure reducer/operation tests, desktop state/scroll/grid tests, web tests and
   the real UI boundaries pass: `npm run test:result-core` (2 suites/15 tests),
   focused desktop Result Panel suites (171 tests plus 55 scroll assertions),
@@ -400,10 +414,9 @@ Closure evidence (2026-09-09, Linux):
   provider imports the desktop connection manager or desktop helper modules.
   Maintenance DDL lookup is host-provided, so a separately bundled companion
   never consults a private desktop registry.
-- `npm run check:architecture` passes with no new cycle and with the
-  companion-boundary negative check enabled. The exact remaining desktop
-  registry edges are fingerprinted exceptions; no `extensions/*` production
-  edge targets `src/*`.
+- `npm run check:architecture` passes with no configured layer/import or cycle
+  exceptions and with the companion-boundary negative check enabled. No
+  `extensions/*` production edge targets `src/*`.
 - `npm run build:companions`, all ten `verify:<dialect>` packaging paths, and
   the companion activation/register smoke pass. The full deterministic root
   suite passes serially: 545 suites, 9,621 tests, one snapshot.
@@ -445,11 +458,13 @@ R7 implementation evidence (2026-09-10, Linux):
   to the authenticated user and legacy keys migrate without overwriting or
   deleting an unverified copy.
 - Regression evidence: the full `npm run verify:pr` gate passed on Linux,
-  including 546 root suites / 9,632 tests, API 18 suites / 97 tests, web 9
+  including 547 root suites / 9,637 tests, API 18 suites / 97 tests, web 9
   suites / 45 tests, type checks, architecture, lint, coverage, and final
-  desktop/API/web builds. The real Playwright `table-rendering.spec.ts` gate
-  also passed (19/19). Live database and Windows-specific gates remain
-  environment-specific and were not represented as locally passed.
+  desktop/API/web builds. Coverage was 71.82% statements, 58.16% branches,
+  76.58% functions, and 72.42% lines. The real Playwright
+  `table-rendering.spec.ts` gate also passed previously (19/19). Live database
+  and Windows-specific gates remain environment-specific and were not
+  represented as locally passed.
 
 ### R8 — Closure
 
@@ -480,10 +495,13 @@ R8 implementation evidence (2026-09-10, Linux):
   implementations stay in the owning dialect packages. Snowflake's staged
   import/export and wizard planner use the provider seam without changing the
   public companion API v1.
-- The 23 stale desktop-to-companion layer exceptions were removed. The graph
-  still guards seven pre-existing cycles; the largest cycle fingerprint changed
-  only because its old optional-companion authoring edges were removed and the
-  exact new fingerprint was recorded in `quality/architecture-rules.json`.
+- The 23 stale desktop-to-companion layer exceptions and the remaining
+  fingerprinted cycle exceptions were removed. The current graph has 1,367
+  production files and 4,490 resolved internal edges, with zero configured
+  exceptions and zero cycles. The architecture checker and companion-boundary
+  negative check remain blocking gates; the former cycle areas were closed by
+  leaf contracts, narrow ports, neutral connection-factory ownership, and a
+  host-provided Netezza maintenance callback.
 - Access index-code data is reproducible from the pinned
   `JustyBase.UCanAccessCs` commit and six source checksums. The generator has a
   deterministic `--check` gate, the generated file is registered as excluded
@@ -495,13 +513,15 @@ R8 implementation evidence (2026-09-10, Linux):
   activation, secrets, transport, and resource lifetime.
 
 Final verification (2026-09-10, Linux) passed with `npm run test:quality-tools`
-(44/44), `npm run check:architecture`, `npm run check-types`, `npm run lint`,
+(45/45), `npm run check:architecture`, `npm run check-types`, `npm run lint`,
 `npm run lint:extended:check` (62 accepted baseline warnings, 0 errors),
-`npm run test:fast` (540 suites, 8,172 tests), `npm run build:companions`,
-`npm run build`, `npm run docs:check`, and `npm run version:check`. The focused
-Snowflake/import/provider tests and all eight affected companion type checks
-also passed. Live database, Windows, and Extension Host gates remain
-environment-specific and were not represented as locally passed.
+`npm run test:fast` (540 suites, 8,175 tests), `npm run verify:pr` including
+coverage (547 suites, 9,637 tests), API (18 suites, 97 tests), web (9 suites,
+45 tests), and desktop/API/web builds, plus `npm run docs:check` and
+`npm run version:check`. Coverage was 71.82% statements, 58.16% branches,
+76.58% functions, and 72.42% lines. Live database, Windows, and any
+environment-specific Extension Host gates not run in this audit remain
+explicit follow-up evidence.
 
 ## Compatibility and Verification
 
@@ -549,7 +569,9 @@ or fixed sleeps.
   core internals.
 - Renderers do not depend on Node/drivers; the backend has isolated
   create/close operations.
-- Migrated boundaries are acyclic; remaining debt has a removal condition.
+- Migrated boundaries are acyclic, with no active architecture exceptions;
+  remaining product, coverage, accessibility, security, and platform debt is
+  tracked separately in the quality roadmap.
 - Compatibility, cleanup, and packaging tests confirm operation; gaps are
   explicit.
 - Documentation describes the actual state without declaring Electron ready.

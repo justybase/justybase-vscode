@@ -31,6 +31,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Bootstrap pinned Access index-code reference
+        shell: bash
+        run: tools/access-ddl-compare/bootstrap.sh
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

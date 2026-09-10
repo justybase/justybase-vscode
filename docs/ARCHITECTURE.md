@@ -247,8 +247,8 @@ alias resolution never silently falls back to a less strict configuration.
 | `companions` | `extensions/*/src` | `contracts`, `shared`, `companions` |
 
 The direction table is intentionally stricter than the current runtime graph.
-There is no layer-wide `desktop ↔ companions` allowance, and the current
-configuration has no desktop-to-companion direction exceptions. Companion
+There is no layer-wide `desktop ↔ companions` allowance, and the `exceptions`
+array is empty, so no layer-direction exception is currently active. Companion
 production code has no edge into `src`; optional capabilities are reached
 through the contracts in `DatabaseAdvancedFeatures` and provider lookup in
 `src/core/connectionFactory.ts`. The migrated designer webviews consume pure
@@ -258,14 +258,14 @@ explicit, exact exception rather than added as a general allowance.
 `ARCH001` reports a forbidden direction or platform import,
 `ARCH002` reports an unresolved internal import, `ARCH003` reports a new or
 changed strongly connected component, and `ARCH004` reports invalid or stale
-configuration. Existing cycles are represented by exact node lists and a
-SHA-256 fingerprint of their internal edges in `cycleExceptions`. A new edge
-inside one of those components changes the fingerprint and fails the check;
-new components fail as well. The migrated Result Panel orchestration cycle has
-been removed. The remaining configured cycle entries are exact fingerprints
-for pre-existing components; the R8 authoring extraction intentionally changed
-the largest component's fingerprint by removing optional-companion authoring
-edges, and the new fingerprint is recorded explicitly.
+configuration. Existing cycles, when intentionally retained during a staged
+migration, are represented by exact node lists and a SHA-256 fingerprint of
+their internal edges in `cycleExceptions`. The current configuration has no
+layer/import exceptions and no cycle exceptions. The current graph contains
+1,367 production files and 4,490 resolved internal edges and reports zero
+cycles. The former R3/R8 cycles were closed through leaf modules, narrow ports,
+neutral connection-factory ownership, and a host-provided maintenance
+callback. Future forbidden edges or cycles fail the check.
 
 The regression suite in
 [`scripts/architecture-check.test.mjs`](../scripts/architecture-check.test.mjs)
@@ -304,7 +304,7 @@ this TypeScript graph's proof.
 
 Exceptions require exact paths and become errors when stale. Cycle node lists
 and fingerprints are updated only when an intentional migration changes the
-graph; the R8 authoring extraction is one such recorded change. Use
+graph. Use
 `npm run architecture:report --silent` for JSON containing the current edge
 map, layer counts, complete cycle list, exceptions and diagnostics. It returns
 a failure exit code on violations and never rewrites the baseline. The same

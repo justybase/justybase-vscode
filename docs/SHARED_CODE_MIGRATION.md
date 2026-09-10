@@ -25,14 +25,14 @@ when comparing revisions; do not commit volatile graph/timing reports.
 
 | Current consumer | Current dependencies and debt |
 | --- | --- |
-| `src` | contracts/shared packages, desktop modules, exact companion registry bridges |
-| `media` | shared packages, desktop protocol/types, media modules, exact companion designer bridges |
+| `src` | contracts/shared packages and desktop modules |
+| `media` | shared packages, desktop protocol/types and media modules |
 | `packages/contracts` | its own public types/helpers; existing type cycle is fingerprinted |
 | `packages/sql-core` | Platform-neutral Netezza lexer/parser, semantic validation, authoring and quality rules |
 | Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime owns shared execution plus compatibility exports, and sqlite/duckdb/netezza-runtime/access-file own Node I/O |
 | `apps/api` | contracts, sql-core, database-runtime, sqlite-runtime, duckdb-runtime, netezza-runtime and API modules |
 | `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
-| `extensions` | own modules, contracts/shared helpers, public core activation API, exact legacy desktop implementation bridges |
+| `extensions` | own modules, contracts/shared helpers and public core activation API |
 
 ## Runtime extraction in R2 (closed 2026-09-08)
 
@@ -104,34 +104,21 @@ Required checks for this slice are:
 - parser, linter, API and Extension Host authoring suites;
 - `npm run check:architecture` with no new exceptions or cycles.
 
-The complete exception inventory is `quality/architecture-rules.json`, not a
-second manually maintained list. The Result Panel orchestration cycle was
-removed in R3. The remaining categories are desktop-to-companion registries.
-Companion production code no longer has an edge into `src`, and migrated
-webviews no longer import companion DDL. Each remaining exact edge has a
-reason, accountable maintainer role and removal condition. There is no
-sql-core-to-desktop or SQL LSP facade exception. Removing an edge requires
-removing its stale exception in the same slice.
+The complete layer/import exception inventory is
+`quality/architecture-rules.json`, not a second manually maintained list. Both
+its `exceptions` and `cycleExceptions` arrays are empty, so no active exact
+direction/import exception or fingerprinted cycle remains. The current graph
+contains 1,367 production files and 4,490 resolved internal edges and passes
+with zero cycles. Companion production code no longer has an edge into `src`,
+and migrated webviews no longer import companion DDL. The former cycle areas
+were closed through leaf contracts, narrow ports, neutral connection-factory
+ownership, and host-provided maintenance callbacks. New forbidden edges or
+cycles fail the blocking check.
 
-The existing cycle inventory, identified by its configured anchor, is:
-
-| Anchor | Area |
-| --- | --- |
-| `media/visualQueryBuilder/VisualQueryBuilderApp.tsx` | visual builder |
-| `packages/access-file/src/accessFileSession.ts` | Access file runtime |
-| `src/commands/schema/types.ts` | desktop core migration target |
-| `src/commands/validationCommands.ts` | validation commands |
-| `src/core/resultDataProvider/types.ts` | result storage contracts |
-| `src/export/exportManager.ts` | export |
-| `src/services/copilotService.ts` | Copilot services |
-
-Exact members and internal-edge fingerprints live in `cycleExceptions` and the
-report. New cycles or changed components fail. Breaking a component is planned
-work: inspect the reduced graph, remove the old entry and record only remaining
-debt with a removal condition. Do not accept enlarged components automatically.
-The report includes type-only imports; these cycles are not all runtime cycles.
-It excludes tests, declarations, generated output and non-TypeScript assets,
-and cannot prove absence of dependencies hidden behind nonliteral loaders.
+The report includes type-only imports; the former cycles were not all runtime
+cycles. It excludes tests, declarations, generated output and non-TypeScript
+assets, and cannot prove absence of dependencies hidden behind nonliteral
+loaders.
 
 ## Companion public entry points and compatibility
 
