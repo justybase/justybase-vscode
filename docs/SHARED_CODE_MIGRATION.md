@@ -108,7 +108,7 @@ The complete layer/import exception inventory is
 `quality/architecture-rules.json`, not a second manually maintained list. Both
 its `exceptions` and `cycleExceptions` arrays are empty, so no active exact
 direction/import exception or fingerprinted cycle remains. The current graph
-contains 1,367 production files and 4,490 resolved internal edges and passes
+contains 1,367 production files and 4,492 resolved internal edges and passes
 with zero cycles. Companion production code no longer has an edge into `src`,
 and migrated webviews no longer import companion DDL. The former cycle areas
 were closed through leaf contracts, narrow ports, neutral connection-factory

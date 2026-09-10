@@ -50,7 +50,9 @@ metadata-prefetch coordinator extractions; CQ06 is closed for the reviewed
 resource/lifecycle seams, including explicit SQL-linter timer/cache/disposable
 ownership. The architecture graph is clean: `exceptions` and
 `cycleExceptions` are empty, and `npm run check:architecture` reports 1,367
-production files, 4,490 resolved internal edges, and zero cycles.
+production files, 4,492 resolved internal edges, and zero cycles. The live
+Netezza integration gate also passes on Linux; Windows and Remote-WSL remain
+platform-specific evidence.
 
 The remaining items in the quality roadmap are separate product, coverage,
 accessibility, security, live-database, and platform-specific follow-up work;
@@ -276,9 +278,9 @@ R3 implementation evidence (2026-09-09, Linux):
 
 Related: CQ02, CQ06.
 
-Status: implementation complete on Linux (2026-09-09). Windows and live
-database checks remain environment-specific evidence and are not represented
-as locally passed.
+Status: implementation complete on Linux (2026-09-09). The live Netezza
+integration gate passes on Linux; Windows and Remote-WSL checks remain
+environment-specific evidence.
 
 1. Extract metadata-core: keys, merging, completeness, indexes, and
    invalidation.
@@ -462,9 +464,11 @@ R7 implementation evidence (2026-09-10, Linux):
   suites / 45 tests, type checks, architecture, lint, coverage, and final
   desktop/API/web builds. Coverage was 71.82% statements, 58.16% branches,
   76.58% functions, and 72.42% lines. The real Playwright
-  `table-rendering.spec.ts` gate also passed previously (19/19). Live database
-  and Windows-specific gates remain environment-specific and were not
-  represented as locally passed.
+  `table-rendering.spec.ts` gate also passed previously (19/19). The real
+  SQLite Extension Host result-panel, Table Designer, and authoring gates
+  passed on Linux; the live Netezza gate passed with 13 suites / 153 tests.
+  Windows-specific and Remote-WSL gates remain environment-specific and were
+  not represented as locally passed.
 
 ### R8 — Closure
 
@@ -497,7 +501,7 @@ R8 implementation evidence (2026-09-10, Linux):
   public companion API v1.
 - The 23 stale desktop-to-companion layer exceptions and the remaining
   fingerprinted cycle exceptions were removed. The current graph has 1,367
-  production files and 4,490 resolved internal edges, with zero configured
+  production files and 4,492 resolved internal edges, with zero configured
   exceptions and zero cycles. The architecture checker and companion-boundary
   negative check remain blocking gates; the former cycle areas were closed by
   leaf contracts, narrow ports, neutral connection-factory ownership, and a
@@ -518,10 +522,12 @@ Final verification (2026-09-10, Linux) passed with `npm run test:quality-tools`
 `npm run test:fast` (540 suites, 8,175 tests), `npm run verify:pr` including
 coverage (547 suites, 9,637 tests), API (18 suites, 97 tests), web (9 suites,
 45 tests), and desktop/API/web builds, plus `npm run docs:check` and
-`npm run version:check`. Coverage was 71.82% statements, 58.16% branches,
-76.58% functions, and 72.42% lines. Live database, Windows, and any
-environment-specific Extension Host gates not run in this audit remain
-explicit follow-up evidence.
+`npm run version:check`, `npm run build:companions`, the SQLite
+`test:extension-host`, `test:extension-host:designer`, and
+`test:extension-host:authoring` gates, and the live Netezza gate (13 suites,
+153 passed tests; 2 suites skipped by the harness). Coverage was 71.82%
+statements, 58.16% branches, 76.58% functions, and 72.42% lines. Windows and
+Remote-WSL gates remain explicit follow-up evidence.
 
 ## Compatibility and Verification
 

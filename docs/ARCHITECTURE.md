@@ -262,7 +262,7 @@ configuration. Existing cycles, when intentionally retained during a staged
 migration, are represented by exact node lists and a SHA-256 fingerprint of
 their internal edges in `cycleExceptions`. The current configuration has no
 layer/import exceptions and no cycle exceptions. The current graph contains
-1,367 production files and 4,490 resolved internal edges and reports zero
+1,367 production files and 4,492 resolved internal edges and reports zero
 cycles. The former R3/R8 cycles were closed through leaf modules, narrow ports,
 neutral connection-factory ownership, and a host-provided maintenance
 callback. Future forbidden edges or cycles fail the check.
