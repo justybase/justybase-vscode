@@ -162,6 +162,9 @@ jobs:
         working-directory: extensions/clickhouse
         run: npm ci
 
+      - name: Bootstrap pinned Access index-code reference
+        run: tools/access-ddl-compare/bootstrap.sh
+
       - name: Verify TypeScript compiler version
         run: npm exec --yes --package=typescript@7.0.2 -- tsc --version
 
