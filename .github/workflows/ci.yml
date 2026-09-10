@@ -157,13 +157,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Bootstrap pinned Access index-code reference
+        run: tools/access-ddl-compare/bootstrap.sh
+
       - name: Install ClickHouse extension dependencies
         if: hashFiles('extensions/clickhouse/package-lock.json') != ''
         working-directory: extensions/clickhouse
         run: npm ci
-
-      - name: Bootstrap pinned Access index-code reference
-        run: tools/access-ddl-compare/bootstrap.sh
 
       - name: Verify TypeScript compiler version
         run: npm exec --yes --package=typescript@7.0.2 -- tsc --version
@@ -238,6 +238,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Bootstrap pinned Access index-code reference
+        run: tools/access-ddl-compare/bootstrap.sh
+
+      - name: Build Access file package
+        run: npm run build:access-file
 
       - name: Install ClickHouse extension dependencies
         if: hashFiles('extensions/clickhouse/package-lock.json') != ''
@@ -315,6 +321,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Bootstrap pinned Access index-code reference
+        run: tools/access-ddl-compare/bootstrap.sh
+
+      - name: Build Access file package
+        run: npm run build:access-file
 
       - name: Install DuckDB extension dependencies
         working-directory: extensions/duckdb
