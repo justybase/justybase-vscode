@@ -7,7 +7,7 @@ export interface ITableStatsToolParameters {
 }
 
 export class TableStatsTool implements vscode.LanguageModelTool<ITableStatsToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<ITableStatsToolParameters>,
@@ -49,4 +49,4 @@ export class TableStatsTool implements vscode.LanguageModelTool<ITableStatsToolP
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

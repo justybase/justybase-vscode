@@ -9,7 +9,7 @@ export interface ISearchSchemaToolParameters {
 }
 
 export class SearchSchemaTool implements vscode.LanguageModelTool<ISearchSchemaToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<ISearchSchemaToolParameters>,
@@ -53,4 +53,4 @@ export class SearchSchemaTool implements vscode.LanguageModelTool<ISearchSchemaT
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

@@ -7,7 +7,7 @@ export interface IExternalTablesToolParameters {
 }
 
 export class ExternalTablesTool implements vscode.LanguageModelTool<IExternalTablesToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IExternalTablesToolParameters>,
@@ -47,4 +47,4 @@ export class ExternalTablesTool implements vscode.LanguageModelTool<IExternalTab
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

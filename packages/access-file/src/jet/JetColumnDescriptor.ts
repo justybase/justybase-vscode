@@ -6,7 +6,7 @@
 
 import type { AccessValue } from '../types';
 import { flipBytes, getNullEntryFlag, getStartEntryFlag, ASC_BOOLEAN_TRUE, ASC_BOOLEAN_FALSE, DESC_BOOLEAN_TRUE, DESC_BOOLEAN_FALSE } from './JetIndexCodes';
-import type { JetColumn } from './JetTable';
+import type { JetColumn } from './JetTableTypes';
 import { ByteStream, indexCodesFor, JetTextSortOrder } from './JetTextSortOrder';
 
 const ASCENDING_COLUMN_FLAG = 0x01;

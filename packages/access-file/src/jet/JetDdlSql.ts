@@ -3,7 +3,7 @@
  * CREATE/DROP VIEW) dispatching to the JetDdl engine.
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import type { JetPageChannel } from './JetPageChannel';
 import {
     addIndex,

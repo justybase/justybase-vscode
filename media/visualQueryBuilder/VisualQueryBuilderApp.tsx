@@ -17,7 +17,6 @@ import {
     type Connection,
     type Edge,
     type EdgeChange,
-    type Node,
     type NodeChange,
 } from '@xyflow/react';
 import { DiagramCanvas } from '../diagram/DiagramCanvas.js';
@@ -52,18 +51,9 @@ import {
     getVisualQueryBuilderColumnFromHandle,
     VisualQueryBuilderSourceNode,
 } from './VisualQueryBuilderSourceNode.js';
+import type { VisualQueryBuilderFlowNode } from './types.js';
 
-export interface VisualQueryBuilderNodeData extends Record<string, unknown> {
-    placed: PlacedTable;
-    table: VisualQueryBuilderTable;
-    onAliasChange: (tableId: string, alias: string) => void;
-    onRemove: (tableId: string) => void;
-    onColumnSelectionChange: (tableId: string, columnName: string, selected: boolean) => void;
-    onAddFilterField: (tableId: string, columnName: string) => void;
-    miniMapColor: string;
-}
-
-export type VisualQueryBuilderFlowNode = Node<VisualQueryBuilderNodeData, 'querySource'>;
+export type { VisualQueryBuilderFlowNode, VisualQueryBuilderNodeData } from './types.js';
 
 interface VisualQueryBuilderEdgeData extends DiagramEdgeData {
     join: VisualQueryBuilderJoin;

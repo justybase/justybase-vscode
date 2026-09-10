@@ -6,13 +6,9 @@ import { exportResultSetToFile } from '../export/resultExporter';
 import { exportStructuredToXlsb, copyFileToClipboard as copyXlsbToClipboard } from '../export/xlsbExporter';
 import { exportStructuredToXlsx, StructuredExportItem } from '../export/xlsxExporter';
 import * as fs from 'fs';
-import { ResultFormattingPayload, ResultFormattingSettings } from '../results/resultFormattingTypes';
+import type { ExportFormattingMetadata } from './exportTypes';
 
-export interface ExportFormattingMetadata {
-    useFormattedValues?: boolean;
-    payload?: ResultFormattingPayload;
-    resultOverride?: Partial<ResultFormattingSettings>;
-}
+export type { ExportFormattingMetadata } from './exportTypes';
 
 export interface ExportMetadata {
     sourceUri: string;

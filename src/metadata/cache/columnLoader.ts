@@ -2,7 +2,7 @@
  * Lazy column hydration from disk column files.
  */
 
-import type { MetadataCache } from './MetadataCache';
+import type { MetadataCachePort } from './metadataCachePort';
 import { Logger } from '../../utils/logger';
 import { extractDatabaseFromLayerKey } from '../diskStorage/metadataDiskPaths';
 import {
@@ -36,7 +36,7 @@ export interface ColumnLoaderDeps {
   state: ColumnLoaderState;
   diskStorage: MetadataDiskStorage | undefined;
   prefetcher: CachePrefetcher;
-  cache: MetadataCache;
+  cache: MetadataCachePort;
   isCacheGenerationCurrent: (generation: number) => boolean;
   onNeedColumnRecovery: (connectionName: string) => void;
 }

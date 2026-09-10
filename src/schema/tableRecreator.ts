@@ -1,7 +1,7 @@
 // import * as odbc from 'odbc'; // Removed odbc dependency
 import {
     createConnectedDatabaseConnectionFromDetails,
-    getRequiredDatabaseDdlProvider
+    getRequiredDatabaseDdlProvider,
 } from '../core/connectionFactory';
 
 export interface RecreateTableResult {

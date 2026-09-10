@@ -2,7 +2,7 @@
  * Cache layer get/set operations (database through object lookup).
  */
 
-import type { ConnectionManager } from '../../core/connectionManager';
+import type { MetadataConnectionManager } from '../../core/connectionManagerPorts';
 import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
 import { Logger } from '../../utils/logger';
 import { normalizeCompletionDescription } from '../../utils/completionDescriptionUtils';
@@ -51,7 +51,7 @@ export interface LayerAccessDeps {
   viewsCatalogLoaded: Set<string>;
   objectsCatalogLoaded: Set<string>;
   deferredIndexConnections: Set<string>;
-  connectionManager: ConnectionManager | undefined;
+  connectionManager: MetadataConnectionManager | undefined;
   isEntryValid: (timestamp: number) => boolean;
 }
 
@@ -82,7 +82,7 @@ function reviveDatabasesFromCatalog(
 }
 
 function getDefaultTypeGroups(
-  connectionManager: ConnectionManager | undefined,
+  connectionManager: MetadataConnectionManager | undefined,
   connectionName?: string,
 ): string[] {
   const kind =
@@ -91,7 +91,7 @@ function getDefaultTypeGroups(
 }
 
 function mergeTypeGroupsWithDefaults(
-  connectionManager: ConnectionManager | undefined,
+  connectionManager: MetadataConnectionManager | undefined,
   connectionName: string,
   types: readonly string[],
 ): string[] {

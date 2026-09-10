@@ -5,7 +5,7 @@ export interface ISchemasToolParameters {
 }
 
 export class SchemasTool implements vscode.LanguageModelTool<ISchemasToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<ISchemasToolParameters>,
@@ -37,4 +37,4 @@ export class SchemasTool implements vscode.LanguageModelTool<ISchemasToolParamet
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

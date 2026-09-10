@@ -394,6 +394,7 @@ export class CopilotContextBuilder {
                 { objTypes: ['TABLE', 'VIEW'] },
                 connectionDetails.dbType,
                 (sql) => executeDatabaseQuery<Record<string, unknown>>(nzConnection!, sql),
+                metadataProvider,
             ) as SchemaRow[];
             let externalResult: SchemaRow[] = [];
             const buildExternalQuery = metadataProvider.buildExternalColumnsWithKeysQuery;

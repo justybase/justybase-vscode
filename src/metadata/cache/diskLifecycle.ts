@@ -2,7 +2,7 @@
  * Disk cache initialization and cross-window re-hydration.
  */
 
-import type { ConnectionManager } from '../../core/connectionManager';
+import type { MetadataConnectionManager } from '../../core/connectionManagerPorts';
 import { Logger } from '../../utils/logger';
 import {
   hydrateConnectionMetadataChunked,
@@ -11,7 +11,7 @@ import {
 } from '../diskStorage';
 import type { CachePrefetcher } from '../prefetch';
 import { supportsLegacyMetadataPrefetchForConnection } from '../prefetchSupport';
-import type { MetadataCache } from './MetadataCache';
+import type { MetadataCachePort } from './metadataCachePort';
 import type { MetadataStore } from './MetadataStore';
 import {
   eagerPreloadColumnsIfEnabled,
@@ -37,8 +37,8 @@ export interface DiskLifecycleDeps {
   diskStorage: MetadataDiskStorage | undefined;
   diskWatcher: MetadataDiskIndexWatcher | undefined;
   prefetcher: CachePrefetcher;
-  cache: MetadataCache;
-  connectionManager: ConnectionManager | undefined;
+  cache: MetadataCachePort;
+  connectionManager: MetadataConnectionManager | undefined;
   columnLoaderDeps: ColumnLoaderDeps;
   isDiskPersistenceEnabled: () => boolean;
   isCacheGenerationCurrent: (generation: number) => boolean;

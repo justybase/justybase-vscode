@@ -4,31 +4,13 @@
 
 import { Logger } from '../../utils/logger';
 import type { MetadataStore } from './MetadataStore';
-import {
-  removeTableCacheEntry,
-} from './tableIndexes';
+import { removeTableCacheEntry } from './tableIndexes';
 import {
   buildProcedureCatalogLoadedKey,
 } from './schemaTreeDataSource';
 import type { CacheStatsTracker } from '../cacheStats';
 
-export function invalidateObjectsByTypeForDb(
-  store: MetadataStore,
-  connectionName: string,
-  dbName: string,
-): void {
-  const prefix = `${connectionName}|${dbName}|`;
-  const keysToDelete: string[] = [];
-  for (const key of store.objectsByTypeCache.keys()) {
-    if (key.startsWith(prefix)) {
-      keysToDelete.push(key);
-    }
-  }
-
-  for (const key of keysToDelete) {
-    store.objectsByTypeCache.delete(key);
-  }
-}
+export { invalidateObjectsByTypeForDb } from './cacheInvalidationHelpers';
 
 export function removeProcedureCacheEntry(
   store: MetadataStore,

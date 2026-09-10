@@ -1,4 +1,4 @@
-import type { ColumnDefinition } from '../../types';
+import type { ColumnDefinition } from '../../types/columnDefinition';
 
 export interface RowRange {
     offset: number;

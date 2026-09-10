@@ -20,7 +20,7 @@ export interface IGetDDLToolParameters {
  * - DATABASE.SCHEMA.TABLENAME (fully qualified)
  */
 export class GetDDLTool implements vscode.LanguageModelTool<IGetDDLToolParameters> {
-    constructor(private copilotService: CopilotService) { }
+    constructor(private copilotService: CopilotToolService) { }
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IGetDDLToolParameters>,
@@ -80,4 +80,4 @@ export class GetDDLTool implements vscode.LanguageModelTool<IGetDDLToolParameter
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

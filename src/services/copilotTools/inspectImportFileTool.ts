@@ -6,7 +6,7 @@ export interface IInspectImportFileToolParameters {
 }
 
 export class InspectImportFileTool implements vscode.LanguageModelTool<IInspectImportFileToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IInspectImportFileToolParameters>,
@@ -39,4 +39,4 @@ export class InspectImportFileTool implements vscode.LanguageModelTool<IInspectI
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

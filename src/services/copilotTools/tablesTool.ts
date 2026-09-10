@@ -6,7 +6,7 @@ export interface ITablesToolParameters {
 }
 
 export class TablesTool implements vscode.LanguageModelTool<ITablesToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<ITablesToolParameters>,
@@ -44,4 +44,4 @@ export class TablesTool implements vscode.LanguageModelTool<ITablesToolParameter
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

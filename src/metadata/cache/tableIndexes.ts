@@ -14,7 +14,7 @@ import {
 } from '../helpers';
 import type { CachedObjectInfo, TableMetadata } from '../types';
 import type { MetadataStore } from './MetadataStore';
-import { invalidateObjectsByTypeForDb } from './invalidation';
+import { invalidateObjectsByTypeForDb } from './cacheInvalidationHelpers';
 
 export function resolveTableSchemaName(
   item: TableMetadata,

@@ -8,7 +8,7 @@ export interface ITuningAdviceToolParameters {
 }
 
 export class TuningAdviceTool implements vscode.LanguageModelTool<ITuningAdviceToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<ITuningAdviceToolParameters>,
@@ -53,4 +53,4 @@ export class TuningAdviceTool implements vscode.LanguageModelTool<ITuningAdviceT
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

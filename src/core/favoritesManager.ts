@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { SchemaItem } from '../providers/schemaProvider';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,6 +35,19 @@ export interface SchemaFavorite {
 interface FavoritesRepositoryFile {
     version: number;
     favorites: SchemaFavorite[];
+}
+
+/** The schema-item fields required by favorites; keeps storage independent of the tree provider. */
+export interface FavoriteSchemaItemLike {
+    readonly id?: string;
+    readonly label: string;
+    readonly rawLabel: string;
+    readonly connectionName?: string;
+    readonly dbName?: string;
+    readonly schema?: string;
+    readonly objType?: string;
+    readonly owner?: string;
+    readonly objectDescription?: string;
 }
 
 export class FavoritesManager {
@@ -240,7 +252,7 @@ export class FavoritesManager {
         return migrated;
     }
 
-    public static generateId(item: SchemaItem | SchemaFavorite | { id?: string }): string {
+    public static generateId(item: FavoriteSchemaItemLike | SchemaFavorite | { id?: string }): string {
         if ('id' in item && typeof item.id === 'string' && item.id) return item.id;
         try {
             return crypto.randomUUID();
@@ -271,7 +283,7 @@ export class FavoritesManager {
         return this.cache.find(f => f.id === id);
     }
 
-    public isFavorite(item: SchemaItem): boolean {
+    public isFavorite(item: FavoriteSchemaItemLike): boolean {
         if (!this.initialized) this.initialize();
         const objectLabel = this.normalizeObjectLabel(item.rawLabel || item.label);
         // Since we don't know the exact UUID of an item just from a SchemaItem,
@@ -286,7 +298,7 @@ export class FavoritesManager {
         );
     }
 
-    public getFavoriteByLogicalIdentity(item: SchemaItem): SchemaFavorite | undefined {
+    public getFavoriteByLogicalIdentity(item: FavoriteSchemaItemLike): SchemaFavorite | undefined {
         if (!this.initialized) this.initialize();
         const objectLabel = this.normalizeObjectLabel(item.rawLabel || item.label);
         return this.cache.find(f =>
@@ -300,7 +312,7 @@ export class FavoritesManager {
     }
 
     // Existing toggleFavorite will still work but it adds to the root.
-    public async toggleFavorite(item: SchemaItem): Promise<boolean> {
+    public async toggleFavorite(item: FavoriteSchemaItemLike): Promise<boolean> {
         if (!this.initialized) this.initialize();
 
         const existing = this.getFavoriteByLogicalIdentity(item);

@@ -71,6 +71,7 @@ import { TableDdlSynchronizer } from './metadata/tableDdlSynchronizer';
 import { metadataSessionSweeper } from './metadata/metadataSessionSweeper';
 import { setMetadataQueryConcurrencyLimit } from './metadata/metadataQueryLimiter';
 import { configureDatabaseTunnelRuntime } from './core/connectionFactory';
+import { ensureBuiltInDialectsRegistered } from './dialects';
 import {
     createQueryExecutionCoordinator,
     setDefaultQueryExecutionCoordinator,
@@ -89,6 +90,7 @@ let queryExecutionCoordinator: QueryExecutionCoordinator | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<JustyBaseLiteApi> {
     isExtensionShuttingDown = false;
+    ensureBuiltInDialectsRegistered();
     deferredFeatureScheduler?.dispose();
     deferredFeatureScheduler = undefined;
     context.subscriptions.push({

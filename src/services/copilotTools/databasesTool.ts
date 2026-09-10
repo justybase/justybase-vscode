@@ -4,7 +4,7 @@ import { logWithFallback } from '../../utils/logger';
 export type IDatabasesToolParameters = Record<string, never>;
 
 export class DatabasesTool implements vscode.LanguageModelTool<IDatabasesToolParameters> {
-    constructor(private copilotService: CopilotService) { }
+    constructor(private copilotService: CopilotToolService) { }
 
     async prepareInvocation(
         _options: vscode.LanguageModelToolInvocationPrepareOptions<IDatabasesToolParameters>,
@@ -35,4 +35,4 @@ export class DatabasesTool implements vscode.LanguageModelTool<IDatabasesToolPar
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

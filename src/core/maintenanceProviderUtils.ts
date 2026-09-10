@@ -3,7 +3,6 @@ import type {
     DatabaseMaintenanceServices,
     DatabaseMaintenanceTarget
 } from '@justybase/contracts';
-import { getRequiredDatabaseDdlProvider } from './connectionFactory';
 import {
     openRecreateTableScript as openSharedRecreateTableScript,
     quoteSqlLiteral,
@@ -16,8 +15,5 @@ export async function openRecreateTableScript(
     services: DatabaseMaintenanceServices,
     kind: DatabaseKind
 ): Promise<void> {
-    return openSharedRecreateTableScript(target, {
-        ...services,
-        getDdlProvider: services.getDdlProvider ?? (providerKind => getRequiredDatabaseDdlProvider(providerKind)),
-    }, kind);
+    return openSharedRecreateTableScript(target, services, kind);
 }

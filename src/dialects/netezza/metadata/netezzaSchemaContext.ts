@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import {
   createConnectedDatabaseConnectionFromDetails,
-} from "../../../core/connectionFactory";
+} from "../../../core/connectedDatabaseFactory";
 import type { ConnectionManager } from "../../../core/connectionManager";
 import { runQueryRaw, queryResultToRows } from "../../../core/queryRunner";
 import type { MetadataCache } from "../../../metadataCache";

@@ -8,7 +8,7 @@ export interface IGetCommentsToolParameters {
 }
 
 export class GetCommentsTool implements vscode.LanguageModelTool<IGetCommentsToolParameters> {
-    constructor(private copilotService: CopilotService) { }
+    constructor(private copilotService: CopilotToolService) { }
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IGetCommentsToolParameters>,
@@ -60,4 +60,4 @@ export class GetCommentsTool implements vscode.LanguageModelTool<IGetCommentsToo
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

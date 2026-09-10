@@ -1,3 +1,5 @@
+import * as vscode from 'vscode';
+
 const validateMock = jest.fn();
 const getInitializedSqlValidatorMock = jest.fn();
 const getSqlValidationContextMock = jest.fn();
@@ -185,4 +187,23 @@ describe('SqlLinterProvider function coverage', () => {
       );
     },
   );
+
+  it('clears deferred activation work when disposed', () => {
+    jest.useFakeTimers();
+    try {
+      const lintAllOpenDocuments = jest.spyOn(
+        provider as unknown as { lintAllOpenDocuments(): void },
+        'lintAllOpenDocuments',
+      );
+      const context = { subscriptions: [] as vscode.Disposable[] } as unknown as vscode.ExtensionContext;
+
+      provider.activate(context);
+      provider.dispose();
+      jest.advanceTimersByTime(100);
+
+      expect(lintAllOpenDocuments).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

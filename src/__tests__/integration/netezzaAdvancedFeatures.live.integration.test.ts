@@ -28,6 +28,7 @@ import { netezzaSessionMonitorProvider } from '../../dialects/netezza/sessionMon
 import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
 import type { ConnectionManager } from '../../core/connectionManager';
 import { NetezzaTuningAdvisor } from '../../dialects/netezza/tuning/netezzaTuningAdvisor';
+import { generateRecreateTableScript } from '../../schema/tableRecreator';
 import {
     buildNetezzaLiveConnectionDetails,
     buildNetezzaLiveDetails,
@@ -377,6 +378,7 @@ describeIfFixture('Netezza advanced features live contract', () => {
             context: {} as ExtensionContext,
             executeSql: async sql => executeNetezzaScript(connection, sql),
             getConnectionDetails: async () => buildNetezzaLiveConnectionDetails(fixture.database),
+            generateRecreateTableScript,
             openSqlDocument: async content => {
                 openedDocuments.push(content);
             },

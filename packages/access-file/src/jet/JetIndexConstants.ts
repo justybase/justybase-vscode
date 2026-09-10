@@ -1,0 +1,1 @@
+export const INVALID_INDEX_PAGE_NUMBER = 0;

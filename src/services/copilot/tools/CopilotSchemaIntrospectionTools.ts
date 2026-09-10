@@ -9,7 +9,6 @@ import {
 import { queryResultToRows, runQueryRaw } from '../../../core/queryRunner';
 import { NzConnection } from '../../../types';
 import {
-    buildCopilotDefaultObjectTypes,
     CanonicalColumnMetadata,
     groupCanonicalColumnsByTable,
     loadColumnsWithKeysRows,
@@ -156,8 +155,8 @@ export class CopilotSchemaIntrospectionTools {
         }
 
         const databaseKind = this.deps.connectionManager.getConnectionDatabaseKind(connectionName);
-        const objectTypes = buildCopilotDefaultObjectTypes(databaseKind);
         const metadataProvider = getDatabaseMetadataProvider(databaseKind);
+        const objectTypes = [...metadataProvider.defaultColumnObjectTypes];
         const fetchedColumns: CanonicalColumnMetadata[] = [];
 
         // Keep targeted schema introspection serial. A user can request many
@@ -199,6 +198,7 @@ export class CopilotSchemaIntrospectionTools {
                         }
                         return queryResultToRows<Record<string, unknown>>(result);
                     },
+                    metadataProvider,
                 );
                 let targetColumns = matchingColumns(
                     mapColumnsWithKeysRows(rawRows, target.database),

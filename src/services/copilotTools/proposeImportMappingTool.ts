@@ -6,7 +6,7 @@ export interface IProposeImportMappingToolParameters {
 }
 
 export class ProposeImportMappingTool implements vscode.LanguageModelTool<IProposeImportMappingToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IProposeImportMappingToolParameters>,
@@ -41,4 +41,4 @@ export class ProposeImportMappingTool implements vscode.LanguageModelTool<IPropo
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

@@ -281,6 +281,12 @@ export interface DatabaseMaintenanceTarget {
     qualifiedName: string;
 }
 
+export interface DatabaseRecreateTableResult {
+    success: boolean;
+    sqlScript?: string;
+    error?: string;
+}
+
 /**
  * Services available to maintenance providers for executing operations.
  */
@@ -300,6 +306,14 @@ export interface DatabaseMaintenanceServices {
    * @returns The connection details or undefined if not found
    */
   getConnectionDetails(connectionName: string): Promise<ConnectionDetails | undefined>;
+  /** Generate a recreate-table script in the host's schema/DDL layer. */
+  generateRecreateTableScript?(
+    connectionDetails: ConnectionDetails,
+    database: string,
+    schema: string,
+    tableName: string,
+    newTableNameInput?: string,
+  ): Promise<DatabaseRecreateTableResult>;
   /**
    * Open a SQL document in the editor.
    * @param content The document content

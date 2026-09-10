@@ -1,6 +1,11 @@
-import { queryResultToRows } from '../core/queryRunner';
-import { DatabaseColumnQueryOptions, DatabaseKind } from '../contracts/database';
-import { getDatabaseMetadataProvider } from '../core/connectionFactory';
+import {
+    DatabaseColumnQueryOptions,
+    DatabaseKind,
+    DatabaseMetadataProvider,
+    normalizeDatabaseKind,
+} from '../contracts/database';
+import { getDatabaseDialectByKind } from '../core/factories/databaseDialectRegistry';
+import { ResultFormatter } from '../core/streaming/ResultFormatter';
 import {
     ColumnsWithKeysQueryRole,
     loadNetezzaColumnsWithKeysRows,
@@ -46,6 +51,14 @@ export type ColumnsWithKeysRowReader = (
     sql: string,
     role: ColumnsWithKeysQueryRole,
 ) => Promise<Record<string, unknown>[]>;
+
+function getMetadataProvider(kind?: string | DatabaseKind) {
+    const dialect = getDatabaseDialectByKind(normalizeDatabaseKind(kind));
+    if (!dialect) {
+        throw new Error(`No database dialect registered for '${normalizeDatabaseKind(kind)}'`);
+    }
+    return dialect.metadataProvider;
+}
 
 export interface RawTableColumnsRow {
     ATTNAME: string;
@@ -96,7 +109,7 @@ export function buildColumnsWithKeysQuery(
     },
     kind?: string | DatabaseKind
 ): string {
-    return getDatabaseMetadataProvider(kind).buildColumnsWithKeysQuery(database, options);
+    return getMetadataProvider(kind).buildColumnsWithKeysQuery(database, options);
 }
 
 /** Execute a dialect's complete columns-with-keys operation. */
@@ -105,8 +118,9 @@ export async function loadColumnsWithKeysRows(
     options: DatabaseColumnQueryOptions | undefined,
     kind: string | DatabaseKind | undefined,
     readRows: ColumnsWithKeysRowReader,
+    metadataProvider?: DatabaseMetadataProvider,
 ): Promise<RawColumnsWithKeysRow[]> {
-    const provider = getDatabaseMetadataProvider(kind);
+    const provider = metadataProvider ?? getMetadataProvider(kind);
     const querySet = provider.buildColumnsWithKeysQueries?.(database, options);
     if (querySet) {
         return loadNetezzaColumnsWithKeysRows(querySet, readRows) as Promise<RawColumnsWithKeysRow[]>;
@@ -120,7 +134,7 @@ export function buildTableColumnsQuery(
     tableName: string,
     kind?: string | DatabaseKind
 ): string {
-    return getDatabaseMetadataProvider(kind).buildTableColumnsQuery(database, schema, tableName);
+    return getMetadataProvider(kind).buildTableColumnsQuery(database, schema, tableName);
 }
 
 export function mapColumnsWithKeysRows(rows: RawColumnsWithKeysRow[], fallbackDatabase?: string): CanonicalColumnMetadata[] {
@@ -187,7 +201,7 @@ export function parseColumnsWithKeysResult(result: QueryResult | undefined, fall
         return [];
     }
 
-    const rows = queryResultToRows<RawColumnsWithKeysRow>(result);
+    const rows = ResultFormatter.queryResultToRows<RawColumnsWithKeysRow>(result);
     return mapColumnsWithKeysRows(rows, fallbackDatabase);
 }
 
@@ -228,7 +242,7 @@ export function toCacheColumnMetadata(column: CanonicalColumnMetadata): CacheCol
 }
 
 export function buildCopilotDefaultObjectTypes(kind?: string | DatabaseKind): string[] {
-    return [...getDatabaseMetadataProvider(kind).defaultColumnObjectTypes];
+    return [...getMetadataProvider(kind).defaultColumnObjectTypes];
 }
 
 function compareOrdinalPosition(a: CanonicalColumnMetadata, b: CanonicalColumnMetadata): number {

@@ -5,7 +5,7 @@ export interface IValidateSqlToolParameters {
 }
 
 export class ValidateSqlTool implements vscode.LanguageModelTool<IValidateSqlToolParameters> {
-    constructor(private copilotService: CopilotService) {}
+    constructor(private copilotService: CopilotToolService) {}
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<IValidateSqlToolParameters>,
@@ -46,4 +46,4 @@ export class ValidateSqlTool implements vscode.LanguageModelTool<IValidateSqlToo
     }
 }
 
-import { CopilotService } from '../copilotService';
+import type { CopilotToolService } from './copilotToolService';

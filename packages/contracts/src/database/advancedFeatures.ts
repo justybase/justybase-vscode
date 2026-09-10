@@ -282,10 +282,24 @@ export interface DatabaseMaintenanceTarget {
   qualifiedName: string;
 }
 
+export interface DatabaseRecreateTableResult {
+  success: boolean;
+  sqlScript?: string;
+  error?: string;
+}
+
 export interface DatabaseMaintenanceServices {
   context: unknown;
   executeSql(sql: string, connectionName: string, progressTitle: string): Promise<void>;
   getConnectionDetails(connectionName: string): Promise<ConnectionDetails | undefined>;
+  /** Generate a recreate-table script in the host's schema/DDL layer. */
+  generateRecreateTableScript?(
+    connectionDetails: ConnectionDetails,
+    database: string,
+    schema: string,
+    tableName: string,
+    newTableNameInput?: string,
+  ): Promise<DatabaseRecreateTableResult>;
   /**
    * Resolve a DDL provider in the host extension's dialect registry.
    *

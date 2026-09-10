@@ -13,7 +13,7 @@
  */
 
 import * as fs from 'node:fs/promises';
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import type {
     AccessFileFormat,
     AccessTableSnapshot,

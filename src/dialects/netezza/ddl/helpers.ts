@@ -2,7 +2,7 @@
  * DDL Generator - Helper Functions
  */
 import type { NzConnection, ConnectionDetails } from '../../../types';
-import { createConnectedDatabaseConnectionFromDetails } from '../../../core/connectionFactory';
+import { createConnectedDatabaseConnectionFromDetails } from '../../../core/connectedDatabaseFactory';
 
 /**
  * Execute query and return array of objects (shim for NzConnection)

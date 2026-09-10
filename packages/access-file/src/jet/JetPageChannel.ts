@@ -9,7 +9,7 @@
  * page views stay valid while pages are appended.
  */
 
-import { AccessFileError } from '../accessFileSession';
+import { AccessFileError } from '../accessErrors';
 import { JET_PAGE_TYPES } from './JetLayout';
 import type { JetLayout } from './JetLayout';
 import { JetUsageMap } from './JetUsageMap';
