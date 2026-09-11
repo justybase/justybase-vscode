@@ -16,10 +16,19 @@ module.exports = {
     ...liveDbIgnorePatterns,
     "/__tests__/performance/",
   ],
-  moduleFileExtensions: ["ts", "js", "json"],
+  moduleFileExtensions: ["ts", "tsx", "js", "json"],
   resolver: "<rootDir>/scripts/jest-media-resolver.cjs",
   transform: {
-    "^.+\\/media\\/.+\\.ts$": [
+    "^.+\\/media\\/.+\\.tsx?$": [
+      "ts-jest",
+      {
+        tsconfig: "tsconfig.media.json",
+      },
+    ],
+    // Keep a fallback for media TSX reached through a resolver from a root
+    // test (Jest may normalize the resolved path before applying the scoped
+    // media pattern).
+    "^.+\\.tsx$": [
       "ts-jest",
       {
         tsconfig: "tsconfig.media.json",
@@ -67,6 +76,10 @@ module.exports = {
     "^@justybase/netezza-runtime/(.*)$": "<rootDir>/packages/netezza-runtime/src/$1",
     "^@justybase/result-core$": "<rootDir>/packages/result-core/src/index.ts",
     "^@justybase/result-core/(.*)$": "<rootDir>/packages/result-core/src/$1",
+    "^@justybase/ui-core$": "<rootDir>/packages/ui-core/src/index.ts",
+    "^@justybase/ui-core/(.*)$": "<rootDir>/packages/ui-core/src/$1",
+    "^@justybase/ui-react$": "<rootDir>/packages/ui-react/src/index.ts",
+    "^@justybase/ui-react/(.*)$": "<rootDir>/packages/ui-react/src/$1",
     "^@justybase/sql-core/validation$": "<rootDir>/packages/sql-core/src/validation.ts",
     "^@justybase/sql-core$": "<rootDir>/packages/sql-core/src/index.ts",
     "^@justybase/sql-core/(.*)$": "<rootDir>/packages/sql-core/src/$1",
@@ -76,7 +89,7 @@ module.exports = {
     "^@justybase/tabular-import-runtime/(.*)$": "<rootDir>/packages/tabular-import-runtime/src/$1",
     "^@justybase/vscode-companion-adapter$": "<rootDir>/packages/vscode-companion-adapter/src/index.ts",
     "^@justybase/vscode-companion-adapter/(.*)$": "<rootDir>/packages/vscode-companion-adapter/src/$1",
-    "^(.*/media/.+)\\.js$": "$1.ts",
+    "^(.*/media/.+)\\.js$": "$1",
     // Jest (CJS) cannot resolve ESM-only packages with "exports: { import: ... }" conditions.
     "^hyparquet$": "<rootDir>/node_modules/hyparquet/src/index.js",
     "^hyparquet/src/(.*)\\.js$": "<rootDir>/node_modules/hyparquet/src/$1.js",

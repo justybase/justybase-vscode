@@ -27,6 +27,10 @@
 !packages/result-core/**
 !packages/metadata-core/
 !packages/metadata-core/**
+!packages/ui-core/
+!packages/ui-core/**
+!packages/ui-react/
+!packages/ui-react/**
 !packages/database-utils/
 !packages/database-utils/**
 !packages/dialect-utils/
