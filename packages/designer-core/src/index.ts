@@ -65,3 +65,9 @@ export {
   type TableDesignerProfile,
   type TableDesignerRuntimeContext,
 } from './tableDesigner';
+
+export {
+  buildNetezzaTableDdl,
+  buildNetezzaViewDdl,
+  quoteNetezzaIdentifier,
+} from './netezzaTableDdl';

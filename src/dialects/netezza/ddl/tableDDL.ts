@@ -3,7 +3,7 @@
  */
 
 import type { ColumnInfo, KeyInfo } from './types';
-import { quoteNameIfNeeded } from './helpers';
+import { buildNetezzaTableDdl } from '@justybase/designer-core';
 import { getColumns, getDistributionInfo, getOrganizeInfo, getKeysInfo, getTableComment } from './metadata';
 
 import type { NzConnection } from '../../../types';
@@ -53,92 +53,14 @@ export function buildTableDDLFromCache(
     keysInfo: Map<string, KeyInfo>,
     tableComment: string | null
 ): string {
-    if (columns.length === 0) {
-        return `-- Table ${database}.${schema}.${tableName} has no columns or was not found`;
-    }
-
-    const cleanDatabase = quoteNameIfNeeded(database);
-    const cleanSchema = quoteNameIfNeeded(schema);
-    const cleanTableName = quoteNameIfNeeded(tableName);
-
-    const ddlLines: string[] = [];
-    ddlLines.push(`CREATE TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName}`);
-    ddlLines.push('(');
-
-    // Columns
-    const columnDefs: string[] = [];
-    for (const column of columns) {
-        const cleanColumnName = quoteNameIfNeeded(column.name);
-        let colDef = `    ${cleanColumnName} ${column.fullTypeName}`;
-        if (column.notNull) colDef += ' NOT NULL';
-        if (column.defaultValue !== null) colDef += ` DEFAULT ${column.defaultValue}`;
-        columnDefs.push(colDef);
-    }
-    ddlLines.push(columnDefs.join(',\n'));
-
-    // Distribution
-    if (distributionColumns.length > 0) {
-        const cleanDistCols = distributionColumns.map(c => quoteNameIfNeeded(c));
-        ddlLines.push(`)\nDISTRIBUTE ON (${cleanDistCols.join(', ')})`);
-    } else {
-        ddlLines.push(')\nDISTRIBUTE ON RANDOM');
-    }
-
-    // Organize
-    if (organizeColumns.length > 0) {
-        const cleanOrgCols = organizeColumns.map(c => quoteNameIfNeeded(c));
-        ddlLines.push(`ORGANIZE ON (${cleanOrgCols.join(', ')})`);
-    }
-
-    ddlLines.push(';');
-    ddlLines.push('');
-
-    // Keys
-    for (const [keyName, keyInfo] of keysInfo) {
-        const cleanKeyName = quoteNameIfNeeded(keyName);
-        const cleanColumns = keyInfo.columns.map(c => quoteNameIfNeeded(c));
-
-        if (keyInfo.typeChar === 'f') {
-            const cleanPkCols = keyInfo.pkColumns.filter(c => c).map(c => quoteNameIfNeeded(c));
-            if (cleanPkCols.length > 0 && keyInfo.pkDatabase && keyInfo.pkSchema && keyInfo.pkRelation) {
-                const cleanPkDatabase = quoteNameIfNeeded(keyInfo.pkDatabase);
-                const cleanPkSchema = quoteNameIfNeeded(keyInfo.pkSchema);
-                const cleanPkRelation = quoteNameIfNeeded(keyInfo.pkRelation);
-                ddlLines.push(
-                    `ALTER TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName} ` +
-                    `ADD CONSTRAINT ${cleanKeyName} ${keyInfo.type} ` +
-                    `(${cleanColumns.join(', ')}) ` +
-                    `REFERENCES ${cleanPkDatabase}.${cleanPkSchema}.${cleanPkRelation} ` +
-                    `(${cleanPkCols.join(', ')}) ` +
-                    `ON DELETE ${keyInfo.deleteType} ON UPDATE ${keyInfo.updateType};`
-                );
-            }
-        } else if (keyInfo.typeChar === 'p' || keyInfo.typeChar === 'u') {
-            ddlLines.push(
-                `ALTER TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName} ` +
-                `ADD CONSTRAINT ${cleanKeyName} ${keyInfo.type} ` +
-                `(${cleanColumns.join(', ')});`
-            );
-        }
-    }
-
-    // Table comment
-    if (tableComment) {
-        const cleanComment = tableComment.replace(/'/g, "''");
-        ddlLines.push('');
-        ddlLines.push(`COMMENT ON TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName} IS '${cleanComment}';`);
-    }
-
-    // Column comments
-    for (const column of columns) {
-        if (column.description) {
-            const cleanColumnName = quoteNameIfNeeded(column.name);
-            const cleanDesc = column.description.replace(/'/g, "''");
-            ddlLines.push(
-                `COMMENT ON COLUMN ${cleanDatabase}.${cleanSchema}.${cleanTableName}.${cleanColumnName} IS '${cleanDesc}';`
-            );
-        }
-    }
-
-    return ddlLines.join('\n');
+    return buildNetezzaTableDdl(
+        database,
+        schema,
+        tableName,
+        columns,
+        distributionColumns,
+        organizeColumns,
+        keysInfo,
+        tableComment,
+    );
 }
