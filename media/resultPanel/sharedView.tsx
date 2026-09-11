@@ -1,6 +1,6 @@
 import { decode } from '@msgpack/msgpack';
 import { createRoot, type Root } from 'react-dom/client';
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { CapabilityDescriptor, UiIdentity } from '@justybase/contracts';
 import {
     createInitialUiState,
@@ -886,6 +886,9 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     const state = useSharedControllerState(controller);
     const [selectedRow, setSelectedRow] = useState<number | undefined>();
     const activeResult = controller.activeResult();
+    useEffect(() => {
+        setSelectedRow(undefined);
+    }, [activeResult?.sourceId, activeResult?.resultSetId]);
     const sourceResults = useMemo(
         () => Object.values(state.results.byResultSetId).filter(result => result.sourceId === state.results.activeSourceId),
         [state.results],

@@ -128,8 +128,9 @@ describe('shared Web UI adapter edge contracts', () => {
     expect(resultAsyncState({ ...completeResult, status: 'error' }, 1)).toBe('error');
     expect(resultAsyncState({ ...completeResult, status: 'cancelled' }, 1)).toBe('cancelled');
     expect(resultAsyncState({ ...completeResult, status: 'loading' }, 0)).toBe('loading');
-    expect(resultAsyncState({ ...completeResult, status: 'streaming' }, 0)).toBe('loading');
+    expect(resultAsyncState({ ...completeResult, status: 'streaming', loadedRowCount: 0, totalRowCount: 0 }, 0)).toBe('loading');
     expect(resultAsyncState({ ...completeResult, status: 'empty' }, 0)).toBe('empty');
+    expect(resultAsyncState({ ...completeResult, view: { ...completeResult.view, globalFilter: 'missing' } }, 0)).toBe('ready');
     expect(resultAsyncState({ ...completeResult, status: 'streaming' }, 2)).toBe('ready');
     expect(displayRows(undefined, [[1]])).toEqual([]);
     expect(displayRows({ ...completeResult, view: { ...completeResult.view, globalFilter: 'alpha' } }, [[2, 'beta'], [1, 'alpha']])).toEqual([[1, 'alpha']]);
