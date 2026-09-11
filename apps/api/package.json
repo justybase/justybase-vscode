@@ -4,7 +4,24 @@
   "version": "3.16.8",
   "type": "commonjs",
   "main": "dist/main.js",
-  "types": "dist/main.d.ts",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "require": "./dist/server.js",
+      "default": "./dist/server.js"
+    },
+    "./embeddedServer": {
+      "types": "./dist/embeddedServer.d.ts",
+      "require": "./dist/embeddedServer.js",
+      "default": "./dist/embeddedServer.js"
+    }
+  },
   "engines": {
     "node": ">=22.12.0"
   },
