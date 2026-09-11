@@ -322,7 +322,7 @@ export class SharedResultPanelController {
     private readonly nextSequence = new Map<string, number>();
     private readonly nextChunkSequence = new Map<string, number>();
     private readonly cancelRequests = new Map<string, string>();
-    private readonly pendingRowWindows = new Map<number, { readonly sourceId: string; readonly resultSetId: string; readonly offset: number }>();
+    private readonly pendingRowWindows = new Map<number, { readonly ref: ResultRef; readonly offset: number }>();
     private revision = 0;
     private streamRevision = 0;
     private rowRequestId = 0;
@@ -443,11 +443,11 @@ export class SharedResultPanelController {
         const offset = this.getRows(result).length;
         if (offset >= result.totalRowCount) return;
         const alreadyPending = [...this.pendingRowWindows.values()].some(request =>
-            request.sourceId === result.sourceId && request.resultSetId === result.resultSetId && request.offset === offset,
+            request.ref.sourceId === result.sourceId && request.ref.resultSetId === result.resultSetId && request.offset === offset,
         );
         if (alreadyPending) return;
         const requestId = ++this.rowRequestId;
-        this.pendingRowWindows.set(requestId, { sourceId: result.sourceId, resultSetId: result.resultSetId, offset });
+        this.pendingRowWindows.set(requestId, { ref, offset });
         postHostMessage({
             command: 'requestRows',
             sourceUri: result.sourceId,
@@ -568,7 +568,7 @@ export class SharedResultPanelController {
             this.nextChunkSequence.delete(key);
             this.cancelRequests.delete(indexKey);
             for (const [requestId, request] of this.pendingRowWindows.entries()) {
-                if (request.sourceId === ref.sourceId && request.resultSetId === ref.resultSetId) this.pendingRowWindows.delete(requestId);
+                if (request.ref.sourceId === ref.sourceId && request.ref.resultSetId === ref.resultSetId) this.pendingRowWindows.delete(requestId);
             }
         }
         this.dispatch({
@@ -765,9 +765,12 @@ export class SharedResultPanelController {
     private applyRowWindow(message: Extract<ResultPanelHostToWebviewMessage, { command: 'rowWindow' }>): void {
         const pending = this.pendingRowWindows.get(message.requestId);
         this.pendingRowWindows.delete(message.requestId);
-        if (pending && (pending.sourceId !== message.sourceUri || pending.offset !== message.offset)) return;
+        // A response is only valid for a request that is still live. The ref
+        // identity also rejects a late response after refresh/replacement even
+        // when the host reuses the same stable result-set id.
+        if (!pending || pending.ref.sourceId !== message.sourceUri || pending.offset !== message.offset) return;
         const ref = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
-        if (!ref || (pending && pending.resultSetId !== ref.resultSetId)) return;
+        if (!ref || pending.ref !== ref) return;
         this.applyLoadedRows(ref, message.offset, decodeSharedRows(message.rows), message.totalRows);
     }
 
@@ -776,9 +779,9 @@ export class SharedResultPanelController {
         const pending = this.pendingRowWindows.get(message.requestId);
         this.pendingRowWindows.delete(message.requestId);
         const offset = asNonNegativeInteger(message.offset) ?? 0;
-        if (pending && (pending.sourceId !== message.sourceUri || pending.offset !== offset)) return;
+        if (!pending || pending.ref.sourceId !== message.sourceUri || pending.offset !== offset) return;
         const ref = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
-        if (!ref || (pending && pending.resultSetId !== ref.resultSetId)) return;
+        if (!ref || pending.ref !== ref) return;
         this.applyLoadedRows(ref, offset, decodeSharedRows(message.rows), message.totalRows);
     }
 

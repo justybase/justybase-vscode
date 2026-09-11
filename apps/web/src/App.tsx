@@ -117,6 +117,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const preferencesRef = useRef<EditorPreferences | null>(null);
   const activeQueryIdRef = useRef('');
   const tabsRef = useRef<EditorTab[]>(tabs);
+  const connectionsRef = useRef<ConnectionProfileSummary[]>(connections);
   const pendingQueryStartsRef = useRef(new Set<PendingQueryStart>());
   const activeQueryIdsRef = useRef(new Map<string, Set<string>>());
   const savedConnectionIdRef = useRef<string | null>(null);
@@ -129,6 +130,10 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const result = activeTab?.results[activeTab.activeStatementIndex] ?? emptyResult;
 
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  // Editor language callbacks can outlive the render in which the editor was
+  // mounted. Keep connection lookup independent from that initial closure so
+  // an asynchronously loaded profile can still supply its database kind.
+  connectionsRef.current = connections;
 
   const cleanupLiveResources = useCallback(async (clearLiveState = false): Promise<void> => {
     const pendingStarts = [...pendingQueryStartsRef.current];
@@ -357,7 +362,10 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
       connectionId: tabsRef.current.find(tab => tab.id === tabId)?.connectionId,
       database: tabsRef.current.find(tab => tab.id === tabId)?.database ?? '',
       schema: tabsRef.current.find(tab => tab.id === tabId)?.schema ?? '',
-      databaseKind: connections.find(connection => connection.id === tabsRef.current.find(tab => tab.id === tabId)?.connectionId)?.dbType,
+      databaseKind: (() => {
+        const connectionId = tabsRef.current.find(tab => tab.id === tabId)?.connectionId;
+        return connectionsRef.current.find(connection => connection.id === connectionId)?.dbType;
+      })(),
     }), () => preferencesRef.current);
   }
 
@@ -372,8 +380,10 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     if (tabId === activeTabId) setOverwrite(value);
   }
 
-  function activateTab(tabId: string): void {
-    if (!tabs.some(tab => tab.id === tabId)) return;
+  function activateTab(tabId: string, allowQueuedTab = false): void {
+    // React state updates are batched. New-document callers queue the tab and
+    // activate it in the same event, before `tabs` contains the new id.
+    if (!allowQueuedTab && !tabs.some(tab => tab.id === tabId)) return;
     setActiveTabId(tabId);
     editorRef.current = editorRefs.current.get(tabId) ?? null;
     setOverwrite(overwriteByTabRef.current.get(tabId) ?? false);
@@ -530,7 +540,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     const id = `retry-${Date.now()}`;
     const retryInput: ExecutionInput = { connectionId: targetConnection.id, database: targetTab.database ?? workspaceDatabase(targetConnection), sql: statementSql, mode: 'single' };
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: `Retry · Statement ${index + 1}`, sql: statementSql, connectionId: targetConnection.id, database: retryInput.database, schema: targetTab.schema }]);
-    activateTab(id);
+    activateTab(id, true);
     void runQuery('run', retryInput, id).catch(reason => setError(reason instanceof Error ? reason.message : 'Retry failed.'));
   }
 
@@ -607,7 +617,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   function addTab(): void {
     const id = `query-${Date.now()}`;
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), connectionId: selected?.id, database: selected ? workspaceDatabase(selected) : database }]);
-    activateTab(id);
+    activateTab(id, true);
   }
   function closeTab(id: string): boolean {
     const tab = tabs.find(item => item.id === id);
@@ -664,7 +674,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     const id = `schema-${Date.now()}`;
     const queryInput = { connectionId: selected?.id ?? '', database: node.database ?? database, sql: nextSql, mode: 'single' as const };
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title, sql: nextSql, connectionId: selected?.id, database: queryInput.database, schema: node.schema, source: node, sourceSql: nextSql, sourceConnectionId: selected?.id, sourceDatabase: queryInput.database, resultView: title.toLowerCase().startsWith('explain') ? 'explain' : 'grid' }]);
-    activateTab(id);
+    activateTab(id, true);
     void runQuery('run', queryInput, id).catch(reason => setError(reason instanceof Error ? reason.message : 'Could not run schema query.'));
   }
 
@@ -699,7 +709,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   function openHistoryEntry(entry: Awaited<ReturnType<ApiClient['history']>>[number]): void {
     const id = `history-${entry.id}`;
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: 'History query', sql: entry.sql, connectionId: entry.connectionId, database: entry.database }]);
-    activateTab(id);
+    activateTab(id, true);
   }
 
   function openAudit(): void {

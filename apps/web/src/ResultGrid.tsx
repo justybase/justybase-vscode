@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterSpec, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
+import type { UiResultViewState } from '@justybase/ui-core';
+import { DataGrid, processDataGridRows } from '@justybase/ui-react';
 import { aggregateResultRows, filterResultRows, type ResultColumn, type ResultColumnFilter } from '@justybase/result-core';
 import { useApiClient } from './api';
 import { readLegacyWorkspaceValue, useWorkspaceStorage, type WorkspaceStorage } from './workspacePersistence';
 import { type ResultState } from './queryState';
 
-interface GridRow { values: unknown[]; }
+interface GridRow { values: readonly unknown[]; }
 
 interface GridContextMenuState {
   x: number;
@@ -26,6 +27,8 @@ interface SavedGridState {
   columnVisibility?: VisibilityState;
   columnPinning?: ColumnPinningState;
   columnOrder?: string[];
+  columnWidths?: Record<string, number>;
+  grouping?: string[];
 }
 
 interface PersistedGridStateEnvelope {
@@ -99,20 +102,20 @@ function uniqueJsonNames(columns: string[]): string[] {
   });
 }
 
-function rowAsJson(columns: string[], values: unknown[]): string {
+function rowAsJson(columns: string[], values: readonly unknown[]): string {
   const record: Record<string, unknown> = {};
   uniqueJsonNames(columns).forEach((column, index) => { record[column] = serialiseValue(values[index]); });
   return JSON.stringify(record, null, 2);
 }
 
-function rowAsMarkdown(columns: string[], values: unknown[], types: Array<string | undefined>): string {
+function rowAsMarkdown(columns: string[], values: readonly unknown[], types: Array<string | undefined>): string {
   const header = `| ${columns.join(' | ')} |`;
   const separator = `| ${columns.map(() => '---').join(' | ')} |`;
   const body = `| ${values.map((value, index) => formatCellValue(value, types[index]).text.replace(/\|/g, '\\|')).join(' | ')} |`;
   return [header, separator, body].join('\n');
 }
 
-function rowAsInsert(columns: string[], values: unknown[]): string {
+function rowAsInsert(columns: string[], values: readonly unknown[]): string {
   const names = columns.map((column, index) => `"${(column || `column_${index + 1}`).replace(/"/g, '""')}"`).join(', ');
   return `INSERT INTO <table> (${names}) VALUES (${values.map(sqlLiteral).join(', ')});`;
 }
@@ -121,26 +124,6 @@ function rowAsInsert(columns: string[], values: unknown[]): string {
  * Type-aware formatting and display utilities for cell values.
  * Inspired by the extension's result panel but simplified for the web.
  */
-function typeBadge(type?: string): string {
-  if (!type) return '?';
-  const t = type.toUpperCase();
-  if (/INT|BIGINT|SMALLINT|TINYINT/.test(t)) return 'INT';
-  if (/DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(t)) return 'NUM';
-  if (/VARCHAR|CHAR|TEXT|CLOB|STRING/.test(t)) return 'TXT';
-  if (/DATE|TIME|TIMESTAMP/.test(t)) return 'DT';
-  if (/BOOL/.test(t)) return 'BOOL';
-  return t.slice(0, 4);
-}
-
-function typeBadgeClass(type?: string): string {
-  if (!type) return 'tt';
-  const t = type.toUpperCase();
-  if (/INT|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(t)) return 'tn';
-  if (/DATE|TIME|TIMESTAMP/.test(t)) return 'td';
-  if (/BOOL/.test(t)) return 'tb2';
-  return 'tt';
-}
-
 function isNumericType(type?: string): boolean {
   if (!type) return false;
   return /INT|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(type.toUpperCase());
@@ -165,10 +148,6 @@ function formatCellValue(value: unknown, type?: string): { text: string; isNull:
   return { text, isNull: false, colorClass: '' };
 }
 
-function cellAlignment(type?: string): string {
-  return isNumericType(type) ? 'cell-align-right' : '';
-}
-
 export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: { queryId: string; statementIndex?: number; result: ResultState; onEditRow?(values: unknown[]): void }): ReactElement {
   const api = useApiClient();
   const storage = useWorkspaceStorage();
@@ -182,13 +161,13 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ left: [], right: [] });
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [gridGrouping, setGridGrouping] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [exporting, setExporting] = useState(false);
   const [columnOrder, setColumnOrder] = useState<string[]>(() => result.columns.map((_, i) => String(i)));
-  const [draggedColId, setDraggedColId] = useState<string | null>(null);
-  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<GridContextMenuState | null>(null);
   const [detailRowIndex, setDetailRowIndex] = useState<number | null>(null);
   const [showAggregates, setShowAggregates] = useState(false);
@@ -199,7 +178,6 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [pivot, setPivot] = useState<PivotResult | null>(null);
   const [grouping, setGrouping] = useState(false);
   const requestGeneration = useRef(0);
-  const resultGridRef = useRef<HTMLDivElement | null>(null);
   const resultSetId = result.resultSetId ?? `${queryId}::statement-${statementIndex}`;
   const gridKey = gridStateKey(resultSetId);
   const legacyKey = legacyGridStateKey(queryId, statementIndex);
@@ -237,6 +215,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setGlobalFilter(typeof saved?.globalFilter === 'string' ? saved.globalFilter : '');
     setColumnVisibility(saved?.columnVisibility ?? {});
     setColumnPinning(saved?.columnPinning ?? { left: [], right: [] });
+    setColumnWidths(saved?.columnWidths ?? {});
+    setGridGrouping(saved?.grouping ?? []);
     setColumnOrder(mergedOrder);
     setGridHydratedKey(gridKey);
   }, [gridKey, legacyKey, resultSetId, result.sessionId, result.columns, storage]);
@@ -244,13 +224,13 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   useEffect(() => {
     if (gridHydratedKey !== gridKey) return;
     try {
-      const state: SavedGridState = { pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder };
+      const state: SavedGridState = { pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, grouping: gridGrouping };
       const envelope: PersistedGridStateEnvelope = { version: 2, resultSetId, state };
       storage.set(gridKey, JSON.stringify(envelope));
     } catch {
       // A full localStorage should not make the result grid unusable.
     }
-  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, storage]);
+  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, gridGrouping, storage]);
 
   useEffect(() => {
     if (!queryId || !result.sessionId) return;
@@ -384,7 +364,12 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   }), [result.columns, result.columnTypes]);
   const displayRows = useMemo(() => result.sessionId
     ? rows
-    : filterResultRows(result.rows, localFilterColumns, { globalFilter, columnFilters: localFilters }), [result.sessionId, result.rows, rows, localFilterColumns, globalFilter, localFilters]);
+    : processDataGridRows(localFilterColumns, result.rows, {
+      globalFilter,
+      columnFilters: Object.fromEntries(columnFilters.map(item => [item.id, typeof item.value === 'string' ? item.value : ''])),
+      sorting: sorting.map(item => ({ column: item.id, descending: item.desc })),
+      grouping: [],
+    }), [result.sessionId, result.rows, rows, localFilterColumns, globalFilter, columnFilters, sorting]);
   const data = useMemo(() => displayRows.map(values => ({ values })), [displayRows]);
   const table = useReactTable({
     data,
@@ -405,15 +390,36 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
   });
-  const rowVirtualizer = useVirtualizer({
-    count: data.length,
-    getScrollElement: () => resultGridRef.current,
-    estimateSize: () => 34,
-    overscan: 12,
-  });
   const selectedRows = table.getSelectedRowModel().rows;
   const effectiveTotalRows = result.sessionId ? totalRows : data.length;
   const totalPages = Math.max(1, Math.ceil(effectiveTotalRows / pageSize));
+  const sharedGridView = useMemo(() => ({
+    globalFilter,
+    columnFilters: Object.fromEntries(columnFilters.map(item => [item.id, typeof item.value === 'string' ? item.value : ''])),
+    sorting: sorting.map(item => ({ column: item.id, descending: item.desc })),
+    grouping: gridGrouping,
+    columnVisibility,
+    columnOrder,
+    pinnedColumns: columnPinning.left ?? [],
+    columnWidths,
+  }), [globalFilter, columnFilters, sorting, gridGrouping, columnVisibility, columnOrder, columnPinning.left, columnWidths]);
+
+  function updateSharedGridView(patch: Partial<UiResultViewState>): void {
+    if (patch.globalFilter !== undefined) { setGlobalFilter(patch.globalFilter); setPageIndex(0); }
+    if (patch.columnFilters !== undefined) {
+      setColumnFilters(Object.entries(patch.columnFilters).filter(([, value]) => value.length > 0).map(([id, value]) => ({ id, value })));
+      setPageIndex(0);
+    }
+    if (patch.sorting !== undefined) {
+      setSorting(patch.sorting.map(item => ({ id: item.column, desc: item.descending })));
+      setPageIndex(0);
+    }
+    if (patch.columnVisibility !== undefined) setColumnVisibility({ ...patch.columnVisibility });
+    if (patch.columnOrder !== undefined) setColumnOrder([...patch.columnOrder]);
+    if (patch.pinnedColumns !== undefined) setColumnPinning({ left: [...patch.pinnedColumns], right: [] });
+    if (patch.columnWidths !== undefined) setColumnWidths({ ...patch.columnWidths });
+    if (patch.grouping !== undefined) setGridGrouping([...patch.grouping]);
+  }
 
   useEffect(() => {
     const closeMenu = (): void => setContextMenu(null);
@@ -433,7 +439,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   }
 
   function contextRow(): GridRow | undefined {
-    return contextMenu ? table.getRowModel().rows[contextMenu.rowIndex]?.original : undefined;
+    const values = contextMenu ? displayRows[contextMenu.rowIndex] : undefined;
+    return values === undefined ? undefined : { values: [...values] };
   }
 
   function copyContext(format: 'value' | 'tsv' | 'json' | 'markdown' | 'sql'): void {
@@ -516,31 +523,9 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     </div>
     {showAggregates && aggregates && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><table><thead><tr><th>Column</th><th>Count</th><th>Sum</th><th>Average</th><th>Min</th><th>Max</th></tr></thead><tbody>{aggregates.values.map(value => { const name = result.columns[value.columnIndex] ?? `Column ${value.columnIndex + 1}`; const type = result.columnTypes[value.columnIndex]; return <tr key={value.columnIndex}><td>{name}</td><td>{value.count.toLocaleString()}</td><td>{value.sum === undefined ? '—' : value.sum === null ? 'NULL' : String(value.sum)}</td><td>{value.avg === undefined ? '—' : value.avg === null ? 'NULL' : String(value.avg)}</td><td>{value.min === undefined ? '—' : formatCellValue(value.min, type).text}</td><td>{value.max === undefined ? '—' : formatCellValue(value.max, type).text}</td></tr>; })}</tbody></table></div></div>}
     {(grouped || pivot) && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">{pivot ? 'Pivot view' : `Grouped view · ${grouped?.totalGroups.toLocaleString() ?? 0} groups`}<button type="button" className="secondary small" onClick={() => { setGrouped(null); setPivot(null); }}>Close</button></div><div className="grid-aggregates-scroll"><table><thead><tr>{(pivot?.columns ?? grouped?.columns.map(column => column.name) ?? []).map(column => <th key={column}>{column}</th>)}</tr></thead><tbody>{(pivot?.rows ?? grouped?.rows ?? []).map((row, rowIndex) => <tr key={rowIndex}>{row.map((value, columnIndex) => <td key={columnIndex}>{formatCellValue(value, pivot ? undefined : grouped?.columns[columnIndex]?.type).text}</td>)}</tr>)}</tbody></table></div></div>}
-    <div className="result-grid" ref={resultGridRef}><table className="tanstack-result-table"><thead>{table.getHeaderGroups().map(headerGroup => <tr key={headerGroup.id}>{headerGroup.headers.map(header => <th
-      key={header.id}
-      className={[header.column.getIsPinned() ? 'pinned-column' : '', header.column.getIsResizing() ? 'is-resizing' : '', draggedColId === header.column.id ? 'dragging' : '', dragOverColId === header.column.id && draggedColId !== header.column.id && draggedColId !== null ? 'drag-over' : ''].filter(Boolean).join(' ')}
-      style={{ ...(header.column.getIsPinned() ? { left: `${header.column.getStart('left')}px` } : {}), width: header.getSize(), minWidth: header.getSize() }}
-    >{header.isPlaceholder ? null : <div className="grid-header-content"><button type="button" draggable onDragStart={() => setDraggedColId(header.column.id)} onDragOver={event => { event.preventDefault(); setDragOverColId(header.column.id); }} onDragEnd={() => { setDraggedColId(null); setDragOverColId(null); }} onDrop={event => {
-      event.preventDefault();
-      if (!draggedColId || draggedColId === header.column.id) return;
-      setColumnOrder(previous => {
-        const reordered = [...previous];
-        const oldIndex = reordered.indexOf(draggedColId);
-        const newIndex = reordered.indexOf(header.column.id);
-        if (oldIndex === -1 || newIndex === -1) return previous;
-        reordered.splice(oldIndex, 1);
-        reordered.splice(oldIndex < newIndex ? newIndex - 1 : newIndex, 0, draggedColId);
-        return reordered;
-      });
-      setDraggedColId(null);
-      setDragOverColId(null);
-    }} onClick={header.column.getToggleSortingHandler()} title={`Sort by ${String(header.column.columnDef.header)}`}><span className="header-label">{flexRender(header.column.columnDef.header, header.getContext())}</span><span className="sort-arrows"><span className={`sort-arrow sort-asc ${header.column.getIsSorted() === 'asc' ? 'active' : ''}`}>▲</span><span className={`sort-arrow sort-desc ${header.column.getIsSorted() === 'desc' ? 'active' : ''}`}>▼</span></span></button><span className={`tb ${typeBadgeClass((header.column.columnDef.meta as { dataType?: string } | undefined)?.dataType)}`}>{typeBadge((header.column.columnDef.meta as { dataType?: string } | undefined)?.dataType)}</span><input placeholder="filter…" value={String(header.column.getFilterValue() ?? '')} onChange={event => header.column.setFilterValue(event.target.value)} /><div className="col-resizer" onMouseDown={header.getResizeHandler()} onTouchStart={header.getResizeHandler()} /></div>}</th>)}</tr>)}</thead><tbody style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>{rowVirtualizer.getVirtualItems().map(virtualRow => { const row = table.getRowModel().rows[virtualRow.index]; if (!row) return null; return <tr key={row.id} className={virtualRow.index % 2 === 0 ? 'row-even' : 'row-odd'} style={{ position: 'absolute', top: 0, transform: `translateY(${virtualRow.start}px)`, width: '100%', display: 'table', tableLayout: 'fixed' }}>{row.getVisibleCells().map(cell => {
-      const columnIndex = Number(cell.column.id);
-      const colType = result.columnTypes[columnIndex];
-      return <td key={cell.id} className={[cell.column.getIsPinned() ? 'pinned-column' : '', cellAlignment(colType)].filter(Boolean).join(' ')} style={cell.column.getIsPinned() ? { left: `${cell.column.getStart('left')}px` } : undefined} onContextMenu={event => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, rowIndex: virtualRow.index, columnIndex }); }}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>;
-    })}</tr>; })}</tbody></table></div>
-    {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button type="button" onClick={() => copyContext('value')}>Copy value</button><button type="button" onClick={() => copyContext('tsv')}>Copy row as TSV</button><button type="button" onClick={() => copyContext('json')}>Copy row as JSON</button><button type="button" onClick={() => copyContext('markdown')}>Copy row as Markdown</button><button type="button" onClick={() => copyContext('sql')}>Copy SQL INSERT</button><hr /><button type="button" onClick={filterByContextValue}>Filter by this value</button><button type="button" onClick={() => sortByContextValue(false)}>Sort ascending</button><button type="button" onClick={() => sortByContextValue(true)}>Sort descending</button><hr /><button type="button" onClick={() => { setDetailRowIndex(contextMenu.rowIndex); setContextMenu(null); }}>View full row</button>{onEditRow && <button type="button" onClick={() => { const row = contextRow(); if (row) onEditRow(row.values); setContextMenu(null); }}>Edit row…</button>}</div>}
-    {detailRowIndex !== null && table.getRowModel().rows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{table.getRowModel().rows[detailRowIndex].original.values.map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, result.columnTypes[index]).text}</dd></div>)}</dl></aside>}
+    <DataGrid resultSetId={resultSetId} columns={result.columns.map((name, index) => ({ name, type: result.columnTypes[index] }))} rows={result.sessionId ? rows : result.rows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} onViewChange={updateSharedGridView} selectedRowIndex={selectedRows[0] ? Number(selectedRows[0].id) : undefined} onRowSelect={rowIndex => setRowSelection({ [String(rowIndex)]: true })} onContextMenu={context => setContextMenu({ x: context.clientX, y: context.clientY, rowIndex: context.rowIndex, columnIndex: context.columnIndex })} />
+    {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button type="button" onClick={() => copyContext('value')}>Copy value</button><button type="button" onClick={() => copyContext('tsv')}>Copy row as TSV</button><button type="button" onClick={() => copyContext('json')}>Copy row as JSON</button><button type="button" onClick={() => copyContext('markdown')}>Copy row as Markdown</button><button type="button" onClick={() => copyContext('sql')}>Copy SQL INSERT</button><hr /><button type="button" onClick={filterByContextValue}>Filter by this value</button><button type="button" onClick={() => sortByContextValue(false)}>Sort ascending</button><button type="button" onClick={() => sortByContextValue(true)}>Sort descending</button><hr /><button type="button" onClick={() => { setDetailRowIndex(contextMenu.rowIndex); setContextMenu(null); }}>View full row</button>{onEditRow && <button type="button" onClick={() => { const row = contextRow(); if (row) onEditRow([...row.values]); setContextMenu(null); }}>Edit row…</button>}</div>}
+    {detailRowIndex !== null && displayRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{displayRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, result.columnTypes[index]).text}</dd></div>)}</dl></aside>}
     <div className="grid-pagination"><span>{effectiveTotalRows.toLocaleString()} rows · page {pageIndex + 1} / {totalPages}</span><label>Page size<select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageIndex(0); }}><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option></select></label><button className="secondary small" disabled={pageIndex === 0 || loading} onClick={() => setPageIndex(value => value - 1)}>Previous</button><button className="secondary small" disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex(value => value + 1)}>Next</button></div>
   </section>;
 }

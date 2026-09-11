@@ -93,12 +93,12 @@ function eventStream(
   const subscriptionRef: { current?: QueryEventSubscription } = {};
   let pageRequested = false;
 
-  const hydratePages = async (): Promise<void> => {
-    if (!onPage || pageRequested) return;
+  const hydratePages = async (): Promise<Error | undefined> => {
+    if (!onPage || pageRequested) return undefined;
     pageRequested = true;
     try {
       const hydrated = await fetchAllResultPages(client, queryId);
-      if (done) return;
+      if (done) return undefined;
       onPage(
         resultSetIdFor(queryId),
         hydrated.rows,
@@ -106,9 +106,12 @@ function eventStream(
         hydrated.columns,
         queryId,
       );
+      return undefined;
     } catch (error: unknown) {
-      if (done) return;
-      onPageError?.(resultSetIdFor(queryId), error instanceof Error ? error : new Error('Could not load result rows.'), queryId);
+      const failure = error instanceof Error ? error : new Error('Could not load result rows.');
+      if (done) return undefined;
+      onPageError?.(resultSetIdFor(queryId), failure, queryId);
+      return failure;
     }
   };
 
@@ -139,7 +142,13 @@ function eventStream(
     if (event.type === 'complete' && onPage && !pageRequested) {
       // Keep the terminal event behind hydration. The renderer can therefore
       // only expose a complete/ready result after every result page is local.
-      void hydratePages().finally(() => pushMapped(event));
+      void hydratePages().then(failure => {
+        if (failure) {
+          pushMapped({ ...event, type: 'error', message: `Result page hydration failed: ${failure.message}` });
+          return;
+        }
+        pushMapped(event);
+      });
       return;
     }
     pushMapped(event);
