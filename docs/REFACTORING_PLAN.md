@@ -632,14 +632,20 @@ twice merely to compare old and new UI paths.
    the main process; the renderer receives only redacted profiles and opaque
    session/capability results. The shared Web form must not be reused for raw
    Electron connection secrets, and secrets may not enter renderer state,
-   IPC payloads, persistence, logs, or URL values. Electron smoke starts the
-   API with an isolated data directory and explicit test-only
-   `JUSTYBASE_MASTER_KEY`, `JUSTYBASE_ADMIN_USER`, and
-   `JUSTYBASE_ADMIN_PASSWORD` values; a random master key alone does not
-   provision a login. The smoke logs in using that provisioned admin/session,
-   uses controlled data, then verifies window close, API shutdown, timer,
-   socket, session, and temporary-profile cleanup. No installer, auto-update,
-   or system integration is part of R9.
+   IPC payloads, persistence, logs, or URL values. The current
+   `npm run test:electron` gate runs the Electron workspace Jest suite: its
+   startup tests use an injected API factory/fetcher, and its smoke tests
+   cover the broker, redaction, and IPC contracts. It does not launch a real
+   Electron window, read `JUSTYBASE_*` environment variables, or verify
+   process/resource cleanup through a close event. The following are future
+   acceptance criteria for promoting the development shell to a full Electron
+   smoke gate: start the API with an isolated data directory and explicit
+   test-only `JUSTYBASE_MASTER_KEY`, `JUSTYBASE_ADMIN_USER`, and
+   `JUSTYBASE_ADMIN_PASSWORD` values; log in using that provisioned
+   admin/session; use controlled data; launch and close the window; and verify
+   API shutdown plus timer, socket, session, and temporary-profile cleanup. A
+   random master key alone does not provision a login. No installer,
+   auto-update, or system integration is part of R9.
 3. **VS Code:** host the migrated React components in webviews. The adapter
    translates webview messages and Extension Host commands to shared ports,
    preserving current host semantics, activation, secrets, workspace

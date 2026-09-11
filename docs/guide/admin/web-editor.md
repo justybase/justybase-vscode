@@ -40,6 +40,10 @@ deployment because cross-site cookies require `SameSite=None; Secure`.
 HTTP origins remain useful for same-site local development and receive
 `SameSite=Lax` cookies.
 
+The shared UI composition is opt-in. Set `VITE_UI_MODE=shared` at Vite
+development/build time to enable it; leave it unset to use the legacy
+workspace.
+
 ## Required configuration
 
 - `JUSTYBASE_MASTER_KEY` must remain stable for a data directory. It encrypts saved connection passwords. Rotating it without a migration makes existing ciphertext unreadable.

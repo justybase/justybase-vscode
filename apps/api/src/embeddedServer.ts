@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { isIP } from 'node:net';
 import type { ApiConfig } from './config';
 import { buildServer } from './server';
 
@@ -10,6 +11,10 @@ export interface EmbeddedApiServer {
 }
 function loopbackHost(host: string): string {
   return host === '0.0.0.0' || host === '::' || host === '[::]' ? '127.0.0.1' : host;
+}
+
+function urlHost(host: string): string {
+  return isIP(host) === 6 ? `[${host}]` : host;
 }
 
 /**
@@ -34,7 +39,7 @@ export function createEmbeddedApiServer(configuration: ApiConfig): EmbeddedApiSe
         await candidate.listen({ host: loopbackHost(configuration.host), port: configuration.port || 0 });
         const bound = candidate.server.address();
         if (!bound || typeof bound === 'string') throw new Error('Embedded API did not expose a TCP address.');
-        address = `http://${loopbackHost(configuration.host)}:${bound.port}`;
+        address = `http://${urlHost(bound.address)}:${bound.port}`;
         return address;
       } catch (error: unknown) {
         await candidate.close().catch(() => undefined);

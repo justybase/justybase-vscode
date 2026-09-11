@@ -52,6 +52,10 @@ the `ws:`/`wss:` origin from the HTTP base URL. If both are omitted, the client
 uses same-origin `/api` and WebSocket URLs. The WebSocket setting is an origin
 and the client appends `/api/ws` and `/api/lsp`.
 
+The shared UI composition remains opt-in. Set `VITE_UI_MODE=shared` when
+running Vite or building the frontend to enable it; omit the variable (or set
+it to another value) to keep the legacy workspace.
+
 The API must also be configured with the exact frontend origin(s), separated
 by commas, in `JUSTYBASE_WEB_ORIGINS` (for example,
 `JUSTYBASE_WEB_ORIGINS=https://editor.example.test`). This enables

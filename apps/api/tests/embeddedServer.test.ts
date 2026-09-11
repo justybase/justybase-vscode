@@ -36,6 +36,19 @@ describe('embedded API lifecycle', () => {
     }
   });
 
+  it('returns a valid URL when bound to an IPv6 loopback host', async () => {
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-embedded-api-ipv6-'));
+    const embedded = createEmbeddedApiServer({ ...configuration(dataDir), host: '::1' });
+    try {
+      const url = await embedded.start();
+      expect(url).toMatch(/^http:\/\/\[::1\]:\d+$/u);
+      expect(await (await fetch(`${url}/healthz`)).json()).toEqual({ status: 'ok' });
+    } finally {
+      await embedded.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it('cleans up the partially initialized server when listen fails', async () => {
     const dataDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-embedded-api-failed-'));
     const embedded = createEmbeddedApiServer({ ...configuration(dataDir), host: 'invalid-host-name-for-justybase' });
