@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
-import type { ExecutionController, ExecutionHandle, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
+import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import { createExecutionController, createInitialUiState, createUiStore } from '@justybase/ui-core';
 import {
   AsyncStateView,
@@ -49,13 +49,13 @@ export function asSurface(value: string): UiSurface | undefined {
     : undefined;
 }
 
-export function rowsAsText(columns: readonly { readonly name: string; readonly type?: string }[], rows: readonly ElectronRow[]): string {
-  return [columns.map(column => column.name).join('\t'), ...rows.map(row => row.map((value, index) => formatDataGridCellValue(value, columns[index]?.type)).join('\t'))].join('\n');
+export function rowsAsText(columns: readonly UiResultColumn[], rows: readonly ElectronRow[]): string {
+  return [columns.map(column => column.name).join('\t'), ...rows.map(row => row.map((value, index) => formatDataGridCellValue(value, columns[index]?.type, columns[index])).join('\t'))].join('\n');
 }
 
-export function rowsAsCsv(columns: readonly { readonly name: string; readonly type?: string }[], rows: readonly ElectronRow[]): string {
+export function rowsAsCsv(columns: readonly UiResultColumn[], rows: readonly ElectronRow[]): string {
   const quote = (value: unknown): string => `"${String(value ?? '').replaceAll('"', '""')}"`;
-  return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map((value, index) => quote(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type))).join(','))].join('\n');
+  return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map((value, index) => quote(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type, columns[index]))).join(','))].join('\n');
 }
 
 /** Applies a page only when it still belongs to the result execution in the store. */
@@ -64,7 +64,7 @@ export function applyHydratedPage(
   resultSetId: string,
   rows: readonly ElectronRow[],
   totalRowCount: number,
-  columns: readonly { readonly name: string; readonly type?: string }[],
+  columns: readonly UiResultColumn[],
   executionId: string,
   update: (resultSetId: string, rows: readonly ElectronRow[]) => void,
 ): boolean {

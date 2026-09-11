@@ -61,8 +61,9 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(sharedResultPanelMode('legacy')).toBe(false);
         expect(sharedResultPanelMode({ mode: 'shared' })).toBe(false);
         expect(normalizeSharedColumns(undefined)).toEqual([]);
-        expect(normalizeSharedColumns([{ name: 'id', type: 'INTEGER' }, { header: 'name' }, null, { name: '' }])).toEqual([
+        expect(normalizeSharedColumns([{ name: 'id', type: 'INTEGER' }, { name: 'amount', type: 'NUMERIC', scale: 2 }, { header: 'name' }, null, { name: '' }])).toEqual([
             { name: 'id', type: 'INTEGER' },
+            { name: 'amount', type: 'NUMERIC', scale: 2 },
             { name: 'name', type: undefined },
         ]);
         expect(decodeSharedRows([[1], 'not a row', null])).toEqual([[1]]);

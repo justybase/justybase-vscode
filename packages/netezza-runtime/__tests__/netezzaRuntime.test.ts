@@ -135,6 +135,39 @@ describe('Netezza runtime boundary', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps declared numeric type and scale in the portable result metadata', async () => {
+    const close = jest.fn(async () => undefined);
+    const reader = {
+      fieldCount: 1,
+      getName: () => 'AMOUNT',
+      getTypeName: () => 'NUMERIC',
+      getDeclaredTypeName: () => 'NUMERIC(12,2)',
+      getColumnMetadata: () => ({ numericScale: 2 }),
+      getValue: () => '1234.50',
+      read: jest.fn(async () => true).mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+      close: jest.fn(async () => undefined),
+    };
+    const command = {
+      _recordsAffected: 0,
+      commandTimeout: 0,
+      executeReader: jest.fn(async () => reader),
+      executeNonQuery: jest.fn(async () => 0),
+      cancel: jest.fn(async () => undefined),
+    };
+    const connection = { createCommand: jest.fn(() => command), close } as unknown as NetezzaDriverConnection;
+    const runtime = new NetezzaRuntime({ connectionFactory: async () => connection });
+    const columns: unknown[] = [];
+
+    await runtime.execute(target, 'SELECT amount FROM records', { ...options, readOnly: true }, {
+      onColumns: values => columns.push(...values),
+      onRows: () => undefined,
+      onCommand: () => undefined,
+    });
+    await runtime.closeAll();
+
+    expect(columns).toEqual([{ name: 'AMOUNT', type: 'NUMERIC(12,2)', scale: 2 }]);
+  });
+
   it('loads all catalog fields required by the canonical table DDL', async () => {
     const factoryCalls: Array<{ database: string }> = [];
     const factory = jest.fn(async (details: { database: string }) => {

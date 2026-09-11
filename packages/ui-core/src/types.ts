@@ -60,6 +60,15 @@ export interface UiResultViewState {
   readonly anchorRow?: number;
 }
 
+/** Renderer-safe metadata required for canonical result-cell formatting. */
+export interface UiResultColumn {
+  readonly name: string;
+  readonly type?: string;
+  readonly scale?: number;
+  readonly inferredNumericKind?: 'integer' | 'decimal';
+  readonly inferredDateInteger?: boolean;
+}
+
 /**
  * A renderer-safe result projection. Rows remain in the adapter's paging or
  * spool store; this state carries only identity, counts, status and view
@@ -72,7 +81,7 @@ export interface UiResultSurfaceState {
   readonly storageId?: string;
   readonly statementIndex: number;
   readonly status: UiResultStatus;
-  readonly columns: readonly { readonly name: string; readonly type?: string }[];
+  readonly columns: readonly UiResultColumn[];
   readonly totalRowCount: number;
   readonly loadedRowCount: number;
   readonly message?: string;
@@ -136,7 +145,7 @@ export interface UiResultEventBase {
 export type UiResultEvent =
   | (UiResultEventBase & { readonly type: 'started' })
   | (UiResultEventBase & { readonly type: 'statement-started' })
-  | (UiResultEventBase & { readonly type: 'columns'; readonly columns: readonly { readonly name: string; readonly type?: string }[] })
+  | (UiResultEventBase & { readonly type: 'columns'; readonly columns: readonly UiResultColumn[] })
   | (UiResultEventBase & { readonly type: 'rows'; readonly rowCount: number; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'progress'; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'complete'; readonly totalRowCount: number; readonly message?: string })
@@ -167,7 +176,7 @@ export type UiAction =
     readonly resultSetId: string;
     readonly loadedRowCount: number;
     readonly totalRowCount?: number;
-    readonly columns?: readonly { readonly name: string; readonly type?: string }[];
+    readonly columns?: readonly UiResultColumn[];
   }
   | { readonly type: 'execution/cancel-requested'; readonly sourceId: string; readonly executionId: string; readonly requestId: string }
   | { readonly type: 'execution/cancel-acknowledged'; readonly sourceId: string; readonly executionId: string; readonly requestId: string }

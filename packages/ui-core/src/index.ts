@@ -64,6 +64,7 @@ export type {
   UiMetadataState,
   UiResultEvent,
   UiResultEventBase,
+  UiResultColumn,
   UiResultStatus,
   UiResultSurfaceState,
   UiResultViewState,

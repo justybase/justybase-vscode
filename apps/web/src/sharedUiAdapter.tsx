@@ -113,6 +113,14 @@ function queryResultId(queryId: string): string {
   return `${queryId}:0`;
 }
 
+function mapQueryColumn(column: { readonly name: string; readonly type?: string; readonly scale?: number }) {
+  return {
+    name: column.name,
+    ...(column.type === undefined ? {} : { type: column.type }),
+    ...(column.scale === undefined ? {} : { scale: column.scale }),
+  };
+}
+
 export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number): 'loading' | 'empty' | 'error' | 'cancelled' | 'ready' {
   if (!result) return 'empty';
   if (result.status === 'error') return 'error';
@@ -265,7 +273,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     switch (event.type) {
       case 'started': mapped = { ...base, type: 'started' }; break;
       case 'statement-started': mapped = { ...base, type: 'statement-started' }; break;
-      case 'columns': mapped = { ...base, type: 'columns', columns: event.columns.map(column => ({ name: column.name, type: column.type })) }; break;
+      case 'columns': mapped = { ...base, type: 'columns', columns: event.columns.map(mapQueryColumn) }; break;
       case 'rows': {
         const rows = rowsByResultRef.current[active.resultSetId] ?? [];
         const nextRows = [...rows, ...event.rows.map(row => [...row])];
@@ -311,7 +319,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         resultSetId: active.resultSetId,
         loadedRowCount: nextRows.length,
         totalRowCount: page.totalRows,
-        columns: page.columns.map(column => ({ name: column.name, type: column.type })),
+        columns: page.columns.map(mapQueryColumn),
       });
     } catch (error) {
       const current = store.getState().results.byResultSetId[`${active.sourceId}\u0000${active.resultSetId}`];
