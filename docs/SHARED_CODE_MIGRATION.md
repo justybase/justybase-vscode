@@ -53,8 +53,9 @@ All three packages accept resolved product configuration rather than API store
 objects, credentials are decrypted only in the API adapter, and shutdown drains
 active operations in the API managers. Netezza uses a fresh connection per
 execution (including a per-query database override); the manager retains a
-target fingerprint rather than credentials. The future Electron main process can instantiate the same
-runtime packages without importing VS Code or React.
+target fingerprint rather than credentials. The Electron development/test main
+process can instantiate the same runtime packages without importing VS Code or
+React; its renderer boundary is kept separate from the Node runtime.
 
 Closure evidence for R2 (lifecycle/cancellation in desktop DuckDB and File
 SQL, direct `SqliteSession` ownership/close tests plus real Extension Host
@@ -249,8 +250,8 @@ errors, enforce authorization, own pending operations and release sessions on
 product shutdown. Metadata caches are scoped by connection/database/schema and
 user where applicable; no cross-user singleton may hold credentials or results.
 
-Web uses HTTP plus the existing event transport. Future Electron reuses that
-HTTP client against its managed backend; Electron lifecycle APIs do not enter
+Web uses HTTP plus the existing event transport. Electron reuses that HTTP
+client against its embedded backend; Electron lifecycle APIs do not enter
 these interfaces. VS Code uses an in-process compatibility adapter with editor
 and secret-storage integration. A future download handle must be scoped to the
 authenticated owner; it is not a raw server filesystem path.
@@ -274,10 +275,16 @@ authenticated owner; it is not a raw server filesystem path.
    `@justybase/metadata-core`; desktop disk/catalog adapters and the API
    per-server metadata service retain their product-specific ownership.
 6. Migrate companions one at a time with their own activation/runtime evidence.
-7. Only then prepare the Electron composition root.
+7. The R9 Electron composition root is now implemented as a development/test
+   shell: it starts one embedded API instance, authenticates in main, and
+   exposes only redacted/opaque preload data.
 
-Every slice switches desktop through its compatibility adapter first and runs
-VS Code gates before API/web are switched. For the first SQL slice, keep a
+Every backend/shared-code slice in R0–R8 switches desktop through its
+compatibility adapter first and runs VS Code gates before API/web are switched.
+R9 UI slices are governed by the qualified strangler order in
+`REFACTORING_PLAN.md` (`Web → Electron → VS Code`) after their portable
+state/port contract is characterized; this exception does not move execution,
+runtime, or secret ownership out of the desktop-first path. For the first SQL slice, keep a
 baseline fixture corpus with expected diagnostic codes, severities, messages,
 ranges and fixes; compare old and extracted implementations against that same
 corpus before deleting the old implementation. Include Netezza `DB..TABLE`,
@@ -298,7 +305,12 @@ For results, freeze pure state transitions first using
 rows, retries/cancellation and cleanup before DOM work. Then exercise the full
 persisted/async UI matrix in the testing strategy, followed by bundled browser,
 Extension Host and React boundaries. No new reducer tests can prove migration
-parity before a reducer is actually extracted.
+parity before a reducer is actually extracted. The R9 result slice now adds
+`@justybase/ui-core` state/ports and `@justybase/ui-react` presentation, with
+Web and VS Code adapters enabled behind `shared` mode while legacy renderers
+remain the default. Electron now also has an authenticated query/result
+transport adapter and shared editor/result presentation; history, LSP, and the
+remaining first-tier surfaces are still follow-up slices.
 
 ## Repeatable verification and completion
 

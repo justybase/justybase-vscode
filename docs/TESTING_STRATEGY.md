@@ -12,15 +12,18 @@ test behavior.
 
 | Layer | Scope | Command |
 | --- | --- | --- |
-| Static | TypeScript, contracts, API, web | `npm run check-types`, `npm run check-types:api`, `npm run check-types:web` |
+| Static | TypeScript, contracts, API, Web, Electron, shared UI | `npm run check-types`, `npm run check-types:api`, `npm run check-types:web`, `npm run check-types:electron`, `npm run check-types:media` |
 | Architecture | Dependency directions, pure packages, explicit debt and cycles | `npm run check:architecture`, `npm run test:quality-tools` |
 | Lint | Blocking desktop rules plus ratcheted workspace baseline | `npm run lint`, `npm run lint:extended:check` |
 | Quality tooling | Versioned baseline/report and changed-code gate helpers | `npm run test:quality-tools`, `npm run quality:report` |
 | Unit | Parsers, state machines, providers, utilities | `npm run test:validate` |
 | Shared SQL core | Pure validation boundary and package-owned contract tests | `npm run test:sql-core`, `npm run check-types:sql-core` |
 | API/web | Fastify routes and React behavior | `npm run test:api`, `npm run test:web` |
+| Shared UI | `ui-core`, `ui-react`, and migrated media composition | `npm run test:ui-core`, `npm run test:ui-react`, `npm run test:coverage:ui` |
+| Electron | Main/preload secret boundary, renderer presentation, lifecycle | `npm run test:electron` |
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
 | Browser | Bundled webview rendering and recovery | `npm run test:playwright` |
+| Web/API browser | Deterministic authenticated Web workspace against the controlled API/SQLite fixture | `npm run test:playwright:web-api` |
 | Extension Host | Real VS Code activation, commands, webview protocol | `npm run test:extension-host` |
 
 The PR baseline is `npm run verify:pr`. Live proprietary databases are nightly
@@ -29,6 +32,12 @@ or manual because they require credentials and controlled infrastructure.
 `quality/quality-baseline.json`; on a pull request, the CI unit job also runs
 the changed high-risk gate against the pull request base commit. Locally, the
 equivalent is `npm run test:coverage:changed` after fetching `origin/master`.
+The changed-code input is the repository-wide diff, and the gate merges LCOV
+from root Jest, `ui-core`, `ui-react`, Web, Electron, and migrated media. A
+changed executable file without an LCOV record fails; generated files,
+declarations, tests, and setup files are the only automatic exclusions. The
+high-risk changed-code minimum is 80% lines and 70% branches. A green root-only
+LCOV report is not evidence for package, app, or media paths.
 
 `test:sql-core` also builds and loads the public package entrypoints through
 CommonJS and native ESM. This catches missing exports and duplicated
