@@ -18,6 +18,8 @@ export default defineConfig({
       '@justybase/dialect-utils': path.join(repositoryRoot, 'packages/dialect-utils/src'),
       '@justybase/sql-core': path.join(repositoryRoot, 'packages/sql-core/src'),
       '@justybase/result-core': path.join(repositoryRoot, 'packages/result-core/src'),
+      '@justybase/ui-core': path.join(repositoryRoot, 'packages/ui-core/src'),
+      '@justybase/ui-react': path.join(repositoryRoot, 'packages/ui-react/src'),
     },
   },
   server: { port: 5173, proxy: { '/api': { target: 'http://127.0.0.1:3000', ws: true } } },

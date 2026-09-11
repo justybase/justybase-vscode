@@ -82,4 +82,22 @@ describe('ResultsHtmlGenerator', () => {
         expect(exportSplitMenu).toBeGreaterThan(-1);
         expect(html).toContain('split-btn__menu-item');
     });
+
+    it('marks the shared Result Panel mode explicitly while keeping the legacy default', () => {
+        const generator = new ResultsHtmlGenerator('test-csp');
+        const uris = {
+            scriptUri: { toString: () => 'script.js' } as never,
+            virtualUri: { toString: () => 'virtual.js' } as never,
+            mainScriptUri: { toString: () => 'main.js' } as never,
+            styleUri: { toString: () => 'style.css' } as never,
+            workerUri: { toString: () => 'worker.js' } as never,
+            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
+            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
+            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
+        };
+
+        expect(generator.generateHtml(uris)).toContain('window.__JUSTYBASE_UI_MODE__ = "legacy";');
+        expect(generator.generateHtml(uris, { sharedUiMode: true })).toContain('window.__JUSTYBASE_UI_MODE__ = "shared";');
+        expect(generator.generateHtml(uris, { sharedUiMode: true })).toContain('id="shared-ui-root"');
+    });
 });

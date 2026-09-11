@@ -2846,7 +2846,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         return this._htmlGenerator.generateHtml(uris, {
             resultGridFontFamily: this._getResultGridFontFamily(),
             resultGridFontSize: this._getResultGridFontSize(),
-            defaultCopyFormat: vscode.workspace.getConfiguration('justybase.results').get<string>('copyFormat', 'markdown')
+            defaultCopyFormat: vscode.workspace.getConfiguration('justybase.results').get<string>('copyFormat', 'markdown'),
+            sharedUiMode: vscode.workspace.getConfiguration('justybase.ui').get<string>('mode', 'legacy') === 'shared',
         });
     }
 

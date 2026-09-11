@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import type { ConnectionProfileSummary, EditorPreferences, MetadataColumn, MetadataDatabase, SchemaTreeNode, WebUser } from '@justybase/contracts';
+import { AsyncStateView } from '@justybase/ui-react';
 import { ApiClientProvider, createApiClient, useApiClient, type ApiClient, type QueryEventSubscription } from './api';
 import { emptyResult } from './queryState';
 import { registerSqlLanguageFeatures } from './sqlLanguage';
@@ -22,6 +23,7 @@ import { restoreEditorWorkspace, newEditorTab, type EditorTab, type ExecutionInp
 import { applyEventToEditorTab, clearLiveQueryState, statementStateFor, statementStatusClass, statementStatusLabel } from './workspaceExecutionController';
 import { persistDraft, persistEditorWorkspace, readPersistedNumber, resetPersistedWorkspaceLayout } from './workspacePersistenceController';
 import { AuditPanel, ConnectionForm, EditorSettings, HistoryPanel, Login, StatusBar } from './workspacePanels';
+import { configuredWebUiMode, SharedWebWorkspace } from './sharedUiAdapter';
 
 interface PendingQueryStart {
   readonly tabId: string;
@@ -48,8 +50,9 @@ function AuthenticatedApp(): ReactElement {
   const [user, setUser] = useState<WebUser | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => { void api.me().then(response => setUser(response.user)).catch(() => undefined).finally(() => setLoading(false)); }, []);
-  if (loading) return <div className="center-message">Loading JustyBase…</div>;
+  if (loading) return <AsyncStateView state="loading" loadingLabel="Loading JustyBase…" />;
   if (!user) return <Login onLogin={setUser} />;
+  if (configuredWebUiMode() === 'shared') return <SharedWebWorkspace api={api} user={user} onLogout={() => setUser(null)} />;
   return <Workspace user={user} onLogout={() => setUser(null)} />;
 }
 

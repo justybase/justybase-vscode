@@ -77,6 +77,82 @@ export interface QueryEventSubscription {
   getLastSequence(): number;
 }
 
+const queryEventTypes = new Set<QueryEvent['type']>([
+  'started',
+  'statement-started',
+  'columns',
+  'session',
+  'progress',
+  'rows',
+  'complete',
+  'error',
+  'cancelled',
+  'batch-complete',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function isQueryEventColumn(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.name !== 'string') return false;
+  return value.type === undefined || typeof value.type === 'string';
+}
+
+/** Rejects malformed or foreign frames before they reach a product adapter. */
+function parseQueryEvent(value: unknown, queryId: string): QueryEvent | undefined {
+  if (!isRecord(value) || value.queryId !== queryId || typeof value.type !== 'string' || !queryEventTypes.has(value.type as QueryEvent['type'])) return undefined;
+  if (value.sequence !== undefined && !isNonNegativeInteger(value.sequence)) return undefined;
+  if (value.statementIndex !== undefined && !isNonNegativeInteger(value.statementIndex)) return undefined;
+  switch (value.type as QueryEvent['type']) {
+    case 'columns':
+      return Array.isArray(value.columns) && value.columns.every(isQueryEventColumn) ? value as unknown as QueryEvent : undefined;
+    case 'session':
+    case 'progress':
+      return isNonNegativeInteger(value.totalRows) ? value as unknown as QueryEvent : undefined;
+    case 'rows':
+      return Array.isArray(value.rows) && value.rows.every(row => Array.isArray(row))
+        && isNonNegativeInteger(value.totalRows)
+        && value.rows.length <= value.totalRows
+        ? value as unknown as QueryEvent
+        : undefined;
+    case 'complete':
+      return isNonNegativeInteger(value.totalRows)
+        && typeof value.limitReached === 'boolean'
+        && (value.rowsAffected === undefined || isNonNegativeInteger(value.rowsAffected))
+        && (value.message === undefined || typeof value.message === 'string')
+        && (value.commandType === undefined || typeof value.commandType === 'string')
+        ? value as unknown as QueryEvent
+        : undefined;
+    case 'error':
+      return typeof value.message === 'string' ? value as unknown as QueryEvent : undefined;
+    case 'cancelled':
+      return isNonNegativeInteger(value.totalRows)
+        && (value.scope === undefined || value.scope === 'statement' || value.scope === 'batch')
+        ? value as unknown as QueryEvent
+        : undefined;
+    case 'batch-complete':
+      return (value.status === 'complete' || value.status === 'error' || value.status === 'cancelled')
+        && isNonNegativeInteger(value.completedStatements)
+        && (value.message === undefined || typeof value.message === 'string')
+        ? value as unknown as QueryEvent
+        : undefined;
+    case 'started':
+      return (value.startedAt === undefined || (typeof value.startedAt === 'number' && Number.isFinite(value.startedAt)))
+        && (value.mode === undefined || value.mode === 'single' || value.mode === 'script' || value.mode === 'explain')
+        ? value as unknown as QueryEvent
+        : undefined;
+    case 'statement-started':
+      return value.statementSql === undefined || typeof value.statementSql === 'string'
+        ? value as unknown as QueryEvent
+        : undefined;
+  }
+}
+
 function trimBaseUrl(value: string | undefined): string {
   return (value ?? '').trim().replace(/\/$/u, '');
 }
@@ -236,7 +312,8 @@ export function createApiClient(options: ApiClientOptions = {}) {
       });
       socket.addEventListener('message', event => {
         try {
-          const parsed = JSON.parse(String(event.data)) as QueryEvent;
+          const parsed = parseQueryEvent(JSON.parse(String(event.data)) as unknown, queryId);
+          if (!parsed) return;
           if (parsed.sequence !== undefined) {
             if (parsed.sequence <= lastSequence) return;
             lastSequence = parsed.sequence;

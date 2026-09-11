@@ -15,6 +15,8 @@ export interface ResultsHtmlOptions {
   resultGridFontFamily?: string;
   resultGridFontSize?: number;
   defaultCopyFormat?: string;
+  /** Enables the opt-in cross-product React Result Panel adapter. */
+  sharedUiMode?: boolean;
 }
 
 const DEFAULT_RESULTS_GRID_FONT_FAMILY =
@@ -36,6 +38,7 @@ export class ResultsHtmlGenerator {
       options.resultGridFontFamily || DEFAULT_RESULTS_GRID_FONT_FAMILY,
     );
     const resultGridFontSize = options.resultGridFontSize || 12;
+    const uiMode = options.sharedUiMode === true ? 'shared' : 'legacy';
     return `<!DOCTYPE html>
         <html lang="en">
         <head>
@@ -70,11 +73,13 @@ export class ResultsHtmlGenerator {
             <script src="${uris.scriptUri}"></script>
             <script src="${uris.virtualUri}"></script>
             <script>
+                window.__JUSTYBASE_UI_MODE__ = ${JSON.stringify(uiMode)};
                 document.documentElement.style.setProperty('--justybase-results-grid-font-family', ${resultGridFontFamily});
                 document.documentElement.style.setProperty('--justybase-results-grid-font-size', '${resultGridFontSize}px');
             </script>
         </head>
         <body>
+            <div id="shared-ui-root" style="display: none;" aria-live="polite"></div>
             <div class="result-set-header" id="resultSetHeader">
                 <div id="resultSetTabs" class="result-set-tabs" style="display: none;"></div>
                 <span id="docIndicator" class="doc-indicator"></span>
