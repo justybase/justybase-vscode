@@ -13,6 +13,35 @@ export type * from './webviews';
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabaseRecreateTableResult, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorServices, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic, DatabaseExplainOptions, DatabaseExplainProvider, DatabaseQueryProfileProvider, DatabaseStageLocation, DatabaseInlineFileFormatOptions, DatabaseCopyIntoTableOptions, DatabaseCopyIntoStageOptions, DatabaseStageWorkflowProvider, DatabaseImportWizardInput, DatabaseImportExecutionPlan, DatabaseImportWizardProvider } from './database';
 
 export type { ConnectionDetails, DatabaseTunnelConfig, NamedConnectionDetails } from './connectionDetails';
+export {
+  UI_CONTRACT_VERSION,
+  isCapabilityDescriptor,
+  isUiAuthState,
+  isUiCapabilitySnapshot,
+  isRedactedConnectionProfile,
+} from './ui';
+export type {
+  CapabilityDescriptor,
+  CapabilityStatus,
+  ElectronRendererApi,
+  OpaqueCredentialRequestId,
+  PersistenceEnvelope,
+  PersistenceScope,
+  RedactedConnectionProfile,
+  UiAuthState,
+  UiCapabilitySnapshot,
+  UiIdentity,
+  UiMode,
+  UiOperationState,
+  UiOperationStatus,
+  UiPreloadAuthRequest,
+  UiPreloadCapabilitiesRequest,
+  UiPreloadConnectionsRequest,
+  UiPreloadCredentialRequest,
+  UiPreloadRequest,
+  UiPreloadResponse,
+  UiRendererBootstrap,
+} from './ui';
 export type {
   ConnectionQueryResult,
   ConnectionSummary,
