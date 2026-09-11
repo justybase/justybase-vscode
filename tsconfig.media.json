@@ -41,6 +41,7 @@
     "media/etlDiagram.tsx",
     "media/testDataGenerator.ts",
     "media/resultPanel/**/*.ts",
+    "media/resultPanel/**/*.tsx",
     "media/queryHistory/**/*.ts",
     "media/editDataPanel/**/*.ts",
     "media/sessionMonitor/**/*.ts",
