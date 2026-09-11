@@ -298,8 +298,10 @@ export function displaySharedRows(
         : rows.filter(row => row.some(value => String(value ?? '').toLocaleLowerCase().includes(normalizedFilter)));
     const firstSort = sorting[0];
     if (!firstSort) return filtered;
-    const columnIndex = columns.findIndex(column => column.name === firstSort.column);
-    if (columnIndex < 0) return filtered;
+    const namedColumnIndex = columns.findIndex(column => column.name === firstSort.column);
+    const legacyColumnIndex = /^[0-9]+$/u.test(firstSort.column) ? Number(firstSort.column) : -1;
+    const columnIndex = namedColumnIndex >= 0 ? namedColumnIndex : legacyColumnIndex;
+    if (columnIndex < 0 || columnIndex >= columns.length) return filtered;
     return [...filtered].sort((left, right) => {
         const leftValue = String(left[columnIndex] ?? '');
         const rightValue = String(right[columnIndex] ?? '');
@@ -320,8 +322,10 @@ export class SharedResultPanelController {
     private readonly nextSequence = new Map<string, number>();
     private readonly nextChunkSequence = new Map<string, number>();
     private readonly cancelRequests = new Map<string, string>();
+    private readonly pendingRowWindows = new Map<number, { readonly sourceId: string; readonly resultSetId: string; readonly offset: number }>();
     private revision = 0;
     private streamRevision = 0;
+    private rowRequestId = 0;
     private disposed = false;
 
     public constructor() {
@@ -369,6 +373,18 @@ export class SharedResultPanelController {
             case 'streamingComplete':
                 this.applyStreamingComplete(valid);
                 break;
+            case 'diskBackedActivate':
+                this.applyDiskBackedActivate(valid);
+                break;
+            case 'rowCountUpdate':
+                this.applyRowCountUpdate(valid);
+                break;
+            case 'rowWindow':
+                this.applyRowWindow(valid);
+                break;
+            case 'diskQueryResult':
+                this.applyDiskQueryResult(valid);
+                break;
             case 'cancelExecution':
                 this.applyCancellation(valid.sourceUri);
                 break;
@@ -397,9 +413,11 @@ export class SharedResultPanelController {
         this.dispatch({ type: 'shell/surface', surface });
     }
 
-    public selectResult(resultSetId: string): void {
+    public selectResult(resultSetId: string, sourceId?: string): void {
+        const activeSourceId = sourceId ?? this.getState().results.activeSourceId;
         const result = Object.values(this.getState().results.byResultSetId)
-            .find(candidate => candidate.resultSetId === resultSetId);
+            .find(candidate => candidate.resultSetId === resultSetId
+                && (activeSourceId === undefined || candidate.sourceId === activeSourceId));
         if (!result) return;
         this.dispatch({ type: 'results/select', sourceId: result.sourceId, resultSetId });
         const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
@@ -417,6 +435,27 @@ export class SharedResultPanelController {
     public refresh(): void {
         const sourceId = this.getState().results.activeSourceId;
         if (sourceId) this.postResultSync(sourceId, 'shared-refresh');
+    }
+
+    public loadMore(result: UiResultSurfaceState): void {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref || result.totalRowCount <= result.loadedRowCount) return;
+        const offset = this.getRows(result).length;
+        if (offset >= result.totalRowCount) return;
+        const alreadyPending = [...this.pendingRowWindows.values()].some(request =>
+            request.sourceId === result.sourceId && request.resultSetId === result.resultSetId && request.offset === offset,
+        );
+        if (alreadyPending) return;
+        const requestId = ++this.rowRequestId;
+        this.pendingRowWindows.set(requestId, { sourceId: result.sourceId, resultSetId: result.resultSetId, offset });
+        postHostMessage({
+            command: 'requestRows',
+            sourceUri: result.sourceId,
+            resultSetIndex: ref.resultSetIndex,
+            offset,
+            limit: 2_000,
+            requestId,
+        });
     }
 
     public cancel(sourceId: string | undefined): void {
@@ -465,6 +504,7 @@ export class SharedResultPanelController {
         this.nextSequence.clear();
         this.nextChunkSequence.clear();
         this.cancelRequests.clear();
+        this.pendingRowWindows.clear();
         this.store.dispose();
     }
 
@@ -492,6 +532,9 @@ export class SharedResultPanelController {
             ?? asNonNegativeInteger(data.resultSyncVersion)
             ?? ++this.streamRevision;
         let activeResultSetId: string | undefined;
+        const incomingResultSetIds = new Set<string>();
+        const incomingIndexKeys = new Set<string>();
+        const previousRefs = [...this.refs.entries()];
 
         for (const [resultSetIndex, normalized] of resultSets.entries()) {
             const resultSetId = normalized.resultSetId
@@ -503,11 +546,36 @@ export class SharedResultPanelController {
                 executionId: `vscode-execution-${sourceId}-${resultSetId}-${version}`,
             };
             const key = resultKey(sourceId, resultSetId);
-            this.refs.set(sourceIndexKey(sourceId, resultSetIndex), ref);
+            incomingResultSetIds.add(resultSetId);
+            const indexKey = sourceIndexKey(sourceId, resultSetIndex);
+            incomingIndexKeys.add(indexKey);
+            this.refs.set(indexKey, ref);
             this.rows.set(key, normalized.rows);
             this.startResult(ref, normalized, executingSources.has(sourceId));
             if (resultSetIndex === activeResultSetIndex) activeResultSetId = resultSetId;
         }
+
+        for (const [indexKey, ref] of previousRefs) {
+            if (ref.sourceId !== sourceId) continue;
+            const retainedAtSameIndex = incomingIndexKeys.has(indexKey)
+                && this.refs.get(indexKey)?.resultSetId === ref.resultSetId;
+            if (retainedAtSameIndex) continue;
+            if (this.refs.get(indexKey)?.resultSetId === ref.resultSetId) this.refs.delete(indexKey);
+            if (incomingResultSetIds.has(ref.resultSetId)) continue;
+            const key = resultKey(ref.sourceId, ref.resultSetId);
+            this.rows.delete(key);
+            this.nextSequence.delete(key);
+            this.nextChunkSequence.delete(key);
+            this.cancelRequests.delete(indexKey);
+            for (const [requestId, request] of this.pendingRowWindows.entries()) {
+                if (request.sourceId === ref.sourceId && request.resultSetId === ref.resultSetId) this.pendingRowWindows.delete(requestId);
+            }
+        }
+        this.dispatch({
+            type: 'results/reconcile-source',
+            sourceId,
+            resultSetIds: [...incomingResultSetIds],
+        });
 
         if (resultSets.length > 0) {
             this.dispatch({ type: 'results/select-source', sourceId });
@@ -648,6 +716,96 @@ export class SharedResultPanelController {
         this.dispatch({ type: 'results/select', sourceId, resultSetId });
     }
 
+    private applyDiskBackedActivate(message: Extract<ResultPanelHostToWebviewMessage, { command: 'diskBackedActivate' }>): void {
+        const currentSource = this.getState().results.activeSourceId;
+        if (currentSource && currentSource !== message.sourceUri) return;
+        const knownRef = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
+        if (knownRef && message.resultSetId !== undefined && knownRef.resultSetId !== message.resultSetId) return;
+        const resultSetId = message.resultSetId ?? knownRef?.resultSetId ?? `vscode-disk-${message.sourceUri}-${message.resultSetIndex}`;
+        const ref: ResultRef = {
+            sourceId: message.sourceUri,
+            resultSetIndex: message.resultSetIndex,
+            resultSetId,
+            executionId: `vscode-disk-execution-${message.sourceUri}-${resultSetId}-${++this.streamRevision}`,
+        };
+        const rows = decodeSharedRows(message.rows);
+        const key = resultKey(ref.sourceId, ref.resultSetId);
+        this.refs.set(sourceIndexKey(ref.sourceId, ref.resultSetIndex), ref);
+        this.rows.set(key, rows);
+        this.nextChunkSequence.delete(key);
+        this.startResult(ref, {
+            resultSetId,
+            columns: normalizeSharedColumns(message.columns),
+            rows,
+            totalRowCount: Math.max(message.totalRows, rows.length),
+            isLog: false,
+            isError: false,
+            isCancelled: false,
+            isStreamingComplete: false,
+        }, true);
+        this.dispatch({ type: 'results/select-source', sourceId: ref.sourceId });
+        this.dispatch({ type: 'results/select', sourceId: ref.sourceId, resultSetId: ref.resultSetId });
+    }
+
+    private applyRowCountUpdate(message: Extract<ResultPanelHostToWebviewMessage, { command: 'rowCountUpdate' }>): void {
+        const ref = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
+        if (!ref || (message.resultSetId !== undefined && message.resultSetId !== ref.resultSetId)) return;
+        const result = this.resultForRef(ref);
+        if (!result) return;
+        this.dispatch({
+            type: 'results/hydrate',
+            sourceId: ref.sourceId,
+            executionId: ref.executionId,
+            resultSetId: ref.resultSetId,
+            loadedRowCount: this.rows.get(resultKey(ref.sourceId, ref.resultSetId))?.length ?? result.loadedRowCount,
+            totalRowCount: message.totalRows,
+        });
+    }
+
+    private applyRowWindow(message: Extract<ResultPanelHostToWebviewMessage, { command: 'rowWindow' }>): void {
+        const pending = this.pendingRowWindows.get(message.requestId);
+        this.pendingRowWindows.delete(message.requestId);
+        if (pending && (pending.sourceId !== message.sourceUri || pending.offset !== message.offset)) return;
+        const ref = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
+        if (!ref || (pending && pending.resultSetId !== ref.resultSetId)) return;
+        this.applyLoadedRows(ref, message.offset, decodeSharedRows(message.rows), message.totalRows);
+    }
+
+    private applyDiskQueryResult(message: Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>): void {
+        if (message.action !== 'window' || message.rows === undefined) return;
+        const pending = this.pendingRowWindows.get(message.requestId);
+        this.pendingRowWindows.delete(message.requestId);
+        const offset = asNonNegativeInteger(message.offset) ?? 0;
+        if (pending && (pending.sourceId !== message.sourceUri || pending.offset !== offset)) return;
+        const ref = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
+        if (!ref || (pending && pending.resultSetId !== ref.resultSetId)) return;
+        this.applyLoadedRows(ref, offset, decodeSharedRows(message.rows), message.totalRows);
+    }
+
+    private resultForRef(ref: ResultRef): UiResultSurfaceState | undefined {
+        return Object.values(this.getState().results.byResultSetId)
+            .find(result => result.sourceId === ref.sourceId && result.resultSetId === ref.resultSetId);
+    }
+
+    private applyLoadedRows(ref: ResultRef, offset: number, rows: readonly unknown[][], totalRows?: number): void {
+        const result = this.resultForRef(ref);
+        if (!result) return;
+        const key = resultKey(ref.sourceId, ref.resultSetId);
+        const existingRows = this.rows.get(key) ?? [];
+        const insertAt = Math.min(offset, existingRows.length);
+        const nextRows = [...existingRows];
+        nextRows.splice(insertAt, rows.length, ...rows);
+        this.rows.set(key, nextRows);
+        this.dispatch({
+            type: 'results/hydrate',
+            sourceId: ref.sourceId,
+            executionId: ref.executionId,
+            resultSetId: ref.resultSetId,
+            loadedRowCount: nextRows.length,
+            totalRowCount: Math.max(result.totalRowCount, totalRows ?? 0, nextRows.length),
+        });
+    }
+
     private applyStreamingComplete(message: Extract<ResultPanelHostToWebviewMessage, { command: 'streamingComplete' }>): void {
         const sourceId = message.sourceUri;
         if (this.getState().results.activeSourceId && this.getState().results.activeSourceId !== sourceId) return;
@@ -701,7 +859,7 @@ export class SharedResultPanelController {
         const sourceId = this.getState().results.activeSourceId;
         if (!sourceId) return;
         const ref = this.refs.get(sourceIndexKey(sourceId, index));
-        if (ref) this.selectResult(ref.resultSetId);
+        if (ref) this.selectResult(ref.resultSetId, sourceId);
     }
 }
 
@@ -744,10 +902,10 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         <FocusOnMount>
             <WorkspaceTabs tabs={[{ id: state.results.activeSourceId ?? 'result-panel', label: sourceLabel }]} activeId={state.results.activeSourceId ?? 'result-panel'} onSelect={id => controller.selectSource(id)} />
             {state.shell.activeSurface === 'results' && <>
-                <ResultTabs results={sourceResults} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={id => controller.selectResult(id)} />
-                <ResultViewToolbar view={view} onChange={patch => activeResult && controller.updateView(activeResult.resultSetId, patch)} onRefresh={() => controller.refresh()} onCopy={() => controller.copyActive()} onExport={() => controller.exportActive()} />
+                <ResultTabs results={sourceResults} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(id, sourceId) => controller.selectResult(id, sourceId)} />
+                <ResultViewToolbar columns={activeResult?.columns ?? []} view={view} onChange={patch => activeResult && controller.updateView(activeResult.resultSetId, patch)} onRefresh={() => controller.refresh()} onCopy={() => controller.copyActive()} onExport={() => controller.exportActive()} />
                 <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
-                    {activeResult && <DataGrid sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} columns={activeResult.columns} rows={displayRows} totalRowCount={activeResult.totalRowCount} scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }} onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })} onRowSelect={setSelectedRow} />}
+                    {activeResult && <DataGrid sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} columns={activeResult.columns} rows={displayRows} totalRowCount={activeResult.totalRowCount} scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }} onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })} onLoadMore={() => controller.loadMore(activeResult)} onRowSelect={setSelectedRow} />}
                 </AsyncStateView>
                 {selected && activeResult && <RowDetail columns={activeResult.columns} row={selected} onClose={() => setSelectedRow(undefined)} />}
             </>}
@@ -790,6 +948,7 @@ function ensureSharedStyles(): void {
 
 let sharedRoot: Root | undefined;
 let sharedController: SharedResultPanelController | undefined;
+let sharedHostMessageHandler: ((event: MessageEvent<unknown>) => void) | undefined;
 
 export function mountSharedResultPanelIfConfigured(): boolean {
     if (!sharedModeFromGlobal()) return false;
@@ -800,6 +959,8 @@ export function mountSharedResultPanelIfConfigured(): boolean {
     document.body.classList.add('shared-ui-mode');
     ensureSharedStyles();
     sharedController = new SharedResultPanelController();
+    sharedHostMessageHandler = event => sharedController?.handleHostMessage(event.data);
+    window.addEventListener('message', sharedHostMessageHandler);
     sharedRoot = createRoot(rootElement);
     sharedRoot.render(<SharedResultPanelApp controller={sharedController} />);
     (globalThis as Record<string, unknown>)[SHARED_MOUNT_FLAG] = true;
@@ -808,6 +969,8 @@ export function mountSharedResultPanelIfConfigured(): boolean {
 }
 
 export function disposeSharedResultPanel(): void {
+    if (sharedHostMessageHandler) window.removeEventListener('message', sharedHostMessageHandler);
+    sharedHostMessageHandler = undefined;
     sharedRoot?.unmount();
     sharedRoot = undefined;
     sharedController?.dispose();

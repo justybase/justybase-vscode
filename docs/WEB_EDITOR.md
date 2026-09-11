@@ -52,9 +52,31 @@ the `ws:`/`wss:` origin from the HTTP base URL. If both are omitted, the client
 uses same-origin `/api` and WebSocket URLs. The WebSocket setting is an origin
 and the client appends `/api/ws` and `/api/lsp`.
 
-The shared UI composition remains opt-in. Set `VITE_UI_MODE=shared` when
-running Vite or building the frontend to enable it; omit the variable (or set
-it to another value) to keep the legacy workspace.
+The default authenticated Web workspace uses the web-only Dockyard layout
+adapter. Set `VITE_UI_MODE=shared` when running Vite or building the frontend
+to exercise the explicit R9 shared composition; omit the variable to use
+Dockyard. Dockyard keeps one retained `LayoutDocument` per query and provides
+in-page dockable, floating, and auto-hide tools. Its versioned user-scoped
+layout stores only stable content IDs and layout configuration, never
+credentials, result data, DOM nodes, or runtime handles. Existing `tabs`, grid,
+`sidebar`, and `editor_pct` values remain readable during migration.
+
+## Controlled test login
+
+The local/CI browser harness can build a test-only frontend with
+`VITE_ENABLE_TEST_LOGIN=1` and `--mode test`, then start the API with
+`JUSTYBASE_ENABLE_TEST_LOGIN=1` and `NODE_ENV=test`. In that controlled build
+the Login page shows the exact `Use test login data` button. It performs a
+bodyless server-side login using the configured test administrator and receives
+the normal session and CSRF cookies. Test specs must use this control instead
+of repeating credentials. Do not enable either flag in a production build or
+deployment; the route is not registered outside test mode.
+
+The deterministic gate is:
+
+```bash
+npm run test:playwright:web-api
+```
 
 The API must also be configured with the exact frontend origin(s), separated
 by commas, in `JUSTYBASE_WEB_ORIGINS` (for example,

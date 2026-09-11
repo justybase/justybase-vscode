@@ -93,12 +93,14 @@ describe('Electron renderer composition', () => {
     expect(displayRows(resultFixture, [[2, 'Beta'], [1, 'Alpha']])).toEqual([[2, 'Beta'], [1, 'Alpha']]);
     expect(displayRows({ ...resultFixture, view: { ...resultFixture.view, globalFilter: 'alpha' } }, [[2, 'Beta'], [1, 'Alpha']])).toEqual([[1, 'Alpha']]);
     expect(displayRows({ ...resultFixture, view: { ...resultFixture.view, sorting: [{ column: 'bad', descending: false }] } }, [[2, 'Beta']])).toEqual([[2, 'Beta']]);
+    expect(displayRows({ ...resultFixture, view: { ...resultFixture.view, sorting: [{ column: 'NAME', descending: false }] } }, [[2, 'Beta'], [1, 'Alpha']])).toEqual([[1, 'Alpha'], [2, 'Beta']]);
     expect(displayRows({ ...resultFixture, view: { ...resultFixture.view, sorting: [{ column: '0', descending: true }] } }, [[2, 'Beta'], [1, 'Alpha']])).toEqual([[2, 'Beta'], [1, 'Alpha']]);
     expect(displayRows({ ...resultFixture, view: { ...resultFixture.view, sorting: [{ column: '0', descending: false }] } }, [[2, 'Beta'], [1, 'Alpha']])).toEqual([[1, 'Alpha'], [2, 'Beta']]);
     expect(asSurface('results')).toBe('results');
     expect(asSurface('not-a-surface')).toBeUndefined();
     expect(rowsAsText([{ name: 'ID' }, { name: 'NAME' }], [[1, null]])).toBe('ID\tNAME\n1\t');
     expect(rowsAsCsv([{ name: 'ID' }], [[1], ['two']])).toBe('"ID"\n"1"\n"two"');
+    expect(rowsAsCsv([{ name: 'A"B' }], [['x"y']])).toBe('"A""B"\n"x""y"');
   });
 
   it('renders authenticated shared presentation after the preload bootstrap resolves', async () => {

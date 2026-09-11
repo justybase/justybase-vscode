@@ -24,7 +24,8 @@
       "@justybase/sql-core": ["../../packages/sql-core/src"],
       "@justybase/result-core": ["../../packages/result-core/src"],
       "@justybase/ui-core": ["../../packages/ui-core/src"],
-      "@justybase/ui-react": ["../../packages/ui-react/src"]
+      "@justybase/ui-react": ["../../packages/ui-react/src"],
+      "avalondock-web": ["../../vendor/dockyard/src/index.d.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

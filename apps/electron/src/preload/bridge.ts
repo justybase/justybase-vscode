@@ -41,7 +41,7 @@ export function createPreloadBridge(invoke: IpcInvoker): ElectronRendererApi {
     },
     requestCredential: async (purpose: 'login' | 'connection'): Promise<OpaqueCredentialRequestId> => {
       const response = await invokeResponse(invoke, { method: 'credential/request', payload: { purpose } });
-      if (typeof response.requestId !== 'string' || response.requestId.length === 0 || /password|secret|credential|master.?key|token/iu.test(response.requestId)) malformedField('credential request');
+      if (typeof response.requestId !== 'string' || response.requestId.length === 0 || /password|passphrase|secret|credential|master.?key|token|api.?key/iu.test(response.requestId)) malformedField('credential request');
       return response.requestId as OpaqueCredentialRequestId;
     },
     listConnections: async (): Promise<readonly RedactedConnectionProfile[]> => {

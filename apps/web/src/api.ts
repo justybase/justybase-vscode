@@ -257,7 +257,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
     const response = await fetchImpl(joinUrl(httpBaseUrl, path), {
       ...init,
       headers: {
-        'Content-Type': 'application/json',
+        ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(csrf ? { 'x-justybase-csrf': csrf } : {}),
         ...(init?.headers ?? {}),
       },

@@ -3,8 +3,6 @@ import path from 'node:path';
 import { test, expect, type Page } from '@playwright/test';
 
 const screenshotDirectory = path.resolve(__dirname, '../../artifacts/playwright/web-sql');
-const adminUsername = 'playwright-admin';
-const adminPassword = 'playwright-admin-password';
 
 const netezza = {
   host: process.env.NZ_DEV_HOST ?? '',
@@ -57,6 +55,12 @@ async function openRunMenu(page: Page): Promise<void> {
   await expect(page.locator('.tb-run-dropdown')).toBeVisible();
 }
 
+async function loginWithTestData(page: Page): Promise<void> {
+  const button = page.getByRole('button', { name: 'Use test login data', exact: true });
+  await expect(button).toBeVisible();
+  await button.click();
+}
+
 test.describe('deterministic SQLite API-backed web workspace', () => {
   test('runs a controlled fixture through authentication, connection, result, and history @web-api', async ({ page }) => {
     const profileName = `Playwright SQLite ${Date.now()}`;
@@ -68,9 +72,7 @@ SELECT 3, 'SQLITE_FIXTURE'`;
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
-    await page.getByLabel('Username').fill(adminUsername);
-    await page.getByLabel('Password').fill(adminPassword);
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    await loginWithTestData(page);
     await expect(page.locator('.sidebar .section-title').filter({ hasText: 'Connections' })).toBeVisible();
 
     await page.locator('.sidebar .icon-button').first().click();
@@ -92,6 +94,98 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await expect(page.locator('.history-card .section-title')).toContainText('Query history');
     await expect(page.locator('.history-entry').first()).toContainText('SQLITE_FIXTURE');
   });
+
+  test('keeps query documents and Dockyard tool layout across reorder, float, auto-hide, and reload @web-api', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
+    await loginWithTestData(page);
+    await expect(page.locator('.dockyard-host.ad-manager')).toBeVisible();
+
+    const documents = page.locator('.ad-document-pane .ad-tab');
+    await expect(documents).toHaveCount(1);
+    await page.getByRole('button', { name: 'New query', exact: true }).click();
+    await expect(documents).toHaveCount(2);
+    await expect(documents.nth(1).locator('.ad-label-text')).toContainText('Query 2');
+
+    const secondTabBox = await documents.nth(1).boundingBox();
+    const firstTabBox = await documents.nth(0).boundingBox();
+    expect(secondTabBox).not.toBeNull();
+    expect(firstTabBox).not.toBeNull();
+    await page.mouse.move(secondTabBox!.x + secondTabBox!.width / 2, secondTabBox!.y + secondTabBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(firstTabBox!.x + 4, firstTabBox!.y + firstTabBox!.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await expect.poll(async () => (await documents.nth(0).locator('.ad-label-text').textContent())?.trim()).toBe('Query 2');
+
+    await documents.nth(0).dblclick();
+    await expect(page.locator('.ad-floating')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Dock window' }).click();
+    await expect(page.locator('.ad-floating')).toHaveCount(0);
+
+    const explorerPane = page.locator('.ad-anchorable-pane:has([data-tab-id="connections"])');
+    await explorerPane.getByRole('button', { name: 'Auto-hide group' }).click();
+    const connectionsAnchor = page.locator('.ad-anchor-tab[data-content-id="connections"]');
+    await expect(connectionsAnchor).toBeVisible();
+    await connectionsAnchor.click();
+    await expect(page.locator('.ad-peek')).toBeVisible();
+    await page.getByRole('button', { name: 'Pin tool window' }).click();
+    await expect(connectionsAnchor).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await expect(page.locator('.dockyard-history-tool .section-title')).toContainText('Query history');
+    await page.getByRole('button', { name: 'Explain', exact: true }).click();
+    await expect(page.locator('.dockyard-explain-tool')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Connections', exact: true }).click();
+    await page.locator('.dockyard-connections-tool .section-title .icon-button').click();
+    await expect(page.getByRole('dialog', { name: 'Add connection' })).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Add connection' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: '⚙ Settings', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Editor settings' })).toBeVisible();
+    await page.getByRole('button', { name: 'Close editor settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Editor settings' })).toHaveCount(0);
+
+    const storedLayout = await page.evaluate(() => {
+      const key = Object.keys(localStorage).find(value => value.endsWith(':dockyard_layout_v1'));
+      return key ? localStorage.getItem(key) : null;
+    });
+    expect(storedLayout).not.toBeNull();
+    expect(storedLayout).toContain('justybase-dockyard-layout');
+    expect(storedLayout).not.toMatch(/password|resultRows|rowData|runtimeHandle/iu);
+    const reorderedFirstId = await documents.nth(0).getAttribute('data-tab-id');
+    const persistedDocumentOrder = await page.evaluate(() => {
+      const key = Object.keys(localStorage).find(value => value.endsWith(':dockyard_layout_v1'));
+      const raw = key ? localStorage.getItem(key) : null;
+      if (!raw) return [];
+      const root = (JSON.parse(raw) as { payload?: { snapshot?: { layout?: unknown } } }).payload?.snapshot?.layout;
+      const order: string[] = [];
+      const visit = (record: unknown): void => {
+        if (!record || typeof record !== 'object') return;
+        const value = record as { type?: unknown; props?: { ContentId?: unknown }; children?: unknown[]; rootPanel?: unknown; sides?: Record<string, unknown>; floatingWindows?: unknown[]; hidden?: unknown[] };
+        if (value.type === 'LayoutDocument' && typeof value.props?.ContentId === 'string') order.push(value.props.ContentId);
+        visit(value.rootPanel);
+        for (const child of value.children ?? []) visit(child);
+        for (const side of Object.values(value.sides ?? {})) visit(side);
+        for (const child of value.floatingWindows ?? []) visit(child);
+        for (const child of value.hidden ?? []) visit(child);
+      };
+      visit(root);
+      return order;
+    });
+    expect(persistedDocumentOrder[0]).toBe(reorderedFirstId);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.dockyard-host.ad-manager')).toBeVisible();
+    await expect(page.locator('.dockyard-init-error')).toHaveCount(0);
+    await expect(documents).toHaveCount(2);
+    await expect.poll(async () => (await documents.nth(0).locator('.ad-label-text').textContent())?.trim()).toBe('Query 2');
+
+    await page.setViewportSize({ width: 720, height: 900 });
+    await expect(page.locator('.dockyard-shell')).toBeVisible();
+    await expect(page.locator('.dockyard-tool-buttons')).toBeVisible();
+  });
 });
 
 test.describe('live Netezza web workspace', () => {
@@ -102,9 +196,7 @@ test.describe('live Netezza web workspace', () => {
     await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
     await capture(page, '01-login.png');
 
-    await page.getByLabel('Username').fill(adminUsername);
-    await page.getByLabel('Password').fill(adminPassword);
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    await loginWithTestData(page);
     await expect(page.locator('.sidebar .section-title').filter({ hasText: 'Connections' })).toBeVisible();
     await capture(page, '02-workspace-after-login.png');
 

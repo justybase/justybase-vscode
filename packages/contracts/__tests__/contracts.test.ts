@@ -8,9 +8,40 @@ import {
   createDatabaseDialectTraits,
   getDatabaseDesignerCapabilities,
   resolveDatabaseDesignerCapabilities,
+  isCapabilityDescriptor,
+  isRedactedConnectionProfile,
+  isUiAuthState,
+  isUiCapabilitySnapshot,
 } from "../src/index";
 
 describe("@justybase/contracts", () => {
+  describe("renderer-safe UI guards", () => {
+    const profile = {
+      id: "connection-1",
+      name: "SQLite",
+      host: "local",
+      port: 0,
+      database: ":memory:",
+      user: "local",
+      dbType: "sqlite",
+      readOnly: true,
+    };
+    const descriptor = {
+      key: "results.read",
+      status: "available" as const,
+      owner: "adapter",
+      documentation: "/docs/results",
+      removalCondition: "never",
+    };
+
+    it("rejects nested secret-shaped properties", () => {
+      expect(isRedactedConnectionProfile({ ...profile, metadata: { password: "pw" } })).toBe(false);
+      expect(isUiAuthState({ status: "authenticated", metadata: { sessionToken: "token" } })).toBe(false);
+      expect(isCapabilityDescriptor({ ...descriptor, metadata: { apiKey: "key" } })).toBe(false);
+      expect(isUiCapabilitySnapshot({ descriptors: [descriptor], metadata: { authToken: "token" } })).toBe(false);
+    });
+  });
+
   describe("SUPPORTED_DATABASE_KINDS", () => {
     it("contains expected dialects", () => {
       expect(SUPPORTED_DATABASE_KINDS).toContain("netezza");

@@ -1,28 +1,37 @@
 # Cross-product UI parity matrix
 
 Last updated: 2026-09-11
-Status: R9 in progress; the shared foundation, authenticated Electron shell,
-and guarded Result Panel vertical slices are implemented, but full first-tier
-parity is not complete.
+Status: R10 Web Dockyard rollout is implemented on Linux; R9 cross-product
+parity and non-Linux evidence remain open.
 
-This is the operational inventory for [R9 in the refactoring plan](REFACTORING_PLAN.md#r9-cautious-cross-product-ui-parity-rollout).
+This is the operational inventory for [R9 and R10 in the refactoring plan](REFACTORING_PLAN.md#r10-dockyard-web-workspace-and-test-harness-login).
 It records the ownership and behavior that a vertical slice must preserve
 across the Web editor/API, the Electron development/test shell, and VS Code. Update the
 affected row before extraction, after each adapter is wired, and when the
 legacy fallback is removed.
 
 `Current` identifies the implementation that owns behavior today. `Target`
-identifies the R9 shared owner. A `legacy` row remains on the existing path;
-`shared` is enabled only after the row's product gates pass. Product-specific
-differences are intentional only when they are represented by a capability
-descriptor and have an owner. Web and VS Code use an opt-in shared mode while
-a slice is incomplete; the current Electron development/test shell is
-shared-only because it has no legacy renderer.
+identifies the R9 shared owner or the R10 Web Dockyard boundary. A `legacy` row
+remains on the existing path; `shared` is enabled only after the row's product
+gates pass. Product-specific differences are intentional only when they are
+represented by a capability descriptor and have an owner. The Web default is
+now the Dockyard shell; `VITE_UI_MODE=shared` remains an explicit R9 probe.
+VS Code keeps its existing host path, and the current Electron development/test
+shell is shared-only because it has no legacy renderer.
 
 For Web, the production entrypoint initializes the mode from the Vite
-build-time variable `VITE_UI_MODE`; set it to `shared` to exercise the shared
-composition. Leaving it unset keeps the legacy workspace. Tests may set the
-equivalent `globalThis.__JUSTYBASE_UI_MODE__` value directly.
+build-time variable `VITE_UI_MODE`; set it to `shared` to exercise the R9 shared
+composition. Leaving it unset selects the R10 Dockyard workspace. Tests may
+set the equivalent `globalThis.__JUSTYBASE_UI_MODE__` value directly.
+
+R10 keeps Dockyard web-only in `apps/web/src/dockyard/`, pinned to upstream
+commit `921b9a66cac88b07af6edb3ebd5cd47af500c900`. Its retained DOM, floating,
+auto-hide, and JSON layout model do not cross into `ui-core` or `ui-react`.
+Stable layout identities are `query:<tabId>`, `connections`, `schema`,
+`inspector`, `history`, and `explain:<tabId>`. The user-scoped layout contains
+only versioned layout JSON and stable content IDs; credentials, results, DOM,
+and runtime handles are excluded. A malformed, foreign, future, or unsafe
+snapshot resets to the safe default layout.
 
 The status table below separates current implementation, R9 target, and
 removal conditions. Electron currently exists only as a development/test shell;
@@ -54,13 +63,13 @@ that the shared implementation already exists everywhere.
 
 | Surface | Web/API current | Electron current | VS Code current | R9 target | Status | Capability owner / removal condition |
 | --- | --- | --- | --- | --- | --- | --- |
-| Shell and workspace tabs | `apps/web/src/App.tsx` and `SharedWebWorkspace` when `VITE_UI_MODE=shared` | `apps/electron/src/renderer/App.tsx` uses shared store/presentation; the development/test shell is shared-only | VS Code workbench and webviews | `@justybase/ui-core` + `@justybase/ui-react` | Web shared opt-in; Electron shared-only shell; VS Code adapter-backed | R9 UI owner; remove legacy per product after tab identity, persistence, lifecycle, and browser/Extension Host gates. |
-| SQL editor and LSP | Monaco in `apps/web`, API `sql-core` adapter | Shared editor shell and execution adapter; LSP wiring remains open | VS Code editor/LSP providers | Shared document ports + `sql-core` semantics | `adapter-backed` with shared shell composition; full parity pending | Editor/LSP owners; remove legacy after parser/completion, reconnect, and all-product authoring gates. |
+| Shell and workspace tabs | `apps/web/src/dockyard/DockyardWorkspace.tsx` by default; `SharedWebWorkspace` only with `VITE_UI_MODE=shared` | `apps/electron/src/renderer/App.tsx` uses shared store/presentation; the development/test shell is shared-only | VS Code workbench and webviews | `@justybase/ui-core` + `@justybase/ui-react`; Dockyard is the Web layout adapter | Web Dockyard default; shared probe remains opt-in; Electron shared-only shell; VS Code adapter-backed | R10 Web adapter plus R9 UI owner; remove recovery/legacy paths after tab identity, persistence, lifecycle, and browser/Extension Host gates. |
+| SQL editor and LSP | Monaco in `DockyardWorkspace`, API `sql-core` adapter | Shared editor shell and execution adapter; LSP wiring remains open | VS Code editor/LSP providers | Shared document ports + `sql-core` semantics | Dockyard adapter-backed Web shell; full parity pending | Editor/LSP owners; remove legacy after parser/completion, reconnect, and all-product authoring gates. |
 | Connections | `workspacePanels.tsx` + API profile routes (including ephemeral password form state) | Main-owned authenticated session and redacted profile IPC | `ConnectionManager` + `SecretStorage` | Shared profile/auth ports; secrets remain adapter-owned | `shared` redacted bootstrap boundary; connection workflow remains adapter-backed | API/VS Code/Electron auth owners; remove legacy only after secret-boundary and auth tests pass. |
-| Query execution and cancellation | `SharedWebWorkspace` maps API/WebSocket events to `ui-core` when `VITE_UI_MODE=shared` | Renderer execution adapter maps the authenticated API/WebSocket stream to `ui-core`; the development/test shell is shared-only | `StreamingManager` and desktop execution adapter | Shared execution state ports; runtime remains backend-owned | Web shared opt-in; Electron shared-only shell; VS Code adapter-backed | Execution owners; remove legacy after ordered-event, cancellation, reconnect, and no-duplicate-execution gates. |
-| Result panel and Data Grid | `SharedWebWorkspace` uses shared result state/presentation when `VITE_UI_MODE=shared` | Shared editor, result tabs, grid, filtering, copy/export, and scroll state are wired through the renderer adapter; no legacy Electron renderer exists | `media/resultPanel/sharedView.tsx` opt-in with legacy fallback | `@justybase/ui-core` + `@justybase/ui-react` result ports | Web/VS Code shared opt-in; Electron shared-only shell | Result Panel owner; remove legacy after identity/scroll, browser, Electron, Extension Host, and performance gates. |
+| Query execution and cancellation | `DockyardWorkspace` maps API/WebSocket events through the existing workspace controller; `SharedWebWorkspace` remains the explicit `shared` probe | Renderer execution adapter maps the authenticated API/WebSocket stream to `ui-core`; the development/test shell is shared-only | `StreamingManager` and desktop execution adapter | Shared execution state ports; runtime remains backend-owned | Web Dockyard default; Electron shared-only shell; VS Code adapter-backed | Execution owners; remove legacy after ordered-event, cancellation, reconnect, and no-duplicate-execution gates. |
+| Result panel and Data Grid | `DockyardWorkspace` owns one query document per tab; `SharedWebWorkspace` remains the explicit shared composition | Shared editor, result tabs, grid, filtering, copy/export, and scroll state are wired through the renderer adapter; no legacy Electron renderer exists | `media/resultPanel/sharedView.tsx` opt-in with legacy fallback | `@justybase/ui-core` + `@justybase/ui-react` result ports | Web Dockyard default; Web/VS Code shared probe remains opt-in; Electron shared-only shell | Result Panel owner; remove legacy after identity/scroll, browser, Electron, Extension Host, and performance gates. |
 | Schema navigation and metadata | Shared adapter maps API schema tree; legacy remains default | Capability is explicitly host-owned/unavailable in current shared Result Panel | metadata cache and schema tree | Shared explorer state + `metadata-core` | Adapter-backed; shared Result Panel capability-gated | Metadata owner; remove legacy after restart/invalidation and both SchemaProvider gates. |
-| Query history | API `/api/history` + shared Web history state when enabled | Profile shell with explicit adapter-backed/unavailable capability | `QueryHistoryManager` uses `context.globalStorageUri`; `globalState` is legacy migration/fallback | Shared history view state; repository scope remains adapter-owned | Adapter-backed; shared Web composition includes an explicit pending state | History owner; remove legacy after scope/retention migration tests and all-product persistence gates. |
+| Query history | Dockyard history tool backed by API `/api/history`; shared Web history remains an explicit probe | Profile shell with explicit adapter-backed/unavailable capability | `QueryHistoryManager` uses `context.globalStorageUri`; `globalState` is legacy migration/fallback | Shared history view state; repository scope remains adapter-owned | Dockyard tool is default Web presentation; repository parity remains open | History owner; remove legacy after scope/retention migration tests and all-product persistence gates. |
 | Explain | Web `ExplainPanel` + API explain execution | Explicitly adapter-backed/pending | VS Code Explain command/webview path | Shared request/view state; provider plan parsing remains adapter-owned | Adapter-backed with capability state | Explain owner; remove legacy after dialect capability and cancellation/output fixtures pass. |
 | Common designer workflows | Web `ObjectDesigner` + API guarded writes | Explicitly read-only/adapter-backed | Designer webviews/commands and companions | `designer-core` + shared React workflow components | Adapter-backed with explicit read-only capability | Designer/dialect owners; remove legacy per workflow after capability, preview-token, read-only, and packaging gates. |
 | Import/export | Web panels/API routes | Not implemented | Workspace/temp-file and export services | Shared workflow state; format/filesystem ports | `platform-specific` in part; adapter-backed | Import/export owner; remove per-format legacy only after file sandbox, browser download, and companion gates. |
@@ -107,6 +116,7 @@ and points to its adapter owner and removal condition.
 | Results | Web/VS Code `legacy` default until all three products pass; Electron shared-only shell | Shared Result Panel/Data Grid composition is opt-in with `VITE_UI_MODE=shared` | Authenticated shared editor/query/result composition is the only renderer path in the development/test shell; no legacy fallback | Shared Result Panel adapter is opt-in; legacy fallback retained | Result identity/scroll tests, Web/media/Electron coverage, browser and Extension Host evidence; Electron full product gate remains open | Result Panel owner; complete the remaining Electron/Web/VS Code parity matrix before changing Web/VS Code defaults. |
 | Workspace/authoring | Web/VS Code `legacy` until authoring matrix passes; Electron shared-only shell | Shared shell/document/execution composition is opt-in with `VITE_UI_MODE=shared`; legacy remains default | Shared editor shell is the only renderer path; API/LSP and execution wiring remain open | Existing editor/LSP semantics and host ownership remain | LSP/completion/parity, authoring Extension Host, reconnect, and persistence tests | SQL/editor owners; preserve public commands. |
 | Schema/designers | `legacy` per surface | Schema state is adapter-backed in shared Web composition | Explicit capability/adapter-backed state | Existing designer/companion paths | Designer, capability, guarded-write, metadata-refresh, and packaging gates | Designer/metadata owners; document dialect exceptions. |
+| Web Dockyard workspace | Default Web shell; `VITE_UI_MODE=shared` is an explicit R9 probe | Not applicable | VS Code host/workbench remains product-owned | One `LayoutDocument` per query, dockable tools, in-page float/auto-hide, versioned user layout | Test login + workspace Playwright, layout migration, lifecycle/disposal, and Dockyard checksum/API checks | Remove only after the Dockyard recovery window and R9 first-tier evidence are closed. |
 
 ## Update rules
 

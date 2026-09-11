@@ -26,7 +26,7 @@ export interface IpcHandlers {
 function hasSecretKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasSecretKey);
   if (typeof value !== 'object' || value === null) return false;
-  return Object.entries(value).some(([key, nested]) => /password|secret|credential|master.?key|token/iu.test(key) || hasSecretKey(nested));
+  return Object.entries(value).some(([key, nested]) => /password|passphrase|secret|credential|master.?key|token|api.?key/iu.test(key) || hasSecretKey(nested));
 }
 
 function validMethod(value: string): value is IpcMethod {
@@ -54,7 +54,7 @@ export async function dispatchIpcMessage(message: unknown, handlers: IpcHandlers
         const purpose = (candidate.payload as { purpose?: unknown }).purpose;
         if (purpose !== 'login' && purpose !== 'connection') return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'Credential purpose is invalid.' };
         const requestId = await handlers.credentialBroker.request(purpose);
-        return typeof requestId === 'string' && requestId.length > 0 && !/password|secret|credential|master.?key|token/iu.test(requestId)
+        return typeof requestId === 'string' && requestId.length > 0 && !/password|passphrase|secret|credential|master.?key|token|api.?key/iu.test(requestId)
           ? { ok: true, requestId }
           : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid credential request.' };
       }
@@ -75,7 +75,7 @@ export async function dispatchIpcMessage(message: unknown, handlers: IpcHandlers
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '';
-    return { ok: false, code: 'IPC_OPERATION_FAILED', message: /password|secret|credential|master.?key|token/iu.test(message) ? 'Electron operation failed.' : message || 'Electron operation failed.' };
+    return { ok: false, code: 'IPC_OPERATION_FAILED', message: /password|passphrase|secret|credential|master.?key|token|api.?key/iu.test(message) ? 'Electron operation failed.' : message || 'Electron operation failed.' };
   }
 }
 

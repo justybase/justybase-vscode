@@ -12,12 +12,17 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | @chevrotain/regexp-to-ast | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | @chevrotain/utils | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | @hono/node-server | 2.1.1 | MIT | [upstream](https://github.com/honojs/node-server) |
+| @justybase/database-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/duckdb-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
+| @justybase/metadata-core | 3.17.14 | Apache-2.0 | See npm package metadata |
 | @justybase/netezza-driver | 3.0.0 | Apache-2.0 | [upstream](https://github.com/justybase/justybase_netezza_node_driver) |
 | @justybase/netezza-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
+| @justybase/result-core | 3.17.14 | Apache-2.0 | See npm package metadata |
 | @justybase/spreadsheet-tasks | 2.1.1 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
 | @justybase/sql-core | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/sqlite-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
+| @justybase/ui-core | 3.17.14 | Apache-2.0 | See npm package metadata |
+| @justybase/ui-react | 3.17.14 | Apache-2.0 | See npm package metadata |
 | @modelcontextprotocol/sdk | 1.30.0 | MIT | [upstream](https://github.com/modelcontextprotocol/typescript-sdk) |
 | @msgpack/msgpack | 3.1.3 | ISC | [upstream](https://github.com/msgpack/msgpack-javascript) |
 | @tanstack/table-core | 8.21.3 | MIT | [upstream](https://github.com/TanStack/table) |
@@ -31,6 +36,7 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | archiver | 7.0.1 | MIT | [upstream](https://github.com/archiverjs/node-archiver) |
 | archiver-utils | 5.0.2 | MIT | [upstream](https://github.com/archiverjs/archiver-utils) |
 | async | 3.2.6 | MIT | [upstream](https://github.com/caolan/async) |
+| avalondock-web (vendored) | 0.1.0 @ 921b9a66cac88b07af6edb3ebd5cd47af500c900 | MIT | [upstream](https://github.com/wieslawsoltes/Dockyard) |
 | b4a | 1.8.1 | Apache-2.0 | [upstream](https://github.com/holepunchto/b4a) |
 | balanced-match | 4.0.4 | MIT | [upstream](https://github.com/juliangruber/balanced-match) |
 | brace-expansion | 5.0.9 | MIT | [upstream](https://github.com/juliangruber/brace-expansion) |
@@ -117,10 +123,15 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 
 The following published packages declare the listed SPDX license in their package metadata but do not ship a separate license text:
 
+- @justybase/database-runtime@3.16.8 — Apache-2.0
 - @justybase/duckdb-runtime@3.16.8 — Apache-2.0
+- @justybase/metadata-core@3.17.14 — Apache-2.0
 - @justybase/netezza-runtime@3.16.8 — Apache-2.0
+- @justybase/result-core@3.17.14 — Apache-2.0
 - @justybase/sql-core@3.16.8 — Apache-2.0
 - @justybase/sqlite-runtime@3.16.8 — Apache-2.0
+- @justybase/ui-core@3.17.14 — Apache-2.0
+- @justybase/ui-react@3.17.14 — Apache-2.0
 
 ## Included license texts
 
@@ -886,6 +897,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+### avalondock-web (vendored)@0.1.0 @ 921b9a66cac88b07af6edb3ebd5cd47af500c900
+
+```text
+MIT License
+
+Copyright (c) 2026 AvalonDock Web contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### balanced-match@4.0.4

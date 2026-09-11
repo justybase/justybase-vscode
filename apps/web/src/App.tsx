@@ -1,29 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import type { ConnectionProfileSummary, EditorPreferences, MetadataColumn, MetadataDatabase, SchemaTreeNode, WebUser } from '@justybase/contracts';
 import { AsyncStateView } from '@justybase/ui-react';
 import { ApiClientProvider, createApiClient, useApiClient, type ApiClient, type QueryEventSubscription } from './api';
 import { emptyResult } from './queryState';
 import { registerSqlLanguageFeatures } from './sqlLanguage';
-import { SchemaTree } from './SchemaTree';
-import { ResultGrid } from './ResultGrid';
-import { InspectorPanel } from './InspectorPanel';
 import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
 import { EditRowPanel } from './EditRowPanel';
-import { ExplainPanel } from './ExplainPanel';
 import { AdminPanel } from './AdminPanel';
-import { EditorToolbar, type RunMode } from './EditorToolbar';
+import type { RunMode } from './EditorToolbar';
 import { useSplitPane } from './useSplitPane';
 import { createWorkspaceStorage, migrateLegacyWorkspace, useWorkspaceStorage, WorkspaceStorageProvider, type WorkspaceStorage } from './workspacePersistence';
 import { canEditActiveResult, workspaceDatabase } from './workspaceConnectionController';
-import { restoreEditorWorkspace, newEditorTab, type EditorTab, type ExecutionInput, type StatementExecutionStatus } from './workspaceDocumentController';
-import { applyEventToEditorTab, clearLiveQueryState, statementStateFor, statementStatusClass, statementStatusLabel } from './workspaceExecutionController';
+import { restoreEditorWorkspace, newEditorTab, type EditorTab, type ExecutionInput } from './workspaceDocumentController';
+import { applyEventToEditorTab, clearLiveQueryState } from './workspaceExecutionController';
 import { persistDraft, persistEditorWorkspace, readPersistedNumber, resetPersistedWorkspaceLayout } from './workspacePersistenceController';
-import { AuditPanel, ConnectionForm, EditorSettings, HistoryPanel, Login, StatusBar } from './workspacePanels';
+import { AuditPanel, ConnectionForm, EditorSettings, Login } from './workspacePanels';
 import { configuredWebUiMode, SharedWebWorkspace } from './sharedUiAdapter';
+import { DockyardWorkspace } from './dockyard/DockyardWorkspace';
+import { LegacyWorkspaceRecovery } from './dockyard/LegacyWorkspaceRecovery';
 
 interface PendingQueryStart {
   readonly tabId: string;
@@ -50,9 +47,16 @@ function AuthenticatedApp(): ReactElement {
   const [user, setUser] = useState<WebUser | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => { void api.me().then(response => setUser(response.user)).catch(() => undefined).finally(() => setLoading(false)); }, []);
+  const invalidateSession = useCallback(async (): Promise<void> => {
+    try {
+      await api.logout();
+    } finally {
+      setUser(null);
+    }
+  }, [api]);
   if (loading) return <AsyncStateView state="loading" loadingLabel="Loading JustyBase…" />;
   if (!user) return <Login onLogin={setUser} />;
-  if (configuredWebUiMode() === 'shared') return <SharedWebWorkspace api={api} user={user} onLogout={() => setUser(null)} />;
+  if (configuredWebUiMode() === 'shared') return <SharedWebWorkspace api={api} user={user} onLogout={() => { void invalidateSession(); }} />;
   return <Workspace user={user} onLogout={() => setUser(null)} />;
 }
 
@@ -90,19 +94,17 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const [columns, setColumns] = useState<MetadataColumn[]>([]);
   const [inspectedObject, setInspectedObject] = useState<SchemaTreeNode | null>(null);
   const [designerTarget, setDesignerTarget] = useState<SchemaTreeNode | null>(null);
-  const [showInspector, setShowInspector] = useState(false);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | null>(null);
   const [editRow, setEditRow] = useState<unknown[] | null>(null);
   const [databases, setDatabases] = useState<MetadataDatabase[]>([]);
   const [lastQueryTime, setLastQueryTime] = useState<number | null>(null);
   const [overwrite, setOverwrite] = useState(false);
 
-  // Split pane sizes — persisted in localStorage
-  const sidebar = useSplitPane('horizontal', readPersistedNumber(storage, 'sidebar', 250), 160, 500);
+  // Dockyard owns explorer/tool geometry; the query/result split remains a
+  // product-level preference and is migrated from editor_pct.
   const editorSplit = useSplitPane('vertical', readPersistedNumber(storage, 'editor_pct', 45), 20, 80);
   const [showConnectionForm, setShowConnectionForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<Awaited<ReturnType<ApiClient['history']>>>([]);
   const [showAudit, setShowAudit] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -119,24 +121,12 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const activeQueryIdsRef = useRef(new Map<string, Set<string>>());
   const savedConnectionIdRef = useRef<string | null>(null);
   const savedDatabaseRef = useRef('');
+  const editorRefs = useRef(new Map<string, Monaco.editor.IStandaloneCodeEditor>());
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const dockyardResetRef = useRef<(() => void) | undefined>(undefined);
   const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
-  const sql = activeTab?.sql ?? '';
-  const result = activeTab?.results[activeTab.activeStatementIndex] ?? emptyResult;
   const activeQueryId = activeTab?.queryId ?? '';
-  const busy = activeTab?.running === true;
-  const statementIndexes = activeTab
-    ? Array.from(new Set([...Object.keys(activeTab.results), ...Object.keys(activeTab.statementStates)]).values(), Number).sort((a, b) => a - b)
-    : [];
-  const batchStatementCount = activeTab?.batchStatementCount ?? statementIndexes.length;
-  const isBatchResult = batchStatementCount > 1 || statementIndexes.length > 1;
-  const batchStates = statementIndexes.map(index => statementStateFor(activeTab!, index));
-  const batchStatusCounts = batchStates.reduce<Record<StatementExecutionStatus, number>>((counts, state) => {
-    counts[state.status] += 1;
-    return counts;
-  }, { pending: 0, running: 0, success: 0, error: 0, cancelled: 0, skipped: 0 });
-  const batchVisualStatus = activeTab?.batchStatus ?? (busy && isBatchResult ? 'running' : undefined);
-  const batchExecutedCount = batchStatusCounts.success + batchStatusCounts.error + batchStatusCounts.cancelled;
-  const failedStatementIndex = statementIndexes.find(index => statementStateFor(activeTab!, index).status === 'error');
+  const result = activeTab?.results[activeTab.activeStatementIndex] ?? emptyResult;
 
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
 
@@ -257,8 +247,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
 
   useEffect(() => { if (!selected) return; void api.databases(selected.id).then(setDatabases).catch(() => undefined); }, [selected?.id]);
 
-  // Persist panel sizes
-  useEffect(() => { storage.set('sidebar', String(sidebar.size)); }, [sidebar.size, storage]);
+  // Dockyard persists its own explorer/tool geometry in its versioned layout.
   useEffect(() => { storage.set('editor_pct', String(editorSplit.size)); }, [editorSplit.size, storage]);
 
   // Persist connection selection
@@ -284,8 +273,11 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const handleCancelRef = useRef(handleCancel);
   handleCancelRef.current = handleCancel;
 
-  function handleCancel(): void {
-    if (activeQueryId) { void api.cancelQuery(activeQueryId); }
+  function handleCancel(targetTabId = activeTabId): void {
+    const targetTab = tabs.find(tab => tab.id === targetTabId);
+    const queryIds = new Set<string>(targetTab?.queryId ? [targetTab.queryId] : []);
+    for (const queryId of activeQueryIdsRef.current.get(targetTabId) ?? []) queryIds.add(queryId);
+    for (const queryId of queryIds) void api.cancelQuery(queryId).catch(() => undefined);
   }
 
   // Keyboard shortcuts
@@ -295,7 +287,6 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
       if (e.key === 'Escape') {
         if (showConnectionForm || editingConnection) { e.preventDefault(); setEditingConnection(null); setShowConnectionForm(false); return; }
         if (showSettings) { e.preventDefault(); setShowSettings(false); return; }
-        if (showHistory) { e.preventDefault(); setShowHistory(false); return; }
         if (showAudit) { e.preventDefault(); setShowAudit(false); return; }
         if (showAdmin) { e.preventDefault(); setShowAdmin(false); return; }
         if (importTarget) { e.preventDefault(); setImportTarget(null); return; }
@@ -341,7 +332,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     }
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTabId, editRow, editingConnection, importTarget, showAdmin, showAudit, showConnectionForm, showHistory, showSettings]);
+  }, [activeTabId, editRow, editingConnection, importTarget, showAdmin, showAudit, showConnectionForm, showSettings]);
 
   function saveConnection(connection: ConnectionProfileSummary): void {
     setConnections(previous => previous.some(item => item.id === connection.id) ? previous.map(item => item.id === connection.id ? connection : item) : [...previous, connection]);
@@ -356,29 +347,68 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     try { await api.deleteConnection(connection.id); setConnections(previous => previous.filter(item => item.id !== connection.id)); if (selected?.id === connection.id) setSelected(null); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Could not delete connection.'); }
   }
 
-  function executionInput(mode: RunMode): ExecutionInput | null {
-    if (!selected || !activeTab) return null;
-    const editor = editorRef.current;
+  function handleEditorReady(tabId: string, editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco): void {
+    editorRefs.current.set(tabId, editor);
+    if (tabId === activeTabId) editorRef.current = editor;
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      handleRunRef.current('run', tabId);
+    });
+    registerSqlLanguageFeatures(editor, monaco, api, () => ({
+      connectionId: tabsRef.current.find(tab => tab.id === tabId)?.connectionId,
+      database: tabsRef.current.find(tab => tab.id === tabId)?.database ?? '',
+      schema: tabsRef.current.find(tab => tab.id === tabId)?.schema ?? '',
+      databaseKind: connections.find(connection => connection.id === tabsRef.current.find(tab => tab.id === tabId)?.connectionId)?.dbType,
+    }), () => preferencesRef.current);
+  }
+
+  function handleEditorDispose(tabId: string): void {
+    editorRefs.current.delete(tabId);
+    if (tabId === activeTabId) editorRef.current = null;
+  }
+
+  const overwriteByTabRef = useRef(new Map<string, boolean>());
+  function handleOverwriteChange(tabId: string, value: boolean): void {
+    overwriteByTabRef.current.set(tabId, value);
+    if (tabId === activeTabId) setOverwrite(value);
+  }
+
+  function activateTab(tabId: string): void {
+    if (!tabs.some(tab => tab.id === tabId)) return;
+    setActiveTabId(tabId);
+    editorRef.current = editorRefs.current.get(tabId) ?? null;
+    setOverwrite(overwriteByTabRef.current.get(tabId) ?? false);
+  }
+
+  function executionInput(mode: RunMode, targetTabId = activeTabId): ExecutionInput | null {
+    const targetTab = tabs.find(tab => tab.id === targetTabId);
+    if (!targetTab) return null;
+    const targetConnection = targetTab.connectionId
+      ? connections.find(connection => connection.id === targetTab.connectionId)
+      : selected;
+    if (!targetConnection) return null;
+    const targetDatabase = targetTab.database ?? workspaceDatabase(targetConnection);
+    const editor = editorRefs.current.get(targetTabId) ?? (targetTabId === activeTabId ? editorRef.current : null);
     const model = editor?.getModel();
     const selection = editor?.getSelection();
     const selectedSql = model && selection && !selection.isEmpty() ? model.getValueInRange(selection) : '';
+    const targetSql = model?.getValue() ?? targetTab.sql;
     if (mode === 'explain') {
-      const base = executionInput('run');
+      const base = executionInput('run', targetTabId);
       if (!base || !base.sql.trim()) return null;
       return { ...base, mode: 'explain' };
     }
     if (mode === 'run') {
-      if (selectedSql.trim()) return { connectionId: selected.id, database, sql: selectedSql, mode: 'single' };
-      return { connectionId: selected.id, database, sql, mode: 'single', cursorOffset: model && editor?.getPosition() ? model.getOffsetAt(editor.getPosition()!) : undefined };
+      if (selectedSql.trim()) return { connectionId: targetConnection.id, database: targetDatabase, sql: selectedSql, mode: 'single' };
+      return { connectionId: targetConnection.id, database: targetDatabase, sql: targetSql, mode: 'single', cursorOffset: model && editor?.getPosition() ? model.getOffsetAt(editor.getPosition()!) : undefined };
     }
-    if (mode === 'smart' && !selectedSql.trim()) return executionInput('run');
-    return { connectionId: selected.id, database, sql: mode === 'smart' ? selectedSql : sql, mode: 'script' };
+    if (mode === 'smart' && !selectedSql.trim()) return executionInput('run', targetTabId);
+    return { connectionId: targetConnection.id, database: targetDatabase, sql: mode === 'smart' ? selectedSql : targetSql, mode: 'script' };
   }
 
   async function runQuery(mode: 'run' | 'smart' | 'batch' = 'run', inputOverride?: ExecutionInput, targetTabId = activeTabId): Promise<{ queryId: string; statementIndex: number; status: 'complete' | 'error' | 'cancelled' }> {
-    if (!selected) throw new Error('Select a connection first.');
-    const input = inputOverride ?? executionInput(mode);
+    const input = inputOverride ?? executionInput(mode, targetTabId);
     if (!input) throw new Error('No active editor tab.');
+    if (!connections.some(connection => connection.id === input.connectionId)) throw new Error('Select a connection first.');
     const tabId = targetTabId;
     setError('');
     setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, results: {}, activeStatementIndex: 0, queryId: undefined, running: true, statementStates: {}, batchStatus: undefined, batchMessage: undefined, batchCompletedStatements: undefined, batchStatementCount: undefined } : tab));
@@ -466,11 +496,11 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   }
 
   /** Run query, then export results. */
-  async function runAndExport(format: 'csv' | 'xlsx' | 'xlsb'): Promise<void> {
-    if (!selected) { setError('Select a connection first.'); return; }
+  async function runAndExport(format: 'csv' | 'xlsx' | 'xlsb', targetTabId = activeTabId): Promise<void> {
+    if (!executionInput('run', targetTabId)) { setError('Select a connection first.'); return; }
     setError('');
     try {
-      const outcome = await runQuery('run');
+      const outcome = await runQuery('run', undefined, targetTabId);
       if (outcome.status !== 'complete') throw new Error(outcome.status === 'cancelled' ? 'Query cancelled.' : 'Query failed.');
       const { blob, fileName } = await api.exportQuery(outcome.queryId, {
         statementIndex: outcome.statementIndex,
@@ -488,62 +518,66 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     }
   }
 
-  function retryStatement(index: number): void {
-    const statement = activeTab?.statementStates[index];
+  function retryStatement(index: number, targetTabId = activeTabId): void {
+    const targetTab = tabs.find(tab => tab.id === targetTabId);
+    const statement = targetTab?.statementStates[index];
     const statementSql = statement?.sql;
-    if (!selected || !activeTab || !statementSql?.trim()) {
+    const targetConnection = targetTab?.connectionId ? connections.find(connection => connection.id === targetTab.connectionId) : selected;
+    if (!targetConnection || !targetTab || !statementSql?.trim()) {
       setError('The failed statement text is unavailable for retry.');
       return;
     }
     const id = `retry-${Date.now()}`;
-    const retryInput: ExecutionInput = { connectionId: selected.id, database: activeTab.database ?? database, sql: statementSql, mode: 'single' };
-    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: `Retry · Statement ${index + 1}`, sql: statementSql, connectionId: selected.id, database: retryInput.database, schema: activeTab.schema }]);
-    setActiveTabId(id);
+    const retryInput: ExecutionInput = { connectionId: targetConnection.id, database: targetTab.database ?? workspaceDatabase(targetConnection), sql: statementSql, mode: 'single' };
+    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: `Retry · Statement ${index + 1}`, sql: statementSql, connectionId: targetConnection.id, database: retryInput.database, schema: targetTab.schema }]);
+    activateTab(id);
     void runQuery('run', retryInput, id).catch(reason => setError(reason instanceof Error ? reason.message : 'Retry failed.'));
   }
 
-  function handleRun(mode: RunMode): void {
-    if (mode === 'export-csv') { void runAndExport('csv'); }
-    else if (mode === 'export-xlsx') { void runAndExport('xlsx'); }
-    else if (mode === 'export-xlsb') { void runAndExport('xlsb'); }
+  function handleRun(mode: RunMode, targetTabId = activeTabId): void {
+    if (mode === 'export-csv') { void runAndExport('csv', targetTabId); }
+    else if (mode === 'export-xlsx') { void runAndExport('xlsx', targetTabId); }
+    else if (mode === 'export-xlsb') { void runAndExport('xlsb', targetTabId); }
     else if (mode === 'explain') {
-      const input = executionInput(mode);
+      const input = executionInput(mode, targetTabId);
       if (input) {
-        setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, resultView: 'explain' } : tab));
-        void runQuery('run', input).catch(() => undefined);
+        setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, resultView: 'explain' } : tab));
+        void runQuery('run', input, targetTabId).catch(() => undefined);
       }
     } else {
-      setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, resultView: 'grid' } : tab));
-      void runQuery(mode).catch(() => undefined);
+      setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, resultView: 'grid' } : tab));
+      void runQuery(mode, undefined, targetTabId).catch(() => undefined);
     }
   }
 
-  async function handleSave(): Promise<void> {
-    const active = tabs.find(t => t.id === activeTabId);
+  async function handleSave(targetTabId = activeTabId): Promise<void> {
+    const active = tabs.find(t => t.id === targetTabId);
     if (!active) return;
-    if (preferences?.formatOnSave) await editorRef.current?.getAction('editor.action.formatDocument')?.run();
-    const savedSql = editorRef.current?.getValue() ?? active.sql;
+    const editor = editorRefs.current.get(targetTabId) ?? (targetTabId === activeTabId ? editorRef.current : null);
+    if (preferences?.formatOnSave) await editor?.getAction('editor.action.formatDocument')?.run();
+    const savedSql = editor?.getValue() ?? active.sql;
     try {
       persistDraft(storage, savedSql);
     } catch { /* ignore */ }
-    setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, sql: savedSql, dirty: false } : t));
+    setTabs(prev => prev.map(t => t.id === targetTabId ? { ...t, sql: savedSql, dirty: false } : t));
   }
 
-  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
-
-  function handleFormat(): void {
-    void editorRef.current?.getAction('editor.action.formatDocument')?.run();
+  function handleFormat(targetTabId = activeTabId): void {
+    const editor = editorRefs.current.get(targetTabId) ?? (targetTabId === activeTabId ? editorRef.current : null);
+    void editor?.getAction('editor.action.formatDocument')?.run();
   }
 
-  function handleComment(): void {
-    const ed = editorRef.current;
+  function handleComment(targetTabId = activeTabId): void {
+    const targetTab = tabs.find(tab => tab.id === targetTabId);
+    if (!targetTab) return;
+    const ed = editorRefs.current.get(targetTabId) ?? (targetTabId === activeTabId ? editorRef.current : null);
     if (ed) {
       // Use Monaco's built-in comment action (respects selection)
       ed.getAction('editor.action.commentLine')?.run();
       return;
     }
     // Fallback: toggle -- on every line
-    const lines = sql.split('\n');
+    const lines = targetTab.sql.split('\n');
     const allCommented = lines.every(l => l.trim() === '' || l.trim().startsWith('--'));
     updateSql(lines.map(l => {
       const trimmed = l.trimStart();
@@ -554,12 +588,12 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
         return l.startsWith(' ') || l.startsWith('\t') ? l.replace(/^(\s*)/, '$1-- ') : `-- ${l}`;
       }
       return l;
-    }).join('\n'));
+    }).join('\n'), targetTabId);
   }
 
-  function updateSql(nextSql: string): void { setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, sql: nextSql, dirty: true, source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab)); setInspectedObject(null); }
-  function insertSql(value: string): void {
-    const editor = editorRef.current;
+  function updateSql(nextSql: string, targetTabId = activeTabId): void { setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, sql: nextSql, dirty: true, source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab)); setInspectedObject(null); }
+  function insertSql(value: string, targetTabId = activeTabId): void {
+    const editor = editorRefs.current.get(targetTabId) ?? (targetTabId === activeTabId ? editorRef.current : null);
     const model = editor?.getModel();
     if (editor && model) {
       const selection = editor.getSelection() ?? model.getFullModelRange();
@@ -567,17 +601,18 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
       editor.focus();
       return;
     }
-    updateSql(`${sql}${value}`);
+    const targetTab = tabs.find(tab => tab.id === targetTabId);
+    updateSql(`${targetTab?.sql ?? ''}${value}`, targetTabId);
   }
   function addTab(): void {
     const id = `query-${Date.now()}`;
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), connectionId: selected?.id, database: selected ? workspaceDatabase(selected) : database }]);
-    setActiveTabId(id);
+    activateTab(id);
   }
-  function closeTab(id: string): void {
+  function closeTab(id: string): boolean {
     const tab = tabs.find(item => item.id === id);
-    if (!tab || tabs.length === 1) return;
-    if (tab.dirty && !window.confirm(`Close modified tab “${tab.title}”?`)) return;
+    if (!tab || tabs.length === 1) return false;
+    if (tab.dirty && !window.confirm(`Close modified tab “${tab.title}”?`)) return false;
     const queryIds = new Set<string>();
     if (tab.queryId) queryIds.add(tab.queryId);
     for (const queryId of activeQueryIdsRef.current.get(id) ?? []) queryIds.add(queryId);
@@ -593,7 +628,10 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     const index = tabs.findIndex(item => item.id === id);
     const next = tabs.filter(item => item.id !== id);
     setTabs(next);
-    if (id === activeTabId) setActiveTabId(next[Math.max(0, index - 1)]?.id ?? next[0]!.id);
+    editorRefs.current.delete(id);
+    overwriteByTabRef.current.delete(id);
+    if (id === activeTabId) activateTab(next[Math.max(0, index - 1)]?.id ?? next[0]!.id);
+    return true;
   }
   function contextChanged(nextDatabase?: string, nextSchema?: string): void {
     const nextDb = nextDatabase ?? '';
@@ -608,7 +646,6 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     setSchema(node.schema);
     setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, database: node.database, schema: node.schema, source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
     setInspectedObject(node);
-    setShowInspector(true);
     setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, source: node } : tab));
     void api.columns(selected.id, node.database, node.schema, node.objectName).then(setColumns).catch(reason =>
       setError(reason instanceof Error ? reason.message : 'Could not load columns.')
@@ -621,270 +658,195 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
       return;
     }
     setDesignerTarget(node);
-    setShowInspector(false);
   }
-  function selectColumn(column: MetadataColumn): void { insertSql(column.name); }
+  function selectColumn(column: MetadataColumn): void { insertSql(column.name, activeTabId); }
   function openSchemaQuery(nextSql: string, title: string, node: SchemaTreeNode): void {
     const id = `schema-${Date.now()}`;
     const queryInput = { connectionId: selected?.id ?? '', database: node.database ?? database, sql: nextSql, mode: 'single' as const };
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title, sql: nextSql, connectionId: selected?.id, database: queryInput.database, schema: node.schema, source: node, sourceSql: nextSql, sourceConnectionId: selected?.id, sourceDatabase: queryInput.database, resultView: title.toLowerCase().startsWith('explain') ? 'explain' : 'grid' }]);
-    setActiveTabId(id);
+    activateTab(id);
     void runQuery('run', queryInput, id).catch(reason => setError(reason instanceof Error ? reason.message : 'Could not run schema query.'));
   }
 
   function resetLayout(): void {
-    sidebar.setSize(250);
     editorSplit.setSize(45);
     try { resetPersistedWorkspaceLayout(storage); } catch { /* ignore */ }
+    dockyardResetRef.current?.();
   }
 
-  function selectConnection(id: string): void {
+  function selectConnection(id: string, targetTabId = activeTabId): void {
     const conn = connections.find(c => c.id === id);
     if (conn) {
       setSelected(conn);
       setDatabase(workspaceDatabase(conn));
       setSchema('');
       setColumns([]);
-      setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, connectionId: conn.id, database: workspaceDatabase(conn), schema: '', source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
+      setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, connectionId: conn.id, database: workspaceDatabase(conn), schema: '', source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
       setInspectedObject(null);
     }
   }
 
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">JustyBase</div>
-        <div className="workspace-title">Netezza SQL Workspace</div>
-        <div className="topbar-user">
-          <button className="secondary small" onClick={() => { setShowHistory(true); void api.history().then(setHistory); }}>History</button>
-          <button className="secondary small" onClick={() => { setShowAudit(true); void api.audit().then(setAudit).catch(reason => setError(reason instanceof Error ? reason.message : 'Could not load audit log.')); }}>Audit</button>
-          {user.role === 'admin' && <button className="secondary small" onClick={() => setShowAdmin(true)}>Admin</button>}
-          <button className="secondary small" onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          <span>{user.username}</span>
-          <button className="secondary small" onClick={() => void handleLogout()}>Log out</button>
-        </div>
-      </header>
+  function selectDatabase(nextDatabase: string, targetTabId = activeTabId): void {
+    setDatabase(nextDatabase);
+    setSchema('');
+    setTabs(previous => previous.map(tab => tab.id === targetTabId
+      ? { ...tab, database: nextDatabase, schema: '', source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined }
+      : tab));
+    setColumns([]);
+    setInspectedObject(null);
+  }
 
-      <div className="workspace" ref={sidebar.containerRef}>
-        {/* ── Left panel (sidebar) ── */}
-        <aside className="sidebar" style={{ width: `${sidebar.size}px` }}>
-          <div className="sidebar-section">
-            <div className="section-title">
-              Connections
-              <button className="icon-button" onClick={() => { setEditingConnection(null); setShowConnectionForm(value => !value); }}>+</button>
-            </div>
-            {connections.map(connection => (
-              <div className="connection-row-wrap" key={connection.id}>
-                <button className={`tree-row connection-row ${selected?.id === connection.id ? 'active' : ''}`}
-                  onClick={() => selectConnection(connection.id)}
-                >
-                  <span className="status-dot" />{connection.name}
-                </button>
-                <div className="connection-actions">
-                  <button title="Edit connection" onClick={() => { setEditingConnection(connection); setShowConnectionForm(false); }}>✎</button>
-                  <button title="Delete connection" onClick={() => void deleteConnection(connection)}>×</button>
-                </div>
-              </div>
-            ))}
-          </div>
-          {selected ? (
-            <SchemaTree
-              connectionId={selected.id}
-              database={database}
-              databaseKind={selected.dbType}
-              onInsert={insertSql}
-              onContextChange={contextChanged}
-              onObjectSelect={selectObject}
-              onOpenDesigner={openObjectDesigner}
-              onOpenQuery={openSchemaQuery}
-              onImport={node => setImportTarget(node)}
-            />
-          ) : (
-            <div className="sidebar-empty-state"><strong>No connections</strong><span>Add a connection to browse its schema.</span><button type="button" className="secondary small" onClick={() => { setEditingConnection(null); setShowConnectionForm(true); }}>Add connection</button></div>
-          )}
-        </aside>
+  function openHistoryEntry(entry: Awaited<ReturnType<ApiClient['history']>>[number]): void {
+    const id = `history-${entry.id}`;
+    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: 'History query', sql: entry.sql, connectionId: entry.connectionId, database: entry.database }]);
+    activateTab(id);
+  }
 
-        {/* Resize handle */}
-        <div className="split-handle split-handle-h" onMouseDown={sidebar.onMouseDown} />
+  function openAudit(): void {
+    setShowAudit(true);
+    void api.audit().then(setAudit).catch(reason => setError(reason instanceof Error ? reason.message : 'Could not load audit log.'));
+  }
 
-        {/* ── Center area ── */}
-        <main className="editor-area">
-          {/* Editor tabs */}
-          <div className="editor-tabs">
-            {tabs.map(tab => (
-              <button className={`editor-tab ${tab.id === activeTabId ? 'active' : ''}`} key={tab.id} onClick={() => setActiveTabId(tab.id)}>
-                {tab.title}{tab.dirty ? ' •' : ''}
-                <span className="editor-tab-close" onClick={event => { event.stopPropagation(); closeTab(tab.id); }}>×</span>
-              </button>
-            ))}
-            <button className="editor-tab-add" onClick={addTab}>+</button>
-          </div>
+  const registerDockyardReset = useCallback((reset: (() => void) | undefined): void => {
+    dockyardResetRef.current = reset;
+  }, []);
 
-          {/* New toolbar */}
-          <EditorToolbar
-            connectionId={selected?.id ?? ''}
-            database={database}
-            connections={connections}
-            databases={databases}
-            onSelectConnection={selectConnection}
-            onSelectDatabase={db => { setDatabase(db); setSchema(''); contextChanged(db, undefined); }}
-            onRun={handleRun}
-            onSave={handleSave}
-            onComment={handleComment}
-            onFormat={handleFormat}
-            isRunning={busy}
-            onCancel={handleCancel}
-          />
+  function openEditRow(tabId: string, values: unknown[]): void {
+    activateTab(tabId);
+    setEditRow(values);
+  }
 
-          {/* Editor + Results with vertical split */}
-          <div className="editor-split-container" ref={editorSplit.containerRef}>
-            <div className="editor" style={{ height: `${editorSplit.size}%` }}>
-              <Editor
-                height="100%"
-                language="sql"
-                theme="vs-dark"
-                value={sql}
-                onChange={value => updateSql(value ?? '')}
-                onMount={(editor, monaco) => {
-                  editorRef.current = editor;
-                  // Register Ctrl+Enter as a Monaco command for Run
-                  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-                    handleRunRef.current('run');
-                  });
-                  // Track INSERT/OVR mode
-              const isInsert = editor.getOption(monaco.editor.EditorOption.insertMode);
-              setOverwrite(!isInsert);
-              const disposable = editor.onKeyDown(e => {
-                if (e.keyCode === monaco.KeyCode.Insert) {
-                  setTimeout(() => {
-                    setOverwrite(!editor.getOption(monaco.editor.EditorOption.insertMode));
-                  }, 0);
-                }
-              });
-              editor.onDidDispose(() => disposable.dispose());
-                  registerSqlLanguageFeatures(editor, monaco, api, () => ({
-                    connectionId: selectedRef.current?.id,
-                    database: databaseRef.current,
-                    schema: schemaRef.current,
-                    databaseKind: selectedRef.current?.dbType,
-                  }), () => preferencesRef.current);
-                }}
-                options={{
-                  minimap: { enabled: preferences?.minimap ?? false },
-                  fontSize: preferences?.fontSize ?? 14,
-                  tabSize: preferences?.tabSize ?? 4,
-                  insertSpaces: preferences?.insertSpaces ?? true,
-                  wordWrap: preferences?.wordWrap ?? 'off',
-                  lineNumbers: preferences?.lineNumbers === false ? 'off' : 'on',
-                  formatOnType: preferences?.formatOnType ?? false,
-                  automaticLayout: true,
-                  padding: { top: 12 },
-                }}
-              />
-            </div>
+  const transientUi = <>
+    {(showConnectionForm || editingConnection) && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) { setEditingConnection(null); setShowConnectionForm(false); } }}>
+      <section className="modal-card connection-card" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title">
+        <div className="section-title"><span id="connection-dialog-title">{editingConnection ? 'Edit connection' : 'Add connection'}</span><button type="button" className="icon-button" aria-label="Close connection dialog" onClick={() => { setEditingConnection(null); setShowConnectionForm(false); }}>×</button></div>
+        <ConnectionForm initial={editingConnection ?? undefined} onCreated={saveConnection} onCancel={() => { setEditingConnection(null); setShowConnectionForm(false); }} />
+      </section>
+    </div>}
+    {showSettings && preferences && <EditorSettings value={preferences} onSave={next => { setPreferences(next); setShowSettings(false); }} onClose={() => setShowSettings(false)} onResetLayout={resetLayout} />}
+    {showAudit && <AuditPanel entries={audit} onClose={() => setShowAudit(false)} />}
+    {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+    {designerTarget && selected && <ObjectDesigner
+      connectionId={selected.id}
+      database={designerTarget.database ?? database}
+      databaseKind={selected.dbType}
+      target={designerTarget}
+      onClose={() => setDesignerTarget(null)}
+      onApplied={() => { setError('Object designer change submitted. Refresh the schema to see the new definition.'); setDesignerTarget(null); }}
+    />}
+    {importTarget && selected && <ImportPanel connectionId={selected.id} database={database} target={importTarget} onClose={() => setImportTarget(null)} onCompleted={() => { setImportTarget(null); setInspectedObject(importTarget); }} />}
+    {editRow && activeTab?.source && selected && canEditActiveResult(activeTab, result, selected) && <EditRowPanel connectionId={selected.id} database={activeTab.database ?? database} target={activeTab.source} columns={result.columns} columnTypes={result.columnTypes} values={editRow} onClose={() => setEditRow(null)} onCompleted={message => { setEditRow(null); setError(message); void runQuery('run').catch(() => undefined); }} />}
+  </>;
 
-            {/* Vertical resize handle */}
-            <div className="split-handle split-handle-v" onMouseDown={editorSplit.onMouseDown} />
+  const recoveryContent = (reason: string): ReactElement => <LegacyWorkspaceRecovery
+    user={user}
+    storage={storage}
+    tabs={tabs}
+    activeTabId={activeTabId}
+    connections={connections}
+    selected={selected}
+    database={database}
+    schema={schema}
+    columns={columns}
+    inspectedObject={inspectedObject}
+    databases={databases}
+    preferences={preferences}
+    error={error}
+    lastQueryTime={lastQueryTime}
+    overwrite={overwrite}
+    editorSplit={editorSplit}
+    onEditorReady={handleEditorReady}
+    onEditorDispose={handleEditorDispose}
+    onOverwriteChange={handleOverwriteChange}
+    onActivateTab={activateTab}
+    onCloseTab={closeTab}
+    onAddTab={addTab}
+    onUpdateSql={(tabId, nextSql) => updateSql(nextSql, tabId)}
+    onRun={(tabId, mode) => handleRun(mode, tabId)}
+    onSave={handleSave}
+    onComment={handleComment}
+    onFormat={handleFormat}
+    onCancel={handleCancel}
+    onSelectStatement={(tabId, statementIndex) => setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, activeStatementIndex: statementIndex } : tab))}
+    onRetryStatement={(tabId, statementIndex) => retryStatement(statementIndex, tabId)}
+    onSelectConnection={(tabId, connectionId) => { activateTab(tabId); selectConnection(connectionId, tabId); }}
+    onSelectDatabase={(tabId, nextDatabase) => { activateTab(tabId); selectDatabase(nextDatabase, tabId); }}
+    onInsertSql={value => insertSql(value, activeTabId)}
+    onContextChange={contextChanged}
+    onObjectSelect={selectObject}
+    onOpenDesigner={openObjectDesigner}
+    onOpenQuery={openSchemaQuery}
+    onImport={node => setImportTarget(node)}
+    onInsertColumn={selectColumn}
+    onEditRow={openEditRow}
+    onOpenConnectionForm={() => { setEditingConnection(null); setShowConnectionForm(true); }}
+    onEditConnection={connection => { setEditingConnection(connection); setShowConnectionForm(false); }}
+    onDeleteConnection={connection => { void deleteConnection(connection); }}
+    onHistoryRefresh={() => { void api.history().then(setHistory).catch(() => undefined); }}
+    history={history}
+    onHistoryOpen={openHistoryEntry}
+    onOpenAudit={openAudit}
+    onOpenAdmin={() => setShowAdmin(true)}
+    onOpenSettings={() => setShowSettings(true)}
+    onLogout={() => { void handleLogout(); }}
+    transientUi={transientUi}
+    recoveryReason={reason}
+    onRetryDockyard={() => window.location.reload()}
+  />;
 
-            <section className="results" style={{ height: `${100 - editorSplit.size}%` }}>
-              {error && <div className="error-banner">{error}</div>}
-              <div className="results-header">
-                <strong>Results</strong>
-                <div className="result-statement-tabs">
-                  {statementIndexes.map(index => {
-                    const state = statementStateFor(activeTab!, index);
-                    return <button key={index} className={`secondary small statement-tab ${activeTab?.activeStatementIndex === index ? 'active' : ''}`} title={state.sql ?? `Statement ${index + 1}`} aria-label={`Statement ${index + 1}: ${statementStatusLabel(state.status)}`} onClick={() => setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, activeStatementIndex: index } : tab))}>
-                      <span>Statement {index + 1}</span><span className={statementStatusClass(state.status)}>{statementStatusLabel(state.status)}</span>
-                    </button>;
-                  })}
-                </div>
-                <span className={`result-status result-status-${result.status.startsWith('complete') ? 'complete' : result.status}`}>{result.status}{result.totalRows >= 0 ? ` · ${result.totalRows.toLocaleString()} rows` : ''}</span>
-              </div>
-              {isBatchResult && activeTab && <div className={`batch-summary ${batchVisualStatus ? `batch-summary-${batchVisualStatus}` : ''}`} role="status">
-                <div className="batch-summary-heading"><strong>{batchVisualStatus === 'running' ? 'Running batch' : 'Batch complete'}</strong><span>{batchExecutedCount} of {batchStatementCount} statements executed</span></div>
-                <div className="batch-summary-counts">
-                  <span className="batch-count batch-count-success">{batchStatusCounts.success} succeeded</span>
-                  <span className="batch-count batch-count-error">{batchStatusCounts.error} failed</span>
-                  <span className="batch-count batch-count-skipped">{batchStatusCounts.skipped} skipped</span>
-                  {batchStatusCounts.cancelled > 0 && <span className="batch-count batch-count-cancelled">{batchStatusCounts.cancelled} cancelled</span>}
-                </div>
-                {activeTab.batchMessage && <span className="batch-summary-message">{activeTab.batchMessage}</span>}
-                {failedStatementIndex !== undefined && <button type="button" className="secondary small batch-retry" onClick={() => retryStatement(failedStatementIndex)}>Retry failed statement</button>}
-              </div>}
-              {result.message && <div className={`${result.status === 'error' ? 'error' : 'result-notice'} result-message`}>{result.message}</div>}
-              {activeTab?.resultView === 'explain' && activeQueryId && result.sessionId ? (
-                <ExplainPanel queryId={activeQueryId} statementIndex={activeTab.activeStatementIndex} result={result} />
-              ) : result.columns.length > 0 && activeQueryId && result.sessionId ? (
-                <ResultGrid queryId={activeQueryId} statementIndex={activeTab?.activeStatementIndex ?? 0} result={result} onEditRow={canEditActiveResult(activeTab, result, selected) ? row => setEditRow(row) : undefined} />
-              ) : (
-                <div className="empty-state" aria-live="polite">
-                  {!selected ? <><strong>No connection selected</strong><span>Add a connection to browse schema and run SQL.</span><button type="button" onClick={() => { setEditingConnection(null); setShowConnectionForm(true); }}>Add connection</button></> : result.status === 'idle' ? <><strong>Ready to run SQL</strong><span>Write a query or choose a table from the schema explorer.</span><small>Run with Ctrl/Cmd+Enter</small></> : result.status === 'running' ? <><span className="empty-state-spinner" aria-hidden="true" /> <strong>Preparing result session…</strong></> : <><strong>No tabular rows</strong><span>The statement completed without returning a result grid.</span></>}
-                </div>
-              )}
-            </section>
-          </div>
-        </main>
-
-        {/* ── Right panel (inspector) ── */}
-        {(showInspector && (inspectedObject || columns.length > 0)) ? <aside className="inspector">
-          <div className="inspector-toolbar"><span>Inspector</span><button type="button" className="icon-button" aria-label="Hide inspector" onClick={() => setShowInspector(false)}>×</button></div>
-          <InspectorPanel
-            database={database}
-            schema={schema}
-            columns={columns}
-            selectedObject={inspectedObject}
-            onInsertColumn={selectColumn}
-            connectionName={selected?.name}
-          />
-        </aside> : (inspectedObject || columns.length > 0) ? <button type="button" className="inspector-toggle" aria-label="Show inspector" onClick={() => setShowInspector(true)}>‹<span>Inspector</span></button> : null}
-      </div>
-
-      {(showConnectionForm || editingConnection) && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) { setEditingConnection(null); setShowConnectionForm(false); } }}>
-        <section className="modal-card connection-card" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title">
-          <div className="section-title"><span id="connection-dialog-title">{editingConnection ? 'Edit connection' : 'Add connection'}</span><button type="button" className="icon-button" aria-label="Close connection dialog" onClick={() => { setEditingConnection(null); setShowConnectionForm(false); }}>×</button></div>
-          <ConnectionForm initial={editingConnection ?? undefined} onCreated={saveConnection} onCancel={() => { setEditingConnection(null); setShowConnectionForm(false); }} />
-        </section>
-      </div>}
-      {showSettings && preferences && (
-        <EditorSettings
-          value={preferences}
-          onSave={next => { setPreferences(next); setShowSettings(false); }}
-          onClose={() => setShowSettings(false)}
-          onResetLayout={resetLayout}
-        />
-      )}
-      {showHistory && (
-        <HistoryPanel
-          entries={history}
-          onClose={() => setShowHistory(false)}
-          onOpen={entry => {
-            const id = `history-${entry.id}`;
-            setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: 'History query', sql: entry.sql, connectionId: entry.connectionId, database: entry.database }]);
-            setActiveTabId(id);
-            setShowHistory(false);
-          }}
-        />
-      )}
-      {showAudit && <AuditPanel entries={audit} onClose={() => setShowAudit(false)} />}
-      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
-      {designerTarget && selected && <ObjectDesigner
-        connectionId={selected.id}
-        database={designerTarget.database ?? database}
-        databaseKind={selected.dbType}
-        target={designerTarget}
-        onClose={() => setDesignerTarget(null)}
-        onApplied={() => { setError('Object designer change submitted. Refresh the schema to see the new definition.'); setDesignerTarget(null); }}
-      />}
-      {importTarget && selected && <ImportPanel connectionId={selected.id} database={database} target={importTarget} onClose={() => setImportTarget(null)} onCompleted={() => { setImportTarget(null); setInspectedObject(importTarget); }} />}
-      {editRow && activeTab?.source && selected && canEditActiveResult(activeTab, result, selected) && <EditRowPanel connectionId={selected.id} database={activeTab.database ?? database} target={activeTab.source} columns={result.columns} columnTypes={result.columnTypes} values={editRow} onClose={() => setEditRow(null)} onCompleted={message => { setEditRow(null); setError(message); void runQuery('run').catch(() => undefined); }} />}
-
-      {/* ── Status bar ── */}
-      <StatusBar
-        connectionName={selected?.name}
-        database={database}
-        lastQueryTime={lastQueryTime}
-        overwrite={overwrite}
-      />
-    </div>
-  );
+  return <DockyardWorkspace
+    user={user}
+    storage={storage}
+    tabs={tabs}
+    activeTabId={activeTabId}
+    connections={connections}
+    selected={selected}
+    database={database}
+    schema={schema}
+    columns={columns}
+    inspectedObject={inspectedObject}
+    databases={databases}
+    preferences={preferences}
+    error={error}
+    lastQueryTime={lastQueryTime}
+    overwrite={overwrite}
+    editorSplit={editorSplit}
+    onEditorReady={handleEditorReady}
+    onEditorDispose={handleEditorDispose}
+    onOverwriteChange={handleOverwriteChange}
+    onActivateTab={activateTab}
+    onCloseTab={closeTab}
+    onAddTab={addTab}
+    onUpdateSql={(tabId, nextSql) => updateSql(nextSql, tabId)}
+    onRun={(tabId, mode) => handleRun(mode, tabId)}
+    onSave={handleSave}
+    onComment={handleComment}
+    onFormat={handleFormat}
+    onCancel={handleCancel}
+    onSelectStatement={(tabId, statementIndex) => setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, activeStatementIndex: statementIndex } : tab))}
+    onRetryStatement={(tabId, statementIndex) => retryStatement(statementIndex, tabId)}
+    onSelectConnection={(tabId, connectionId) => { activateTab(tabId); selectConnection(connectionId, tabId); }}
+    onSelectDatabase={(tabId, nextDatabase) => { activateTab(tabId); selectDatabase(nextDatabase, tabId); }}
+    onInsertSql={value => insertSql(value, activeTabId)}
+    onContextChange={contextChanged}
+    onObjectSelect={selectObject}
+    onOpenDesigner={openObjectDesigner}
+    onOpenQuery={openSchemaQuery}
+    onImport={node => setImportTarget(node)}
+    onInsertColumn={selectColumn}
+    onEditRow={openEditRow}
+    onOpenConnectionForm={() => { setEditingConnection(null); setShowConnectionForm(true); }}
+    onEditConnection={connection => { setEditingConnection(connection); setShowConnectionForm(false); }}
+    onDeleteConnection={connection => { void deleteConnection(connection); }}
+    onHistoryRefresh={() => { void api.history().then(setHistory).catch(() => undefined); }}
+    history={history}
+    onHistoryOpen={openHistoryEntry}
+    onOpenAudit={openAudit}
+    onOpenAdmin={() => setShowAdmin(true)}
+    onOpenSettings={() => setShowSettings(true)}
+    onLogout={() => { void handleLogout(); }}
+    transientUi={transientUi}
+    recoveryContent={recoveryContent}
+    onDockyardResetRegistration={registerDockyardReset}
+  />;
 }

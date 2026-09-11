@@ -458,3 +458,54 @@ tbody tr:hover td { background: #1e293b; }
 .audit-entry small { color: #64748b; font-size: 10px; }
 @media (max-width: 1100px) { .workspace { grid-template-columns: 220px minmax(0, 1fr); } .inspector, .inspector-toggle { display: none; } }
 @media (max-width: 720px) { .workspace { grid-template-columns: minmax(0, 1fr); } .sidebar { display: none; } .topbar { gap: 10px; padding: 0 10px; } .workspace-title, .topbar-user > span { display: none; } .topbar-user { gap: 4px; } .topbar-user button { padding: 5px 7px; } .toolbar-center { margin: 0 4px; } .toolbar-right { max-width: 45%; } .tb-select { min-width: 0; max-width: 120px; } .connection-fields, .settings-grid { grid-template-columns: 1fr; } .settings-rule-label { grid-column: auto; } }
+
+/* ── Dockyard web workspace ───────────────────────── */
+.dockyard-shell { min-width: 0; min-height: 0; }
+.dockyard-shell > .topbar { flex: 0 0 48px; min-width: 0; }
+.dockyard-tool-buttons { display: flex; align-items: center; gap: 5px; min-width: 0; overflow-x: auto; }
+.dockyard-workspace-shell { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+.dockyard-host { position: absolute; inset: 0; min-width: 0; min-height: 0; }
+.dockyard-react-content-host { display: flex; flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.dockyard-query-document { display: flex; flex: 1 1 auto; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: #111827; }
+.dockyard-query-split-container { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.dockyard-query-editor { flex: 0 0 auto; width: 100%; min-height: 0; overflow: hidden; }
+.dockyard-query-results { flex: 1 1 auto; width: 100%; min-height: 0; border-top: 1px solid #374151; }
+.dockyard-query-results .result-statement-tabs { min-width: 0; }
+.dockyard-tool-content { display: flex; flex: 1 1 auto; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: #17202d; }
+.dockyard-tool-content.sidebar { border: 0; }
+.dockyard-connections-tool { overflow: auto; }
+.dockyard-schema-tool { overflow: hidden; }
+.dockyard-inspector-tool { padding: 0; overflow: hidden; }
+.dockyard-history-tool { padding: 12px; overflow: hidden; }
+.dockyard-history-tool .history-list { flex: 1; max-height: none; overflow: auto; }
+.dockyard-tool-heading { flex: 0 0 auto; }
+.dockyard-explain-tool { padding: 0; overflow: hidden; }
+.dockyard-empty-tool { align-items: center; justify-content: center; padding: 24px; text-align: center; }
+.dockyard-explorer-context { flex: 0 0 auto; padding: 8px 12px; border-top: 1px solid #2d3748; }
+.dockyard-init-error { position: absolute; z-index: 5; inset: 16px; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 24px; border: 1px solid #7f1d1d; border-radius: 8px; background: #1f2937; color: #fecaca; text-align: center; box-shadow: 0 12px 40px #0008; }
+.dockyard-init-error span { max-width: 620px; color: #fca5a5; font-size: 13px; }
+.dockyard-shell > .statusbar { flex: 0 0 24px; }
+@media (max-width: 900px) {
+  .dockyard-tool-buttons { flex: 1 1 auto; }
+  .dockyard-tool-buttons button { flex-shrink: 0; }
+  .dockyard-shell > .topbar { gap: 10px; padding: 0 10px; overflow: hidden; }
+  .dockyard-shell .workspace-title { display: none; }
+.dockyard-shell .topbar-user { flex-shrink: 0; }
+}
+.legacy-recovery-workspace { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; overflow: hidden; background: #111827; }
+.legacy-recovery-sidebar { width: 250px; flex: 0 0 250px; }
+.legacy-recovery-editor { min-width: 0; min-height: 0; flex: 1 1 auto; }
+.legacy-recovery-banner { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; padding: 7px 10px; border-bottom: 1px solid #7f1d1d; color: #fecaca; background: rgba(127,29,29,.25); font-size: 12px; }
+.legacy-recovery-banner span { min-width: 0; overflow: hidden; color: #fca5a5; text-overflow: ellipsis; white-space: nowrap; }
+.legacy-recovery-banner button { margin-left: auto; flex-shrink: 0; }
+.legacy-recovery-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 6px; padding: 6px 10px; border-bottom: 1px solid #374151; background: #1a2536; }
+.legacy-recovery-actions .muted { margin-right: auto; }
+.legacy-recovery-tabs { flex: 0 0 auto; }
+.legacy-recovery-editor > .dockyard-query-document { min-height: 0; }
+.legacy-recovery-inspector { width: 220px; flex: 0 0 220px; overflow: auto; }
+@media (max-width: 1100px) { .legacy-recovery-inspector { display: none; } }
+@media (max-width: 720px) {
+  .legacy-recovery-sidebar { display: none; }
+  .legacy-recovery-banner { align-items: flex-start; flex-wrap: wrap; }
+  .legacy-recovery-banner span { flex: 1 1 100%; order: 3; }
+}

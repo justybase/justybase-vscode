@@ -83,9 +83,28 @@ function createSharedStore(user: WebUser): UiStore {
   return store;
 }
 
-export function mapSchemaNode(node: SchemaTreeNode) {
+export function mapSchemaNode(node: SchemaTreeNode, parentId = node.parentId) {
   const kind = node.kind === 'cte' ? 'object' : node.kind;
-  return { id: node.id, parentId: node.parentId, kind, label: node.label, hasChildren: node.hasChildren } as const;
+  return { id: node.id, ...(parentId === undefined ? {} : { parentId }), kind, label: node.label, hasChildren: node.hasChildren } as const;
+}
+
+function visibleSchemaNodes<T extends { readonly id: string; readonly parentId?: string }>(nodes: readonly T[], expandedIds: readonly string[]): readonly T[] {
+  const expanded = new Set(expandedIds);
+  const childrenByParent = new Map<string | undefined, T[]>();
+  for (const node of nodes) {
+    const children = childrenByParent.get(node.parentId) ?? [];
+    children.push(node);
+    childrenByParent.set(node.parentId, children);
+  }
+  const visible: T[] = [];
+  const visit = (parentId: string | undefined): void => {
+    for (const node of childrenByParent.get(parentId) ?? []) {
+      visible.push(node);
+      if (expanded.has(node.id)) visit(node.id);
+    }
+  };
+  visit(undefined);
+  return visible;
 }
 
 function queryResultId(queryId: string): string {
@@ -109,8 +128,10 @@ export function displayRows(result: UiResultSurfaceState | undefined, rows: read
     : rows.filter(row => row.some(value => String(value ?? '').toLocaleLowerCase().includes(filter)));
   const sorting = result.view.sorting[0];
   if (!sorting) return filtered;
-  const columnIndex = Number(sorting.column);
-  if (!Number.isInteger(columnIndex)) return filtered;
+  const namedColumnIndex = result.columns.findIndex(column => column.name === sorting.column);
+  const legacyColumnIndex = /^[0-9]+$/u.test(sorting.column) ? Number(sorting.column) : -1;
+  const columnIndex = namedColumnIndex >= 0 ? namedColumnIndex : legacyColumnIndex;
+  if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= result.columns.length) return filtered;
   return filtered.sort((left, right) => {
     const leftText = String(left[columnIndex] ?? '');
     const rightText = String(right[columnIndex] ?? '');
@@ -151,6 +172,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const activeQueryRef = useRef<ActiveQuery | undefined>(undefined);
   const queryByResultRef = useRef(new Map<string, string>());
   const pageHydrationRef = useRef(new Set<string>());
+  const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
+  const schemaLoadedParentsRef = useRef(new Set<string>());
   const selectedConnectionId = state.connections.selectedConnectionId;
   const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
@@ -159,6 +182,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     : undefined;
   const activeRows = activeResult ? rowsByResult[activeResult.resultSetId] ?? [] : [];
   const visibleRows = displayRows(activeResult, activeRows);
+  const visibleSchema = visibleSchemaNodes(schemaNodes, state.metadata.expandedNodeIds);
 
   useEffect(() => () => {
     const active = activeQueryRef.current;
@@ -197,6 +221,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   useEffect(() => {
     if (!selectedConnectionId) {
+      schemaLoadedParentsRef.current.clear();
       setSchemaNodes([]);
       return undefined;
     }
@@ -204,7 +229,9 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     store.dispatch({ type: 'metadata/status', status: 'loading' });
     void api.schemaTree(selectedConnectionId).then(response => {
       if (!live) return;
-      setSchemaNodes(response.nodes.map(mapSchemaNode));
+      schemaLoadedParentsRef.current.clear();
+      schemaLoadedParentsRef.current.add('');
+      setSchemaNodes(response.nodes.map(node => mapSchemaNode(node)));
       store.dispatch({ type: 'metadata/status', status: 'complete' });
     }).catch(error => {
       if (!live) return;
@@ -213,6 +240,28 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     });
     return () => { live = false; };
   }, [api, selectedConnectionId, store]);
+
+  const toggleSchemaNode = useCallback((node: ReturnType<typeof mapSchemaNode>): void => {
+    const isExpanded = state.metadata.expandedNodeIds.includes(node.id);
+    store.dispatch({ type: 'metadata/toggle-expanded', nodeId: node.id });
+    if (isExpanded || !node.hasChildren || !selectedConnectionId || schemaLoadedParentsRef.current.has(node.id)) return;
+
+    schemaLoadedParentsRef.current.add(node.id);
+    store.dispatch({ type: 'metadata/status', status: 'loading' });
+    void api.schemaTree(selectedConnectionId, node.id).then(response => {
+      if (store.getState().connections.selectedConnectionId !== selectedConnectionId) return;
+      setSchemaNodes(previous => {
+        const merged = new Map(previous.map(item => [item.id, item] as const));
+        for (const child of response.nodes) merged.set(child.id, mapSchemaNode(child, node.id));
+        return [...merged.values()];
+      });
+      store.dispatch({ type: 'metadata/status', status: 'complete' });
+    }).catch(error => {
+      if (store.getState().connections.selectedConnectionId !== selectedConnectionId) return;
+      schemaLoadedParentsRef.current.delete(node.id);
+      store.dispatch({ type: 'metadata/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load schema.' });
+    });
+  }, [api, selectedConnectionId, state.metadata.expandedNodeIds, store]);
 
   const dispatchQueryEvent = useCallback((active: ActiveQuery, event: QueryEvent, nextSequence: () => number): void => {
     const base = { sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId, sequence: nextSequence() };
@@ -240,15 +289,25 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (mapped) store.dispatch({ type: 'execution/event', event: mapped });
   }, [store]);
 
-  const hydrateResultPage = useCallback((active: ActiveQuery): void => {
-    const hydrationKey = `${active.sourceId}\u0000${active.resultSetId}\u0000${active.queryId}`;
+  const loadResultPage = useCallback(async (active: ActiveQuery, offset: number, replace: boolean): Promise<void> => {
+    const hydrationKey = `${active.sourceId}\u0000${active.resultSetId}\u0000${active.queryId}\u0000${offset}`;
     if (pageHydrationRef.current.has(hydrationKey)) return;
     pageHydrationRef.current.add(hydrationKey);
-    void api.queryPage(active.queryId, { statementIndex: active.statementIndex, offset: 0, limit: 500 }).then(page => {
+    try {
+      const page = await api.queryPage(active.queryId, { statementIndex: active.statementIndex, offset, limit: 500 });
       if (queryByResultRef.current.get(active.resultSetId) !== active.queryId) return;
-      const nextRows = page.rows.map(row => [...row]);
+      const pageRows = page.rows.map(row => [...row]);
+      const previousRows = rowsByResultRef.current[active.resultSetId] ?? [];
+      const pageOffset = Math.max(0, page.offset);
+      const nextRows = replace || pageOffset === 0
+        ? pageRows
+        : [...previousRows.slice(0, pageOffset), ...pageRows, ...previousRows.slice(pageOffset + pageRows.length)];
       rowsByResultRef.current = { ...rowsByResultRef.current, [active.resultSetId]: nextRows };
       setRowsByResult(rowsByResultRef.current);
+      pageStateRef.current.set(active.resultSetId, {
+        totalRows: page.totalRows,
+        hasMore: page.hasMore || pageOffset + pageRows.length < page.totalRows,
+      });
       store.dispatch({
         type: 'results/hydrate',
         sourceId: active.sourceId,
@@ -258,15 +317,19 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         totalRowCount: page.totalRows,
         columns: page.columns.map(column => ({ name: column.name, type: column.type })),
       });
-    }).catch(error => {
+    } catch (error) {
       const current = store.getState().results.byResultSetId[`${active.sourceId}\u0000${active.resultSetId}`];
       if (current?.executionId === active.executionId && current.status !== 'cancelled' && current.status !== 'error') {
         setNotice(error instanceof Error ? error.message : 'Could not load result rows.');
       }
-    }).finally(() => {
+    } finally {
       pageHydrationRef.current.delete(hydrationKey);
-    });
+    }
   }, [api, store]);
+
+  const hydrateResultPage = useCallback((active: ActiveQuery): void => {
+    void loadResultPage(active, 0, true);
+  }, [loadResultPage]);
 
   const run = useCallback(async (mode: 'single' | 'explain' = 'single'): Promise<void> => {
     if (!selectedConnection) {
@@ -287,10 +350,13 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       const active: ActiveQuery = { queryId: started.queryId, resultSetId: queryResultId(started.queryId), sourceId: sourceIdFor(user), executionId: started.queryId, statementIndex: 0 };
       activeQueryRef.current = active;
       queryByResultRef.current.set(active.resultSetId, active.queryId);
+      pageStateRef.current.delete(active.resultSetId);
       rowsByResultRef.current = { ...rowsByResultRef.current, [active.resultSetId]: [] };
       setRowsByResult(rowsByResultRef.current);
       setSelectedRow(undefined);
       store.dispatch({ type: 'execution/start', sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId });
+      store.dispatch({ type: 'results/select-source', sourceId: active.sourceId });
+      store.dispatch({ type: 'results/select', sourceId: active.sourceId, resultSetId: active.resultSetId });
       let sequence = 0;
       const nextSequence = (): number => { sequence += 1; return sequence; };
       const subscriptionRef: { current?: QueryEventSubscription } = {};
@@ -317,6 +383,24 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
   }, [activeDocument?.content, api, dispatchQueryEvent, hydrateResultPage, selectedConnection, store, user]);
 
+  const loadMoreRows = useCallback((): void => {
+    if (!activeResult) return;
+    const queryId = queryByResultRef.current.get(activeResult.resultSetId);
+    if (!queryId) return;
+    const loadedRows = rowsByResultRef.current[activeResult.resultSetId]?.length ?? 0;
+    const pageState = pageStateRef.current.get(activeResult.resultSetId);
+    const totalRows = pageState?.totalRows ?? activeResult.totalRowCount;
+    if (!pageState?.hasMore && pageState !== undefined) return;
+    if (loadedRows >= totalRows) return;
+    void loadResultPage({
+      queryId,
+      resultSetId: activeResult.resultSetId,
+      sourceId: activeResult.sourceId,
+      executionId: activeResult.executionId,
+      statementIndex: activeResult.statementIndex,
+    }, loadedRows, false);
+  }, [activeResult, loadResultPage]);
+
   const cancel = useCallback(async (): Promise<void> => {
     const active = activeQueryRef.current;
     if (!active) return;
@@ -334,26 +418,16 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (!activeResult) return;
     const queryId = queryByResultRef.current.get(activeResult.resultSetId);
     if (!queryId) return;
-    try {
-      const page = await api.queryPage(queryId, { statementIndex: activeResult.statementIndex, offset: 0, limit: 500 });
-      if (queryByResultRef.current.get(activeResult.resultSetId) !== queryId) return;
-      const nextRows = page.rows.map(row => [...row]);
-      rowsByResultRef.current = { ...rowsByResultRef.current, [activeResult.resultSetId]: nextRows };
-      setRowsByResult(rowsByResultRef.current);
-      store.dispatch({
-        type: 'results/hydrate',
-        sourceId: activeResult.sourceId,
-        executionId: activeResult.executionId,
-        resultSetId: activeResult.resultSetId,
-        loadedRowCount: nextRows.length,
-        totalRowCount: page.totalRows,
-        columns: page.columns.map(column => ({ name: column.name, type: column.type })),
-      });
-      setNotice(undefined);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Could not refresh results.');
-    }
-  }, [activeResult, api, store]);
+    pageStateRef.current.delete(activeResult.resultSetId);
+    setNotice(undefined);
+    await loadResultPage({
+      queryId,
+      resultSetId: activeResult.resultSetId,
+      sourceId: activeResult.sourceId,
+      executionId: activeResult.executionId,
+      statementIndex: activeResult.statementIndex,
+    }, 0, true);
+  }, [activeResult, loadResultPage]);
 
   const updateSql = useCallback((content: string): void => {
     if (!activeDocument) return;
@@ -402,7 +476,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   return <UiShell title="JustyBase" activeSurface={state.shell.activeSurface} onSurfaceChange={selectSurface} surfaces={[{ id: 'workspace', label: 'Workspace' }, { id: 'history', label: 'History' }, { id: 'explain', label: 'Explain' }, { id: 'designer', label: 'Designer' }]} sidebar={<div className="shared-sidebar">
     <strong>Connections</strong>{state.connections.profiles.map(profile => <button type="button" key={profile.id} aria-pressed={profile.id === selectedConnectionId} onClick={() => store.dispatch({ type: 'connections/select', connectionId: profile.id })}>{profile.name}</button>)}
-    <SchemaTree nodes={schemaNodes} selectedId={state.metadata.selectedNodeId} expandedIds={state.metadata.expandedNodeIds} onToggle={node => store.dispatch({ type: 'metadata/toggle-expanded', nodeId: node.id })} onSelect={node => store.dispatch({ type: 'metadata/select', nodeId: node.id })} />
+    <SchemaTree nodes={visibleSchema} selectedId={state.metadata.selectedNodeId} expandedIds={state.metadata.expandedNodeIds} onToggle={toggleSchemaNode} onSelect={node => store.dispatch({ type: 'metadata/select', nodeId: node.id })} />
     <button type="button" onClick={onLogout}>Log out</button>
   </div>}>
     {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={entry => { const sourceId = sourceIdFor(user); store.dispatch({ type: 'workspace/open-document', document: { id: `history:${entry.id}`, sourceId, title: entry.label || 'History query', content: history.find(item => item.id === entry.id)?.sql ?? '', dirty: false } }); store.dispatch({ type: 'shell/surface', surface: 'workspace' }); }} />
@@ -415,8 +489,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               <button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button>
               {notice && <div role="status">{notice}</div>}
               <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-              {activeResult && <ResultViewToolbar view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={exportResults} />}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={visibleRows} totalRowCount={activeResult?.totalRowCount} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onRowSelect={setSelectedRow} /></AsyncStateView>
+              {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={exportResults} />}
+              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={visibleRows} totalRowCount={activeResult?.totalRowCount} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
               {selectedRow !== undefined && visibleRows[selectedRow] && activeResult && <RowDetail columns={activeResult.columns} row={visibleRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
             </div>
           </>}

@@ -75,6 +75,55 @@ describe('Electron renderer execution adapter', () => {
     await port.dispose();
   });
 
+  it('hydrates every finalized API page before completing the stream', async () => {
+    const fixture = fakeClient();
+    fixture.client.queryPage = jest.fn(async (_queryId, input) => input.offset === 0
+      ? {
+        sessionId: 'session-1',
+        columns: [{ name: 'value', type: 'INTEGER' }],
+        rows: [[1], [2]],
+        offset: 0,
+        limit: 500,
+        totalRows: 3,
+        hasMore: true,
+      }
+      : {
+        sessionId: 'session-1',
+        columns: [{ name: 'value', type: 'INTEGER' }],
+        rows: [[3]],
+        offset: 2,
+        limit: 500,
+        totalRows: 3,
+        hasMore: false,
+      });
+    const order: string[] = [];
+    const pages: Array<readonly (readonly unknown[])[]> = [];
+    const port = createElectronExecutionPort({
+      client: fixture.client,
+      onPage: (_resultSetId, rows) => { order.push('page'); pages.push(rows); },
+    });
+    const handle = await port.start({ sourceId: 'electron:scratch', sql: 'SELECT 1', connectionId: 'connection-1', mode: 'single' });
+    fixture.emit({ queryId: 'query-1', type: 'complete', totalRows: 3, limitReached: false });
+    for await (const event of handle.events) {
+      if (event.type === 'complete') order.push('complete');
+    }
+
+    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(1, 'query-1', { statementIndex: 0, offset: 0, limit: 500 });
+    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(2, 'query-1', { statementIndex: 0, offset: 2, limit: 500 });
+    expect(pages).toEqual([[[1], [2], [3]]]);
+    expect(order).toEqual(['page', 'complete']);
+    await port.dispose();
+  });
+
+  it('rejects script mode before opening a single-result stream', async () => {
+    const fixture = fakeClient();
+    const port = createElectronExecutionPort({ client: fixture.client });
+
+    await expect(port.start({ sourceId: 'electron:scratch', sql: 'SELECT 1; SELECT 2', connectionId: 'connection-1', mode: 'script' })).rejects.toThrow('does not support script mode');
+    expect(fixture.client.startQuery).not.toHaveBeenCalled();
+    await port.dispose();
+  });
+
   it('supports explicit cancellation and converts transport failure to an error event', async () => {
     const fixture = fakeClient();
     const port = createElectronExecutionPort({ client: fixture.client });

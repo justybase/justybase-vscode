@@ -93,13 +93,42 @@ function updateResultView(state: UiState, resultSetId: string, sourceId: string 
   return withResult(state, next);
 }
 
+function reconcileResultsForSource(state: UiState, sourceId: string, resultSetIds: readonly string[]): UiState {
+  const retainedIds = new Set(resultSetIds);
+  const existingEntries = Object.entries(state.results.byResultSetId);
+  const byResultSetId = Object.fromEntries(existingEntries.filter(([, result]) =>
+    result.sourceId !== sourceId || retainedIds.has(result.resultSetId),
+  ));
+  const removed = existingEntries.length !== Object.keys(byResultSetId).length;
+  if (!removed) return state;
+
+  if (state.results.activeSourceId !== sourceId) {
+    return { ...state, results: { ...state.results, byResultSetId } };
+  }
+
+  const sourceResults = Object.values(byResultSetId).filter(result => result.sourceId === sourceId);
+  const activeResult = sourceResults.find(result => result.resultSetId === state.results.activeResultSetId) ?? sourceResults[0];
+  return {
+    ...state,
+    results: {
+      ...state.results,
+      byResultSetId,
+      activeSourceId: activeResult?.sourceId,
+      activeResultSetId: activeResult?.resultSetId,
+    },
+  };
+}
+
 function hydrateResult(state: UiState, action: Extract<UiAction, { type: 'results/hydrate' }>): UiState {
   const found = resultFor(state, action.sourceId, action.resultSetId);
   if (!found || found.executionId !== action.executionId) return state;
   if (found.status === 'cancelled' || found.status === 'error') return state;
   if (!Number.isInteger(action.loadedRowCount) || action.loadedRowCount < 0) return state;
   if (action.totalRowCount !== undefined && (!Number.isInteger(action.totalRowCount) || action.totalRowCount < 0)) return state;
-  const totalRowCount = Math.max(found.totalRowCount, action.totalRowCount ?? found.totalRowCount);
+  // Hydration reports the authoritative count for the current result. It may
+  // legitimately shrink after a refresh, so do not preserve an older count;
+  // only reject a page whose loaded rows cannot fit in that count.
+  const totalRowCount = action.totalRowCount ?? found.totalRowCount;
   if (action.loadedRowCount > totalRowCount) return state;
   return withResult(state, {
     ...found,
@@ -121,10 +150,12 @@ function applyResultEvent(state: UiState, event: UiResultEvent): UiState {
     || previous.status === 'error'
     || previous.status === 'cancelled';
   if (terminal) return state;
-  // A failed cancellation is non-terminal: the execution is still allowed to
-  // produce its authoritative result. Requested/acknowledged cancellation,
-  // however, blocks late output until the cancelled terminal event arrives.
-  if ((previous.cancellation === 'requested' || previous.cancellation === 'acknowledged') && event.type !== 'cancelled') return state;
+  // A cancellation request is unresolved until the port acknowledges it. The
+  // execution can finish during that interval, and its terminal event must be
+  // consumed so a later cancellation failure cannot strand the result. Once
+  // cancellation is acknowledged, only the cancelled terminal event remains
+  // authoritative and late output is suppressed.
+  if (previous.cancellation === 'acknowledged' && event.type !== 'cancelled') return state;
 
   const base = { ...previous, lastSequence: event.sequence };
   let next: UiResultSurfaceState;
@@ -288,6 +319,8 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
         ? { ...state, results: { ...state.results, activeSourceId: result.sourceId, activeResultSetId: result.resultSetId } }
         : state;
     }
+    case 'results/reconcile-source':
+      return reconcileResultsForSource(state, action.sourceId, action.resultSetIds);
     case 'results/view':
       return updateResultView(state, action.resultSetId, action.sourceId, action.patch);
     case 'metadata/status':

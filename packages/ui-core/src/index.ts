@@ -1,4 +1,5 @@
 export type {
+  AuthPort,
   CapabilityPort,
   CancellationSignal,
   CancellationResult,
@@ -15,6 +16,7 @@ export type {
   ExecutionHandle,
   ExecutionInput,
   ExecutionPort,
+  ConnectionPort,
   HistoryEntry,
   HistoryPort,
   MetadataNode,
