@@ -30,6 +30,7 @@ import { asHostMessage, postHostMessage } from './protocol.js';
 interface SharedColumn {
     readonly name: string;
     readonly type?: string;
+    readonly scale?: number;
 }
 
 interface SharedResultSetPayload {
@@ -176,7 +177,10 @@ export function normalizeSharedColumns(value: unknown): readonly SharedColumn[] 
         const name = asNonEmptyString(item.name) ?? asNonEmptyString(item.header);
         if (!name) return [];
         const type = typeof item.type === 'string' ? item.type : undefined;
-        return [{ name, type }];
+        const scale = typeof item.scale === 'number' && Number.isInteger(item.scale) && item.scale >= 0 && item.scale <= 1000
+            ? item.scale
+            : undefined;
+        return [{ name, ...(type === undefined ? {} : { type }), ...(scale === undefined ? {} : { scale }) }];
     });
 }
 
@@ -259,14 +263,14 @@ function csvCell(value: unknown): string {
 
 function rowsAsCsv(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
     const header = columns.map(column => csvCell(column.name)).join(',');
-    const body = rows.map(row => row.map((value, index) => csvCell(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type))).join(',')).join('\n');
+    const body = rows.map(row => row.map((value, index) => csvCell(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type, columns[index]))).join(',')).join('\n');
     return [header, body].filter(Boolean).join('\n');
 }
 
 function rowsAsText(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
     return [
         columns.map(column => column.name).join('\t'),
-        ...rows.map(row => row.map((value, index) => value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type)).join('\t')),
+        ...rows.map(row => row.map((value, index) => value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type, columns[index])).join('\t')),
     ].join('\n');
 }
 

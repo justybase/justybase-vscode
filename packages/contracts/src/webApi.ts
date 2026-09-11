@@ -242,7 +242,8 @@ export interface QueryPreviewResponse {
   expiresAt: number;
   statements: QueryPreviewStatement[];
 }
-export interface QueryColumn { name: string; type?: string; }
+/** Result metadata kept small enough for streaming/page responses. */
+export interface QueryColumn { name: string; type?: string; scale?: number; }
 export interface QueryEventBase {
   queryId: string;
   /** Monotonically increasing per-query event number, used for WebSocket replay. */

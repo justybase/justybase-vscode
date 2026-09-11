@@ -96,11 +96,41 @@ function normalizeValue(value: unknown): unknown {
   return value;
 }
 
-function toColumns(reader: Pick<NetezzaDriverReader, 'fieldCount' | 'getName' | 'getTypeName'>): QueryColumn[] {
-  return Array.from({ length: reader.fieldCount }, (_, index) => ({
-    name: reader.getName(index),
-    type: reader.getTypeName(index),
-  }));
+type NetezzaColumnReader = Pick<NetezzaDriverReader, 'fieldCount' | 'getName' | 'getTypeName'> & {
+  getDeclaredTypeName?: (index: number) => string;
+  getColumnMetadata?: (index: number) => { numericScale?: unknown } | null;
+  getSchemaTable?: () => { Rows?: Array<{ NumericScale?: unknown }> } | Array<{ NumericScale?: unknown }>;
+};
+
+function numericScale(reader: NetezzaColumnReader, index: number): number | undefined {
+  let value: unknown;
+  try {
+    value = reader.getColumnMetadata?.(index)?.numericScale;
+  } catch {
+    value = undefined;
+  }
+  if (typeof value !== 'number') {
+    try {
+      const schema = reader.getSchemaTable?.();
+      const rows = Array.isArray(schema) ? schema : schema?.Rows;
+      value = rows?.[index]?.NumericScale;
+    } catch {
+      value = undefined;
+    }
+  }
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1000 ? value : undefined;
+}
+
+function toColumns(reader: NetezzaColumnReader): QueryColumn[] {
+  return Array.from({ length: reader.fieldCount }, (_, index) => {
+    const declaredType = reader.getDeclaredTypeName?.(index)?.trim();
+    const scale = numericScale(reader, index);
+    return {
+      name: reader.getName(index),
+      type: declaredType || reader.getTypeName(index),
+      ...(scale === undefined ? {} : { scale }),
+    };
+  });
 }
 
 function identifier(value: string): string {

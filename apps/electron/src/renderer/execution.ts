@@ -1,11 +1,11 @@
-import type { QueryEvent } from '@justybase/contracts';
+import type { QueryColumn, QueryEvent } from '@justybase/contracts';
 import type { ExecutionHandle, ExecutionInput, ExecutionPort, UiResultEvent } from '@justybase/ui-core';
 import type { ElectronApiClient, QueryEventSubscription } from './api';
 
 const RESULT_PAGE_SIZE = 500;
 
 export interface HydratedResultRows {
-  readonly columns: readonly { readonly name: string; readonly type?: string }[];
+  readonly columns: readonly QueryColumn[];
   readonly rows: readonly (readonly unknown[])[];
   readonly totalRowCount: number;
 }
@@ -27,7 +27,11 @@ export async function fetchAllResultPages(
 
     if (!page.hasMore) {
       return {
-        columns: page.columns.map(column => ({ name: column.name, type: column.type })),
+        columns: page.columns.map(column => ({
+          name: column.name,
+          ...(column.type === undefined ? {} : { type: column.type }),
+          ...(column.scale === undefined ? {} : { scale: column.scale }),
+        })),
         rows,
         totalRowCount: page.totalRows,
       };
@@ -41,7 +45,7 @@ export interface ElectronExecutionPortOptions {
   readonly client: ElectronApiClient;
   readonly onRows?: (resultSetId: string, rows: readonly (readonly unknown[])[]) => void;
   /** Replaces the adapter-owned page after the API has finalized the session. */
-  readonly onPage?: (resultSetId: string, rows: readonly (readonly unknown[])[], totalRowCount: number, columns: readonly { readonly name: string; readonly type?: string }[], executionId: string) => void;
+  readonly onPage?: (resultSetId: string, rows: readonly (readonly unknown[])[], totalRowCount: number, columns: readonly QueryColumn[], executionId: string) => void;
   readonly onPageError?: (resultSetId: string, error: Error, executionId: string) => void;
 }
 
@@ -61,7 +65,11 @@ function mapEvent(sourceId: string, queryId: string, event: QueryEvent, sequence
   switch (event.type) {
     case 'started': return { ...base, type: 'started' };
     case 'statement-started': return { ...base, type: 'statement-started' };
-    case 'columns': return { ...base, type: 'columns', columns: event.columns.map(column => ({ name: column.name, type: column.type })) };
+    case 'columns': return { ...base, type: 'columns', columns: event.columns.map(column => ({
+      name: column.name,
+      ...(column.type === undefined ? {} : { type: column.type }),
+      ...(column.scale === undefined ? {} : { scale: column.scale }),
+    })) };
     case 'progress': return { ...base, type: 'progress', totalRowCount: event.totalRows };
     case 'rows': {
       onRows?.(resultSetId, event.rows.map(row => [...row]));

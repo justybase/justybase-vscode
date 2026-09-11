@@ -284,7 +284,14 @@ export class QuerySessionManager {
     if (groupIndices.length === 0) throw new Error('Select at least one valid grouping column.');
     const filtered = filterSql(session.manifest, request);
     const aggregateInputs = Array.isArray(request.aggregates) ? request.aggregates : [{ function: 'count' as const }];
-    const outputColumns: QueryColumn[] = groupIndices.map(index => ({ name: session.manifest.columns[index]?.name ?? `Column ${index + 1}`, type: session.manifest.columns[index]?.type }));
+    const outputColumns: QueryColumn[] = groupIndices.map(index => {
+      const source = session.manifest.columns[index];
+      return {
+        name: source?.name ?? `Column ${index + 1}`,
+        ...(source?.type === undefined ? {} : { type: source.type }),
+        ...(source?.scale === undefined ? {} : { scale: source.scale }),
+      };
+    });
     const aggregateSpecs = aggregateInputs.flatMap(aggregate => {
       const functionName = aggregate.function;
       if (!['count', 'sum', 'avg', 'min', 'max'].includes(functionName)) return [];

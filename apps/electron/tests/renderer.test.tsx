@@ -100,6 +100,7 @@ describe('Electron renderer composition', () => {
     expect(asSurface('results')).toBe('results');
     expect(asSurface('not-a-surface')).toBeUndefined();
     expect(rowsAsText([{ name: 'ID' }, { name: 'NAME' }], [[1, null]])).toBe('ID\tNAME\n1\tNULL');
+    expect(rowsAsText([{ name: 'AMOUNT', type: 'NUMERIC', scale: 2 }], [['1234.5']])).toBe('AMOUNT\n1 234.50');
     expect(rowsAsCsv([{ name: 'ID' }], [[1], ['two']])).toBe('"ID"\n"1"\n"two"');
     expect(rowsAsCsv([{ name: 'A"B' }], [['x"y']])).toBe('"A""B"\n"x""y"');
   });

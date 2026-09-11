@@ -102,7 +102,8 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isQueryEventColumn(value: unknown): boolean {
   if (!isRecord(value) || typeof value.name !== 'string') return false;
-  return value.type === undefined || typeof value.type === 'string';
+  return (value.type === undefined || typeof value.type === 'string')
+    && (value.scale === undefined || (isNonNegativeInteger(value.scale) && value.scale <= 1000));
 }
 
 /** Rejects malformed or foreign frames before they reach a product adapter. */
