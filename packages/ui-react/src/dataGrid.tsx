@@ -256,21 +256,30 @@ function compareValues(left: unknown, right: unknown, type?: string): number {
   return cellText(left).localeCompare(cellText(right), undefined, { numeric: true, sensitivity: 'base' });
 }
 
-/** Shared filtering/sorting semantics used by the Electron shell and tests. */
-export function processDataGridRows(
+function matchesRow(
+  columns: readonly DataGridColumn[],
+  values: readonly unknown[],
+  view: DataGridViewState,
+): boolean {
+  const globalFilter = view.globalFilter.trim().toLocaleLowerCase();
+  if (globalFilter && !values.some(value => cellText(value).toLocaleLowerCase().includes(globalFilter))) return false;
+  return columns.every((column, columnIndex) => {
+    const filter = filterValue(view, column, columnIndex).trim().toLocaleLowerCase();
+    return !filter || cellText(values[columnIndex]).toLocaleLowerCase().includes(filter);
+  });
+}
+
+function processIndexedRows(
   columns: readonly DataGridColumn[],
   rows: readonly (readonly unknown[])[],
   view: DataGridViewState,
-): readonly (readonly unknown[])[] {
-  const globalFilter = view.globalFilter.trim().toLocaleLowerCase();
-  const filtered = rows.filter(row => {
-    if (globalFilter && !row.some(value => cellText(value).toLocaleLowerCase().includes(globalFilter))) return false;
-    return columns.every((column, columnIndex) => {
-      const filter = filterValue(view, column, columnIndex).trim().toLocaleLowerCase();
-      return !filter || cellText(row[columnIndex]).toLocaleLowerCase().includes(filter);
-    });
+  clientProcessing: boolean,
+): readonly IndexedRow[] {
+  const indexed = rows.flatMap((values, sourceIndex) => {
+    if (clientProcessing && !matchesRow(columns, values, view)) return [];
+    return [{ values, sourceIndex }];
   });
-  const indexed = filtered.map((values, sourceIndex) => ({ values, sourceIndex }));
+  if (!clientProcessing) return indexed;
   const sorting = view.sorting
     .map(item => ({ ...item, columnIndex: resolveColumnIndex(columns, item.column) }))
     .filter(item => item.columnIndex >= 0);
@@ -281,7 +290,16 @@ export function processDataGridRows(
     }
     return left.sourceIndex - right.sourceIndex;
   });
-  return indexed.map(item => item.values);
+  return indexed;
+}
+
+/** Shared filtering/sorting semantics used by the Electron shell and tests. */
+export function processDataGridRows(
+  columns: readonly DataGridColumn[],
+  rows: readonly (readonly unknown[])[],
+  view: DataGridViewState,
+): readonly (readonly unknown[])[] {
+  return processIndexedRows(columns, rows, view, true).map(item => item.values);
 }
 
 function indexedRows(
@@ -290,26 +308,7 @@ function indexedRows(
   view: DataGridViewState,
   clientProcessing: boolean,
 ): readonly IndexedRow[] {
-  if (!clientProcessing) return rows.map((values, sourceIndex) => ({ values, sourceIndex }));
-  const globalFilter = view.globalFilter.trim().toLocaleLowerCase();
-  const filtered = rows.flatMap((values, sourceIndex) => {
-    if (globalFilter && !values.some(value => cellText(value).toLocaleLowerCase().includes(globalFilter))) return [];
-    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-      const filter = filterValue(view, columns[columnIndex]!, columnIndex).trim().toLocaleLowerCase();
-      if (filter && !cellText(values[columnIndex]).toLocaleLowerCase().includes(filter)) return [];
-    }
-    return [{ values, sourceIndex }];
-  });
-  const sorting = view.sorting
-    .map(item => ({ ...item, columnIndex: resolveColumnIndex(columns, item.column) }))
-    .filter(item => item.columnIndex >= 0);
-  return filtered.sort((left, right) => {
-    for (const item of sorting) {
-      const comparison = compareValues(left.values[item.columnIndex], right.values[item.columnIndex], columns[item.columnIndex]?.type);
-      if (comparison !== 0) return item.descending ? -comparison : comparison;
-    }
-    return left.sourceIndex - right.sourceIndex;
-  });
+  return processIndexedRows(columns, rows, view, clientProcessing);
 }
 
 function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow[], grouping: readonly string[]): readonly RenderedRow[] {
@@ -421,6 +420,11 @@ export function DataGrid({
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+
+  useEffect(() => {
+    setSelectionValue(undefined);
+    setCollapsedGroups(new Set());
+  }, [resultSetId]);
 
   useEffect(() => {
     const restore = (): void => {
