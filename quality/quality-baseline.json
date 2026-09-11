@@ -31,7 +31,12 @@
       "src/import/",
       "src/migration/",
       "src/state/",
-      "src/views/"
+      "src/views/",
+      "media/",
+      "apps/web/",
+      "apps/electron/",
+      "packages/ui-core/",
+      "packages/ui-react/"
     ]
   },
   "documentationFreshnessDays": 31

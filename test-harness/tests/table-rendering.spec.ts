@@ -2,6 +2,12 @@ import { test, expect } from '@playwright/test';
 
 const TEST_PAGE = 'http://localhost:8892/test-harness/table-rendering.html';
 
+test.beforeEach(({ browser }) => {
+    // Keep the managed Chromium version in the report for every static
+    // webview run, including failures before the page is loaded.
+    test.info().annotations.push({ type: 'chromium', description: browser.version() });
+});
+
 test.describe('Table rendering', () => {
 
     test.beforeEach(async ({ page }) => {

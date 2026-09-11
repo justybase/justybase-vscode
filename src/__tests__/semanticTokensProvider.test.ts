@@ -873,7 +873,11 @@ END_PROC;`;
       expect(raw.data.length).toBeGreaterThan(0);
       expect(positionAtSpy).not.toHaveBeenCalled();
       expect(parseSpy).not.toHaveBeenCalled();
-      expect(elapsedMs).toBeLessThan(200);
+      // Istanbul instrumentation changes this synchronous hot path
+      // substantially; the non-instrumented test above keeps the strict
+      // responsiveness budget for normal Extension Host execution.
+      const coverageInstrumented = Object.prototype.hasOwnProperty.call(globalThis, '__coverage__');
+      if (!coverageInstrumented) expect(elapsedMs).toBeLessThan(200);
     } finally {
       parseSpy.mockRestore();
       localProvider.dispose();

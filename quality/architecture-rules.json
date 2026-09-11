@@ -43,11 +43,19 @@
     ],
     "packages/vscode-companion-adapter": [
       "packages/contracts"
+    ],
+    "packages/ui-core": [
+      "packages/contracts"
+    ],
+    "packages/ui-react": [
+      "packages/contracts",
+      "packages/ui-core"
     ]
   },
   "browserSources": [
     "media/**",
-    "apps/web/src/**"
+    "apps/web/src/**",
+    "apps/electron/src/renderer/**"
   ],
   "browserExternalImports": [
     "react",
@@ -73,12 +81,21 @@
     "packages/contracts/src/**",
     "packages/database-utils/src/**",
     "packages/dialect-utils/src/**",
-    "packages/*-core/src/**"
+    "packages/*-core/src/**",
+    "packages/ui-react/src/**"
   ],
   "pureExternalImports": [
     "chevrotain"
   ],
-  "pureExternalExceptions": [],
+  "pureExternalExceptions": [
+    {
+      "source": "packages/ui-react/src/components.tsx",
+      "target": "react",
+      "reason": "The shared React presentation package necessarily depends on React.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    }
+  ],
   "layers": {
     "contracts": {
       "sources": [
@@ -108,6 +125,21 @@
     "web": {
       "sources": [
         "apps/web/src"
+      ]
+    },
+    "electron-main": {
+      "sources": [
+        "apps/electron/src/main"
+      ]
+    },
+    "electron-preload": {
+      "sources": [
+        "apps/electron/src/preload"
+      ]
+    },
+    "electron-renderer": {
+      "sources": [
+        "apps/electron/src/renderer"
       ]
     },
     "companions": {
@@ -145,16 +177,34 @@
       "shared",
       "web"
     ],
+    "electron-main": [
+      "contracts",
+      "shared",
+      "api",
+      "electron-main"
+    ],
+    "electron-preload": [
+      "contracts",
+      "shared",
+      "electron-preload"
+    ],
+    "electron-renderer": [
+      "contracts",
+      "shared",
+      "electron-renderer"
+    ],
     "companions": [
       "contracts",
       "shared",
       "companions"
     ]
   },
-  "workspaceEntryPoints": {
-    "@justybase/metadata-core": "packages/metadata-core/src/index.ts",
-    "@justybase/result-core": "packages/result-core/src/index.ts",
-    "@justybase/sql-core": "packages/sql-core/src/index.ts"
+    "workspaceEntryPoints": {
+      "@justybase/metadata-core": "packages/metadata-core/src/index.ts",
+      "@justybase/result-core": "packages/result-core/src/index.ts",
+      "@justybase/sql-core": "packages/sql-core/src/index.ts",
+      "@justybase/ui-core": "packages/ui-core/src/index.ts",
+      "@justybase/ui-react": "packages/ui-react/src/index.ts"
   },
   "forbiddenImports": [
     {
@@ -181,6 +231,18 @@
     {
       "source": "packages/designer-core/src/**",
       "specifier": "^(?:react|react-dom|node:|@justybase/(?:netezza-driver|spreadsheet-tasks)(?:/|$))"
+    },
+    {
+      "source": "packages/ui-core/src/**",
+      "specifier": "^(?:react|react-dom|node:|vscode|electron)(?:/|$)"
+    },
+    {
+      "source": "packages/ui-react/src/**",
+      "specifier": "^(?:node:|vscode|electron|@justybase/(?:database-runtime|duckdb-runtime|netezza-runtime|sqlite-runtime|web-api)(?:/|$))"
+    },
+    {
+      "layer": "electron-renderer",
+      "specifier": "^(?:node:|electron|vscode)(?:/|$)"
     }
   ],
   "exceptions": [],
