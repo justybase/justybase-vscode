@@ -50,6 +50,11 @@ export interface UiResultViewState {
   readonly grouping: readonly string[];
   readonly aggregation?: string;
   readonly pivotColumn?: string;
+  /** Optional grid presentation state shared by the web and desktop shells. */
+  readonly columnVisibility?: Readonly<Record<string, boolean>>;
+  readonly columnOrder?: readonly string[];
+  readonly pinnedColumns?: readonly string[];
+  readonly columnWidths?: Readonly<Record<string, number>>;
   readonly scrollTop: number;
   readonly scrollLeft: number;
   readonly anchorRow?: number;

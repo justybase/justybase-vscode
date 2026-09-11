@@ -95,6 +95,45 @@ describe('shared React presentation', () => {
     expect(grid.scrollLeft).toBe(24);
   });
 
+  it('keeps filtering, sorting, selection, grouping and column actions in the shared grid', () => {
+    const onViewChange = jest.fn();
+    const onSelectionChange = jest.fn();
+    const onContextMenu = jest.fn();
+    const onCopySelection = jest.fn();
+    const view = { globalFilter: '', columnFilters: {}, sorting: [], grouping: [] } as const;
+    render(<DataGrid
+      resultSetId="shared-grid"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'VARCHAR' }]}
+      rows={[[2, 'beta'], [1, 'alpha']]}
+      view={view}
+      onViewChange={onViewChange}
+      onSelectionChange={onSelectionChange}
+      onContextMenu={onContextMenu}
+      onCopySelection={onCopySelection}
+    />);
+
+    expect(screen.getByRole('columnheader', { name: '#' })).toBeInTheDocument();
+    expect(screen.getByText('INT')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /ID Not sorted/ }));
+    expect(onViewChange).toHaveBeenCalledWith({ sorting: [{ column: '0', descending: false }] });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter NAME' }), { target: { value: 'alpha' } });
+    expect(onViewChange).toHaveBeenCalledWith({ columnFilters: { '1': 'alpha' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Pin ID' }));
+    expect(onViewChange).toHaveBeenCalledWith({ pinnedColumns: ['0'] });
+    fireEvent.click(screen.getByRole('button', { name: 'Group by NAME' }));
+    expect(onViewChange).toHaveBeenCalledWith({ grouping: ['1'] });
+
+    const betaCell = screen.getByRole('cell', { name: 'beta' });
+    const alphaCell = screen.getByRole('cell', { name: 'alpha' });
+    fireEvent.mouseDown(betaCell, { button: 0 });
+    fireEvent.mouseEnter(alphaCell);
+    expect(onSelectionChange).toHaveBeenLastCalledWith(expect.objectContaining({ anchorRow: 0, anchorColumn: 1, focusRow: 1, focusColumn: 1 }));
+    fireEvent.contextMenu(betaCell, { clientX: 20, clientY: 40 });
+    expect(onContextMenu).toHaveBeenCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 20, clientY: 40 });
+    fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
+    expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
+  });
+
   it('exposes shared filter, grouping, aggregation, pivot and row-detail actions', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();

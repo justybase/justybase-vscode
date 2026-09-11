@@ -232,6 +232,56 @@ describe('shared VS Code Result Panel adapter', () => {
         controller.dispose();
     });
 
+    it('ignores row windows without a live request or matching result generation', () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage({
+            command: 'diskBackedActivate',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            resultSetId: 'disk-result',
+            totalRows: 3,
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[1]],
+            limitReached: false,
+        });
+        const result = controller.activeResult();
+        controller.loadMore(result!);
+
+        // Replacing the result while the request is in flight must invalidate
+        // the old response, even when the host reuses the stable result id.
+        controller.handleHostMessage({
+            command: 'diskBackedActivate',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            resultSetId: 'disk-result',
+            totalRows: 3,
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[9]],
+            limitReached: false,
+        });
+        controller.handleHostMessage({
+            command: 'rowWindow',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            offset: 1,
+            rows: [[2], [3]],
+            requestId: 1,
+            totalRows: 3,
+        });
+        controller.handleHostMessage({
+            command: 'rowWindow',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            offset: 0,
+            rows: [[8]],
+            requestId: 999,
+            totalRows: 3,
+        });
+
+        expect(controller.getRows(controller.activeResult())).toEqual([[9]]);
+        controller.dispose();
+    });
+
     it('renders common React presentation states, controls and capability messaging', () => {
         const controller = new SharedResultPanelController();
         controller.handleHostMessage(hydrateMessage([

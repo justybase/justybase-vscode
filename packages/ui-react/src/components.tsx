@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react';
-import type { KeyboardEvent, ReactNode, UIEvent } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import type { CapabilityDescriptor } from '@justybase/contracts';
 import type { MetadataNode } from '@justybase/ui-core';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { uiTokens } from './tokens';
+export { DataGrid } from './dataGrid';
+export type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, GridScrollPosition } from './dataGrid';
 
 export type AsyncViewState = 'loading' | 'empty' | 'error' | 'cancelled' | 'ready';
 
@@ -113,76 +115,12 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
   })}</div>;
 }
 
-export interface GridScrollPosition {
-  readonly sourceId?: string;
-  readonly resultSetId: string;
-  readonly top: number;
-  readonly left: number;
-  readonly anchorRow?: number;
-}
-
-export interface DataGridProps {
-  readonly sourceId?: string;
-  readonly resultSetId: string;
-  readonly columns: readonly { readonly name: string; readonly type?: string }[];
-  readonly rows: readonly (readonly unknown[])[];
-  readonly totalRowCount?: number;
-  readonly scroll?: GridScrollPosition;
-  readonly onScroll?: (position: GridScrollPosition) => void;
-  /** Requests the next adapter-owned page when the rendered rows near the end. */
-  readonly onLoadMore?: () => void;
-  readonly onRowSelect?: (rowIndex: number) => void;
-}
-
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return 'NULL';
   if (typeof value === 'object') {
     try { return JSON.stringify(value); } catch { return String(value); }
   }
   return String(value);
-}
-
-export function DataGrid({ sourceId, resultSetId, columns, rows, totalRowCount = rows.length, scroll, onScroll, onLoadMore, onRowSelect }: DataGridProps): ReactNode {
-  const scroller = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const restore = (): void => {
-      const element = scroller.current;
-      if (!element || !scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) return;
-      element.scrollTop = Math.max(0, scroll.top);
-      element.scrollLeft = Math.max(0, scroll.left);
-    };
-    const element = scroller.current;
-    if (!element) return;
-    restore();
-
-    // A grid may be mounted before its rows or containing surface has a
-    // measurable layout. Re-apply on the next frame and whenever the grid is
-    // resized (including hide/reveal), because an early write can be clamped
-    // to zero by the browser.
-    let frame: number | undefined;
-    if (typeof requestAnimationFrame === 'function') {
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        restore();
-      });
-    }
-    const observer = typeof ResizeObserver === 'undefined'
-      ? undefined
-      : new ResizeObserver(() => restore());
-    observer?.observe(element);
-    return () => {
-      if (frame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
-      observer?.disconnect();
-    };
-  }, [resultSetId, sourceId, scroll?.sourceId, scroll?.resultSetId, scroll?.top, scroll?.left, scroll?.anchorRow, rows.length, columns.length, totalRowCount]);
-  function handleScroll(event: UIEvent<HTMLDivElement>): void {
-    const element = event.currentTarget;
-    onScroll?.({ ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / 32) });
-    const distanceFromEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (onLoadMore && rows.length < totalRowCount && distanceFromEnd <= 160) onLoadMore();
-  }
-  if (columns.length === 0 || rows.length === 0) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
-  return <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}><table className="ui-data-grid"><thead><tr>{columns.map(column => <th scope="col" key={column.name}>{column.name}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={`${resultSetId}:${rowIndex}`} onClick={() => onRowSelect?.(rowIndex)}>{columns.map((column, columnIndex) => <td key={`${column.name}:${columnIndex}`}>{cellText(row[columnIndex])}</td>)}</tr>)}</tbody></table></div>;
 }
 
 export interface ResultViewToolbarProps {
