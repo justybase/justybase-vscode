@@ -74,6 +74,7 @@ interface RenderedGroup {
 interface RenderedDataRow extends IndexedRow {
   readonly kind: 'data';
   readonly displayIndex: number;
+  readonly groupId?: string;
 }
 
 type RenderedRow = RenderedGroup | RenderedDataRow;
@@ -104,6 +105,43 @@ function cellText(value: unknown): string {
   return String(value);
 }
 
+interface ComparableDecimal {
+  readonly coefficient: bigint;
+  readonly scale: number;
+}
+
+function parseComparableDecimal(value: unknown): ComparableDecimal | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const raw = typeof value === 'number' || typeof value === 'bigint' ? String(value) : String(value);
+  const compact = raw.replace(/[\s\u00a0\u202f,]/gu, '');
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/u.exec(compact);
+  if (!match) return undefined;
+  const exponent = Number(match[4] ?? 0);
+  const fraction = match[3] ?? '';
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 1_000 || match[2]!.length + fraction.length > 10_000) return undefined;
+  let scale = fraction.length - exponent;
+  if (!Number.isSafeInteger(scale) || scale < -1_000 || scale > 1_000) return undefined;
+  let coefficient = BigInt(`${match[2]}${fraction}`) * (match[1] === '-' ? -1n : 1n);
+  if (scale < 0) {
+    coefficient *= 10n ** BigInt(-scale);
+    scale = 0;
+  }
+  while (scale > 0 && coefficient % 10n === 0n) {
+    coefficient /= 10n;
+    scale -= 1;
+  }
+  return { coefficient, scale };
+}
+
+function compareComparableDecimals(left: ComparableDecimal, right: ComparableDecimal): number {
+  if (left.coefficient < 0n && right.coefficient >= 0n) return -1;
+  if (left.coefficient >= 0n && right.coefficient < 0n) return 1;
+  const scale = Math.max(left.scale, right.scale);
+  const leftValue = left.coefficient * (10n ** BigInt(scale - left.scale));
+  const rightValue = right.coefficient * (10n ** BigInt(scale - right.scale));
+  return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+}
+
 function typeBadge(type?: string): string {
   if (!type) return '?';
   const value = type.toUpperCase();
@@ -126,6 +164,20 @@ function typeBadgeClass(type?: string): string {
 
 function isNumericType(type?: string): boolean {
   return type !== undefined && /INT|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(type.toUpperCase());
+}
+
+function isTemporalType(type?: string): boolean {
+  return type !== undefined && /DATE|TIME|TIMESTAMP/.test(type.toUpperCase());
+}
+
+function parseTemporalSortValue(value: unknown): number | undefined {
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+    return Number.isNaN(timestamp) ? undefined : timestamp;
+  }
+  const raw = cellText(value);
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 function valueClass(value: unknown, type?: string): string {
@@ -185,12 +237,21 @@ function resolveColumnIndex(columns: readonly DataGridColumn[], key: string): nu
 }
 
 function compareValues(left: unknown, right: unknown, type?: string): number {
-  if (left === null || left === undefined) return right === null || right === undefined ? 0 : 1;
-  if (right === null || right === undefined) return -1;
+  if (left === null || left === undefined) return right === null || right === undefined ? 0 : -1;
+  if (right === null || right === undefined) return 1;
+  if (isTemporalType(type)) {
+    const leftTime = parseTemporalSortValue(left);
+    const rightTime = parseTemporalSortValue(right);
+    if (leftTime !== undefined || rightTime !== undefined) {
+      if (leftTime === undefined) return -1;
+      if (rightTime === undefined) return 1;
+      return leftTime - rightTime;
+    }
+  }
   if (isNumericType(type)) {
-    const leftNumber = Number(left);
-    const rightNumber = Number(right);
-    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber - rightNumber;
+    const leftDecimal = parseComparableDecimal(left);
+    const rightDecimal = parseComparableDecimal(right);
+    if (leftDecimal && rightDecimal) return compareComparableDecimals(leftDecimal, rightDecimal);
   }
   return cellText(left).localeCompare(cellText(right), undefined, { numeric: true, sensitivity: 'base' });
 }
@@ -259,7 +320,7 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
       const index = resolveColumnIndex(columns, key);
       return cellText(index >= 0 ? row.values[index] : undefined);
     });
-    const id = values.join('\u001f');
+    const id = JSON.stringify(values);
     const group = groups.get(id) ?? [];
     group.push(row);
     groups.set(id, group);
@@ -267,9 +328,9 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
   const rendered: RenderedRow[] = [];
   let displayIndex = 0;
   for (const [id, group] of groups) {
-    const label = id.split('\u001f').join(' · ');
+    const label = JSON.parse(id).join(' · ') as string;
     rendered.push({ kind: 'group', id, label, count: group.length });
-    for (const row of group) rendered.push({ ...row, kind: 'data', displayIndex });
+    for (const row of group) rendered.push({ ...row, kind: 'data', displayIndex, groupId: id });
     displayIndex += group.length;
   }
   return rendered;
@@ -282,6 +343,21 @@ function selectedRange(selection: DataGridSelection | undefined): { minRow: numb
     maxRow: Math.max(selection.anchorRow, selection.focusRow),
     minColumn: Math.min(selection.anchorColumn, selection.focusColumn),
     maxColumn: Math.max(selection.anchorColumn, selection.focusColumn),
+  };
+}
+
+function selectedColumnPositionRange(
+  selection: DataGridSelection | undefined,
+  visibleColumnIndexes: readonly number[],
+): { minColumn: number; maxColumn: number } | undefined {
+  if (!selection) return undefined;
+  const anchor = visibleColumnIndexes.indexOf(selection.anchorColumn);
+  const focus = visibleColumnIndexes.indexOf(selection.focusColumn);
+  const anchorPosition = anchor >= 0 ? anchor : selection.anchorColumn;
+  const focusPosition = focus >= 0 ? focus : selection.focusColumn;
+  return {
+    minColumn: Math.min(anchorPosition, focusPosition),
+    maxColumn: Math.max(anchorPosition, focusPosition),
   };
 }
 
@@ -343,6 +419,8 @@ export function DataGrid({
   const processedRows = useMemo(() => indexedRows(columns, rows, activeView, clientProcessing), [columns, rows, activeView, clientProcessing]);
   const renderedRows = useMemo(() => groupRows(columns, processedRows, activeView.grouping), [columns, processedRows, activeView.grouping]);
   const range = selectedRange(selection);
+  const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     const restore = (): void => {
@@ -448,7 +526,7 @@ export function DataGrid({
     const selected = range;
     const minRow = selected?.minRow ?? 0;
     const maxRow = selected?.maxRow ?? Math.max(0, processedRows.length - 1);
-    const selectedColumns = visibleColumnIndexes.filter(columnIndex => selected === undefined || (columnIndex >= selected.minColumn && columnIndex <= selected.maxColumn));
+    const selectedColumns = visibleColumnIndexes.filter((_columnIndex, position) => columnRange === undefined || (position >= columnRange.minColumn && position <= columnRange.maxColumn));
     const columnIndexes = selectedColumns.length > 0 ? selectedColumns : visibleColumnIndexes;
     const selectedRows = processedRows.slice(minRow, maxRow + 1).map(row => row.values);
     const payload: DataGridCopyPayload = { columns: columnIndexes.map(index => columns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection };
@@ -499,7 +577,11 @@ export function DataGrid({
           })}
         </tr></thead>
         <tbody>{renderedRows.map(rendered => {
-          if (rendered.kind === 'group') return <tr className="ui-data-grid-group-row" key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1}><span className="ui-data-grid-group-marker">▾</span>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
+          if (rendered.kind === 'group') {
+            const collapsed = collapsedGroups.has(rendered.id);
+            return <tr className="ui-data-grid-group-row" key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
+          }
+          if (rendered.groupId !== undefined && collapsedGroups.has(rendered.groupId)) return null;
           const rowSelected = selectedRowIndex === rendered.displayIndex;
           return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rendered.values.map(cellText).join(' ')} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.displayIndex)}>
             <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, 0)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.displayIndex); }}>{rendered.displayIndex + 1}</button></th>
@@ -507,7 +589,8 @@ export function DataGrid({
               const column = columns[columnIndex]!;
               const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
               const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(columns[index]!, index, key))).reduce((sum, index) => sum + (activeView.columnWidths?.[columnKey(columns[index]!, index)] ?? DEFAULT_COLUMN_WIDTH), 0) : undefined;
-              const selected = range !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnIndex >= range.minColumn && columnIndex <= range.maxColumn;
+              const columnPosition = visibleColumnIndexes.indexOf(columnIndex);
+              const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];
               return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column.type)}`, isNumericType(column.type) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.displayIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={cellText(value)}>{cellText(value)}</td>;
             })}
