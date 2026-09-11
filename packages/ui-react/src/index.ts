@@ -2,6 +2,22 @@ export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
 export { formatDataGridCellValue, processDataGridRows } from './dataGrid';
 export {
+  formatCanonicalDataGridCellValue,
+  formatDataGridBinaryPlaceholder,
+  inferDataGridColumnMetadata,
+  isDataGridBinaryType,
+  isDataGridIntegerType,
+  isDataGridNumericColumn,
+  isDataGridTemporalColumn,
+} from './resultGridFormatting';
+export type {
+  DataGridCellMetadata,
+  DataGridDecimalFormattingOptions,
+  DataGridFormattingOptions,
+  DataGridIntegerFormattingOptions,
+  DataGridNumericKind,
+} from './resultGridFormatting';
+export {
   AsyncStateView,
   CapabilityGate,
   DataGrid,

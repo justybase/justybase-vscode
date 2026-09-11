@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, UIEvent } from 'react';
 import type { UiResultViewState } from '@justybase/ui-core';
+import {
+  formatDataGridCellValue,
+  inferDataGridColumnMetadata,
+  isDataGridNumericColumn,
+  isDataGridTemporalColumn,
+} from './resultGridFormatting';
+import type { DataGridCellMetadata } from './resultGridFormatting';
 
-export interface DataGridColumn {
+export { formatDataGridCellValue } from './resultGridFormatting';
+
+export interface DataGridColumn extends DataGridCellMetadata {
   readonly name: string;
-  readonly type?: string;
 }
 
 export type DataGridViewState = Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'sorting' | 'grouping'> &
@@ -99,28 +107,8 @@ function normaliseView(view: DataGridViewState | undefined): DataGridViewState {
   };
 }
 
-function cellText(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL';
-  if (typeof value === 'object') {
-    try { return JSON.stringify(value); } catch { return String(value); }
-  }
-  return String(value);
-}
-
-function isBooleanType(type?: string): boolean {
-  return type !== undefined && /BOOL/.test(type.toUpperCase());
-}
-
-function booleanValue(value: unknown): boolean {
-  if (value === true || value === 1 || value === '1') return true;
-  return typeof value === 'string' && ['t', 'true', 'yes'].includes(value.trim().toLocaleLowerCase());
-}
-
-/** Formats a cell for display without changing the raw value kept by adapters. */
-export function formatDataGridCellValue(value: unknown, type?: string): string {
-  if (value === null || value === undefined) return 'NULL';
-  if (isBooleanType(type)) return booleanValue(value) ? '✓ true' : '✗ false';
-  return cellText(value);
+function cellText(value: unknown, metadata: DataGridCellMetadata = {}): string {
+  return formatDataGridCellValue(value, metadata.type, metadata);
 }
 
 interface ComparableDecimal {
@@ -166,9 +154,12 @@ function compareComparableDecimals(left: ComparableDecimal, right: ComparableDec
   return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
 }
 
-function typeBadge(type?: string): string {
-  if (!type) return '?';
-  const value = type.toUpperCase();
+function typeBadge(column: DataGridColumn): string {
+  if (column.inferredDateInteger) return 'DT';
+  if (column.inferredNumericKind === 'integer') return 'INT';
+  if (column.inferredNumericKind === 'decimal') return 'NUM';
+  if (!column.type) return '?';
+  const value = column.type.toUpperCase();
   if (/INT|BIGINT|SMALLINT|TINYINT/.test(value)) return 'INT';
   if (/DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(value)) return 'NUM';
   if (/VARCHAR|CHAR|TEXT|CLOB|STRING/.test(value)) return 'TXT';
@@ -177,38 +168,38 @@ function typeBadge(type?: string): string {
   return value.slice(0, 4);
 }
 
-function typeBadgeClass(type?: string): string {
-  if (!type) return 'text';
-  const value = type.toUpperCase();
+function typeBadgeClass(column: DataGridColumn): string {
+  if (column.inferredDateInteger) return 'temporal';
+  if (column.inferredNumericKind !== undefined) return 'numeric';
+  if (!column.type) return 'text';
+  const value = column.type.toUpperCase();
   if (/INT|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(value)) return 'numeric';
   if (/DATE|TIME|TIMESTAMP/.test(value)) return 'temporal';
   if (/BOOL/.test(value)) return 'boolean';
   return 'text';
 }
 
-function isNumericType(type?: string): boolean {
-  return type !== undefined && /INT|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(type.toUpperCase());
-}
-
-function isTemporalType(type?: string): boolean {
-  return type !== undefined && /DATE|TIME|TIMESTAMP/.test(type.toUpperCase());
-}
-
-function parseTemporalSortValue(value: unknown): number | undefined {
+function parseTemporalSortValue(value: unknown, metadata: DataGridCellMetadata = {}): number | undefined {
   if (value instanceof Date) {
     const timestamp = value.getTime();
     return Number.isNaN(timestamp) ? undefined : timestamp;
   }
-  const raw = cellText(value);
+  if (metadata.inferredDateInteger) {
+    const rawInteger = Number(String(value));
+    return Number.isFinite(rawInteger) ? rawInteger : undefined;
+  }
+  const raw = cellText(value, metadata);
   const parsed = Date.parse(raw);
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-function valueClass(value: unknown, type?: string): string {
+function valueClass(value: unknown, column: DataGridColumn): string {
   if (value === null || value === undefined) return 'null';
-  if (isNumericType(type)) return 'numeric';
-  if (type !== undefined && /DATE|TIME|TIMESTAMP/.test(type.toUpperCase())) return 'temporal';
-  if (isBooleanType(type)) return booleanValue(value) ? 'boolean-true' : 'boolean-false';
+  if (isDataGridNumericColumn(column)) return 'numeric';
+  if (isDataGridTemporalColumn(column)) return 'temporal';
+  if (column.type !== undefined && /BOOL/u.test(column.type.toUpperCase())) {
+    return formatDataGridCellValue(value, column.type, column) === '✓ true' ? 'boolean-true' : 'boolean-false';
+  }
   return '';
 }
 
@@ -257,24 +248,34 @@ function resolveColumnIndex(columns: readonly DataGridColumn[], key: string): nu
   return -1;
 }
 
-function compareValues(left: unknown, right: unknown, type?: string): number {
+function resolveDataGridColumns(
+  columns: readonly DataGridColumn[],
+  rows: readonly (readonly unknown[])[],
+): readonly DataGridColumn[] {
+  return columns.map((column, columnIndex) => ({
+    ...column,
+    ...inferDataGridColumnMetadata(column, rows.slice(0, 100).map(row => row[columnIndex])),
+  }));
+}
+
+function compareValues(left: unknown, right: unknown, column: DataGridColumn): number {
   if (left === null || left === undefined) return right === null || right === undefined ? 0 : -1;
   if (right === null || right === undefined) return 1;
-  if (isTemporalType(type)) {
-    const leftTime = parseTemporalSortValue(left);
-    const rightTime = parseTemporalSortValue(right);
+  if (isDataGridTemporalColumn(column)) {
+    const leftTime = parseTemporalSortValue(left, column);
+    const rightTime = parseTemporalSortValue(right, column);
     if (leftTime !== undefined || rightTime !== undefined) {
       if (leftTime === undefined) return -1;
       if (rightTime === undefined) return 1;
       return leftTime - rightTime;
     }
   }
-  if (isNumericType(type)) {
+  if (isDataGridNumericColumn(column)) {
     const leftDecimal = parseComparableDecimal(left);
     const rightDecimal = parseComparableDecimal(right);
     if (leftDecimal && rightDecimal) return compareComparableDecimals(leftDecimal, rightDecimal);
   }
-  return cellText(left).localeCompare(cellText(right), undefined, { numeric: true, sensitivity: 'base' });
+  return cellText(left, column).localeCompare(cellText(right, column), undefined, { numeric: true, sensitivity: 'base' });
 }
 
 function matchesRow(
@@ -283,10 +284,10 @@ function matchesRow(
   view: DataGridViewState,
 ): boolean {
   const globalFilter = view.globalFilter.trim().toLocaleLowerCase();
-  if (globalFilter && !values.some((value, columnIndex) => formatDataGridCellValue(value, columns[columnIndex]?.type).toLocaleLowerCase().includes(globalFilter))) return false;
+  if (globalFilter && !values.some((value, columnIndex) => formatDataGridCellValue(value, columns[columnIndex]?.type, columns[columnIndex]).toLocaleLowerCase().includes(globalFilter))) return false;
   return columns.every((column, columnIndex) => {
     const filter = filterValue(view, column, columnIndex).trim().toLocaleLowerCase();
-    return !filter || formatDataGridCellValue(values[columnIndex], column.type).toLocaleLowerCase().includes(filter);
+    return !filter || formatDataGridCellValue(values[columnIndex], column.type, column).toLocaleLowerCase().includes(filter);
   });
 }
 
@@ -306,7 +307,7 @@ function processIndexedRows(
     .filter(item => item.columnIndex >= 0);
   indexed.sort((left, right) => {
     for (const item of sorting) {
-      const comparison = compareValues(left.values[item.columnIndex], right.values[item.columnIndex], columns[item.columnIndex]?.type);
+      const comparison = compareValues(left.values[item.columnIndex], right.values[item.columnIndex], columns[item.columnIndex]!);
       if (comparison !== 0) return item.descending ? -comparison : comparison;
     }
     return left.sourceIndex - right.sourceIndex;
@@ -320,7 +321,8 @@ export function processDataGridRows(
   rows: readonly (readonly unknown[])[],
   view: DataGridViewState,
 ): readonly (readonly unknown[])[] {
-  return processIndexedRows(columns, rows, view, true).map(item => item.values);
+  const resolvedColumns = resolveDataGridColumns(columns, rows);
+  return processIndexedRows(resolvedColumns, rows, view, true).map(item => item.values);
 }
 
 function indexedRows(
@@ -338,7 +340,7 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
   for (const row of rows) {
     const values = grouping.map(key => {
       const index = resolveColumnIndex(columns, key);
-      return formatDataGridCellValue(index >= 0 ? row.values[index] : undefined, index >= 0 ? columns[index]?.type : undefined);
+      return formatDataGridCellValue(index >= 0 ? row.values[index] : undefined, index >= 0 ? columns[index]?.type : undefined, index >= 0 ? columns[index] : undefined);
     });
     const id = JSON.stringify(values);
     const group = groups.get(id) ?? [];
@@ -402,6 +404,7 @@ export function DataGrid({
   const scroller = useRef<HTMLDivElement>(null);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
   const activeView = normaliseView(view ?? internalView);
+  const resolvedColumns = useMemo(() => resolveDataGridColumns(columns, rows), [columns, rows]);
   const [selection, setSelection] = useState<DataGridSelection | undefined>(undefined);
   const selectionRef = useRef<DataGridSelection | undefined>(undefined);
   const dragSelectingRef = useRef(false);
@@ -442,9 +445,9 @@ export function DataGrid({
     };
   }, []);
 
-  const visibleColumnIndexes = useMemo(() => orderColumns(columns, activeView), [columns, activeView]);
-  const processedRows = useMemo(() => indexedRows(columns, rows, activeView, clientProcessing), [columns, rows, activeView, clientProcessing]);
-  const renderedRows = useMemo(() => groupRows(columns, processedRows, activeView.grouping), [columns, processedRows, activeView.grouping]);
+  const visibleColumnIndexes = useMemo(() => orderColumns(resolvedColumns, activeView), [resolvedColumns, activeView]);
+  const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing), [resolvedColumns, rows, activeView, clientProcessing]);
+  const renderedRows = useMemo(() => groupRows(resolvedColumns, processedRows, activeView.grouping), [resolvedColumns, processedRows, activeView.grouping]);
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
@@ -459,7 +462,7 @@ export function DataGrid({
     sourceId,
     resultSetId,
     clientProcessing,
-    columns: columns.map(column => [column.name, column.type]),
+    columns: resolvedColumns.map(column => [column.name, column.type, column.scale, column.inferredNumericKind, column.inferredDateInteger]),
     view: {
       globalFilter: activeView.globalFilter,
       columnFilters: activeView.columnFilters,
@@ -557,18 +560,18 @@ export function DataGrid({
   }
 
   function sortColumn(columnIndex: number): void {
-    const id = columnKey(columns[columnIndex]!, columnIndex);
-    const current = activeView.sorting.find(item => columnMatchesKey(columns[columnIndex]!, columnIndex, item.column));
+    const id = columnKey(resolvedColumns[columnIndex]!, columnIndex);
+    const current = activeView.sorting.find(item => columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, item.column));
     const nextSorting = current === undefined
       ? [{ column: id, descending: false }]
       : current.descending
-        ? activeView.sorting.filter(item => !columnMatchesKey(columns[columnIndex]!, columnIndex, item.column))
-        : activeView.sorting.map(item => columnMatchesKey(columns[columnIndex]!, columnIndex, item.column) ? { ...item, descending: true } : item);
+        ? activeView.sorting.filter(item => !columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, item.column))
+        : activeView.sorting.map(item => columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, item.column) ? { ...item, descending: true } : item);
     updateView({ sorting: nextSorting });
   }
 
   function filterColumn(columnIndex: number, value: string): void {
-    const id = columnKey(columns[columnIndex]!, columnIndex);
+    const id = columnKey(resolvedColumns[columnIndex]!, columnIndex);
     const nextFilters = { ...activeView.columnFilters };
     if (value) nextFilters[id] = value;
     else delete nextFilters[id];
@@ -576,18 +579,18 @@ export function DataGrid({
   }
 
   function togglePin(columnIndex: number): void {
-    const id = columnKey(columns[columnIndex]!, columnIndex);
+    const id = columnKey(resolvedColumns[columnIndex]!, columnIndex);
     const pinned = [...(activeView.pinnedColumns ?? [])];
-    const index = pinned.findIndex(key => columnMatchesKey(columns[columnIndex]!, columnIndex, key));
+    const index = pinned.findIndex(key => columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, key));
     if (index >= 0) pinned.splice(index, 1);
     else pinned.push(id);
     updateView({ pinnedColumns: pinned });
   }
 
   function reorderColumn(columnIndex: number, targetIndex: number): void {
-    const current = [...(activeView.columnOrder ?? columns.map((_column, index) => columnKey(columns[index]!, index)))];
-    const sourceId = columnKey(columns[columnIndex]!, columnIndex);
-    const targetId = columnKey(columns[targetIndex]!, targetIndex);
+    const current = [...(activeView.columnOrder ?? resolvedColumns.map((_column, index) => columnKey(resolvedColumns[index]!, index)))];
+    const sourceId = columnKey(resolvedColumns[columnIndex]!, columnIndex);
+    const targetId = columnKey(resolvedColumns[targetIndex]!, targetIndex);
     const sourcePosition = current.indexOf(sourceId);
     const targetPosition = current.indexOf(targetId);
     if (sourcePosition < 0 || targetPosition < 0 || sourcePosition === targetPosition) return;
@@ -609,7 +612,11 @@ export function DataGrid({
       return;
     }
     if (typeof navigator === 'undefined' || !navigator.clipboard) return;
-    const text = [payload.columns.map(column => column.name).join('\t'), ...payload.rows.map(row => row.map((value, index) => formatDataGridCellValue(value, payload.columns[index]?.type)).join('\t'))].join('\n');
+    const text = [payload.columns.map(column => column.name).join('\t'), ...payload.rows.map(row => row.map((value, index) => {
+      const columnIndex = columnIndexes[index];
+      const column = columnIndex === undefined ? payload.columns[index] : resolvedColumns[columnIndex];
+      return formatDataGridCellValue(value, column?.type, column);
+    }).join('\t'))].join('\n');
     void navigator.clipboard.writeText(text);
   }
 
@@ -620,7 +627,7 @@ export function DataGrid({
     }
   }
 
-  if (columns.length === 0 || (rows.length === 0 && !hasMoreRows)) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
+  if (resolvedColumns.length === 0 || (rows.length === 0 && !hasMoreRows)) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
 
   // Keep the legacy result-grid hook as a compatibility selector while the
   // shared class remains the styling/API identity for every host.
@@ -630,17 +637,17 @@ export function DataGrid({
         <thead><tr>
           <th scope="col" className="ui-data-grid-row-number">#</th>
           {visibleColumnIndexes.map(columnIndex => {
-            const column = columns[columnIndex]!;
+            const column = resolvedColumns[columnIndex]!;
             const id = columnKey(column, columnIndex);
             const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(columns[index]!, index, key))).reduce((sum, index) => sum + (activeView.columnWidths?.[columnKey(columns[index]!, index)] ?? DEFAULT_COLUMN_WIDTH), 0) : undefined;
+            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + (activeView.columnWidths?.[columnKey(resolvedColumns[index]!, index)] ?? DEFAULT_COLUMN_WIDTH), 0) : undefined;
             const sort = activeView.sorting.find(item => columnMatchesKey(column, columnIndex, item.column));
             const width = activeView.columnWidths?.[id] ?? DEFAULT_COLUMN_WIDTH;
             return <th scope="col" key={id} className={pinned ? 'ui-data-grid-pinned' : undefined} style={{ width, minWidth: width, ...(left === undefined ? {} : { left }) }} onDragOver={event => event.preventDefault()} onDrop={() => { const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex); draggedColumnRef.current = undefined; }}>
               <div className="ui-data-grid-header-content">
                 <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} onDragStart={() => { draggedColumnRef.current = columnIndex; }} onDragEnd={() => { draggedColumnRef.current = undefined; }}>⠿</button>
                 <button type="button" className="ui-data-grid-header-label" onClick={() => sortColumn(columnIndex)} title={`Sort by ${column.name}`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : sort.descending ? 'Sorted descending' : 'Sorted ascending'}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}</span></button>
-                <span className={`ui-data-grid-type-badge ui-data-grid-type-${typeBadgeClass(column.type)}`}>{typeBadge(column.type)}</span>
+                <span className={`ui-data-grid-type-badge ui-data-grid-type-${typeBadgeClass(column)}`}>{typeBadge(column)}</span>
                 <button type="button" className={`ui-data-grid-header-action ${pinned ? 'active' : ''}`} aria-label={pinned ? `Unpin ${column.name}` : `Pin ${column.name}`} title={pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}>📌</button>
                 <input className="ui-data-grid-column-filter" aria-label={`Filter ${column.name}`} placeholder="filter…" value={filterValue(activeView, column, columnIndex)} onChange={event => filterColumn(columnIndex, event.target.value)} />
                 <button type="button" className="ui-data-grid-group-action" aria-label={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? `Ungroup ${column.name}` : `Group by ${column.name}`} title={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? 'Remove grouping' : 'Group by column'} onClick={() => { const grouping = activeView.grouping.filter(key => !columnMatchesKey(column, columnIndex, key)); if (grouping.length === activeView.grouping.length) grouping.push(id); updateView({ grouping }); }}>▦</button>
@@ -656,19 +663,19 @@ export function DataGrid({
           }
           if (rendered.groupId !== undefined && collapsedGroups.has(rendered.groupId)) return null;
           const rowSelected = selectedRowIndex === rendered.sourceIndex;
-          const rowLabel = rendered.values.map((value, columnIndex) => formatDataGridCellValue(value, columns[columnIndex]?.type)).join(' ');
+          const rowLabel = rendered.values.map((value, columnIndex) => formatDataGridCellValue(value, resolvedColumns[columnIndex]?.type, resolvedColumns[columnIndex])).join(' ');
           const firstVisibleColumn = visibleColumnIndexes[0];
           return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rowLabel} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.sourceIndex)}>
             <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => firstVisibleColumn !== undefined && extendSelection(rendered.displayIndex, firstVisibleColumn)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.sourceIndex); }}>{rendered.displayIndex + 1}</button></th>
             {visibleColumnIndexes.map(columnIndex => {
-              const column = columns[columnIndex]!;
+              const column = resolvedColumns[columnIndex]!;
               const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(columns[index]!, index, key))).reduce((sum, index) => sum + (activeView.columnWidths?.[columnKey(columns[index]!, index)] ?? DEFAULT_COLUMN_WIDTH), 0) : undefined;
+              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + (activeView.columnWidths?.[columnKey(resolvedColumns[index]!, index)] ?? DEFAULT_COLUMN_WIDTH), 0) : undefined;
               const columnPosition = visibleColumnIndexes.indexOf(columnIndex);
               const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];
-              const displayValue = formatDataGridCellValue(value, column.type);
-              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column.type)}`, isNumericType(column.type) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
+              const displayValue = formatDataGridCellValue(value, column.type, column);
+              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column)}`, isDataGridNumericColumn(column) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
             })}
           </tr>;
         })}</tbody>
