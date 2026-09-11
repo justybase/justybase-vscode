@@ -26,6 +26,7 @@ export interface DataGridSelection {
 }
 
 export interface DataGridCellContext {
+  /** Index into the supplied raw rows, not the filtered or sorted display list. */
   readonly rowIndex: number;
   readonly columnIndex: number;
   readonly clientX: number;

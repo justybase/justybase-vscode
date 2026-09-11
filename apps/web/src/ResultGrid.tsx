@@ -397,7 +397,10 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     ? undefined
     : result.sessionId
       ? selectedDisplayIndex
-      : result.rows.findIndex(row => row === displayRows[selectedDisplayIndex]);
+      : (() => {
+        const rawIndex = result.rows.findIndex(row => row === displayRows[selectedDisplayIndex]);
+        return rawIndex >= 0 ? rawIndex : undefined;
+      })();
   const effectiveTotalRows = result.sessionId ? totalRows : data.length;
   const totalPages = Math.max(1, Math.ceil(effectiveTotalRows / pageSize));
   const sharedGridView = useMemo(() => ({
