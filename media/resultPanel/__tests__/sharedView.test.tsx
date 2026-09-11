@@ -298,6 +298,17 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(screen.getByText('one')).toBeInTheDocument();
         fireEvent.change(screen.getByRole('textbox', { name: 'Filter results' }), { target: { value: 'two' } });
         expect(screen.queryByText('one')).not.toBeInTheDocument();
+        fireEvent.change(screen.getByRole('textbox', { name: 'Filter results' }), { target: { value: '' } });
+        fireEvent.change(screen.getByRole('textbox', { name: 'Filter label' }), { target: { value: 'one' } });
+        expect(screen.getByText('one')).toBeInTheDocument();
+        expect(screen.queryByText('two')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Group by label' }));
+        expect(screen.getByText(/1 rows/)).toBeInTheDocument();
+        expect(controller.activeResult()?.view).toMatchObject({ columnFilters: { '1': 'one' }, grouping: ['1'] });
+        const selectedCell = screen.getByRole('cell', { name: 'one' });
+        fireEvent.mouseDown(selectedCell, { button: 0 });
+        expect(selectedCell).toHaveClass('ui-data-grid-cell-selected');
+        fireEvent.change(screen.getByRole('textbox', { name: 'Filter label' }), { target: { value: '' } });
         fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
         fireEvent.click(screen.getByRole('row', { name: '2 two' }));
         expect(screen.getByRole('heading', { name: 'Row details' })).toBeInTheDocument();
