@@ -16,6 +16,7 @@ import {
   SchemaTree,
   UiShell,
   WorkspaceTabs,
+  formatDataGridCellValue,
   processDataGridRows,
 } from '../src';
 
@@ -34,6 +35,13 @@ const result: UiResultSurfaceState = {
 };
 
 describe('shared React presentation', () => {
+  it('uses the canonical VS Code boolean cell representation', () => {
+    expect(formatDataGridCellValue(true, 'BOOLEAN')).toBe('✓ true');
+    expect(formatDataGridCellValue('t', 'BOOL')).toBe('✓ true');
+    expect(formatDataGridCellValue(false, 'BOOLEAN')).toBe('✗ false');
+    expect(formatDataGridCellValue(null, 'BOOLEAN')).toBe('NULL');
+  });
+
   it('renders every async state with accessible status semantics', () => {
     const { rerender } = render(<AsyncStateView state="loading" />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading');
@@ -133,6 +141,21 @@ describe('shared React presentation', () => {
     expect(onContextMenu).toHaveBeenCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 20, clientY: 40 });
     fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
+  });
+
+  it('renders formatted boolean values while preserving raw selection payloads', () => {
+    const onCopySelection = jest.fn();
+    render(<DataGrid
+      resultSetId="formatted-values"
+      columns={[{ name: 'ENABLED', type: 'BOOLEAN' }]}
+      rows={[[true], [false]]}
+      onCopySelection={onCopySelection}
+    />);
+    expect(screen.getByRole('cell', { name: '✓ true' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '✗ false' })).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole('cell', { name: '✓ true' }), { button: 0 });
+    fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
+    expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ rows: [[true]] }));
   });
 
   it('matches canonical typed sorting and keeps selection coordinates in display order', () => {

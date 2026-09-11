@@ -48,6 +48,7 @@ export interface DataGridProps {
   readonly onScroll?: (position: GridScrollPosition) => void;
   /** Requests the next adapter-owned page when the rendered rows near the end. */
   readonly onLoadMore?: () => void;
+/** Index into the displayed rows after the shared view has been applied. */
   readonly onRowSelect?: (rowIndex: number) => void;
   readonly selectedRowIndex?: number;
   readonly view?: DataGridViewState;
@@ -105,6 +106,22 @@ function cellText(value: unknown): string {
   return String(value);
 }
 
+function isBooleanType(type?: string): boolean {
+  return type !== undefined && /BOOL/.test(type.toUpperCase());
+}
+
+function booleanValue(value: unknown): boolean {
+  if (value === true || value === 1 || value === '1') return true;
+  return typeof value === 'string' && ['t', 'true', 'yes'].includes(value.trim().toLocaleLowerCase());
+}
+
+/** Formats a cell for display without changing the raw value kept by adapters. */
+export function formatDataGridCellValue(value: unknown, type?: string): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (isBooleanType(type)) return booleanValue(value) ? '✓ true' : '✗ false';
+  return cellText(value);
+}
+
 interface ComparableDecimal {
   readonly coefficient: bigint;
   readonly scale: number;
@@ -112,15 +129,21 @@ interface ComparableDecimal {
 
 function parseComparableDecimal(value: unknown): ComparableDecimal | undefined {
   if (value === null || value === undefined || value === '') return undefined;
-  const raw = typeof value === 'number' || typeof value === 'bigint' ? String(value) : String(value);
+  const raw = String(value);
   const compact = raw.replace(/[\s\u00a0\u202f,]/gu, '');
   const match = /^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/u.exec(compact);
   if (!match) return undefined;
-  const exponent = Number(match[4] ?? 0);
   const fraction = match[3] ?? '';
-  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 1_000 || match[2]!.length + fraction.length > 10_000) return undefined;
-  let scale = fraction.length - exponent;
-  if (!Number.isSafeInteger(scale) || scale < -1_000 || scale > 1_000) return undefined;
+  if (match[2]!.length + fraction.length > 10_000) return undefined;
+  let exponent: bigint;
+  try {
+    exponent = BigInt(match[4] ?? 0);
+  } catch {
+    return undefined;
+  }
+  const scaleValue = BigInt(fraction.length) - exponent;
+  if (scaleValue < -1_000n || scaleValue > 1_000n) return undefined;
+  let scale = Number(scaleValue);
   let coefficient = BigInt(`${match[2]}${fraction}`) * (match[1] === '-' ? -1n : 1n);
   if (scale < 0) {
     coefficient *= 10n ** BigInt(-scale);
@@ -184,10 +207,7 @@ function valueClass(value: unknown, type?: string): string {
   if (value === null || value === undefined) return 'null';
   if (isNumericType(type)) return 'numeric';
   if (type !== undefined && /DATE|TIME|TIMESTAMP/.test(type.toUpperCase())) return 'temporal';
-  if (type !== undefined && /BOOL/.test(type.toUpperCase())) {
-    const truthy = value === true || value === 1 || value === 't' || value === 'TRUE' || value === 'true';
-    return truthy ? 'boolean-true' : 'boolean-false';
-  }
+  if (isBooleanType(type)) return booleanValue(value) ? 'boolean-true' : 'boolean-false';
   return '';
 }
 
@@ -262,10 +282,10 @@ function matchesRow(
   view: DataGridViewState,
 ): boolean {
   const globalFilter = view.globalFilter.trim().toLocaleLowerCase();
-  if (globalFilter && !values.some(value => cellText(value).toLocaleLowerCase().includes(globalFilter))) return false;
+  if (globalFilter && !columns.some((column, columnIndex) => formatDataGridCellValue(values[columnIndex], column.type).toLocaleLowerCase().includes(globalFilter))) return false;
   return columns.every((column, columnIndex) => {
     const filter = filterValue(view, column, columnIndex).trim().toLocaleLowerCase();
-    return !filter || cellText(values[columnIndex]).toLocaleLowerCase().includes(filter);
+    return !filter || formatDataGridCellValue(values[columnIndex], column.type).toLocaleLowerCase().includes(filter);
   });
 }
 
@@ -317,7 +337,7 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
   for (const row of rows) {
     const values = grouping.map(key => {
       const index = resolveColumnIndex(columns, key);
-      return cellText(index >= 0 ? row.values[index] : undefined);
+      return formatDataGridCellValue(index >= 0 ? row.values[index] : undefined, index >= 0 ? columns[index]?.type : undefined);
     });
     const id = JSON.stringify(values);
     const group = groups.get(id) ?? [];
@@ -388,7 +408,11 @@ export function DataGrid({
   const resizeRef = useRef<{ columnId: string; startX: number; startWidth: number } | undefined>(undefined);
   const activeViewRef = useRef<DataGridViewState>(activeView);
   const updateViewRef = useRef<(patch: Partial<UiResultViewState>) => void>(() => undefined);
+  const selectionScopeRef = useRef<string | undefined>(undefined);
+  const selectionChangeRef = useRef(onSelectionChange);
+  const emptyPageRequestRef = useRef<string | undefined>(undefined);
   activeViewRef.current = activeView;
+  selectionChangeRef.current = onSelectionChange;
 
   const updateView = (patch: Partial<UiResultViewState>): void => {
     if (view === undefined) setInternalView(previous => normaliseView({ ...previous, ...patch }));
@@ -397,7 +421,10 @@ export function DataGrid({
   updateViewRef.current = updateView;
 
   useEffect(() => {
-    const handleMouseUp = (): void => { dragSelectingRef.current = false; };
+    const handleMouseUp = (): void => {
+      dragSelectingRef.current = false;
+      resizeRef.current = undefined;
+    };
     const handleMouseMove = (event: MouseEvent): void => {
       const resize = resizeRef.current;
       if (!resize) return;
@@ -420,11 +447,49 @@ export function DataGrid({
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const hasMoreRows = onLoadMore !== undefined && rows.length < totalRowCount;
+  const emptyPageRequestKey = JSON.stringify({
+    rowCount: rows.length,
+    totalRowCount,
+    globalFilter: activeView.globalFilter,
+    columnFilters: activeView.columnFilters,
+  });
+  const selectionScope = JSON.stringify({
+    sourceId,
+    resultSetId,
+    clientProcessing,
+    columns: columns.map(column => [column.name, column.type]),
+    view: {
+      globalFilter: activeView.globalFilter,
+      columnFilters: activeView.columnFilters,
+      sorting: activeView.sorting,
+      grouping: activeView.grouping,
+      columnVisibility: activeView.columnVisibility,
+      columnOrder: activeView.columnOrder,
+      pinnedColumns: activeView.pinnedColumns,
+    },
+  });
 
   useEffect(() => {
-    setSelectionValue(undefined);
+    const previousScope = selectionScopeRef.current;
+    selectionScopeRef.current = selectionScope;
+    if (previousScope === undefined || previousScope === selectionScope) return;
+    dragSelectingRef.current = false;
+    selectionRef.current = undefined;
+    setSelection(undefined);
     setCollapsedGroups(new Set());
-  }, [resultSetId]);
+    selectionChangeRef.current?.(undefined);
+  }, [selectionScope]);
+
+  useEffect(() => {
+    if (!hasMoreRows || processedRows.length > 0) {
+      emptyPageRequestRef.current = undefined;
+      return;
+    }
+    if (emptyPageRequestRef.current === emptyPageRequestKey) return;
+    emptyPageRequestRef.current = emptyPageRequestKey;
+    onLoadMore?.();
+  }, [emptyPageRequestKey, hasMoreRows, onLoadMore, processedRows.length]);
 
   useEffect(() => {
     const restore = (): void => {
@@ -452,7 +517,7 @@ export function DataGrid({
     const element = event.currentTarget;
     onScroll?.({ ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / ROW_HEIGHT) });
     const distanceFromEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (onLoadMore && processedRows.length < totalRowCount && distanceFromEnd <= 160) onLoadMore();
+    if (onLoadMore && rows.length < totalRowCount && distanceFromEnd <= 160) onLoadMore();
   }
 
   function setSelectionValue(next: DataGridSelection | undefined): void {
@@ -463,6 +528,7 @@ export function DataGrid({
 
   function selectCell(rowIndex: number, columnIndex: number, event: ReactMouseEvent<HTMLElement>): void {
     if (event.button !== 0) return;
+    scroller.current?.focus({ preventScroll: true });
     const previous = selectionRef.current;
     const next = event.shiftKey && previous
       ? { anchorRow: previous.anchorRow, anchorColumn: previous.anchorColumn, focusRow: rowIndex, focusColumn: columnIndex }
@@ -477,11 +543,14 @@ export function DataGrid({
   }
 
   function selectWholeRow(rowIndex: number, event: ReactMouseEvent<HTMLElement>): void {
-    if (event.button !== 0 || columns.length === 0) return;
+    const firstColumn = visibleColumnIndexes[0];
+    const lastColumn = visibleColumnIndexes[visibleColumnIndexes.length - 1];
+    if (event.button !== 0 || firstColumn === undefined || lastColumn === undefined) return;
+    scroller.current?.focus({ preventScroll: true });
     const previous = selectionRef.current;
     const next = event.shiftKey && previous
-      ? { anchorRow: previous.anchorRow, anchorColumn: 0, focusRow: rowIndex, focusColumn: columns.length - 1 }
-      : { anchorRow: rowIndex, anchorColumn: 0, focusRow: rowIndex, focusColumn: columns.length - 1 };
+      ? { anchorRow: previous.anchorRow, anchorColumn: firstColumn, focusRow: rowIndex, focusColumn: lastColumn }
+      : { anchorRow: rowIndex, anchorColumn: firstColumn, focusRow: rowIndex, focusColumn: lastColumn };
     dragSelectingRef.current = true;
     setSelectionValue(next);
   }
@@ -539,7 +608,7 @@ export function DataGrid({
       return;
     }
     if (typeof navigator === 'undefined' || !navigator.clipboard) return;
-    const text = [payload.columns.map(column => column.name).join('\t'), ...payload.rows.map(row => row.map(cellText).join('\t'))].join('\n');
+    const text = [payload.columns.map(column => column.name).join('\t'), ...payload.rows.map(row => row.map((value, index) => formatDataGridCellValue(value, payload.columns[index]?.type)).join('\t'))].join('\n');
     void navigator.clipboard.writeText(text);
   }
 
@@ -550,14 +619,13 @@ export function DataGrid({
     }
   }
 
-  if (columns.length === 0 || rows.length === 0) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
-  if (processedRows.length === 0) return <div className="ui-grid-empty" role="status">No matching rows.</div>;
+  if (columns.length === 0 || (rows.length === 0 && !hasMoreRows)) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
 
   // Keep the legacy result-grid hook as a compatibility selector while the
   // shared class remains the styling/API identity for every host.
   return <div className="ui-result-grid result-grid">
     <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}>
-      <table className="ui-data-grid">
+      {processedRows.length === 0 ? <div className="ui-grid-empty" role="status">No matching rows.{hasMoreRows && <button type="button" onClick={onLoadMore}>Load more rows</button>}</div> : <table className="ui-data-grid">
         <thead><tr>
           <th scope="col" className="ui-data-grid-row-number">#</th>
           {visibleColumnIndexes.map(columnIndex => {
@@ -587,8 +655,10 @@ export function DataGrid({
           }
           if (rendered.groupId !== undefined && collapsedGroups.has(rendered.groupId)) return null;
           const rowSelected = selectedRowIndex === rendered.displayIndex;
-          return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rendered.values.map(cellText).join(' ')} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.displayIndex)}>
-            <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, 0)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.displayIndex); }}>{rendered.displayIndex + 1}</button></th>
+          const rowLabel = rendered.values.map((value, columnIndex) => formatDataGridCellValue(value, columns[columnIndex]?.type)).join(' ');
+          const firstVisibleColumn = visibleColumnIndexes[0];
+          return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rowLabel} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.displayIndex)}>
+            <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => firstVisibleColumn !== undefined && extendSelection(rendered.displayIndex, firstVisibleColumn)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.displayIndex); }}>{rendered.displayIndex + 1}</button></th>
             {visibleColumnIndexes.map(columnIndex => {
               const column = columns[columnIndex]!;
               const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
@@ -596,11 +666,12 @@ export function DataGrid({
               const columnPosition = visibleColumnIndexes.indexOf(columnIndex);
               const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];
-              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column.type)}`, isNumericType(column.type) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.displayIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={cellText(value)}>{cellText(value)}</td>;
+              const displayValue = formatDataGridCellValue(value, column.type);
+              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column.type)}`, isNumericType(column.type) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.displayIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
             })}
           </tr>;
         })}</tbody>
-      </table>
+      </table>}
     </div>
   </div>;
 }

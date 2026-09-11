@@ -14,6 +14,7 @@ import {
   RowDetail,
   UiShell,
   WorkspaceTabs,
+  formatDataGridCellValue,
   processDataGridRows,
 } from '@justybase/ui-react';
 import type { GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
@@ -43,8 +44,8 @@ export function asSurface(value: string): UiSurface | undefined {
     : undefined;
 }
 
-export function rowsAsText(columns: readonly { readonly name: string }[], rows: readonly ElectronRow[]): string {
-  return [columns.map(column => column.name).join('\t'), ...rows.map(row => row.map(value => String(value ?? '')).join('\t'))].join('\n');
+export function rowsAsText(columns: readonly { readonly name: string; readonly type?: string }[], rows: readonly ElectronRow[]): string {
+  return [columns.map(column => column.name).join('\t'), ...rows.map(row => row.map((value, index) => formatDataGridCellValue(value, columns[index]?.type)).join('\t'))].join('\n');
 }
 
 export function rowsAsCsv(columns: readonly { readonly name: string }[], rows: readonly ElectronRow[]): string {
