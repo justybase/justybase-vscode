@@ -119,6 +119,7 @@ import {
   setResultSets,
 } from './types.js';
 import type { CellDescriptor, ColumnSearchMapItem, ResultSet, TanStackColumn, TanStackTable } from './types.js';
+import { mountSharedResultPanelIfConfigured } from './sharedView.js';
 
 declare const workerUri: string | undefined;
 declare function setViewMode(mode: string): void;
@@ -866,6 +867,9 @@ function renderSidebarSchema(): void {
 // Entry point for resultPanelView.ts
 export function init(): void {
   try {
+    if (mountSharedResultPanelIfConfigured()) {
+      return;
+    }
     // Inject styles
     injectStyles();
 

@@ -22,7 +22,9 @@
       "@justybase/designer-core": ["../../packages/designer-core/src"],
       "@justybase/dialect-utils": ["../../packages/dialect-utils/src"],
       "@justybase/sql-core": ["../../packages/sql-core/src"],
-      "@justybase/result-core": ["../../packages/result-core/src"]
+      "@justybase/result-core": ["../../packages/result-core/src"],
+      "@justybase/ui-core": ["../../packages/ui-core/src"],
+      "@justybase/ui-react": ["../../packages/ui-react/src"]
     }
   },
   "include": ["src", "vite.config.ts"]

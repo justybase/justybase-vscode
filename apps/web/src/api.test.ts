@@ -122,6 +122,55 @@ describe('API client factory', () => {
     expect(socket?.readyState).toBe(3);
   });
 
+  it('drops malformed, foreign, and unsupported query-event frames at the transport boundary', () => {
+    const client = createApiClient({
+      fetch: jest.fn(async () => jsonResponse({ ok: true })),
+      webSocketBaseUrl: 'wss://events.example.test',
+      WebSocket: FakeWebSocket as unknown as new (url: string) => WebSocket,
+    });
+    const events: QueryEvent[] = [];
+    const subscription = client.connectToQueryEvents('query-1', event => events.push(event));
+    const socket = FakeWebSocket.instances[0];
+    socket?.open();
+
+    const malformed = [
+      'not-json',
+      JSON.stringify({ queryId: 'other', type: 'started' }),
+      JSON.stringify({ queryId: 'query-1', type: 'unknown' }),
+      JSON.stringify({ queryId: 'query-1', type: 'started', sequence: -1 }),
+      JSON.stringify({ queryId: 'query-1', type: 'started', statementIndex: -1 }),
+      JSON.stringify({ queryId: 'query-1', type: 'columns', columns: [{ name: 1 }] }),
+      JSON.stringify({ queryId: 'query-1', type: 'session', totalRows: -1 }),
+      JSON.stringify({ queryId: 'query-1', type: 'progress', totalRows: 'many' }),
+      JSON.stringify({ queryId: 'query-1', type: 'rows', rows: [[1, 2]], totalRows: 0 }),
+      JSON.stringify({ queryId: 'query-1', type: 'complete', totalRows: 1, limitReached: 'no' }),
+      JSON.stringify({ queryId: 'query-1', type: 'error', message: 42 }),
+      JSON.stringify({ queryId: 'query-1', type: 'cancelled', totalRows: 0, scope: 'unknown' }),
+      JSON.stringify({ queryId: 'query-1', type: 'batch-complete', status: 'complete', completedStatements: -1 }),
+      JSON.stringify({ queryId: 'query-1', type: 'started', startedAt: Number.NaN }),
+      JSON.stringify({ queryId: 'query-1', type: 'statement-started', statementSql: 42 }),
+    ];
+    for (const frame of malformed) socket?.message(frame);
+
+    const valid = [
+      { queryId: 'query-1', type: 'started', sequence: 1 },
+      { queryId: 'query-1', type: 'statement-started', sequence: 2 },
+      { queryId: 'query-1', type: 'columns', sequence: 3, columns: [{ name: 'ID' }] },
+      { queryId: 'query-1', type: 'session', sequence: 4, totalRows: 1 },
+      { queryId: 'query-1', type: 'progress', sequence: 5, totalRows: 1 },
+      { queryId: 'query-1', type: 'rows', sequence: 6, rows: [[1]], totalRows: 1 },
+      { queryId: 'query-1', type: 'complete', sequence: 7, totalRows: 1, limitReached: false },
+      { queryId: 'query-1', type: 'error', sequence: 8, message: 'later error' },
+      { queryId: 'query-1', type: 'cancelled', sequence: 9, totalRows: 1 },
+      { queryId: 'query-1', type: 'batch-complete', sequence: 10, status: 'complete', completedStatements: 1 },
+    ];
+    for (const frame of valid) socket?.message(JSON.stringify(frame));
+
+    expect(events).toHaveLength(valid.length);
+    expect(subscription.getLastSequence()).toBe(10);
+    subscription.close();
+  });
+
   it('bootstraps CSRF from a remote API origin before state-changing requests', async () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

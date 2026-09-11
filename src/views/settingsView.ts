@@ -161,6 +161,18 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 actionLabel: 'Open'
             },
             {
+                id: 'ui-mode',
+                label: 'Cross-product UI Mode',
+                description: 'Choose the legacy host renderer or the opt-in shared React presentation for migrated surfaces',
+                type: 'select',
+                configKey: 'ui.mode',
+                defaultValue: 'legacy',
+                options: [
+                    { label: 'Legacy', value: 'legacy' },
+                    { label: 'Shared', value: 'shared' }
+                ]
+            },
+            {
                 id: 'clear-cache',
                 label: 'Clear Autocomplete Cache',
                 description: 'Remove all cached databases, schemas, tables, and columns. Cache will rebuild on next use.',

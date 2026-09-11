@@ -10,5 +10,12 @@ module.exports = {
     '^@justybase/designer-core/(.*)$': '<rootDir>/../../packages/designer-core/src/$1',
     '^@justybase/result-core$': '<rootDir>/../../packages/result-core/src',
     '^@justybase/result-core/(.*)$': '<rootDir>/../../packages/result-core/src/$1',
+    '^@justybase/ui-core$': '<rootDir>/../../packages/ui-core/src',
+    '^@justybase/ui-core/(.*)$': '<rootDir>/../../packages/ui-core/src/$1',
+    '^@justybase/ui-react$': '<rootDir>/../../packages/ui-react/src',
+    '^@justybase/ui-react/(.*)$': '<rootDir>/../../packages/ui-react/src/$1',
   },
+  collectCoverageFrom: ['src/**/*.ts', 'src/**/*.tsx', '!src/**/*.d.ts'],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text-summary', 'json-summary', 'lcov'],
 };
