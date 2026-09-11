@@ -52,6 +52,8 @@ export interface DataGridProps {
   readonly resultSetId: string;
   readonly columns: readonly DataGridColumn[];
   readonly rows: readonly (readonly unknown[])[];
+  /** Provides value metadata when a column's cells have heterogeneous source types. */
+  readonly getCellMetadata?: (value: unknown, rowIndex: number, columnIndex: number, column: DataGridColumn) => DataGridCellMetadata;
   readonly totalRowCount?: number;
   readonly scroll?: GridScrollPosition;
   readonly onScroll?: (position: GridScrollPosition) => void;
@@ -193,7 +195,7 @@ function parseTemporalSortValue(value: unknown, metadata: DataGridCellMetadata =
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-function valueClass(value: unknown, column: DataGridColumn): string {
+function valueClass(value: unknown, column: DataGridCellMetadata): string {
   if (value === null || value === undefined) return 'null';
   if (isDataGridNumericColumn(column)) return 'numeric';
   if (isDataGridTemporalColumn(column)) return 'temporal';
@@ -388,6 +390,7 @@ export function DataGrid({
   resultSetId,
   columns,
   rows,
+  getCellMetadata,
   totalRowCount = rows.length,
   scroll,
   onScroll,
@@ -663,7 +666,11 @@ export function DataGrid({
           }
           if (rendered.groupId !== undefined && collapsedGroups.has(rendered.groupId)) return null;
           const rowSelected = selectedRowIndex === rendered.sourceIndex;
-          const rowLabel = rendered.values.map((value, columnIndex) => formatDataGridCellValue(value, resolvedColumns[columnIndex]?.type, resolvedColumns[columnIndex])).join(' ');
+          const rowLabel = rendered.values.map((value, columnIndex) => {
+            const column = resolvedColumns[columnIndex];
+            const metadata = column === undefined ? undefined : getCellMetadata?.(value, rendered.sourceIndex, columnIndex, column) ?? column;
+            return formatDataGridCellValue(value, metadata?.type, metadata);
+          }).join(' ');
           const firstVisibleColumn = visibleColumnIndexes[0];
           return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rowLabel} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.sourceIndex)}>
             <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => firstVisibleColumn !== undefined && extendSelection(rendered.displayIndex, firstVisibleColumn)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.sourceIndex); }}>{rendered.displayIndex + 1}</button></th>
@@ -674,8 +681,9 @@ export function DataGrid({
               const columnPosition = visibleColumnIndexes.indexOf(columnIndex);
               const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];
-              const displayValue = formatDataGridCellValue(value, column.type, column);
-              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column)}`, isDataGridNumericColumn(column) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
+              const metadata = getCellMetadata?.(value, rendered.sourceIndex, columnIndex, column) ?? column;
+              const displayValue = formatDataGridCellValue(value, metadata.type, metadata);
+              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, metadata)}`, isDataGridNumericColumn(metadata) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
             })}
           </tr>;
         })}</tbody>
