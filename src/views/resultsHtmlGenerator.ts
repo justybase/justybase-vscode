@@ -5,6 +5,8 @@ export interface ViewScriptUris {
   virtualUri: vscode.Uri;
   mainScriptUri: vscode.Uri;
   styleUri: vscode.Uri;
+  /** Shared React Result Grid skin, emitted with the webview bundles. */
+  sharedGridStyleUri?: vscode.Uri;
   workerUri: vscode.Uri;
   fontRegularUri: vscode.Uri;
   fontBoldUri: vscode.Uri;
@@ -70,6 +72,7 @@ export class ResultsHtmlGenerator {
                 }
             </style>
             <link rel="stylesheet" href="${uris.styleUri}">
+            ${uris.sharedGridStyleUri ? `<link rel="stylesheet" href="${uris.sharedGridStyleUri}">` : ''}
             <script src="${uris.scriptUri}"></script>
             <script src="${uris.virtualUri}"></script>
             <script>
