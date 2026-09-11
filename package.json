@@ -4559,7 +4559,7 @@
     "check-types:ts7": "npm run build:access-file && npm run build:database-runtime && npm exec --yes --package=typescript@7.0.2 -- tsc --version && npm exec --yes --package=typescript@7.0.2 -- tsc --noEmit && npm exec --yes --package=typescript@7.0.2 -- tsc --project tsconfig.media.json --noEmit",
     "check-types:api": "npm run build:metadata-core && npm run build:designer-core && npm run check-types --workspace @justybase/sql-core && npm run build:sql-core && npm run check-types --workspace @justybase/duckdb-runtime && npm run build:duckdb-runtime && npm run check-types --workspace @justybase/netezza-runtime && npm run build:netezza-runtime && npm run build:runtime && npm run check-types --workspace @justybase/sqlite-runtime && npm run build:sqlite-runtime && npm run check-types --workspace @justybase/web-api",
     "check-types:web": "npm run check-types --workspace @justybase/web",
-    "check-types:electron": "npm run check-types --workspace @justybase/electron-shell",
+    "check-types:electron": "npm run build:sql-core && npm run check-types --workspace @justybase/electron-shell",
     "check-types:media": "tsc --project tsconfig.media.json --noEmit",
     "check-types:media:strict": "tsc --project tsconfig.media.json --noEmit",
     "check-types:db2": "node ./node_modules/typescript/bin/tsc --project extensions/db2/tsconfig.json --noEmit",
