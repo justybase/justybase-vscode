@@ -18,7 +18,10 @@ export function createChangedDiff({ root = process.cwd(), configuredBase = proce
 
   let diff;
   try {
-    diff = git(['diff', '--unified=0', '--no-ext-diff', configuredBase, '--']);
+    const mergeBase = git(['merge-base', configuredBase, 'HEAD']).trim();
+    if (!mergeBase) throw new Error(`Unable to resolve merge base for ${configuredBase}`);
+    // Compare the merge base with the worktree so committed, staged, and unstaged edits are included.
+    diff = git(['diff', '--unified=0', '--no-ext-diff', mergeBase, '--']);
   } catch (error) {
     if (process.env.QUALITY_BASE_SHA || process.env.CI === 'true') throw error;
     diff = git(['diff', '--unified=0', '--no-ext-diff', 'HEAD', '--']);
