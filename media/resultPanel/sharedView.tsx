@@ -960,16 +960,7 @@ function ensureSharedStyles(): void {
         #${SHARED_ROOT_ID} .ui-shell-sidebar { border-right: 1px solid var(--vscode-panel-border, #444); padding: 8px; }
         #${SHARED_ROOT_ID} .ui-shell-main { min-width: 0; padding: 6px; }
         #${SHARED_ROOT_ID} button, #${SHARED_ROOT_ID} input { font: inherit; }
-        #${SHARED_ROOT_ID} .ui-data-grid-scroll { overflow: auto; max-height: calc(100vh - 180px); border: 1px solid var(--vscode-panel-border, #444); }
-        #${SHARED_ROOT_ID} .ui-data-grid { border-collapse: separate; border-spacing: 0; min-width: 100%; }
-        #${SHARED_ROOT_ID} th, #${SHARED_ROOT_ID} td { padding: 4px 8px; border-bottom: 1px solid var(--vscode-panel-border, #444); text-align: left; white-space: nowrap; }
-        #${SHARED_ROOT_ID} th { position: sticky; top: 0; z-index: 3; background: var(--vscode-editor-background, #1e1e1e); }
-        #${SHARED_ROOT_ID} .ui-data-grid .ui-data-grid-row-number { position: sticky; left: 0; z-index: 5; min-width: 48px; width: 48px; max-width: 48px; background: var(--vscode-editor-background, #1e1e1e); text-align: center; }
-        #${SHARED_ROOT_ID} .ui-data-grid .ui-data-grid-pinned { position: sticky; z-index: 4; background: var(--vscode-editor-background, #1e1e1e); box-shadow: 1px 0 0 var(--vscode-panel-border, #444); }
-        #${SHARED_ROOT_ID} .ui-data-grid thead .ui-data-grid-pinned { z-index: 10; }
-        #${SHARED_ROOT_ID} .ui-data-grid thead .ui-data-grid-row-number { z-index: 12; }
-        #${SHARED_ROOT_ID} .ui-data-grid-resizer { position: absolute; top: 0; right: 0; bottom: 0; width: 5px; cursor: col-resize; opacity: 0; touch-action: none; }
-        #${SHARED_ROOT_ID} .ui-data-grid th:hover .ui-data-grid-resizer, #${SHARED_ROOT_ID} .ui-data-grid-resizer:hover { opacity: 1; background: var(--vscode-focusBorder, #3794ff); }
+        #${SHARED_ROOT_ID} .ui-data-grid-scroll { max-height: calc(100vh - 180px); }
         #${SHARED_ROOT_ID} .ui-row-detail { margin-top: 8px; padding: 8px; border: 1px solid var(--vscode-panel-border, #444); }
         #${SHARED_ROOT_ID} .ui-row-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
         #${SHARED_ROOT_ID} .ui-row-detail dt { font-weight: 600; }

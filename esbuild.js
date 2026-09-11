@@ -18,6 +18,12 @@ async function main() {
     fs.rmSync(staleAsset, { force: true });
   }
 
+  // The VS Code shared Result Panel is a webview, so it cannot import the
+  // package CSS through Vite. Publish the same package-owned skin next to the
+  // browser bundles and let the webview HTML load it as a stylesheet.
+  fs.mkdirSync('dist/media', { recursive: true });
+  fs.copyFileSync('./packages/ui-react/src/resultGrid.css', 'dist/media/sharedResultGrid.css');
+
   // These libraries are loaded as globals by several webviews. Build them from
   // their published ESM sources instead of shipping upstream production/minified
   // UMD files, so Marketplace artifacts stay readable and source-mapped.

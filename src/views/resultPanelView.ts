@@ -2868,6 +2868,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             styleUri: this._view!.webview.asWebviewUri(
                 vscode.Uri.joinPath(this._extensionUri, 'media', 'resultPanel.css')
             ),
+            sharedGridStyleUri: this._view!.webview.asWebviewUri(
+                vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'sharedResultGrid.css')
+            ),
             fontRegularUri: this._view!.webview.asWebviewUri(
                 vscode.Uri.joinPath(this._extensionUri, 'media', 'fonts', 'JetBrainsMono-Regular.woff2')
             ),

@@ -100,4 +100,20 @@ describe('ResultsHtmlGenerator', () => {
         expect(generator.generateHtml(uris, { sharedUiMode: true })).toContain('window.__JUSTYBASE_UI_MODE__ = "shared";');
         expect(generator.generateHtml(uris, { sharedUiMode: true })).toContain('id="shared-ui-root"');
     });
+
+    it('loads the package-owned shared grid skin after the legacy webview skin', () => {
+        const generator = new ResultsHtmlGenerator('test-csp');
+        const html = generator.generateHtml({
+            scriptUri: { toString: () => 'script.js' } as never,
+            virtualUri: { toString: () => 'virtual.js' } as never,
+            mainScriptUri: { toString: () => 'main.js' } as never,
+            styleUri: { toString: () => 'legacy.css' } as never,
+            sharedGridStyleUri: { toString: () => 'shared-grid.css' } as never,
+            workerUri: { toString: () => 'worker.js' } as never,
+            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
+            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
+            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
+        });
+        expect(html.indexOf('href="legacy.css"')).toBeLessThan(html.indexOf('href="shared-grid.css"'));
+    });
 });
