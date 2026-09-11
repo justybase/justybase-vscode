@@ -471,7 +471,9 @@ export function DataGrid({
   if (columns.length === 0 || rows.length === 0) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
   if (processedRows.length === 0) return <div className="ui-grid-empty" role="status">No matching rows.</div>;
 
-  return <div className="ui-result-grid">
+  // Keep the legacy result-grid hook as a compatibility selector while the
+  // shared class remains the styling/API identity for every host.
+  return <div className="ui-result-grid result-grid">
     <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}>
       <table className="ui-data-grid">
         <thead><tr>
