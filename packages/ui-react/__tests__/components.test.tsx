@@ -45,6 +45,7 @@ describe('shared React presentation', () => {
   it('uses the canonical typed formatting for numbers, dates and binary values', () => {
     expect(formatDataGridCellValue(1234567, 'INTEGER')).toBe('1 234 567');
     expect(formatDataGridCellValue('1234.5', 'NUMERIC')).toBe('1 234.5000');
+    expect(formatDataGridCellValue('1234.5', 'NUMERIC', { scale: 2 })).toBe('1 234.50');
     expect(formatDataGridCellValue('99.99999', 'NUMERIC(10,2)')).toBe('100.00');
     expect(formatDataGridCellValue(new Date('2024-06-15T14:30:45.000Z'), 'TIMESTAMP')).toBe('2024-06-15 14:30:45');
     expect(formatDataGridCellValue(20260315, 'INTEGER', { inferredDateInteger: true })).toBe('2026 03 15');

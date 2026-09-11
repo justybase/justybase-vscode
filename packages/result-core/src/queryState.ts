@@ -10,7 +10,7 @@ interface PortableQueryEventBase {
 export type PortableQueryEvent =
   | (PortableQueryEventBase & { type: 'started'; startedAt: number; mode?: PortableQueryExecutionMode })
   | (PortableQueryEventBase & { type: 'statement-started'; statementSql?: string })
-  | (PortableQueryEventBase & { type: 'columns'; columns: Array<{ name: string; type?: string }> })
+  | (PortableQueryEventBase & { type: 'columns'; columns: Array<{ name: string; type?: string; scale?: number }> })
   | (PortableQueryEventBase & { type: 'session'; sessionId: string; totalRows: number })
   | (PortableQueryEventBase & { type: 'progress'; totalRows: number })
   | (PortableQueryEventBase & { type: 'rows'; rows: unknown[][]; totalRows: number })
@@ -22,6 +22,7 @@ export type PortableQueryEvent =
 export interface PortableQueryResultState {
   columns: string[];
   columnTypes: Array<string | undefined>;
+  columnScales: Array<number | undefined>;
   rows: unknown[][];
   status: string;
   message?: string;
@@ -46,6 +47,7 @@ export interface PortableQueryResultState {
 export const emptyPortableQueryResult: PortableQueryResultState = {
   columns: [],
   columnTypes: [],
+  columnScales: [],
   rows: [],
   status: 'idle',
   totalRows: 0,
@@ -85,7 +87,14 @@ export function applyPortableQueryEvent(previous: PortableQueryResultState, even
       lastSequence: sequence,
     };
   }
-  if (event.type === 'columns') return { ...previous, ...identity, columns: event.columns.map(column => column.name), columnTypes: event.columns.map(column => column.type), lastSequence: sequence };
+  if (event.type === 'columns') return {
+    ...previous,
+    ...identity,
+    columns: event.columns.map(column => column.name),
+    columnTypes: event.columns.map(column => column.type),
+    columnScales: event.columns.map(column => column.scale),
+    lastSequence: sequence,
+  };
   if (event.type === 'session') return { ...previous, ...identity, sessionId: event.sessionId, storageSessionId: event.sessionId, totalRows: event.totalRows, lastSequence: sequence };
   if (event.type === 'progress') return { ...previous, ...identity, totalRows: event.totalRows, lastSequence: sequence };
   if (event.type === 'rows') return { ...previous, ...identity, rows: [...previous.rows, ...event.rows.map(row => row.slice())], totalRows: event.totalRows, lastSequence: sequence };
