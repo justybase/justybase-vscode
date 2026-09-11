@@ -33,7 +33,10 @@ export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCo
   const rowsMayBeOutsideView = result.totalRowCount > 0
     && (hasViewFilter || result.loadedRowCount < result.totalRowCount);
   if (result.status === 'loading') return 'loading';
-  if (result.status === 'streaming' && rowCount === 0 && !rowsMayBeOutsideView) return 'loading';
+  // Electron keeps result rows local until the stream has finalized and page
+  // hydration completes, so a progress event must not look like an empty
+  // result while there are still no displayed rows.
+  if (result.status === 'streaming' && rowCount === 0) return 'loading';
   if (result.status === 'empty' || (rowCount === 0 && !rowsMayBeOutsideView)) return 'empty';
   return 'ready';
 }
@@ -249,12 +252,12 @@ export function App(): ReactElement {
   }, [activeResult, store]);
 
   const copyActive = useCallback(async (): Promise<void> => {
-    const row = selectedRow === undefined ? rows[0] : rows[selectedRow];
+    const row = selectedRow === undefined ? visibleRows[0] : rows[selectedRow];
     if (!row || !activeResult) return;
     const text = rowsAsText(activeResult.columns, [row]);
     if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
     setNotice('Result copied.');
-  }, [activeResult, rows, selectedRow]);
+  }, [activeResult, rows, selectedRow, visibleRows]);
 
   const exportActive = useCallback((): void => {
     if (!activeResult || typeof document === 'undefined') return;

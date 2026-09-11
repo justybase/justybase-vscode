@@ -451,12 +451,12 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [updateResultView]);
 
   const copySelected = useCallback(async (): Promise<void> => {
-    const row = selectedRow === undefined ? activeRows[0] : activeRows[selectedRow];
+    const row = selectedRow === undefined ? visibleRows[0] : activeRows[selectedRow];
     if (!row) return;
     const text = row.map((value, index) => formatDataGridCellValue(value, activeResult?.columns[index]?.type)).join('\t');
     if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
     setNotice('Row copied.');
-  }, [activeResult?.columns, activeRows, selectedRow]);
+  }, [activeResult?.columns, activeRows, selectedRow, visibleRows]);
 
   const exportResults = useCallback((): void => {
     if (typeof document === 'undefined') return;
