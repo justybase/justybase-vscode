@@ -1,4 +1,6 @@
 import type {
+  DatabaseDdlKeyInfo,
+  DatabaseTableDdlMetadata,
   DatabaseQueryCallbacks,
   DatabaseQueryCommand,
   DatabaseQueryOptions,
@@ -46,6 +48,8 @@ export interface NetezzaRuntimeTarget {
   connectionId: string;
   details: NetezzaConnectionDetails;
 }
+
+export type NetezzaTableDdlMetadata = DatabaseTableDdlMetadata;
 
 export interface NetezzaRuntimeOptions {
   isReadOnlySql?: (sql: string) => boolean;
@@ -106,6 +110,48 @@ function identifier(value: string): string {
 
 function literal(value: string): string {
   return value.replace(/'/g, "''");
+}
+
+function unquoteNetezzaIdentifier(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/""/g, '"');
+  }
+  return trimmed.toUpperCase();
+}
+
+function formatNetezzaIdentifier(value: string): string {
+  const normalized = unquoteNetezzaIdentifier(value);
+  if (/^[A-Z_][A-Z0-9_]*$/u.test(normalized)) return normalized;
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+function identifierEquality(columnExpression: string, value: string): string {
+  return `${columnExpression} = '${literal(unquoteNetezzaIdentifier(value))}'`;
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true
+    || value === 1
+    || ['1', 't', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function optionalDescription(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function stringValue(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function optionalStringValue(value: unknown): string | null {
+  return value ? String(value) : null;
+}
+
+function rawStringValue(value: unknown): string {
+  return String(value ?? '');
 }
 
 function defaultReadOnlySql(sql: string): boolean {
@@ -313,6 +359,173 @@ export class NetezzaRuntime {
     }));
   }
 
+  /**
+   * Loads the catalog fields required by the canonical Netezza table DDL
+   * formatter.  The result is serializable so API and desktop adapters can
+   * pass it across their own transport boundaries without sharing a driver
+   * connection or a Map instance.
+   */
+  public async getTableDdlMetadata(
+    target: NetezzaRuntimeTarget,
+    database: string,
+    schema: string,
+    table: string,
+  ): Promise<NetezzaTableDdlMetadata> {
+    const db = formatNetezzaIdentifier(database);
+    const columns = await this.queryMetadata(target, `
+      SELECT
+        X.OBJID::INT AS OBJID,
+        X.ATTNUM,
+        X.ATTNAME,
+        X.DESCRIPTION,
+        X.FORMAT_TYPE AS FULL_TYPE,
+        X.ATTNOTNULL::BOOL AS ATTNOTNULL,
+        X.COLDEFAULT
+      FROM ${db}.._V_RELATION_COLUMN X
+      INNER JOIN ${db}.._V_OBJECT_DATA D ON X.OBJID = D.OBJID
+      WHERE X.TYPE IN ('TABLE','VIEW','SEQUENCE','SYSTEM VIEW','SYSTEM TABLE')
+        AND X.OBJID NOT IN (4,5)
+        AND ${identifierEquality('D.SCHEMA', schema)}
+        AND ${identifierEquality('D.OBJNAME', table)}
+      ORDER BY OBJID, ATTNUM
+    `.trim(), values => ({
+      name: stringValue(values[2]),
+      description: optionalDescription(values[3]),
+      fullTypeName: stringValue(values[4]),
+      notNull: booleanValue(values[5]),
+      defaultValue: values[6] ? String(values[6]) : null,
+    }), database).then(rows => rows.filter(row => row.name.length > 0));
+
+    if (columns.length === 0) {
+      throw new Error(`Table ${database}.${schema}.${table} not found or has no columns`);
+    }
+
+    const distributionPromise = this.queryMetadata(target, `
+      SELECT ATTNAME
+      FROM ${db}.._V_TABLE_DIST_MAP
+      WHERE ${identifierEquality('SCHEMA', schema)}
+        AND ${identifierEquality('TABLENAME', table)}
+      ORDER BY DISTSEQNO
+    `.trim(), values => rawStringValue(values[0]), database).catch(() => [] as string[]);
+
+    const organizePromise = this.queryMetadata(target, `
+      SELECT ATTNAME
+      FROM ${db}.._V_TABLE_ORGANIZE_COLUMN
+      WHERE ${identifierEquality('SCHEMA', schema)}
+        AND ${identifierEquality('TABLENAME', table)}
+      ORDER BY ORGSEQNO
+    `.trim(), values => rawStringValue(values[0]), database).catch(() => [] as string[]);
+
+    const keysPromise = this.queryMetadata(target, `
+      SELECT
+        X.CONSTRAINTNAME,
+        X.CONTYPE,
+        X.ATTNAME,
+        X.PKDATABASE,
+        X.PKSCHEMA,
+        X.PKRELATION,
+        X.PKATTNAME,
+        X.UPDT_TYPE,
+        X.DEL_TYPE
+      FROM ${db}.._V_RELATION_KEYDATA X
+      WHERE X.OBJID NOT IN (4,5)
+        AND ${identifierEquality('X.SCHEMA', schema)}
+        AND ${identifierEquality('X.RELATION', table)}
+      ORDER BY X.SCHEMA, X.RELATION, X.CONSEQ
+    `.trim(), values => ({
+      name: stringValue(values[0]),
+      typeChar: rawStringValue(values[1]),
+      column: rawStringValue(values[2]),
+      pkDatabase: optionalStringValue(values[3]),
+      pkSchema: optionalStringValue(values[4]),
+      pkRelation: optionalStringValue(values[5]),
+      pkColumn: optionalStringValue(values[6]),
+      updateType: optionalStringValue(values[7]) || 'NO ACTION',
+      deleteType: optionalStringValue(values[8]) || 'NO ACTION',
+    }), database).then(rows => {
+      const keys = new Map<string, DatabaseDdlKeyInfo>();
+      for (const row of rows) {
+        if (!keys.has(row.name)) {
+          const type = row.typeChar === 'p'
+            ? 'PRIMARY KEY'
+            : row.typeChar === 'f'
+              ? 'FOREIGN KEY'
+              : row.typeChar === 'u'
+                ? 'UNIQUE'
+                : 'UNKNOWN';
+          keys.set(row.name, {
+            type,
+            typeChar: row.typeChar,
+            columns: [],
+            pkDatabase: row.pkDatabase,
+            pkSchema: row.pkSchema,
+            pkRelation: row.pkRelation,
+            pkColumns: [],
+            updateType: row.updateType,
+            deleteType: row.deleteType,
+          });
+        }
+        const key = keys.get(row.name);
+        if (!key) continue;
+        key.columns.push(row.column);
+        if (row.pkColumn) key.pkColumns.push(row.pkColumn);
+      }
+      return [...keys.entries()].map(([name, info]) => ({ name, info }));
+    }).catch(() => [] as Array<{ name: string; info: DatabaseDdlKeyInfo }>);
+
+    const tableCommentPromise = this.queryMetadata(target, `
+      SELECT DESCRIPTION
+      FROM ${db}.._V_OBJECT_DATA
+      WHERE ${identifierEquality('DBNAME', database)}
+        AND ${identifierEquality('SCHEMA', schema)}
+        AND ${identifierEquality('OBJNAME', table)}
+        AND OBJTYPE = 'TABLE'
+    `.trim(), values => optionalStringValue(values[0]), database).then(rows => rows[0] ?? null).catch(async () => {
+      try {
+        const rows = await this.queryMetadata(target, `
+          SELECT DESCRIPTION
+          FROM ${db}.._V_OBJECT_DATA
+          WHERE ${identifierEquality('DBNAME', database)}
+            AND ${identifierEquality('SCHEMA', schema)}
+            AND ${identifierEquality('OBJNAME', table)}
+        `.trim(), values => optionalStringValue(values[0]), database);
+        return rows[0] ?? null;
+      } catch {
+        return null;
+      }
+    });
+
+    const [distributionColumns, organizeColumns, keys, tableComment] = await Promise.all([
+      distributionPromise,
+      organizePromise,
+      keysPromise,
+      tableCommentPromise,
+    ]);
+    return { columns, distributionColumns, organizeColumns, keys, tableComment };
+  }
+
+  /**
+   * Netezza exposes view source only when the connection is established to
+   * the database containing that view.  `queryMetadata` therefore receives an
+   * explicit database override here.
+   */
+  public async getViewDefinition(
+    target: NetezzaRuntimeTarget,
+    database: string,
+    schema: string,
+    view: string,
+  ): Promise<string> {
+    const db = formatNetezzaIdentifier(database);
+    const rows = await this.queryMetadata(target, `
+      SELECT DEFINITION
+      FROM ${db}.._V_VIEW
+      WHERE ${identifierEquality('SCHEMA', schema)}
+        AND ${identifierEquality('VIEWNAME', view)}
+    `.trim(), values => String(values[0] ?? ''), database);
+    if (rows.length === 0) throw new Error(`View ${database}.${schema}.${view} not found`);
+    return rows[0] ?? '';
+  }
+
   public async closeConnection(connectionId: string): Promise<void> {
     const session = this.sessions.get(connectionId);
     if (!session) return;
@@ -351,9 +564,18 @@ export class NetezzaRuntime {
     return session;
   }
 
-  private async queryMetadata<T>(target: NetezzaRuntimeTarget, sql: string, map: (values: unknown[]) => T): Promise<T[]> {
+  private async queryMetadata<T>(
+    target: NetezzaRuntimeTarget,
+    sql: string,
+    map: (values: unknown[]) => T,
+    databaseOverride?: string,
+  ): Promise<T[]> {
     const rows: T[] = [];
-    await this.execute(target, sql, { maxRows: 100_000, timeoutSeconds: 90 }, {
+    await this.execute(target, sql, {
+      maxRows: 100_000,
+      timeoutSeconds: 90,
+      ...(databaseOverride === undefined ? {} : { database: databaseOverride }),
+    }, {
       onColumns: () => undefined,
       onCommand: () => undefined,
       onRows: values => values.forEach(row => rows.push(map(row))),

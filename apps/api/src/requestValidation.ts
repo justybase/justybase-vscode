@@ -1,6 +1,7 @@
 import type {
   DesignerCapabilitiesRequest,
   DesignerChangeContext,
+  MetadataDdlRequest,
   QueryAggregateRequest,
   QueryExportRequest,
   QueryGroupRequest,
@@ -36,6 +37,17 @@ export function parseDesignerCapabilitiesRequest(value: unknown): DesignerCapabi
     schema: optionalString(record.schema, 'schema'),
     objectName: optionalString(record.objectName, 'objectName'),
     objectType: optionalString(record.objectType, 'objectType'),
+  };
+}
+
+export function parseMetadataDdlRequest(value: unknown): MetadataDdlRequest {
+  const record = objectValue(value, 'query');
+  return {
+    connectionId: requiredString(record.connectionId, 'connectionId'),
+    database: requiredString(record.database, 'database'),
+    schema: requiredString(record.schema, 'schema'),
+    objectName: requiredString(record.objectName, 'objectName'),
+    objectType: requiredString(record.objectType, 'objectType'),
   };
 }
 

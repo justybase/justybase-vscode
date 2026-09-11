@@ -2,6 +2,7 @@ import type {
   DatabaseQueryCallbacks,
   DatabaseQueryOptions,
   DatabaseQueryResult,
+  DatabaseTableDdlMetadata,
   MetadataColumn,
   MetadataDatabase,
   MetadataObject,
@@ -36,6 +37,20 @@ export interface ApiDatabaseRuntime {
     schema: string,
     table: string,
   ): Promise<MetadataColumn[]>;
+  /** Optional native catalog payload used by an exact dialect DDL adapter. */
+  getTableDdlMetadata?(
+    profile: StoredConnection,
+    database: string,
+    schema: string,
+    table: string,
+  ): Promise<DatabaseTableDdlMetadata>;
+  /** Optional source lookup for dialects whose view definition is catalog-owned. */
+  getViewDefinition?(
+    profile: StoredConnection,
+    database: string,
+    schema: string,
+    view: string,
+  ): Promise<string>;
   closeConnection(connectionId: string): Promise<void>;
   closeAll(): Promise<void>;
 }
