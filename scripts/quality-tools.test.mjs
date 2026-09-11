@@ -51,6 +51,45 @@ test('includes staged and unstaged tracked edits when the base resolves', () => 
   }
 });
 
+test('uses the merge base when the configured branch has diverged', () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-quality-git-'));
+  const source = path.join(temporaryRoot, 'src', 'tracked.ts');
+
+  try {
+    runGit(temporaryRoot, ['init']);
+    fs.mkdirSync(path.dirname(source), { recursive: true });
+    fs.writeFileSync(source, 'export const initial = true;\n');
+    runGit(temporaryRoot, ['add', 'src/tracked.ts']);
+    commitGitFixture(temporaryRoot, 'initial');
+
+    const featureBranch = runGit(temporaryRoot, ['branch', '--show-current']).trim();
+    runGit(temporaryRoot, ['branch', 'base']);
+
+    fs.appendFileSync(source, 'export const feature = true;\n');
+    runGit(temporaryRoot, ['add', 'src/tracked.ts']);
+    commitGitFixture(temporaryRoot, 'feature change');
+
+    runGit(temporaryRoot, ['checkout', 'base']);
+    fs.appendFileSync(source, 'export const baseOnly = true;\n');
+    runGit(temporaryRoot, ['add', 'src/tracked.ts']);
+    commitGitFixture(temporaryRoot, 'base change');
+
+    runGit(temporaryRoot, ['checkout', featureBranch]);
+    fs.appendFileSync(source, 'export const staged = true;\n');
+    runGit(temporaryRoot, ['add', 'src/tracked.ts']);
+    fs.appendFileSync(source, 'export const working = true;\n');
+
+    const diff = createChangedDiff({ root: temporaryRoot, configuredBase: 'base' });
+    assert.match(diff, /\+export const feature = true;/u);
+    assert.match(diff, /\+export const staged = true;/u);
+    assert.match(diff, /\+export const working = true;/u);
+    assert.doesNotMatch(diff, /baseOnly/u);
+    assert.deepEqual([...parseChangedLines(diff).get('src/tracked.ts')], [2, 3, 4]);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test('includes the final line of an untracked file without a trailing newline', () => {
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-quality-git-'));
   const source = path.join(temporaryRoot, 'README.md');
