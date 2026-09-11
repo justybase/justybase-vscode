@@ -110,6 +110,27 @@ describe('API client factory', () => {
     expect(JSON.stringify(fetch.mock.calls[0])).not.toContain('password');
   });
 
+  it('requests schema DDL by identity without rebuilding it in the browser', async () => {
+    const fetch = jest.fn(async () => jsonResponse({
+      success: true,
+      ddlCode: 'CREATE TABLE MYDB.ADMIN.USERS (...);',
+      ddlFidelity: 'exact',
+    }));
+    const client = createApiClient({ fetch });
+
+    await expect(client.ddl({
+      connectionId: 'connection-1',
+      database: 'MYDB',
+      schema: 'ADMIN',
+      objectName: 'USERS',
+      objectType: 'TABLE',
+    })).resolves.toEqual(expect.objectContaining({ success: true, ddlFidelity: 'exact' }));
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/metadata/ddl?connectionId=connection-1&database=MYDB&schema=ADMIN&objectName=USERS&objectType=TABLE',
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
   it('preserves HTTP error status and deduplicates replayed WebSocket events', async () => {
     const fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void input;

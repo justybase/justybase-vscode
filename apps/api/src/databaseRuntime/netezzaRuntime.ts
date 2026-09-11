@@ -55,6 +55,14 @@ export class NetezzaApiDatabaseRuntime implements ApiDatabaseRuntime {
     return this.runtime.listColumns(this.targetFor(profile), database, schema, table);
   }
 
+  public getTableDdlMetadata(profile: StoredConnection, database: string, schema: string, table: string) {
+    return this.runtime.getTableDdlMetadata(this.targetFor(profile), database, schema, table);
+  }
+
+  public getViewDefinition(profile: StoredConnection, database: string, schema: string, view: string) {
+    return this.runtime.getViewDefinition(this.targetFor(profile), database, schema, view);
+  }
+
   public async closeConnection(connectionId: string): Promise<void> {
     await this.runtime.closeConnection(connectionId);
   }

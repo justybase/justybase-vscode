@@ -1,5 +1,7 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
+import { getSchemaObjectDdlResponse, SchemaDdlUnavailableError } from '../schemaDdlService';
 import { getSchemaTree, searchSchema } from '../schemaService';
+import { parseMetadataDdlRequest } from '../requestValidation';
 
 export interface MetadataRouteHooks {
   authenticate: preHandlerHookHandler;
@@ -31,6 +33,21 @@ export function registerMetadataRoutes(app: FastifyInstance, hooks: MetadataRout
     const profile = app.store.getConnection(request.user!.id, String(query.connectionId ?? ''));
     if (!profile || !query.database || !query.schema || !query.table) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Table scope not found.' });
     return app.metadataService.listColumns(app.databaseRuntimes, request.user!.id, profile, query.database, query.schema, query.table);
+  });
+
+  app.get('/api/metadata/ddl', { preHandler: hooks.authenticate }, async (request, reply) => {
+    try {
+      const input = parseMetadataDdlRequest(request.query);
+      const profile = app.store.getConnection(request.user!.id, input.connectionId);
+      if (!profile) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
+      return await getSchemaObjectDdlResponse(profile, input, app.databaseRuntimes);
+    } catch (error: unknown) {
+      const statusCode = error instanceof SchemaDdlUnavailableError ? 501 : 400;
+      return reply.code(statusCode).send({
+        code: error instanceof SchemaDdlUnavailableError ? error.code : 'SCHEMA_DDL_FAILED',
+        message: error instanceof Error ? error.message : 'Schema DDL generation failed.',
+      });
+    }
   });
 
   app.get('/api/schema/tree', { preHandler: hooks.authenticate }, async (request, reply) => {
