@@ -1,4 +1,5 @@
 import type {
+  DatabaseDdlResult,
   DatabaseDesignerCapabilities,
   DatabaseObjectSnapshot,
   DatabaseDesignerTarget,
@@ -100,6 +101,16 @@ export interface MetadataColumn {
   isPk?: boolean;
   isFk?: boolean;
 }
+
+export interface MetadataDdlRequest {
+  connectionId: string;
+  database: string;
+  schema: string;
+  objectName: string;
+  objectType: string;
+}
+
+export type MetadataDdlResponse = DatabaseDdlResult;
 
 /** Target used by the capability-aware object designer API. */
 export interface DesignerCapabilitiesRequest {

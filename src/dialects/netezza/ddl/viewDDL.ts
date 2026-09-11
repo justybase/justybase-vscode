@@ -2,7 +2,8 @@
  * DDL Generator - View DDL Generation
  */
 
-import { executeQueryHelper, quoteNameIfNeeded } from './helpers';
+import { executeQueryHelper } from './helpers';
+import { buildNetezzaViewDdl } from '@justybase/designer-core';
 import type { NzConnection } from '../../../types';
 import { NZ_SYSTEM_VIEWS } from '../metadata/systemQueries';
 
@@ -15,15 +16,7 @@ export function buildViewDDLFromCache(
     viewName: string,
     definition: string
 ): string {
-    const cleanDatabase = quoteNameIfNeeded(database);
-    const cleanSchema = quoteNameIfNeeded(schema);
-    const cleanViewName = quoteNameIfNeeded(viewName);
-
-    const ddlLines: string[] = [];
-    ddlLines.push(`CREATE OR REPLACE VIEW ${cleanDatabase}.${cleanSchema}.${cleanViewName} AS`);
-    ddlLines.push(definition || '');
-
-    return ddlLines.join('\n');
+    return buildNetezzaViewDdl(database, schema, viewName, definition);
 }
 
 /**

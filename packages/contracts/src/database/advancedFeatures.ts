@@ -32,6 +32,19 @@ export interface DatabaseDdlKeyInfo {
 }
 
 /**
+ * Serializable catalog payload consumed by a platform-neutral table DDL
+ * formatter. Runtime adapters may fetch this with a driver-specific query,
+ * but hosts must not have to know about driver connections or Map instances.
+ */
+export interface DatabaseTableDdlMetadata {
+  columns: DatabaseDdlColumnInfo[];
+  distributionColumns: string[];
+  organizeColumns: string[];
+  keys: Array<{ name: string; info: DatabaseDdlKeyInfo }>;
+  tableComment: string | null;
+}
+
+/**
  * Native storage-definition metadata for table-like objects.
  *
  * The fields intentionally keep ClickHouse expressions as SQL text. Parsing
