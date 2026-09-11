@@ -95,6 +95,13 @@
       "reason": "The shared React presentation package necessarily depends on React.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/dataGrid.tsx",
+      "target": "react",
+      "reason": "The shared result grid is a React presentation component consumed by web, Electron and VS Code adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     }
   ],
   "layers": {
