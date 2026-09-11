@@ -364,6 +364,25 @@ body,
   color: var(--justybase-grid-muted);
 }
 
+.ui-data-grid-group-toggle {
+  width: 22px;
+  height: 22px;
+  margin: -2px 2px -2px -4px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.ui-data-grid-group-toggle:hover,
+.ui-data-grid-group-toggle:focus-visible {
+  color: var(--justybase-grid-accent);
+  outline: 1px solid var(--justybase-grid-accent);
+}
+
 .ui-data-grid-group-count {
   margin-left: 10px;
   color: var(--justybase-grid-muted);

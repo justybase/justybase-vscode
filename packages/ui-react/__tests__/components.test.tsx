@@ -16,6 +16,7 @@ import {
   SchemaTree,
   UiShell,
   WorkspaceTabs,
+  processDataGridRows,
 } from '../src';
 
 const result: UiResultSurfaceState = {
@@ -132,6 +133,49 @@ describe('shared React presentation', () => {
     expect(onContextMenu).toHaveBeenCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 20, clientY: 40 });
     fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
+  });
+
+  it('matches canonical typed sorting and keeps selection coordinates in display order', () => {
+    const numericColumns = [{ name: 'AMOUNT', type: 'DECIMAL' }];
+    expect(processDataGridRows(numericColumns, [['9007199254740993'], ['10.00'], [null], ['2.0']], {
+      globalFilter: '', columnFilters: {}, sorting: [{ column: '0', descending: false }], grouping: [],
+    })).toEqual([[null], ['2.0'], ['10.00'], ['9007199254740993']]);
+    expect(processDataGridRows([{ name: 'DATE', type: 'DATE' }], [['2024-12-01'], ['2024-02-01'], ['2024-10-01']], {
+      globalFilter: '', columnFilters: {}, sorting: [{ column: '0', descending: false }], grouping: [],
+    })).toEqual([['2024-02-01'], ['2024-10-01'], ['2024-12-01']]);
+
+    const onCopySelection = jest.fn();
+    render(<DataGrid
+      resultSetId="reordered-selection"
+      columns={[{ name: 'A' }, { name: 'B' }, { name: 'C' }]}
+      rows={[[1, 2, 3]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [], columnOrder: ['2', '0', '1'] }}
+      onCopySelection={onCopySelection}
+    />);
+    const cells = screen.getAllByRole('cell');
+    fireEvent.mouseDown(cells[0]!, { button: 0 });
+    fireEvent.mouseEnter(cells[1]!);
+    fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
+    expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({
+      columns: [{ name: 'C' }, { name: 'A' }],
+      rows: [[3, 1]],
+    }));
+  });
+
+  it('can collapse and reopen grouped rows without changing the shared view', () => {
+    render(<DataGrid
+      resultSetId="collapsible-groups"
+      columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[['A', 1], ['A', 2], ['B', 3]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['0'] }}
+    />);
+    expect(screen.getByText('1 rows')).toBeInTheDocument();
+    expect(screen.getByText('2 rows')).toBeInTheDocument();
+    const group = screen.getByRole('button', { name: 'Collapse group A' });
+    fireEvent.click(group);
+    expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand group A' }));
+    expect(screen.getByRole('row', { name: /A 1/ })).toBeInTheDocument();
   });
 
   it('exposes shared filter, grouping, aggregation, pivot and row-detail actions', async () => {
