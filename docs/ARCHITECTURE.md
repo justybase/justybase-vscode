@@ -1,7 +1,7 @@
 # Architecture overview
 
-JustyBase is a layered monorepo with two runtime products and a shared contract
-surface.
+JustyBase is a layered monorepo with VS Code, Web/API, and Electron
+development/test products plus shared contract and presentation surfaces.
 
 Cross-cutting architecture debt, enforcement work, and measurable exit criteria
 are tracked in the
@@ -10,8 +10,8 @@ describes the intended structure; the automated architecture check determines
 which parts are currently enforced.
 
 The [refactoring plan](REFACTORING_PLAN.md) orders further extraction for
-production VS Code, the existing web/API, and a future Electron adapter.
-It does not introduce a new application or replace the quality backlog.
+production VS Code, the existing web/API, and the Electron development/test
+adapter. It does not replace the quality backlog.
 
 The current dependency map, contract audit, service proposal and ordered
 migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
@@ -20,8 +20,10 @@ The SQL boundary is now implemented as a platform-neutral Netezza core:
 validation primitives, authoring helpers, quality rules and validation model.
 Desktop and API adapters compose metadata, transport, editor lifecycle and
 incremental-cache state around that core while preserving their existing public
-shapes. Public results and wire contracts remain unchanged. This does not create empty
-packages or an Electron application.
+shapes. Public results and wire contracts remain unchanged. The R9 working
+tree now contains non-empty `ui-core`, `ui-react`, and Electron
+development/test packages; the Electron shell is not a production installer
+or release target.
 
 Desktop SQL compatibility facades consume named `sql-core` subpaths for the
 parser base/rules, Netezza parser/lexer/identifier patterns and source scanning.
@@ -40,10 +42,10 @@ Arrows below mean “imports”; product composition roots select and inject
 implementations. A pure engine never imports an adapter or driver.
 
 ```text
-VS Code adapter / API backend / future Electron backend
+VS Code adapter / API backend / Electron main backend
     -> Node database-runtime / dialect-<kind>-runtime -> driver or Node database API
     -> pure SQL / metadata / result engines -> contracts
-Desktop webview / React renderer -> pure engines and contracts
+Desktop webview / Web / Electron React renderer -> `ui-react` -> pure engines and contracts
 React renderer -> HTTP client -> API backend
 ```
 
@@ -57,7 +59,8 @@ React renderer -> HTTP client -> API backend
 | Database-specific SQL grammar and authoring | future `@justybase/dialect-<kind>` |
 | Stable public and transport types | `@justybase/contracts` |
 | Secrets, filesystem, transport, editor integration and lifecycle | product adapter |
-| DOM/TanStack webviews and React components | separate desktop and React renderers |
+| Shared React presentation and tokens | `@justybase/ui-react`; effects enter through product ports |
+| Product-specific DOM/webview/window integration | VS Code, Web, or Electron adapter |
 
 These are ownership decisions, not a claim that every future engine already
 exists. `designer-core`, `result-core`, and `metadata-core` already own pure
@@ -95,10 +98,11 @@ desktop dialect and MCP composition roots use the exported factory. The
 compatibility exports in `@justybase/database-runtime` re-export this surface
 without importing the driver themselves.
 
-The future Electron main process will host/manage the backend; its React
-renderer will use the same HTTP client as web. Backend startup, authentication,
-port selection and shutdown belong to that later composition-root slice.
-Electron APIs must stay in its adapter, never in a shared package.
+The Electron main process hosts/manages the embedded backend; its React
+renderer uses the same HTTP client boundary as Web after main-owned
+authentication. Backend startup, authentication, port selection and shutdown
+belong to the Electron composition root. Electron APIs stay in that adapter,
+never in a shared package.
 
 ## Runtime boundaries
 
@@ -244,6 +248,9 @@ alias resolution never silently falls back to a less strict configuration.
 | `media` | `media` | `contracts`, `shared`, `desktop`, `media` |
 | `api` | `apps/api/src` | `contracts`, `shared`, `api` |
 | `web` | `apps/web/src` | `contracts`, `shared`, `web` |
+| `electron-main` | `apps/electron/src/main` | `contracts`, `shared`, `api`, `electron-main` |
+| `electron-preload` | `apps/electron/src/preload` | `contracts`, `electron-preload` |
+| `electron-renderer` | `apps/electron/src/renderer` | `contracts`, `shared`, `electron-renderer` |
 | `companions` | `extensions/*/src` | `contracts`, `shared`, `companions` |
 
 The direction table is intentionally stricter than the current runtime graph.
@@ -262,7 +269,7 @@ configuration. Existing cycles, when intentionally retained during a staged
 migration, are represented by exact node lists and a SHA-256 fingerprint of
 their internal edges in `cycleExceptions`. The current configuration has no
 layer/import exceptions and no cycle exceptions. The current graph contains
-1,367 production files and 4,492 resolved internal edges and reports zero
+1,397 production files and 4,564 resolved internal edges and reports zero
 cycles. The former R3/R8 cycles were closed through leaf modules, narrow ports,
 neutral connection-factory ownership, and a host-provided maintenance
 callback. Future forbidden edges or cycles fail the check.
@@ -279,8 +286,11 @@ metadata/result engines. Register each future pure dialect package in that
 list when its first implementation is added. Pure packages cannot import a
 shared Node runtime, even through an alias. External imports require an exact
 approved specifier; Node built-ins (bare and `node:`), VS Code, LSP libraries,
-React and Electron are rejected. This also rejects existing or new database
-drivers without relying on a driver-name blacklist.
+and Electron are rejected. `ui-react` is the deliberate pure presentation
+exception: its exact React import is documented in
+`quality/architecture-rules.json`; it still cannot import Node, VS Code,
+Electron, database runtimes, or drivers. This also rejects existing or new
+database drivers without relying on a driver-name blacklist.
 Shared packages reject `vscode` and `electron`; Node runtimes may use Node and
 drivers. Companions may import their own implementation, shared contracts and
 shared engines/runtime helpers, but cannot import another companion directly.

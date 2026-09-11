@@ -3,10 +3,12 @@
 ## Goal and Principles
 
 Practical modularity means sharing SQL logic, database handling, metadata,
-and results while retaining product adapters. Production VS Code extensions
-preserve behavior, commands, settings, and companion compatibility. Existing
-web/API implementations serve to confirm portability. We are not building a
-new Electron application, new web features, or a single GUI for all products.
+results, and the presentation of the main user workflows while retaining
+product adapters. Production VS Code extensions preserve behavior, commands,
+settings, and companion compatibility. Existing web/API implementations serve
+to confirm portability. R0–R8 establish the portable backend and ownership
+boundaries; R9 adds near-parity UI for the web, Electron, and VS Code without
+creating one universal UI for every dialect-specific product feature.
 
 This plan specifies the migration sequence; it is not a second quality
 backlog. Statuses and completion evidence remain in the
@@ -14,7 +16,10 @@ backlog. Statuses and completion evidence remain in the
 [architecture](ARCHITECTURE.md), [testing strategy](TESTING_STRATEGY.md),
 [execution contract](EXECUTION_CONTRACT.md),
 [metadata contract](METADATA_CACHE_CONTRACT.md), and
-[migration preparation](SHARED_CODE_MIGRATION.md) apply.
+[migration preparation](SHARED_CODE_MIGRATION.md) apply. R9 maintains the
+[cross-product UI parity matrix](CROSS_PRODUCT_UI_PARITY.md); that matrix is
+the operational inventory, while this document defines the migration rules
+and gates.
 
 ## Baseline from the Analysis
 
@@ -67,11 +72,14 @@ they are not silently promoted to complete by this closure.
 | designer-core | Models, capabilities, and pure DDL logic | I/O and rendering belong in adapters |
 | result-core, new | Identity, state transitions, and shared data operations | No DOM, transport, or disk |
 | metadata-core, new | Keys, merging, completeness, and invalidation | No connections, timers, or disk |
+| ui-core, new | UI state transitions, ports, persistence envelopes, and capability descriptors | No React, DOM, Node, VS Code, Electron, drivers, or secrets |
+| ui-react, new | Shared React components, tokens, layout, focus, and keyboard interaction | No Node, VS Code, Electron, drivers, or direct platform effects |
 | database-runtime | Execution, cancellation, retry, limits, and cleanup | Database dependencies are passed explicitly |
 | Dialect runtime | Driver, connection, catalog, and database behavior | No product dependencies |
+| Electron adapter, new | Dev/test main-process lifecycle and loopback composition | No Electron APIs in shared packages; no installer or auto-update in R9 |
 | VS Code adapter | Activation, commands, editors, secrets, and webviews | Preserve existing public entry points |
 | API | Authorization, transport, and server-instance state | No extension dependencies |
-| React/webview | Rendering, interactions, and presentation state | No drivers or secrets |
+| React/webview | Shared rendering, interactions, and presentation state | No drivers or secrets; platform effects go through adapters |
 
 Imports flow from products toward engines/runtimes and contracts. The product
 composition selects the driver. Factories and constructors receive concrete
@@ -79,14 +87,15 @@ dependencies; no DI container or global service locator is introduced.
 
 A package is created together with the migrated implementation, its consumer,
 and its tests. We do not create empty packages or a universal engine for all
-SQL differences. React and webviews retain separate components and editor
-integrations.
+SQL differences. R9 may share React presentation components across web,
+Electron, and selected VS Code webviews, while editor integrations and
+platform-specific capabilities remain adapter-owned.
 
-The future Electron application will manage the backend in the main process,
-while the renderer will use the same HTTP client and events as the web. For
-now, we are preparing the backend factory, resource shutdown, address
-configuration, and engine independence. Preload, IPC, installers, updates,
-and system integration are out of scope.
+The Electron development/test shell manages the backend in the main process,
+while its renderer uses the same HTTP client boundary as Web after
+main-owned authentication. Preload, IPC, lifecycle cleanup, and secret
+redaction are implemented for this shell; installers, updates, and system
+integration remain out of scope.
 
 ## Implementation Stages
 
@@ -131,7 +140,8 @@ and the DuckDB/File SQL companion, and `@justybase/netezza-runtime` is the
 sole owner of the driver import in the production runtime path.
 `@justybase/database-runtime` retains compatibility exports without a driver
 dependency. Adapters still own the sandbox, secrets, path resolution, and
-read-only policy. No Electron application has been created.
+read-only policy. R9 now adds a separate Electron development/test shell;
+there is still no production installer or system integration.
 
 1. Share SQLite between the API and desktop while preserving their different
    path, value, and read-only-policy adapters.
@@ -529,6 +539,210 @@ coverage (547 suites, 9,637 tests), API (18 suites, 97 tests), web (9 suites,
 statements, 58.16% branches, 76.58% functions, and 72.42% lines. Windows and
 Remote-WSL gates remain explicit follow-up evidence.
 
+### R9 — Cautious cross-product UI parity rollout
+
+Status: in progress. The shared `ui-core`/`ui-react` foundation, coverage
+enforcement, authenticated Electron development/test shell, Web shared
+composition, and opt-in Web/Electron/VS Code Result Panel vertical slices are now in
+the working tree. Full first-tier parity remains open; `legacy` is still the
+default until each slice passes all three product gates. R9 is a
+strangler-style product-surface migration after the
+R0–R8 refactoring closure. It targets near-parity for the main workflows in
+the Web editor, the Electron development/test shell, and VS Code webviews. The objective is
+shared behavior, layout, interaction vocabulary, and capability coverage;
+pixel-perfect identity is not required where window, filesystem,
+authentication, or editor semantics differ.
+
+R9 does not authorize a big-bang rewrite or a universal renderer for every
+dialect-specific feature. The existing renderer remains the fallback until the
+corresponding slice has passed every product gate. Comparison uses shared
+contracts, controlled fixtures, and traces; production SQL is never executed
+twice merely to compare old and new UI paths.
+
+#### R9.1 — Freeze the baseline and parity contract
+
+1. Preserve any pre-existing working-tree changes in this plan and record the
+   baseline environment: `git status`, relevant diff, Node/npm, OS, VS Code,
+   and Chromium versions. Missing environment-specific tools are recorded as
+   unavailable evidence, never treated as a passing gate.
+2. Maintain the [cross-product UI parity matrix](CROSS_PRODUCT_UI_PARITY.md)
+   from contributed commands, registered views, webviews, React routes, API
+   routes, and capability descriptors. Every row names the state owner,
+   resource owner, actions/shortcuts, loading/empty/error/cancel states,
+   persistence and identity, capability/auth requirements, tests, and known
+   differences.
+3. Classify each surface as `shared`, `adapter-backed`, or
+   `platform-specific`. A platform-specific limitation needs an explicit
+   capability state, owner, documentation, and removal condition; it must not
+   disappear silently from a product.
+4. The mandatory first tier is: shell and workspace tabs, SQL editor/LSP,
+   connections, query execution and cancellation, Result Panel/Data Grid,
+   schema navigation, history, Explain, and common designer workflows.
+5. The second tier is import/export, notebooks, visual query/ERD/ETL,
+   database administration, and advanced analysis. The matrix records whether
+   each is migrated or deliberately capability-gated.
+
+#### R9.2 — Establish the shared UI boundary
+
+1. Add `packages/ui-core` as `@justybase/ui-core`. It owns serializable UI
+   state and transitions for shell/workspace, execution, metadata, and
+   results, plus ports and capability descriptors. It may consume additive
+   contracts and existing pure cores, but cannot import React, DOM, Node,
+   VS Code, Electron, browser storage, drivers, or secrets.
+2. Add `packages/ui-react` as `@justybase/ui-react`. It owns shared React
+   components, design tokens, layout primitives, focus management, keyboard
+   navigation, and loading/empty/error/cancel presentations. It cannot import
+   VS Code, Electron, Node, database runtimes, or platform effects directly.
+3. Define ports for storage, clipboard, dialogs/notifications,
+   document open/save, command dispatch, navigation, capability discovery,
+   editor/LSP, metadata, execution, and results. The result port supports
+   paging, streaming chunks, cancellation, hydration, filtering, sorting,
+   grouping, aggregation, pivot/alternate views, row detail, guarded edits,
+   export, and stable `resultSetId` identity.
+4. Extend `quality/architecture-rules.json`, the architecture checker and its
+   negative tests, TypeScript/build configuration, and architecture docs for
+   the UI and Electron layers. Do not add import exceptions or cycles to make
+   the boundary pass.
+5. Before the first R9 UI production file is added, extend the changed-code
+   coverage enforcement: `quality/quality-baseline.json`, the diff scope in
+   CI and `test:coverage:changed`, and the LCOV/package gates must cover
+   `media`, `apps/web`, `apps/electron`, `packages/ui-core`, and
+   `packages/ui-react`. If one root LCOV cannot represent all consumers, use
+   separate package/app LCOV gates and aggregate their failures. The 80% line
+   and 70% branch rule must be executable for these paths, not only stated in
+   this plan.
+6. Keep HTTP, WebSocket, webview, and companion contracts additive. New DTOs
+   belong in `@justybase/contracts` and contain no credentials, driver
+   instances, VS Code handles, or DOM objects.
+
+#### R9.3 — Build adapters around one shared presentation
+
+1. **Web/API:** map the existing API client, REST, and WebSocket events to
+   `ui-core` controllers and `ui-react`; keep authentication, CSRF, file
+   authorization, and user-scoped persistence in the API/web adapter. The
+   current `Login` and `ConnectionForm` temporarily hold user-entered
+   passwords in Web form state, so they are not treated as an Electron secret
+   boundary until they are port-driven.
+2. **Electron:** create only a development/test shell under `apps/electron`.
+   The main process starts the existing API/server factory on loopback and
+   owns start, stop, and cleanup. The renderer loads the same React bundle and
+   uses the HTTP/WebSocket flow only after an Electron-owned authentication
+   session exists. An `AuthPort`/secret broker over the preload boundary (or a
+   main-process native credential dialog) keeps stored database passwords in
+   the main process; the renderer receives only redacted profiles and opaque
+   session/capability results. The shared Web form must not be reused for raw
+   Electron connection secrets, and secrets may not enter renderer state,
+   IPC payloads, persistence, logs, or URL values. Electron smoke starts the
+   API with an isolated data directory and explicit test-only
+   `JUSTYBASE_MASTER_KEY`, `JUSTYBASE_ADMIN_USER`, and
+   `JUSTYBASE_ADMIN_PASSWORD` values; a random master key alone does not
+   provision a login. The smoke logs in using that provisioned admin/session,
+   uses controlled data, then verifies window close, API shutdown, timer,
+   socket, session, and temporary-profile cleanup. No installer, auto-update,
+   or system integration is part of R9.
+3. **VS Code:** host the migrated React components in webviews. The adapter
+   translates webview messages and Extension Host commands to shared ports,
+   preserving current host semantics, activation, secrets, workspace
+   ownership, and public commands. Shared packages never import `vscode`.
+4. Use capability descriptors and adapter-owned commands for filesystem
+   access, document navigation, administration, native dialogs, dialect
+   features, and guarded writes. Do not scatter product checks through JSX.
+   Authentication and connection-secret capabilities must identify their
+   owner and whether the renderer may collect only ephemeral login input or
+   must delegate the prompt entirely to the host.
+5. Keep tokens for spacing, typography, colors, focus, density, icons, tables,
+   menus, dialogs, and status states in `ui-react`; product shells may add
+   chrome but not change migrated interaction semantics.
+
+#### R9.4 — Migrate vertical slices in risk order
+
+Every slice follows the same order:
+`characterization test → port/state extraction → adapter → Web → Electron →
+VS Code → all-product tests → removal of the old path`. The `legacy/shared`
+feature flag defaults to `legacy`; `shared` becomes the default only after the
+slice passes all gates.
+
+1. **Foundation:** create the ports, capability descriptors, tokens,
+   persistence adapters, route/command mapping, feature flag, and Electron
+   dev/test shell with lifecycle tests.
+2. **Results first:** migrate Result Grid and tabs, Logs/result switching,
+   filtering, sorting, grouping, aggregation, pivot/alternate views, row
+   detail, copy/export, streaming, cancellation, disk-backed results,
+   hydration, scroll restoration, zero-sized/empty/error states, and guarded
+   edit. Retain the current desktop grid as fallback during the migration.
+3. **Workspace/authoring:** migrate shell, documents/tabs, connections,
+   Monaco/LSP authoring, history, and Explain. The VS Code adapter retains
+   existing Extension Host semantics while the shared controller owns the
+   portable transitions.
+4. **Schema/designers:** migrate schema navigation and common table, index,
+   and partition designer workflows, plus portable visual-query, ERD, and ETL
+   components. `designer-core`, database-specific DDL, capability checks, and
+   database operations remain adapter-owned where required.
+5. **Second tier:** migrate import/export, notebooks, advanced analysis, and
+   administration only when their contracts are portable. Otherwise expose a
+   visible capability state with a documented owner and removal condition.
+6. Remove the legacy renderer only for a slice that has passed Web, Electron,
+   VS Code, browser/Extension Host, compatibility, lifecycle, and security
+   gates. Do not introduce a second production SQL execution path.
+
+#### R9.5 — State, compatibility, and resource safety
+
+- Shared UI state stores identity, view configuration, and user choices only;
+  never complete results, passwords, drivers, or VS Code handles.
+- Keep distinct source, execution, result-set, and storage identities. Result
+  persistence is keyed by stable `resultSetId`, uses versioned envelopes, and
+  retains a legacy read fallback until all products have migrated and the
+  documented cleanup window has elapsed.
+- Web persistence is user-scoped, Electron persistence is profile-scoped, and
+  VS Code persistence retains each feature's actual ownership. In particular,
+  `QueryHistoryManager` currently stores history below
+  `context.globalStorageUri`; `globalState` is used for legacy migration and
+  saved-view/configuration values. A future workspace/profile scope change
+  requires an explicit versioned migration, visibility review, and retention
+  decision. Serializers may be shared; storage lifetime belongs to the product
+  adapter.
+- Every adapter owns and deterministically cleans up listeners, timers,
+  workers, sockets, sessions, temporary files, and subscriptions. Shutdown and
+  failed initialization are idempotent.
+- Negative tests cover foreign result identities, malformed messages,
+  unauthorized files, auth/CSRF failures, read-only write rejection,
+  unavailable capabilities, reconnect, delayed/duplicate events, and no live
+  resources after shutdown.
+
+#### R9.6 — Verification and acceptance gates
+
+| Moment | Required evidence |
+| --- | --- |
+| Baseline and every slice | `npm run check:architecture`, `npm run check-types`, `npm run lint`, `npm run lint:extended:check`, and focused tests; skipped environment gates are recorded, not passed. |
+| Changed UI coverage enforcement | CI and local changed-coverage input include `media`, `apps/web`, `apps/electron`, `packages/ui-core`, and `packages/ui-react`; each changed UI file has an LCOV/package gate at least 80% lines and 70% branches. |
+| `ui-core` / `ui-react` | Reducer, port, capability, persistence, React component, focus, keyboard, and accessibility tests, including loading/empty/error/cancel states; changed-code coverage must include the UI paths before their shared flag is enabled. |
+| Result Panel | `npm run test:result-core`, Web tests, `test-harness/tests/table-rendering.spec.ts`, `npm run test:extension-host`, `JUSTYBASE_EXTENSION_HOST_REPEAT=20 npm run test:extension-host`, `npm run benchmark:data-grid`, and `npm run test:playwright:data-grid-performance`. |
+| Workspace/LSP | `npm run test:web`, `npm run test:playwright:web-api`, `npm run test:extension-host:authoring`, parser/completion/parity tests, and a Web smoke against a controlled API. |
+| Schema/designers/companions | `designer-core` tests, API/Web tests, `npm run test:extension-host:designer`, `npm run build:companions`, and the relevant companion verification gates. |
+| Final R9 | `npm run verify:pr`, `npm run test`, `npm run test:playwright`, `npm run test:playwright:web-api`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, main/companion builds, and packaging. |
+| Additional environments | Live database suites only with required variables; Windows and Remote-WSL are separate evidence, never default skips. |
+
+High-risk changed code keeps at least 80% line and 70% branch coverage. The
+lint warning baseline and global thresholds are not increased or weakened.
+The changed-code gate is active for `ui-core`, `ui-react`, `apps/web`,
+`apps/electron`, and migrated `media` files. It merges their LCOV reports,
+fails when a changed executable file has no record, and enforces the stated
+80% line and 70% branch thresholds. A green root-only coverage report is not
+sufficient evidence for these paths.
+Async tests assert ordering, duplicates, delayed messages, cancellation,
+reconnect, disposal, and the absence of active resources after completion.
+
+R9 is complete only when all first-tier surfaces use `ui-core` state/ports and
+`ui-react` presentation in Web, Electron, and VS Code; platform differences
+are capability-backed, documented, and tested; legacy paths are removed only
+for migrated slices; architecture has no new exceptions or cycles; public
+contracts remain compatible; and the parity, browser, Extension Host,
+Electron, build, packaging, security, type, lint, and project gates pass.
+
+The implementation rule for the entire R9 is: work only in the working tree,
+never run `git commit` or `git push`, and keep generated/test artifacts
+temporary and ignored until the user makes a separate release decision.
+
 ## Compatibility and Verification
 
 Public companion APIs, wire messages, and HTTP preserve their meaning. The
@@ -554,18 +768,23 @@ integration: `npm run verify:pr`, `npm run docs:check`,
 `npm run version:check`. SQL additionally requires sql-core, parity, parser,
 Extension Host authoring, and the LSP benchmark; MSSQL/Oracle construction
 must remain below 2000 ms. Results require Extension Host, Playwright
-table-rendering, and web components. Metadata requires disk restart and both
+table-rendering, the deterministic `npm run test:playwright:web-api` smoke,
+and web components. Metadata requires disk restart and both
 SchemaProviders. Dialects require verify, integration, companion activation,
 and packaging. Verify VS Code on Linux and Windows; Remote-WSL requires a
 separate environment.
 
-Order: R0 → R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8. Every extraction follows:
+Order: R0 → R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8 → R9. For R0–R8 and
+backend/shared-code extractions, every slice follows:
 behavior test → extraction → desktop facade → VS Code gate → API/web → removal
-of the replaced path. Code used only by the API has the appropriate API gate.
-Comparison of old and new is test-only, never by executing production SQL
-twice. A facade enables returning to the previous delegation, while data
-remains readable. Do not mask differences by updating expectations, thresholds,
-or fixed sleeps.
+of the replaced path. R9 UI slices are the qualified exception and use the
+product order in R9.4 (`Web → Electron → VS Code`) after the portable
+state/port contract is characterized; this does not change desktop-first
+ownership of execution, runtime, or secrets. Code used only by the API has the
+appropriate API gate. Comparison of old and new is test-only, never by
+executing production SQL twice. A facade enables returning to the previous
+delegation, while data remains readable. Do not mask differences by updating
+expectations, thresholds, or fixed sleeps.
 
 ## Definition of Done
 
