@@ -1,0 +1,34 @@
+{
+  "name": "@justybase/electron-shell",
+  "private": true,
+  "version": "3.17.14",
+  "description": "Development and test Electron shell for the shared JustyBase UI.",
+  "license": "Apache-2.0",
+  "main": "dist/main/main.js",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "build": "npm run build --workspace @justybase/web-api && npm run build --workspace @justybase/ui-core && npm run build --workspace @justybase/ui-react && node esbuild.electron.mjs",
+    "check-types": "npm run build --workspace @justybase/web-api && npm run build --workspace @justybase/ui-core && npm run build --workspace @justybase/ui-react && tsc -p tsconfig.json --noEmit",
+    "test": "jest --runInBand",
+    "test:smoke": "jest --runInBand tests/electronSmoke.test.ts"
+  },
+  "dependencies": {
+    "@justybase/contracts": "*",
+    "@justybase/ui-core": "*",
+    "@justybase/ui-react": "*",
+    "@justybase/web-api": "*",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "electron": "^39.0.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^6.0.0"
+  }
+}
