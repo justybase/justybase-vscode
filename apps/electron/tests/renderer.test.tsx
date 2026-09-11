@@ -85,8 +85,9 @@ describe('Electron renderer composition', () => {
     expect(resultAsyncState({ ...resultFixture, status: 'error' }, 1)).toBe('error');
     expect(resultAsyncState({ ...resultFixture, status: 'cancelled' }, 1)).toBe('cancelled');
     expect(resultAsyncState({ ...resultFixture, status: 'loading' }, 0)).toBe('loading');
-    expect(resultAsyncState({ ...resultFixture, status: 'streaming' }, 0)).toBe('loading');
+    expect(resultAsyncState({ ...resultFixture, status: 'streaming', loadedRowCount: 0, totalRowCount: 0 }, 0)).toBe('loading');
     expect(resultAsyncState({ ...resultFixture, status: 'empty' }, 0)).toBe('empty');
+    expect(resultAsyncState({ ...resultFixture, view: { ...resultFixture.view, globalFilter: 'missing' } }, 0)).toBe('ready');
     expect(resultAsyncState(resultFixture, 0)).toBe('empty');
     expect(resultAsyncState(resultFixture, 2)).toBe('ready');
     expect(displayRows(undefined, [[1]])).toEqual([]);

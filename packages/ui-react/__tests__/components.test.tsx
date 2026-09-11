@@ -201,6 +201,71 @@ describe('shared React presentation', () => {
     expect(screen.getByRole('row', { name: /A 1/ })).toBeInTheDocument();
   });
 
+  it('keeps grouped row numbers and callbacks tied to the actual raw rows', () => {
+    const onRowSelect = jest.fn();
+    render(<DataGrid
+      resultSetId="group-row-indexes"
+      columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[['A', 1], ['A', 2], ['B', 3]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['0'] }}
+      onRowSelect={onRowSelect}
+    />);
+    expect(screen.getByRole('button', { name: 'Select row 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select row 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select row 3' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('cell', { name: '2' }));
+    expect(onRowSelect).toHaveBeenCalledWith(1);
+  });
+
+  it('keeps resize state bounded to the pointer gesture', () => {
+    const onViewChange = jest.fn();
+    render(<DataGrid
+      resultSetId="resize-gesture"
+      columns={[{ name: 'ID' }]}
+      rows={[[1]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }}
+      onViewChange={onViewChange}
+    />);
+    fireEvent.mouseDown(screen.getByRole('separator', { name: 'Resize ID' }), { button: 0, clientX: 20 });
+    fireEvent.mouseUp(window);
+    fireEvent.mouseMove(window, { clientX: 200 });
+    expect(onViewChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps the paging trigger mounted when a loaded page has no matches', () => {
+    const onLoadMore = jest.fn();
+    render(<DataGrid
+      resultSetId="filtered-page"
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[1]]}
+      totalRowCount={2}
+      view={{ globalFilter: 'later', columnFilters: {}, sorting: [], grouping: [] }}
+      onLoadMore={onLoadMore}
+    />);
+    expect(screen.getByRole('status')).toHaveTextContent('No matching rows');
+    expect(onLoadMore).toHaveBeenCalled();
+    const scroller = screen.getByRole('status').parentElement as HTMLDivElement;
+    fireEvent.scroll(scroller);
+    expect(onLoadMore.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('focuses the grid for copy shortcuts and clears cell selection for a new result', () => {
+    const onSelectionChange = jest.fn();
+    const { rerender } = render(<DataGrid
+      resultSetId="selection-one"
+      columns={[{ name: 'ID' }]}
+      rows={[[1]]}
+      onSelectionChange={onSelectionChange}
+    />);
+    const cell = screen.getByRole('cell', { name: '1' });
+    const scroller = screen.getByRole('table').parentElement;
+    fireEvent.mouseDown(cell, { button: 0 });
+    expect(document.activeElement).toBe(scroller);
+    expect(onSelectionChange).toHaveBeenLastCalledWith(expect.any(Object));
+    rerender(<DataGrid resultSetId="selection-two" columns={[{ name: 'ID' }]} rows={[[2]]} onSelectionChange={onSelectionChange} />);
+    expect(onSelectionChange).toHaveBeenLastCalledWith(undefined);
+  });
+
   it('exposes shared filter, grouping, aggregation, pivot and row-detail actions', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();

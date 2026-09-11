@@ -117,8 +117,13 @@ export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCo
   if (!result) return 'empty';
   if (result.status === 'error') return 'error';
   if (result.status === 'cancelled') return 'cancelled';
-  if (result.status === 'loading' || (result.status === 'streaming' && rowCount === 0)) return 'loading';
-  if (result.status === 'empty' || rowCount === 0) return 'empty';
+  const hasViewFilter = result.view.globalFilter.trim().length > 0
+    || Object.values(result.view.columnFilters).some(value => value.trim().length > 0);
+  const rowsMayBeOutsideView = result.totalRowCount > 0
+    && (hasViewFilter || result.loadedRowCount < result.totalRowCount);
+  if (result.status === 'loading') return 'loading';
+  if (result.status === 'streaming' && rowCount === 0 && !rowsMayBeOutsideView) return 'loading';
+  if (result.status === 'empty' || (rowCount === 0 && !rowsMayBeOutsideView)) return 'empty';
   return 'ready';
 }
 
@@ -170,6 +175,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const activeRows = activeResult ? rowsByResult[activeResult.resultSetId] ?? [] : [];
   const visibleRows = displayRows(activeResult, activeRows);
   const visibleSchema = visibleSchemaNodes(schemaNodes, state.metadata.expandedNodeIds);
+
+  useEffect(() => {
+    setSelectedRow(undefined);
+  }, [activeResult?.sourceId, activeResult?.resultSetId]);
 
   useEffect(() => () => {
     const active = activeQueryRef.current;
@@ -434,12 +443,12 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [updateResultView]);
 
   const copySelected = useCallback(async (): Promise<void> => {
-    const row = selectedRow === undefined ? visibleRows[0] : visibleRows[selectedRow];
+    const row = selectedRow === undefined ? activeRows[0] : activeRows[selectedRow];
     if (!row) return;
     const text = row.map((value, index) => formatDataGridCellValue(value, activeResult?.columns[index]?.type)).join('\t');
     if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
     setNotice('Row copied.');
-  }, [activeResult, selectedRow, visibleRows]);
+  }, [activeResult?.columns, activeRows, selectedRow]);
 
   const exportResults = useCallback((): void => {
     if (typeof document === 'undefined') return;
@@ -477,8 +486,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               {notice && <div role="status">{notice}</div>}
               <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
               {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={exportResults} />}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
-              {selectedRow !== undefined && visibleRows[selectedRow] && activeResult && <RowDetail columns={activeResult.columns} row={visibleRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
+              {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={activeResult.columns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
             </div>
           </>}
   </UiShell>;

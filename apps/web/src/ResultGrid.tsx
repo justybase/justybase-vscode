@@ -142,7 +142,7 @@ function formatCellValue(value: unknown, type?: string): { text: string; isNull:
   }
   if (/BOOL/.test(t)) {
     const text = formatDataGridCellValue(value, type);
-    return { text, isNull: false, colorClass: text === 'TRUE' ? 'val-bool-t' : 'val-bool-f' };
+    return { text, isNull: false, colorClass: text.startsWith('✓') ? 'val-bool-t' : 'val-bool-f' };
   }
   const text = formatDataGridCellValue(value, type);
   return { text, isNull: false, colorClass: '' };
@@ -370,6 +370,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
       sorting: sorting.map(item => ({ column: item.id, descending: item.desc })),
       grouping: [],
     }), [result.sessionId, result.rows, rows, localFilterColumns, globalFilter, columnFilters, sorting]);
+  const gridRows = result.sessionId ? rows : result.rows;
   const data = useMemo(() => displayRows.map(values => ({ values })), [displayRows]);
   const table = useReactTable({
     data,
@@ -391,6 +392,12 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     getCoreRowModel: getCoreRowModel(),
   });
   const selectedRows = table.getSelectedRowModel().rows;
+  const selectedDisplayIndex = selectedRows[0] ? Number(selectedRows[0].id) : undefined;
+  const selectedRawIndex = selectedDisplayIndex === undefined
+    ? undefined
+    : result.sessionId
+      ? selectedDisplayIndex
+      : result.rows.findIndex(row => row === displayRows[selectedDisplayIndex]);
   const effectiveTotalRows = result.sessionId ? totalRows : data.length;
   const totalPages = Math.max(1, Math.ceil(effectiveTotalRows / pageSize));
   const sharedGridView = useMemo(() => ({
@@ -439,7 +446,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   }
 
   function contextRow(): GridRow | undefined {
-    const values = contextMenu ? displayRows[contextMenu.rowIndex] : undefined;
+    const values = contextMenu ? gridRows[contextMenu.rowIndex] : undefined;
     return values === undefined ? undefined : { values: [...values] };
   }
 
@@ -523,9 +530,9 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     </div>
     {showAggregates && aggregates && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><table><thead><tr><th>Column</th><th>Count</th><th>Sum</th><th>Average</th><th>Min</th><th>Max</th></tr></thead><tbody>{aggregates.values.map(value => { const name = result.columns[value.columnIndex] ?? `Column ${value.columnIndex + 1}`; const type = result.columnTypes[value.columnIndex]; return <tr key={value.columnIndex}><td>{name}</td><td>{value.count.toLocaleString()}</td><td>{value.sum === undefined ? '—' : value.sum === null ? 'NULL' : String(value.sum)}</td><td>{value.avg === undefined ? '—' : value.avg === null ? 'NULL' : String(value.avg)}</td><td>{value.min === undefined ? '—' : formatCellValue(value.min, type).text}</td><td>{value.max === undefined ? '—' : formatCellValue(value.max, type).text}</td></tr>; })}</tbody></table></div></div>}
     {(grouped || pivot) && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">{pivot ? 'Pivot view' : `Grouped view · ${grouped?.totalGroups.toLocaleString() ?? 0} groups`}<button type="button" className="secondary small" onClick={() => { setGrouped(null); setPivot(null); }}>Close</button></div><div className="grid-aggregates-scroll"><table><thead><tr>{(pivot?.columns ?? grouped?.columns.map(column => column.name) ?? []).map(column => <th key={column}>{column}</th>)}</tr></thead><tbody>{(pivot?.rows ?? grouped?.rows ?? []).map((row, rowIndex) => <tr key={rowIndex}>{row.map((value, columnIndex) => <td key={columnIndex}>{formatCellValue(value, pivot ? undefined : grouped?.columns[columnIndex]?.type).text}</td>)}</tr>)}</tbody></table></div></div>}
-    <DataGrid resultSetId={resultSetId} columns={result.columns.map((name, index) => ({ name, type: result.columnTypes[index] }))} rows={result.sessionId ? rows : result.rows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} onViewChange={updateSharedGridView} selectedRowIndex={selectedRows[0] ? Number(selectedRows[0].id) : undefined} onRowSelect={rowIndex => setRowSelection({ [String(rowIndex)]: true })} onContextMenu={context => setContextMenu({ x: context.clientX, y: context.clientY, rowIndex: context.rowIndex, columnIndex: context.columnIndex })} />
+    <DataGrid resultSetId={resultSetId} columns={result.columns.map((name, index) => ({ name, type: result.columnTypes[index] }))} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onContextMenu={context => setContextMenu({ x: context.clientX, y: context.clientY, rowIndex: context.rowIndex, columnIndex: context.columnIndex })} />
     {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button type="button" onClick={() => copyContext('value')}>Copy value</button><button type="button" onClick={() => copyContext('tsv')}>Copy row as TSV</button><button type="button" onClick={() => copyContext('json')}>Copy row as JSON</button><button type="button" onClick={() => copyContext('markdown')}>Copy row as Markdown</button><button type="button" onClick={() => copyContext('sql')}>Copy SQL INSERT</button><hr /><button type="button" onClick={filterByContextValue}>Filter by this value</button><button type="button" onClick={() => sortByContextValue(false)}>Sort ascending</button><button type="button" onClick={() => sortByContextValue(true)}>Sort descending</button><hr /><button type="button" onClick={() => { setDetailRowIndex(contextMenu.rowIndex); setContextMenu(null); }}>View full row</button>{onEditRow && <button type="button" onClick={() => { const row = contextRow(); if (row) onEditRow([...row.values]); setContextMenu(null); }}>Edit row…</button>}</div>}
-    {detailRowIndex !== null && displayRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{displayRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, result.columnTypes[index]).text}</dd></div>)}</dl></aside>}
+    {detailRowIndex !== null && gridRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{gridRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, result.columnTypes[index]).text}</dd></div>)}</dl></aside>}
     <div className="grid-pagination"><span>{effectiveTotalRows.toLocaleString()} rows · page {pageIndex + 1} / {totalPages}</span><label>Page size<select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageIndex(0); }}><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option></select></label><button className="secondary small" disabled={pageIndex === 0 || loading} onClick={() => setPageIndex(value => value - 1)}>Previous</button><button className="secondary small" disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex(value => value + 1)}>Next</button></div>
   </section>;
 }

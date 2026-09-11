@@ -28,8 +28,13 @@ export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCo
   if (!result) return 'empty';
   if (result.status === 'error') return 'error';
   if (result.status === 'cancelled') return 'cancelled';
-  if (result.status === 'loading' || (result.status === 'streaming' && rowCount === 0)) return 'loading';
-  if (result.status === 'empty' || rowCount === 0) return 'empty';
+  const hasViewFilter = result.view.globalFilter.trim().length > 0
+    || Object.values(result.view.columnFilters).some(value => value.trim().length > 0);
+  const rowsMayBeOutsideView = result.totalRowCount > 0
+    && (hasViewFilter || result.loadedRowCount < result.totalRowCount);
+  if (result.status === 'loading') return 'loading';
+  if (result.status === 'streaming' && rowCount === 0 && !rowsMayBeOutsideView) return 'loading';
+  if (result.status === 'empty' || (rowCount === 0 && !rowsMayBeOutsideView)) return 'empty';
   return 'ready';
 }
 
@@ -48,9 +53,9 @@ export function rowsAsText(columns: readonly { readonly name: string; readonly t
   return [columns.map(column => column.name).join('\t'), ...rows.map(row => row.map((value, index) => formatDataGridCellValue(value, columns[index]?.type)).join('\t'))].join('\n');
 }
 
-export function rowsAsCsv(columns: readonly { readonly name: string }[], rows: readonly ElectronRow[]): string {
+export function rowsAsCsv(columns: readonly { readonly name: string; readonly type?: string }[], rows: readonly ElectronRow[]): string {
   const quote = (value: unknown): string => `"${String(value ?? '').replaceAll('"', '""')}"`;
-  return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map(quote).join(','))].join('\n');
+  return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map((value, index) => quote(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type))).join(','))].join('\n');
 }
 
 /** Applies a page only when it still belongs to the result execution in the store. */
@@ -184,6 +189,10 @@ export function App(): ReactElement {
   const resultState = resultAsyncState(activeResult, visibleRows.length);
   const resultMessage = activeResult?.message;
 
+  useEffect(() => {
+    setSelectedRow(undefined);
+  }, [activeResult?.sourceId, activeResult?.resultSetId]);
+
   const updateRows = useCallback((resultSetId: string, nextRows: readonly ElectronRow[]): void => {
     const next = { ...rowsByResultRef.current, [resultSetId]: nextRows };
     rowsByResultRef.current = next;
@@ -240,12 +249,12 @@ export function App(): ReactElement {
   }, [activeResult, store]);
 
   const copyActive = useCallback(async (): Promise<void> => {
-    const row = selectedRow === undefined ? visibleRows[0] : visibleRows[selectedRow];
+    const row = selectedRow === undefined ? rows[0] : rows[selectedRow];
     if (!row || !activeResult) return;
     const text = rowsAsText(activeResult.columns, [row]);
     if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
     setNotice('Result copied.');
-  }, [activeResult, selectedRow, visibleRows]);
+  }, [activeResult, rows, selectedRow]);
 
   const exportActive = useCallback((): void => {
     if (!activeResult || typeof document === 'undefined') return;
@@ -313,7 +322,7 @@ export function App(): ReactElement {
             <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…">
               <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateView} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onRowSelect={setSelectedRow} />
             </AsyncStateView>
-            {activeResult && selectedRow !== undefined && visibleRows[selectedRow] && <RowDetail columns={activeResult.columns} row={visibleRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+            {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={activeResult.columns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>
         </>}
   </UiShell></CapabilityGate> as ReactElement;

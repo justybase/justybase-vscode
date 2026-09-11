@@ -48,7 +48,7 @@ export interface DataGridProps {
   readonly onScroll?: (position: GridScrollPosition) => void;
   /** Requests the next adapter-owned page when the rendered rows near the end. */
   readonly onLoadMore?: () => void;
-/** Index into the displayed rows after the shared view has been applied. */
+  /** Index into the supplied raw rows, even when displayed rows are filtered, sorted, or grouped. */
   readonly onRowSelect?: (rowIndex: number) => void;
   readonly selectedRowIndex?: number;
   readonly view?: DataGridViewState;
@@ -282,7 +282,7 @@ function matchesRow(
   view: DataGridViewState,
 ): boolean {
   const globalFilter = view.globalFilter.trim().toLocaleLowerCase();
-  if (globalFilter && !columns.some((column, columnIndex) => formatDataGridCellValue(values[columnIndex], column.type).toLocaleLowerCase().includes(globalFilter))) return false;
+  if (globalFilter && !values.some((value, columnIndex) => formatDataGridCellValue(value, columns[columnIndex]?.type).toLocaleLowerCase().includes(globalFilter))) return false;
   return columns.every((column, columnIndex) => {
     const filter = filterValue(view, column, columnIndex).trim().toLocaleLowerCase();
     return !filter || formatDataGridCellValue(values[columnIndex], column.type).toLocaleLowerCase().includes(filter);
@@ -349,7 +349,7 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
   for (const [id, group] of groups) {
     const label = JSON.parse(id).join(' · ') as string;
     rendered.push({ kind: 'group', id, label, count: group.length });
-    for (const row of group) rendered.push({ ...row, kind: 'data', displayIndex, groupId: id });
+    group.forEach((row, groupIndex) => rendered.push({ ...row, kind: 'data', displayIndex: displayIndex + groupIndex, groupId: id }));
     displayIndex += group.length;
   }
   return rendered;
@@ -654,11 +654,11 @@ export function DataGrid({
             return <tr className="ui-data-grid-group-row" key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
           }
           if (rendered.groupId !== undefined && collapsedGroups.has(rendered.groupId)) return null;
-          const rowSelected = selectedRowIndex === rendered.displayIndex;
+          const rowSelected = selectedRowIndex === rendered.sourceIndex;
           const rowLabel = rendered.values.map((value, columnIndex) => formatDataGridCellValue(value, columns[columnIndex]?.type)).join(' ');
           const firstVisibleColumn = visibleColumnIndexes[0];
-          return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rowLabel} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.displayIndex)}>
-            <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => firstVisibleColumn !== undefined && extendSelection(rendered.displayIndex, firstVisibleColumn)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.displayIndex); }}>{rendered.displayIndex + 1}</button></th>
+          return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rowLabel} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.sourceIndex)}>
+            <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => firstVisibleColumn !== undefined && extendSelection(rendered.displayIndex, firstVisibleColumn)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.sourceIndex); }}>{rendered.displayIndex + 1}</button></th>
             {visibleColumnIndexes.map(columnIndex => {
               const column = columns[columnIndex]!;
               const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
@@ -667,7 +667,7 @@ export function DataGrid({
               const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];
               const displayValue = formatDataGridCellValue(value, column.type);
-              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column.type)}`, isNumericType(column.type) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.displayIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
+              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, column.type)}`, isNumericType(column.type) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
             })}
           </tr>;
         })}</tbody>
