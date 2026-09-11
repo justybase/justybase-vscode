@@ -15,6 +15,7 @@ import {
     AsyncStateView,
     CapabilityGate,
     DataGrid,
+    processDataGridRows,
     FocusOnMount,
     ResultTabs,
     ResultViewToolbar,
@@ -292,21 +293,11 @@ export function displaySharedRows(
     filter: string,
     sorting: UiResultSurfaceState['view']['sorting'],
 ): readonly (readonly unknown[])[] {
-    const normalizedFilter = filter.trim().toLocaleLowerCase();
-    const filtered = normalizedFilter.length === 0
-        ? [...rows]
-        : rows.filter(row => row.some(value => String(value ?? '').toLocaleLowerCase().includes(normalizedFilter)));
-    const firstSort = sorting[0];
-    if (!firstSort) return filtered;
-    const namedColumnIndex = columns.findIndex(column => column.name === firstSort.column);
-    const legacyColumnIndex = /^[0-9]+$/u.test(firstSort.column) ? Number(firstSort.column) : -1;
-    const columnIndex = namedColumnIndex >= 0 ? namedColumnIndex : legacyColumnIndex;
-    if (columnIndex < 0 || columnIndex >= columns.length) return filtered;
-    return [...filtered].sort((left, right) => {
-        const leftValue = String(left[columnIndex] ?? '');
-        const rightValue = String(right[columnIndex] ?? '');
-        const result = leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: 'base' });
-        return firstSort.descending ? -result : result;
+    return processDataGridRows(columns, rows, {
+        globalFilter: filter,
+        columnFilters: {},
+        sorting,
+        grouping: [],
     });
 }
 
@@ -884,7 +875,9 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         [state.results],
     );
     const rows = controller.getRows(activeResult);
-    const displayRows = displaySharedRows(rows, activeResult?.columns ?? [], activeResult?.view.globalFilter ?? '', activeResult?.view.sorting ?? []);
+    const displayRows = activeResult
+        ? processDataGridRows(activeResult.columns, rows, activeResult.view)
+        : [];
     const resultState = asyncStateFor(activeResult);
     const schemaCapability = capability(state.capabilities, 'result-panel.schema-navigation');
     const sourceLabel = state.results.activeSourceId?.split(/[\\/]/u).pop() ?? 'Query Results';
@@ -908,7 +901,20 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                 <ResultTabs results={sourceResults} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(id, sourceId) => controller.selectResult(id, sourceId)} />
                 <ResultViewToolbar columns={activeResult?.columns ?? []} view={view} onChange={patch => activeResult && controller.updateView(activeResult.resultSetId, patch)} onRefresh={() => controller.refresh()} onCopy={() => controller.copyActive()} onExport={() => controller.exportActive()} />
                 <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
-                    {activeResult && <DataGrid sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} columns={activeResult.columns} rows={displayRows} totalRowCount={activeResult.totalRowCount} scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }} onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })} onLoadMore={() => controller.loadMore(activeResult)} onRowSelect={setSelectedRow} />}
+                    {activeResult && <DataGrid
+                        sourceId={activeResult.sourceId}
+                        resultSetId={activeResult.resultSetId}
+                        columns={activeResult.columns}
+                        rows={rows}
+                        totalRowCount={activeResult.totalRowCount}
+                        view={activeResult.view}
+                        onViewChange={patch => controller.updateView(activeResult.resultSetId, patch)}
+                        scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }}
+                        onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })}
+                        onLoadMore={() => controller.loadMore(activeResult)}
+                        onRowSelect={setSelectedRow}
+                        onCopySelection={payload => postHostMessage({ command: 'copyToClipboard', text: rowsAsText(payload.columns, payload.rows) })}
+                    />}
                 </AsyncStateView>
                 {selected && activeResult && <RowDetail columns={activeResult.columns} row={selected} onClose={() => setSelectedRow(undefined)} />}
             </>}
