@@ -29,6 +29,7 @@ plans/
 node_modules/
 apps/
 packages/
+vendor/dockyard/
 
 icon.svg
 
