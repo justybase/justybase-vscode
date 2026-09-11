@@ -153,6 +153,9 @@ describe('shared Web UI adapter edge contracts', () => {
     await screen.findByRole('table');
     await user.click(screen.getByRole('button', { name: 'Sort' }));
     await user.type(screen.getByRole('textbox', { name: 'Filter results' }), 'a');
+    await user.type(screen.getByRole('textbox', { name: 'Filter NAME' }), 'a');
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.queryByText('b')).not.toBeInTheDocument();
     const grid = screen.getByRole('table').parentElement as HTMLDivElement;
     grid.scrollTop = 64;
     grid.scrollLeft = 32;

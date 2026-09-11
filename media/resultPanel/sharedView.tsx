@@ -469,13 +469,19 @@ export class SharedResultPanelController {
     public copyActive(): void {
         const result = this.activeResult();
         if (!result) return;
-        postHostMessage({ command: 'copyToClipboard', text: rowsAsText(result.columns, this.getRows(result)) });
+        postHostMessage({
+            command: 'copyToClipboard',
+            text: rowsAsText(result.columns, processDataGridRows(result.columns, this.getRows(result), result.view)),
+        });
     }
 
     public exportActive(): void {
         const result = this.activeResult();
         if (!result) return;
-        postHostMessage({ command: 'exportCsv', data: rowsAsCsv(result.columns, this.getRows(result)) });
+        postHostMessage({
+            command: 'exportCsv',
+            data: rowsAsCsv(result.columns, processDataGridRows(result.columns, this.getRows(result), result.view)),
+        });
     }
 
     public activeResult(): UiResultSurfaceState | undefined {
@@ -882,7 +888,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     const schemaCapability = capability(state.capabilities, 'result-panel.schema-navigation');
     const sourceLabel = state.results.activeSourceId?.split(/[\\/]/u).pop() ?? 'Query Results';
     const view = activeResult?.view ?? { globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined };
-    const selected = selectedRow === undefined ? undefined : rows[selectedRow];
+    const selected = selectedRow === undefined ? undefined : displayRows[selectedRow];
 
     return <UiShell
         title={sourceLabel}

@@ -18,6 +18,7 @@ import type { UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@j
 import {
   AsyncStateView,
   DataGrid,
+  processDataGridRows,
   DesignerForm,
   EditorSurface,
   ExplainView,
@@ -122,22 +123,7 @@ export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCo
 
 export function displayRows(result: UiResultSurfaceState | undefined, rows: readonly (readonly unknown[])[]): readonly (readonly unknown[])[] {
   if (!result) return [];
-  const filter = result.view.globalFilter.trim().toLocaleLowerCase();
-  const filtered = filter.length === 0
-    ? [...rows]
-    : rows.filter(row => row.some(value => String(value ?? '').toLocaleLowerCase().includes(filter)));
-  const sorting = result.view.sorting[0];
-  if (!sorting) return filtered;
-  const namedColumnIndex = result.columns.findIndex(column => column.name === sorting.column);
-  const legacyColumnIndex = /^[0-9]+$/u.test(sorting.column) ? Number(sorting.column) : -1;
-  const columnIndex = namedColumnIndex >= 0 ? namedColumnIndex : legacyColumnIndex;
-  if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= result.columns.length) return filtered;
-  return filtered.sort((left, right) => {
-    const leftText = String(left[columnIndex] ?? '');
-    const rightText = String(right[columnIndex] ?? '');
-    const order = leftText.localeCompare(rightText, undefined, { numeric: true });
-    return sorting.descending ? -order : order;
-  });
+  return processDataGridRows(result.columns, rows, result.view);
 }
 
 interface ActiveQuery {
@@ -490,7 +476,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               {notice && <div role="status">{notice}</div>}
               <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
               {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={exportResults} />}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={visibleRows} totalRowCount={activeResult?.totalRowCount} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
+              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
               {selectedRow !== undefined && visibleRows[selectedRow] && activeResult && <RowDetail columns={activeResult.columns} row={visibleRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
             </div>
           </>}
