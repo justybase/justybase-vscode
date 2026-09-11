@@ -60,6 +60,7 @@
   "browserExternalImports": [
     "react",
     "react/jsx-runtime",
+    "react-dom",
     "react-dom/client",
     "@monaco-editor/react",
     "monaco-editor",
