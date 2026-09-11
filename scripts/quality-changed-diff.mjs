@@ -18,7 +18,7 @@ export function createChangedDiff({ root = process.cwd(), configuredBase = proce
 
   let diff;
   try {
-    diff = git(['diff', '--unified=0', '--no-ext-diff', `${configuredBase}...HEAD`, '--']);
+    diff = git(['diff', '--unified=0', '--no-ext-diff', configuredBase, '--']);
   } catch (error) {
     if (process.env.QUALITY_BASE_SHA || process.env.CI === 'true') throw error;
     diff = git(['diff', '--unified=0', '--no-ext-diff', 'HEAD', '--']);
@@ -32,7 +32,13 @@ export function createChangedDiff({ root = process.cwd(), configuredBase = proce
   for (const file of untracked) {
     const absolute = path.join(root, file);
     if (!fs.existsSync(absolute)) continue;
-    const lineCount = fs.readFileSync(absolute, 'utf8').split(/\r?\n/u).length - 1;
+    const contents = fs.readFileSync(absolute, 'utf8');
+    const lines = contents.split(/\r\n|\r|\n/u);
+    const lineCount = contents.length === 0
+      ? 0
+      : lines[lines.length - 1] === ''
+        ? lines.length - 1
+        : lines.length;
     if (lineCount <= 0) continue;
     if (!diff.endsWith('\n') && diff.length > 0) diff += '\n';
     diff += `+++ b/${file}\n@@ -0,0 +1,${lineCount} @@\n`;

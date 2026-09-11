@@ -167,6 +167,18 @@ for (const dependencyDir of dependencyDirectories) {
   });
 }
 
+if (isCore) {
+  const dockyardLicensePath = path.join(REPOSITORY_ROOT, 'vendor', 'dockyard', 'LICENSE');
+  assert(existsSync(dockyardLicensePath), `Missing vendored Dockyard license: ${dockyardLicensePath}`);
+  components.push({
+    name: 'avalondock-web (vendored)',
+    version: '0.1.0 @ 921b9a66cac88b07af6edb3ebd5cd47af500c900',
+    license: 'MIT',
+    repository: 'https://github.com/wieslawsoltes/Dockyard',
+    licenseText: readFileSync(dockyardLicensePath, 'utf8').replace(/\r\n?/gu, '\n').trim(),
+  });
+}
+
 components.sort((left, right) =>
   left.name.localeCompare(right.name) || left.version.localeCompare(right.version));
 

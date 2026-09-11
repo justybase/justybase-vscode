@@ -1,13 +1,77 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertLintRatchet, checkChangedCoverage, lintSummary, mergeLcovReports, parseChangedLines, parseLcov } from './quality-gate.mjs';
+import { createChangedDiff } from './quality-changed-diff.mjs';
 import { prepareQualityArtifacts } from './prepare-quality-artifacts.mjs';
 import { buildReport, qualityInputFailures } from './quality-report.mjs';
 
 const lintBaseline = { lint: { total: 3, areas: { media: 2, apps: 1 } } };
+
+function runGit(root, args) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+}
+
+function commitGitFixture(root, message) {
+  return runGit(root, [
+    '-c', 'user.name=Quality Tests',
+    '-c', 'user.email=quality@example.invalid',
+    'commit', '-m', message,
+  ]);
+}
+
+test('includes staged and unstaged tracked edits when the base resolves', () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-quality-git-'));
+  const source = path.join(temporaryRoot, 'src', 'tracked.ts');
+
+  try {
+    runGit(temporaryRoot, ['init']);
+    fs.mkdirSync(path.dirname(source), { recursive: true });
+    fs.writeFileSync(source, 'export const initial = true;\n');
+    runGit(temporaryRoot, ['add', 'src/tracked.ts']);
+    commitGitFixture(temporaryRoot, 'initial');
+
+    fs.appendFileSync(source, 'export const committed = true;\n');
+    runGit(temporaryRoot, ['add', 'src/tracked.ts']);
+    commitGitFixture(temporaryRoot, 'committed change');
+
+    fs.appendFileSync(source, 'export const staged = true;\n');
+    runGit(temporaryRoot, ['add', 'src/tracked.ts']);
+    fs.appendFileSync(source, 'export const working = true;\n');
+
+    const diff = createChangedDiff({ root: temporaryRoot, configuredBase: 'HEAD~1' });
+    assert.match(diff, /\+export const staged = true;/u);
+    assert.match(diff, /\+export const working = true;/u);
+    assert.deepEqual([...parseChangedLines(diff).get('src/tracked.ts')], [2, 3, 4]);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('includes the final line of an untracked file without a trailing newline', () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-quality-git-'));
+  const source = path.join(temporaryRoot, 'README.md');
+  const untracked = path.join(temporaryRoot, 'src', 'untracked.ts');
+
+  try {
+    runGit(temporaryRoot, ['init']);
+    fs.writeFileSync(source, 'fixture\n');
+    runGit(temporaryRoot, ['add', 'README.md']);
+    commitGitFixture(temporaryRoot, 'initial');
+
+    fs.mkdirSync(path.dirname(untracked), { recursive: true });
+    fs.writeFileSync(untracked, 'export const untracked = true;');
+
+    const diff = createChangedDiff({ root: temporaryRoot, configuredBase: 'HEAD' });
+    assert.match(diff, /\+\+\+ b\/src\/untracked\.ts\n@@ -0,0 \+1,1 @@/u);
+    assert.deepEqual([...parseChangedLines(diff).get('src/untracked.ts')], [1]);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
 
 test('all first-party workspace packages declare their distribution license', () => {
   const packagesRoot = path.resolve(process.cwd(), 'packages');

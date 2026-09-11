@@ -8,6 +8,10 @@ import type {
 } from '@justybase/contracts';
 import { useApiClient, type ApiClient } from './api';
 
+export function isTestLoginEnabled(): boolean {
+  return (globalThis as { __JUSTYBASE_ENABLE_TEST_LOGIN__?: unknown }).__JUSTYBASE_ENABLE_TEST_LOGIN__ === true;
+}
+
 export function Login({ onLogin }: { onLogin(user: WebUser): void }): ReactElement {
   const api = useApiClient();
   const [username, setUsername] = useState('');
@@ -18,7 +22,11 @@ export function Login({ onLogin }: { onLogin(user: WebUser): void }): ReactEleme
     event.preventDefault(); setBusy(true); setError('');
     try { onLogin((await api.login(username, password)).user); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Login failed.'); } finally { setBusy(false); }
   }
-  return <main className="auth-shell"><form className="card auth-card" onSubmit={event => void submit(event)}><div className="brand">JustyBase</div><h1>Web database editor</h1><p className="muted">Sign in to your self-hosted workspace.</p><label>Username<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" /></label><label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" /></label>{error && <div className="error">{error}</div>}<button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button></form></main>;
+  async function testLogin(): Promise<void> {
+    setBusy(true); setError('');
+    try { onLogin((await api.testLogin()).user); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Test login failed.'); } finally { setBusy(false); }
+  }
+  return <main className="auth-shell"><form className="card auth-card" onSubmit={event => void submit(event)}><div className="brand">JustyBase</div><h1>Web database editor</h1><p className="muted">Sign in to your self-hosted workspace.</p><label>Username<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" /></label><label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" /></label>{error && <div className="error">{error}</div>}<button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>{isTestLoginEnabled() && <button type="button" className="secondary test-login-button" disabled={busy} onClick={() => void testLogin()}>Use test login data</button>}</form></main>;
 }
 
 type WebConnectionKind = 'netezza' | 'sqlite' | 'duckdb';

@@ -248,7 +248,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
     }
     if (csrfToken) return csrfToken;
     const normalizedMethod = (method ?? 'GET').toUpperCase();
-    if (!remoteOrigin || ['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod) || path === '/api/auth/login') return undefined;
+    if (!remoteOrigin || ['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod) || path === '/api/auth/login' || path === '/api/auth/test-login') return undefined;
     return fetchRemoteCsrfToken();
   }
 
@@ -370,6 +370,9 @@ export function createApiClient(options: ApiClientOptions = {}) {
   return {
     me: () => request<{ user: WebUser }>('/api/auth/me'),
     login: (username: string, password: string) => request<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+    // Test credentials stay server-side. This request intentionally has no
+    // body, so they cannot enter React state, the DOM, the URL, or storage.
+    testLogin: () => request<AuthResponse>('/api/auth/test-login', { method: 'POST' }),
     logout,
     connections: () => request<ConnectionProfileSummary[]>('/api/connections'),
     createConnection: (input: ConnectionProfileInput) => request<ConnectionProfileSummary>('/api/connections', { method: 'POST', body: JSON.stringify(input) }),

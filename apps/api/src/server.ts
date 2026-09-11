@@ -385,6 +385,12 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
   const webOrigins = apiConfig.webOrigins ?? [];
 
   if (apiConfig.adminUsername && apiConfig.adminPassword && store.countUsers() === 0) store.createUser(apiConfig.adminUsername, apiConfig.adminPassword, 'admin');
+  const testLoginCredentials = process.env.NODE_ENV === 'test'
+    && process.env.JUSTYBASE_ENABLE_TEST_LOGIN === '1'
+    && apiConfig.adminUsername
+    && apiConfig.adminPassword
+    ? { username: apiConfig.adminUsername, password: apiConfig.adminPassword }
+    : undefined;
 
   app.get('/healthz', async () => ({ status: 'ok' }));
   registerAuthAdminRoutes(app, {
@@ -400,6 +406,7 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
     restoreBodyLimit: MAX_ADMIN_RESTORE_BODY_BYTES,
     backup: () => createAdminBackup(app),
     restore: (server, input) => restoreAdminBackup(server, input),
+    ...(testLoginCredentials ? { testLogin: () => testLoginCredentials } : {}),
   });
 
   registerConnectionRoutes(app, { authenticate, validateCsrf, bodyObject, requiredString });

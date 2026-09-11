@@ -16,10 +16,22 @@ export interface AuthAdminRouteHooks {
   restoreBodyLimit: number;
   backup(): Promise<{ data: Buffer; fileName: string }>;
   restore(app: FastifyInstance, input: AdminRestoreRequest): Promise<Record<string, unknown>>;
+  /**
+   * Test-harness-only credential source. The route is not registered unless
+   * the composition root explicitly supplies this hook.
+   */
+  testLogin?(): { username: string; password: string } | undefined;
 }
 
 /** Authentication and user-administration HTTP routes. */
 export function registerAuthAdminRoutes(app: FastifyInstance, hooks: AuthAdminRouteHooks): void {
+  function createSession(row: { id: string; username: string; role: string }, request: FastifyRequest, reply: FastifyReply): { user: { id: string; username: string; role: string } } {
+    const token = randomBytes(32).toString('base64url');
+    app.store.createSession(row.id, token, Date.now() + 7 * 24 * 60 * 60 * 1000);
+    hooks.setSessionCookie(reply, token, request);
+    return { user: { id: row.id, username: row.username, role: row.role } };
+  }
+
   app.post('/api/auth/login', { preHandler: hooks.loginRateLimit }, async (request, reply) => {
     const body = hooks.bodyObject(request.body);
     const username = hooks.requiredString(body.username, 'username');
@@ -28,11 +40,21 @@ export function registerAuthAdminRoutes(app: FastifyInstance, hooks: AuthAdminRo
     if (!row || !verifyPassword(password, row.password_hash)) {
       return reply.code(401).send({ code: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' });
     }
-    const token = randomBytes(32).toString('base64url');
-    app.store.createSession(row.id, token, Date.now() + 7 * 24 * 60 * 60 * 1000);
-    hooks.setSessionCookie(reply, token, request);
-    return { user: { id: row.id, username: row.username, role: row.role } };
+    return createSession(row, request, reply);
   });
+
+  if (hooks.testLogin) {
+    app.post('/api/auth/test-login', { preHandler: hooks.loginRateLimit }, async (request, reply) => {
+      const credentials = hooks.testLogin?.();
+      const row = credentials ? app.store.findUserByUsername(credentials.username) : undefined;
+      if (!credentials || !row || !verifyPassword(credentials.password, row.password_hash)) {
+        return reply.code(503).send({ code: 'TEST_LOGIN_UNAVAILABLE', message: 'Test login is unavailable.' });
+      }
+      // Deliberately ignore request.body. The harness receives credentials
+      // from the server-side environment, never from the browser.
+      return createSession(row, request, reply);
+    });
+  }
 
   app.get('/api/auth/csrf', async (request, reply) => ({ csrfToken: hooks.issueCsrfToken(reply, request) }));
 
