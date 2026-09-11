@@ -2,6 +2,41 @@ import type { QueryEvent } from '@justybase/contracts';
 import type { ExecutionHandle, ExecutionInput, ExecutionPort, UiResultEvent } from '@justybase/ui-core';
 import type { ElectronApiClient, QueryEventSubscription } from './api';
 
+const RESULT_PAGE_SIZE = 500;
+
+export interface HydratedResultRows {
+  readonly columns: readonly { readonly name: string; readonly type?: string }[];
+  readonly rows: readonly (readonly unknown[])[];
+  readonly totalRowCount: number;
+}
+
+/** Loads the complete finalized result for one statement from the API spool. */
+export async function fetchAllResultPages(
+  client: ElectronApiClient,
+  queryId: string,
+  statementIndex = 0,
+): Promise<HydratedResultRows> {
+  const rows: Array<readonly unknown[]> = [];
+  let offset = 0;
+
+  for (;;) {
+    const page = await client.queryPage(queryId, { statementIndex, offset, limit: RESULT_PAGE_SIZE });
+    if (page.offset !== offset) throw new Error('Electron result paging returned a non-contiguous offset.');
+
+    rows.push(...page.rows.map(row => [...row]));
+
+    if (!page.hasMore) {
+      return {
+        columns: page.columns.map(column => ({ name: column.name, type: column.type })),
+        rows,
+        totalRowCount: page.totalRows,
+      };
+    }
+    if (page.rows.length === 0) throw new Error('Electron result paging made no progress.');
+    offset += page.rows.length;
+  }
+}
+
 export interface ElectronExecutionPortOptions {
   readonly client: ElectronApiClient;
   readonly onRows?: (resultSetId: string, rows: readonly (readonly unknown[])[]) => void;
@@ -13,14 +48,15 @@ export interface ElectronExecutionPortOptions {
 interface ActiveStream {
   readonly queryId: string;
   readonly subscription: QueryEventSubscription;
+  readonly stop: () => void;
 }
 
-function resultSetIdFor(queryId: string): string {
-  return `${queryId}:0`;
+function resultSetIdFor(queryId: string, statementIndex = 0): string {
+  return `${queryId}:${statementIndex}`;
 }
 
 function mapEvent(sourceId: string, queryId: string, event: QueryEvent, sequence: number, loadedRowCount: number, onRows: ElectronExecutionPortOptions['onRows']): UiResultEvent | undefined {
-  const resultSetId = resultSetIdFor(queryId);
+  const resultSetId = resultSetIdFor(queryId, event.statementIndex ?? 0);
   const base = { sourceId, executionId: queryId, resultSetId, sequence };
   switch (event.type) {
     case 'started': return { ...base, type: 'started' };
@@ -57,20 +93,23 @@ function eventStream(
   const subscriptionRef: { current?: QueryEventSubscription } = {};
   let pageRequested = false;
 
-  const hydratePage = (): void => {
+  const hydratePages = async (): Promise<void> => {
     if (!onPage || pageRequested) return;
     pageRequested = true;
-    void client.queryPage(queryId, { statementIndex: 0, offset: 0, limit: 500 }).then(page => {
+    try {
+      const hydrated = await fetchAllResultPages(client, queryId);
+      if (done) return;
       onPage(
         resultSetIdFor(queryId),
-        page.rows.map(row => [...row]),
-        page.totalRows,
-        page.columns.map(column => ({ name: column.name, type: column.type })),
+        hydrated.rows,
+        hydrated.totalRowCount,
+        hydrated.columns,
         queryId,
       );
-    }).catch(error => {
+    } catch (error: unknown) {
+      if (done) return;
       onPageError?.(resultSetIdFor(queryId), error instanceof Error ? error : new Error('Could not load result rows.'), queryId);
-    });
+    }
   };
 
   const flush = (): void => {
@@ -84,17 +123,26 @@ function eventStream(
     onActive(undefined);
     flush();
   };
-  const push = (event: QueryEvent): void => {
+  const pushMapped = (event: QueryEvent): void => {
     if (done) return;
-    if (event.type === 'session' || event.type === 'batch-complete') return;
     if (event.type === 'rows') loadedRowCount += event.rows.length;
-    if (event.type === 'complete') hydratePage();
     const mapped = mapEvent(sourceId, queryId, event, ++sequence, loadedRowCount, onRows);
     if (mapped) {
       queue.push(mapped);
       if (mapped.type === 'complete' || mapped.type === 'error' || mapped.type === 'cancelled') finish();
       flush();
     }
+  };
+  const push = (event: QueryEvent): void => {
+    if (done) return;
+    if (event.type === 'session' || event.type === 'batch-complete') return;
+    if (event.type === 'complete' && onPage && !pageRequested) {
+      // Keep the terminal event behind hydration. The renderer can therefore
+      // only expose a complete/ready result after every result page is local.
+      void hydratePages().finally(() => pushMapped(event));
+      return;
+    }
+    pushMapped(event);
   };
   const subscription = client.connectToQueryEvents(queryId, push, error => {
     if (done) return;
@@ -103,7 +151,7 @@ function eventStream(
   });
   subscriptionRef.current = subscription;
   if (done) subscription.close();
-  else onActive({ queryId, subscription });
+  else onActive({ queryId, subscription, stop: finish });
 
   const iterator: AsyncIterator<UiResultEvent> = {
     next: () => {
@@ -122,6 +170,7 @@ export function createElectronExecutionPort(options: ElectronExecutionPortOption
   return {
     async start(input: ExecutionInput): Promise<ExecutionHandle> {
       if (disposed) throw new Error('Electron execution port is disposed.');
+      if (input.mode === 'script') throw new Error('Electron execution does not support script mode.');
       const started = await options.client.startQuery({ connectionId: input.connectionId, sql: input.sql, mode: input.mode });
       const sourceId = input.sourceId;
       const resultSetId = resultSetIdFor(started.queryId);
@@ -146,7 +195,7 @@ export function createElectronExecutionPort(options: ElectronExecutionPortOption
       disposed = true;
       const streams = [...active.values()];
       active.clear();
-      for (const stream of streams) stream.subscription.close();
+      for (const stream of streams) stream.stop();
       await Promise.allSettled(streams.map(stream => options.client.cancelQuery(stream.queryId)));
     },
   };

@@ -1,7 +1,7 @@
 jest.mock('electron', () => ({
   app: {
     whenReady: jest.fn(async () => undefined),
-    once: jest.fn(),
+    on: jest.fn(),
     quit: jest.fn(),
   },
   BrowserWindow: class MockBrowserWindow {},

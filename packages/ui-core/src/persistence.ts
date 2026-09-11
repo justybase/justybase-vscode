@@ -35,6 +35,7 @@ const identityKeys: readonly (keyof UiIdentity)[] = [
   'resultSetId',
   'storageId',
 ];
+const persistenceSecretKeyPattern = /password|passphrase|secret|credential|master.?key|token|api.?key/iu;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -52,7 +53,7 @@ function assertJsonValue(value: unknown, path = '$'): asserts value is JsonValue
   }
   if (isRecord(value)) {
     for (const [key, item] of Object.entries(value)) {
-      if (/(?:password|secret|credential|master.?key|access.?token|refresh.?token|(?:^|_)token$)/iu.test(key)) {
+      if (persistenceSecretKeyPattern.test(key)) {
         throw new PersistenceDecodeError(`Persistence value at ${path}.${key} is not allowed.`);
       }
       if (/^(?:rows|resultRows|rowData|resultData)$/iu.test(key)) {
@@ -70,7 +71,7 @@ function assertIdentity(identity: unknown): asserts identity is UiIdentity {
     throw new PersistenceDecodeError('Persistence envelope identity is invalid.');
   }
   for (const key of Object.keys(identity)) {
-    if (!identityKeys.includes(key as keyof UiIdentity) || /password|secret|credential|master.?key|token/iu.test(key)) {
+    if (!identityKeys.includes(key as keyof UiIdentity) || persistenceSecretKeyPattern.test(key)) {
       throw new PersistenceDecodeError(`Persistence identity field '${key}' is not allowed.`);
     }
   }
@@ -151,6 +152,7 @@ export function decodePersistenceEnvelope<T>(value: unknown, options: Persistenc
   if (!isRecord(raw)
     || typeof rawSchemaVersion !== 'number'
     || !Number.isInteger(rawSchemaVersion)
+    || rawSchemaVersion < 1
     || typeof raw.scope !== 'string'
     || !isRecord(raw.identity)
     || !Object.prototype.hasOwnProperty.call(raw, 'payload')) {

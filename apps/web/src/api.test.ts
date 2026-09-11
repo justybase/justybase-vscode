@@ -92,6 +92,24 @@ describe('API client factory', () => {
     }));
   });
 
+  it('uses a bodyless request for the server-side test login', async () => {
+    const fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return jsonResponse({ user: { id: 'test-user', username: 'test-admin', role: 'admin' } });
+    });
+    const client = createApiClient({ fetch });
+
+    await expect(client.testLogin()).resolves.toEqual({
+      user: { id: 'test-user', username: 'test-admin', role: 'admin' },
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/auth/test-login', expect.objectContaining({ method: 'POST', credentials: 'include' }));
+    expect(fetch.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(fetch.mock.calls[0]?.[1]?.headers).not.toEqual(expect.objectContaining({ 'Content-Type': 'application/json' }));
+    expect(JSON.stringify(fetch.mock.calls[0])).not.toContain('password');
+  });
+
   it('preserves HTTP error status and deduplicates replayed WebSocket events', async () => {
     const fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void input;

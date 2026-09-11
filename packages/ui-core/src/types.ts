@@ -169,6 +169,7 @@ export type UiAction =
   | { readonly type: 'execution/cancel-failed'; readonly sourceId: string; readonly executionId: string; readonly requestId: string; readonly message: string }
   | { readonly type: 'results/select-source'; readonly sourceId?: string }
   | { readonly type: 'results/select'; readonly resultSetId: string; readonly sourceId?: string }
+  | { readonly type: 'results/reconcile-source'; readonly sourceId: string; readonly resultSetIds: readonly string[] }
   | { readonly type: 'results/view'; readonly resultSetId: string; readonly sourceId?: string; readonly patch: Partial<UiResultViewState> }
   | { readonly type: 'metadata/status'; readonly status: UiOperationStatus; readonly message?: string }
   | { readonly type: 'metadata/select'; readonly nodeId?: string }

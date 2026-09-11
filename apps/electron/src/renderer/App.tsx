@@ -17,7 +17,7 @@ import {
 } from '@justybase/ui-react';
 import type { GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import { createElectronApiClient } from './api';
-import { createElectronExecutionPort } from './execution';
+import { createElectronExecutionPort, fetchAllResultPages } from './execution';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
@@ -39,8 +39,10 @@ export function displayRows(result: UiResultSurfaceState | undefined, rows: read
     : rows.filter(row => row.some(value => String(value ?? '').toLocaleLowerCase().includes(filter)));
   const sorting = result.view.sorting[0];
   if (!sorting) return filtered;
-  const columnIndex = Number(sorting.column);
-  if (!Number.isInteger(columnIndex)) return filtered;
+  const namedColumnIndex = result.columns.findIndex(column => column.name === sorting.column);
+  const legacyColumnIndex = /^[0-9]+$/u.test(sorting.column) ? Number(sorting.column) : -1;
+  const columnIndex = namedColumnIndex >= 0 ? namedColumnIndex : legacyColumnIndex;
+  if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= result.columns.length) return filtered;
   return filtered.sort((left, right) => {
     const order = String(left[columnIndex] ?? '').localeCompare(String(right[columnIndex] ?? ''), undefined, { numeric: true });
     return sorting.descending ? -order : order;
@@ -58,7 +60,7 @@ export function rowsAsText(columns: readonly { readonly name: string }[], rows: 
 }
 
 export function rowsAsCsv(columns: readonly { readonly name: string }[], rows: readonly ElectronRow[]): string {
-  const quote = (value: unknown): string => JSON.stringify(String(value ?? ''));
+  const quote = (value: unknown): string => `"${String(value ?? '').replaceAll('"', '""')}"`;
   return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map(quote).join(','))].join('\n');
 }
 
@@ -219,6 +221,7 @@ export function App(): ReactElement {
       const handle = await execution.run({ sourceId: 'electron:scratch', sql: activeDocument.content, connectionId: selectedConnection.id, mode });
       activeExecutionRef.current = handle;
       updateRows(handle.resultSetId, []);
+      store.dispatch({ type: 'results/select', sourceId: handle.sourceId, resultSetId: handle.resultSetId });
       store.dispatch({ type: 'shell/surface', surface: 'results' });
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : 'Could not start query.');
@@ -232,16 +235,16 @@ export function App(): ReactElement {
   }, [execution]);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const active = activeExecutionRef.current;
-    if (!active || !activeResult) return;
+    if (!activeResult) return;
+    const { executionId, resultSetId, statementIndex } = activeResult;
     try {
-      const page = await clientRef.current!.queryPage(active.executionId, { statementIndex: activeResult.statementIndex, offset: 0, limit: 500 });
-      updateRows(active.resultSetId, page.rows.map(row => [...row]));
+      const hydrated = await fetchAllResultPages(clientRef.current!, executionId, statementIndex);
+      applyHydratedPage(store, resultSetId, hydrated.rows, hydrated.totalRowCount, hydrated.columns, executionId, updateRows);
       setNotice(undefined);
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : 'Could not refresh results.');
     }
-  }, [activeResult, updateRows]);
+  }, [activeResult, store, updateRows]);
 
   const updateView = useCallback((patch: Partial<UiResultSurfaceState['view']>): void => {
     if (activeResult) store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
@@ -317,7 +320,7 @@ export function App(): ReactElement {
             <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
             {notice && <div role="status">{notice}</div>}
             <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-            {activeResult && <ResultViewToolbar view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={exportActive} />}
+            {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={exportActive} />}
             <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…">
               <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={visibleRows} totalRowCount={activeResult?.totalRowCount} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onRowSelect={setSelectedRow} />
             </AsyncStateView>

@@ -87,8 +87,19 @@ export interface UiCapabilitySnapshot {
 
 const capabilityStatuses: readonly CapabilityStatus[] = ['available', 'unavailable', 'requires-auth', 'read-only', 'unsupported', 'degraded'];
 
-function hasSecretKey(value: Record<string, unknown>): boolean {
-  return Object.keys(value).some(key => /password|secret|credential|master.?key|token/iu.test(key));
+const secretKeyPattern = /password|passphrase|secret|credential|master.?key|token|api.?key/iu;
+
+/**
+ * Renderer-bound values may contain additive fields, so checking only the
+ * fields known by the current contract is not sufficient. Walk every nested
+ * object/array and reject secret-shaped keys before the value crosses IPC.
+ */
+function hasSecretKey(value: unknown, seen = new Set<object>()): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) return value.some(item => hasSecretKey(item, seen));
+  return Object.entries(value).some(([key, nested]) => secretKeyPattern.test(key) || hasSecretKey(nested, seen));
 }
 
 export function isCapabilityDescriptor(value: unknown): value is CapabilityDescriptor {
@@ -124,7 +135,7 @@ export function isUiAuthState(value: unknown): value is UiAuthState {
     && (candidate.username === undefined || typeof candidate.username === 'string')
     && (candidate.message === undefined || typeof candidate.message === 'string')
     && (candidate.sessionId === undefined || typeof candidate.sessionId === 'string')
-    && !Object.keys(candidate).some(key => /password|secret|credential|master.?key|token/iu.test(key));
+    && !hasSecretKey(candidate);
 }
 
 export interface UiPreloadAuthRequest {
@@ -133,7 +144,8 @@ export interface UiPreloadAuthRequest {
 
 export interface UiPreloadCredentialRequest {
   readonly type: 'credential/request';
-  readonly requestId: OpaqueCredentialRequestId;
+  /** Optional correlation for callers that already have one; the broker owns the response ID. */
+  readonly requestId?: OpaqueCredentialRequestId;
   readonly purpose: 'connection' | 'login';
 }
 
@@ -185,5 +197,5 @@ export function isRedactedConnectionProfile(value: unknown): value is RedactedCo
     && typeof candidate.user === 'string'
     && typeof candidate.dbType === 'string'
     && typeof candidate.readOnly === 'boolean'
-    && !Object.keys(candidate).some(key => /password|secret|credential|master.?key|token/iu.test(key));
+    && !hasSecretKey(candidate);
 }

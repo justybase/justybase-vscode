@@ -142,6 +142,16 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(controller.activeResult()?.view).toMatchObject({ globalFilter: 'one', scrollTop: 128, scrollLeft: 32, anchorRow: 4 });
         controller.selectResult('result-error');
         expect(controller.getState().results.activeResultSetId).toBe('result-error');
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'result-1',
+                columns: [{ name: 'id', type: 'INTEGER' }],
+                data: [[3, 'replacement']],
+                totalRowCount: 1,
+            },
+        ]));
+        expect(Object.values(controller.getState().results.byResultSetId).map(result => result.resultSetId)).toEqual(['result-1']);
+        expect(controller.getRows(failed)).toEqual([]);
         controller.selectSource('missing-source');
         controller.refresh();
         controller.copyActive();
@@ -192,6 +202,36 @@ describe('shared VS Code Result Panel adapter', () => {
         cancelled.dispose();
     });
 
+    it('hydrates disk-backed windows and requests the next row window from the host', () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage({
+            command: 'diskBackedActivate',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            resultSetId: 'disk-result',
+            totalRows: 3,
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[1]],
+            limitReached: false,
+        });
+        let result = controller.activeResult();
+        expect(result).toMatchObject({ resultSetId: 'disk-result', status: 'streaming', totalRowCount: 3, loadedRowCount: 1 });
+        controller.loadMore(result!);
+        controller.handleHostMessage({
+            command: 'rowWindow',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            offset: 1,
+            rows: [[2], [3]],
+            requestId: 1,
+            totalRows: 3,
+        });
+        result = controller.activeResult();
+        expect(controller.getRows(result)).toEqual([[1], [2], [3]]);
+        expect(result).toMatchObject({ loadedRowCount: 3, totalRowCount: 3 });
+        controller.dispose();
+    });
+
     it('renders common React presentation states, controls and capability messaging', () => {
         const controller = new SharedResultPanelController();
         controller.handleHostMessage(hydrateMessage([
@@ -220,7 +260,7 @@ describe('shared VS Code Result Panel adapter', () => {
         controller.dispose();
     });
 
-    it('mounts only for explicit shared mode and cleans up its React root idempotently', () => {
+    it('mounts only for explicit shared mode, consumes host messages, and cleans up idempotently', async () => {
         document.body.innerHTML = '<div id="shared-ui-root" style="display:none"></div><div class="layout-wrapper"></div>';
         expect(mountSharedResultPanelIfConfigured()).toBe(false);
         (globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__ = 'shared';
@@ -231,6 +271,11 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(document.getElementById('shared-ui-root')).toHaveStyle({ display: 'block' });
         expect(document.getElementById('justybase-shared-result-panel-styles')).not.toBeNull();
         expect(mountSharedResultPanelIfConfigured()).toBe(true);
+        act(() => window.dispatchEvent(new MessageEvent('message', { data: hydrateMessage([
+            { resultSetId: 'listener-result', columns: [{ name: 'id' }], data: [[7]], totalRowCount: 1 },
+        ]) })));
+        expect(await screen.findByRole('table')).toBeInTheDocument();
+        expect(screen.getByText('7')).toBeInTheDocument();
         act(() => disposeSharedResultPanel());
         expect(document.body).not.toHaveClass('shared-ui-mode');
         act(() => disposeSharedResultPanel());

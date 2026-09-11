@@ -1,18 +1,18 @@
 jest.mock('electron', () => {
-  const appEvents = new Map<string, () => void>();
+  const appEvents = new Map<string, (...args: unknown[]) => void>();
   const app = {
     whenReady: jest.fn(async () => undefined),
-    once: jest.fn((event: string, listener: () => void) => { appEvents.set(event, listener); }),
+    on: jest.fn((event: string, listener: (...args: unknown[]) => void) => { appEvents.set(event, listener); }),
     quit: jest.fn(),
     __events: appEvents,
   };
   const windows: MockBrowserWindow[] = [];
   class MockBrowserWindow {
-    public readonly events = new Map<string, () => void>();
-    public readonly loadURL = jest.fn(async () => undefined);
+    public readonly events = new Map<string, (...args: unknown[]) => void>();
+    public readonly loadURL = jest.fn(async () => { this.events.get('ready-to-show')?.(); });
     public readonly show = jest.fn();
     public constructor() { windows.push(this); }
-    public on(event: string, listener: () => void): void { this.events.set(event, listener); }
+    public on(event: string, listener: (...args: unknown[]) => void): void { this.events.set(event, listener); }
   }
   return {
     app,
@@ -41,23 +41,31 @@ describe('Electron main composition root', () => {
     await new Promise<void>(resolve => setImmediate(resolve));
 
     const electron = jest.requireMock('electron') as {
-      app: { __events: Map<string, () => void> };
-      __windows: Array<{ events: Map<string, () => void>; loadURL: jest.Mock; show: jest.Mock }>;
+      app: { __events: Map<string, (...args: unknown[]) => void>; quit: jest.Mock };
+      __windows: Array<{ events: Map<string, (...args: unknown[]) => void>; loadURL: jest.Mock; show: jest.Mock }>;
       ipcMain: { handle: jest.Mock; removeHandler: jest.Mock };
       session: { defaultSession: { cookies: { set: jest.Mock } } };
     };
     const startup = jest.requireMock('../src/main/startup') as { __runtime: { applyAuthenticationCookie: jest.Mock; close: jest.Mock } };
     const windowInstance = electron.__windows[0];
     expect(windowInstance?.loadURL).toHaveBeenCalledWith('http://127.0.0.1:43123/');
-    windowInstance?.events.get('ready-to-show')?.();
     expect(windowInstance?.show).toHaveBeenCalledTimes(1);
     expect(startup.__runtime.applyAuthenticationCookie).toHaveBeenCalledTimes(1);
     expect(electron.ipcMain.handle).toHaveBeenCalledWith('ui:request', expect.any(Function));
 
-    electron.app.__events.get('before-quit')?.();
+    let resolveClose!: () => void;
+    startup.__runtime.close.mockImplementation(() => new Promise<void>(resolve => { resolveClose = resolve; }));
+    const preventDefault = jest.fn();
+    electron.app.__events.get('before-quit')?.({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(startup.__runtime.close).toHaveBeenCalledTimes(1);
+    expect(electron.app.quit).not.toHaveBeenCalled();
+    resolveClose();
     windowInstance?.events.get('closed')?.();
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(startup.__runtime.close).toHaveBeenCalledTimes(1);
     expect(electron.ipcMain.removeHandler).toHaveBeenCalledTimes(1);
+    expect(electron.app.quit).toHaveBeenCalledTimes(1);
   });
 });

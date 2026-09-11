@@ -133,6 +133,7 @@ describe('shared Web UI adapter edge contracts', () => {
     expect(resultAsyncState({ ...completeResult, status: 'streaming' }, 2)).toBe('ready');
     expect(displayRows(undefined, [[1]])).toEqual([]);
     expect(displayRows({ ...completeResult, view: { ...completeResult.view, globalFilter: 'alpha' } }, [[2, 'beta'], [1, 'alpha']])).toEqual([[1, 'alpha']]);
+    expect(displayRows({ ...completeResult, columns: [{ name: 'ID' }, { name: 'LABEL' }], view: { ...completeResult.view, sorting: [{ column: 'LABEL', descending: false }] } }, [[1, 'z'], [2, 'a']])).toEqual([[2, 'a'], [1, 'z']]);
     expect(displayRows({ ...completeResult, view: { ...completeResult.view, sorting: [{ column: '0', descending: false }] } }, [[2], [1]])).toEqual([[1], [2]]);
     expect(displayRows({ ...completeResult, view: { ...completeResult.view, sorting: [{ column: '0', descending: true }] } }, [[1], [2]])).toEqual([[2], [1]]);
     expect(displayRows({ ...completeResult, view: { ...completeResult.view, sorting: [{ column: 'bad', descending: false }] } }, [[1]])).toEqual([[1]]);

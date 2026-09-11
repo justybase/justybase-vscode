@@ -121,6 +121,8 @@ export interface ExecutionPort extends Disposable {
 }
 
 export interface ResultPageRequest {
+  readonly sourceId: string;
+  readonly executionId: string;
   readonly resultSetId: string;
   readonly offset: number;
   readonly limit: number;

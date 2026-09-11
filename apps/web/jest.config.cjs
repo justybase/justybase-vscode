@@ -5,6 +5,7 @@ module.exports = {
   testMatch: ['<rootDir>/src/**/*.test.ts', '<rootDir>/src/**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   moduleNameMapper: {
+    '^.+\\.css$': '<rootDir>/src/styleStub.cjs',
     '^@justybase/contracts$': '<rootDir>/../../packages/contracts/src',
     '^@justybase/designer-core$': '<rootDir>/../../packages/designer-core/src',
     '^@justybase/designer-core/(.*)$': '<rootDir>/../../packages/designer-core/src/$1',
@@ -14,6 +15,7 @@ module.exports = {
     '^@justybase/ui-core/(.*)$': '<rootDir>/../../packages/ui-core/src/$1',
     '^@justybase/ui-react$': '<rootDir>/../../packages/ui-react/src',
     '^@justybase/ui-react/(.*)$': '<rootDir>/../../packages/ui-react/src/$1',
+    '^avalondock-web$': '<rootDir>/src/dockyard/avalondockTestShim.ts',
   },
   collectCoverageFrom: ['src/**/*.ts', 'src/**/*.tsx', '!src/**/*.d.ts'],
   coverageDirectory: 'coverage',

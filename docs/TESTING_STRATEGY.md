@@ -175,6 +175,28 @@ flows. Serious or critical accessibility violations fail the gate. Verify
 accessible names, focus entry/return, modal focus containment, Escape/Enter,
 grid selection/copy, high-contrast themes, zoom, and reduced-motion behavior.
 
+## Dockyard and controlled Web login
+
+The Web workspace uses the pinned, web-only Dockyard adapter by default. The
+adapter owns retained DOM hosts, layout models, floating/auto-hide behavior,
+browser listeners, and teardown; `ui-core` and `ui-react` must not import it.
+Test stable identities (`query:<tabId>`, `connections`, `schema`, `inspector`,
+`history`, and `explain:<tabId>`) rather than generated DOM ids. Stateful tests
+must cover query-document reorder/close, tool hide/float/auto-hide/dock-back,
+reload, old layout migration, corrupt/foreign/future snapshot reset, and
+`dispose()` with no remaining hosts, listeners, subscriptions, timers, or late
+callbacks. The browser scenario also runs at a narrow viewport.
+
+The exact `Use test login data` button is a test-harness control. It is rendered
+only by a Vite `test` build with `VITE_ENABLE_TEST_LOGIN=1`, while the API route
+is registered only with `NODE_ENV=test` and `JUSTYBASE_ENABLE_TEST_LOGIN=1`.
+The request is bodyless and obtains the configured test administrator through
+the server; credentials must not be repeated in Playwright specs or enter
+React state, DOM, URL, localStorage, logs, or the frontend bundle. The normal
+username/password login path remains covered independently. Use
+`npm run test:playwright:web-api` for the controlled API/SQLite browser gate;
+never enable these flags in a production build or deployment.
+
 ## Live test hygiene
 
 Live suites must be explicitly selected, fail when required environment

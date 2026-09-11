@@ -33,6 +33,7 @@ export default defineConfig({
     env: {
       ...process.env,
       NODE_ENV: 'test',
+      JUSTYBASE_ENABLE_TEST_LOGIN: '1',
       JUSTYBASE_HOST: '127.0.0.1',
       JUSTYBASE_PORT: '3010',
       JUSTYBASE_MASTER_KEY: 'playwright-web-sql-master-key',

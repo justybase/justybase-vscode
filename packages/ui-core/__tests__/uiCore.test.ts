@@ -66,6 +66,16 @@ describe('ui-core reducer', () => {
     expect(reduceUiState(cancelled, { type: 'execution/event', event: { type: 'complete', sourceId: 'source-1', executionId: 'exec-2', resultSetId: 'result-2', sequence: 3, totalRowCount: 1 } })).toBe(cancelled);
   });
 
+  it('keeps a terminal event that arrives before cancellation is acknowledged', () => {
+    let state = reduceUiState(initial(), { type: 'execution/start', sourceId: 'source-1', executionId: 'exec-race', resultSetId: 'result-race' });
+    state = reduceUiState(state, { type: 'execution/event', event: { type: 'started', sourceId: 'source-1', executionId: 'exec-race', resultSetId: 'result-race', sequence: 1 } });
+    state = reduceUiState(state, { type: 'execution/cancel-requested', sourceId: 'source-1', executionId: 'exec-race', requestId: 'cancel-race' });
+    const completed = reduceUiState(state, { type: 'execution/event', event: { type: 'complete', sourceId: 'source-1', executionId: 'exec-race', resultSetId: 'result-race', sequence: 2, totalRowCount: 1 } });
+    expect(completed.results.byResultSetId['source-1\u0000result-race']).toMatchObject({ status: 'complete', lastSequence: 2 });
+    const afterFailedCancellation = reduceUiState(completed, { type: 'execution/cancel-failed', sourceId: 'source-1', executionId: 'exec-race', requestId: 'cancel-race', message: 'Already completed.' });
+    expect(afterFailedCancellation.results.byResultSetId['source-1\u0000result-race']).toMatchObject({ status: 'complete', cancellation: 'failed' });
+  });
+
   it('resumes the normal stream after a failed cancellation without re-running SQL', () => {
     let state = reduceUiState(initial(), { type: 'execution/start', sourceId: 'source-1', executionId: 'exec-3', resultSetId: 'result-3' });
     state = reduceUiState(state, { type: 'execution/event', event: { type: 'started', sourceId: 'source-1', executionId: 'exec-3', resultSetId: 'result-3', sequence: 1 } });
@@ -99,8 +109,12 @@ describe('ui-core persistence and capabilities', () => {
     expect(read?.envelope.identity.workspaceId).toBe('workspace-1');
     expect(() => createPersistenceEnvelope({ rows: [[1]] }, options)).toThrow(PersistenceDecodeError);
     expect(() => createPersistenceEnvelope({ accessToken: 'never-store' }, options)).toThrow(PersistenceDecodeError);
+    expect(() => createPersistenceEnvelope({ sessionToken: 'never-store' }, options)).toThrow(PersistenceDecodeError);
+    expect(() => createPersistenceEnvelope({ authToken: 'never-store' }, options)).toThrow(PersistenceDecodeError);
+    expect(() => createPersistenceEnvelope({ apiKey: 'never-store' }, options)).toThrow(PersistenceDecodeError);
     expect(() => decodePersistenceEnvelope(JSON.stringify({ ...envelope, identity: { ...identity, password: 'never-store' } }), options)).toThrow(PersistenceDecodeError);
     expect(() => decodePersistenceEnvelope(JSON.stringify({ ...envelope, scope: 'another-product' }), options)).toThrow(PersistenceDecodeError);
+    expect(() => decodePersistenceEnvelope(JSON.stringify({ ...envelope, schemaVersion: 0 }), { ...options, migrations: { 0: value => value } })).toThrow(PersistenceDecodeError);
   });
 
   it('requires available capabilities and exposes a stable descriptor for unavailable ones', () => {

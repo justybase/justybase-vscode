@@ -201,31 +201,40 @@ describe('ui-core reducer action coverage', () => {
       executionId: 'execution-hydrate',
       resultSetId: 'result-hydrate',
       loadedRowCount: 2,
-      totalRowCount: 2,
+      totalRowCount: 100,
       columns: [{ name: 'ID', type: 'INTEGER' }],
     });
-    expect(hydrated.results.byResultSetId['source-1\u0000result-hydrate']).toMatchObject({ loadedRowCount: 2, totalRowCount: 2, columns: [{ name: 'ID' }] });
-    expect(reduceUiState(hydrated, {
+    expect(hydrated.results.byResultSetId['source-1\u0000result-hydrate']).toMatchObject({ loadedRowCount: 2, totalRowCount: 100, columns: [{ name: 'ID' }] });
+    const refreshed = reduceUiState(hydrated, {
+      type: 'results/hydrate',
+      sourceId: 'source-1',
+      executionId: 'execution-hydrate',
+      resultSetId: 'result-hydrate',
+      loadedRowCount: 2,
+      totalRowCount: 10,
+    });
+    expect(refreshed.results.byResultSetId['source-1\u0000result-hydrate']?.totalRowCount).toBe(10);
+    expect(reduceUiState(refreshed, {
       type: 'results/hydrate',
       sourceId: 'other-source',
       executionId: 'execution-hydrate',
       resultSetId: 'result-hydrate',
       loadedRowCount: 1,
-    })).toBe(hydrated);
-    expect(reduceUiState(hydrated, {
+    })).toBe(refreshed);
+    expect(reduceUiState(refreshed, {
       type: 'results/hydrate',
       sourceId: 'source-1',
       executionId: 'old-execution',
       resultSetId: 'result-hydrate',
       loadedRowCount: 1,
-    })).toBe(hydrated);
-    expect(reduceUiState(hydrated, {
+    })).toBe(refreshed);
+    expect(reduceUiState(refreshed, {
       type: 'results/hydrate',
       sourceId: 'source-1',
       executionId: 'execution-hydrate',
       resultSetId: 'result-hydrate',
       loadedRowCount: 3,
       totalRowCount: 2,
-    })).toBe(hydrated);
+    })).toBe(refreshed);
   });
 });

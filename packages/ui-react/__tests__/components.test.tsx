@@ -86,22 +86,31 @@ describe('shared React presentation', () => {
     expect(screen.getByRole('status')).toHaveTextContent('No rows');
   });
 
+  it('retries scroll restoration when rows arrive after the initial mount', () => {
+    const { rerender } = render(<DataGrid resultSetId="delayed-result" columns={[{ name: 'ID' }]} rows={[]} scroll={{ resultSetId: 'delayed-result', top: 96, left: 24 }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('No rows');
+    rerender(<DataGrid resultSetId="delayed-result" columns={[{ name: 'ID' }]} rows={[[1]]} scroll={{ resultSetId: 'delayed-result', top: 96, left: 24 }} />);
+    const grid = screen.getByRole('table').parentElement as HTMLDivElement;
+    expect(grid.scrollTop).toBe(96);
+    expect(grid.scrollLeft).toBe(24);
+  });
+
   it('exposes shared filter, grouping, aggregation, pivot and row-detail actions', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();
     const callbacks = { onRefresh: jest.fn(), onCopy: jest.fn(), onExport: jest.fn() };
     const onClose = jest.fn();
-    render(<><ResultViewToolbar view={{ globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined }} onChange={onChange} {...callbacks} /><RowDetail columns={[{ name: 'ID' }]} row={[7]} onClose={onClose} /></>);
+    render(<><ResultViewToolbar columns={[{ name: 'ID' }]} view={{ globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined }} onChange={onChange} {...callbacks} /><RowDetail columns={[{ name: 'ID' }]} row={[7]} onClose={onClose} /></>);
     await user.type(screen.getByRole('textbox', { name: 'Filter results' }), 'orders');
     expect(onChange).toHaveBeenCalledWith({ globalFilter: 'o' });
     await user.click(screen.getByRole('button', { name: 'Group' }));
     await user.click(screen.getByRole('button', { name: 'Sort' }));
     await user.click(screen.getByRole('button', { name: 'Aggregate' }));
     await user.click(screen.getByRole('button', { name: 'Pivot' }));
-    expect(onChange).toHaveBeenCalledWith({ grouping: ['0'] });
-    expect(onChange).toHaveBeenCalledWith({ sorting: [{ column: '0', descending: false }] });
+    expect(onChange).toHaveBeenCalledWith({ grouping: ['ID'] });
+    expect(onChange).toHaveBeenCalledWith({ sorting: [{ column: 'ID', descending: false }] });
     expect(onChange).toHaveBeenCalledWith({ aggregation: 'count' });
-    expect(onChange).toHaveBeenCalledWith({ pivotColumn: '0' });
+    expect(onChange).toHaveBeenCalledWith({ pivotColumn: 'ID' });
     expect(screen.getByText('7')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
     await user.click(screen.getByRole('button', { name: 'Copy' }));
@@ -146,7 +155,7 @@ describe('shared React presentation', () => {
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(onToggle).toHaveBeenCalledWith(expect.objectContaining({ id: 'schema-1' }));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'column-1' }));
-    expect(onResultSelect).toHaveBeenCalledWith(result.resultSetId);
+    expect(onResultSelect).toHaveBeenCalledWith(result.resultSetId, result.sourceId);
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-1' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalled();
@@ -157,11 +166,12 @@ describe('shared React presentation', () => {
   it('handles optional callbacks, reverse keyboard navigation and explicit async messages', async () => {
     const user = userEvent.setup();
     const onSelect = jest.fn();
+    const onCancel = jest.fn();
     render(<>
       <WorkspaceTabs tabs={[{ id: 'one', label: 'one.sql' }, { id: 'two', label: 'two.sql' }]} activeId="two" onSelect={onSelect} onClose={() => undefined} />
       <AsyncStateView state="error" />
       <HistoryView entries={[]} state="empty" />
-      <ExplainView state="ready" plan="SCAN orders" />
+      <ExplainView state="ready" plan="SCAN orders" onCancel={onCancel} />
       <UiShell title="JustyBase" activeSurface="workspace" onSurfaceChange={onSelect} surfaces={[]}><span>content</span></UiShell>
     </>);
     screen.getByRole('tab', { name: 'two.sql' }).focus();
@@ -171,5 +181,7 @@ describe('shared React presentation', () => {
     expect(onSelect).toHaveBeenCalledWith('one');
     expect(screen.getByText('Something went wrong.')).toBeInTheDocument();
     expect(screen.getByText('SCAN orders')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });

@@ -100,9 +100,16 @@ export function FocusOnMount({ children }: { readonly children: ReactNode }): Re
 }
 
 export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect }: ResultTabsProps): ReactNode {
+  const matchingActiveResults = results.filter(result => result.resultSetId === activeResultSetId);
   return <div className="ui-result-tabs" role="tablist" aria-label="Result sets">{results.map((result, index) => {
-    const active = result.resultSetId === activeResultSetId && (activeSourceId === undefined || result.sourceId === activeSourceId);
-    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} aria-selected={active} onClick={() => activeSourceId === undefined ? onSelect(result.resultSetId) : onSelect(result.resultSetId, result.sourceId)}>Result {index + 1}{result.status === 'streaming' ? ' · streaming' : ''}</button>;
+    // A source-less active ID is only safe when it identifies one result. Do
+    // not mark multiple same-named result sets active while the source is
+    // being resolved.
+    const active = result.resultSetId === activeResultSetId
+      && (activeSourceId === undefined
+        ? matchingActiveResults.length === 1
+        : result.sourceId === activeSourceId);
+    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} aria-selected={active} onClick={() => onSelect(result.resultSetId, result.sourceId)}>Result {index + 1}{result.status === 'streaming' ? ' · streaming' : ''}</button>;
   })}</div>;
 }
 
@@ -122,6 +129,8 @@ export interface DataGridProps {
   readonly totalRowCount?: number;
   readonly scroll?: GridScrollPosition;
   readonly onScroll?: (position: GridScrollPosition) => void;
+  /** Requests the next adapter-owned page when the rendered rows near the end. */
+  readonly onLoadMore?: () => void;
   readonly onRowSelect?: (rowIndex: number) => void;
 }
 
@@ -133,23 +142,51 @@ function cellText(value: unknown): string {
   return String(value);
 }
 
-export function DataGrid({ sourceId, resultSetId, columns, rows, totalRowCount = rows.length, scroll, onScroll, onRowSelect }: DataGridProps): ReactNode {
+export function DataGrid({ sourceId, resultSetId, columns, rows, totalRowCount = rows.length, scroll, onScroll, onLoadMore, onRowSelect }: DataGridProps): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const restore = (): void => {
+      const element = scroller.current;
+      if (!element || !scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) return;
+      element.scrollTop = Math.max(0, scroll.top);
+      element.scrollLeft = Math.max(0, scroll.left);
+    };
     const element = scroller.current;
-    if (!element || !scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) return;
-    element.scrollTop = Math.max(0, scroll.top);
-    element.scrollLeft = Math.max(0, scroll.left);
-  }, [resultSetId, sourceId, scroll?.sourceId, scroll?.resultSetId, scroll?.top, scroll?.left, scroll?.anchorRow]);
+    if (!element) return;
+    restore();
+
+    // A grid may be mounted before its rows or containing surface has a
+    // measurable layout. Re-apply on the next frame and whenever the grid is
+    // resized (including hide/reveal), because an early write can be clamped
+    // to zero by the browser.
+    let frame: number | undefined;
+    if (typeof requestAnimationFrame === 'function') {
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        restore();
+      });
+    }
+    const observer = typeof ResizeObserver === 'undefined'
+      ? undefined
+      : new ResizeObserver(() => restore());
+    observer?.observe(element);
+    return () => {
+      if (frame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [resultSetId, sourceId, scroll?.sourceId, scroll?.resultSetId, scroll?.top, scroll?.left, scroll?.anchorRow, rows.length, columns.length, totalRowCount]);
   function handleScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
     onScroll?.({ ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / 32) });
+    const distanceFromEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (onLoadMore && rows.length < totalRowCount && distanceFromEnd <= 160) onLoadMore();
   }
   if (columns.length === 0 || rows.length === 0) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
   return <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}><table className="ui-data-grid"><thead><tr>{columns.map(column => <th scope="col" key={column.name}>{column.name}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={`${resultSetId}:${rowIndex}`} onClick={() => onRowSelect?.(rowIndex)}>{columns.map((column, columnIndex) => <td key={`${column.name}:${columnIndex}`}>{cellText(row[columnIndex])}</td>)}</tr>)}</tbody></table></div>;
 }
 
 export interface ResultViewToolbarProps {
+  readonly columns: readonly { readonly name: string }[];
   readonly view: Pick<UiResultViewState, 'globalFilter' | 'sorting' | 'grouping' | 'aggregation' | 'pivotColumn'>;
   readonly onChange: (patch: Partial<UiResultViewState>) => void;
   readonly onRefresh?: () => void;
@@ -158,13 +195,15 @@ export interface ResultViewToolbarProps {
 }
 
 /** Product-neutral controls for the common result view state. */
-export function ResultViewToolbar({ view, onChange, onRefresh, onCopy, onExport }: ResultViewToolbarProps): ReactNode {
+export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onExport }: ResultViewToolbarProps): ReactNode {
+  const firstColumn = columns[0]?.name;
+  const canSelectColumn = firstColumn !== undefined;
   return <div className="ui-result-toolbar" role="toolbar" aria-label="Result view controls">
     <label>Filter<input aria-label="Filter results" value={view.globalFilter} onChange={event => onChange({ globalFilter: event.target.value })} /></label>
-    <button type="button" aria-pressed={view.sorting.length > 0} onClick={() => onChange({ sorting: view.sorting.length > 0 ? [] : [{ column: '0', descending: false }] })}>Sort</button>
-    <button type="button" aria-pressed={view.grouping.length > 0} onClick={() => onChange({ grouping: view.grouping.length > 0 ? [] : ['0'] })}>Group</button>
+    <button type="button" aria-pressed={view.sorting.length > 0} disabled={!canSelectColumn && view.sorting.length === 0} onClick={() => onChange({ sorting: view.sorting.length > 0 ? [] : firstColumn === undefined ? [] : [{ column: firstColumn, descending: false }] })}>Sort</button>
+    <button type="button" aria-pressed={view.grouping.length > 0} disabled={!canSelectColumn && view.grouping.length === 0} onClick={() => onChange({ grouping: view.grouping.length > 0 ? [] : firstColumn === undefined ? [] : [firstColumn] })}>Group</button>
     <button type="button" aria-pressed={view.aggregation !== undefined} onClick={() => onChange({ aggregation: view.aggregation === undefined ? 'count' : undefined })}>Aggregate</button>
-    <button type="button" aria-pressed={view.pivotColumn !== undefined} onClick={() => onChange({ pivotColumn: view.pivotColumn === undefined ? '0' : undefined })}>Pivot</button>
+    <button type="button" aria-pressed={view.pivotColumn !== undefined} disabled={!canSelectColumn && view.pivotColumn === undefined} onClick={() => onChange({ pivotColumn: view.pivotColumn === undefined ? firstColumn : undefined })}>Pivot</button>
     {onRefresh && <button type="button" onClick={onRefresh}>Refresh</button>}
     {onCopy && <button type="button" onClick={onCopy}>Copy</button>}
     {onExport && <button type="button" onClick={onExport}>Export</button>}
@@ -238,7 +277,7 @@ export function HistoryView({ entries, state = 'ready', message, onOpen }: Histo
 }
 
 export function ExplainView({ state, plan, message, onCancel }: ExplainViewProps): ReactNode {
-  return <section className="ui-explain" aria-labelledby="ui-explain-title"><h2 id="ui-explain-title">Explain</h2><AsyncStateView state={state} message={message}>{plan && <pre>{plan}</pre>}</AsyncStateView>{(state === 'loading' || state === 'ready') && onCancel && <button type="button" onClick={onCancel}>Cancel</button>}</section>;
+  return <section className="ui-explain" aria-labelledby="ui-explain-title"><h2 id="ui-explain-title">Explain</h2><AsyncStateView state={state} message={message}>{plan && <pre>{plan}</pre>}</AsyncStateView>{state === 'loading' && onCancel && <button type="button" onClick={onCancel}>Cancel</button>}</section>;
 }
 
 export function DesignerForm({ fields, capability, onChange, onPreview, onApply }: DesignerFormProps): ReactNode {

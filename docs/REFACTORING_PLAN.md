@@ -749,6 +749,86 @@ The implementation rule for the entire R9 is: work only in the working tree,
 never run `git commit` or `git push`, and keep generated/test artifacts
 temporary and ignored until the user makes a separate release decision.
 
+### R10 — Dockyard web workspace and test-harness login
+
+Status: implementation complete for the Web Dockyard path and its controlled
+test harness on Linux (2026-09-11); cross-product parity and non-Linux browser
+evidence remain follow-up work. R10 starts after the R9 foundation is in place.
+It replaces the Web editor's default shell with the web-only Dockyard adapter
+while keeping `ui-core` and `ui-react` platform-neutral. Dockyard is used as a
+retained-DOM layout engine; it is not treated as a verified AvalonDock/XAML
+port.
+
+#### R10.1 — Vendored layout boundary
+
+1. Vendor upstream Dockyard below `vendor/dockyard`, pinned to commit
+   `921b9a66cac88b07af6edb3ebd5cd47af500c900` (`0.1.0`), with its license,
+   upstream record, checksum manifest, and third-party notice. Verify the
+   upstream `build`, `test`, API-surface, and checksum checks without changing
+   the vendored source.
+2. Keep all Dockyard imports in `apps/web/src/dockyard/`. The adapter owns DOM
+   content hosts, Dockyard models, browser listeners, subscriptions, and
+   serialization; `ui-core` owns portable state/persistence contracts and
+   `ui-react` remains unaware of Dockyard, the DOM, and browser storage.
+3. Use stable content identities `query:<tabId>`, `connections`, `schema`,
+   `inspector`, `history`, and `explain:<tabId>`. Map activation, reorder,
+   close/cancel, hide, float, auto-hide, and dock-back to the Web workspace
+   controller. `dispose()` must release hosts, listeners, subscriptions, and
+   Dockyard resources, including failed initialization paths.
+
+#### R10.2 — Web workspace and persistence
+
+1. Each query is one Dockyard `LayoutDocument` containing its toolbar, Monaco
+   editor, result view, statement tabs, Explain state, and empty/error/cancel
+   states. Connections, schema, inspector, history, and per-tab Explain are
+   dockable tools. Floating and auto-hide stay in the page; no
+   `window.open` pop-outs are introduced.
+2. The old `sidebar` preference is used as the explorer width and `editor_pct`
+   remains the inner query/editor-result split. Existing `tabs`, grid state,
+   and legacy layout keys remain readable during migration; new layout writes
+   use a user-scoped, schema-versioned `WorkspaceStorage` envelope.
+3. Persist only Dockyard JSON, stable content IDs, layout configuration, and
+   the pinned Dockyard version/commit. Reject foreign, future, malformed, or
+   unsafe snapshots; never persist credentials, result buffers, DOM nodes, or
+   runtime handles. A rejected snapshot resets to the safe default layout.
+   The previous shell is retained as a temporary initialization-recovery path
+   until the Dockyard rollout is fully closed.
+4. The Dockyard path is the default Web shell without a long A/B rollout.
+   `VITE_UI_MODE=shared` remains an explicit R9 shared-composition probe;
+   failure to initialize Dockyard presents a recoverable reload/reset state
+   rather than blocking authentication or data access.
+
+#### R10.3 — Controlled test login
+
+1. Add the exact `Use test login data` button only to a test-mode frontend
+   (`MODE=test` and `VITE_ENABLE_TEST_LOGIN=1`). `api.testLogin()` sends a
+   bodyless `POST` and does not place an administrator password in React
+   state, the DOM, URL, localStorage, logs, or the frontend bundle.
+2. Register `POST /api/auth/test-login` only when `NODE_ENV=test` and
+   `JUSTYBASE_ENABLE_TEST_LOGIN=1`. It uses the configured
+   `JUSTYBASE_ADMIN_USER`/`JUSTYBASE_ADMIN_PASSWORD`, shares normal session,
+   CSRF-cookie, and session-creation logic, and is absent in all other modes.
+   The regular username/password form and login route remain unchanged.
+3. `test:playwright:web-api` builds with the test flag and starts the API with
+   the server-side flag. Specs use the button instead of repeating
+   credentials. Documentation must make clear that this path is for local/CI
+   harnesses only and must never be enabled in production.
+
+#### R10.4 — Verification and acceptance gates
+
+| Area | Required evidence |
+| --- | --- |
+| Static boundary | `npm run check:architecture`, `npm run check-types:web`, `npm run lint:extended:check`, and the Dockyard API-surface/checksum verification. |
+| Test login | Web client/component tests; API route tests for bodyless login, matching cookies/session, and absence outside controlled test mode. |
+| Dockyard lifecycle | Layout migration/validation tests plus adapter disposal tests covering hosts, listeners, subscriptions, stale content, and failed initialization. |
+| Web workspace | `npm run test:web`, `npm run build:web`, and the deterministic Playwright flow covering login, query documents, reorder, float, auto-hide, dock-back, reload, history, Explain, modals, cancellation, and narrow viewport. |
+| Final R10 | `npm run verify:pr`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, and the applicable browser/API/package gates. |
+
+R10 is complete only when the Web Dockyard layout survives reload and user
+scope changes without leaking non-layout data, the controlled test login is
+unavailable outside test mode, all first-tier workspace interactions retain
+their existing API/LSP semantics, and the adapter has deterministic teardown.
+
 ## Compatibility and Verification
 
 Public companion APIs, wire messages, and HTTP preserve their meaning. The
@@ -780,7 +860,7 @@ SchemaProviders. Dialects require verify, integration, companion activation,
 and packaging. Verify VS Code on Linux and Windows; Remote-WSL requires a
 separate environment.
 
-Order: R0 → R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8 → R9. For R0–R8 and
+Order: R0 → R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8 → R9 → R10. For R0–R8 and
 backend/shared-code extractions, every slice follows:
 behavior test → extraction → desktop facade → VS Code gate → API/web → removal
 of the replaced path. R9 UI slices are the qualified exception and use the

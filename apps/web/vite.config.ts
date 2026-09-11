@@ -20,6 +20,7 @@ export default defineConfig({
       '@justybase/result-core': path.join(repositoryRoot, 'packages/result-core/src'),
       '@justybase/ui-core': path.join(repositoryRoot, 'packages/ui-core/src'),
       '@justybase/ui-react': path.join(repositoryRoot, 'packages/ui-react/src'),
+      'avalondock-web': path.join(repositoryRoot, 'vendor/dockyard/src/index.js'),
     },
   },
   server: { port: 5173, proxy: { '/api': { target: 'http://127.0.0.1:3000', ws: true } } },
