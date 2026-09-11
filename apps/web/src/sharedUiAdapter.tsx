@@ -453,7 +453,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const copySelected = useCallback(async (): Promise<void> => {
     const row = selectedRow === undefined ? visibleRows[0] : activeRows[selectedRow];
     if (!row) return;
-    const text = row.map((value, index) => formatDataGridCellValue(value, activeResult?.columns[index]?.type)).join('\t');
+    const text = row.map((value, index) => {
+      const column = activeResult?.columns[index];
+      return formatDataGridCellValue(value, column?.type, column);
+    }).join('\t');
     if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
     setNotice('Row copied.');
   }, [activeResult?.columns, activeRows, selectedRow, visibleRows]);
