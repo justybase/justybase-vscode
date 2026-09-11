@@ -4,7 +4,7 @@ import { getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterSpec, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
 import type { UiResultViewState } from '@justybase/ui-core';
-import { DataGrid, processDataGridRows } from '@justybase/ui-react';
+import { DataGrid, formatDataGridCellValue, processDataGridRows } from '@justybase/ui-react';
 import { aggregateResultRows, filterResultRows, type ResultColumn, type ResultColumnFilter } from '@justybase/result-core';
 import { useApiClient } from './api';
 import { readLegacyWorkspaceValue, useWorkspaceStorage, type WorkspaceStorage } from './workspacePersistence';
@@ -141,10 +141,10 @@ function formatCellValue(value: unknown, type?: string): { text: string; isNull:
     return { text: String(value), isNull: false, colorClass: 'val-date' };
   }
   if (/BOOL/.test(t)) {
-    const boolValue = value === true || value === 1 || value === 't' || value === 'TRUE' || value === 'true';
-    return { text: boolValue ? 'TRUE' : 'FALSE', isNull: false, colorClass: boolValue ? 'val-bool-t' : 'val-bool-f' };
+    const text = formatDataGridCellValue(value, type);
+    return { text, isNull: false, colorClass: text === 'TRUE' ? 'val-bool-t' : 'val-bool-f' };
   }
-  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const text = formatDataGridCellValue(value, type);
   return { text, isNull: false, colorClass: '' };
 }
 

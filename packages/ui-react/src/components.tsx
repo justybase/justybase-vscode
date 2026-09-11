@@ -5,7 +5,8 @@ import type { MetadataNode } from '@justybase/ui-core';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { uiTokens } from './tokens';
-export { DataGrid } from './dataGrid';
+import { formatDataGridCellValue } from './dataGrid';
+export { DataGrid, formatDataGridCellValue } from './dataGrid';
 export type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, GridScrollPosition } from './dataGrid';
 
 export type AsyncViewState = 'loading' | 'empty' | 'error' | 'cancelled' | 'ready';
@@ -115,14 +116,6 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
   })}</div>;
 }
 
-function cellText(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL';
-  if (typeof value === 'object') {
-    try { return JSON.stringify(value); } catch { return String(value); }
-  }
-  return String(value);
-}
-
 export interface ResultViewToolbarProps {
   readonly columns: readonly { readonly name: string }[];
   readonly view: Pick<UiResultViewState, 'globalFilter' | 'sorting' | 'grouping' | 'aggregation' | 'pivotColumn'>;
@@ -149,13 +142,13 @@ export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, 
 }
 
 export interface RowDetailProps {
-  readonly columns: readonly { readonly name: string }[];
+  readonly columns: readonly { readonly name: string; readonly type?: string }[];
   readonly row: readonly unknown[];
   readonly onClose: () => void;
 }
 
 export function RowDetail({ columns, row, onClose }: RowDetailProps): ReactNode {
-  return <aside className="ui-row-detail" aria-labelledby="ui-row-detail-title"><div><h2 id="ui-row-detail-title">Row details</h2><button type="button" onClick={onClose}>Close</button></div><dl>{columns.map((column, index) => <div key={column.name}><dt>{column.name}</dt><dd>{cellText(row[index])}</dd></div>)}</dl></aside>;
+  return <aside className="ui-row-detail" aria-labelledby="ui-row-detail-title"><div><h2 id="ui-row-detail-title">Row details</h2><button type="button" onClick={onClose}>Close</button></div><dl>{columns.map((column, index) => <div key={column.name}><dt>{column.name}</dt><dd>{formatDataGridCellValue(row[index], column.type)}</dd></div>)}</dl></aside>;
 }
 
 export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect }: SchemaTreeProps): ReactNode {

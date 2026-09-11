@@ -98,7 +98,7 @@ describe('Electron renderer composition', () => {
     expect(displayRows({ ...resultFixture, view: { ...resultFixture.view, sorting: [{ column: '0', descending: false }] } }, [[2, 'Beta'], [1, 'Alpha']])).toEqual([[1, 'Alpha'], [2, 'Beta']]);
     expect(asSurface('results')).toBe('results');
     expect(asSurface('not-a-surface')).toBeUndefined();
-    expect(rowsAsText([{ name: 'ID' }, { name: 'NAME' }], [[1, null]])).toBe('ID\tNAME\n1\t');
+    expect(rowsAsText([{ name: 'ID' }, { name: 'NAME' }], [[1, null]])).toBe('ID\tNAME\n1\tNULL');
     expect(rowsAsCsv([{ name: 'ID' }], [[1], ['two']])).toBe('"ID"\n"1"\n"two"');
     expect(rowsAsCsv([{ name: 'A"B' }], [['x"y']])).toBe('"A""B"\n"x""y"');
   });

@@ -18,6 +18,7 @@ import type { UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@j
 import {
   AsyncStateView,
   DataGrid,
+  formatDataGridCellValue,
   processDataGridRows,
   DesignerForm,
   EditorSurface,
@@ -435,10 +436,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const copySelected = useCallback(async (): Promise<void> => {
     const row = selectedRow === undefined ? visibleRows[0] : visibleRows[selectedRow];
     if (!row) return;
-    const text = row.map(value => String(value ?? '')).join('\t');
+    const text = row.map((value, index) => formatDataGridCellValue(value, activeResult?.columns[index]?.type)).join('\t');
     if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
     setNotice('Row copied.');
-  }, [selectedRow, visibleRows]);
+  }, [activeResult, selectedRow, visibleRows]);
 
   const exportResults = useCallback((): void => {
     if (typeof document === 'undefined') return;

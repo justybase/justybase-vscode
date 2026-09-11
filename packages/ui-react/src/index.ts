@@ -1,6 +1,6 @@
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
-export { processDataGridRows } from './dataGrid';
+export { formatDataGridCellValue, processDataGridRows } from './dataGrid';
 export {
   AsyncStateView,
   CapabilityGate,

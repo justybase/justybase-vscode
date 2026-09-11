@@ -15,6 +15,7 @@ import {
     AsyncStateView,
     CapabilityGate,
     DataGrid,
+    formatDataGridCellValue,
     processDataGridRows,
     FocusOnMount,
     ResultTabs,
@@ -258,14 +259,14 @@ function csvCell(value: unknown): string {
 
 function rowsAsCsv(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
     const header = columns.map(column => csvCell(column.name)).join(',');
-    const body = rows.map(row => row.map(csvCell).join(',')).join('\n');
+    const body = rows.map(row => row.map((value, index) => csvCell(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type))).join(',')).join('\n');
     return [header, body].filter(Boolean).join('\n');
 }
 
 function rowsAsText(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
     return [
         columns.map(column => column.name).join('\t'),
-        ...rows.map(row => row.map(value => value === null || value === undefined ? '' : String(value)).join('\t')),
+        ...rows.map(row => row.map((value, index) => value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type)).join('\t')),
     ].join('\n');
 }
 
@@ -434,7 +435,7 @@ export class SharedResultPanelController {
         const offset = this.getRows(result).length;
         if (offset >= result.totalRowCount) return;
         const alreadyPending = [...this.pendingRowWindows.values()].some(request =>
-            request.ref.sourceId === result.sourceId && request.ref.resultSetId === result.resultSetId && request.offset === offset,
+            request.ref === ref && request.offset === offset,
         );
         if (alreadyPending) return;
         const requestId = ++this.rowRequestId;
@@ -520,6 +521,15 @@ export class SharedResultPanelController {
         postHostMessage({ command: 'requestResultSync', sourceUri: sourceId, reason });
     }
 
+    private replaceRef(indexKey: string, ref: ResultRef): void {
+        for (const [requestId, request] of this.pendingRowWindows.entries()) {
+            if (request.ref.sourceId === ref.sourceId && request.ref.resultSetId === ref.resultSetId && request.ref !== ref) {
+                this.pendingRowWindows.delete(requestId);
+            }
+        }
+        this.refs.set(indexKey, ref);
+    }
+
     private applyHydrate(data: SharedResultPanelData): void {
         const sourceId = parseJsonString(data.activeSourceJson) ?? 'vscode:results';
         const resultSets = resultSetsFromData(data);
@@ -546,7 +556,7 @@ export class SharedResultPanelController {
             incomingResultSetIds.add(resultSetId);
             const indexKey = sourceIndexKey(sourceId, resultSetIndex);
             incomingIndexKeys.add(indexKey);
-            this.refs.set(indexKey, ref);
+            this.replaceRef(indexKey, ref);
             this.rows.set(key, normalized.rows);
             this.startResult(ref, normalized, executingSources.has(sourceId));
             if (resultSetIndex === activeResultSetIndex) activeResultSetId = resultSetId;
@@ -678,7 +688,7 @@ export class SharedResultPanelController {
                 isCancelled: false,
             }, true);
         }
-        this.refs.set(sourceIndexKey(sourceId, index), ref);
+        this.replaceRef(sourceIndexKey(sourceId, index), ref);
 
         if (message.chunkSequence !== undefined) {
             const expectedChunk = this.nextChunkSequence.get(key) ?? 0;
@@ -727,7 +737,7 @@ export class SharedResultPanelController {
         };
         const rows = decodeSharedRows(message.rows);
         const key = resultKey(ref.sourceId, ref.resultSetId);
-        this.refs.set(sourceIndexKey(ref.sourceId, ref.resultSetIndex), ref);
+        this.replaceRef(sourceIndexKey(ref.sourceId, ref.resultSetIndex), ref);
         this.rows.set(key, rows);
         this.nextChunkSequence.delete(key);
         this.startResult(ref, {
@@ -881,14 +891,11 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         [state.results],
     );
     const rows = controller.getRows(activeResult);
-    const displayRows = activeResult
-        ? processDataGridRows(activeResult.columns, rows, activeResult.view)
-        : [];
     const resultState = asyncStateFor(activeResult);
     const schemaCapability = capability(state.capabilities, 'result-panel.schema-navigation');
     const sourceLabel = state.results.activeSourceId?.split(/[\\/]/u).pop() ?? 'Query Results';
     const view = activeResult?.view ?? { globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined };
-    const selected = selectedRow === undefined ? undefined : displayRows[selectedRow];
+    const selected = selectedRow === undefined ? undefined : rows[selectedRow];
 
     return <UiShell
         title={sourceLabel}
@@ -915,6 +922,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         totalRowCount={activeResult.totalRowCount}
                         view={activeResult.view}
                         onViewChange={patch => controller.updateView(activeResult.resultSetId, patch)}
+                        selectedRowIndex={selectedRow}
                         scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }}
                         onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })}
                         onLoadMore={() => controller.loadMore(activeResult)}
@@ -950,9 +958,15 @@ function ensureSharedStyles(): void {
         #${SHARED_ROOT_ID} .ui-shell-main { min-width: 0; padding: 6px; }
         #${SHARED_ROOT_ID} button, #${SHARED_ROOT_ID} input { font: inherit; }
         #${SHARED_ROOT_ID} .ui-data-grid-scroll { overflow: auto; max-height: calc(100vh - 180px); border: 1px solid var(--vscode-panel-border, #444); }
-        #${SHARED_ROOT_ID} .ui-data-grid { border-collapse: collapse; min-width: 100%; }
+        #${SHARED_ROOT_ID} .ui-data-grid { border-collapse: separate; border-spacing: 0; min-width: 100%; }
         #${SHARED_ROOT_ID} th, #${SHARED_ROOT_ID} td { padding: 4px 8px; border-bottom: 1px solid var(--vscode-panel-border, #444); text-align: left; white-space: nowrap; }
-        #${SHARED_ROOT_ID} th { position: sticky; top: 0; background: var(--vscode-editor-background, #1e1e1e); }
+        #${SHARED_ROOT_ID} th { position: sticky; top: 0; z-index: 3; background: var(--vscode-editor-background, #1e1e1e); }
+        #${SHARED_ROOT_ID} .ui-data-grid .ui-data-grid-row-number { position: sticky; left: 0; z-index: 5; min-width: 48px; width: 48px; max-width: 48px; background: var(--vscode-editor-background, #1e1e1e); text-align: center; }
+        #${SHARED_ROOT_ID} .ui-data-grid .ui-data-grid-pinned { position: sticky; z-index: 4; background: var(--vscode-editor-background, #1e1e1e); box-shadow: 1px 0 0 var(--vscode-panel-border, #444); }
+        #${SHARED_ROOT_ID} .ui-data-grid thead .ui-data-grid-pinned { z-index: 10; }
+        #${SHARED_ROOT_ID} .ui-data-grid thead .ui-data-grid-row-number { z-index: 12; }
+        #${SHARED_ROOT_ID} .ui-data-grid-resizer { position: absolute; top: 0; right: 0; bottom: 0; width: 5px; cursor: col-resize; opacity: 0; touch-action: none; }
+        #${SHARED_ROOT_ID} .ui-data-grid th:hover .ui-data-grid-resizer, #${SHARED_ROOT_ID} .ui-data-grid-resizer:hover { opacity: 1; background: var(--vscode-focusBorder, #3794ff); }
         #${SHARED_ROOT_ID} .ui-row-detail { margin-top: 8px; padding: 8px; border: 1px solid var(--vscode-panel-border, #444); }
         #${SHARED_ROOT_ID} .ui-row-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
         #${SHARED_ROOT_ID} .ui-row-detail dt { font-weight: 600; }
