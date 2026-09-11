@@ -298,7 +298,12 @@ export class QuerySessionManager {
       const hasColumn = Number.isInteger(aggregate.columnIndex) && (aggregate.columnIndex ?? -1) >= 0 && (aggregate.columnIndex ?? -1) < session.manifest.columns.length;
       if (functionName !== 'count' && !hasColumn) return [];
       const columnName = hasColumn ? session.manifest.columns[aggregate.columnIndex ?? 0]?.name ?? `Column ${(aggregate.columnIndex ?? 0) + 1}` : '*';
-      outputColumns.push({ name: `${functionName.toUpperCase()}(${columnName})`, type: functionName === 'count' ? 'BIGINT' : numericType(session.manifest.columns[aggregate.columnIndex ?? 0]?.type) ? 'DECIMAL' : session.manifest.columns[aggregate.columnIndex ?? 0]?.type });
+      const source = hasColumn ? session.manifest.columns[aggregate.columnIndex ?? 0] : undefined;
+      outputColumns.push({
+        name: `${functionName.toUpperCase()}(${columnName})`,
+        type: functionName === 'count' ? 'BIGINT' : numericType(source?.type) ? 'DECIMAL' : source?.type,
+        ...(functionName === 'count' || source?.scale === undefined ? {} : { scale: source.scale }),
+      });
       return [{ functionName, columnIndex: hasColumn ? aggregate.columnIndex : undefined }];
     });
     if (aggregateSpecs.length === 0) {

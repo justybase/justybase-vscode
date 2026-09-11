@@ -315,12 +315,12 @@ describe('web API authentication and connection profiles', () => {
       expect(response.json()).toEqual({ statementIndex: 1, filteredRowCount: 3, values: [{ columnIndex: 0, count: 0, sum: 12, avg: 4 }] });
 
       const groupedQueryId = `group-route-${Date.now()}`;
-      const groupedSessionId = app.querySessions.create(groupedQueryId, userId, 'connection-1', [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'VALUE', type: 'INT' }], 0, 1);
+      const groupedSessionId = app.querySessions.create(groupedQueryId, userId, 'connection-1', [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'VALUE', type: 'NUMERIC(10,2)', scale: 2 }], 0, 1);
       app.querySessions.appendRows(userId, groupedSessionId, [['A', 10], ['A', 20], ['B', 5]]);
       app.querySessions.complete(userId, groupedSessionId);
       const grouped = await app.inject({ method: 'POST', url: `/api/query/${groupedQueryId}/group`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { groupByColumnIndices: [0], aggregates: [{ function: 'count' }, { function: 'sum', columnIndex: 1 }] } });
       expect(grouped.statusCode).toBe(200);
-      expect(grouped.json()).toEqual(expect.objectContaining({ totalGroups: 2, rows: [['A', 2, 30], ['B', 1, 5]] }));
+      expect(grouped.json()).toEqual(expect.objectContaining({ totalGroups: 2, columns: [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'COUNT(*)', type: 'BIGINT' }, { name: 'SUM(VALUE)', type: 'DECIMAL', scale: 2 }], rows: [['A', 2, 30], ['B', 1, 5]] }));
       app.querySessions.delete(userId, groupedSessionId);
     } finally {
       app.querySessions.delete(userId, sessionId);
