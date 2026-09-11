@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertLintRatchet, checkChangedCoverage, lintSummary, parseChangedLines, parseLcov } from './quality-gate.mjs';
+import { assertLintRatchet, checkChangedCoverage, lintSummary, mergeLcovReports, parseChangedLines, parseLcov } from './quality-gate.mjs';
 import { prepareQualityArtifacts } from './prepare-quality-artifacts.mjs';
 import { buildReport, qualityInputFailures } from './quality-report.mjs';
 
@@ -110,6 +110,38 @@ test('merges duplicate LCOV records for the same source file', () => {
   assert.deepEqual(result.failures, []);
 });
 
+test('merges LCOV reports from separate UI/package collectors', () => {
+  const merged = mergeLcovReports([
+    'SF:packages/ui-core/src/reducer.ts\nDA:10,1\nend_of_record\n',
+    'SF:apps/web/src/sharedUiAdapter.tsx\nDA:12,1\nend_of_record\n',
+  ]);
+  assert.deepEqual([...merged.keys()], ['packages/ui-core/src/reducer.ts', 'apps/web/src/sharedUiAdapter.tsx']);
+  assert.equal(merged.get('packages/ui-core/src/reducer.ts')?.length, 1);
+  assert.equal(merged.get('apps/web/src/sharedUiAdapter.tsx')?.length, 1);
+});
+
+test('handles Windows LCOV paths and changed filenames containing spaces', () => {
+  const source = 'apps/web/src/feature with spaces.tsx';
+  const result = checkChangedCoverage({
+    diff: `+++ b/${source}\n@@ -1 +1 @@\n`,
+    lcov: `SF:C:\\runner\\workspace\\${source.replaceAll('/', '\\\\')}\nDA:1,1\nBRDA:1,0,0,1\nend_of_record\n`,
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['apps/web/'] } },
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.files[0].coveredLines, 1);
+  assert.equal(result.files[0].coveredBranches, 1);
+});
+
+test('fails a changed line that was collected but never executed', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/packages/ui-core/src/reducer.ts\n@@ -1 +10 @@\n',
+    lcov: 'SF:packages/ui-core/src/reducer.ts\nDA:10,0\nend_of_record\n',
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['packages/ui-core/'] } },
+  });
+  assert.equal(result.files[0].coveredLines, 0);
+  assert.match(result.failures[0], /changed line coverage/);
+});
+
 test('merges exact duplicate LCOV records in either order, including branches', () => {
   const source = 'src/activation/resultPanelRegression.ts';
   for (const [firstLineHit, secondLineHit, firstBranchHit, secondBranchHit] of [
@@ -198,6 +230,25 @@ test('rejects changed high-risk files missing from coverage', () => {
     baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/migration/'] } },
   });
   assert.match(result.failures[0], /no LCOV record/);
+});
+
+test('allows type-only declarations and test setup files without executable coverage', () => {
+  const typeOnly = path.resolve(process.cwd(), 'packages/ui-core/src/types.ts');
+  const setup = path.resolve(process.cwd(), 'packages/ui-react/jest.setup.ts');
+  const typeOnlyResult = checkChangedCoverage({
+    diff: '+++ b/packages/ui-core/src/types.ts\n@@ -1 +1 @@\n',
+    lcov: '',
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['packages/ui-core/'] } },
+  });
+  const setupResult = checkChangedCoverage({
+    diff: '+++ b/packages/ui-react/jest.setup.ts\n@@ -1 +1 @@\n',
+    lcov: '',
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['packages/ui-react/'] } },
+  });
+  assert.deepEqual(typeOnlyResult.failures, []);
+  assert.deepEqual(setupResult.failures, []);
+  assert.equal(fs.existsSync(typeOnly), true);
+  assert.equal(fs.existsSync(setup), true);
 });
 
 test('does not require LCOV for Istanbul-ignored files', () => {

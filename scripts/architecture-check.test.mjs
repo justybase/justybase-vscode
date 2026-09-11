@@ -21,6 +21,9 @@ function createFixture() {
     'media',
     'apps/api/src',
     'apps/web/src',
+    'apps/electron/src/main',
+    'apps/electron/src/preload',
+    'apps/electron/src/renderer',
     'extensions/example/src',
   ]) fs.mkdirSync(path.join(root, directory), { recursive: true });
   return root;
@@ -50,6 +53,9 @@ function fixtureRules(overrides = {}) {
       media: { sources: ['media'] },
       api: { sources: ['apps/api/src'] },
       web: { sources: ['apps/web/src'] },
+      'electron-main': { sources: ['apps/electron/src/main'] },
+      'electron-preload': { sources: ['apps/electron/src/preload'] },
+      'electron-renderer': { sources: ['apps/electron/src/renderer'] },
       companions: { sources: ['extensions/*/src'] },
     },
     allowedDependencies: {
@@ -59,6 +65,9 @@ function fixtureRules(overrides = {}) {
       media: ['contracts', 'shared', 'desktop', 'media'],
       api: ['contracts', 'shared', 'api'],
       web: ['contracts', 'shared', 'web'],
+      'electron-main': ['contracts', 'shared', 'api', 'electron-main'],
+      'electron-preload': ['contracts', 'shared', 'electron-preload'],
+      'electron-renderer': ['contracts', 'shared', 'electron-renderer'],
       companions: ['contracts', 'shared', 'companions'],
     },
     workspaceEntryPoints: {},

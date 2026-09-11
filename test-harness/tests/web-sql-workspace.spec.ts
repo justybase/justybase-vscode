@@ -21,6 +21,13 @@ SELECT 2, 'NPS', 20
 UNION ALL
 SELECT 3, 'NPS', 30`;
 
+test.beforeEach(({ browser }) => {
+  // Keep the managed browser version in the Playwright report. A missing
+  // chromium executable and an incompatible browser version are different
+  // failures, so the gate must leave an auditable environment fingerprint.
+  test.info().annotations.push({ type: 'chromium', description: browser.version() });
+});
+
 function hasLiveNetezzaConfiguration(): boolean {
   return Boolean(netezza.host && netezza.user && netezza.password && netezza.database);
 }
@@ -49,6 +56,43 @@ async function openRunMenu(page: Page): Promise<void> {
   await page.getByTitle('More run options').click();
   await expect(page.locator('.tb-run-dropdown')).toBeVisible();
 }
+
+test.describe('deterministic SQLite API-backed web workspace', () => {
+  test('runs a controlled fixture through authentication, connection, result, and history @web-api', async ({ page }) => {
+    const profileName = `Playwright SQLite ${Date.now()}`;
+    const fixtureQuery = `SELECT 1 AS SCENARIO_ID, 'SQLITE_FIXTURE' AS ENGINE_NAME
+UNION ALL
+SELECT 2, 'SQLITE_FIXTURE'
+UNION ALL
+SELECT 3, 'SQLITE_FIXTURE'`;
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
+    await page.getByLabel('Username').fill(adminUsername);
+    await page.getByLabel('Password').fill(adminPassword);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.locator('.sidebar .section-title').filter({ hasText: 'Connections' })).toBeVisible();
+
+    await page.locator('.sidebar .icon-button').first().click();
+    const dialog = page.getByRole('dialog', { name: 'Add connection' });
+    await dialog.getByLabel('Database type').selectOption('sqlite');
+    await dialog.getByLabel('Profile name').fill(profileName);
+    await dialog.locator('#connection-database').fill(':memory:');
+    await dialog.getByLabel('User').fill('local');
+    await dialog.getByRole('button', { name: 'Add connection', exact: true }).click();
+    await expect(page.getByRole('button', { name: profileName, exact: true })).toBeVisible();
+
+    await replaceEditorText(page, fixtureQuery);
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await waitForCompletedResult(page);
+    await expect(page.locator('.result-grid tbody tr')).toHaveCount(3);
+    await expect(page.locator('.result-grid')).toContainText('SQLITE_FIXTURE');
+
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await expect(page.locator('.history-card .section-title')).toContainText('Query history');
+    await expect(page.locator('.history-entry').first()).toContainText('SQLITE_FIXTURE');
+  });
+});
 
 test.describe('live Netezza web workspace', () => {
   test('captures read-only editor workflows and result scenarios', async ({ page }) => {

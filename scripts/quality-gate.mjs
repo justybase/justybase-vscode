@@ -4,12 +4,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import ts from 'typescript';
 import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDirectory, '..');
 const baselinePath = path.join(root, 'quality', 'quality-baseline.json');
 const workspaceAreas = new Set(['src', 'media', 'apps', 'packages', 'extensions', 'Benchmark', 'scripts']);
+const coverageFileExtensions = new Set(['.ts', '.tsx', '.mts', '.cts']);
+const ignoredCoverageFilePattern = /(?:\.(?:test|spec)|(?:^|\/)(?:jest\.)?setup)\.[cm]?[jt]sx?$/u;
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -90,6 +93,20 @@ export function parseLcov(source) {
   return records;
 }
 
+/** Merge package/app LCOV reports while preserving duplicate-source coverage. */
+export function mergeLcovReports(sources) {
+  const merged = new Map();
+  for (const source of sources) {
+    const records = parseLcov(source);
+    for (const [file, fileRecords] of records) {
+      const existing = merged.get(file) ?? [];
+      existing.push(...fileRecords);
+      merged.set(file, existing);
+    }
+  }
+  return merged;
+}
+
 function findLcovRecords(records, file) {
   const wanted = relativePath(file);
   const exactMatches = [];
@@ -132,12 +149,26 @@ function isIstanbulIgnoredFile(file) {
   }
 }
 
+/** Type-only source files are declarations after TypeScript erases them. */
+function isTypeOnlySource(file) {
+  try {
+    const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText
+      .replace(/^"use strict";\s*/u, '')
+      .replace(/^Object\.defineProperty\(exports, "__esModule", \{ value: true \}\);\s*/u, '');
+    return output.trim().length === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function parseChangedLines(diff) {
   const changed = new Map();
   let file;
   for (const line of diff.split(/\r?\n/u)) {
     if (line.startsWith('+++ b/')) {
-      file = line.slice(6);
+      file = normalizePath(line.slice(6));
       changed.set(file, new Set());
       continue;
     }
@@ -153,6 +184,25 @@ export function parseChangedLines(diff) {
   return changed;
 }
 
+export function scopeLcovReport(source, reportPath) {
+  const report = relativePath(reportPath);
+  const reportDirectory = normalizePath(path.posix.dirname(report));
+  const scope = reportDirectory === 'coverage'
+    ? ''
+    : reportDirectory.startsWith('coverage/')
+      ? reportDirectory.slice('coverage/'.length)
+      : reportDirectory.endsWith('/coverage')
+        ? reportDirectory.slice(0, -'/coverage'.length)
+        : '';
+  if (!scope) return source;
+  return source.split(/\r?\n/u).map(line => {
+    if (!line.startsWith('SF:')) return line;
+    const file = line.slice(3);
+    if (file.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(file) || file.startsWith(`${scope}/`)) return line;
+    return `SF:${scope}/${file}`;
+  }).join('\n');
+}
+
 export function isHighRiskPath(file, roots) {
   const normalized = normalizePath(file);
   return roots.some(prefix => normalized === prefix || normalized.startsWith(prefix));
@@ -160,13 +210,15 @@ export function isHighRiskPath(file, roots) {
 
 export function checkChangedCoverage({ diff, lcov, baseline }) {
   const changed = parseChangedLines(diff);
-  const records = parseLcov(lcov);
+  const records = Array.isArray(lcov) ? mergeLcovReports(lcov) : parseLcov(lcov);
   const failures = [];
   const files = [];
   for (const [file, lines] of changed) {
     if (!isHighRiskPath(file, baseline.changedHighRiskCoverage.roots)) continue;
+    if (!coverageFileExtensions.has(path.extname(file)) || file.endsWith('.d.ts') || ignoredCoverageFilePattern.test(file)) continue;
     if (isIstanbulIgnoredFile(path.join(root, file))) continue;
     const matchingRecords = findLcovRecords(records, path.join(root, file));
+    if (matchingRecords.length === 0 && isTypeOnlySource(path.join(root, file))) continue;
     if (matchingRecords.length === 0) {
       failures.push(`${file}: no LCOV record was produced for changed high-risk code.`);
       continue;
@@ -210,10 +262,27 @@ async function main() {
     const baseOption = process.argv.find(value => value.startsWith('--base='));
     const baseIndex = process.argv.indexOf('--base');
     const base = process.env.QUALITY_BASE_SHA || baseOption?.slice('--base='.length) || (baseIndex >= 0 ? process.argv[baseIndex + 1] : undefined) || 'unspecified';
-    const lcovPath = path.join(root, 'coverage', 'lcov.info');
-    if (!fs.existsSync(lcovPath)) throw new Error(`Missing ${relativePath(lcovPath)}. Run npm run test:coverage first.`);
+    const explicitLcovFiles = process.argv
+      .filter(value => value.startsWith('--lcov-file='))
+      .map(value => value.slice('--lcov-file='.length));
+    const defaultLcovFiles = [
+      'coverage/lcov.info',
+      'packages/ui-core/coverage/lcov.info',
+      'packages/ui-react/coverage/lcov.info',
+      'apps/web/coverage/lcov.info',
+      'apps/electron/coverage/lcov.info',
+      'coverage/media/lcov.info',
+    ];
+    const lcovFiles = [...new Set(explicitLcovFiles.length > 0 ? explicitLcovFiles : defaultLcovFiles)]
+      .map(file => path.resolve(root, file))
+      .filter(file => fs.existsSync(file));
+    if (lcovFiles.length === 0) throw new Error('Missing all configured LCOV reports. Run the root and UI coverage suites first.');
     const diffFile = process.argv.find(value => value.startsWith('--diff-file='))?.slice('--diff-file='.length);
-    const result = checkChangedCoverage({ diff: await readInput(diffFile), lcov: fs.readFileSync(lcovPath, 'utf8'), baseline });
+    const result = checkChangedCoverage({
+      diff: await readInput(diffFile),
+      lcov: lcovFiles.map(file => scopeLcovReport(fs.readFileSync(file, 'utf8'), file)),
+      baseline,
+    });
     console.log(JSON.stringify({ base, ...result }, null, 2));
     if (result.failures.length > 0) {
       for (const failure of result.failures) console.error(failure);

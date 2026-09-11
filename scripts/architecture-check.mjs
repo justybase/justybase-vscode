@@ -30,6 +30,9 @@ export const architectureLayerNames = Object.freeze([
   'media',
   'api',
   'web',
+  'electron-main',
+  'electron-preload',
+  'electron-renderer',
   'companions',
 ]);
 
