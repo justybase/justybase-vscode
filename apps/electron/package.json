@@ -19,6 +19,8 @@
     "@justybase/ui-core": "*",
     "@justybase/ui-react": "*",
     "@justybase/web-api": "*",
+    "@monaco-editor/react": "^4.7.0",
+    "monaco-editor": "^0.56.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

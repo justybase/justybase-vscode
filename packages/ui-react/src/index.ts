@@ -20,6 +20,8 @@ export type {
   DataGridNumericKind,
 } from './resultGridFormatting';
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
+export { disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';
+export type { SqlLanguageApi } from './sqlLanguage';
 export {
   AsyncStateView,
   CapabilityGate,

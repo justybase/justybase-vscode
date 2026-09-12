@@ -134,12 +134,19 @@ describe('Electron renderer execution adapter', () => {
     await port.dispose();
   });
 
-  it('rejects script mode before opening a single-result stream', async () => {
+  it('opens a stream for script mode and forwards the execution mode', async () => {
     const fixture = fakeClient();
     const port = createElectronExecutionPort({ client: fixture.client });
 
-    await expect(port.start({ sourceId: 'electron:scratch', sql: 'SELECT 1; SELECT 2', connectionId: 'connection-1', mode: 'script' })).rejects.toThrow('does not support script mode');
-    expect(fixture.client.startQuery).not.toHaveBeenCalled();
+    await expect(port.start({ sourceId: 'electron:scratch', sql: 'SELECT 1; SELECT 2', connectionId: 'connection-1', mode: 'script' })).resolves.toMatchObject({
+      sourceId: 'electron:scratch',
+      executionId: 'query-1',
+    });
+    expect(fixture.client.startQuery).toHaveBeenCalledWith({
+      connectionId: 'connection-1',
+      sql: 'SELECT 1; SELECT 2',
+      mode: 'script',
+    });
     await port.dispose();
   });
 

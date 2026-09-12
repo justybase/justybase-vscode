@@ -1,10 +1,45 @@
 import type {
+  DesignerCapabilitiesRequest,
+  DesignerCapabilitiesResponse,
+  DesignerSnapshotResponse,
+  EditorPreferences,
+  EditorPreferencesPatch,
+  HistoryEntry,
+  MetadataColumn,
+  MetadataDatabase,
+  MetadataDdlRequest,
+  MetadataDdlResponse,
+  MetadataObject,
+  MetadataSchema,
   QueryEvent,
+  QueryAggregateRequest,
+  QueryAggregateResponse,
+  QueryAuditEntry,
+  QueryEditPreviewRequest,
+  QueryEditRequest,
   QueryExportRequest,
+  QueryFileImportPreviewRequest,
+  QueryFileImportRequest,
+  QueryGroupRequest,
+  QueryGroupResponse,
+  QueryImportPreviewRequest,
+  QueryImportRequest,
   QueryPageRequest,
   QueryPageResponse,
+  QueryPreviewResponse,
   QueryStartRequest,
   QueryStartResponse,
+  QueryWriteResponse,
+  SchemaSearchRequest,
+  SchemaSearchResponse,
+  SchemaTreeResponse,
+  SqlCompletionRequest,
+  SqlCompletionResponse,
+  SqlDiagnosticsRequest,
+  SqlDiagnosticsResponse,
+  SqlFormatRequest,
+  SqlFormatResponse,
+  WriteOperationPreviewResponse,
 } from '@justybase/contracts';
 
 export interface QueryEventSubscription {
@@ -18,6 +53,37 @@ export interface ElectronApiClient {
   cancelQuery(queryId: string): Promise<{ ok: true }>;
   exportQuery(queryId: string, input: QueryExportRequest): Promise<{ readonly blob: Blob; readonly fileName: string }>;
   connectToQueryEvents(queryId: string, onEvent: (event: QueryEvent) => void, onError?: (error: Error) => void): QueryEventSubscription;
+}
+
+/** Full authenticated workspace surface layered on the query transport. */
+export interface ElectronWorkspaceApi extends ElectronApiClient {
+  databases(connectionId: string): Promise<readonly MetadataDatabase[]>;
+  schemas(connectionId: string, database: string): Promise<readonly MetadataSchema[]>;
+  objects(connectionId: string, database: string, schema?: string): Promise<readonly MetadataObject[]>;
+  columns(connectionId: string, database: string, schema: string, table: string): Promise<readonly MetadataColumn[]>;
+  ddl(input: MetadataDdlRequest): Promise<MetadataDdlResponse>;
+  designerCapabilities(input: DesignerCapabilitiesRequest): Promise<DesignerCapabilitiesResponse>;
+  designerSnapshot(input: DesignerCapabilitiesRequest): Promise<DesignerSnapshotResponse>;
+  history(): Promise<readonly HistoryEntry[]>;
+  audit(limit?: number): Promise<readonly QueryAuditEntry[]>;
+  previewQuery(input: QueryStartRequest): Promise<QueryPreviewResponse>;
+  editPreview(input: QueryEditPreviewRequest): Promise<WriteOperationPreviewResponse>;
+  edit(input: QueryEditRequest): Promise<QueryWriteResponse>;
+  importPreview(input: QueryImportPreviewRequest): Promise<WriteOperationPreviewResponse>;
+  importRows(input: QueryImportRequest): Promise<QueryWriteResponse>;
+  importFilePreview(input: QueryFileImportPreviewRequest): Promise<WriteOperationPreviewResponse>;
+  importFile(input: QueryFileImportRequest): Promise<QueryWriteResponse>;
+  aggregate(queryId: string, input?: QueryAggregateRequest): Promise<QueryAggregateResponse>;
+  group(queryId: string, input: QueryGroupRequest): Promise<QueryGroupResponse>;
+  editorPreferences(): Promise<EditorPreferences>;
+  updateEditorPreferences(input: EditorPreferencesPatch): Promise<EditorPreferences>;
+  schemaTree(connectionId: string, parentId?: string): Promise<SchemaTreeResponse>;
+  searchSchema(input: SchemaSearchRequest): Promise<SchemaSearchResponse>;
+  completion(input: SqlCompletionRequest): Promise<SqlCompletionResponse>;
+  diagnostics(input: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse>;
+  formatSql(input: SqlFormatRequest): Promise<SqlFormatResponse>;
+  snippets(): Promise<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>;
+  openWebSocket(path: string): WebSocket;
 }
 
 export interface ElectronApiClientOptions {
@@ -36,10 +102,10 @@ function csrfCookie(): string | undefined {
   }
 }
 
-function websocketUrl(): string {
+function websocketUrl(path = '/api/ws'): string {
   if (typeof window === 'undefined' || !window.location.host) throw new Error('Electron WebSocket location is unavailable.');
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/api/ws`;
+  return `${protocol}//${window.location.host}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 function readErrorMessage(value: unknown): string {
@@ -124,7 +190,7 @@ function parseQueryEvent(value: unknown, queryId: string): QueryEvent | undefine
 }
 
 /** Same-origin API transport used after main has installed the session cookie. */
-export function createElectronApiClient(options: ElectronApiClientOptions = {}): ElectronApiClient {
+export function createElectronApiClient(options: ElectronApiClientOptions = {}): ElectronWorkspaceApi {
   const fetcher = options.fetcher ?? globalThis.fetch?.bind(globalThis) ?? (async () => {
     throw new Error('Fetch is unavailable in the Electron renderer.');
   }) as typeof fetch;
@@ -228,10 +294,41 @@ export function createElectronApiClient(options: ElectronApiClientOptions = {}):
   }
 
   return {
+    databases: connectionId => request<MetadataDatabase[]>(`/api/metadata/databases?connectionId=${encodeURIComponent(connectionId)}`),
+    schemas: (connectionId, database) => request<MetadataSchema[]>(`/api/metadata/schemas?connectionId=${encodeURIComponent(connectionId)}&database=${encodeURIComponent(database)}`),
+    objects: (connectionId, database, schema) => request<MetadataObject[]>(`/api/metadata/objects?connectionId=${encodeURIComponent(connectionId)}&database=${encodeURIComponent(database)}${schema ? `&schema=${encodeURIComponent(schema)}` : ''}`),
+    columns: (connectionId, database, schema, table) => request<MetadataColumn[]>(`/api/metadata/columns?connectionId=${encodeURIComponent(connectionId)}&database=${encodeURIComponent(database)}&schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`),
+    ddl: input => request<MetadataDdlResponse>(`/api/metadata/ddl?${new URLSearchParams(Object.entries(input).map(([key, value]) => [key, String(value)] as [string, string])).toString()}`),
+    designerCapabilities: input => request<DesignerCapabilitiesResponse>(`/api/designer/capabilities?${new URLSearchParams(Object.entries(input).filter(([, value]) => value !== undefined) as Array<[string, string]>).toString()}`),
+    designerSnapshot: input => request<DesignerSnapshotResponse>(`/api/designer/snapshot?${new URLSearchParams(Object.entries(input).filter(([, value]) => value !== undefined) as Array<[string, string]>).toString()}`),
+    history: () => request<HistoryEntry[]>('/api/history'),
+    audit: (limit = 200) => request<QueryAuditEntry[]>(`/api/audit?limit=${encodeURIComponent(String(limit))}`),
     startQuery: input => request<QueryStartResponse>('/api/query', { method: 'POST', body: JSON.stringify(input) }),
+    previewQuery: input => request<QueryPreviewResponse>('/api/query/preview', { method: 'POST', body: JSON.stringify(input) }),
+    editPreview: input => request<WriteOperationPreviewResponse>('/api/query/edit/preview', { method: 'POST', body: JSON.stringify(input) }),
+    edit: input => request<QueryWriteResponse>('/api/query/edit', { method: 'POST', body: JSON.stringify(input) }),
+    importPreview: input => request<WriteOperationPreviewResponse>('/api/query/import/preview', { method: 'POST', body: JSON.stringify(input) }),
+    importRows: input => request<QueryWriteResponse>('/api/query/import', { method: 'POST', body: JSON.stringify(input) }),
+    importFilePreview: input => request<WriteOperationPreviewResponse>('/api/query/import-file/preview', { method: 'POST', body: JSON.stringify(input) }),
+    importFile: input => request<QueryWriteResponse>('/api/query/import-file', { method: 'POST', body: JSON.stringify(input) }),
     queryPage: (queryId, input) => request<QueryPageResponse>(`/api/query/${encodeURIComponent(queryId)}/page`, { method: 'POST', body: JSON.stringify(input) }),
+    aggregate: (queryId, input = {}) => request<QueryAggregateResponse>(`/api/query/${encodeURIComponent(queryId)}/aggregate`, { method: 'POST', body: JSON.stringify(input) }),
+    group: (queryId, input) => request<QueryGroupResponse>(`/api/query/${encodeURIComponent(queryId)}/group`, { method: 'POST', body: JSON.stringify(input) }),
     cancelQuery: queryId => request<{ ok: true }>(`/api/query/${encodeURIComponent(queryId)}/cancel`, { method: 'POST' }),
     exportQuery: (queryId, input) => download(`/api/query/${encodeURIComponent(queryId)}/export`, { method: 'POST', body: JSON.stringify(input) }, `justybase-result.${input.format}`),
+    editorPreferences: () => request<EditorPreferences>('/api/preferences/editor'),
+    updateEditorPreferences: input => request<EditorPreferences>('/api/preferences/editor', { method: 'PATCH', body: JSON.stringify(input) }),
+    schemaTree: (connectionId, parentId) => request<SchemaTreeResponse>(`/api/schema/tree?connectionId=${encodeURIComponent(connectionId)}${parentId ? `&parentId=${encodeURIComponent(parentId)}` : ''}`),
+    searchSchema: input => request<SchemaSearchResponse>('/api/schema/search', { method: 'POST', body: JSON.stringify(input) }),
+    completion: input => request<SqlCompletionResponse>('/api/lsp/completion', { method: 'POST', body: JSON.stringify(input) }),
+    diagnostics: input => request<SqlDiagnosticsResponse>('/api/lsp/diagnostics', { method: 'POST', body: JSON.stringify(input) }),
+    formatSql: input => request<SqlFormatResponse>('/api/lsp/format', { method: 'POST', body: JSON.stringify(input) }),
+    snippets: () => request<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>('/api/lsp/snippets'),
+    openWebSocket: path => {
+      const WebSocketConstructor = options.WebSocket ?? (typeof WebSocket === 'function' ? WebSocket : undefined);
+      if (!WebSocketConstructor) throw new Error('WebSocket is unavailable in the Electron renderer.');
+      return new WebSocketConstructor(websocketUrl(path));
+    },
     connectToQueryEvents,
   };
 }

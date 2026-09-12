@@ -217,8 +217,14 @@ export function createElectronExecutionPort(options: ElectronExecutionPortOption
   return {
     async start(input: ExecutionInput): Promise<ExecutionHandle> {
       if (disposed) throw new Error('Electron execution port is disposed.');
-      if (input.mode === 'script') throw new Error('Electron execution does not support script mode.');
-      const started = await options.client.startQuery({ connectionId: input.connectionId, sql: input.sql, mode: input.mode });
+      const started = await options.client.startQuery({
+        connectionId: input.connectionId,
+        sql: input.sql,
+        mode: input.mode,
+        ...(input.cursorOffset === undefined ? {} : { cursorOffset: input.cursorOffset }),
+        ...(input.writeConfirmed === undefined ? {} : { writeConfirmed: input.writeConfirmed }),
+        ...(input.writePreviewToken === undefined ? {} : { writePreviewToken: input.writePreviewToken }),
+      });
       const sourceId = input.sourceId;
       const resultSetId = resultSetIdFor(started.queryId);
       const events = eventStream(sourceId, started.queryId, options.client, options.onRows, options.onPage, stream => {

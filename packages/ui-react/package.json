@@ -22,6 +22,7 @@
   "dependencies": {
     "@justybase/contracts": "*",
     "@justybase/ui-core": "*",
+    "monaco-editor": "^0.56.0",
     "react": "^19.2.0"
   },
   "devDependencies": {
