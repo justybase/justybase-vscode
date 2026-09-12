@@ -141,6 +141,15 @@ function mergeLcovRecords(records) {
   return merged;
 }
 
+export function resolveLcovFiles(files) {
+  const resolved = [...new Set(files)].map(file => path.resolve(root, file));
+  const missing = resolved.filter(file => !fs.existsSync(file));
+  if (missing.length > 0) {
+    throw new Error(`Missing configured LCOV report(s): ${missing.map(file => path.relative(root, file)).join(', ')}`);
+  }
+  return resolved;
+}
+
 function isIstanbulIgnoredFile(file) {
   try {
     return /^\s*\/\*\s*istanbul\s+ignore\s+file\b/mu.test(fs.readFileSync(file, 'utf8'));
@@ -158,6 +167,20 @@ function isTypeOnlySource(file) {
       .replace(/^"use strict";\s*/u, '')
       .replace(/^Object\.defineProperty\(exports, "__esModule", \{ value: true \}\);\s*/u, '');
     return output.trim().length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyNonExecutableLine(file, lineNumber) {
+  try {
+    const sourceLine = fs.readFileSync(file, 'utf8').split(/\r\n|\r|\n/u)[lineNumber - 1] ?? '';
+    const trimmed = sourceLine.trim();
+    return trimmed.length === 0
+      || /^(?:\/\/|\/\*|\*|\*\/)/u.test(trimmed)
+      || /^(?:export\s+)?(?:declare\s+)?(?:interface|type)\b/u.test(trimmed)
+      || /^import\s+type\b/u.test(trimmed)
+      || /^[{}()[\],;]+$/u.test(trimmed);
   } catch {
     return false;
   }
@@ -224,13 +247,15 @@ export function checkChangedCoverage({ diff, lcov, baseline }) {
       continue;
     }
     const record = mergeLcovRecords(matchingRecords);
-    const executable = [...lines].filter(line => record.lines.has(line));
+    const missingExecutable = [...lines].filter(line => !record.lines.has(line) && !isLikelyNonExecutableLine(path.join(root, file), line));
+    const executable = [...lines].filter(line => record.lines.has(line) || missingExecutable.includes(line));
     const covered = executable.filter(line => (record.lines.get(line) ?? 0) > 0);
     const linePercent = executable.length === 0 ? 100 : (covered.length / executable.length) * 100;
     const branches = [...record.branches.values()].filter(branch => lines.has(branch.line));
     const branchPercent = branches.length === 0 ? 100 : (branches.filter(branch => branch.hit).length / branches.length) * 100;
     const result = { file, executableLines: executable.length, coveredLines: covered.length, linePercent, branches: branches.length, coveredBranches: branches.filter(branch => branch.hit).length, branchPercent };
     files.push(result);
+    if (missingExecutable.length > 0) failures.push(`${file}: changed executable line(s) missing from LCOV: ${missingExecutable.join(', ')}.`);
     if (linePercent < baseline.changedHighRiskCoverage.lines) failures.push(`${file}: changed line coverage ${linePercent.toFixed(2)}% < ${baseline.changedHighRiskCoverage.lines}%.`);
     if (branchPercent < baseline.changedHighRiskCoverage.branches) failures.push(`${file}: changed branch coverage ${branchPercent.toFixed(2)}% < ${baseline.changedHighRiskCoverage.branches}%.`);
   }
@@ -273,10 +298,7 @@ async function main() {
       'apps/electron/coverage/lcov.info',
       'coverage/media/lcov.info',
     ];
-    const lcovFiles = [...new Set(explicitLcovFiles.length > 0 ? explicitLcovFiles : defaultLcovFiles)]
-      .map(file => path.resolve(root, file))
-      .filter(file => fs.existsSync(file));
-    if (lcovFiles.length === 0) throw new Error('Missing all configured LCOV reports. Run the root and UI coverage suites first.');
+    const lcovFiles = resolveLcovFiles(explicitLcovFiles.length > 0 ? explicitLcovFiles : defaultLcovFiles);
     const diffFile = process.argv.find(value => value.startsWith('--diff-file='))?.slice('--diff-file='.length);
     const result = checkChangedCoverage({
       diff: await readInput(diffFile),

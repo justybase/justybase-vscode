@@ -77,17 +77,12 @@ export function createExecutionController(store: UiStore, execution: ExecutionPo
       if (disposed) return;
       const resultSetId = resultIdForExecution(store.getState(), handle.sourceId, handle.executionId);
       if (!resultSetId) return;
-      const lastSequence = store.getState().results.byResultSetId[`${handle.sourceId}\u0000${resultSetId}`]?.lastSequence ?? 0;
       store.dispatch({
-        type: 'execution/event',
-        event: {
-          type: 'error',
-          sourceId: handle.sourceId,
-          executionId: handle.executionId,
-          resultSetId,
-          sequence: lastSequence + 1,
-          message: error instanceof Error ? error.message : 'Execution stream failed.',
-        },
+        type: 'execution/stream-failed',
+        sourceId: handle.sourceId,
+        executionId: handle.executionId,
+        resultSetId,
+        message: error instanceof Error ? error.message : 'Execution stream failed.',
       });
     }
   }

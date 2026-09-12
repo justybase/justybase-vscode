@@ -9,6 +9,11 @@ export interface PersistenceCodecOptions<T> {
   readonly identity: UiIdentity;
   readonly migrations?: Readonly<Record<number, (payload: unknown) => unknown>>;
   readonly validatePayload?: (payload: unknown) => payload is T;
+  /**
+   * Legacy storage was unscoped. Callers may opt into migration only when
+   * they can prove that the legacy key belongs to this identity.
+   */
+  readonly legacyIdentity?: UiIdentity;
 }
 
 export interface LegacyPersistenceRead<T> {
@@ -188,6 +193,11 @@ export function decodeWithLegacyFallback<T>(current: unknown, legacy: unknown, o
   const currentEnvelope = decodePersistenceEnvelope<T>(current, options);
   if (currentEnvelope) return { envelope: currentEnvelope, migratedFromLegacy: false };
   if (legacy === undefined || legacy === null || legacy === '') return undefined;
+  if (!options.legacyIdentity) throw new PersistenceDecodeError('Legacy persistence payload has no identity and cannot be migrated safely.');
+  assertIdentity(options.legacyIdentity);
+  if (!identitiesMatch(options.identity, options.legacyIdentity) || !identitiesMatch(options.legacyIdentity, options.identity)) {
+    throw new PersistenceDecodeError('Legacy persistence payload identity does not match the active identity.');
+  }
   const legacyPayload = parseRaw(legacy);
   assertJsonValue(legacyPayload);
   if (options.validatePayload && !options.validatePayload(legacyPayload)) throw new PersistenceDecodeError('Legacy persistence payload failed validation.');

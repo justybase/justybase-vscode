@@ -163,13 +163,13 @@ describe('shared React presentation', () => {
     expect(screen.getByRole('columnheader', { name: '#' })).toBeInTheDocument();
     expect(screen.getByText('INT')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /ID Not sorted/ }));
-    expect(onViewChange).toHaveBeenCalledWith({ sorting: [{ column: '0', descending: false }] });
+    expect(onViewChange).toHaveBeenCalledWith({ sorting: [{ column: 'ID', descending: false }] });
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter NAME' }), { target: { value: 'alpha' } });
-    expect(onViewChange).toHaveBeenCalledWith({ columnFilters: { '1': 'alpha' } });
+    expect(onViewChange).toHaveBeenCalledWith({ columnFilters: { NAME: 'alpha' } });
     fireEvent.click(screen.getByRole('button', { name: 'Pin ID' }));
-    expect(onViewChange).toHaveBeenCalledWith({ pinnedColumns: ['0'] });
+    expect(onViewChange).toHaveBeenCalledWith({ pinnedColumns: ['ID'] });
     fireEvent.click(screen.getByRole('button', { name: 'Group by NAME' }));
-    expect(onViewChange).toHaveBeenCalledWith({ grouping: ['1'] });
+    expect(onViewChange).toHaveBeenCalledWith({ grouping: ['NAME'] });
 
     const betaCell = screen.getByRole('cell', { name: 'beta' });
     const alphaCell = screen.getByRole('cell', { name: 'alpha' });
@@ -371,6 +371,17 @@ describe('shared React presentation', () => {
     expect(onChange).toHaveBeenCalled();
     expect(onPreview).toHaveBeenCalledTimes(1);
     expect(onApply).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps result tabs keyboard navigable with roving focus', () => {
+    const onSelect = jest.fn();
+    render(<ResultTabs results={[{ ...result, resultSetId: 'result-1' }, { ...result, resultSetId: 'result-2' }]} activeResultSetId="result-1" onSelect={onSelect} />);
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs[0]).toHaveAttribute('tabindex', '0');
+    expect(tabs[1]).toHaveAttribute('tabindex', '-1');
+    fireEvent.keyDown(tabs[0]!, { key: 'ArrowRight' });
+    expect(onSelect).toHaveBeenCalledWith('result-2', 'source-1');
+    expect(document.activeElement).toBe(tabs[1]);
   });
 
   it('handles optional callbacks, reverse keyboard navigation and explicit async messages', async () => {

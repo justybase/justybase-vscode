@@ -204,6 +204,7 @@ type Disposable = { dispose(): void };
 class SqlLanguageFeatureRegistry {
   private readonly registrations = new Map<string, SqlModelRegistration>();
   private readonly providerDisposables: Disposable[];
+  private readonly commandEditors = new WeakSet<object>();
 
   public constructor(private readonly monaco: typeof Monaco) {
     const semanticTokenLegend: Monaco.languages.SemanticTokensLegend = {
@@ -504,6 +505,14 @@ class SqlLanguageFeatureRegistry {
     return registration?.model === model ? registration : undefined;
   }
 
+  public hasCommandsFor(editor: Monaco.editor.IStandaloneCodeEditor): boolean {
+    return this.commandEditors.has(editor as unknown as object);
+  }
+
+  public markCommandsFor(editor: Monaco.editor.IStandaloneCodeEditor): void {
+    this.commandEditors.add(editor as unknown as object);
+  }
+
   public dispose(): void {
     for (const registration of [...this.registrations.values()]) registration.dispose();
     for (const disposable of this.providerDisposables) disposable.dispose();
@@ -526,23 +535,36 @@ export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCod
   const model = editor.getModel();
   if (!model) return;
   const registry = registryFor(monaco);
-  const registration = registry.register(editor, api, getContext, getPreferences);
+  registry.register(editor, api, getContext, getPreferences);
 
   // Statement window navigation remains editor-specific even though the SQL
   // authoring providers above are shared by all models.
   async function navigateStatement(direction: 'before' | 'after'): Promise<void> {
     const position = editor.getPosition();
     const currentModel = editor.getModel();
-    if (!position || !currentModel || registry.registrationFor(currentModel) !== registration) return;
+    const currentRegistration = currentModel ? registry.registrationFor(currentModel) : undefined;
+    if (!position || !currentModel || !currentRegistration) return;
     const offset = currentModel.getOffsetAt(position);
     try {
-      const target = await registration.client.statementNav(offset, direction) as number | null;
+      const target = await currentRegistration.client.statementNav(offset, direction) as number | null;
       if (target === null || target === undefined) return;
       const targetPosition = currentModel.getPositionAt(target);
       editor.setPosition(targetPosition);
       editor.revealPositionInCenter(targetPosition);
     } catch { /* editor remains usable */ }
   }
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.UpArrow, () => { void navigateStatement('before'); });
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.DownArrow, () => { void navigateStatement('after'); });
+  if (!registry.hasCommandsFor(editor)) {
+    registry.markCommandsFor(editor);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.UpArrow, () => { void navigateStatement('before'); });
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.DownArrow, () => { void navigateStatement('after'); });
+  }
+}
+
+/** Releases language providers and model clients when a Monaco host is torn down. */
+export function disposeSqlLanguageFeatures(monaco: typeof Monaco): void {
+  const key = monaco as unknown as object;
+  const registry = sqlLanguageRegistries.get(key);
+  if (!registry) return;
+  registry.dispose();
+  sqlLanguageRegistries.delete(key);
 }

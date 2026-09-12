@@ -207,14 +207,15 @@ function valueClass(value: unknown, column: DataGridCellMetadata): string {
   return '';
 }
 
-function columnKey(_column: DataGridColumn, index: number): string {
-  // Numeric IDs are shared with the API query paging contract and remain
-  // stable when result columns have duplicate display names.
-  return String(index);
+function columnKey(column: DataGridColumn, index: number): string {
+  // Persist a semantic key instead of the position. Keep accepting the
+  // historical numeric key below so existing saved views still resolve.
+  const name = column.name.trim();
+  return name.length > 0 ? name : `column-${index}`;
 }
 
 function columnMatchesKey(column: DataGridColumn, index: number, key: string): boolean {
-  return key === columnKey(column, index) || key === column.name;
+  return key === columnKey(column, index) || key === column.name || key === String(index);
 }
 
 function visibilityFor(column: DataGridColumn, index: number, view: DataGridViewState): boolean {

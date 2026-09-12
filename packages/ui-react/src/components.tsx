@@ -105,6 +105,13 @@ export function FocusOnMount({ children }: { readonly children: ReactNode }): Re
 
 export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect }: ResultTabsProps): ReactNode {
   const matchingActiveResults = results.filter(result => result.resultSetId === activeResultSetId);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const focusTab = (index: number): void => {
+    const result = results[index];
+    if (!result) return;
+    onSelect(result.resultSetId, result.sourceId);
+    tabRefs.current[index]?.focus();
+  };
   return <div className="ui-result-tabs" role="tablist" aria-label="Result sets">{results.map((result, index) => {
     // A source-less active ID is only safe when it identifies one result. Do
     // not mark multiple same-named result sets active while the source is
@@ -113,7 +120,13 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
       && (activeSourceId === undefined
         ? matchingActiveResults.length === 1
         : result.sourceId === activeSourceId);
-    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} aria-selected={active} onClick={() => onSelect(result.resultSetId, result.sourceId)}>Result {index + 1}{result.status === 'streaming' ? ' · streaming' : ''}</button>;
+    const tabIndex = active || (activeResultSetId === undefined && index === 0) ? 0 : -1;
+    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} onKeyDown={event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? results.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + results.length) % results.length;
+      focusTab(nextIndex);
+    }} onClick={() => onSelect(result.resultSetId, result.sourceId)}>Result {index + 1}{result.status === 'streaming' ? ' · streaming' : ''}</button>;
   })}</div>;
 }
 

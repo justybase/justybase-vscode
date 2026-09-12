@@ -1,5 +1,6 @@
 import type { WorkspaceStorage } from './workspacePersistence';
 import {
+  createTransientTabId,
   newEditorTab,
   restoreEditorWorkspace,
   serializeEditorWorkspace,
@@ -16,6 +17,13 @@ function memoryWorkspaceStorage(values: Record<string, string> = {}): WorkspaceS
 }
 
 describe('workspace document controller', () => {
+  it('creates unique transient tab ids within the same clock tick', () => {
+    const first = createTransientTabId('query');
+    const second = createTransientTabId('query');
+    expect(second).not.toBe(first);
+    expect(first).toMatch(/^query-[a-z0-9]+-[a-z0-9]+$/u);
+  });
+
   it('restores a draft when no tab collection exists', () => {
     const restored = restoreEditorWorkspace(memoryWorkspaceStorage({ current_draft: 'SELECT 1' }));
     expect(restored.activeTabId).toBe('query-1');

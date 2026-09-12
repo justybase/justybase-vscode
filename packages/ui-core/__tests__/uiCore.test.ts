@@ -54,6 +54,14 @@ describe('ui-core reducer', () => {
     expect(reduceUiState(accepted, { type: 'execution/event', event: { type: 'progress', sourceId: 'source-1', executionId: 'exec-1', resultSetId: 'result-1', sequence: 2, totalRowCount: 4 } })).toBe(accepted);
   });
 
+  it('fails a stream even when the transport sequence has a gap', () => {
+    let state = reduceUiState(initial(), { type: 'execution/start', sourceId: 'source-1', executionId: 'exec-gap', resultSetId: 'result-gap' });
+    state = reduceUiState(state, { type: 'execution/event', event: { type: 'started', sourceId: 'source-1', executionId: 'exec-gap', resultSetId: 'result-gap', sequence: 1 } });
+    state = reduceUiState(state, { type: 'execution/event', event: { type: 'progress', sourceId: 'source-1', executionId: 'exec-gap', resultSetId: 'result-gap', sequence: 3, totalRowCount: 1 } });
+    const failed = reduceUiState(state, { type: 'execution/stream-failed', sourceId: 'source-1', executionId: 'exec-gap', resultSetId: 'result-gap', message: 'stream disconnected' });
+    expect(failed.results.byResultSetId['source-1\u0000result-gap']).toMatchObject({ status: 'error', lastSequence: 1, message: 'stream disconnected' });
+  });
+
   it('uses an explicit cancellation state machine and ignores post-cancel output', () => {
     let state = reduceUiState(initial(), { type: 'execution/start', sourceId: 'source-1', executionId: 'exec-2', resultSetId: 'result-2' });
     state = reduceUiState(state, { type: 'execution/event', event: { type: 'started', sourceId: 'source-1', executionId: 'exec-2', resultSetId: 'result-2', sequence: 1 } });
@@ -104,9 +112,10 @@ describe('ui-core persistence and capabilities', () => {
 
   it('supports a legacy read fallback without accepting result buffers or secrets', () => {
     const envelope = createPersistenceEnvelope({ globalFilter: 'legacy' }, options);
-    const read = decodeWithLegacyFallback(undefined, { globalFilter: 'legacy' }, options);
+    const read = decodeWithLegacyFallback(undefined, { globalFilter: 'legacy' }, { ...options, legacyIdentity: identity });
     expect(read?.migratedFromLegacy).toBe(true);
     expect(read?.envelope.identity.workspaceId).toBe('workspace-1');
+    expect(() => decodeWithLegacyFallback(undefined, { globalFilter: 'foreign' }, options)).toThrow(PersistenceDecodeError);
     expect(() => createPersistenceEnvelope({ rows: [[1]] }, options)).toThrow(PersistenceDecodeError);
     expect(() => createPersistenceEnvelope({ accessToken: 'never-store' }, options)).toThrow(PersistenceDecodeError);
     expect(() => createPersistenceEnvelope({ sessionToken: 'never-store' }, options)).toThrow(PersistenceDecodeError);

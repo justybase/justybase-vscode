@@ -1,3 +1,4 @@
+import { UI_CONTRACT_VERSION } from '@justybase/contracts';
 import type { CapabilityDescriptor, UiAuthState, UiIdentity, UiMode, PersistenceScope } from '@justybase/contracts';
 import type {
   UiAction,
@@ -26,7 +27,7 @@ const emptyResultView = (): UiResultViewState => ({
 
 export function createInitialUiState(identity: UiIdentity, options: InitialUiStateOptions = {}): UiState {
   return {
-    contractVersion: 1,
+    contractVersion: UI_CONTRACT_VERSION,
     mode: options.mode ?? 'legacy',
     identity: { ...identity },
     auth: options.auth ?? { status: 'unauthenticated' },
@@ -78,6 +79,12 @@ function withResult(state: UiState, result: UiResultSurfaceState): UiState {
       byResultSetId: { ...state.results.byResultSetId, [key]: result },
     },
   };
+}
+
+function failExecution(state: UiState, action: Extract<UiAction, { type: 'execution/stream-failed' }>): UiState {
+  const result = resultFor(state, action.sourceId, action.resultSetId);
+  if (!result || result.executionId !== action.executionId || result.status === 'complete' || result.status === 'empty' || result.status === 'error' || result.status === 'cancelled') return state;
+  return withResult(state, { ...result, status: 'error', message: action.message });
 }
 
 function findResultById(state: UiState, resultSetId: string, sourceId?: string): UiResultSurfaceState | undefined {
@@ -287,6 +294,8 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
     }
     case 'execution/event':
       return applyResultEvent(state, action.event);
+    case 'execution/stream-failed':
+      return failExecution(state, action);
     case 'results/hydrate':
       return hydrateResult(state, action);
     case 'execution/cancel-requested': {

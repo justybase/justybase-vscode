@@ -5,7 +5,7 @@ import type { ConnectionProfileSummary, EditorPreferences, MetadataColumn, Metad
 import { AsyncStateView } from '@justybase/ui-react';
 import { ApiClientProvider, createApiClient, useApiClient, type ApiClient, type QueryEventSubscription } from './api';
 import { emptyResult } from './queryState';
-import { registerSqlLanguageFeatures } from './sqlLanguage';
+import { disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';
 import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
 import { EditRowPanel } from './EditRowPanel';
@@ -14,7 +14,7 @@ import type { RunMode } from './EditorToolbar';
 import { useSplitPane } from './useSplitPane';
 import { createWorkspaceStorage, migrateLegacyWorkspace, useWorkspaceStorage, WorkspaceStorageProvider, type WorkspaceStorage } from './workspacePersistence';
 import { canEditActiveResult, workspaceDatabase } from './workspaceConnectionController';
-import { restoreEditorWorkspace, newEditorTab, type EditorTab, type ExecutionInput } from './workspaceDocumentController';
+import { createTransientTabId, restoreEditorWorkspace, newEditorTab, type EditorTab, type ExecutionInput } from './workspaceDocumentController';
 import { applyEventToEditorTab, clearLiveQueryState } from './workspaceExecutionController';
 import { persistDraft, persistEditorWorkspace, readPersistedNumber, resetPersistedWorkspaceLayout } from './workspacePersistenceController';
 import { AuditPanel, ConnectionForm, EditorSettings, Login } from './workspacePanels';
@@ -124,6 +124,10 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const savedDatabaseRef = useRef('');
   const editorRefs = useRef(new Map<string, Monaco.editor.IStandaloneCodeEditor>());
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const sqlMonacoRef = useRef<typeof Monaco | undefined>(undefined);
+  useEffect(() => () => {
+    if (sqlMonacoRef.current) disposeSqlLanguageFeatures(sqlMonacoRef.current);
+  }, []);
   const dockyardResetRef = useRef<(() => void) | undefined>(undefined);
   const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
   const activeQueryId = activeTab?.queryId ?? '';
@@ -353,6 +357,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   }
 
   function handleEditorReady(tabId: string, editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco): void {
+    sqlMonacoRef.current = monaco;
     editorRefs.current.set(tabId, editor);
     if (tabId === activeTabId) editorRef.current = editor;
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
@@ -537,7 +542,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
       setError('The failed statement text is unavailable for retry.');
       return;
     }
-    const id = `retry-${Date.now()}`;
+    const id = createTransientTabId('retry');
     const retryInput: ExecutionInput = { connectionId: targetConnection.id, database: targetTab.database ?? workspaceDatabase(targetConnection), sql: statementSql, mode: 'single' };
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: `Retry · Statement ${index + 1}`, sql: statementSql, connectionId: targetConnection.id, database: retryInput.database, schema: targetTab.schema }]);
     activateTab(id, true);
@@ -615,7 +620,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     updateSql(`${targetTab?.sql ?? ''}${value}`, targetTabId);
   }
   function addTab(): void {
-    const id = `query-${Date.now()}`;
+    const id = createTransientTabId('query');
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), connectionId: selected?.id, database: selected ? workspaceDatabase(selected) : database }]);
     activateTab(id, true);
   }
@@ -671,7 +676,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   }
   function selectColumn(column: MetadataColumn): void { insertSql(column.name, activeTabId); }
   function openSchemaQuery(nextSql: string, title: string, node: SchemaTreeNode): void {
-    const id = `schema-${Date.now()}`;
+    const id = createTransientTabId('schema');
     const queryInput = { connectionId: selected?.id ?? '', database: node.database ?? database, sql: nextSql, mode: 'single' as const };
     setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title, sql: nextSql, connectionId: selected?.id, database: queryInput.database, schema: node.schema, source: node, sourceSql: nextSql, sourceConnectionId: selected?.id, sourceDatabase: queryInput.database, resultView: title.toLowerCase().startsWith('explain') ? 'explain' : 'grid' }]);
     activateTab(id, true);

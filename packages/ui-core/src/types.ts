@@ -1,3 +1,4 @@
+import { UI_CONTRACT_VERSION } from '@justybase/contracts';
 import type {
   CapabilityDescriptor,
   PersistenceScope,
@@ -119,7 +120,7 @@ export interface UiDesignerState {
 }
 
 export interface UiState {
-  readonly contractVersion: 1;
+  readonly contractVersion: typeof UI_CONTRACT_VERSION;
   readonly mode: UiMode;
   readonly identity: UiIdentity;
   readonly auth: UiAuthState;
@@ -169,6 +170,7 @@ export type UiAction =
   | { readonly type: 'connections/select'; readonly connectionId?: string }
   | { readonly type: 'execution/start'; readonly sourceId: string; readonly executionId: string; readonly resultSetId: string; readonly statementIndex?: number; readonly storageId?: string }
   | { readonly type: 'execution/event'; readonly event: UiResultEvent }
+  | { readonly type: 'execution/stream-failed'; readonly sourceId: string; readonly executionId: string; readonly resultSetId: string; readonly message: string }
   | {
     readonly type: 'results/hydrate';
     readonly sourceId: string;
