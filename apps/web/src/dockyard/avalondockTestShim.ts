@@ -64,8 +64,12 @@ class TestElement {
 
 class TestGroup extends TestElement {
   public readonly Children: TestCollection<TestElement>;
+  public DockWidth: unknown;
+  public DockHeight: unknown;
   public constructor(options: Record<string, unknown> = {}) {
     super(options);
+    this.DockWidth = options.DockWidth ?? '1*';
+    this.DockHeight = options.DockHeight ?? '1*';
     this.Children = new TestCollection(this);
     const children = options.Children;
     if (children && typeof children !== 'string' && Symbol.iterator in Object(children)) this.Children.AddRange(children as Iterable<TestElement>);
