@@ -1,6 +1,6 @@
 # Web Editor ↔ VS Code Extension — Parity Audit & Backlog
 
-Last updated: 2026-08-31
+Last updated: 2026-09-12
 
 This document is the **feature-by-feature parity audit** between the two products shipped
 from this repository:
@@ -69,20 +69,20 @@ P0 = safety/regression risk, P1 = high value for cost, P2 = nice-to-have.
 
 | Domain | Full parity | Value | Effort to reach parity |
 | --- | --- | --- | --- |
-| D1 – SQL language / editor intelligence | ✅ broad, 🟡 code actions | High | **M** |
+| D1 – SQL language / editor intelligence | ✅ broad, 🟡 advanced code actions | High | **M** |
 | D2 – Query execution pipeline | ✅ broad, 🟡 desktop-specific depth | High | S–M |
 | D3 – Results grid | ✅ core depth, 🟡 advanced analysis | High | M |
 | D4 – Schema explorer / metadata | 🟡 | Medium | S–M |
 | D5 – Database Ops (import/DDL/DBA) | ❌ large | Medium-High | L–XL |
-| D6 – Multi-dialect support | ❌ | Medium | L–XL |
+| D6 – Multi-dialect support | 🟡 authoring / ❌ remote runtime | Medium | L–XL |
 | D7 – Platform (auth/security/multi-user) | ✅ + web-native | High | S |
 | D8 – AI / MCP / notebooks / ETL / ERD | ❌ | Medium | XL |
 
 Fast summary: web covers **SQL authoring, single/smart/script execution, result
 exploration, guarded writes, and schema browsing** well. The principal gaps are
-remaining code actions, desktop-only database administration, advanced result
+advanced desktop-only code actions and database administration, advanced result
 analysis, and remote multi-dialect runtimes. Test depth for the React surface is
-materially behind its implemented functionality; see the quality roadmap.
+still behind its implemented functionality; see the quality roadmap.
 
 ---
 
@@ -99,7 +99,7 @@ materially behind its implemented functionality; see the quality roadmap.
 | Rename (+ prepare) | ✅ LSP | ✅ WS | ✅ | Quote-aware `formatSqlRenameReplacement` — `prepareRename` + `rename`. |
 | Inlay hints | ✅ LSP (`inlayHintEngine`) | ✅ WS | ✅ | Column/type hints via `LspInlayHintEngine` + `registerInlayHintsProvider`. |
 | Signature help | ✅ LSP (`signatureAndCodeActionHandlers`) | ✅ WS | ✅ | `findFunctionCall` + `getDatabaseSqlAuthoring().signatures` + `registerSignatureHelpProvider`. |
-| Code actions (linter fixes) | ✅ LSP SQL/PAR + ext NZ/NZP | ❌ | M | Expose `codeActions` JSON-RPC; NZ/NZP still extension-host → needs core port or a "quickfix" REST for NZ codes. |
+| Code actions (linter fixes) | ✅ LSP SQL/PAR + ext NZ/NZP | 🟡 WS/LSP | M | Shared core exposes parser fixes, SQL004/007/012/019/048, PAR003/PAR004/PAR101, Netezza guard/limit/normalization fixes, and metadata-backed qualification. Desktop still has richer context-sensitive NZ/NZP actions. |
 | Code actions (refactors) | ✅ ext (Extract CTE / Materialize / Inline) | ❌ | M | `sqlRefactorCodeActions`. |
 | Document symbols | 🟡 ext | ✅ WS | ✅ | Parse-session CST + macro scan mirrored from `documentSymbolProvider` into `documentSymbols()`. |
 | Semantic tokens | ✅ ext (`semanticTokensProvider`) | ✅ WS | ✅ | The API adapter composes the vscode-free sql-core lexer and symbol collector into LSP tokens; desktop semantic token ownership remains product-specific. |
@@ -125,8 +125,14 @@ materially behind its implemented functionality; see the quality roadmap.
 > desktop behavior unchanged (guard: `linterCodeActions`,
 > `sqlQualityEngine.unified`, `linterRules.commentRegression`, 83 tests). `core.diagnostics()`
 > now runs NZ/NZP quality rules and transports parser `suggestedFix` via `data.suggestedFix`
-> through JSON-RPC and Monaco markers. Core/API tests: `sqlCoreFeatures.test.ts` (11/11). Code
-> actions (NZ/NZP fixes + refactors) remain backlog (Commit 2).
+> through JSON-RPC and Monaco markers. Core/API coverage lives in
+> `apps/api/tests/sqlCoreFeatures.test.ts` and the shared browser gate.
+
+> **D1 authoring parity refresh 2026-09-12** — the shared Web/Electron authoring path now
+> exposes the complete connection-profile dialect catalog, live completion checks for
+> PostgreSQL, Db2, ClickHouse, Oracle and MSSQL, and an Extension Host `Definition Provider`
+> check for CTE navigation. Deterministic shared quick fixes are available through the same
+> WebSocket LSP contract; full desktop refactor actions remain intentionally separate.
 
 ---
 
@@ -149,7 +155,7 @@ materially behind its implemented functionality; see the quality roadmap.
 
 ---
 
-## D3 – Results Grid (TanStack vs desktop `media/resultPanel`)
+## D3 – Results Grid (shared Web/Electron renderer + desktop compatibility)
 
 | Feature | Desktop | Web | Status | Notes |
 | --- | --- | --- | --- | --- |
@@ -166,17 +172,17 @@ materially behind its implemented functionality; see the quality roadmap.
 | Column charts / range | ✅ `rangeChart.ts`, mini-chart cards (`analysis.ts`) | ❌ | L | |
 | Context menu | ✅ deep desktop menu | ✅ value/row formats, filter, sort, detail/edit | 🟡 | Desktop additionally exposes database- and analysis-specific actions. |
 | Row detail / full row viewer | ✅ `rowView.ts` | ✅ | ✅ | Web renders all fields for the loaded row. |
-| Large-data virtualization | ✅ disk-backed 200k+ | ✅ virtualized current page + server spool | 🟡 | Web virtualizes the selected server page rather than a continuous 200k-row window. |
+| Large-data virtualization | ✅ disk-backed 200k+ | ✅ shared virtualized page + server spool | 🟡 | Web and Electron use the same React/TanStack renderer and virtualized page contract; VS Code keeps its disk-backed DOM renderer. |
 | Result tabs / multi-query panel | ✅ tabs + container | ✅ editor and statement result tabs | ✅ | Results and statement status are retained per editor tab. |
-| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ | 🟡 | Web persists page size, sort, filters, visibility, pinning, and order; state is not yet schema-versioned. |
+| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ shared Web/Electron | 🟡 | Page size, sort, filters, visibility, pinning, order, and both scroll axes are restored by stable result identity; the shared React state still needs schema-version migration. |
 
 ### D3 deep-dive — current web grid and remaining backlog
 
-Key architecture fact: **desktop is a DOM grid with a Node host**; web is a
-React/TanStack grid with a Fastify API. Full-result aggregation and grouping
-already execute against the API SQLite spool; client features operate on the
-loaded page. The renderers remain intentionally separate, while shared public
-request/response types stay additive.
+Key architecture fact: **VS Code desktop is a DOM grid with a Node host**; Web and
+Electron use the same React/TanStack grid over an async REST/WS spool. Full-result
+aggregation and grouping already execute against the API SQLite spool; client features
+operate on the loaded page. Public request/response types remain additive and the
+Web/Electron renderer is shared without forcing the VS Code webview onto React.
 
 | # | Feature (desktop ref) | Web approach | Effort |
 | --- | --- | --- | --- |
@@ -197,18 +203,20 @@ rule that applies is the shared-contracts additive rule: any new request/respons
 (`QueryAggregateRequest`, pivot spec) must **add** to `@justybase/contracts`/`webApi.ts`,
 never re-type existing fields.
 
-### Architecture decision (2026-08-09)
+### Architecture decision (updated 2026-09-12)
 
-**Full grid unification (single shared renderer for desktop + web) is REJECTED.**
+**One renderer across VS Code + Web + Electron remains out of scope; Web and Electron
+share one renderer.**
 
-- Desktop grid (`media/resultPanel`) is vanilla-DOM + disk-backed, wired to the VS Code host
-  (`protocol.ts`); web grid is React/TanStack with an async REST/WS spool. Merging renderers
-  = a 2–3 week refactor with real desktop regression risk and no proportionate payoff.
-- The web grid keeps its own **TanStack renderer**; the desktop grid stays as is.
+- VS Code grid (`media/resultPanel`) is vanilla-DOM + disk-backed, wired to the VS Code host
+  (`protocol.ts`); Web/Electron use a React/TanStack renderer with an async REST/WS spool.
+- Web and Electron consume the same `@justybase/ui-react` `DataGrid` and shared view,
+  clipboard, context-action, and viewport contracts. This gives the two application shells
+  identical behavior while preserving the low-risk VS Code renderer boundary.
 - If pure logic sharing is ever wanted, extract it into a framework-agnostic
   `@justybase/grid-core` (formatting, aggregation math, clipboard generators, pivot/group SQL,
-  edit-UPDATE builder) — additive, web-first, desktop adopts later. This is a **follow-up
-  opportunity**, not a parity prerequisite.
+  edit-UPDATE builder) — additive, web-first, desktop adopts later. This remains a **follow-up
+  opportunity**, not a prerequisite for Web/Electron parity.
 
 ---
 
@@ -237,10 +245,10 @@ webviews.
 | Feature | Desktop | Web | Status | Effort | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Select top/1000, per object | ✅ | ✅ | ✅ | – | Schema context menu opens a source-backed query tab. |
-| Generate DDL (`createDDL`, `goToCatalogDdl`) | ✅ provider-specific | 🟡 basic table/view DDL | 🟡 | M | Web Copy DDL does not yet match all provider-specific detail. |
+| Generate DDL (`createDDL`, `goToCatalogDdl`) | ✅ provider-specific | 🟡 exact Netezza + reconstructed local table/view | 🟡 | M | Netezza table/view/procedure/external-table/synonym paths preserve native catalog fidelity; SQLite/DuckDB table/view DDL is explicitly marked reconstructed. Remote authoring-only profiles do not receive fabricated DDL. |
 | Copy DDL | ✅ | ✅ | ✅ | – | Available from the schema object menu. |
 | View/Edit data (50k editor) | ✅ | ✅ guarded row edit | 🟡 | M | Web edit requires eligible source metadata, preview token, explicit confirmation, ownership, and non-read-only profile. |
-| Import CSV/XLSX (smart paste, wizard) | ✅ | ✅ basic file import | 🟡 | L | Web supports preview-token-confirmed CSV/XLSX import; desktop wizard and format depth remain broader. |
+| Import CSV/XLSX (smart paste, wizard) | ✅ | ✅ guarded file import | 🟡 | L | Web supports preview-token-confirmed CSV/XLSX, null/Unicode/duplicate-header handling, compressed CSV, bounded rows and rollback; desktop wizard and format depth remain broader. |
 | DDL templates (CREATE VIEW/PROC/SEQUENCE/EXT TABLE) | ✅ | ❌ | ❌ | M | Reuse `externalTableTemplates` and `procedureTemplates`. |
 | Comments (table/column) | ✅ | ❌ | ❌ | S–M | Use the existing guarded write boundary. |
 | Constraints PK/FK/Unique | ✅ | ❌ | ❌ | S–M | Requires provider-specific DDL and metadata refresh. |
@@ -267,20 +275,21 @@ webviews.
 | --- | --- | --- | --- |
 | Netezza | ✅ | ✅ | ✅ |
 | SQLite / DuckDB | ✅ (extensions) | ✅ local profiles, metadata, query sessions, paging, analysis, and guarded writes | 🟡 product-depth parity |
-| Oracle / PostgreSQL / Vertica / Snowflake / Db2 / MSSQL / MySQL / Access | ✅ (extensions) | ❌ | ❌ |
+| Oracle / PostgreSQL / Vertica / Snowflake / Db2 / MSSQL / MySQL / ClickHouse / Access | ✅ (extensions) | 🟡 authoring-only | 🟡 |
 
-The web connection contract and form support Netezza, SQLite, and DuckDB.
-Profiles retain a shared `DatabaseKind`; the API selects local database handling
-and provider-specific EXPLAIN/write quoting without hard-coding every profile to
-Netezza. Remote companion runtimes still require explicit server-side runtime
-isolation, metadata providers, capability declarations, and live contracts.
+The shared connection contract and forms expose every supported `DatabaseKind`.
+Profiles retain the selected dialect, so Monaco completion, snippets, diagnostics,
+signature help, formatting and semantic authoring use the selected profile. The API
+runtime registry currently executes Netezza, SQLite and DuckDB; remote profiles are
+clearly labelled authoring-only and keep save/test/run/schema/DDL controls disabled
+until an explicit server-side driver/runtime adapter, metadata provider, capability
+declarations and live contract are added.
 
 SQLite and DuckDB are already available in the web API for local profiles,
 metadata, query sessions, paging, aggregation and grouping. The remaining work
-is parity polish (connection UX, file-SQL workflows, and capability-specific
-metadata) before adding remote dialect drivers. Add Oracle, PostgreSQL, Vertica,
-Snowflake, Db2, MSSQL, MySQL and Access only with explicit runtime isolation and
-integration coverage.
+is parity polish (file-SQL workflows, capability-specific runtime gates, and
+controlled remote runtime adapters). Add remote execution only with explicit
+runtime isolation and integration coverage.
 
 ---
 
@@ -324,7 +333,7 @@ role-based connection sharing and deeper adversarial/security coverage.)
 | 0 | Baseline LSP (completion+diagnostics) | ✅ | shared | – |
 |1 | Hover / Definition / References / Rename | ✅ | wiring | ✅ done (2026-08-09) |
 | 2 | Inlay hints / Signature help | ✅ | wiring | ✅ done (2026-08-09) |
-| 3 | Linter (NZ/NZP) + code actions into web | 🟡 NZ/NZP diag done | core | M — code actions still ❌ |
+| 3 | Linter (NZ/NZP) + code actions into web | 🟡 diagnostics + deterministic quick fixes | core | M — desktop refactors and context-sensitive actions remain |
 | 4 | Format SQL (real formatter) | ✅ | core | ✅ done (2026-08-09) |
 | 5 | Snippets + semantic tokens | ✅ | core | ✅ done (2026-08-09) |
 | 6 | Selected/cursor/smart/script run modes | ✅ | core+api+web | done |
@@ -332,8 +341,8 @@ role-based connection sharing and deeper adversarial/security coverage.)
 | 8 | Grid context menu + row detail | ✅ broad | grid | 🟡 desktop-only actions remain |
 | 9 | Alternate views | 🟡 basic pivot | grid | M for richer UX/cards |
 | 10 | Guarded DML/DDL execution + confirm/audit | ✅ | api+web | done; guided DBA actions remain |
-| 11 | Import | 🟡 CSV/XLSX file flow | api+web | L for desktop wizard/format depth |
-| 12 | Multi-dialect start (SQLite/DuckDB) | ✅ | api+web | done; remote dialects remain |
+| 11 | Import/export | 🟡 guarded CSV/XLSX + compressed CSV flow | api+web | L for desktop wizard/format depth |
+| 12 | Multi-dialect authoring/runtime | 🟡 authoring catalog + local runtimes | api+web | remote dialect runtimes remain |
 
 ---
 
@@ -342,8 +351,8 @@ role-based connection sharing and deeper adversarial/security coverage.)
 1. **Quality foundation:** add React component coverage, version and test
    persisted tab/grid state, and enforce the high-risk gates in the project
    quality roadmap.
-2. **Editor completion:** expose NZ/NZP quick fixes and parser-backed refactors
-   through the web LSP/code-action surface.
+2. **Editor completion:** expose the remaining context-sensitive NZ/NZP quick fixes
+   and parser-backed refactors through the web LSP/code-action surface.
 3. **Grid hardening:** deepen reload/race/accessibility tests, improve pivot UX,
    and close copy/edit semantics before considering charts and cards.
 4. **Database workflows:** deepen DDL generation and import UX on top of the
