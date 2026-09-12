@@ -112,6 +112,7 @@ async function start(): Promise<void> {
     masterKey,
     adminUsername: 'electron-local-admin',
     adminPassword: localAdminPassword(masterKey),
+    ...(process.env.JUSTYBASE_ELECTRON_PROVISION_SQLITE === '1' ? { provisionSqliteFixture: true } : {}),
   });
   if (quitRequested) {
     await startedRuntime.close();

@@ -4529,6 +4529,7 @@
     "test:ui-core": "npm run test --workspace @justybase/ui-core",
     "test:ui-react": "npm run build:ui-core && npm run test --workspace @justybase/ui-react",
     "test:electron": "npm run build:electron && npm run test --workspace @justybase/electron-shell",
+    "test:electron:live": "npm run build:electron && node scripts/electron/electronLiveSmoke.js",
     "test:netezza-runtime": "npm run build:contracts && npm run test --workspace @justybase/netezza-runtime",
     "test:database-runtime": "npm run build:contracts && npm run test --workspace @justybase/database-runtime",
     "test:api": "npm run build:metadata-core && npm run build:designer-core && npm run build:sql-core && npm run build:duckdb-runtime && npm run build:runtime && npm run build:sqlite-runtime && npm run test --workspace @justybase/web-api",
