@@ -576,6 +576,56 @@ body,
   flex-direction: column;
 }
 
+.shared-sidebar {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--justybase-grid-text);
+  font-size: 12px;
+}
+
+.shared-sidebar > button {
+  min-height: 26px;
+  padding: 4px 7px;
+  color: var(--justybase-grid-muted);
+  background: transparent;
+  text-align: left;
+}
+
+.shared-sidebar > button:hover,
+.shared-sidebar > button[aria-pressed='true'] { color: var(--justybase-grid-text); background: var(--justybase-grid-hover); }
+
+.shared-editor-stack {
+  display: flex;
+  min-width: 0;
+  min-height: 220px;
+  height: 38vh;
+  flex: 0 1 38vh;
+  flex-direction: column;
+  border-bottom: 1px solid var(--justybase-grid-border);
+}
+
+.shared-sql-editor { min-width: 0; min-height: 0; flex: 1; }
+.shared-sql-problems { display: flex; min-height: 30px; max-height: 132px; flex: 0 0 auto; flex-direction: column; overflow: hidden; border-top: 1px solid var(--justybase-grid-border); background: var(--justybase-grid-bg); }
+.shared-sql-problems > header { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 5px 10px; color: var(--justybase-grid-muted); font-size: 11px; }
+.shared-sql-problems > header span { min-width: 18px; padding: 1px 5px; border-radius: 10px; color: var(--justybase-grid-muted); background: var(--justybase-grid-surface); font-size: 10px; text-align: center; }
+.shared-sql-problems-list { min-height: 0; overflow: auto; }
+.shared-sql-problems-list button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 25px; padding: 4px 10px; border: 0; color: var(--justybase-grid-text); background: transparent; font-size: 11px; text-align: left; }
+.shared-sql-problems-list button:hover { background: var(--justybase-grid-hover); }
+.shared-sql-problems-list button > span:nth-child(2) { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-sql-problems-list small { flex: 0 0 auto; color: var(--justybase-grid-muted); }
+.shared-sql-problem-severity { width: 14px; font-weight: 700; text-align: center; }
+.shared-sql-problem-error { color: #f87171; }
+.shared-sql-problem-warning { color: #fbbf24; }
+.shared-sql-problem-info,
+.shared-sql-problem-hint { color: #60a5fa; }
+.shared-sql-problems-empty { padding: 4px 10px 7px; color: var(--justybase-grid-muted); font-size: 11px; }
+
+.shared-result-panel { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.shared-result-panel > .ui-result-tabs { flex: 0 0 auto; }
+
 .electron-sidebar-content {
   display: flex;
   min-height: 0;

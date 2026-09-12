@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import type {
   CapabilityDescriptor,
   ConnectionProfileSummary,
+  EditorPreferences,
   HistoryEntry,
   QueryEvent,
   SchemaTreeNode,
@@ -22,7 +23,6 @@ import {
   formatDataGridCellValue,
   processDataGridRows,
   DesignerForm,
-  EditorSurface,
   ExplainView,
   HistoryView,
   ResultTabs,
@@ -36,6 +36,7 @@ import {
 } from '@justybase/ui-react';
 import type { GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import type { ApiClient, QueryEventSubscription } from './api';
+import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
 
 const sharedCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'workspace', status: 'available', owner: 'ui-core', documentation: 'Shared workspace state and presentation.', removalCondition: 'Keep the shared workspace owner.' },
@@ -180,6 +181,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const [rowsByResult, setRowsByResult] = useState<Record<string, readonly (readonly unknown[])[]>>({});
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
+  const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
   const [schemaNodes, setSchemaNodes] = useState<ReturnType<typeof mapSchemaNode>[]>([]);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -192,6 +195,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const schemaLoadedParentsRef = useRef(new Set<string>());
   const selectedConnectionId = state.connections.selectedConnectionId;
   const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
+  const databaseKind = selectedConnection?.dbType ?? 'netezza';
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
   const activeResult = state.results.activeResultSetId
     ? Object.values(state.results.byResultSetId).find(result => result.sourceId === state.results.activeSourceId && result.resultSetId === state.results.activeResultSetId)
@@ -224,6 +228,14 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     });
     return () => { live = false; };
   }, [api, store]);
+
+  useEffect(() => {
+    let live = true;
+    void api.editorPreferences().then(value => {
+      if (live) setPreferences(value);
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [api]);
 
   useEffect(() => {
     let live = true;
@@ -520,7 +532,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         : state.shell.activeSurface === 'designer' ? <DesignerForm fields={designerFields} capability={state.capabilities.find(capability => capability.key === 'designer')} onChange={() => undefined} onPreview={() => setNotice('Designer preview remains adapter-backed in shared mode.')} onApply={() => setNotice('Designer apply is guarded and unavailable for this read-only capability.')} />
           : <>
             <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} />
-            <EditorSurface value={activeDocument?.content ?? ''} onChange={updateSql} onSubmit={() => void run()} />
+            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind })} onChange={updateSql} onRun={() => void run()} onProblemsChange={setProblems} /><SharedSqlProblems problems={problems} onSelect={problem => setNotice(`SQL problem at line ${problem.startLineNumber}, column ${problem.startColumn}.`)} /></div>
             <div className="shared-result-panel">
               <button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button>
               {notice && <div role="status">{notice}</div>}
