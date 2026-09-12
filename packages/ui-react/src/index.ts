@@ -69,3 +69,9 @@ export type {
   WorkspaceTab,
   WorkspaceTabsProps,
 } from './components';
+export { ObjectDesigner } from './objectDesigner/ObjectDesigner';
+export { CAPABILITY_ROWS, capabilityClass, capabilityLabel, getAvailableDesignerTabs, getDesignerTargetFlags, isMutatingCapability, viewDefinitionFromMetadata } from './objectDesigner/model';
+export { useObjectDesignerController } from './objectDesigner/useObjectDesignerController';
+export type { ObjectDesignerApi, ObjectDesignerQueryEventSubscription } from './objectDesigner/types';
+export type { ObjectDesignerControllerProps } from './objectDesigner/useObjectDesignerController';
+export type { ObjectDesignerProps } from './objectDesigner/ObjectDesigner';

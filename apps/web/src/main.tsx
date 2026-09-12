@@ -5,6 +5,7 @@ import { App } from './App';
 import { createApiClient } from './api';
 import './styles.css';
 import '../../../packages/ui-react/src/resultGrid.css';
+import '../../../packages/ui-react/src/objectDesigner.css';
 
 // Vite replaces VITE_UI_MODE at build time. Keep the selected mode on the
 // runtime global consumed by the composition root so direct component tests
