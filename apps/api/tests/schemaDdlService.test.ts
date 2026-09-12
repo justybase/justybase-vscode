@@ -1,4 +1,9 @@
-import type { DatabaseTableDdlMetadata } from '@justybase/contracts';
+import type {
+  DatabaseExternalTableDdlMetadata,
+  DatabaseProcedureInfo,
+  DatabaseSynonymInfo,
+  DatabaseTableDdlMetadata,
+} from '@justybase/contracts';
 import type { ApiDatabaseRuntime, ApiDatabaseRuntimeRegistry } from '../src/databaseRuntime/contracts';
 import { getSchemaObjectDdlResponse, SchemaDdlUnavailableError } from '../src/schemaDdlService';
 import type { StoredConnection } from '../src/store';
@@ -87,6 +92,89 @@ describe('schema DDL service', () => {
 
     expect(result.ddlCode).toBe('CREATE OR REPLACE VIEW MYDB.ADMIN.V_USERS AS\nSELECT ID FROM USERS;');
     expect(runtime.getViewDefinition).toHaveBeenCalledWith(profile(), 'MYDB', 'ADMIN', 'V_USERS');
+  });
+
+  it('returns exact procedure DDL through the shared formatter', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null });
+    const metadata: DatabaseProcedureInfo = {
+      schema: 'ADMIN',
+      procedureSource: 'BEGIN\n  RETURN 1;\nEND;',
+      objId: 42,
+      returns: 'INTEGER',
+      executeAsOwner: false,
+      description: 'User procedure',
+      procedureSignature: 'P_USERS()',
+      procedureName: 'P_USERS',
+      arguments: null,
+    };
+    runtime.getProcedureDdlMetadata = jest.fn().mockResolvedValue(metadata);
+
+    const result = await getSchemaObjectDdlResponse(profile(), {
+      connectionId: 'connection-1', database: 'MYDB', schema: 'ADMIN', objectName: 'P_USERS()', objectType: 'PROCEDURE',
+    }, registryFor(runtime));
+
+    expect(result).toEqual(expect.objectContaining({ success: true, ddlFidelity: 'exact' }));
+    expect(result.ddlCode).toContain('CREATE OR REPLACE PROCEDURE MYDB.ADMIN.P_USERS()');
+    expect(result.ddlCode).toContain('LANGUAGE NZPLSQL AS');
+    expect(result.ddlCode).toContain("COMMENT ON PROCEDURE P_USERS IS 'User procedure';");
+    expect(runtime.getProcedureDdlMetadata).toHaveBeenCalledWith(profile(), 'MYDB', 'ADMIN', 'P_USERS()');
+  });
+
+  it('returns exact external-table DDL with catalog options and columns', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null });
+    const metadata: DatabaseExternalTableDdlMetadata = {
+      info: {
+        schema: 'ADMIN', tableName: 'EXT_USERS', dataObject: '/tmp/users.csv', delimiter: '|', encoding: 'INTERNAL',
+        timeStyle: null, remoteSource: 'LOCAL', skipRows: 1, maxErrors: 2, escapeChar: null, logDir: null,
+        decimalDelim: null, quotedValue: null, nullValue: null, crInString: null, truncString: null, ctrlChars: null,
+        ignoreZero: null, timeExtraZeros: null, y2Base: null, fillRecord: null, compress: null, includeHeader: null,
+        lfInString: null, dateStyle: null, dateDelim: null, timeDelim: null, boolStyle: null, format: 'TEXT',
+        socketBufSize: null, recordDelim: null, maxRows: null, requireQuotes: null, recordLength: null,
+        dateTimeDelim: null, rejectFile: null,
+      },
+      columns: [{ name: 'ID', description: null, fullTypeName: 'INTEGER', notNull: true, defaultValue: null }],
+      metadataComplete: true,
+    };
+    runtime.getExternalTableDdlMetadata = jest.fn().mockResolvedValue(metadata);
+
+    const result = await getSchemaObjectDdlResponse(profile(), {
+      connectionId: 'connection-1', database: 'MYDB', schema: 'ADMIN', objectName: 'EXT_USERS', objectType: 'EXTERNAL TABLE',
+    }, registryFor(runtime));
+
+    expect(result.ddlCode).toContain('CREATE EXTERNAL TABLE MYDB.ADMIN.EXT_USERS');
+    expect(result.ddlCode).toContain('SKIPROWS 1');
+    expect(result.ddlCode).toContain('ID INTEGER NOT NULL');
+    expect(result.ddlFidelity).toBe('exact');
+    expect(runtime.getExternalTableDdlMetadata).toHaveBeenCalledWith(profile(), 'MYDB', 'ADMIN', 'EXT_USERS');
+  });
+
+  it('returns exact synonym DDL with the runtime-resolved target', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null });
+    const metadata: DatabaseSynonymInfo = {
+      schema: 'ADMIN', synonymName: 'S_USERS', referenceObjectName: 'MYDB.ADMIN.USERS', owner: 'ADMIN', description: null,
+    };
+    runtime.getSynonymDdlMetadata = jest.fn().mockResolvedValue(metadata);
+
+    const result = await getSchemaObjectDdlResponse(profile(), {
+      connectionId: 'connection-1', database: 'MYDB', schema: 'ADMIN', objectName: 'S_USERS', objectType: 'SYNONYM',
+    }, registryFor(runtime));
+
+    expect(result.ddlCode).toBe('CREATE SYNONYM MYDB.ADMIN.S_USERS FOR MYDB.ADMIN.USERS;');
+    expect(result.ddlFidelity).toBe('exact');
+    expect(runtime.getSynonymDdlMetadata).toHaveBeenCalledWith(profile(), 'MYDB', 'ADMIN', 'S_USERS');
+  });
+
+  it('refuses an external table when typed columns are incomplete', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null });
+    runtime.getExternalTableDdlMetadata = jest.fn().mockResolvedValue({
+      info: {} as DatabaseExternalTableDdlMetadata['info'],
+      columns: [{ name: 'ID', description: null, fullTypeName: '', notNull: false, defaultValue: null }],
+      metadataComplete: true,
+    });
+
+    await expect(getSchemaObjectDdlResponse(profile(), {
+      connectionId: 'connection-1', database: 'MYDB', schema: 'ADMIN', objectName: 'EXT_USERS', objectType: 'EXTERNAL TABLE',
+    }, registryFor(runtime))).rejects.toBeInstanceOf(SchemaDdlUnavailableError);
   });
 
   it('refuses incomplete catalog metadata instead of emitting executable-looking fake DDL', async () => {

@@ -2,19 +2,9 @@
  * DDL Generator - Synonym DDL Generation
  */
 
-import { executeQueryHelper, quoteNameIfNeeded } from './helpers';
+import { buildNetezzaSynonymDdl } from '@justybase/designer-core';
+import { executeQueryHelper } from './helpers';
 import { NzConnection } from '../../../types';
-
-/**
- * Quote a multi-part identifier (DB.SCHEMA.TABLE) properly.
- * Splits by dots and quotes each part individually.
- */
-function quoteMultiPartRef(refObjName: string): string {
-    if (!refObjName) return refObjName;
-    return refObjName.split('.')
-        .map(part => quoteNameIfNeeded(part))
-        .join('.');
-}
 
 /**
  * Build synonym DDL from metadata
@@ -27,20 +17,13 @@ export function buildSynonymDDLFromCache(
     schema: string,
     description: string | null
 ): string {
-    const cleanDatabase = quoteNameIfNeeded(database);
-    const ownerSchema = quoteNameIfNeeded(owner || schema);
-    const cleanSynonymName = quoteNameIfNeeded(synonymName);
-    const cleanRefObj = quoteMultiPartRef(refObjName);
-
-    const ddlLines: string[] = [];
-    ddlLines.push(`CREATE SYNONYM ${cleanDatabase}.${ownerSchema}.${cleanSynonymName} FOR ${cleanRefObj};`);
-
-    if (description) {
-        const cleanComment = description.replace(/'/g, "''");
-        ddlLines.push(`COMMENT ON SYNONYM ${cleanSynonymName} IS '${cleanComment}';`);
-    }
-
-    return ddlLines.join('\n');
+    return buildNetezzaSynonymDdl(database, schema, synonymName, {
+        schema,
+        synonymName,
+        referenceObjectName: refObjName,
+        owner,
+        description,
+    });
 }
 
 /**

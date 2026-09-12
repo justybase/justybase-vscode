@@ -5,7 +5,10 @@ import type {
 import {
   buildReconstructedTableDdl,
   buildReconstructedViewDdl,
+  buildNetezzaExternalTableDdl,
+  buildNetezzaProcedureDdl,
   buildNetezzaTableDdl,
+  buildNetezzaSynonymDdl,
   buildNetezzaViewDdl,
 } from '@justybase/designer-core';
 import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
@@ -98,6 +101,88 @@ export async function getSchemaObjectDdlResponse(
           request.schema,
           request.objectName,
           definition,
+        ),
+        objectInfo,
+        ddlFidelity: 'exact',
+      };
+    }
+
+    if (objectType === 'PROCEDURE') {
+      if (!runtime.getProcedureDdlMetadata) {
+        throw new SchemaDdlUnavailableError(`Exact DDL for PROCEDURE is not available for ${profile.dbType}.`);
+      }
+      const procedure = await runtime.getProcedureDdlMetadata(
+        profile,
+        request.database,
+        request.schema,
+        request.objectName,
+      );
+      if (!procedure.procedureName.trim() || !procedure.returns.trim() || !procedure.procedureSource.trim()) {
+        throw new SchemaDdlUnavailableError(
+          `The catalog did not return a complete procedure definition for ${request.database}.${request.schema}.${request.objectName}.`,
+        );
+      }
+      return {
+        success: true,
+        ddlCode: buildNetezzaProcedureDdl(request.database, request.schema, procedure),
+        objectInfo,
+        ddlFidelity: 'exact',
+      };
+    }
+
+    if (objectType === 'EXTERNAL TABLE') {
+      if (!runtime.getExternalTableDdlMetadata) {
+        throw new SchemaDdlUnavailableError(`Exact DDL for EXTERNAL TABLE is not available for ${profile.dbType}.`);
+      }
+      const metadata = await runtime.getExternalTableDdlMetadata(
+        profile,
+        request.database,
+        request.schema,
+        request.objectName,
+      );
+      if (metadata.metadataComplete === false
+        || metadata.columns.length === 0
+        || metadata.columns.some(column => !column.fullTypeName.trim())) {
+        throw new SchemaDdlUnavailableError(
+          `The catalog did not return complete external-table metadata for ${request.database}.${request.schema}.${request.objectName}.`,
+        );
+      }
+      return {
+        success: true,
+        ddlCode: buildNetezzaExternalTableDdl(
+          request.database,
+          request.schema,
+          request.objectName,
+          metadata.info,
+          metadata.columns,
+        ),
+        objectInfo,
+        ddlFidelity: 'exact',
+      };
+    }
+
+    if (objectType === 'SYNONYM') {
+      if (!runtime.getSynonymDdlMetadata) {
+        throw new SchemaDdlUnavailableError(`Exact DDL for SYNONYM is not available for ${profile.dbType}.`);
+      }
+      const synonym = await runtime.getSynonymDdlMetadata(
+        profile,
+        request.database,
+        request.schema,
+        request.objectName,
+      );
+      if (!synonym.referenceObjectName.trim()) {
+        throw new SchemaDdlUnavailableError(
+          `The catalog did not return a target for synonym ${request.database}.${request.schema}.${request.objectName}.`,
+        );
+      }
+      return {
+        success: true,
+        ddlCode: buildNetezzaSynonymDdl(
+          request.database,
+          request.schema,
+          request.objectName,
+          synonym,
         ),
         objectInfo,
         ddlFidelity: 'exact',

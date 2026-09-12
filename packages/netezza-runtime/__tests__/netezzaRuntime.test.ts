@@ -260,4 +260,82 @@ describe('Netezza runtime boundary', () => {
     expect(factoryCalls).toEqual([{ database: 'MYDB' }]);
     await runtime.closeAll();
   });
+
+  it('loads and normalizes procedure metadata for the shared DDL formatter', async () => {
+    const factoryCalls: Array<{ database: string }> = [];
+    const runtime = new NetezzaRuntime({
+      connectionFactory: jest.fn(async (details: { database: string }) => {
+        factoryCalls.push({ database: details.database });
+        return connectionForMetadata(sql => {
+          expect(sql).toContain('MYDB.._V_PROCEDURE');
+          return {
+            columns: ['SCHEMA', 'PROCEDURESOURCE', 'OBJID', 'RETURNS', 'EXECUTEDASOWNER', 'DESCRIPTION', 'PROCEDURESIGNATURE', 'PROCEDURE', 'ARGUMENTS'],
+            rows: [['ADMIN', 'BEGIN RETURN 1; END;', '7', 'CHARACTER VARYING', 'f', "Owner's proc", 'P_USERS()', 'P_USERS', '()']],
+          };
+        });
+      }),
+    });
+
+    await expect(runtime.getProcedureDdlMetadata(
+      { connectionId: 'procedure', details: { host: 'host', port: 5480, database: 'SYSTEM', user: 'user', password: 'secret' } },
+      'MYDB', 'ADMIN', 'P_USERS()',
+    )).resolves.toEqual({
+      schema: 'ADMIN', procedureSource: 'BEGIN RETURN 1; END;', objId: 7,
+      returns: 'CHARACTER VARYING(ANY)', executeAsOwner: false, description: "Owner's proc",
+      procedureSignature: 'P_USERS()', procedureName: 'P_USERS', arguments: '()',
+    });
+    expect(factoryCalls).toEqual([{ database: 'MYDB' }]);
+    await runtime.closeAll();
+  });
+
+  it('loads external options and typed columns without dropping zero values', async () => {
+    const runtime = new NetezzaRuntime({
+      connectionFactory: jest.fn(async () => connectionForMetadata(sql => {
+        if (sql.includes('C.ATTNAME')) {
+          return {
+            columns: ['ATTNAME', 'DESCRIPTION', 'FORMAT_TYPE', 'ATTNOTNULL', 'COLDEFAULT'],
+            rows: [['ID', null, 'INTEGER', 't', null]],
+          };
+        }
+        return {
+          columns: Array.from({ length: 36 }, (_, index) => `FIELD_${index}`),
+          rows: [['ADMIN', 'EXT_USERS', '/tmp/users.csv', '|', 'INTERNAL', null, 'LOCAL', '0', '0', null, null, null, null, null, 'f', 'f', 'f', 'f', 'f', '1970', 'f', 'f', 'f', 'f', null, null, null, '1_0', 'TEXT', '0', '\n', '0', 'f', '1024', null, null]],
+        };
+      })),
+    });
+
+    await expect(runtime.getExternalTableDdlMetadata(
+      { connectionId: 'external', details: { host: 'host', port: 5480, database: 'SYSTEM', user: 'user', password: 'secret' } },
+      'MYDB', 'ADMIN', 'EXT_USERS',
+    )).resolves.toEqual(expect.objectContaining({
+      info: expect.objectContaining({ skipRows: 0, maxErrors: 0, y2Base: 1970, socketBufSize: 0, maxRows: 0, recordDelim: '\\n' }),
+      columns: [{ name: 'ID', description: null, fullTypeName: 'INTEGER', notNull: true, defaultValue: null }],
+      metadataComplete: true,
+    }));
+    await runtime.closeAll();
+  });
+
+  it('resolves an unqualified synonym target in its own database', async () => {
+    const runtime = new NetezzaRuntime({
+      connectionFactory: jest.fn(async () => connectionForMetadata(sql => {
+        if (sql.includes('_V_SYNONYM')) {
+          return {
+            columns: ['SCHEMA', 'OWNER', 'SYNONYM_NAME', 'REFOBJNAME', 'DESCRIPTION'],
+            rows: [['ADMIN', 'ADMIN', 'S_USERS', 'USERS', null]],
+          };
+        }
+        expect(sql).toContain('_V_OBJECT_DATA');
+        return { columns: ['DBNAME', 'SCHEMA', 'OBJNAME'], rows: [['MYDB', 'ADMIN', 'USERS']] };
+      })),
+    });
+
+    await expect(runtime.getSynonymDdlMetadata(
+      { connectionId: 'synonym', details: { host: 'host', port: 5480, database: 'SYSTEM', user: 'user', password: 'secret' } },
+      'MYDB', 'ADMIN', 'S_USERS',
+    )).resolves.toEqual({
+      schema: 'ADMIN', owner: 'ADMIN', synonymName: 'S_USERS',
+      referenceObjectName: 'MYDB.ADMIN.USERS', description: null,
+    });
+    await runtime.closeAll();
+  });
 });

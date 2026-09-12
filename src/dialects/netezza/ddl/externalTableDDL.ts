@@ -2,8 +2,9 @@
  * DDL Generator - External Table DDL Generation
  */
 
+import { buildNetezzaExternalTableDdl } from '@justybase/designer-core';
 import type { ExternalTableInfo } from './types';
-import { executeQueryHelper, quoteNameIfNeeded } from './helpers';
+import { executeQueryHelper } from './helpers';
 import { getExternalColumns } from './metadata';
 import type { NzConnection } from '../../../types';
 
@@ -17,132 +18,7 @@ export function buildExternalTableDDLFromCache(
     extInfo: ExternalTableInfo,
     columns: ColumnInfo[]
 ): string {
-    const cleanDatabase = quoteNameIfNeeded(database);
-    const cleanSchema = quoteNameIfNeeded(schema);
-    const cleanTableName = quoteNameIfNeeded(tableName);
-
-    const ddlLines: string[] = [];
-    ddlLines.push(`CREATE EXTERNAL TABLE ${cleanDatabase}.${cleanSchema}.${cleanTableName}`);
-    ddlLines.push('(');
-
-    // Add columns
-    const columnDefs = columns.map(col => {
-        let def = `    ${quoteNameIfNeeded(col.name)} ${col.fullTypeName}`;
-        if (col.notNull) {
-            def += ' NOT NULL';
-        }
-        return def;
-    });
-    ddlLines.push(columnDefs.join(',\n'));
-    ddlLines.push(')');
-
-    ddlLines.push('USING');
-    ddlLines.push('(');
-
-    // Add external table options
-    if (extInfo.dataObject !== null) {
-        ddlLines.push(`    DATAOBJECT('${extInfo.dataObject}')`);
-    }
-    if (extInfo.delimiter !== null) {
-        ddlLines.push(`    DELIMITER '${extInfo.delimiter}'`);
-    }
-    if (extInfo.encoding !== null) {
-        ddlLines.push(`    ENCODING '${extInfo.encoding}'`);
-    }
-    if (extInfo.timeStyle !== null) {
-        ddlLines.push(`    TIMESTYLE '${extInfo.timeStyle}'`);
-    }
-    if (extInfo.remoteSource !== null) {
-        ddlLines.push(`    REMOTESOURCE '${extInfo.remoteSource}'`);
-    }
-    if (extInfo.maxErrors !== null) {
-        ddlLines.push(`    MAXERRORS ${extInfo.maxErrors}`);
-    }
-    if (extInfo.escapeChar !== null) {
-        ddlLines.push(`    ESCAPECHAR '${extInfo.escapeChar}'`);
-    }
-    if (extInfo.decimalDelim !== null) {
-        ddlLines.push(`    DECIMALDELIM '${extInfo.decimalDelim}'`);
-    }
-    if (extInfo.logDir !== null) {
-        ddlLines.push(`    LOGDIR '${extInfo.logDir}'`);
-    }
-    if (extInfo.quotedValue !== null) {
-        ddlLines.push(`    QUOTEDVALUE '${extInfo.quotedValue}'`);
-    }
-    if (extInfo.nullValue !== null) {
-        ddlLines.push(`    NULLVALUE '${extInfo.nullValue}'`);
-    }
-    if (extInfo.crInString !== null) {
-        ddlLines.push(`    CRINSTRING ${extInfo.crInString}`);
-    }
-    if (extInfo.truncString !== null) {
-        ddlLines.push(`    TRUNCSTRING ${extInfo.truncString}`);
-    }
-    if (extInfo.ctrlChars !== null) {
-        ddlLines.push(`    CTRLCHARS ${extInfo.ctrlChars}`);
-    }
-    if (extInfo.ignoreZero !== null) {
-        ddlLines.push(`    IGNOREZERO ${extInfo.ignoreZero}`);
-    }
-    if (extInfo.timeExtraZeros !== null) {
-        ddlLines.push(`    TIMEEXTRAZEROS ${extInfo.timeExtraZeros}`);
-    }
-    if (extInfo.y2Base !== null) {
-        ddlLines.push(`    Y2BASE ${extInfo.y2Base}`);
-    }
-    if (extInfo.fillRecord !== null) {
-        ddlLines.push(`    FILLRECORD ${extInfo.fillRecord}`);
-    }
-    if (extInfo.compress !== null) {
-        ddlLines.push(`    COMPRESS ${extInfo.compress}`);
-    }
-    if (extInfo.includeHeader !== null) {
-        ddlLines.push(`    INCLUDEHEADER ${extInfo.includeHeader}`);
-    }
-    if (extInfo.lfInString !== null) {
-        ddlLines.push(`    LFINSTRING ${extInfo.lfInString}`);
-    }
-    if (extInfo.dateStyle !== null) {
-        ddlLines.push(`    DATESTYLE '${extInfo.dateStyle}'`);
-    }
-    if (extInfo.dateDelim !== null) {
-        ddlLines.push(`    DATEDELIM '${extInfo.dateDelim}'`);
-    }
-    if (extInfo.timeDelim !== null) {
-        ddlLines.push(`    TIMEDELIM '${extInfo.timeDelim}'`);
-    }
-    if (extInfo.boolStyle !== null) {
-        ddlLines.push(`    BOOLSTYLE '${extInfo.boolStyle}'`);
-    }
-    if (extInfo.format !== null) {
-        ddlLines.push(`    FORMAT '${extInfo.format}'`);
-    }
-    if (extInfo.socketBufSize !== null) {
-        ddlLines.push(`    SOCKETBUFSIZE ${extInfo.socketBufSize}`);
-    }
-    if (extInfo.recordDelim !== null) {
-        ddlLines.push(`    RECORDDELIM '${extInfo.recordDelim}'`);
-    }
-    if (extInfo.maxRows !== null) {
-        ddlLines.push(`    MAXROWS ${extInfo.maxRows}`);
-    }
-    if (extInfo.requireQuotes !== null) {
-        ddlLines.push(`    REQUIREQUOTES ${extInfo.requireQuotes}`);
-    }
-    if (extInfo.recordLength !== null) {
-        ddlLines.push(`    RECORDLENGTH ${extInfo.recordLength}`);
-    }
-    if (extInfo.dateTimeDelim !== null) {
-        ddlLines.push(`    DATETIMEDELIM '${extInfo.dateTimeDelim}'`);
-    }
-    if (extInfo.rejectFile !== null) {
-        ddlLines.push(`    REJECTFILE '${extInfo.rejectFile}'`);
-    }
-
-    ddlLines.push(');');
-
-    return ddlLines.join('\n');
+    return buildNetezzaExternalTableDdl(database, schema, tableName, extInfo, columns);
 }
 
 import type { ColumnInfo } from './types';
