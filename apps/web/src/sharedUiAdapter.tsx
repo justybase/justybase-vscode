@@ -48,6 +48,7 @@ import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
 import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
 import { createWorkspaceStorage, migrateLegacyWorkspace, readLegacyWorkspaceValue, type WorkspaceStorage } from './workspacePersistence';
+import { readSharedResultView, writeSharedResultView } from './sharedResultViewPersistence';
 import { readSharedSchemaShortcuts, rememberSharedSchemaObject, sharedSchemaObjectIdentity, toggleSharedSchemaFavorite, writeSharedSchemaShortcuts } from './sharedSchemaPersistence';
 import { ConnectionForm } from './workspacePanels';
 
@@ -270,6 +271,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const schemaLoadedParentsRef = useRef(new Set<string>());
   const schemaLoadingParentsRef = useRef(new Set<string>());
   const schemaGenerationRef = useRef(0);
+  const restoredResultViewsRef = useRef(new Set<string>());
+  const pendingResultViewWritesRef = useRef(new Map<string, { readonly timer: ReturnType<typeof setTimeout>; readonly write: () => void }>());
   const selectedConnectionId = state.connections.selectedConnectionId;
   const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
@@ -281,6 +284,26 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const activeRows = activeResult ? rowsByResult[activeResult.resultSetId] ?? [] : [];
   const visibleRows = displayRows(activeResult, activeRows);
   const visibleSchema = visibleSchemaNodes(schemaNodes, state.metadata.expandedNodeIds);
+
+  const flushResultViewWrites = useCallback((): void => {
+    for (const [key, pending] of pendingResultViewWritesRef.current) {
+      clearTimeout(pending.timer);
+      pending.write();
+      pendingResultViewWritesRef.current.delete(key);
+    }
+  }, []);
+
+  const scheduleResultViewWrite = useCallback((result: UiResultSurfaceState, view: UiResultSurfaceState['view']): void => {
+    const key = `${result.sourceId}\u0000${result.resultSetId}`;
+    const previous = pendingResultViewWritesRef.current.get(key);
+    if (previous) clearTimeout(previous.timer);
+    const write = (): void => writeSharedResultView(workspaceStorage, user.id, result, view);
+    const timer = setTimeout(() => {
+      write();
+      pendingResultViewWritesRef.current.delete(key);
+    }, 180);
+    pendingResultViewWritesRef.current.set(key, { timer, write });
+  }, [user.id, workspaceStorage]);
 
   const reloadConnections = useCallback(async (preferredId?: string): Promise<void> => {
     store.dispatch({ type: 'connections/status', status: 'loading' });
@@ -337,6 +360,28 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   useEffect(() => {
     migrateLegacyWorkspace(workspaceStorage);
   }, [workspaceStorage]);
+
+  useEffect(() => {
+    if (!activeResult) return;
+    const resultKey = `${activeResult.sourceId}\u0000${activeResult.resultSetId}`;
+    if (restoredResultViewsRef.current.has(resultKey)) return;
+    restoredResultViewsRef.current.add(resultKey);
+    const queryId = queryByResultRef.current.get(activeResult.resultSetId);
+    const restored = readSharedResultView(workspaceStorage, user.id, activeResult, queryId, activeResult.statementIndex);
+    if (!restored) return;
+    store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch: restored.view });
+    if (restored.migratedFromLegacy) scheduleResultViewWrite(activeResult, restored.view);
+  }, [activeResult?.resultSetId, activeResult?.sourceId, activeResult?.statementIndex, scheduleResultViewWrite, store, user.id, workspaceStorage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const flush = (): void => flushResultViewWrites();
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flushResultViewWrites();
+    };
+  }, [flushResultViewWrites]);
 
   useEffect(() => {
     if (!selectedConnectionId) {
@@ -869,8 +914,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [store]);
 
   const updateResultView = useCallback((patch: Partial<UiResultSurfaceState['view']>): void => {
-    if (activeResult) store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
-  }, [activeResult, store]);
+    if (!activeResult) return;
+    const nextView = { ...activeResult.view, ...patch };
+    store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
+    scheduleResultViewWrite(activeResult, nextView);
+  }, [activeResult, scheduleResultViewWrite, store]);
 
   const onScroll = useCallback((position: GridScrollPosition): void => {
     updateResultView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
