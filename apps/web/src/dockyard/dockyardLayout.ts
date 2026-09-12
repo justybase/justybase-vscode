@@ -103,7 +103,14 @@ export function saveDockyardLayout(storage: WorkspaceStorage, snapshot: LayoutSn
  * overwrite the bad value after the next user layout change.
  */
 export function loadDockyardLayout(storage: WorkspaceStorage): LayoutSnapshot | undefined {
-  const raw = storage.get(DOCKYARD_LAYOUT_STORAGE_KEY);
+  let raw: string | null;
+  try {
+    raw = storage.get(DOCKYARD_LAYOUT_STORAGE_KEY);
+  } catch {
+    // Storage is an optional browser capability. A read failure must not
+    // prevent the workspace from creating its safe in-memory layout.
+    return undefined;
+  }
   if (!raw) return undefined;
   try {
     const decoded = decodePersistenceEnvelope<DockyardLayoutPayload>(raw, {

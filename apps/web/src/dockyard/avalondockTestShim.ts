@@ -153,6 +153,8 @@ export type LayoutElement = TestElement;
 
 interface ManagerOptions {
   Layout?: LayoutRoot;
+  DocumentContextMenu?: unknown;
+  AnchorableContextMenu?: unknown;
 }
 
 export class DockingManager {
@@ -161,11 +163,15 @@ export class DockingManager {
   public readonly DocumentClosed = new TestEvent<{ Document: LayoutDocument }>();
   public readonly LayoutUpdated = new TestEvent<Record<string, never>>();
   public readonly Error = new TestEvent<{ Error: Error }>();
+  public DocumentContextMenu: unknown;
+  public AnchorableContextMenu: unknown;
   public Layout: LayoutRoot;
   public readonly Host: HTMLElement | null;
   public constructor(host: HTMLElement, options: ManagerOptions = {}) {
     this.Host = host;
     this.Layout = options.Layout ?? new LayoutRoot({ RootPanel: new LayoutPanel({ Children: [new LayoutDocumentPane()] }) });
+    this.DocumentContextMenu = options.DocumentContextMenu ?? null;
+    this.AnchorableContextMenu = options.AnchorableContextMenu ?? null;
   }
   public BeginUpdate(): { Dispose(): void } { return { Dispose: () => undefined }; }
   public Find(contentId: string): LayoutContent | null { return contents(this.Layout).find(item => item.ContentId === contentId) ?? null; }

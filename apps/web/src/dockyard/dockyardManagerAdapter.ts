@@ -17,7 +17,7 @@ import {
   LayoutRoot,
   contents,
 } from 'avalondock-web';
-import type { LayoutSnapshot } from 'avalondock-web';
+import type { LayoutSnapshot, MenuEntry } from 'avalondock-web';
 import type { WorkspaceStorage } from '../workspacePersistence';
 import {
   loadDockyardLayout,
@@ -194,6 +194,18 @@ function errorValue(reason: unknown): Error {
 }
 
 /**
+ * Browser windows are outside the web workspace lifecycle and bypass the
+ * in-page Dockyard recovery/teardown contract. Keep the upstream context
+ * menu useful while removing only that unsupported action.
+ */
+export function filterDockyardContextMenu(_model: LayoutContent, _manager: DockingManager, defaults: (MenuEntry | null)[]): (MenuEntry | null)[] {
+  return defaults.filter(entry => {
+    const label = entry?.Label ?? entry?.label;
+    return label !== 'Open in browser window';
+  });
+}
+
+/**
  * DOM/React boundary for the vendored Dockyard model. ui-core owns portable
  * state and persistence rules; this adapter owns only Dockyard models,
  * content hosts, browser listeners, and layout serialization.
@@ -217,27 +229,43 @@ export class DockyardManagerAdapter {
     this.explorerWidth = Number.isFinite(options.explorerWidth) ? options.explorerWidth : 250;
     this.rightWidth = options.rightWidth ?? 320;
     this.replaceDefinitions(options.definitions);
-    this.manager = new DockingManager(options.host, {
+    const manager = new DockingManager(options.host, {
       Layout: createDefaultDockyardLayout(options.definitions, this.explorerWidth, this.rightWidth),
       Theme: 'dark',
       AllowMixedOrientation: true,
       EnableHistory: true,
       AutoSave: false,
       RestoreOnLoad: false,
+      DocumentContextMenu: filterDockyardContextMenu,
+      AnchorableContextMenu: filterDockyardContextMenu,
     });
-    this.subscribeToManager();
-    const saved = loadDockyardLayout(this.storage);
-    if (saved) {
-      try {
-        this.manager.LoadLayout(normalizeDockyardSnapshot(saved));
-      } catch {
-        // Persisted layout is user data. A stale/corrupt snapshot must not
-        // prevent the workspace from opening; discard it and retain the safe
-        // layout supplied to the manager constructor.
-        resetDockyardLayout(this.storage);
+    this.manager = manager;
+    try {
+      this.subscribeToManager();
+      const saved = loadDockyardLayout(this.storage);
+      if (saved) {
+        try {
+          this.manager.LoadLayout(normalizeDockyardSnapshot(saved));
+        } catch {
+          // Persisted layout is user data. A stale/corrupt snapshot must not
+          // prevent the workspace from opening; discard it and retain the safe
+          // layout supplied to the manager constructor.
+          try {
+            resetDockyardLayout(this.storage);
+          } catch {
+            // Storage is optional. The in-memory safe layout is still usable.
+          }
+        }
       }
+      this.syncDefinitions(options.definitions);
+    } catch (reason: unknown) {
+      for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
+      manager.Dispose();
+      this.models.clear();
+      this.hosts.clear();
+      this.definitions.clear();
+      throw reason;
     }
-    this.syncDefinitions(options.definitions);
   }
 
   public setCallbacks(callbacks: DockyardManagerCallbacks): void {
