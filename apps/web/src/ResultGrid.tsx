@@ -4,21 +4,14 @@ import { getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterSpec, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
 import type { UiResultViewState } from '@justybase/ui-core';
-import { DataGrid, createDataGridClipboardPayload, formatDataGridCellValue, formatDataGridClipboard, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
-import type { DataGridCellMetadata, DataGridCopyPayload, GridScrollPosition } from '@justybase/ui-react';
+import { CellValueViewer, DataGrid, createDataGridClipboardPayload, formatDataGridCellValue, formatDataGridClipboard, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
+import type { DataGridCellContext, DataGridCellMetadata, DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition } from '@justybase/ui-react';
 import { aggregateResultRows, filterResultRows, type ResultColumn, type ResultColumnFilter } from '@justybase/result-core';
 import { useApiClient } from './api';
 import { readLegacyWorkspaceValue, useWorkspaceStorage, type WorkspaceStorage } from './workspacePersistence';
 import { type ResultState } from './queryState';
 
 interface GridRow { values: readonly unknown[]; }
-
-interface GridContextMenuState {
-  x: number;
-  y: number;
-  rowIndex: number;
-  columnIndex: number;
-}
 
 interface SavedGridState {
   pageSize?: number;
@@ -139,8 +132,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [exporting, setExporting] = useState(false);
   const [columnOrder, setColumnOrder] = useState<string[]>(() => result.columns.map((_, i) => String(i)));
-  const [contextMenu, setContextMenu] = useState<GridContextMenuState | null>(null);
   const [detailRowIndex, setDetailRowIndex] = useState<number | null>(null);
+  const [cellViewer, setCellViewer] = useState<{ readonly column: ResultGridColumnMetadata; readonly value: unknown; readonly rowNumber: number } | undefined>(undefined);
   const [showAggregates, setShowAggregates] = useState(false);
   const [aggregates, setAggregates] = useState<QueryAggregateResponse | null>(null);
   const [aggregatesLoading, setAggregatesLoading] = useState(false);
@@ -191,8 +184,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setRowSelection({});
     setError('');
     setAggregates(null);
-    setContextMenu(null);
     setDetailRowIndex(null);
+    setCellViewer(undefined);
     setShowAggregates(false);
     setGridHydratedKey(null);
     const saved = readGridState(storage, gridKey, resultSetId)
@@ -493,96 +486,61 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     updateSharedGridView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
   }
 
-  useEffect(() => {
-    const closeMenu = (): void => setContextMenu(null);
-    const handleKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') setContextMenu(null); };
-    document.addEventListener('click', closeMenu);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => { document.removeEventListener('click', closeMenu); document.removeEventListener('keydown', handleKeyDown); };
-  }, []);
-
-  function copyText(text: string): void {
-    const writeText = navigator.clipboard?.writeText;
-    if (!writeText) {
+  async function copyGridPayload(payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): Promise<void> {
+    const options = { includeHeaders: payload.includeHeaders ?? true };
+    const formatted = createDataGridClipboardPayload(payload, options);
+    const plainText = formatDataGridClipboard(payload, format, options);
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
       setError('Clipboard access is unavailable');
       return;
     }
-    void writeText.call(navigator.clipboard, text).catch(() => setError('Failed to copy to clipboard'));
-  }
-
-  async function copyGridPayload(payload: DataGridCopyPayload, plainFormat: 'text' | 'markdown' | 'json' | 'sql' = 'text'): Promise<void> {
-    const formatted = createDataGridClipboardPayload(payload);
-    const plainText = formatDataGridClipboard(payload, plainFormat);
-    if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard?.write === 'function') {
-      try {
+    try {
+      if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
         await navigator.clipboard.write([new ClipboardItem({
           'text/html': new Blob([formatted.html], { type: 'text/html' }),
           'text/plain': new Blob([plainText], { type: 'text/plain' }),
         })]);
+      } else if (typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(plainText);
+      } else {
+        setError('Clipboard access is unavailable');
         return;
+      }
+      setNotice('Copied.');
+    } catch {
+      try {
+        await navigator.clipboard.writeText(plainText);
+        setNotice('Copied.');
       } catch {
-        // Fall back to plain text for browsers that expose write() but reject
-        // HTML clipboard items in the current permission context.
+        setError('Failed to copy to clipboard');
       }
     }
-    copyText(plainText);
   }
 
-  function copyGridSelection(payload: DataGridCopyPayload): void {
-    void copyGridPayload(payload);
-    setNotice('Selection copied.');
+  function copyGridSelection(payload: DataGridCopyPayload, format?: DataGridClipboardFormat): void {
+    void copyGridPayload(payload, format);
   }
 
-  function contextRow(): GridRow | undefined {
-    const values = contextMenu ? gridRows[contextMenu.rowIndex] : undefined;
-    return values === undefined ? undefined : { values: [...values] };
+  function openCellValue(context: DataGridCellContext): void {
+    const column = gridColumns[context.columnIndex];
+    const row = gridRows[context.rowIndex];
+    if (!column || !row) return;
+    setCellViewer({
+      column,
+      value: row[context.columnIndex],
+      rowNumber: (result.sessionId ? pageIndex * pageSize : 0) + context.rowIndex + 1,
+    });
   }
 
-  function copyContext(format: 'value' | 'tsv' | 'json' | 'markdown' | 'sql'): void {
-    if (!contextMenu) return;
-    const row = contextRow();
-    if (!row) return;
-    const value = row.values[contextMenu.columnIndex];
-    if (format === 'value') copyText(formatCellValue(value, gridColumns[contextMenu.columnIndex]).text);
-    else void copyGridPayload({ columns: gridColumns, rows: [row.values] }, format === 'tsv' ? 'text' : format);
-    setContextMenu(null);
-  }
-
-  function filterByContextValue(): void {
-    if (!contextMenu) return;
-    const row = contextRow();
-    if (!row) return;
-    const id = String(contextMenu.columnIndex);
-    const value = row.values[contextMenu.columnIndex];
-    setColumnFilters([...columnFilters.filter(item => item.id !== id), { id, value: value === null || value === undefined ? '' : String(value) }]);
-    setPageIndex(0);
-    setContextMenu(null);
-  }
-
-  function sortByContextValue(desc: boolean): void {
-    if (!contextMenu) return;
-    setSorting([{ id: String(contextMenu.columnIndex), desc }]);
-    setPageIndex(0);
-    setContextMenu(null);
+  function copyCellValue(): void {
+    const item = cellViewer;
+    if (!item) return;
+    void copyGridPayload({ columns: [item.column], rows: [[item.value]], includeHeaders: false });
   }
 
   function copySelection(): void {
     const selected = selectedRows.length > 0 ? selectedRows : table.getRowModel().rows;
-    const headerRow = result.columns.map(col => col).join('\t');
-    const dataRows = selected.map(row =>
-      row.original.values.map((value, i) => formatCellValue(value, gridColumns[i]).text).join('\t')
-    );
-    const text = [headerRow, ...dataRows].join('\n');
-    const writeText = navigator.clipboard?.writeText;
-    if (!writeText) {
-      setError('Clipboard access is unavailable');
-      return;
-    }
-    void writeText.call(navigator.clipboard, text).then(() => {
-      // Show brief inline feedback
-      const btn = document.querySelector('.copy-btn');
-      if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1200); }
-    }).catch(() => setError('Failed to copy to clipboard'));
+    void copyGridPayload({ columns: gridColumns, rows: selected.map(row => row.original.values) });
   }
 
   async function exportResult(): Promise<void> {
@@ -613,8 +571,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     </div>
     {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
     {(grouped || pivot) && groupedGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">{pivot ? 'Pivot view' : `Grouped view · ${grouped?.totalGroups.toLocaleString() ?? 0} groups`}<button type="button" className="secondary small" onClick={() => { setGrouped(null); setPivot(null); }}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:${pivot ? 'pivot' : 'grouped'}`} columns={groupedGrid.columns} rows={groupedGrid.rows} totalRowCount={groupedGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} /></div></div>}
-    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} showContextMenu={false} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow }} onScroll={handleGridScroll} onCopySelection={copyGridSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onContextMenu={context => setContextMenu({ x: context.clientX, y: context.clientY, rowIndex: context.rowIndex, columnIndex: context.columnIndex })} />
-    {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button type="button" onClick={() => copyContext('value')}>Copy value</button><button type="button" onClick={() => copyContext('tsv')}>Copy row as TSV</button><button type="button" onClick={() => copyContext('json')}>Copy row as JSON</button><button type="button" onClick={() => copyContext('markdown')}>Copy row as Markdown</button><button type="button" onClick={() => copyContext('sql')}>Copy SQL INSERT</button><hr /><button type="button" onClick={filterByContextValue}>Filter by this value</button><button type="button" onClick={() => sortByContextValue(false)}>Sort ascending</button><button type="button" onClick={() => sortByContextValue(true)}>Sort descending</button><hr /><button type="button" onClick={() => { setDetailRowIndex(contextMenu.rowIndex); setContextMenu(null); }}>View full row</button>{onEditRow && <button type="button" onClick={() => { const row = contextRow(); if (row) onEditRow([...row.values]); setContextMenu(null); }}>Edit row…</button>}</div>}
+    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} showContextMenu onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow }} onScroll={handleGridScroll} onCopySelection={copyGridSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onViewRow={context => setDetailRowIndex(context.rowIndex)} onViewCell={openCellValue} onEditRow={onEditRow ? context => { const row = gridRows[context.rowIndex]; if (row) onEditRow([...row]); } : undefined} />
+    {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}
     {detailRowIndex !== null && gridRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{gridRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, gridColumns[index]).text}</dd></div>)}</dl></aside>}
     <div className="grid-pagination"><span>{effectiveTotalRows.toLocaleString()} rows · page {pageIndex + 1} / {totalPages}</span><label>Page size<select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageIndex(0); }}><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option></select></label><button className="secondary small" disabled={pageIndex === 0 || loading} onClick={() => setPageIndex(value => value - 1)}>Previous</button><button className="secondary small" disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex(value => value + 1)}>Next</button></div>
   </section>;
