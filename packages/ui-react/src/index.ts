@@ -1,6 +1,6 @@
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
-export { formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumnIndexes, resolveDataGridColumns } from './dataGrid';
+export { calculateDataGridVirtualWindow, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumnIndexes, resolveDataGridColumns } from './dataGrid';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,
@@ -43,6 +43,7 @@ export type {
   EditorSurfaceProps,
   ExplainViewProps,
   GridScrollPosition,
+  DataGridVirtualWindow,
   HistoryViewEntry,
   HistoryViewProps,
   ResultTabsProps,

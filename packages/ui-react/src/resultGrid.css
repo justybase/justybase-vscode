@@ -115,6 +115,15 @@ body,
   white-space: nowrap;
 }
 
+.ui-data-grid tr.ui-data-grid-virtual-spacer td {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
 .ui-data-grid tr.ui-data-grid-row-even td,
 .ui-data-grid tr.ui-data-grid-row-even th[scope='row'] {
   background: var(--justybase-grid-bg);
