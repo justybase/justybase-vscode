@@ -43,7 +43,13 @@ jest.mock('../src/main/startup', () => {
 });
 
 describe('Electron main composition root', () => {
-  afterAll(() => rmSync('/tmp/justybase-electron-main-test', { recursive: true, force: true }));
+  const previousFixtureFlag = process.env.JUSTYBASE_ELECTRON_PROVISION_SQLITE;
+  beforeAll(() => { process.env.JUSTYBASE_ELECTRON_PROVISION_SQLITE = '1'; });
+  afterAll(() => {
+    if (previousFixtureFlag === undefined) delete process.env.JUSTYBASE_ELECTRON_PROVISION_SQLITE;
+    else process.env.JUSTYBASE_ELECTRON_PROVISION_SQLITE = previousFixtureFlag;
+    rmSync('/tmp/justybase-electron-main-test', { recursive: true, force: true });
+  });
 
   it('starts an authenticated window and shuts down all main-owned resources once', async () => {
     await import('../src/main/main');
@@ -60,6 +66,7 @@ describe('Electron main composition root', () => {
     const windowInstance = electron.__windows[0];
     expect(windowInstance?.loadURL).toHaveBeenCalledWith('http://127.0.0.1:43123/');
     expect(windowInstance?.show).toHaveBeenCalledTimes(1);
+    expect(startup.startElectronSession).toHaveBeenCalledWith(expect.objectContaining({ provisionSqliteFixture: true }));
     expect(startup.__runtime.applyAuthenticationCookie).toHaveBeenCalledTimes(1);
     expect(electron.ipcMain.handle).toHaveBeenCalledWith('ui:request', expect.any(Function));
 
