@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import {
   AsyncStateView,
+  CellValueViewer,
   CapabilityGate,
   DataGrid,
   DesignerForm,
@@ -96,6 +97,20 @@ describe('shared React presentation', () => {
     render(<RowDetail columns={[{ name: 'DATE', type: 'INTEGER', inferredDateInteger: true }, { name: 'AMOUNT', type: 'NUMERIC', scale: 2 }]} row={[20260315, '1234.5']} onClose={onClose} />);
     expect(screen.getByText('2026 03 15')).toBeInTheDocument();
     expect(screen.getByText('1 234.50')).toBeInTheDocument();
+  });
+
+  it('renders a safe large-value viewer with copy and Escape close actions', async () => {
+    const user = userEvent.setup();
+    const onClose = jest.fn();
+    const onCopy = jest.fn();
+    render(<CellValueViewer column={{ name: 'PAYLOAD', type: 'JSON' }} value={{ nested: true }} rowNumber={7} onClose={onClose} onCopy={onCopy} />);
+    expect(screen.getByRole('dialog', { name: 'Cell Value: PAYLOAD' })).toBeInTheDocument();
+    expect(screen.getByText(/"nested": true/)).toBeInTheDocument();
+    expect(screen.getByText('Type: JSON | Row: 7')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Copy Value' }));
+    expect(onCopy).toHaveBeenCalledTimes(1);
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('infers the same display metadata for untyped result columns', () => {
