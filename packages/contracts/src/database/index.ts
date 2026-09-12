@@ -106,6 +106,17 @@ export const DATABASE_KIND_DISPLAY_NAMES: Readonly<Partial<Record<DatabaseKind, 
   access: 'Microsoft Access',
 };
 
+/** Canonical database choices shared by connection and authoring surfaces. */
+export interface DatabaseKindOption {
+  readonly value: DatabaseKind;
+  readonly label: string;
+}
+
+export const DATABASE_KIND_OPTIONS: readonly DatabaseKindOption[] = SUPPORTED_DATABASE_KINDS.map(kind => ({
+  value: kind,
+  label: DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind,
+}));
+
 export { DatabaseConnection, DatabaseCommand, DatabaseDataReader };
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor };
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue };

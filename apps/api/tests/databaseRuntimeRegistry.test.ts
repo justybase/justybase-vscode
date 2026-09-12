@@ -47,12 +47,21 @@ describe('API database runtime registry', () => {
     ['netezza', 'netezza'],
     ['sqlite', 'sqlite'],
     ['duckdb', 'duckdb'],
-    ['future-database', 'netezza'],
   ] as const)('selects %s profiles through the %s runtime', (dbType, expectedKind) => {
     const runtimes = [runtime('netezza'), runtime('sqlite'), runtime('duckdb')];
     const registry = createApiDatabaseRuntimeRegistry({ masterKey: 'unused', runtimes });
 
     expect(registry.forProfile(profile(dbType))).toBe(runtimes.find(candidate => candidate.kind === expectedKind));
+  });
+
+  it('rejects an authoring-only or unknown profile instead of silently routing it to Netezza', () => {
+    const runtimes = [runtime('netezza'), runtime('sqlite'), runtime('duckdb')];
+    const registry = createApiDatabaseRuntimeRegistry({ masterKey: 'unused', runtimes });
+
+    expect(() => registry.forProfile(profile('postgresql'))).toThrow("No API database runtime is registered for 'postgresql'.");
+    expect(() => registry.forProfile(profile('future-database'))).toThrow("No API database runtime is registered for 'future-database'.");
+    expect(registry.isAvailable(profile('postgresql'))).toBe(false);
+    expect(runtimes[0]?.execute).not.toHaveBeenCalled();
   });
 
   it('delegates execution, metadata, read-only checks, and normalization to the selected runtime', async () => {

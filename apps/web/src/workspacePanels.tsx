@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
+import { DATABASE_KIND_OPTIONS, tryNormalizeDatabaseKind } from '@justybase/contracts';
 import type {
   ConnectionProfileSummary,
   ConnectionProfileUpdate,
+  DatabaseKind,
   EditorPreferences,
   WebUser,
 } from '@justybase/contracts';
@@ -29,13 +31,36 @@ export function Login({ onLogin }: { onLogin(user: WebUser): void }): ReactEleme
   return <main className="auth-shell"><form className="card auth-card" onSubmit={event => void submit(event)}><div className="brand">JustyBase</div><h1>Web database editor</h1><p className="muted">Sign in to your self-hosted workspace.</p><label>Username<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" /></label><label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" /></label>{error && <div className="error">{error}</div>}<button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>{isTestLoginEnabled() && <button type="button" className="secondary test-login-button" disabled={busy} onClick={() => void testLogin()}>Use test login data</button>}</form></main>;
 }
 
-type WebConnectionKind = 'netezza' | 'sqlite' | 'duckdb';
-interface ConnectionFormState { name: string; host: string; port: number; database: string; user: string; password: string; dbType: WebConnectionKind; readOnly: boolean; }
+interface WebConnectionOption {
+  readonly value: DatabaseKind;
+  readonly label: string;
+  readonly runtimeAvailable: boolean;
+}
 
-function webConnectionKind(value: ConnectionProfileSummary['dbType'] | undefined): WebConnectionKind {
-  if (value === 'sqlite') return 'sqlite';
-  if (value === 'duckdb') return 'duckdb';
-  return 'netezza';
+const webDatabaseOptions: readonly WebConnectionOption[] = DATABASE_KIND_OPTIONS.map(option => ({
+  ...option,
+  label: option.value === 'netezza'
+    ? option.label
+    : option.value === 'sqlite' || option.value === 'duckdb'
+      ? `${option.label} · local file`
+      : `${option.label} · authoring ready`,
+  runtimeAvailable: option.value === 'netezza' || option.value === 'sqlite' || option.value === 'duckdb',
+}));
+
+interface ConnectionFormState { name: string; host: string; port: number; database: string; user: string; password: string; dbType: DatabaseKind; readOnly: boolean; }
+
+function webConnectionKind(value: ConnectionProfileSummary['dbType'] | undefined): DatabaseKind {
+  if (typeof value !== 'string' || value.trim().length === 0) return 'netezza';
+  return tryNormalizeDatabaseKind(value) ?? value;
+}
+
+function webConnectionOption(kind: DatabaseKind): WebConnectionOption {
+  return webDatabaseOptions.find(option => option.value === kind)
+    ?? { value: kind, label: `${kind} · runtime unavailable`, runtimeAvailable: false };
+}
+
+function localDatabase(kind: DatabaseKind): boolean {
+  return kind === 'sqlite' || kind === 'duckdb';
 }
 
 export function ConnectionForm({ initial, onCreated, onCancel, api: providedApi }: { initial?: ConnectionProfileSummary; onCreated(connection: ConnectionProfileSummary): void; onCancel(): void; api?: ApiClient }): ReactElement {
@@ -51,6 +76,11 @@ export function ConnectionForm({ initial, onCreated, onCancel, api: providedApi 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault(); setSaving(true); setError('');
     try {
+      const selectedOption = webConnectionOption(form.dbType);
+      if (!selectedOption.runtimeAvailable) {
+        setError('This dialect is ready for SQL authoring, but its Web database runtime is not enabled yet.');
+        return;
+      }
       if (initial) {
         const input: ConnectionProfileUpdate = { ...form, password: form.password || undefined };
         onCreated(await api.updateConnection(initial.id, input));
@@ -62,6 +92,10 @@ export function ConnectionForm({ initial, onCreated, onCancel, api: providedApi 
     } finally { setSaving(false); }
   }
   async function test(): Promise<void> {
+    if (!webConnectionOption(form.dbType).runtimeAvailable) {
+      setError('This dialect is ready for SQL authoring, but its Web database runtime is not enabled yet.');
+      return;
+    }
     setTesting(true); setTestMessage(''); setError('');
     try {
       if (initial && !form.password) {
@@ -74,11 +108,12 @@ export function ConnectionForm({ initial, onCreated, onCancel, api: providedApi 
     catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Connection test failed.'); }
     finally { setTesting(false); }
   }
-  const update = (key: keyof ConnectionFormState, value: string | number | boolean | WebConnectionKind): void => setForm(previous => ({ ...previous, [key]: value }));
-  const local = form.dbType !== 'netezza';
+  const update = (key: keyof ConnectionFormState, value: string | number | boolean | DatabaseKind): void => setForm(previous => ({ ...previous, [key]: value }));
+  const local = localDatabase(form.dbType);
+  const selectedOption = webConnectionOption(form.dbType);
   return <form className="connection-form" onSubmit={event => void submit(event)}>
     <div className="connection-fields">
-      <label htmlFor="connection-type">Database type<select id="connection-type" value={form.dbType} onChange={event => update('dbType', event.target.value as WebConnectionKind)}><option value="netezza">Netezza</option><option value="sqlite">SQLite (local)</option><option value="duckdb">DuckDB (optional)</option></select></label>
+      <label htmlFor="connection-type">Database type<select id="connection-type" value={form.dbType} onChange={event => update('dbType', event.target.value as DatabaseKind)}>{webDatabaseOptions.map(option => <option key={option.value} value={option.value} disabled={!option.runtimeAvailable}>{option.label}</option>)}{!webDatabaseOptions.some(option => option.value === form.dbType) && <option value={form.dbType} disabled>{selectedOption.label}</option>}</select><span className="field-help">{selectedOption.runtimeAvailable ? 'Metadata, execution and Result Grid are available.' : 'SQL authoring profile is available; Web runtime connection is not enabled.'}</span></label>
       <label htmlFor="connection-name">Profile name<input id="connection-name" required value={form.name} onChange={event => update('name', event.target.value)} /></label>
       <label htmlFor="connection-host">Host<input id="connection-host" disabled={local} placeholder={local ? 'Not used for local databases' : undefined} value={form.host} onChange={event => update('host', event.target.value)} /></label>
       <label htmlFor="connection-port">Port<input id="connection-port" type="number" min="1" max="65535" disabled={local} value={form.port} onChange={event => update('port', Number(event.target.value))} /></label>
@@ -89,7 +124,7 @@ export function ConnectionForm({ initial, onCreated, onCancel, api: providedApi 
     <label className="checkbox"><input type="checkbox" checked={form.readOnly} onChange={event => update('readOnly', event.target.checked)} /> Read-only mode <span className="field-help">Recommended for exploration</span></label>
     {error && <div className="error" role="alert">{error}</div>}
     {testMessage && <div className="success-message" role="status">{testMessage} You can now save this profile.</div>}
-    <div className="form-actions connection-actions-row"><button type="submit" disabled={saving}>{saving ? 'Saving…' : initial ? 'Save changes' : 'Add connection'}</button><button type="button" className="secondary" disabled={testing || saving} onClick={() => void test()}>{testing ? 'Testing…' : 'Test connection'}</button><button type="button" className="secondary" disabled={saving} onClick={onCancel}>Cancel</button></div>
+    <div className="form-actions connection-actions-row"><button type="submit" disabled={saving || !selectedOption.runtimeAvailable}>{saving ? 'Saving…' : initial ? 'Save changes' : 'Add connection'}</button><button type="button" className="secondary" disabled={testing || saving || !selectedOption.runtimeAvailable} onClick={() => void test()}>{testing ? 'Testing…' : 'Test connection'}</button><button type="button" className="secondary" disabled={saving} onClick={onCancel}>Cancel</button></div>
   </form>;
 }
 

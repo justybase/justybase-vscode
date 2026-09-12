@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
-import type { ConnectionProfileInput, ConnectionProfileUpdate } from '@justybase/contracts';
+import { tryNormalizeDatabaseKind, type ConnectionProfileInput, type ConnectionProfileUpdate } from '@justybase/contracts';
 import { encryptSecret } from '../security';
 import type { StoredConnection } from '../store';
 
@@ -12,8 +12,21 @@ export interface ConnectionRouteHooks {
   requiredString(value: unknown, field: string): string;
 }
 
-function connectionKind(value: unknown): 'netezza' | 'sqlite' | 'duckdb' {
-  return value === 'sqlite' || value === 'duckdb' ? value : 'netezza';
+type RuntimeConnectionKind = 'netezza' | 'sqlite' | 'duckdb';
+
+function connectionKind(value: unknown): RuntimeConnectionKind {
+  if (value === undefined || value === null || (typeof value === 'string' && value.trim().length === 0)) return 'netezza';
+  if (typeof value !== 'string') throw new Error('Database kind must be a string.');
+  const normalized = tryNormalizeDatabaseKind(value);
+  if (!normalized) throw new Error(`Unsupported database kind '${value}'.`);
+  if (normalized !== 'netezza' && normalized !== 'sqlite' && normalized !== 'duckdb') {
+    throw new Error(`Database runtime for '${normalized}' is not enabled in this Web deployment.`);
+  }
+  return normalized as RuntimeConnectionKind;
+}
+
+function localDatabase(kind: RuntimeConnectionKind): boolean {
+  return kind === 'sqlite' || kind === 'duckdb';
 }
 
 function optionalLocalString(value: unknown, fallback: string): string {
@@ -28,7 +41,7 @@ export function registerConnectionRoutes(app: FastifyInstance, hooks: Connection
     try {
       const body = hooks.bodyObject(request.body);
       const dbType = connectionKind(body.dbType);
-      const local = dbType !== 'netezza';
+      const local = localDatabase(dbType);
       const input: ConnectionProfileInput = {
         name: hooks.requiredString(body.name, 'name'),
         host: local ? optionalLocalString(body.host, 'local') : hooks.requiredString(body.host, 'host'),
@@ -49,7 +62,7 @@ export function registerConnectionRoutes(app: FastifyInstance, hooks: Connection
     try {
       const body = hooks.bodyObject(request.body);
       const dbType = connectionKind(body.dbType);
-      const local = dbType !== 'netezza';
+      const local = localDatabase(dbType);
       const input: ConnectionProfileUpdate = {
         name: hooks.requiredString(body.name, 'name'),
         host: local ? optionalLocalString(body.host, 'local') : hooks.requiredString(body.host, 'host'),
@@ -84,7 +97,7 @@ export function registerConnectionRoutes(app: FastifyInstance, hooks: Connection
     try {
       const body = hooks.bodyObject(request.body);
       const dbType = connectionKind(body.dbType);
-      const local = dbType !== 'netezza';
+      const local = localDatabase(dbType);
       const password = local ? optionalLocalString(body.password, '') : hooks.requiredString(body.password, 'password');
       const encrypted = encryptSecret(password, app.apiConfig.masterKey);
       const profile: StoredConnection = {

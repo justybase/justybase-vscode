@@ -266,6 +266,26 @@ describe('web API authentication and connection profiles', () => {
     expect(deleted.statusCode).toBe(200);
   });
 
+  it('rejects authoring-only database kinds instead of creating a misleading Netezza profile', async () => {
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
+    const rawCookie = login.headers['set-cookie'];
+    const cookies = Array.isArray(rawCookie) ? rawCookie.map(value => value.split(';')[0]) : [String(rawCookie).split(';')[0]];
+    const cookie = cookies.join('; ');
+    const csrf = cookies.find(value => value.startsWith('justybase_csrf='))?.split('=')[1] ?? '';
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/connections',
+      headers: { cookie, 'x-justybase-csrf': csrf },
+      payload: { name: `PostgreSQL authoring ${Date.now()}`, dbType: 'postgresql', host: 'localhost', database: 'app', user: 'app', password: 'secret' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual(expect.objectContaining({
+      code: 'INVALID_CONNECTION',
+      message: "Database runtime for 'postgresql' is not enabled in this Web deployment.",
+    }));
+  });
+
   it('serves web assets and falls back to the SPA entry point', async () => {
     const staticDataDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-api-static-data-'));
     const webDistDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-api-static-web-'));

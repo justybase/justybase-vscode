@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
+import { DATABASE_KIND_OPTIONS } from '@justybase/contracts';
 import type { DatabaseKind, RedactedConnectionProfile, UiConnectionProfileInput } from '@justybase/contracts';
 
 interface ConnectionPanelProps {
@@ -14,16 +15,15 @@ interface DatabaseOption {
   readonly runtimeAvailable: boolean;
 }
 
-const databaseOptions: readonly DatabaseOption[] = [
-  { value: 'netezza', label: 'Netezza', runtimeAvailable: true },
-  { value: 'postgresql', label: 'PostgreSQL · authoring ready', runtimeAvailable: false },
-  { value: 'db2', label: 'Db2 · authoring ready', runtimeAvailable: false },
-  { value: 'clickhouse', label: 'ClickHouse · authoring ready', runtimeAvailable: false },
-  { value: 'oracle', label: 'Oracle · authoring ready', runtimeAvailable: false },
-  { value: 'mssql', label: 'Microsoft SQL Server · authoring ready', runtimeAvailable: false },
-  { value: 'sqlite', label: 'SQLite · local file', runtimeAvailable: true },
-  { value: 'duckdb', label: 'DuckDB · local file', runtimeAvailable: true },
-];
+const databaseOptions: readonly DatabaseOption[] = DATABASE_KIND_OPTIONS.map(option => ({
+  ...option,
+  label: option.value === 'netezza'
+    ? option.label
+    : option.value === 'sqlite' || option.value === 'duckdb'
+      ? `${option.label} · local file`
+      : `${option.label} · authoring ready`,
+  runtimeAvailable: option.value === 'netezza' || option.value === 'sqlite' || option.value === 'duckdb',
+}));
 
 function initialValue(profile: RedactedConnectionProfile | undefined): UiConnectionProfileInput {
   return {

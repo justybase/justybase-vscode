@@ -46,9 +46,14 @@ class DefaultApiDatabaseRuntimeRegistry implements ApiDatabaseRuntimeRegistry {
   }
 
   public forProfile(profile: Pick<StoredConnection, 'dbType'>): ApiDatabaseRuntime {
-    let kind: ApiDatabaseRuntimeKind = 'netezza';
-    if (profile.dbType === 'sqlite') kind = 'sqlite';
-    if (profile.dbType === 'duckdb') kind = 'duckdb';
+    const kind: ApiDatabaseRuntimeKind | undefined = profile.dbType === 'netezza'
+      ? 'netezza'
+      : profile.dbType === 'sqlite'
+        ? 'sqlite'
+        : profile.dbType === 'duckdb'
+          ? 'duckdb'
+          : undefined;
+    if (!kind) throw new Error(`No API database runtime is registered for '${profile.dbType}'.`);
     const runtime = this.byKind.get(kind);
     if (!runtime) throw new Error(`Database runtime ${kind} is not registered.`);
     return runtime;
