@@ -3,8 +3,8 @@ import type { ReactElement } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import type { EditorPreferences, SqlLanguageContext } from '@justybase/contracts';
-import { EditorSurface, disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from '@justybase/ui-react';
-import type { SqlLanguageApi } from '@justybase/ui-react';
+import { EditorSurface, registerSqlLanguageFeatures } from '@justybase/ui-react';
+import type { SqlLanguageApi, SqlLanguageFeatureHandle } from '@justybase/ui-react';
 
 export interface SharedSqlEditorProblem {
   readonly message: string;
@@ -61,19 +61,20 @@ export function SharedSqlEditor({ documentId, value, api, preferences, getContex
   const runRef = useRef(onRun);
   const contextRef = useRef(getContext);
   const preferencesRef = useRef<EditorPreferences | null>(preferences ?? null);
-  const monacoRef = useRef<typeof Monaco | undefined>(undefined);
+  const languageHandleRef = useRef<SqlLanguageFeatureHandle | undefined>(undefined);
   runRef.current = onRun;
   contextRef.current = getContext;
   preferencesRef.current = preferences ?? null;
 
   useEffect(() => () => {
-    if (monacoRef.current) disposeSqlLanguageFeatures(monacoRef.current);
+    languageHandleRef.current?.dispose();
+    languageHandleRef.current = undefined;
   }, []);
 
   const handleMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco): void => {
-    monacoRef.current = monaco;
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => runRef.current());
-    registerSqlLanguageFeatures(editor, monaco, api, () => contextRef.current(), () => preferencesRef.current);
+    languageHandleRef.current?.dispose();
+    languageHandleRef.current = registerSqlLanguageFeatures(editor, monaco, api, () => contextRef.current(), () => preferencesRef.current);
   }, [api]);
 
   const handleValidate = useCallback((markers: Monaco.editor.IMarker[]): void => {

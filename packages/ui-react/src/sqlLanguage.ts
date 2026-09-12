@@ -29,6 +29,18 @@ export interface SqlLanguageApi {
   formatSql(input: SqlFormatRequest): Promise<SqlFormatResponse>;
 }
 
+/**
+ * Owns the SQL language registration for one Monaco model/editor.
+ *
+ * Monaco language providers are host-wide, while an LSP client and its
+ * diagnostics belong to a single document. Product shells must therefore
+ * release one document without tearing down providers for every other open
+ * SQL tab.
+ */
+export interface SqlLanguageFeatureHandle {
+  dispose(): void;
+}
+
 interface RpcMessage { id?: number; method?: string; result?: unknown; error?: { message?: string }; params?: Record<string, unknown>; }
 interface PendingRequest { resolve(value: unknown): void; reject(reason: unknown): void; }
 
@@ -562,11 +574,11 @@ function registryFor(monaco: typeof Monaco): SqlLanguageFeatureRegistry {
   return registry;
 }
 
-export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco, api: SqlLanguageApi, getContext: () => SqlLanguageContext, getPreferences: () => EditorPreferences | null = () => null): void {
+export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco, api: SqlLanguageApi, getContext: () => SqlLanguageContext, getPreferences: () => EditorPreferences | null = () => null): SqlLanguageFeatureHandle | undefined {
   const model = editor.getModel();
-  if (!model) return;
+  if (!model) return undefined;
   const registry = registryFor(monaco);
-  registry.register(editor, api, getContext, getPreferences);
+  const registration = registry.register(editor, api, getContext, getPreferences);
 
   // Statement window navigation remains editor-specific even though the SQL
   // authoring providers above are shared by all models.
@@ -589,6 +601,7 @@ export function registerSqlLanguageFeatures(editor: Monaco.editor.IStandaloneCod
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.UpArrow, () => { void navigateStatement('before'); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.DownArrow, () => { void navigateStatement('after'); });
   }
+  return registration;
 }
 
 /** Releases language providers and model clients when a Monaco host is torn down. */
