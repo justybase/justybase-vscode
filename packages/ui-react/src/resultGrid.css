@@ -770,6 +770,9 @@ body,
 .electron-sidebar-title button:hover,
 .electron-schema-heading button:hover { color: var(--justybase-grid-text); }
 
+.electron-schema-actions { display: flex; align-items: center; gap: 2px; }
+.electron-schema-actions button { min-width: 22px; padding-inline: 4px; }
+
 .electron-connections {
   display: grid;
   gap: 3px;
@@ -1053,6 +1056,15 @@ body,
 .electron-schema-loading,
 .electron-schema-empty { display: block; padding: 8px 4px; color: var(--justybase-grid-muted); font-size: 11px; }
 .electron-schema-error { padding: 5px; color: #fca5a5; background: rgb(127 29 29 / 25%); font-size: 10px; }
+.electron-schema-notice { padding: 5px; color: #bfdbfe; background: rgb(30 64 175 / 20%); font-size: 10px; }
+.electron-schema-shortcuts { display: grid; max-height: 150px; gap: 6px; overflow: auto; padding: 4px 0; border-block: 1px solid var(--justybase-grid-border); }
+.electron-schema-shortcuts > div { display: grid; gap: 2px; }
+.electron-schema-shortcuts-title { padding: 1px 4px; color: var(--justybase-grid-muted); font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.electron-schema-shortcut { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; gap: 4px; min-width: 0; padding: 3px 5px; color: var(--justybase-grid-text); background: transparent; font: inherit; text-align: left; }
+.electron-schema-shortcut:hover { background: var(--justybase-grid-hover); }
+.electron-schema-shortcut > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.electron-schema-shortcut > span:first-child { color: var(--justybase-grid-accent); text-align: center; }
+.electron-schema-shortcut small { overflow: hidden; max-width: 80px; color: var(--justybase-grid-muted); text-overflow: ellipsis; white-space: nowrap; }
 .electron-schema-row { display: flex; align-items: center; min-width: 0; min-height: 25px; gap: 2px; }
 .electron-schema-row:hover { background: var(--justybase-grid-hover); }
 .electron-schema-expander { width: 18px; min-height: 22px; padding: 0; color: var(--justybase-grid-muted); background: transparent; font-size: 11px; }
