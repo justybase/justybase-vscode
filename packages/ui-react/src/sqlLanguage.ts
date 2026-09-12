@@ -45,6 +45,21 @@ interface RpcMessage { id?: number; method?: string; result?: unknown; error?: {
 interface PendingRequest { resolve(value: unknown): void; reject(reason: unknown): void; }
 
 interface CoreRangeLike { start: { line: number; character: number }; end: { line: number; character: number }; }
+interface CoreCodeActionLike {
+  title?: string;
+  kind?: string;
+  isPreferred?: boolean;
+  diagnostics?: CoreDiagnosticLike[];
+  edit?: { changes?: Record<string, Array<{ range?: CoreRangeLike; newText?: string }>> };
+}
+interface CoreDiagnosticLike {
+  range: CoreRangeLike;
+  severity?: number;
+  code?: string | number;
+  source?: string;
+  message: string;
+  data?: { suggestedFix?: string };
+}
 interface CoreSymbolLike { name: string; detail: string; kind: number; range: CoreRangeLike; selectionRange: CoreRangeLike; children?: CoreSymbolLike[]; }
 interface CoreSignatureParameterLike { label: string; documentation?: string; }
 interface CoreSignatureInformationLike { label: string; documentation?: string; parameters: CoreSignatureParameterLike[]; }
@@ -154,6 +169,17 @@ class WebLspClient {
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/formatting', { textDocument: { uri: this.uri }, options }));
   }
+  public codeActions(range: Monaco.IRange, diagnostics: CoreDiagnosticLike[]): Promise<unknown> {
+    this.syncContext();
+    return this.ready.then(() => this.request('textDocument/codeAction', {
+      textDocument: { uri: this.uri },
+      range: {
+        start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+        end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+      },
+      context: { diagnostics },
+    }));
+  }
   public semanticTokens(): Promise<unknown> {
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/semanticTokens/full', { textDocument: { uri: this.uri } }));
@@ -198,6 +224,31 @@ function monacoRange(_monaco: typeof Monaco, range: CoreRangeLike | undefined): 
 function monacoLocation(monaco: typeof Monaco, location: { uri?: string; range?: CoreRangeLike }): Monaco.languages.Location | null {
   if (!location || !location.uri || !location.range) return null;
   return { uri: monaco.Uri.parse(location.uri), range: monacoRange(monaco, location.range) };
+}
+
+function markerLspSeverity(severity: Monaco.MarkerSeverity): number {
+  if (severity === 8) return 1;
+  if (severity === 4) return 2;
+  if (severity === 2) return 3;
+  return 4;
+}
+
+function markerDiagnostic(marker: Monaco.editor.IMarkerData, suggestedFix?: string): CoreDiagnosticLike {
+  const code = typeof marker.code === 'string'
+    ? marker.code
+    : typeof marker.code === 'object' && marker.code
+      ? marker.code.value
+      : undefined;
+  return {
+    range: {
+      start: { line: marker.startLineNumber - 1, character: marker.startColumn - 1 },
+      end: { line: marker.endLineNumber - 1, character: marker.endColumn - 1 },
+    },
+    severity: markerLspSeverity(marker.severity),
+    code,
+    message: marker.message,
+    data: suggestedFix ? { suggestedFix } : undefined,
+  };
 }
 
 function monacoDocumentSymbol(_monaco: typeof Monaco, symbol: CoreSymbolLike): Monaco.languages.DocumentSymbol {
@@ -412,11 +463,11 @@ class SqlLanguageFeatureRegistry {
         },
       }),
       this.monaco.languages.registerCodeActionProvider('sql', {
-        provideCodeActions: (model, _range, context) => {
+        provideCodeActions: async (model, range, context) => {
           const registration = this.registrationFor(model);
           if (!registration) return { actions: [], dispose: () => undefined };
           const markerKey = (code: string, line: number, character: number): string => `${code}:${line}:${character}`;
-          const actions = context.markers.flatMap(marker => {
+          const localActions = context.markers.flatMap(marker => {
             const code = typeof marker.code === 'string' ? marker.code : typeof marker.code === 'object' ? marker.code.value : '';
             const suggestedFix = registration.suggestedFixes.get(markerKey(code, marker.startLineNumber - 1, marker.startColumn - 1));
             if (!suggestedFix) return [];
@@ -428,9 +479,36 @@ class SqlLanguageFeatureRegistry {
               edit: {
                 edits: [{ resource: model.uri, versionId: model.getVersionId(), textEdit: { range: { startLineNumber: marker.startLineNumber, startColumn: marker.startColumn, endLineNumber: marker.endLineNumber, endColumn: marker.endColumn }, text: suggestedFix } }],
               },
-            } satisfies Monaco.languages.CodeAction];
+              } satisfies Monaco.languages.CodeAction];
           });
-          return { actions, dispose: () => undefined };
+          try {
+            const response = await registration.client.codeActions(range, context.markers.map(marker => {
+              const code = typeof marker.code === 'string' ? marker.code : typeof marker.code === 'object' ? marker.code.value : '';
+              const suggestedFix = registration.suggestedFixes.get(markerKey(code, marker.startLineNumber - 1, marker.startColumn - 1));
+              return markerDiagnostic(marker, suggestedFix);
+            })) as CoreCodeActionLike[] | { actions?: CoreCodeActionLike[] } | null;
+            const remoteActions = Array.isArray(response) ? response : response?.actions ?? [];
+            const actions: Monaco.languages.CodeAction[] = [];
+            for (const action of remoteActions) {
+              const edits: Monaco.languages.IWorkspaceTextEdit[] = [];
+              for (const [uri, textEdits] of Object.entries(action.edit?.changes ?? {})) {
+                for (const textEdit of textEdits ?? []) {
+                  if (!textEdit.range) continue;
+                  edits.push({ resource: this.monaco.Uri.parse(uri), versionId: undefined, textEdit: { range: monacoRange(this.monaco, textEdit.range), text: textEdit.newText ?? '' } });
+                }
+              }
+              if (!action.title || edits.length === 0) continue;
+              actions.push({
+                title: action.title,
+                kind: action.kind ?? 'quickfix',
+                isPreferred: action.isPreferred,
+                diagnostics: context.markers,
+                edit: { edits },
+              });
+            }
+            if (actions.length > 0) return { actions, dispose: () => undefined };
+          } catch { /* Fall back to diagnostic-local suggested fixes. */ }
+          return { actions: localActions, dispose: () => undefined };
         },
       }, { providedCodeActionKinds: ['quickfix'] }),
       this.monaco.languages.registerDocumentSemanticTokensProvider('sql', {

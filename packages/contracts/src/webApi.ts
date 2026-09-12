@@ -451,6 +451,7 @@ export interface SqlDiagnostic {
   code?: string;
   start: SqlDiagnosticPosition;
   end: SqlDiagnosticPosition;
+  data?: { suggestedFix?: string };
 }
 
 export interface SqlDiagnosticsRequest extends SqlLanguageContext {
