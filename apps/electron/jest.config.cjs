@@ -13,10 +13,15 @@ module.exports = {
     '^@justybase/sql-core/(.*)$': '<rootDir>/../../packages/sql-core/src/$1',
     '^@justybase/ui-core$': '<rootDir>/../../packages/ui-core/src',
     '^@justybase/ui-react$': '<rootDir>/../../packages/ui-react/src',
+    '^@chevrotain/(.+)$': '<rootDir>/../../node_modules/@chevrotain/$1/lib/src/api.js',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
+    '^.+\\.[mc]?js$': ['babel-jest', {
+      presets: [['@babel/preset-env', { targets: { node: 'current' }, modules: 'commonjs' }]],
+    }],
   },
+  transformIgnorePatterns: ['/node_modules/(?!chevrotain|@chevrotain)/'],
   collectCoverageFrom: ['src/**/*.ts', 'src/**/*.tsx', '!src/**/*.d.ts'],
   coverageDirectory: 'coverage',
   coverageReporters: ['text-summary', 'json-summary', 'lcov'],
