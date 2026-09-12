@@ -3,6 +3,7 @@ import type { OpaqueCredentialRequestId } from '@justybase/contracts';
 
 export interface CredentialProvider {
   request(purpose: 'login' | 'connection'): Promise<string | undefined>;
+  dispose?(): void;
 }
 /** Main-process-only credential broker. Renderer code sees only opaque IDs. */
 export class MainCredentialBroker {
@@ -34,6 +35,7 @@ export class MainCredentialBroker {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.provider?.dispose?.();
     this.values.clear();
   }
 }

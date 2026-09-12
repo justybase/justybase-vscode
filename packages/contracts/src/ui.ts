@@ -1,3 +1,5 @@
+import type { DatabaseKind } from './database';
+
 /**
  * Additive contracts shared by the cross-product UI adapters.
  *
@@ -69,6 +71,21 @@ export interface RedactedConnectionProfile {
   readonly database: string;
   readonly user: string;
   readonly dbType: string;
+  readonly readOnly: boolean;
+}
+
+/**
+ * Connection fields that may cross the Electron renderer boundary. The
+ * password is deliberately absent; the main process resolves it from an
+ * opaque broker request immediately before calling the authenticated API.
+ */
+export interface UiConnectionProfileInput {
+  readonly name: string;
+  readonly host: string;
+  readonly port: number;
+  readonly database: string;
+  readonly user: string;
+  readonly dbType: DatabaseKind;
   readonly readOnly: boolean;
 }
 
@@ -166,6 +183,7 @@ export type UiPreloadResponse =
   | { readonly ok: true; readonly requestId: OpaqueCredentialRequestId }
   | { readonly ok: true; readonly profile: RedactedConnectionProfile }
   | { readonly ok: true; readonly profiles: readonly RedactedConnectionProfile[] }
+  | { readonly ok: true; readonly operation: 'deleted' | 'tested' }
   | { readonly ok: true; readonly capabilities: UiCapabilitySnapshot }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
@@ -181,7 +199,30 @@ export interface ElectronRendererApi {
   readonly getAuthState: () => Promise<UiAuthState>;
   readonly requestCredential: (purpose: 'login' | 'connection') => Promise<OpaqueCredentialRequestId>;
   readonly listConnections: () => Promise<readonly RedactedConnectionProfile[]>;
+  readonly createConnection: (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<RedactedConnectionProfile>;
+  readonly updateConnection: (id: string, input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<RedactedConnectionProfile>;
+  readonly deleteConnection: (id: string) => Promise<void>;
+  readonly testConnection: (id: string) => Promise<void>;
+  readonly testConnectionProfile: (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<void>;
   readonly listCapabilities: () => Promise<UiCapabilitySnapshot>;
+}
+
+function nonEmptyString(value: unknown, maxLength = 512): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= maxLength;
+}
+
+/** Runtime guard for the safe profile shape accepted by Electron IPC. */
+export function isUiConnectionProfileInput(value: unknown): value is UiConnectionProfileInput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return nonEmptyString(candidate.name, 200)
+    && typeof candidate.host === 'string' && candidate.host.length <= 512
+    && Number.isInteger(candidate.port) && (candidate.port as number) >= 0 && (candidate.port as number) <= 65535
+    && nonEmptyString(candidate.database, 2048)
+    && typeof candidate.user === 'string' && candidate.user.length <= 512
+    && nonEmptyString(candidate.dbType, 64)
+    && typeof candidate.readOnly === 'boolean'
+    && !hasSecretKey(candidate);
 }
 
 /** Runtime guard used at IPC boundaries before a value enters the renderer. */

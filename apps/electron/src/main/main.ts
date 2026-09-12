@@ -2,10 +2,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app, BrowserWindow, safeStorage, session } from 'electron';
+import type { OpaqueCredentialRequestId } from '@justybase/contracts';
 import { CapabilityRegistry } from '@justybase/ui-core';
 import { MainCredentialBroker } from './credentialBroker';
+import { createNativeCredentialProvider } from './credentialPrompt';
 import { registerIpcHandlers } from './ipc';
-import { redactConnectionProfiles } from './redaction';
+import { redactConnectionProfile, redactConnectionProfiles } from './redaction';
 import { startElectronSession, type ElectronSessionHandle } from './startup';
 
 let runtime: ElectronSessionHandle | undefined;
@@ -54,6 +56,13 @@ async function loadOrCreateMasterKey(dataDirectory: string): Promise<string> {
 
 function localAdminPassword(masterKey: string): string {
   return createHash('sha256').update('justybase-electron-admin\0').update(masterKey, 'utf8').digest('base64url');
+}
+
+function credentialForRequest(broker: MainCredentialBroker, requestId: OpaqueCredentialRequestId | undefined): string | undefined {
+  if (requestId === undefined) return undefined;
+  const value = broker.consume(requestId);
+  if (value === undefined) throw new Error('AUTH_CREDENTIAL_UNAVAILABLE');
+  return value;
 }
 
 async function shutdown(): Promise<void> {
@@ -112,9 +121,7 @@ async function start(): Promise<void> {
   const currentRuntime = runtime;
   if (!currentRuntime) throw new Error('Electron runtime failed to initialize.');
   const capabilities = new CapabilityRegistry(currentRuntime.bootstrap.capabilities.descriptors);
-  const broker = new MainCredentialBroker();
   capabilityRegistry = capabilities;
-  credentialBroker = broker;
   window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -128,6 +135,11 @@ async function start(): Promise<void> {
   });
   const currentWindow = window;
   if (!currentWindow) throw new Error('Electron window failed to initialize.');
+  const broker = new MainCredentialBroker(createNativeCredentialProvider({
+    owner: () => window,
+    preloadPath: path.resolve(__dirname, '../preload/credentialPromptPreload.js'),
+  }));
+  credentialBroker = broker;
   // Register before navigation: ready-to-show may be emitted while loadURL is
   // still pending, especially for a local renderer bundle.
   currentWindow.on('ready-to-show', () => {
@@ -144,6 +156,50 @@ async function start(): Promise<void> {
     authStatus: () => ({ status: 'authenticated', sessionId: currentRuntime.bootstrap.sessionId }),
     credentialBroker: broker,
     listConnections: async () => redactConnectionProfiles(await currentRuntime.requestJson<readonly unknown[]>('/api/connections')),
+    createConnection: async (input, requestId) => {
+      let password = credentialForRequest(broker, requestId);
+      try {
+        const profile = await currentRuntime.requestJson<unknown>('/api/connections', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
+        });
+        return redactConnectionProfile(profile);
+      } finally {
+        password = undefined;
+      }
+    },
+    updateConnection: async (id, input, requestId) => {
+      let password = credentialForRequest(broker, requestId);
+      try {
+        const profile = await currentRuntime.requestJson<unknown>(`/api/connections/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
+        });
+        return redactConnectionProfile(profile);
+      } finally {
+        password = undefined;
+      }
+    },
+    deleteConnection: async id => {
+      await currentRuntime.requestJson(`/api/connections/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    },
+    testConnection: async id => {
+      await currentRuntime.requestJson(`/api/connections/${encodeURIComponent(id)}/test`, { method: 'POST' });
+    },
+    testConnectionProfile: async (input, requestId) => {
+      let password = credentialForRequest(broker, requestId);
+      try {
+        await currentRuntime.requestJson('/api/connections/test', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
+        });
+      } finally {
+        password = undefined;
+      }
+    },
     listCapabilities: () => ({ descriptors: capabilities.list() }),
   });
   await currentWindow.loadURL(`${currentRuntime.url}/`);

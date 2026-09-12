@@ -9,16 +9,19 @@ declare module 'electron' {
   export class BrowserWindow {
     public constructor(options: Record<string, unknown>);
     public loadURL(url: string): Promise<void>;
+    public show(): void;
     public on(event: string, listener: (...args: unknown[]) => void): this;
     public isDestroyed(): boolean;
     public close(): void;
     public webContents: { openDevTools(): void };
   }
   export const contextBridge: { exposeInMainWorld(name: string, value: unknown): void };
-  export const ipcRenderer: { invoke(channel: string, message: unknown): Promise<unknown> };
+  export const ipcRenderer: { invoke(channel: string, message: unknown): Promise<unknown>; send(channel: string, message: unknown): void };
   export const ipcMain: {
     handle(channel: string, listener: (...args: unknown[]) => unknown): void;
     removeHandler(channel: string): void;
+    on(channel: string, listener: (...args: unknown[]) => void): this;
+    removeListener(channel: string, listener: (...args: unknown[]) => void): this;
   };
   export const session: { defaultSession: { cookies: { set(details: { url: string; name: string; value: string; path: string; httpOnly: boolean }): Promise<void> } } };
 }

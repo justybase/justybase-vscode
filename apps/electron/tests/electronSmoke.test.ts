@@ -39,10 +39,16 @@ describe('Electron main/preload secret boundary', () => {
 
   it('rejects malformed, unknown and secret-bearing IPC messages', async () => {
     const broker = new MainCredentialBroker({ request: async () => 'secret' });
+    const profile = { id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true } as const;
     const handlers = {
       authStatus: () => ({ status: 'authenticated' as const }),
       credentialBroker: broker,
       listConnections: () => [],
+      createConnection: async () => profile,
+      updateConnection: async () => profile,
+      deleteConnection: async () => undefined,
+      testConnection: async () => undefined,
+      testConnectionProfile: async () => undefined,
       listCapabilities: () => ({ descriptors: [] }),
     };
     await expect(dispatchIpcMessage(null, handlers)).resolves.toEqual(expect.objectContaining({ ok: false, code: 'INVALID_IPC_MESSAGE' }));
@@ -59,6 +65,35 @@ describe('Electron main/preload secret boundary', () => {
     broker.dispose();
   });
 
+  it('routes only safe profile data and consumes a credential handle once', async () => {
+    const broker = new MainCredentialBroker({ request: async () => 'secret' });
+    const profile = { id: 'connection-1', name: 'Netezza', host: 'db', port: 5480, database: 'SYSTEM', user: 'admin', dbType: 'netezza', readOnly: true } as const;
+    const createConnection = jest.fn(async (_input: unknown, requestId?: string) => {
+      expect(requestId).toBe('opaque-request');
+      return profile;
+    });
+    const handlers = {
+      authStatus: () => ({ status: 'authenticated' as const }),
+      credentialBroker: broker,
+      listConnections: () => [],
+      createConnection,
+      updateConnection: async () => profile,
+      deleteConnection: async () => undefined,
+      testConnection: async () => undefined,
+      testConnectionProfile: async () => undefined,
+      listCapabilities: () => ({ descriptors: [] }),
+    };
+    await expect(dispatchIpcMessage({ method: 'connections/create', payload: {
+      profile: { name: 'Netezza', host: 'db', port: 5480, database: 'SYSTEM', user: 'admin', dbType: 'netezza', readOnly: true },
+      requestId: 'opaque-request',
+    } }, handlers)).resolves.toEqual({ ok: true, profile });
+    expect(createConnection).toHaveBeenCalledWith(expect.objectContaining({ host: 'db' }), 'opaque-request');
+    await expect(dispatchIpcMessage({ method: 'connections/create', payload: { profile: { name: 'Netezza', host: 'db', port: 5480, database: 'SYSTEM', user: 'admin', dbType: 'netezza', readOnly: true, password: 'secret' } } }, handlers)).resolves.toEqual(expect.objectContaining({ ok: false, code: 'SECRET_IN_IPC' }));
+    await expect(dispatchIpcMessage({ method: 'connections/update', payload: { id: 'connection-1', profile: { name: 'Netezza', host: 'db', port: 5480, database: 'SYSTEM', user: 'admin', dbType: 'netezza', readOnly: true }, requestId: 'password-handle' } }, handlers)).resolves.toEqual(expect.objectContaining({ ok: false, code: 'INVALID_IPC_PAYLOAD' }));
+    await expect(dispatchIpcMessage({ method: 'connections/delete', payload: { id: '' } }, handlers)).resolves.toEqual(expect.objectContaining({ ok: false, code: 'INVALID_IPC_PAYLOAD' }));
+    broker.dispose();
+  });
+
   it('exposes only the allowlisted preload methods and validates main responses', async () => {
     const calls: unknown[] = [];
     const bridge = createPreloadBridge(async message => {
@@ -71,7 +106,7 @@ describe('Electron main/preload secret boundary', () => {
     await expect(bridge.getAuthState()).resolves.toEqual({ status: 'authenticated' });
     await expect(bridge.listConnections()).resolves.toEqual([]);
     await expect(bridge.listCapabilities()).resolves.toEqual({ descriptors: [] });
-    expect(Object.keys(bridge)).toEqual(['getAuthState', 'requestCredential', 'listConnections', 'listCapabilities']);
+    expect(Object.keys(bridge)).toEqual(['getAuthState', 'requestCredential', 'listConnections', 'createConnection', 'updateConnection', 'deleteConnection', 'testConnection', 'testConnectionProfile', 'listCapabilities']);
     expect(JSON.stringify(bridge)).toBe('{}');
     expect(calls).toHaveLength(3);
 

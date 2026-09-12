@@ -2,10 +2,11 @@ import type {
   ElectronRendererApi,
   OpaqueCredentialRequestId,
   RedactedConnectionProfile,
+  UiConnectionProfileInput,
   UiAuthState,
   UiCapabilitySnapshot,
 } from '@justybase/contracts';
-import { isRedactedConnectionProfile, isUiAuthState, isUiCapabilitySnapshot } from '@justybase/contracts';
+import { isRedactedConnectionProfile, isUiAuthState, isUiCapabilitySnapshot, isUiConnectionProfileInput } from '@justybase/contracts';
 
 export interface RendererIpcMessage {
   readonly method: string;
@@ -48,6 +49,33 @@ export function createPreloadBridge(invoke: IpcInvoker): ElectronRendererApi {
       const response = await invokeResponse(invoke, { method: 'connections/list' });
       if (!Array.isArray(response.profiles) || !response.profiles.every(isRedactedConnectionProfile)) malformedField('connection profiles');
       return response.profiles;
+    },
+    createConnection: async (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId): Promise<RedactedConnectionProfile> => {
+      if (!isUiConnectionProfileInput(input)) malformedField('connection profile');
+      const response = await invokeResponse(invoke, { method: 'connections/create', payload: { profile: input, ...(requestId === undefined ? {} : { requestId }) } });
+      if (!isRedactedConnectionProfile(response.profile)) malformedField('created connection profile');
+      return response.profile;
+    },
+    updateConnection: async (id: string, input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId): Promise<RedactedConnectionProfile> => {
+      if (typeof id !== 'string' || id.length === 0 || !isUiConnectionProfileInput(input)) malformedField('connection profile');
+      const response = await invokeResponse(invoke, { method: 'connections/update', payload: { id, profile: input, ...(requestId === undefined ? {} : { requestId }) } });
+      if (!isRedactedConnectionProfile(response.profile)) malformedField('updated connection profile');
+      return response.profile;
+    },
+    deleteConnection: async (id: string): Promise<void> => {
+      if (typeof id !== 'string' || id.length === 0) malformedField('connection ID');
+      const response = await invokeResponse(invoke, { method: 'connections/delete', payload: { id } });
+      if (response.operation !== 'deleted') malformedField('delete response');
+    },
+    testConnection: async (id: string): Promise<void> => {
+      if (typeof id !== 'string' || id.length === 0) malformedField('connection ID');
+      const response = await invokeResponse(invoke, { method: 'connections/test', payload: { id } });
+      if (response.operation !== 'tested') malformedField('test response');
+    },
+    testConnectionProfile: async (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId): Promise<void> => {
+      if (!isUiConnectionProfileInput(input)) malformedField('connection profile');
+      const response = await invokeResponse(invoke, { method: 'connections/test', payload: { profile: input, ...(requestId === undefined ? {} : { requestId }) } });
+      if (response.operation !== 'tested') malformedField('test response');
     },
     listCapabilities: async (): Promise<UiCapabilitySnapshot> => {
       const response = await invokeResponse(invoke, { method: 'capabilities/list' });

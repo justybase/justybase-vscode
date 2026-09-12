@@ -25,6 +25,7 @@ export type {
   CapabilityStatus,
   ElectronRendererApi,
   OpaqueCredentialRequestId,
+  UiConnectionProfileInput,
   PersistenceEnvelope,
   PersistenceScope,
   RedactedConnectionProfile,
@@ -42,6 +43,7 @@ export type {
   UiPreloadResponse,
   UiRendererBootstrap,
 } from './ui';
+export { isUiConnectionProfileInput } from './ui';
 export type {
   ConnectionQueryResult,
   ConnectionSummary,

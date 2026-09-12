@@ -1,14 +1,25 @@
 import type {
   CapabilityDescriptor,
+  OpaqueCredentialRequestId,
   RedactedConnectionProfile,
+  UiConnectionProfileInput,
   UiAuthState,
   UiCapabilitySnapshot,
   UiPreloadResponse,
 } from '@justybase/contracts';
-import { isRedactedConnectionProfile, isUiAuthState, isUiCapabilitySnapshot } from '@justybase/contracts';
+import { isRedactedConnectionProfile, isUiAuthState, isUiCapabilitySnapshot, isUiConnectionProfileInput } from '@justybase/contracts';
 import type { MainCredentialBroker } from './credentialBroker';
 
-export const IPC_METHODS = ['auth/status', 'credential/request', 'connections/list', 'capabilities/list'] as const;
+export const IPC_METHODS = [
+  'auth/status',
+  'credential/request',
+  'connections/list',
+  'connections/create',
+  'connections/update',
+  'connections/delete',
+  'connections/test',
+  'capabilities/list',
+] as const;
 export type IpcMethod = typeof IPC_METHODS[number];
 
 export interface IpcMessage {
@@ -20,7 +31,53 @@ export interface IpcHandlers {
   readonly authStatus: () => Promise<UiAuthState> | UiAuthState;
   readonly credentialBroker: MainCredentialBroker;
   readonly listConnections: () => Promise<readonly RedactedConnectionProfile[]> | readonly RedactedConnectionProfile[];
+  readonly createConnection: (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<RedactedConnectionProfile>;
+  readonly updateConnection: (id: string, input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<RedactedConnectionProfile>;
+  readonly deleteConnection: (id: string) => Promise<void>;
+  readonly testConnection: (id: string) => Promise<void>;
+  readonly testConnectionProfile: (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<void>;
   readonly listCapabilities: () => Promise<UiCapabilitySnapshot> | UiCapabilitySnapshot;
+}
+
+interface ProfilePayload {
+  readonly profile: UiConnectionProfileInput;
+  readonly requestId?: OpaqueCredentialRequestId;
+}
+
+interface UpdateProfilePayload extends ProfilePayload {
+  readonly id: string;
+}
+
+function isOpaqueRequestId(value: unknown): value is OpaqueCredentialRequestId {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 256
+    && !/password|passphrase|secret|credential|master.?key|token|api.?key/iu.test(value);
+}
+
+function parseProfilePayload(value: unknown): ProfilePayload | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (!isUiConnectionProfileInput(candidate.profile)) return undefined;
+  if (candidate.requestId !== undefined && !isOpaqueRequestId(candidate.requestId)) return undefined;
+  return {
+    profile: candidate.profile,
+    ...(candidate.requestId === undefined ? {} : { requestId: candidate.requestId }),
+  };
+}
+
+function parseUpdateProfilePayload(value: unknown): UpdateProfilePayload | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.id !== 'string' || candidate.id.length === 0 || candidate.id.length > 256) return undefined;
+  const profile = parseProfilePayload(value);
+  return profile ? { ...profile, id: candidate.id } : undefined;
+}
+
+function parseIdPayload(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === 'string' && id.length > 0 && id.length <= 256 ? id : undefined;
 }
 
 function hasSecretKey(value: unknown): boolean {
@@ -64,6 +121,39 @@ export async function dispatchIpcMessage(message: unknown, handlers: IpcHandlers
         return Array.isArray(profiles) && profiles.every(isRedactedConnectionProfile)
           ? { ok: true, profiles }
           : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid connection profile.' };
+      }
+      case 'connections/create': {
+        const payload = parseProfilePayload(candidate.payload);
+        if (!payload) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'A safe connection profile is required.' };
+        const profile = await handlers.createConnection(payload.profile, payload.requestId);
+        return isRedactedConnectionProfile(profile)
+          ? { ok: true, profile }
+          : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid connection profile.' };
+      }
+      case 'connections/update': {
+        const payload = parseUpdateProfilePayload(candidate.payload);
+        if (!payload) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'A connection ID and safe profile are required.' };
+        const profile = await handlers.updateConnection(payload.id, payload.profile, payload.requestId);
+        return isRedactedConnectionProfile(profile)
+          ? { ok: true, profile }
+          : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid connection profile.' };
+      }
+      case 'connections/delete': {
+        const id = parseIdPayload(candidate.payload);
+        if (!id) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'A connection ID is required.' };
+        await handlers.deleteConnection(id);
+        return { ok: true, operation: 'deleted' };
+      }
+      case 'connections/test': {
+        const profile = parseProfilePayload(candidate.payload);
+        if (profile) {
+          await handlers.testConnectionProfile(profile.profile, profile.requestId);
+          return { ok: true, operation: 'tested' };
+        }
+        const id = parseIdPayload(candidate.payload);
+        if (!id) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'A connection ID or safe profile is required.' };
+        await handlers.testConnection(id);
+        return { ok: true, operation: 'tested' };
       }
       case 'capabilities/list': {
         if (candidate.payload !== undefined) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'capabilities/list does not accept a payload.' };
