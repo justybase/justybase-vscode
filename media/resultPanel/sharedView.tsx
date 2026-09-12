@@ -1,12 +1,18 @@
 import { decode } from '@msgpack/msgpack';
 import { createRoot, type Root } from 'react-dom/client';
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { CapabilityDescriptor, UiIdentity } from '@justybase/contracts';
 import {
     createInitialUiState,
     createUiStore,
+    createAggregateAnalysisTable,
+    createGroupAnalysisTable,
+    createPivotAnalysisTable,
     resultKey,
     resultAsyncState as getResultAsyncState,
+    type UiResultAnalysisKind,
+    type UiResultAnalysisTable,
+    type UiResultColumn,
     type UiResultEvent,
     type UiResultSurfaceState,
     type UiState,
@@ -23,6 +29,7 @@ import {
     resolveDataGridColumns,
     FocusOnMount,
     ResultTabs,
+    ResultAnalysisPanel,
     ResultViewToolbar,
     RowDetail,
     UiShell,
@@ -30,6 +37,7 @@ import {
 } from '@justybase/ui-react';
 import type { DataGridClipboardFormat, DataGridCellContext } from '@justybase/ui-react';
 import { callPanelMethod } from './types.js';
+import type { DiskQuerySpec } from './types.js';
 import type { ResultPanelHostToWebviewMessage } from './hostContracts.js';
 import { asHostMessage, postHostMessage } from './protocol.js';
 
@@ -313,6 +321,118 @@ export function displaySharedRows(
     });
 }
 
+interface SharedDatabaseGroupingRequest {
+    readonly groupByColumns: readonly { readonly columnIndex: number; readonly columnName: string }[];
+    readonly functions: readonly { readonly fn: string; readonly columnIndex?: number; readonly alias?: string }[];
+    readonly limit?: number | null;
+    readonly filterSpec?: DiskQuerySpec;
+}
+
+function isNumericSharedColumn(column: Pick<SharedColumn, 'type'>): boolean {
+    return /(?:bigint|smallint|tinyint|integer|int|serial|decimal|numeric|number|double|float|real|money|^dec)/iu.test(column.type ?? '');
+}
+
+export function sharedAnalysisQuerySpec(result: UiResultSurfaceState): DiskQuerySpec | undefined {
+    const globalSearch = result.view.globalFilter.trim();
+    const columnFilters = Object.entries(result.view.columnFilters).flatMap(([name, value]) => {
+        const normalized = value.trim();
+        if (!normalized) return [];
+        const columnIndex = result.columns.findIndex(column => column.name === name);
+        if (columnIndex < 0) return [];
+        return [{
+            columnIndex,
+            conditions: [{ type: 'contains', value: normalized }],
+        }];
+    });
+    const spec: DiskQuerySpec = {
+        ...(globalSearch ? { globalSearch } : {}),
+        ...(columnFilters.length > 0 ? { columnFilters } : {}),
+    };
+    return spec.globalSearch || (spec.columnFilters?.length ?? 0) > 0 ? spec : undefined;
+}
+
+function toAggregateAnalysisTable(
+    columns: readonly UiResultColumn[],
+    result: UiResultSurfaceState,
+    aggregations: readonly { readonly columnIndex: number; readonly fn: string; readonly value: unknown; readonly filteredRowCount?: number }[],
+): UiResultAnalysisTable {
+    const values = new Map<number, {
+        columnIndex: number;
+        count: number;
+        sum?: number | string | null;
+        avg?: number | string | null;
+        min?: unknown;
+        max?: unknown;
+    }>();
+    let filteredRowCount = result.totalRowCount;
+    for (const aggregation of aggregations) {
+        const current = values.get(aggregation.columnIndex) ?? {
+            columnIndex: aggregation.columnIndex,
+            count: 0,
+        };
+        if (aggregation.fn === 'count') {
+            const count = typeof aggregation.value === 'number' ? aggregation.value : Number(aggregation.value);
+            current.count = Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0;
+        } else if (aggregation.fn === 'sum') {
+            current.sum = typeof aggregation.value === 'number' || typeof aggregation.value === 'string'
+                ? aggregation.value
+                : aggregation.value == null ? null : String(aggregation.value);
+        } else if (aggregation.fn === 'avg') {
+            current.avg = typeof aggregation.value === 'number' || typeof aggregation.value === 'string'
+                ? aggregation.value
+                : aggregation.value == null ? null : String(aggregation.value);
+        } else if (aggregation.fn === 'min') {
+            current.min = aggregation.value;
+        } else if (aggregation.fn === 'max') {
+            current.max = aggregation.value;
+        }
+        if (aggregation.filteredRowCount !== undefined) {
+            filteredRowCount = aggregation.filteredRowCount;
+        }
+        values.set(aggregation.columnIndex, current);
+    }
+    return createAggregateAnalysisTable(columns, {
+        filteredRowCount,
+        values: [...values.values()],
+    });
+}
+
+function toGroupAnalysisTable(
+    message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>,
+): UiResultAnalysisTable {
+    return createGroupAnalysisTable({
+        columns: (message.columns ?? []).map(column => ({ name: column.name, type: column.type })),
+        rows: message.rows ?? [],
+        totalGroups: message.totalRows ?? message.rows?.length ?? 0,
+    });
+}
+
+function toPivotAnalysisTable(
+    columns: readonly UiResultColumn[],
+    message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>,
+    valueColumnIndex: number,
+): UiResultAnalysisTable {
+    return createPivotAnalysisTable(
+        columns,
+        {
+            columns: (message.columns ?? []).map(column => ({ name: column.name, type: column.type })),
+            rows: message.rows ?? [],
+            totalGroups: message.totalRows ?? message.rows?.length ?? 0,
+        },
+        0,
+        1,
+        valueColumnIndex,
+    );
+}
+
+interface PendingAnalysisRequest {
+    readonly kind: UiResultAnalysisKind;
+    readonly ref: ResultRef;
+    readonly resolve: (table: UiResultAnalysisTable) => void;
+    readonly reject: (error: Error) => void;
+    readonly timer: ReturnType<typeof setTimeout>;
+}
+
 function capability(capabilities: readonly CapabilityDescriptor[], key: string): CapabilityDescriptor | undefined {
     return capabilities.find(item => item.key === key);
 }
@@ -326,10 +446,12 @@ export class SharedResultPanelController {
     private readonly nextChunkSequence = new Map<string, number>();
     private readonly cancelRequests = new Map<string, string>();
     private readonly pendingRowWindows = new Map<number, { readonly ref: ResultRef; readonly offset: number }>();
+    private readonly pendingAnalysisRequests = new Map<number, PendingAnalysisRequest>();
     private formatSettings: unknown;
     private revision = 0;
     private streamRevision = 0;
     private rowRequestId = 0;
+    private analysisRequestId = 0;
     private disposed = false;
 
     public constructor() {
@@ -393,6 +515,12 @@ export class SharedResultPanelController {
                 break;
             case 'diskQueryResult':
                 this.applyDiskQueryResult(valid);
+                break;
+            case 'databaseAggregationResult':
+                this.applyDatabaseAggregationResult(valid);
+                break;
+            case 'databaseGroupingResult':
+                this.applyDatabaseGroupingResult(valid);
                 break;
             case 'cancelExecution':
                 this.applyCancellation(valid.sourceUri);
@@ -469,6 +597,104 @@ export class SharedResultPanelController {
         });
     }
 
+    public requestAnalysis(kind: UiResultAnalysisKind, result: UiResultSurfaceState): Promise<UiResultAnalysisTable> {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref || ref.resultSetId !== result.resultSetId) {
+            return Promise.reject(new Error('The result set is no longer active.'));
+        }
+        const numericColumns = result.columns
+            .map((column, index) => ({ column, index }))
+            .filter(item => isNumericSharedColumn(item.column));
+        const querySpec = sharedAnalysisQuerySpec(result);
+        const requestId = ++this.analysisRequestId;
+
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                const pending = this.pendingAnalysisRequests.get(requestId);
+                if (!pending) return;
+                this.pendingAnalysisRequests.delete(requestId);
+                pending.reject(new Error(`${kind} analysis timed out.`));
+            }, 300_000);
+            this.pendingAnalysisRequests.set(requestId, { kind, ref, resolve, reject, timer });
+
+            if (kind === 'aggregate') {
+                const aggregations = result.columns.flatMap((_column, columnIndex) => {
+                    const requests = [{ columnIndex, fn: 'count' }];
+                    if (isNumericSharedColumn(result.columns[columnIndex])) {
+                        requests.push(
+                            { columnIndex, fn: 'sum' },
+                            { columnIndex, fn: 'avg' },
+                        );
+                    }
+                    requests.push({ columnIndex, fn: 'min' }, { columnIndex, fn: 'max' });
+                    return requests;
+                });
+                postHostMessage({
+                    command: 'requestDatabaseAggregations',
+                    sourceUri: ref.sourceId,
+                    resultSetIndex: ref.resultSetIndex,
+                    requestId,
+                    aggregations,
+                    querySpec,
+                    timeoutSeconds: 300,
+                });
+                return;
+            }
+
+            const firstColumn = result.columns[0];
+            if (!firstColumn) {
+                this.rejectAnalysis(requestId, new Error('The result set has no columns to analyze.'));
+                return;
+            }
+
+            if (kind === 'group') {
+                const functions = [
+                    { fn: 'count', alias: 'COUNT' },
+                    ...numericColumns.map(item => ({ fn: 'sum', columnIndex: item.index, alias: `SUM_${item.column.name}` })),
+                ];
+                const grouping: SharedDatabaseGroupingRequest = {
+                    groupByColumns: [{ columnIndex: 0, columnName: firstColumn.name }],
+                    functions,
+                    limit: 2_000,
+                    filterSpec: querySpec,
+                };
+                postHostMessage({
+                    command: 'requestDatabaseGrouping',
+                    sourceUri: ref.sourceId,
+                    resultSetIndex: ref.resultSetIndex,
+                    requestId,
+                    grouping,
+                    timeoutSeconds: 300,
+                });
+                return;
+            }
+
+            const pivotColumn = result.columns[1];
+            const valueColumn = numericColumns.find(item => item.index > 1);
+            if (!pivotColumn || !valueColumn) {
+                this.rejectAnalysis(requestId, new Error('Pivot needs two dimensions and a numeric value column.'));
+                return;
+            }
+            const grouping: SharedDatabaseGroupingRequest = {
+                groupByColumns: [
+                    { columnIndex: 0, columnName: firstColumn.name },
+                    { columnIndex: 1, columnName: pivotColumn.name },
+                ],
+                functions: [{ fn: 'sum', columnIndex: valueColumn.index, alias: `SUM_${valueColumn.column.name}` }],
+                limit: 2_000,
+                filterSpec: querySpec,
+            };
+            postHostMessage({
+                command: 'requestDatabaseGrouping',
+                sourceUri: ref.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                requestId,
+                grouping,
+                timeoutSeconds: 300,
+            });
+        });
+    }
+
     public cancel(sourceId: string | undefined): void {
         const activeSource = sourceId ?? this.getState().results.activeSourceId;
         if (!activeSource) return;
@@ -540,6 +766,86 @@ export class SharedResultPanelController {
         return Object.values(state.results.byResultSetId).find(result => result.sourceId === sourceId);
     }
 
+    private rejectAnalysis(requestId: number, error: Error): void {
+        const pending = this.pendingAnalysisRequests.get(requestId);
+        if (!pending) return;
+        this.pendingAnalysisRequests.delete(requestId);
+        clearTimeout(pending.timer);
+        pending.reject(error);
+    }
+
+    private takeAnalysisRequest(
+        requestId: number,
+        sourceUri: string,
+        resultSetIndex: number,
+    ): PendingAnalysisRequest | undefined {
+        const pending = this.pendingAnalysisRequests.get(requestId);
+        if (!pending) return undefined;
+        this.pendingAnalysisRequests.delete(requestId);
+        clearTimeout(pending.timer);
+        const currentRef = this.refs.get(sourceIndexKey(sourceUri, resultSetIndex));
+        if (
+            pending.ref !== currentRef
+            || pending.ref.sourceId !== sourceUri
+            || pending.ref.resultSetIndex !== resultSetIndex
+        ) {
+            pending.reject(new Error('Analysis request superseded.'));
+            return undefined;
+        }
+        return pending;
+    }
+
+    private applyDatabaseAggregationResult(
+        message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseAggregationResult' }>,
+    ): void {
+        const pending = this.takeAnalysisRequest(message.requestId, message.sourceUri, message.resultSetIndex);
+        if (!pending) return;
+        if (pending.kind !== 'aggregate') {
+            pending.reject(new Error('Received an aggregate response for another analysis.'));
+            return;
+        }
+        if (message.error) {
+            pending.reject(new Error(message.error));
+            return;
+        }
+        const result = this.resultForRef(pending.ref);
+        if (!result) {
+            pending.reject(new Error('The result set is no longer available.'));
+            return;
+        }
+        pending.resolve(toAggregateAnalysisTable(result.columns, result, message.aggregations ?? []));
+    }
+
+    private applyDatabaseGroupingResult(
+        message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>,
+    ): void {
+        const pending = this.takeAnalysisRequest(message.requestId, message.sourceUri, message.resultSetIndex);
+        if (!pending) return;
+        if (pending.kind !== 'group' && pending.kind !== 'pivot') {
+            pending.reject(new Error('Received a grouping response for another analysis.'));
+            return;
+        }
+        if (message.error) {
+            pending.reject(new Error(message.error));
+            return;
+        }
+        const result = this.resultForRef(pending.ref);
+        if (!result) {
+            pending.reject(new Error('The result set is no longer available.'));
+            return;
+        }
+        if (pending.kind === 'group') {
+            pending.resolve(toGroupAnalysisTable(message));
+            return;
+        }
+        const valueColumnIndex = result.columns.findIndex((column, index) => index > 1 && isNumericSharedColumn(column));
+        if (valueColumnIndex < 0) {
+            pending.reject(new Error('Pivot value column is no longer available.'));
+            return;
+        }
+        pending.resolve(toPivotAnalysisTable(result.columns, message, valueColumnIndex));
+    }
+
     public dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
@@ -550,6 +856,11 @@ export class SharedResultPanelController {
         this.nextChunkSequence.clear();
         this.cancelRequests.clear();
         this.pendingRowWindows.clear();
+        for (const pending of this.pendingAnalysisRequests.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error('Result panel disposed.'));
+        }
+        this.pendingAnalysisRequests.clear();
         this.store.dispose();
     }
 
@@ -944,10 +1255,51 @@ function useSharedControllerState(controller: SharedResultPanelController): UiSt
 export function SharedResultPanelApp({ controller }: { readonly controller: SharedResultPanelController }): ReactNode {
     const state = useSharedControllerState(controller);
     const [selectedRow, setSelectedRow] = useState<number | undefined>();
+    const [analysisKind, setAnalysisKind] = useState<UiResultAnalysisKind | undefined>();
+    const [analysisTable, setAnalysisTable] = useState<UiResultAnalysisTable | undefined>();
+    const [analysisLoading, setAnalysisLoading] = useState(false);
+    const [analysisError, setAnalysisError] = useState<string | undefined>();
+    const analysisGenerationRef = useRef(0);
     const activeResult = controller.activeResult();
+    const closeAnalysis = useCallback(() => {
+        analysisGenerationRef.current += 1;
+        setAnalysisKind(undefined);
+        setAnalysisTable(undefined);
+        setAnalysisLoading(false);
+        setAnalysisError(undefined);
+    }, []);
     useEffect(() => {
         setSelectedRow(undefined);
-    }, [activeResult?.sourceId, activeResult?.resultSetId]);
+        closeAnalysis();
+    }, [activeResult?.sourceId, activeResult?.resultSetId, closeAnalysis]);
+    const updateView = useCallback((patch: Partial<UiResultSurfaceState['view']>): void => {
+        if ('globalFilter' in patch || 'columnFilters' in patch || 'sorting' in patch) {
+            closeAnalysis();
+        }
+        if (activeResult) controller.updateView(activeResult.resultSetId, patch);
+    }, [activeResult, closeAnalysis, controller]);
+    const runAnalysis = useCallback((kind: UiResultAnalysisKind): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        if (analysisKind === kind && !analysisLoading) {
+            closeAnalysis();
+            return;
+        }
+        const generation = ++analysisGenerationRef.current;
+        setAnalysisKind(kind);
+        setAnalysisTable(undefined);
+        setAnalysisError(undefined);
+        setAnalysisLoading(true);
+        void controller.requestAnalysis(kind, result).then(table => {
+            if (analysisGenerationRef.current !== generation) return;
+            setAnalysisTable(table);
+            setAnalysisLoading(false);
+        }).catch(error => {
+            if (analysisGenerationRef.current !== generation) return;
+            setAnalysisLoading(false);
+            setAnalysisError(error instanceof Error ? error.message : String(error));
+        });
+    }, [analysisKind, analysisLoading, closeAnalysis, controller]);
     const sourceResults = useMemo(
         () => Object.values(state.results.byResultSetId).filter(result => result.sourceId === state.results.activeSourceId),
         [state.results],
@@ -978,6 +1330,30 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
             isNull: value === null || value === undefined,
         });
     };
+    const openAnalysisCellValue = (context: DataGridCellContext): void => {
+        const row = analysisTable?.rows[context.rowIndex];
+        const column = analysisTable?.columns[context.columnIndex];
+        if (!row || !column) return;
+        callPanelMethod('openValueViewer', {
+            rowIndex: context.rowIndex,
+            rowNumber: context.rowIndex + 1,
+            columnId: column.name,
+            columnName: column.name,
+            dataType: column.type ?? 'text',
+            value: row[context.columnIndex],
+            isNull: row[context.columnIndex] === null || row[context.columnIndex] === undefined,
+        });
+    };
+    const copySelection = (payload: { readonly columns: readonly { readonly name: string; readonly type?: string; readonly scale?: number }[]; readonly rows: readonly (readonly unknown[])[] }, format?: DataGridClipboardFormat): void => {
+        postHostMessage({
+            command: 'copyToClipboard',
+            text: formatDataGridClipboard(
+                payload,
+                format === undefined || format === 'tsv' ? 'text' : format,
+                { includeHeaders: payload.rows.length > 0 },
+            ),
+        });
+    };
 
     return <UiShell
         title={sourceLabel}
@@ -994,7 +1370,8 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
             <WorkspaceTabs tabs={[{ id: state.results.activeSourceId ?? 'result-panel', label: sourceLabel }]} activeId={state.results.activeSourceId ?? 'result-panel'} onSelect={id => controller.selectSource(id)} />
             {state.shell.activeSurface === 'results' && <>
                 <ResultTabs results={sourceResults} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(id, sourceId) => controller.selectResult(id, sourceId)} />
-                <ResultViewToolbar columns={activeResult?.columns ?? []} view={view} onChange={patch => activeResult && controller.updateView(activeResult.resultSetId, patch)} onRefresh={() => controller.refresh()} onCopy={() => controller.copyActive()} onExport={() => controller.exportActive()} />
+                <ResultViewToolbar columns={activeResult?.columns ?? []} view={view} onChange={updateView} onAggregate={() => runAnalysis('aggregate')} onGroup={() => runAnalysis('group')} onPivot={() => runAnalysis('pivot')} activeAnalysis={analysisKind} analysisBusy={analysisLoading} onRefresh={() => controller.refresh()} onCopy={() => controller.copyActive()} onExport={() => controller.exportActive()} />
+                {analysisKind && <ResultAnalysisPanel sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'result-panel'} table={analysisTable} loading={analysisLoading} error={analysisError} onClose={closeAnalysis} onCopySelection={copySelection} onViewCell={openAnalysisCellValue} />}
                 <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
                     {activeResult && <DataGrid
                         sourceId={activeResult.sourceId}
@@ -1003,7 +1380,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         rows={rows}
                         totalRowCount={activeResult.totalRowCount}
                         view={activeResult.view}
-                        onViewChange={patch => controller.updateView(activeResult.resultSetId, patch)}
+                        onViewChange={updateView}
                         showContextMenu
                         selectedRowIndex={selectedRow}
                         scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }}
