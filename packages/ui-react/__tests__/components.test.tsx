@@ -14,6 +14,7 @@ import {
   ResultViewToolbar,
   RowDetail,
   SchemaTree,
+  SqlDialectSelect,
   UiShell,
   WorkspaceTabs,
   calculateDataGridVirtualWindow,
@@ -125,6 +126,18 @@ describe('shared React presentation', () => {
     render(<DesignerForm fields={{ name: 'orders' }} capability={{ key: 'designer', status: 'read-only', owner: 'adapter', reason: 'Read-only profile.', documentation: '/docs/designer', removalCondition: 'Use a writable profile.' }} onChange={() => undefined} onApply={() => undefined} />);
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Preview' })).toBeEnabled();
+  });
+
+  it('offers the shared authoring dialect catalog without changing runtime connection state', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+    render(<SqlDialectSelect value="netezza" onChange={onChange} ariaLabel="Authoring dialect" />);
+    const select = screen.getByRole('combobox', { name: 'Authoring dialect' });
+    expect(select).toHaveValue('netezza');
+    expect(screen.getByRole('option', { name: 'PostgreSQL' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'ClickHouse' })).toBeInTheDocument();
+    await user.selectOptions(select, 'postgresql');
+    expect(onChange).toHaveBeenCalledWith('postgresql');
   });
 
   it('supports keyboard tab navigation and editor command submission', async () => {

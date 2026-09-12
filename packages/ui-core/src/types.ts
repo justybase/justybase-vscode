@@ -1,6 +1,7 @@
 import { UI_CONTRACT_VERSION } from '@justybase/contracts';
 import type {
   CapabilityDescriptor,
+  DatabaseKind,
   PersistenceScope,
   RedactedConnectionProfile,
   UiAuthState,
@@ -19,6 +20,8 @@ export interface UiDocumentState {
   readonly content: string;
   readonly dirty: boolean;
   readonly connectionId?: string;
+  /** Authoring profile may be changed independently of the active runtime connection. */
+  readonly databaseKind?: DatabaseKind;
 }
 
 export interface UiWorkspaceState {

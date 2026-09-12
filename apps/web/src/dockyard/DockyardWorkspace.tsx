@@ -5,6 +5,7 @@ import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import type {
   ConnectionProfileSummary,
+  DatabaseKind,
   EditorPreferences,
   HistoryEntry,
   MetadataColumn,
@@ -71,6 +72,7 @@ export interface DockyardWorkspaceProps {
   onRetryStatement(tabId: string, statementIndex: number): void;
   onSelectConnection(tabId: string, connectionId: string): void;
   onSelectDatabase(tabId: string, database: string): void;
+  onSelectDialect(tabId: string, databaseKind: DatabaseKind): void;
   onInsertSql(value: string): void;
   onContextChange(database?: string, schema?: string): void;
   onObjectSelect(node: SchemaTreeNode): void;
@@ -118,6 +120,7 @@ interface QueryDocumentProps {
   onRetryStatement(tabId: string, statementIndex: number): void;
   onSelectConnection(tabId: string, connectionId: string): void;
   onSelectDatabase(tabId: string, database: string): void;
+  onSelectDialect(tabId: string, databaseKind: DatabaseKind): void;
   onOpenConnectionForm(): void;
   onEditRow(tabId: string, values: unknown[]): void;
 }
@@ -145,6 +148,7 @@ export function QueryDocument({
   onRetryStatement,
   onSelectConnection,
   onSelectDatabase,
+  onSelectDialect,
   onOpenConnectionForm,
   onEditRow,
 }: QueryDocumentProps): ReactElement {
@@ -191,6 +195,8 @@ export function QueryDocument({
       databases={databases}
       onSelectConnection={connectionId => onSelectConnection(tab.id, connectionId)}
       onSelectDatabase={database => onSelectDatabase(tab.id, database)}
+      databaseKind={tab.databaseKind ?? targetConnection?.dbType ?? 'netezza'}
+      onSelectDialect={databaseKind => onSelectDialect(tab.id, databaseKind)}
       onRun={mode => onRun(tab.id, mode)}
       onSave={() => void onSave(tab.id)}
       onComment={() => onComment(tab.id)}
@@ -376,6 +382,7 @@ export function DockyardWorkspace({
   onRetryStatement,
   onSelectConnection,
   onSelectDatabase,
+  onSelectDialect,
   onInsertSql,
   onContextChange,
   onObjectSelect,
@@ -527,6 +534,7 @@ export function DockyardWorkspace({
         onRetryStatement={onRetryStatement}
         onSelectConnection={onSelectConnection}
         onSelectDatabase={onSelectDatabase}
+        onSelectDialect={onSelectDialect}
         onOpenConnectionForm={onOpenConnectionForm}
         onEditRow={onEditRow}
       />;

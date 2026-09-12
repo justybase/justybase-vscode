@@ -1,4 +1,4 @@
-import type { QueryStartRequest, SchemaTreeNode } from '@justybase/contracts';
+import type { DatabaseKind, QueryStartRequest, SchemaTreeNode } from '@justybase/contracts';
 import type { ResultState } from './queryState';
 import type { WorkspaceStorage } from './workspacePersistence';
 
@@ -16,6 +16,7 @@ export interface EditorTab {
   sql: string;
   dirty: boolean;
   connectionId?: string;
+  databaseKind?: DatabaseKind;
   database?: string;
   schema?: string;
   results: Record<number, ResultState>;
@@ -40,6 +41,7 @@ export interface PersistedEditorTab {
   sql: string;
   dirty: boolean;
   connectionId?: string;
+  databaseKind?: DatabaseKind;
   database?: string;
   schema?: string;
 }
@@ -73,6 +75,7 @@ export function restoreEditorWorkspace(storage: WorkspaceStorage): { tabs: Edito
       sql: tab.sql,
       dirty: tab.dirty === true,
       connectionId: typeof tab.connectionId === 'string' ? tab.connectionId : undefined,
+      databaseKind: typeof tab.databaseKind === 'string' ? tab.databaseKind : undefined,
       database: typeof tab.database === 'string' ? tab.database : undefined,
       schema: typeof tab.schema === 'string' ? tab.schema : undefined,
       results: {},
@@ -94,6 +97,7 @@ export function serializeEditorWorkspace(tabs: readonly EditorTab[], activeTabId
     sql: tab.sql,
     dirty: tab.dirty,
     connectionId: tab.connectionId,
+    databaseKind: tab.databaseKind,
     database: tab.database,
     schema: tab.schema,
   }));

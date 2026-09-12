@@ -32,13 +32,16 @@ describe('ui-core reducer', () => {
     const before = initial();
     const after = reduceUiState(before, {
       type: 'workspace/open-document',
-      document: { id: 'doc-1', sourceId: 'source-1', title: 'scratch.sql', content: 'select 1', dirty: false },
+      document: { id: 'doc-1', sourceId: 'source-1', title: 'scratch.sql', content: 'select 1', dirty: false, databaseKind: 'netezza' },
     });
 
     expect(before.workspace.documentOrder).toEqual([]);
     expect(after.workspace.documentOrder).toEqual(['doc-1']);
     expect(after.workspace.activeDocumentId).toBe('doc-1');
     expect(after.workspace.documents['doc-1']?.content).toBe('select 1');
+    const changed = reduceUiState(after, { type: 'workspace/update-document', documentId: 'doc-1', patch: { databaseKind: 'postgresql' } });
+    expect(changed.workspace.documents['doc-1']?.databaseKind).toBe('postgresql');
+    expect(after.workspace.documents['doc-1']?.databaseKind).toBe('netezza');
   });
 
   it('rejects foreign, delayed, duplicate and gapped result events', () => {

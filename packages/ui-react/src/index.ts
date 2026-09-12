@@ -38,6 +38,7 @@ export {
   ResultViewToolbar,
   RowDetail,
   SchemaTree,
+  SqlDialectSelect,
   UiShell,
   WorkspaceTabs,
 } from './components';
@@ -59,6 +60,7 @@ export type {
   ResultViewToolbarProps,
   RowDetailProps,
   SchemaTreeProps,
+  SqlDialectSelectProps,
   UiShellProps,
   WorkspaceTab,
   WorkspaceTabsProps,

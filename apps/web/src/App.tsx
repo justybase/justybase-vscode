@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type * as Monaco from 'monaco-editor';
-import type { ConnectionProfileSummary, EditorPreferences, MetadataColumn, MetadataDatabase, SchemaTreeNode, WebUser } from '@justybase/contracts';
+import type { ConnectionProfileSummary, DatabaseKind, EditorPreferences, MetadataColumn, MetadataDatabase, SchemaTreeNode, WebUser } from '@justybase/contracts';
 import { AsyncStateView } from '@justybase/ui-react';
 import { ApiClientProvider, createApiClient, useApiClient, type ApiClient, type QueryEventSubscription } from './api';
 import { emptyResult } from './queryState';
@@ -347,7 +347,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     setConnections(previous => previous.some(item => item.id === connection.id) ? previous.map(item => item.id === connection.id ? connection : item) : [...previous, connection]);
     const nextDatabase = workspaceDatabase(connection);
     setSelected(connection); setDatabase(nextDatabase); setSchema(''); setColumns([]); setEditingConnection(null); setShowConnectionForm(false);
-    setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, connectionId: connection.id, database: nextDatabase, schema: '', source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
+    setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, connectionId: connection.id, databaseKind: connection.dbType, database: nextDatabase, schema: '', source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
     setInspectedObject(null);
   }
 
@@ -368,8 +368,9 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
       database: tabsRef.current.find(tab => tab.id === tabId)?.database ?? '',
       schema: tabsRef.current.find(tab => tab.id === tabId)?.schema ?? '',
       databaseKind: (() => {
-        const connectionId = tabsRef.current.find(tab => tab.id === tabId)?.connectionId;
-        return connectionsRef.current.find(connection => connection.id === connectionId)?.dbType;
+        const tab = tabsRef.current.find(item => item.id === tabId);
+        const connection = connectionsRef.current.find(item => item.id === tab?.connectionId);
+        return tab?.databaseKind ?? connection?.dbType ?? 'netezza';
       })(),
     }), () => preferencesRef.current);
   }
@@ -544,7 +545,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     }
     const id = createTransientTabId('retry');
     const retryInput: ExecutionInput = { connectionId: targetConnection.id, database: targetTab.database ?? workspaceDatabase(targetConnection), sql: statementSql, mode: 'single' };
-    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: `Retry · Statement ${index + 1}`, sql: statementSql, connectionId: targetConnection.id, database: retryInput.database, schema: targetTab.schema }]);
+    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: `Retry · Statement ${index + 1}`, sql: statementSql, connectionId: targetConnection.id, databaseKind: targetTab.databaseKind ?? targetConnection.dbType, database: retryInput.database, schema: targetTab.schema }]);
     activateTab(id, true);
     void runQuery('run', retryInput, id).catch(reason => setError(reason instanceof Error ? reason.message : 'Retry failed.'));
   }
@@ -621,7 +622,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   }
   function addTab(): void {
     const id = createTransientTabId('query');
-    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), connectionId: selected?.id, database: selected ? workspaceDatabase(selected) : database }]);
+    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), connectionId: selected?.id, databaseKind: selected?.dbType ?? 'netezza', database: selected ? workspaceDatabase(selected) : database }]);
     activateTab(id, true);
   }
   function closeTab(id: string): boolean {
@@ -678,7 +679,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   function openSchemaQuery(nextSql: string, title: string, node: SchemaTreeNode): void {
     const id = createTransientTabId('schema');
     const queryInput = { connectionId: selected?.id ?? '', database: node.database ?? database, sql: nextSql, mode: 'single' as const };
-    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title, sql: nextSql, connectionId: selected?.id, database: queryInput.database, schema: node.schema, source: node, sourceSql: nextSql, sourceConnectionId: selected?.id, sourceDatabase: queryInput.database, resultView: title.toLowerCase().startsWith('explain') ? 'explain' : 'grid' }]);
+    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title, sql: nextSql, connectionId: selected?.id, databaseKind: selected?.dbType ?? 'netezza', database: queryInput.database, schema: node.schema, source: node, sourceSql: nextSql, sourceConnectionId: selected?.id, sourceDatabase: queryInput.database, resultView: title.toLowerCase().startsWith('explain') ? 'explain' : 'grid' }]);
     activateTab(id, true);
     void runQuery('run', queryInput, id).catch(reason => setError(reason instanceof Error ? reason.message : 'Could not run schema query.'));
   }
@@ -696,9 +697,13 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
       setDatabase(workspaceDatabase(conn));
       setSchema('');
       setColumns([]);
-      setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, connectionId: conn.id, database: workspaceDatabase(conn), schema: '', source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
+      setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, connectionId: conn.id, databaseKind: conn.dbType, database: workspaceDatabase(conn), schema: '', source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
       setInspectedObject(null);
     }
+  }
+
+  function selectDialect(databaseKind: DatabaseKind, targetTabId = activeTabId): void {
+    setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, databaseKind } : tab));
   }
 
   function selectDatabase(nextDatabase: string, targetTabId = activeTabId): void {
@@ -713,7 +718,8 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
 
   function openHistoryEntry(entry: Awaited<ReturnType<ApiClient['history']>>[number]): void {
     const id = `history-${entry.id}`;
-    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: 'History query', sql: entry.sql, connectionId: entry.connectionId, database: entry.database }]);
+    const connection = connections.find(item => item.id === entry.connectionId);
+    setTabs(previous => [...previous, { ...newEditorTab(previous.length + 1, id), title: 'History query', sql: entry.sql, connectionId: entry.connectionId, databaseKind: connection?.dbType ?? 'netezza', database: entry.database }]);
     activateTab(id, true);
   }
 
@@ -786,6 +792,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     onRetryStatement={(tabId, statementIndex) => retryStatement(statementIndex, tabId)}
     onSelectConnection={(tabId, connectionId) => { activateTab(tabId); selectConnection(connectionId, tabId); }}
     onSelectDatabase={(tabId, nextDatabase) => { activateTab(tabId); selectDatabase(nextDatabase, tabId); }}
+    onSelectDialect={(tabId, databaseKind) => { activateTab(tabId); selectDialect(databaseKind, tabId); }}
     onInsertSql={value => insertSql(value, activeTabId)}
     onContextChange={contextChanged}
     onObjectSelect={selectObject}
@@ -842,6 +849,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     onRetryStatement={(tabId, statementIndex) => retryStatement(statementIndex, tabId)}
     onSelectConnection={(tabId, connectionId) => { activateTab(tabId); selectConnection(connectionId, tabId); }}
     onSelectDatabase={(tabId, nextDatabase) => { activateTab(tabId); selectDatabase(nextDatabase, tabId); }}
+    onSelectDialect={(tabId, databaseKind) => { activateTab(tabId); selectDialect(databaseKind, tabId); }}
     onInsertSql={value => insertSql(value, activeTabId)}
     onContextChange={contextChanged}
     onObjectSelect={selectObject}
