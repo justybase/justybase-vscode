@@ -159,6 +159,13 @@ export interface MetadataNode {
   readonly parentId?: string;
   readonly kind: 'connection' | 'database' | 'schema' | 'group' | 'object' | 'column';
   readonly label: string;
+  readonly description?: string;
+  readonly viewSql?: string;
+  readonly database?: string;
+  readonly schema?: string;
+  readonly objectName?: string;
+  readonly objectType?: string;
+  readonly columnType?: string;
   readonly hasChildren: boolean;
 }
 

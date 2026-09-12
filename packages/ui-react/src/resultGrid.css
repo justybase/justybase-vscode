@@ -597,6 +597,46 @@ body,
 .shared-sidebar > button:hover,
 .shared-sidebar > button[aria-pressed='true'] { color: var(--justybase-grid-text); background: var(--justybase-grid-hover); }
 
+.ui-schema-tree {
+  min-height: 0;
+  overflow: auto;
+  color: var(--justybase-grid-text);
+}
+
+.ui-schema-node {
+  display: flex;
+  align-items: center;
+  min-height: 27px;
+  gap: 3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.ui-schema-node[aria-selected='true'] { background: var(--justybase-grid-hover); }
+.ui-schema-node:hover { background: color-mix(in srgb, var(--justybase-grid-hover) 72%, transparent); }
+.ui-schema-node > button:first-child { min-width: 22px; padding: 2px; color: var(--justybase-grid-muted); background: transparent; }
+.ui-schema-node > button:first-child:hover { background: var(--justybase-grid-hover); }
+.ui-schema-node > button:last-child { min-width: 0; overflow: hidden; padding: 3px 5px; color: var(--justybase-grid-text); background: transparent; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.ui-schema-node > button:last-child:hover { background: transparent; }
+.ui-schema-node > button:last-child::first-letter { color: var(--justybase-grid-accent); }
+.ui-schema-context-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  min-width: 176px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 4px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+.ui-schema-context-menu strong { padding: 4px 7px 5px; overflow: hidden; color: var(--justybase-grid-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-schema-context-menu button { min-height: 26px; padding: 4px 7px; border: 0; color: var(--justybase-grid-text); background: transparent; font-size: 11px; text-align: left; }
+.ui-schema-context-menu button:hover { background: var(--justybase-grid-hover); }
+
 .ui-sql-dialect-select {
   display: inline-flex;
   align-items: center;
