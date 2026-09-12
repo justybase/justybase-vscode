@@ -206,6 +206,12 @@ describe('Dockyard DOM adapter lifecycle', () => {
     if (model) expect(adapter.manager.Close(model)).toBe(false);
     expect(denied).toEqual(['tab-1']);
     expect(adapter.manager.Find(queryDocumentId('tab-1'))).not.toBeNull();
+
+    const subsequentBeginUpdate = jest.spyOn(DockingManager.prototype, 'BeginUpdate').mockImplementation(() => {
+      throw new Error('subsequent sync failed');
+    });
+    expect(() => adapter.syncDefinitions(definitions(document))).not.toThrow();
+    subsequentBeginUpdate.mockRestore();
     adapter.dispose();
 
     const dispose = jest.spyOn(DockingManager.prototype, 'Dispose');
@@ -217,6 +223,7 @@ describe('Dockyard DOM adapter lifecycle', () => {
       storage: memoryStorage('failed-init-user'),
       definitions: definitions(document),
       explorerWidth: 275,
+      onError: () => { throw new Error('initial sync failed'); },
     })).toThrow('initial sync failed');
     expect(dispose).toHaveBeenCalledTimes(1);
     beginUpdate.mockRestore();
