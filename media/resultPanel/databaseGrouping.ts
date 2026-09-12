@@ -8,6 +8,7 @@
 import { postHostMessage } from './protocol.js';
 import { getActiveGridIndex } from './state.js';
 import { getActiveSourceUri, getResultSetAt } from './types.js';
+import type { DiskQuerySpec } from './types.js';
 
 export interface GroupingColumn {
     columnIndex: number;
@@ -26,6 +27,8 @@ export interface DatabaseGroupingRequest {
     orderBy?: { columnIndex: number; desc: boolean }[];
     /** undefined preserves the source query limit; null means Unlimited. */
     limit?: number | null;
+    /** Shared Result Grid filters applied before grouping on the database. */
+    filterSpec?: DiskQuerySpec;
 }
 
 export interface GroupingResultColumn {
