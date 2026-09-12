@@ -7,6 +7,7 @@ import type { UiResultViewState } from '@justybase/ui-core';
 import { uiTokens } from './tokens';
 import { formatDataGridCellValue } from './dataGrid';
 import type { DataGridColumn } from './dataGrid';
+import type { ResultAnalysisKind } from './resultAnalysis';
 export { DataGrid, formatDataGridCellValue, ResultGrid } from './dataGrid';
 export type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
@@ -151,18 +152,27 @@ export interface ResultViewToolbarProps {
   readonly onRefresh?: () => void;
   readonly onCopy?: () => void;
   readonly onExport?: () => void;
+  /** Optional adapter actions for the shared analysis surface. */
+  readonly onAggregate?: () => void;
+  readonly onGroup?: () => void;
+  readonly onPivot?: () => void;
+  readonly activeAnalysis?: ResultAnalysisKind;
+  readonly analysisBusy?: boolean;
 }
 
 /** Product-neutral controls for the common result view state. */
-export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onExport }: ResultViewToolbarProps): ReactNode {
+export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onExport, onAggregate, onGroup, onPivot, activeAnalysis, analysisBusy = false }: ResultViewToolbarProps): ReactNode {
   const firstColumn = columns[0]?.name;
   const canSelectColumn = firstColumn !== undefined;
+  const aggregateActive = activeAnalysis === 'aggregate' || (activeAnalysis === undefined && view.aggregation !== undefined);
+  const groupActive = activeAnalysis === 'group' || (activeAnalysis === undefined && view.grouping.length > 0);
+  const pivotActive = activeAnalysis === 'pivot' || (activeAnalysis === undefined && view.pivotColumn !== undefined);
   return <div className="ui-result-toolbar" role="toolbar" aria-label="Result view controls">
     <label>Filter<input aria-label="Filter results" value={view.globalFilter} onChange={event => onChange({ globalFilter: event.target.value })} /></label>
     <button type="button" aria-pressed={view.sorting.length > 0} disabled={!canSelectColumn && view.sorting.length === 0} onClick={() => onChange({ sorting: view.sorting.length > 0 ? [] : firstColumn === undefined ? [] : [{ column: firstColumn, descending: false }] })}>Sort</button>
-    <button type="button" aria-pressed={view.grouping.length > 0} disabled={!canSelectColumn && view.grouping.length === 0} onClick={() => onChange({ grouping: view.grouping.length > 0 ? [] : firstColumn === undefined ? [] : [firstColumn] })}>Group</button>
-    <button type="button" aria-pressed={view.aggregation !== undefined} onClick={() => onChange({ aggregation: view.aggregation === undefined ? 'count' : undefined })}>Aggregate</button>
-    <button type="button" aria-pressed={view.pivotColumn !== undefined} disabled={!canSelectColumn && view.pivotColumn === undefined} onClick={() => onChange({ pivotColumn: view.pivotColumn === undefined ? firstColumn : undefined })}>Pivot</button>
+    <button type="button" aria-pressed={groupActive} disabled={analysisBusy || (!canSelectColumn && view.grouping.length === 0)} onClick={() => onGroup ? onGroup() : onChange({ grouping: view.grouping.length > 0 ? [] : firstColumn === undefined ? [] : [firstColumn] })}>Group</button>
+    <button type="button" aria-pressed={aggregateActive} disabled={analysisBusy} onClick={() => onAggregate ? onAggregate() : onChange({ aggregation: view.aggregation === undefined ? 'count' : undefined })}>Aggregate</button>
+    <button type="button" aria-pressed={pivotActive} disabled={analysisBusy || (!canSelectColumn && view.pivotColumn === undefined)} onClick={() => onPivot ? onPivot() : onChange({ pivotColumn: view.pivotColumn === undefined ? firstColumn : undefined })}>Pivot</button>
     {onRefresh && <button type="button" onClick={onRefresh}>Refresh</button>}
     {onCopy && <button type="button" onClick={onCopy}>Copy</button>}
     {onExport && <button type="button" onClick={onExport}>Export</button>}
