@@ -172,7 +172,43 @@ function isTypeOnlySource(file) {
   }
 }
 
+function isTypeDeclarationLine(file, lineNumber) {
+  try {
+    const source = fs.readFileSync(file, 'utf8');
+    const sourceFile = ts.createSourceFile(
+      file,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    let declarationLine = false;
+    const visit = node => {
+      const startLine = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile)).line + 1;
+      const endLine = ts.getLineAndCharacterOfPosition(sourceFile, node.end).line + 1;
+      if (
+        lineNumber >= startLine
+        && lineNumber <= endLine
+        && (
+          ts.isInterfaceDeclaration(node)
+          || ts.isTypeAliasDeclaration(node)
+          || ts.isTypeLiteralNode(node)
+          || ts.isMappedTypeNode(node)
+        )
+      ) {
+        declarationLine = true;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    return declarationLine;
+  } catch {
+    return false;
+  }
+}
+
 function isLikelyNonExecutableLine(file, lineNumber) {
+  if (isTypeDeclarationLine(file, lineNumber)) return true;
   try {
     const sourceLine = fs.readFileSync(file, 'utf8').split(/\r\n|\r|\n/u)[lineNumber - 1] ?? '';
     const trimmed = sourceLine.trim();

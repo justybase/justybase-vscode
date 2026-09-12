@@ -363,6 +363,16 @@ test('allows type-only declarations and test setup files without executable cove
   assert.equal(fs.existsSync(setup), true);
 });
 
+test('ignores type members inside executable TypeScript modules', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/src/contracts/webview/webviewContracts.ts\n@@ -72 +73 @@\n',
+    lcov: 'SF:src/contracts/webview/webviewContracts.ts\nDA:1,1\nend_of_record\n',
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/contracts/'] } },
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.files[0]?.executableLines, 0);
+});
+
 test('does not require LCOV for Istanbul-ignored files', () => {
   const result = checkChangedCoverage({
     diff: '+++ b/src/activation/resultPanelFilterPerformance.ts\n@@ -1 +1 @@\n',
