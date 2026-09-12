@@ -7,7 +7,7 @@ import type { UiResultViewState } from '@justybase/ui-core';
 import { uiTokens } from './tokens';
 import { formatDataGridCellValue } from './dataGrid';
 import type { DataGridColumn } from './dataGrid';
-export { DataGrid, formatDataGridCellValue } from './dataGrid';
+export { DataGrid, formatDataGridCellValue, ResultGrid } from './dataGrid';
 export type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
 
 export type AsyncViewState = 'loading' | 'empty' | 'error' | 'cancelled' | 'ready';

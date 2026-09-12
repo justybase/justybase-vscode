@@ -44,6 +44,19 @@ describe('Electron same-origin API adapter', () => {
     expect(fetcher).toHaveBeenLastCalledWith('/api/query/query%2Fone/page', expect.anything());
   });
 
+  it('downloads a server export with the active CSRF cookie and response filename', async () => {
+    const blob = new Blob(['"ID"\n"1"'], { type: 'text/csv' });
+    const fetcher = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-disposition': 'attachment; filename="orders.csv"' }),
+      blob: async () => blob,
+    }) as Response);
+    const client = createElectronApiClient({ fetcher });
+    await expect(client.exportQuery('query/one', { format: 'csv', offset: 0, limit: 500 })).resolves.toEqual({ blob, fileName: 'orders.csv' });
+    expect(fetcher).toHaveBeenCalledWith('/api/query/query%2Fone/export', expect.objectContaining({ credentials: 'same-origin', method: 'POST', headers: expect.objectContaining({ 'x-justybase-csrf': 'csrf-fixture' }) }));
+  });
+
   it('deduplicates malformed/foreign websocket frames and reconnects with the last sequence', () => {
     const client = createElectronApiClient({ fetcher: jest.fn(async () => ({ ok: true, json: async () => ({}) }) as Response), WebSocket: FakeWebSocket as unknown as new (url: string) => WebSocket });
     const events: unknown[] = [];

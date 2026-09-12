@@ -1,5 +1,6 @@
 import type {
   QueryEvent,
+  QueryExportRequest,
   QueryPageRequest,
   QueryPageResponse,
   QueryStartRequest,
@@ -15,6 +16,7 @@ export interface ElectronApiClient {
   startQuery(input: QueryStartRequest): Promise<QueryStartResponse>;
   queryPage(queryId: string, input: QueryPageRequest): Promise<QueryPageResponse>;
   cancelQuery(queryId: string): Promise<{ ok: true }>;
+  exportQuery(queryId: string, input: QueryExportRequest): Promise<{ readonly blob: Blob; readonly fileName: string }>;
   connectToQueryEvents(queryId: string, onEvent: (event: QueryEvent) => void, onError?: (error: Error) => void): QueryEventSubscription;
 }
 
@@ -149,6 +151,28 @@ export function createElectronApiClient(options: ElectronApiClientOptions = {}):
     return body as T;
   }
 
+  async function download(route: string, init: RequestInit, fallbackName: string): Promise<{ readonly blob: Blob; readonly fileName: string }> {
+    const csrf = csrfCookie();
+    const response = await fetcher(route, {
+      ...init,
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/octet-stream, application/json',
+        'Content-Type': 'application/json',
+        ...(csrf ? { 'x-justybase-csrf': csrf } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+    if (!response.ok) {
+      let message = 'Electron export failed.';
+      try { message = readErrorMessage(await response.json()); } catch { /* non-JSON error */ }
+      throw new Error(message);
+    }
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const fileName = /filename="([^"]+)"/iu.exec(disposition)?.[1] ?? fallbackName;
+    return { blob: await response.blob(), fileName };
+  }
+
   function connectToQueryEvents(queryId: string, onEvent: (event: QueryEvent) => void, onError?: (error: Error) => void): QueryEventSubscription {
     const WebSocketConstructor = options.WebSocket ?? (typeof WebSocket === 'function' ? WebSocket : undefined);
     if (!WebSocketConstructor) throw new Error('WebSocket is unavailable in the Electron renderer.');
@@ -207,6 +231,7 @@ export function createElectronApiClient(options: ElectronApiClientOptions = {}):
     startQuery: input => request<QueryStartResponse>('/api/query', { method: 'POST', body: JSON.stringify(input) }),
     queryPage: (queryId, input) => request<QueryPageResponse>(`/api/query/${encodeURIComponent(queryId)}/page`, { method: 'POST', body: JSON.stringify(input) }),
     cancelQuery: queryId => request<{ ok: true }>(`/api/query/${encodeURIComponent(queryId)}/cancel`, { method: 'POST' }),
+    exportQuery: (queryId, input) => download(`/api/query/${encodeURIComponent(queryId)}/export`, { method: 'POST', body: JSON.stringify(input) }, `justybase-result.${input.format}`),
     connectToQueryEvents,
   };
 }
