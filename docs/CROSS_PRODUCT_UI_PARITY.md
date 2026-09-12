@@ -56,9 +56,24 @@ import/export workflows through the real loopback API.
 - Electron real-window smoke: `npm run test:electron:live` passed on
   2026-09-12 with an isolated SQLite fixture, shared Monaco authoring checks,
   Object Designer preview/apply, schema refresh, DDL, 1,200-row result-grid
-  paging/filtering, vertical and horizontal scroll restoration, clipboard,
-  CSV, and CSV gzip export checks. The report contained 10 checks and no
-  credentials or row values.
+  paging/filtering, aggregate analysis, vertical and horizontal scroll
+  restoration, clipboard, CSV, and CSV gzip export checks. The report contained
+  11 checks and no credentials or row values. The aggregate action was verified
+  through the same shared grid/panel path used by the Electron renderer.
+- Result-panel Extension Host evidence: `npm run test:extension-host` passed on
+  2026-09-12 with 3 result sets, 11 trace phases, and restoration of
+  `scrollTop=1800`, `scrollLeft=320`, and the exact virtual anchor row 63 after
+  Logs/source switching. The dedicated
+  `npm run test:extension-host:filter-performance` gate also passed for a
+  4,000 x 32 fixture: filter latency `200.2–200.6 ms`, ascending/descending
+  sort `39/20.7 ms`, and scroll restoration at `scrollTop=9000`,
+  `scrollLeft=320`, `anchorRow=363`.
+- Browser Data Grid evidence: `npm run test:playwright:data-grid-performance`
+  passed 6/6 in 53.1 s, and the rendering complement passed 19/19 in 20.9 s.
+  These gates cover the legacy/shared renderer comparison, worker cold/warm
+  filtering, rapid-query coalescing, sorting, export preparation, virtual
+  scrolling, persistence, grouping, hidden views, and out-of-order stream
+  recovery.
 - `@vscode/test-electron`: package version `3.1.0`; the Extension Host version
   remains the version reported by its managed download on the gate runner.
 
@@ -81,7 +96,7 @@ that the shared implementation already exists everywhere.
 | Explain | Web `ExplainPanel` + API explain execution | Authenticated Explain view backed by the shared execution/API adapter | VS Code Explain command/webview path | Shared request/view state; provider plan parsing remains adapter-owned | Adapter-backed with an available Electron capability | Explain owner; remove legacy after dialect capability and cancellation/output fixtures pass. |
 | Common designer workflows | Web `ObjectDesigner` + API guarded writes | Shared React Object Designer with guarded preview/apply and metadata refresh | Designer webviews/commands and companions | `designer-core` + shared React workflow components | Adapter-backed; guarded SQLite slice is live-tested and capability-described | Designer/dialect owners; remove legacy per workflow after capability, preview-token, read-only, and packaging gates. |
 | Import/export | Web panels/API routes | Shared import panel and authenticated CSV/CSV gzip/result-download adapter | Workspace/temp-file and export services | Shared workflow state; format/filesystem ports | Adapter-backed for guarded import and result export in the development/test shell | Import/export owner; remove per-format legacy only after file sandbox, browser download, and companion gates. |
-| Notebooks and advanced analysis | Partial/feature-specific Web paths | Not implemented | VS Code notebooks and desktop analysis views | Shared state only for portable contracts | `platform-specific` until capability is proven | Notebook/analysis owner; no removal until portable contract and lifecycle gates exist. |
+| Notebooks and advanced analysis | Partial/feature-specific Web paths; shared Result Grid aggregate/group/pivot analysis is available in the shared probe | Shared Result Grid aggregate/group/pivot analysis is live-tested; notebooks are not implemented | Shared Result Panel aggregate/group/pivot analysis is opt-in; VS Code notebooks and desktop analysis views remain host-owned | Shared analysis state only for portable tabular operations; notebook/chart lifecycle remains product-owned | `adapter-backed` for aggregate/group/pivot result analysis; notebooks remain `platform-specific` until capability is proven | Analysis owner; do not represent notebook/chart capability as available until its portable contract and lifecycle gates exist. |
 | Administration and database operations | Web `AdminPanel`/guarded API subset | Not implemented | Provider-specific commands and panels | Capability-backed workflow state; operations remain adapter-owned | `platform-specific` by dialect/product | DBA/security owner; remove legacy only after authorization, audit, read-only, and live-provider evidence. |
 
 ## First-tier surfaces
@@ -89,7 +104,8 @@ that the shared implementation already exists everywhere.
 The state and resource cells list the three products in this order: Web/API,
 Electron, VS Code. The detailed rows below use the current/target/status table
 above. The Electron renderer and the VS Code Result Panel can now opt into the
-shared bundle, but the shared target remains incomplete until the corresponding
+shared bundle, including the shared aggregate/group/pivot analysis panel, but
+the shared target remains incomplete until the corresponding
 slice has passed all product gates.
 
 | Surface | Product | State owner | Resource owner | Actions / shortcuts | Loading / empty / error / cancel | Persistence / identity | Capability / auth | Test | Known differences |
