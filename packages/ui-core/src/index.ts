@@ -65,6 +65,8 @@ export { createExecutionController, createWorkspaceController } from './controll
 export type { ExecutionController, WorkspaceController } from './controllers';
 export { resultAsyncState } from './resultState';
 export type { UiResultAsyncState, UiResultAsyncStateOptions } from './resultState';
+export { createAggregateAnalysisTable, createGroupAnalysisTable, createPivotAnalysisTable } from './resultAnalysis';
+export type { UiResultAnalysisKind, UiResultAnalysisTable } from './resultAnalysis';
 export { resolveUiMode } from './mode';
 export { createInitialUiState, emptyResultView, reduceUiState, resultKey } from './reducer';
 export type { InitialUiStateOptions } from './reducer';

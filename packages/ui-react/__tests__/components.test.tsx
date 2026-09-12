@@ -12,6 +12,7 @@ import {
   FocusOnMount,
   HistoryView,
   ResultTabs,
+  ResultAnalysisPanel,
   ResultViewToolbar,
   RowDetail,
   SchemaTree,
@@ -602,6 +603,45 @@ describe('shared React presentation', () => {
     expect(callbacks.onRefresh).toHaveBeenCalledTimes(1);
     expect(callbacks.onCopy).toHaveBeenCalledTimes(1);
     expect(callbacks.onExport).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes analysis actions to the adapter and renders the analysis table with the shared grid', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+    const onAggregate = jest.fn();
+    const onGroup = jest.fn();
+    const onPivot = jest.fn();
+    const onClose = jest.fn();
+    render(<>
+      <ResultViewToolbar
+        columns={[{ name: 'CATEGORY' }]}
+        view={{ globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined }}
+        onChange={onChange}
+        onAggregate={onAggregate}
+        onGroup={onGroup}
+        onPivot={onPivot}
+        activeAnalysis="group"
+      />
+      <ResultAnalysisPanel
+        sourceId="source-1"
+        resultSetId="result-1"
+        table={{ kind: 'group', title: 'Grouped result', summary: '2 groups', columns: [{ name: 'CATEGORY' }, { name: 'COUNT', type: 'BIGINT' }], rows: [['A', 2], ['B', 1]] }}
+        onClose={onClose}
+      />
+    </>);
+    expect(screen.getByRole('button', { name: 'Group' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Aggregate' }));
+    await user.click(screen.getByRole('button', { name: 'Group' }));
+    await user.click(screen.getByRole('button', { name: 'Pivot' }));
+    expect(onAggregate).toHaveBeenCalledTimes(1);
+    expect(onGroup).toHaveBeenCalledTimes(1);
+    expect(onPivot).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Grouped result' })).toBeInTheDocument();
+    expect(screen.getByText('2 groups')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'A' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close result analysis' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

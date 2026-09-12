@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
-import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
+import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryAggregateFunction, QueryColumnFilterSpec, QueryExportFormat, QueryGroupAggregate, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
-import { createExecutionController, createInitialUiState, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
+import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
 import {
   AsyncStateView,
   CellValueViewer,
@@ -11,6 +11,7 @@ import {
   ExplainView,
   HistoryView,
   ResultTabs,
+  ResultAnalysisPanel,
   ResultViewToolbar,
   RowDetail,
   SqlDialectSelect,
@@ -23,7 +24,8 @@ import {
   processDataGridRows,
   resolveDataGridColumns,
 } from '@justybase/ui-react';
-import type { DataGridCellContext, DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
+import type { DataGridCellContext, DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind } from '@justybase/ui-react';
+import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { createElectronApiClient } from './api';
 import { createElectronExecutionPort, fetchResultPage, RESULT_PAGE_SIZE } from './execution';
 import { ProblemsPanel, SqlEditor } from './SqlEditor';
@@ -44,6 +46,36 @@ export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCo
 export function displayRows(result: UiResultSurfaceState | undefined, rows: readonly ElectronRow[]): readonly ElectronRow[] {
   if (!result) return [];
   return processDataGridRows(result.columns, rows, result.view);
+}
+
+function resultColumnIndex(columns: readonly UiResultColumn[], key: string): number {
+  return columns.findIndex((column, index) => column.name === key || String(index) === key);
+}
+
+function resultQueryOptions(result: UiResultSurfaceState, view: UiResultSurfaceState['view']): {
+  readonly globalFilter?: string;
+  readonly columnFilters?: QueryColumnFilterSpec[];
+  readonly sorting?: QuerySortSpec[];
+} {
+  const columnFilters: QueryColumnFilterSpec[] = Object.entries(view.columnFilters)
+    .flatMap(([column, value]) => {
+      const columnIndex = resultColumnIndex(result.columns, column);
+      return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
+    });
+  const sorting: QuerySortSpec[] = view.sorting.flatMap(item => {
+    const columnIndex = resultColumnIndex(result.columns, item.column);
+    return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
+  });
+  return {
+    ...(view.globalFilter.trim() ? { globalFilter: view.globalFilter } : {}),
+    ...(columnFilters.length > 0 ? { columnFilters } : {}),
+    ...(sorting.length > 0 ? { sorting } : {}),
+  };
+}
+
+function isNumericResultColumn(column: UiResultColumn | undefined): boolean {
+  return /INT|DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/u.test(column?.type?.toUpperCase() ?? '')
+    || column?.inferredNumericKind !== undefined;
 }
 
 export function asSurface(value: string): UiSurface | undefined {
@@ -141,6 +173,9 @@ export function App(): ReactElement {
   const rowsByResultRef = useRef<ElectronRows>({});
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [cellViewer, setCellViewer] = useState<{ readonly column: UiResultColumn; readonly value: unknown; readonly rowNumber: number } | undefined>(undefined);
+  const [resultAnalysis, setResultAnalysis] = useState<UiResultAnalysisTable | undefined>(undefined);
+  const [resultAnalysisLoading, setResultAnalysisLoading] = useState(false);
+  const [resultAnalysisError, setResultAnalysisError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
@@ -164,6 +199,7 @@ export function App(): ReactElement {
   const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
   const restoredResultViewsRef = useRef(new Set<string>());
   const pendingResultViewWritesRef = useRef(new Map<string, { readonly timer: ReturnType<typeof setTimeout>; readonly write: () => void }>());
+  const resultAnalysisGenerationRef = useRef(0);
   const clientRef = useRef<ReturnType<typeof createElectronApiClient> | undefined>(undefined);
   const executionRef = useRef<ExecutionController | undefined>(undefined);
   const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
@@ -322,6 +358,13 @@ export function App(): ReactElement {
 
   useEffect(() => {
     setSelectedRow(undefined);
+  }, [activeResult?.sourceId, activeResult?.resultSetId]);
+
+  useEffect(() => {
+    resultAnalysisGenerationRef.current += 1;
+    setResultAnalysis(undefined);
+    setResultAnalysisError(undefined);
+    setResultAnalysisLoading(false);
   }, [activeResult?.sourceId, activeResult?.resultSetId]);
 
   useEffect(() => {
@@ -615,8 +658,83 @@ export function App(): ReactElement {
     await loadResultPage(activeResult, 0, true);
   }, [activeResult, loadResultPage]);
 
+  const closeResultAnalysis = useCallback((): void => {
+    resultAnalysisGenerationRef.current += 1;
+    setResultAnalysis(undefined);
+    setResultAnalysisError(undefined);
+    setResultAnalysisLoading(false);
+  }, []);
+
+  const toggleResultAnalysis = useCallback((kind: ResultAnalysisKind): void => {
+    if (resultAnalysis?.kind === kind) {
+      closeResultAnalysis();
+      return;
+    }
+    const result = activeResult;
+    const client = clientRef.current;
+    if (!result || !client) {
+      setResultAnalysis(undefined);
+      setResultAnalysisError('This result cannot be analysed because its query session is unavailable.');
+      return;
+    }
+    const generation = ++resultAnalysisGenerationRef.current;
+    setResultAnalysis(undefined);
+    setResultAnalysisError(undefined);
+    setResultAnalysisLoading(true);
+    const options = resultQueryOptions(result, result.view);
+    void (async (): Promise<void> => {
+      try {
+        if (kind === 'aggregate') {
+          const response = await client.aggregate(result.executionId, {
+            statementIndex: result.statementIndex,
+            ...options,
+            functions: ['count', 'sum', 'avg', 'min', 'max'] as QueryAggregateFunction[],
+          });
+          if (generation !== resultAnalysisGenerationRef.current) return;
+          setResultAnalysis(createAggregateAnalysisTable(result.columns, response));
+        } else if (kind === 'group') {
+          if (result.columns.length === 0) throw new Error('This result has no columns to group.');
+          const aggregates: QueryGroupAggregate[] = [
+            { function: 'count' },
+            ...result.columns.flatMap((column, columnIndex) => isNumericResultColumn(column) ? [{ function: 'sum' as const, columnIndex }] : []),
+          ];
+          const response = await client.group(result.executionId, {
+            statementIndex: result.statementIndex,
+            ...options,
+            groupByColumnIndices: [0],
+            aggregates,
+            groupLimit: 2_000,
+          });
+          if (generation !== resultAnalysisGenerationRef.current) return;
+          setResultAnalysis(createGroupAnalysisTable(response));
+        } else {
+          if (result.columns.length < 3) throw new Error('Pivot requires at least three columns.');
+          const valueColumnIndex = result.columns.findIndex((column, index) => index > 1 && isNumericResultColumn(column));
+          if (valueColumnIndex < 0) throw new Error('Pivot requires a numeric value column after the row and pivot columns.');
+          const response = await client.group(result.executionId, {
+            statementIndex: result.statementIndex,
+            ...options,
+            groupByColumnIndices: [0, 1],
+            aggregates: [{ function: 'sum', columnIndex: valueColumnIndex }],
+            groupLimit: 2_000,
+          });
+          if (generation !== resultAnalysisGenerationRef.current) return;
+          setResultAnalysis(createPivotAnalysisTable(result.columns, response, 0, 1, valueColumnIndex));
+        }
+        if (generation === resultAnalysisGenerationRef.current) setResultAnalysisError(undefined);
+      } catch (error: unknown) {
+        if (generation !== resultAnalysisGenerationRef.current) return;
+        setResultAnalysis(undefined);
+        setResultAnalysisError(error instanceof Error ? error.message : 'Could not analyse result.');
+      } finally {
+        if (generation === resultAnalysisGenerationRef.current) setResultAnalysisLoading(false);
+      }
+    })();
+  }, [activeResult, closeResultAnalysis, resultAnalysis]);
+
   const updateView = useCallback((patch: Partial<UiResultSurfaceState['view']>): void => {
     if (!activeResult) return;
+    if (resultAnalysis && ('globalFilter' in patch || 'columnFilters' in patch || 'sorting' in patch)) closeResultAnalysis();
     const nextView = { ...activeResult.view, ...patch };
     store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
     scheduleResultViewWrite(activeResult, nextView);
@@ -624,7 +742,7 @@ export function App(): ReactElement {
       pageStateRef.current.delete(activeResult.resultSetId);
       void loadResultPage({ ...activeResult, view: nextView }, 0, true, nextView);
     }
-  }, [activeResult, loadResultPage, scheduleResultViewWrite, store]);
+  }, [activeResult, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
 
   const loadMoreRows = useCallback((): void => {
     if (!activeResult) return;
@@ -646,6 +764,13 @@ export function App(): ReactElement {
     if (!column || value === undefined && rows[context.rowIndex] === undefined) return;
     setCellViewer({ column, value, rowNumber: context.rowIndex + 1 });
   }, [activeResult?.columns, rows]);
+
+  const openAnalysisCellValue = useCallback((context: DataGridCellContext): void => {
+    const column = resultAnalysis?.columns[context.columnIndex];
+    const row = resultAnalysis?.rows[context.rowIndex];
+    if (!column || !row) return;
+    setCellViewer({ column, value: row[context.columnIndex], rowNumber: context.rowIndex + 1 });
+  }, [resultAnalysis]);
 
   const copyGridPayload = useCallback(async (payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): Promise<void> => {
     const options = { includeHeaders: payload.includeHeaders ?? true };
@@ -819,7 +944,8 @@ export function App(): ReactElement {
           <ProblemsPanel problems={problems} onSelect={selectProblem} />
           <div className="electron-result-panel">
             <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
-            {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
+            {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => toggleResultAnalysis('group')} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
+            {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
             <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onViewCell={openCellValue} onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined} onRowSelect={setSelectedRow} /></AsyncStateView>
             {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>

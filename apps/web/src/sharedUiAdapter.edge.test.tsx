@@ -132,7 +132,16 @@ function edgeApi(options: ApiOptions = {}): { api: ApiClient; fetchMock: jest.Mo
     }
     if (url.includes('/api/query/query-1/page')) {
       if (options.pageError) return Promise.reject('page failed without an Error object');
-      return response({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }], rows: [[2, 'b'], [1, 'a']], offset: 0, limit: 500, totalRows: 2, hasMore: false });
+      return response({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }, { name: 'AMOUNT', type: 'NUMERIC(12,2)', scale: 2 }], rows: [[2, 'b', '10.00'], [1, 'a', '20.00']], offset: 0, limit: 500, totalRows: 2, hasMore: false });
+    }
+    if (url.includes('/api/query/query-1/aggregate')) {
+      return response({ filteredRowCount: 2, values: [{ columnIndex: 0, count: 2, sum: 3, avg: '1.5', min: 1, max: 2 }, { columnIndex: 2, count: 2, sum: '30.00', avg: '15.00', min: '10.00', max: '20.00' }] });
+    }
+    if (url.includes('/api/query/query-1/group')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { groupByColumnIndices?: number[] };
+      return body.groupByColumnIndices?.length === 2
+        ? response({ columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }, { name: 'SUM(AMOUNT)', type: 'NUMERIC(12,2)', scale: 2 }], rows: [[1, 'a', '20.00'], [2, 'b', '10.00']], totalGroups: 2 })
+        : response({ columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'COUNT(*)', type: 'BIGINT' }, { name: 'SUM(AMOUNT)', type: 'NUMERIC(12,2)', scale: 2 }], rows: [[1, 1, '20.00'], [2, 1, '10.00']], totalGroups: 2 });
     }
     if (url.includes('/api/query/query-1/cancel')) {
       if (options.cancelError) throw new Error('cancel failed');
@@ -217,6 +226,17 @@ describe('shared Web UI adapter edge contracts', () => {
     }));
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(writeText).toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Aggregate' }));
+    expect(await screen.findByRole('heading', { name: 'Aggregates' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Result analysis' })).toHaveTextContent('30');
+    await user.click(screen.getByRole('button', { name: 'Close result analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Group' }));
+    expect(await screen.findByRole('heading', { name: 'Grouped result' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close result analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Pivot' }));
+    expect(await screen.findByRole('heading', { name: 'Pivot result' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close result analysis' }));
 
     await user.click(screen.getAllByRole('button', { name: 'Explain' })[0]);
     expect(screen.getByRole('heading', { name: 'Explain' })).toBeInTheDocument();

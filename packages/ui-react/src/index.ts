@@ -2,6 +2,8 @@ export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
 export { calculateDataGridVirtualWindow, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumnIndexes, resolveDataGridColumns } from './dataGrid';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
+export { ResultAnalysisPanel } from './resultAnalysis';
+export type { ResultAnalysisKind, ResultAnalysisPanelProps, ResultAnalysisTable } from './resultAnalysis';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,
