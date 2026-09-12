@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
-import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec, SchemaTreeNode } from '@justybase/contracts';
+import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import { createExecutionController, createInitialUiState, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
 import {
@@ -29,6 +29,7 @@ import type { SqlEditorProblem } from './SqlEditor';
 import { SchemaExplorer } from './SchemaExplorer';
 import { EditRowPanel } from './EditRowPanel';
 import { ImportPanel } from './ImportPanel';
+import { ConnectionPanel } from './ConnectionPanel';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
@@ -156,6 +157,7 @@ export function App(): ReactElement {
   const [selectedObject, setSelectedObject] = useState<SchemaTreeNode | undefined>(undefined);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [editRow, setEditRow] = useState<{ target: SchemaTreeNode; values: ElectronRow } | undefined>(undefined);
+  const [connectionEditor, setConnectionEditor] = useState<{ readonly initial?: RedactedConnectionProfile } | undefined>(undefined);
   const [editColumns, setEditColumns] = useState<readonly MetadataColumn[]>([]);
   const [editColumnsState, setEditColumnsState] = useState<'idle' | 'loading' | 'error'>('idle');
   const activeExecutionRef = useRef<ExecutionHandle | undefined>(undefined);
@@ -337,6 +339,36 @@ export function App(): ReactElement {
     store.dispatch({ type: 'connections/select', connectionId });
     if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId } });
   }, [activeDocument, store]);
+
+  const saveConnection = useCallback((profile: RedactedConnectionProfile): void => {
+    const profiles = state.connections.profiles.some(item => item.id === profile.id)
+      ? state.connections.profiles.map(item => item.id === profile.id ? profile : item)
+      : [...state.connections.profiles, profile];
+    store.dispatch({ type: 'connections/set-profiles', profiles });
+    store.dispatch({ type: 'connections/select', connectionId: profile.id });
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: profile.id } });
+    setDatabase(profile.database);
+    setSchema('');
+    setConnectionEditor(undefined);
+    setNotice(`Connection “${profile.name}” is ready.`);
+  }, [activeDocument, state.connections.profiles, store]);
+
+  const deleteConnection = useCallback(async (profile: RedactedConnectionProfile): Promise<void> => {
+    if (typeof window !== 'undefined' && !window.confirm(`Delete connection “${profile.name}”?`)) return;
+    try {
+      await window.justybaseElectron.deleteConnection(profile.id);
+      const profiles = state.connections.profiles.filter(item => item.id !== profile.id);
+      store.dispatch({ type: 'connections/set-profiles', profiles });
+      if (state.connections.selectedConnectionId === profile.id) {
+        const next = profiles[0];
+        store.dispatch({ type: 'connections/select', connectionId: next?.id });
+        if (activeDocument && next) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: next.id } });
+      }
+      setNotice(`Connection “${profile.name}” deleted.`);
+    } catch (reason: unknown) {
+      setNotice(reason instanceof Error ? reason.message : 'Could not delete connection.');
+    }
+  }, [activeDocument, state.connections.profiles, state.connections.selectedConnectionId, store]);
 
   const selectDatabase = useCallback((nextDatabase: string): void => {
     setDatabase(nextDatabase);
@@ -693,7 +725,7 @@ export function App(): ReactElement {
     surfaces={surfaces}
     sidebar={<div className="electron-sidebar-content">
       <div className="electron-sidebar-title"><strong>Explorer</strong><button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>New SQL</button></div>
-      <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} key={profile.id} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button>)}</section>
+      <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" className="electron-section-action" aria-label="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <div className="electron-connection-item" key={profile.id}><button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="electron-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
       <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={databaseKind} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
     </div>}
   >
@@ -726,6 +758,7 @@ export function App(): ReactElement {
           </div>
         </div>}
     </UiShell>
+    {connectionEditor && <ConnectionPanel initial={connectionEditor.initial} onSaved={saveConnection} onCancel={() => setConnectionEditor(undefined)} />}
     {importTarget && selectedConnection && clientRef.current && <ImportPanel api={clientRef.current} connectionId={selectedConnection.id} target={importTarget} database={database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed. Refresh the schema or rerun the query to see new rows.'); }} />}
     {editRow && selectedConnection && clientRef.current && <>{editColumnsState === 'loading' ? <div className="electron-modal-backdrop" role="presentation"><div className="electron-modal-card" role="status">Loading table columns…</div></div> : editColumnsState === 'error' ? null : <EditRowPanel api={clientRef.current} connectionId={selectedConnection.id} database={database || editRow.target.database || ''} target={editRow.target} columns={editColumns} values={editRow.values} onClose={() => setEditRow(undefined)} onCompleted={message => { setEditRow(undefined); setNotice(message); void refresh(); }} />}</>}
   </></CapabilityGate> as ReactElement;

@@ -16,6 +16,11 @@ describe('Electron IPC registration lifecycle', () => {
       authStatus: () => ({ status: 'authenticated' }),
       credentialBroker: broker,
       listConnections: () => [],
+      createConnection: async () => ({ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }),
+      updateConnection: async () => ({ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }),
+      deleteConnection: async () => undefined,
+      testConnection: async () => undefined,
+      testConnectionProfile: async () => undefined,
       listCapabilities: () => ({ descriptors: [] }),
     });
     expect(electron.ipcMain.handle).toHaveBeenCalledWith('ui:request', expect.any(Function));

@@ -21,7 +21,7 @@ jest.mock('electron', () => {
     app,
     BrowserWindow: MockBrowserWindow,
     __windows: windows,
-    ipcMain: { handle: jest.fn(), removeHandler: jest.fn() },
+    ipcMain: { handle: jest.fn(), removeHandler: jest.fn(), on: jest.fn(), removeListener: jest.fn() },
     session: { defaultSession: { cookies: { set: jest.fn(async () => undefined) } } },
     safeStorage: {
       isEncryptionAvailable: jest.fn(() => false),

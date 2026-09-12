@@ -24,6 +24,15 @@ await build({
   sourcemap: true,
 });
 await build({
+  entryPoints: [path.join(root, 'src/preload/credentialPromptPreload.ts')],
+  bundle: true,
+  platform: 'browser',
+  format: 'cjs',
+  external: ['electron'],
+  outfile: path.join(dist, 'preload/credentialPromptPreload.js'),
+  sourcemap: true,
+});
+await build({
   entryPoints: [path.join(root, 'src/renderer/main.tsx')],
   bundle: true,
   platform: 'browser',
