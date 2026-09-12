@@ -354,7 +354,7 @@ describe('shared React presentation', () => {
     fireEvent.mouseEnter(cells[1]!);
     fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({
-      columns: [{ name: 'C' }, { name: 'A' }],
+      columns: [expect.objectContaining({ name: 'C' }), expect.objectContaining({ name: 'A' })],
       rows: [[3, 1]],
     }));
   });
@@ -373,6 +373,35 @@ describe('shared React presentation', () => {
     expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Expand group A' }));
     expect(screen.getByRole('row', { name: /A 1/ })).toBeInTheDocument();
+  });
+
+  it('removes collapsed children from the virtual scroll extent', () => {
+    jest.useFakeTimers();
+    try {
+      const rows = Array.from({ length: 1_000 }, (_value, index) => [index < 500 ? 'A' : 'B', index]);
+      const { container } = render(<DataGrid
+        resultSetId="virtual-collapsed-groups"
+        columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
+        rows={rows}
+        view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['TEAM'] }}
+      />);
+      const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+      expect(scroller).not.toBeNull();
+      if (!scroller) return;
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
+      act(() => { jest.runOnlyPendingTimers(); });
+      const spacerHeight = (): number => Array.from(container.querySelectorAll<HTMLTableRowElement>('.ui-data-grid-virtual-spacer'))
+        .reduce((sum, spacer) => sum + Number.parseFloat(spacer.firstElementChild?.getAttribute('style')?.match(/height:\s*([\d.]+)px/u)?.[1] ?? '0'), 0);
+      const before = spacerHeight();
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse group A' }));
+      act(() => { jest.runOnlyPendingTimers(); });
+      const after = spacerHeight();
+      expect(after).toBeLessThan(before);
+      expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
+      expect(screen.getAllByRole('row', { name: /B 500/ }).length).toBeGreaterThanOrEqual(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('keeps grouped row numbers and callbacks tied to the actual raw rows', () => {
