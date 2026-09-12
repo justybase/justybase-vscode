@@ -162,8 +162,19 @@ SELECT 3, 'SQLITE_FIXTURE'`;
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
+    await page.evaluate(() => {
+      localStorage.setItem('jwb_sidebar', '333');
+      localStorage.setItem('jwb_editor_pct', '62');
+    });
     await loginWithTestData(page);
     await expect(page.locator('.sidebar .section-title').filter({ hasText: 'Connections' })).toBeVisible();
+    await expect.poll(async () => page.locator('.dockyard-query-editor:visible').first().getAttribute('style')).toContain('height: 62%');
+    await expect.poll(async () => page.evaluate(() => ({
+      sidebar: Object.entries(localStorage).find(([key]) => key.endsWith(':sidebar'))?.[1] ?? null,
+      editorPct: Object.entries(localStorage).find(([key]) => key.endsWith(':editor_pct'))?.[1] ?? null,
+      legacySidebar: localStorage.getItem('jwb_sidebar'),
+      legacyEditorPct: localStorage.getItem('jwb_editor_pct'),
+    }))).toEqual({ sidebar: '333', editorPct: '62', legacySidebar: null, legacyEditorPct: null });
 
     await page.locator('.sidebar .icon-button').first().click();
     const dialog = page.getByRole('dialog', { name: 'Add connection' });
@@ -297,6 +308,17 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await page.setViewportSize({ width: 720, height: 900 });
     await expect(page.locator('.dockyard-shell')).toBeVisible();
     await expect(page.locator('.dockyard-tool-buttons')).toBeVisible();
+
+    const layoutKey = await page.evaluate(() => Object.keys(localStorage).find(value => value.endsWith(':dockyard_layout_v1')) ?? null);
+    expect(layoutKey).not.toBeNull();
+    const validLayoutKey = layoutKey as string;
+    await page.evaluate(key => {
+      localStorage.setItem(key, JSON.stringify({ schemaVersion: 99, scope: 'user', payload: {} }));
+    }, validLayoutKey);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.dockyard-host.ad-manager')).toBeVisible();
+    await expect(page.locator('.dockyard-init-error')).toHaveCount(0);
+    await expect.poll(async () => page.evaluate(key => localStorage.getItem(key), validLayoutKey)).toContain('justybase-dockyard-layout');
   });
 });
 

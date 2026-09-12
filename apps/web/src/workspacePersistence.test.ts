@@ -8,6 +8,7 @@ import {
   WorkspaceStorageProvider,
   type WorkspaceStorage,
 } from './workspacePersistence';
+import { readPersistedNumber } from './workspacePersistenceController';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -53,6 +54,8 @@ describe('workspace persistence', () => {
     browser.setItem('justybase_current_draft', 'SELECT 1');
     browser.setItem('jwb_schema_connection-1', '{"nodes":[]}');
     browser.setItem('jwb_grid_v2_result-1', '{"resultSetId":"result-1"}');
+    browser.setItem('jwb_sidebar', '333');
+    browser.setItem('jwb_editor_pct', '62');
     const first = createWorkspaceStorage('alice@example.test');
 
     migrateLegacyWorkspace(first);
@@ -61,10 +64,15 @@ describe('workspace persistence', () => {
     expect(first.get('current_draft')).toBe('SELECT 1');
     expect(first.get('schema_connection-1')).toBe('{"nodes":[]}');
     expect(first.get('grid_v2_result-1')).toBe('{"resultSetId":"result-1"}');
+    expect(first.get('sidebar')).toBe('333');
+    expect(first.get('editor_pct')).toBe('62');
+    expect(readPersistedNumber(first, 'editor_pct', 45)).toBe(62);
     expect(browser.getItem('jwb_tabs')).toBeNull();
     expect(browser.getItem('justybase_current_draft')).toBeNull();
     expect(browser.getItem('jwb_schema_connection-1')).toBeNull();
     expect(browser.getItem('jwb_grid_v2_result-1')).toBeNull();
+    expect(browser.getItem('jwb_sidebar')).toBeNull();
+    expect(browser.getItem('jwb_editor_pct')).toBeNull();
     expect(browser.getItem('jwb_workspace_migration_v1')).toContain('alice@example.test');
 
     const second = createWorkspaceStorage('bob@example.test');
@@ -113,6 +121,15 @@ describe('workspace persistence', () => {
     expect(storage.get('tabs')).toBeNull();
     expect(() => storage.set('tabs', '[]')).not.toThrow();
     expect(() => storage.remove('tabs')).not.toThrow();
+  });
+
+  it('uses the editor split fallback for missing or invalid persisted values', () => {
+    const storage = createWorkspaceStorage('split-user');
+    expect(readPersistedNumber(storage, 'editor_pct', 45)).toBe(45);
+    storage.set('editor_pct', 'not-a-number');
+    expect(readPersistedNumber(storage, 'editor_pct', 45)).toBe(45);
+    storage.set('editor_pct', '61');
+    expect(readPersistedNumber(storage, 'editor_pct', 45)).toBe(61);
   });
 
   it('provides the user-scoped storage through React context', () => {

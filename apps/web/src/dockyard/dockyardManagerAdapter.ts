@@ -116,6 +116,8 @@ export const DOCKYARD_LAYOUT_IDS = {
   toolsPane: 'dockyard-tools-pane',
 } as const;
 
+export const DEFAULT_DOCKYARD_EXPLORER_WIDTH = 250;
+
 function definitionModel(definition: DockyardContentDefinition): LayoutContent {
   if (definition.kind === 'document') {
     return new LayoutDocument({
@@ -355,6 +357,7 @@ export class DockyardManagerAdapter {
 
   public resetLayout(): void {
     if (this.disposed) return;
+    this.explorerWidth = DEFAULT_DOCKYARD_EXPLORER_WIDTH;
     this.synchronizing = true;
     try {
       this.manager.Layout = createDefaultDockyardLayout([...this.definitions.values()], this.explorerWidth, this.rightWidth);
@@ -396,7 +399,14 @@ export class DockyardManagerAdapter {
   }
 
   private replaceDefinitions(definitions: readonly DockyardContentDefinition[]): void {
-    this.definitions = new Map(definitions.map(definition => [definition.id, definition]));
+    const nextDefinitions = new Map(definitions.map(definition => [definition.id, definition]));
+    for (const contentId of this.hosts.keys()) {
+      if (!nextDefinitions.has(contentId)) this.hosts.delete(contentId);
+    }
+    for (const contentId of this.models.keys()) {
+      if (!nextDefinitions.has(contentId)) this.models.delete(contentId);
+    }
+    this.definitions = nextDefinitions;
     for (const definition of definitions) this.hosts.set(definition.id, definition.content);
   }
 

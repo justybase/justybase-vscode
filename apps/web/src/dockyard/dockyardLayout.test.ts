@@ -4,6 +4,8 @@ import type { LayoutSnapshot } from 'avalondock-web';
 import { DockingManager } from 'avalondock-web';
 import {
   DOCKYARD_CONTENT_IDS,
+  DOCKYARD_LAYOUT_IDS,
+  DEFAULT_DOCKYARD_EXPLORER_WIDTH,
   DockyardManagerAdapter,
   createDefaultDockyardLayout,
   explainToolId,
@@ -121,6 +123,8 @@ describe('Dockyard layout persistence', () => {
       queryDocumentId('tab-1'),
       explainToolId('tab-1'),
     ]));
+    const explorer = [...layout.Descendents()].find(item => item.Id === DOCKYARD_LAYOUT_IDS.explorerPane) as { DockWidth?: unknown } | undefined;
+    expect(explorer?.DockWidth).toBe(275);
   });
 
   it('treats storage read failures as an empty layout', () => {
@@ -166,6 +170,38 @@ describe('Dockyard DOM adapter lifecycle', () => {
     adapter.dispose();
     adapter.dispose();
     expect(adapter.getContentHost(DOCKYARD_CONTENT_IDS.connections)).toBeUndefined();
+  });
+
+  it('releases hosts for definitions removed during document synchronization', () => {
+    const contentDefinitions = definitions(document);
+    const adapter = new DockyardManagerAdapter({
+      host: document.createElement('div'),
+      storage: memoryStorage('stale-host-user'),
+      definitions: contentDefinitions,
+      explorerWidth: 275,
+    });
+    const removedId = explainToolId('tab-1');
+    expect(adapter.getContentHost(removedId)).toBe(contentDefinitions[3]?.content);
+
+    adapter.syncDefinitions(contentDefinitions.filter(definition => definition.id !== removedId));
+
+    expect(adapter.getContentHost(removedId)).toBeUndefined();
+    expect(adapter.manager.Find(removedId)).toBeNull();
+    adapter.dispose();
+  });
+
+  it('uses the default explorer width after a layout reset', () => {
+    const adapter = new DockyardManagerAdapter({
+      host: document.createElement('div'),
+      storage: memoryStorage('reset-user'),
+      definitions: definitions(document),
+      explorerWidth: 430,
+    });
+    adapter.resetLayout();
+
+    const explorer = [...adapter.manager.Layout.Descendents()].find(item => item.Id === DOCKYARD_LAYOUT_IDS.explorerPane) as { DockWidth?: unknown } | undefined;
+    expect(explorer?.DockWidth).toBe(DEFAULT_DOCKYARD_EXPLORER_WIDTH);
+    adapter.dispose();
   });
 
   it('removes the unsupported browser-window action from both context menus', () => {
