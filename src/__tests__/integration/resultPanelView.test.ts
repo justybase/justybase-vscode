@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globa
 import * as vscode from 'vscode';
 import { ResultPanelView } from '../../views/resultPanelView';
 import { clearResultPanelTrace } from '../../views/resultPanelTrace';
+import type { QueryResult, ResultSet } from '../../types';
+import type { runQueryRaw as RunQueryRaw } from '../../core/queryRunner';
+
+jest.mock('../../core/queryRunner', () => ({
+    runQueryRaw: jest.fn(),
+}));
 
 const mockResultsConfigurationValues: Record<string, unknown> = {
     gridFontFamily: "Menlo, Monaco, Consolas, 'Courier New', monospace"
@@ -204,6 +210,87 @@ describe('ResultPanelView Integration', () => {
             streamingTransportCount: 0,
             pendingResultSyncCount: 0,
         });
+    });
+
+    test('executes database aggregation SQL with filtered-count and alias fallbacks', async () => {
+        const queryRunner = jest.requireMock('../../core/queryRunner') as {
+            runQueryRaw: jest.MockedFunction<typeof RunQueryRaw> & { mockResolvedValueOnce: (value: QueryResult) => unknown };
+        };
+        queryRunner.runQueryRaw.mockReset();
+        const sourceUri = 'file:///aggregate.sql';
+        const resultSet: ResultSet = {
+            resultSetId: 'aggregate-result',
+            columns: [{ name: 'AMOUNT', type: 'NUMERIC' }],
+            data: [[10]],
+            sql: 'SELECT AMOUNT FROM SALES LIMIT 100',
+            refreshSql: 'SELECT AMOUNT FROM SALES LIMIT 100',
+            totalRowCount: 1,
+        };
+        const privateProvider = provider as unknown as {
+            _context: vscode.ExtensionContext;
+            _connectionManager: {
+                getConnectionForExecution: jest.Mock;
+                getActiveConnectionName: jest.Mock;
+            };
+            _stateManager: { resultsMap: Map<string, ResultSet[]> };
+            _handleDatabaseAggregations: (...args: unknown[]) => Promise<unknown[]>;
+        };
+        privateProvider._context = {} as vscode.ExtensionContext;
+        privateProvider._connectionManager = {
+            getConnectionForExecution: jest.fn(() => 'connection-1'),
+            getActiveConnectionName: jest.fn(() => undefined),
+        };
+        privateProvider._stateManager.resultsMap.set(sourceUri, [resultSet]);
+        queryRunner.runQueryRaw
+            .mockResolvedValueOnce({
+                columns: [{ name: 'agg_0_count' }, { name: 'agg_0_sum' }, { name: '__jb_filtered_row_count' }],
+                data: [[2, '12.50', '3']],
+            })
+            .mockResolvedValueOnce({
+                columns: [{ name: 'agg_0_count' }, { name: '__JB_FILTERED_ROW_COUNT' }],
+                data: [[1, 'not-a-number']],
+            })
+            .mockResolvedValueOnce({
+                columns: [{ name: 'agg_0_count' }, { name: '__JB_FILTERED_ROW_COUNT' }],
+                data: [[4, 4]],
+            });
+
+        const handleAggregations = privateProvider._handleDatabaseAggregations.bind(provider);
+        const first = await handleAggregations(sourceUri, 0, [
+            { columnIndex: 0, fn: 'count' },
+            { columnIndex: 0, fn: 'sum' },
+        ], { globalSearch: '12' }, 5, true);
+        expect(first).toEqual([
+            { columnIndex: 0, fn: 'count', value: 2, filteredRowCount: 3 },
+            { columnIndex: 0, fn: 'sum', value: '12.50', filteredRowCount: 3 },
+        ]);
+
+        const second = await handleAggregations(sourceUri, 0, [{ columnIndex: 0, fn: 'count' }]);
+        expect(second).toEqual([{ columnIndex: 0, fn: 'count', value: 1 }]);
+        expect(queryRunner.runQueryRaw).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            connectionName: 'connection-1',
+            maxRows: 1,
+            timeoutSeconds: expect.any(Number),
+            query: expect.stringContaining('__JB_FILTERED_ROW_COUNT'),
+        }));
+
+        const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0]?.[0] as (message: unknown) => void;
+        messageHandler({
+            command: 'requestDatabaseAggregations',
+            sourceUri,
+            resultSetIndex: 0,
+            requestId: 19,
+            aggregations: [{ columnIndex: 0, fn: 'count' }],
+            querySpec: { globalSearch: '4' },
+            timeoutSeconds: 7,
+        });
+        await new Promise<void>(resolve => setImmediate(resolve));
+        expect(postedMessages).toContainEqual(expect.objectContaining({
+            command: 'databaseAggregationResult',
+            sourceUri,
+            requestId: 19,
+            aggregations: [{ columnIndex: 0, fn: 'count', value: 4, filteredRowCount: 4 }],
+        }));
     });
 
     test('should hydrate pending execution state when webview becomes ready after execution starts', () => {

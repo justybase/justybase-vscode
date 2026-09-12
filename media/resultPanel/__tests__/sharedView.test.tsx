@@ -1,7 +1,7 @@
 import { encode } from '@msgpack/msgpack';
 import '@testing-library/jest-dom';
 import { act } from 'react';
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import {
     SharedResultPanelApp,
     SharedResultPanelController,
@@ -326,6 +326,132 @@ describe('shared VS Code Result Panel adapter', () => {
         controller.dispose();
     });
 
+    it('rejects stale, mismatched and failed analysis requests', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'analysis-errors-result',
+                columns: [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'AMOUNT', type: 'NUMERIC' }],
+                data: [['EU', 10]],
+                totalRowCount: 1,
+            },
+        ]));
+        const result = controller.activeResult()!;
+
+        await expect(controller.requestAnalysis('aggregate', { ...result, resultSetId: 'replaced-result' }))
+            .rejects.toThrow('no longer active');
+
+        const aggregateForGrouping = controller.requestAnalysis('aggregate', result);
+        const aggregateForGroupingId = (controller as unknown as { analysisRequestId: number }).analysisRequestId;
+        controller.handleHostMessage({
+            command: 'databaseGroupingResult',
+            sourceUri: result.sourceId,
+            resultSetIndex: result.statementIndex,
+            requestId: aggregateForGroupingId,
+            columns: [],
+            rows: [],
+            totalRows: 0,
+        });
+        await expect(aggregateForGrouping).rejects.toThrow('another analysis');
+
+        const groupForAggregation = controller.requestAnalysis('group', result);
+        const groupForAggregationId = (controller as unknown as { analysisRequestId: number }).analysisRequestId;
+        controller.handleHostMessage({
+            command: 'databaseAggregationResult',
+            sourceUri: result.sourceId,
+            resultSetIndex: result.statementIndex,
+            requestId: groupForAggregationId,
+            aggregations: [],
+        });
+        await expect(groupForAggregation).rejects.toThrow('another analysis');
+
+        const failed = controller.requestAnalysis('aggregate', result);
+        const failedId = (controller as unknown as { analysisRequestId: number }).analysisRequestId;
+        controller.handleHostMessage({
+            command: 'databaseAggregationResult',
+            sourceUri: result.sourceId,
+            resultSetIndex: result.statementIndex,
+            requestId: failedId,
+            error: 'aggregation failed on host',
+        });
+        await expect(failed).rejects.toThrow('aggregation failed on host');
+
+        const superseded = controller.requestAnalysis('group', result);
+        const supersededId = (controller as unknown as { analysisRequestId: number }).analysisRequestId;
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: result.resultSetId,
+                columns: result.columns,
+                data: controller.getRows(result),
+                totalRowCount: result.totalRowCount,
+            },
+        ]));
+        controller.handleHostMessage({
+            command: 'databaseGroupingResult',
+            sourceUri: result.sourceId,
+            resultSetIndex: result.statementIndex,
+            requestId: supersededId,
+            columns: [],
+            rows: [],
+            totalRows: 0,
+        });
+        await expect(superseded).rejects.toThrow('superseded');
+
+        const disposed = controller.requestAnalysis('aggregate', controller.activeResult()!);
+        controller.dispose();
+        await expect(disposed).rejects.toThrow('disposed');
+    });
+
+    it('covers analysis validation, exact aggregate values and empty query specs', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'analysis-values-result',
+                columns: [
+                    { name: 'CATEGORY', type: 'VARCHAR' },
+                    { name: 'AMOUNT', type: 'NUMERIC' },
+                ],
+                data: [['EU', '10.00']],
+                totalRowCount: 1,
+            },
+        ]));
+        const result = controller.activeResult()!;
+        expect(sharedAnalysisQuerySpec({
+            ...result,
+            view: { ...result.view, globalFilter: '  ', columnFilters: { UNKNOWN: ' ', MISSING: 'not present' } },
+        })).toBeUndefined();
+
+        const aggregatePromise = controller.requestAnalysis('aggregate', result);
+        const aggregateRequestId = (controller as unknown as { analysisRequestId: number }).analysisRequestId;
+        controller.handleHostMessage({
+            command: 'databaseAggregationResult',
+            sourceUri: result.sourceId,
+            resultSetIndex: result.statementIndex,
+            requestId: aggregateRequestId,
+            aggregations: [
+                { columnIndex: 0, fn: 'count', value: 'not-a-count', filteredRowCount: 4 },
+                { columnIndex: 0, fn: 'sum', value: { unsupported: true } },
+                { columnIndex: 0, fn: 'avg', value: null },
+                { columnIndex: 0, fn: 'min', value: 'A' },
+                { columnIndex: 0, fn: 'max', value: 'Z' },
+                { columnIndex: 1, fn: 'count', value: 1 },
+            ],
+        });
+        const aggregate = await aggregatePromise;
+        expect(aggregate.rows.find(row => row[0] === 'CATEGORY')).toEqual([
+            'CATEGORY', 0, '[object Object]', null, 'A', 'Z',
+        ]);
+
+        const noColumns = { ...result, resultSetId: result.resultSetId, columns: [] };
+        await expect(controller.requestAnalysis('group', noColumns)).rejects.toThrow('has no columns');
+        const noNumericValue = {
+            ...result,
+            columns: [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'PIVOT', type: 'VARCHAR' }],
+        };
+        await expect(controller.requestAnalysis('pivot', noNumericValue)).rejects.toThrow('numeric value column');
+        controller.dispose();
+    });
+
     it('ignores row windows without a live request or matching result generation', () => {
         const controller = new SharedResultPanelController();
         controller.handleHostMessage({
@@ -446,8 +572,27 @@ describe('shared VS Code Result Panel adapter', () => {
         }));
         expect(await screen.findByRole('heading', { name: 'Aggregates' })).toBeInTheDocument();
         expect(screen.getByRole('region', { name: 'Result analysis' })).toHaveTextContent('17');
+        const openValueViewer = jest.fn();
+        (window as unknown as { openValueViewer: typeof openValueViewer }).openValueViewer = openValueViewer;
+        const analysisRegion = screen.getByRole('region', { name: 'Result analysis' });
+        fireEvent.contextMenu(within(analysisRegion).getByRole('cell', { name: '17' }), { clientX: 24, clientY: 36 });
+        fireEvent.click(within(analysisRegion).getByRole('menuitem', { name: 'View Cell Value' }));
+        expect(openValueViewer).toHaveBeenCalledWith(expect.objectContaining({ value: '17', columnName: 'Sum' }));
+        fireEvent.contextMenu(within(analysisRegion).getByRole('cell', { name: '17' }), { clientX: 24, clientY: 36 });
+        fireEvent.click(within(analysisRegion).getByRole('menuitem', { name: 'Copy row as JSON' }));
         fireEvent.click(screen.getByRole('button', { name: 'Close result analysis' }));
         expect(screen.queryByRole('heading', { name: 'Aggregates' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Group' }));
+        const groupRequestId = (controller as unknown as { analysisRequestId: number }).analysisRequestId;
+        act(() => controller.handleHostMessage({
+            command: 'databaseGroupingResult',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            requestId: groupRequestId,
+            error: 'grouping failed',
+        }));
+        expect(await screen.findByRole('alert')).toHaveTextContent('grouping failed');
+        fireEvent.click(screen.getByRole('button', { name: 'Close result analysis' }));
         controller.dispose();
     });
 
