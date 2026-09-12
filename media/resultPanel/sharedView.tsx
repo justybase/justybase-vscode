@@ -986,6 +986,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         totalRowCount={activeResult.totalRowCount}
                         view={activeResult.view}
                         onViewChange={patch => controller.updateView(activeResult.resultSetId, patch)}
+                        showContextMenu
                         selectedRowIndex={selectedRow}
                         scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }}
                         onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })}

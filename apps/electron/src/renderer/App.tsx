@@ -18,7 +18,6 @@ import {
   createDataGridClipboardPayload,
   disposeSqlLanguageFeatures,
   formatDataGridClipboard,
-  formatDataGridCellValue,
   processDataGridRows,
   resolveDataGridColumns,
 } from '@justybase/ui-react';
@@ -34,13 +33,6 @@ import { ConnectionPanel } from './ConnectionPanel';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
-
-interface ElectronGridContextMenu {
-  readonly clientX: number;
-  readonly clientY: number;
-  readonly rowIndex: number;
-  readonly columnIndex: number;
-}
 
 export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
   return getResultAsyncState(result, rowCount);
@@ -146,7 +138,6 @@ export function App(): ReactElement {
   const rowsByResultRef = useRef<ElectronRows>({});
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
-  const [contextMenu, setContextMenu] = useState<ElectronGridContextMenu | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const [problems, setProblems] = useState<readonly SqlEditorProblem[]>([]);
@@ -568,19 +559,6 @@ export function App(): ReactElement {
     [activeResult?.columns, rows],
   );
 
-  const copyText = useCallback(async (text: string): Promise<void> => {
-    if (typeof navigator === 'undefined' || !navigator.clipboard) {
-      setNotice('Clipboard access is unavailable.');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      setNotice('Copied.');
-    } catch {
-      setNotice('Could not copy to the clipboard.');
-    }
-  }, []);
-
   const copyGridPayload = useCallback(async (payload: DataGridCopyPayload): Promise<void> => {
     const formatted = createDataGridClipboardPayload(payload);
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -649,17 +627,15 @@ export function App(): ReactElement {
     }
   }, [activeResult, exportFormat]);
 
-  const openEditRow = useCallback(async (context: ElectronGridContextMenu): Promise<void> => {
+  const openEditRow = useCallback(async (context: DataGridCellContext): Promise<void> => {
     const target = selectedObject;
     const row = rows[context.rowIndex];
     const connectionId = selectedConnection?.id;
     const targetDatabase = database || target?.database;
     if (!target || target.kind !== 'object' || target.objectType?.toUpperCase() === 'VIEW' || !target.schema || !target.objectName || !connectionId || !targetDatabase || !row) {
       setNotice('Select a writable table in the schema explorer before editing a row.');
-      setContextMenu(undefined);
       return;
     }
-    setContextMenu(undefined);
     setEditColumnsState('loading');
     setEditRow({ target, values: row });
     try {
@@ -676,28 +652,6 @@ export function App(): ReactElement {
       setNotice(error instanceof Error ? error.message : 'Could not load table columns.');
     }
   }, [activeResult?.columns, database, rows, selectedConnection?.id, selectedObject]);
-
-  const contextRow = contextMenu ? rows[contextMenu.rowIndex] : undefined;
-  const closeContextMenu = useCallback((): void => setContextMenu(undefined), []);
-  const contextText = useCallback((context: DataGridCellContext, format: 'value' | 'row'): string | undefined => {
-    const row = rows[context.rowIndex];
-    const column = activeResult?.columns[context.columnIndex];
-    if (!row || !column) return undefined;
-    if (format === 'value') return formatDataGridCellValue(row[context.columnIndex], column.type, column);
-    return rowsAsText(activeResult.columns, [row]);
-  }, [activeResult, rows]);
-
-  useEffect(() => {
-    if (!contextMenu) return undefined;
-    const close = (): void => setContextMenu(undefined);
-    const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') close(); };
-    document.addEventListener('click', close);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('click', close);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [contextMenu]);
 
   const selectSurface = useCallback((surface: string): void => {
     const next = asSurface(surface);
@@ -765,8 +719,7 @@ export function App(): ReactElement {
           <div className="electron-result-panel">
             <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
             {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
-            <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onContextMenu={context => setContextMenu(context)} onRowSelect={setSelectedRow} /></AsyncStateView>
-            {contextMenu && contextRow && activeResult && <div className="electron-grid-context-menu" role="menu" style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'value'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy value</button><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'row'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy row</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ columnFilters: { ...activeResult.view.columnFilters, [column.name]: String(contextRow[contextMenu.columnIndex] ?? '') } }); closeContextMenu(); }}>Filter by value</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ sorting: [{ column: column.name, descending: false }] }); closeContextMenu(); }}>Sort ascending</button><button type="button" role="menuitem" onClick={() => { setSelectedRow(contextMenu.rowIndex); closeContextMenu(); }}>View full row</button>{selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' && <button type="button" role="menuitem" onClick={() => void openEditRow(contextMenu)}>Edit row</button>}</div>}
+            <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined} onRowSelect={setSelectedRow} /></AsyncStateView>
             {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>
         </div>}
