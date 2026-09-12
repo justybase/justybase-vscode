@@ -7,7 +7,9 @@
  */
 
 import type { DatabaseKind } from '../contracts/database';
+import type { DiskQuerySpec } from '../core/resultDataProvider/types';
 import type { ColumnDefinition } from '../types';
+import { buildDatabaseWhereSql } from './databaseFilterSql';
 
 export interface GroupingColumn {
     columnIndex: number;
@@ -28,6 +30,8 @@ export interface DatabaseGroupingRequest {
     orderBy?: { columnIndex: number; desc: boolean }[];
     /** undefined keeps the source query's limiter; null explicitly removes it. */
     limit?: number | null;
+    /** Optional shared-grid filter applied to the derived result before grouping. */
+    filterSpec?: DiskQuerySpec;
 }
 
 export interface DatabaseGroupingResultColumn {
@@ -303,6 +307,7 @@ export function buildDatabaseGroupingSql(
         ? requestedOrder.join(', ')
         : `${(defaultOrderIndex >= 0 ? defaultOrderIndex : aggregateOrderIndex >= 0 ? aggregateOrderIndex : 0) + 1} DESC`;
     const appliedLimit = resolveRequestedLimit(request, normalized.sourceLimit);
+    const whereSql = buildDatabaseWhereSql(request.filterSpec, columns);
 
     return {
         sql: [
@@ -310,6 +315,7 @@ export function buildDatabaseGroupingSql(
             'FROM (',
             normalized.sql,
             ') t',
+            whereSql ? `WHERE ${whereSql}` : '',
             `GROUP BY ${groupExpressions.join(', ')}`,
             `ORDER BY ${orderBy}`,
             outerLimitClause(options.databaseKind, appliedLimit),

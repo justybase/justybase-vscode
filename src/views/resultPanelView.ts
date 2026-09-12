@@ -260,8 +260,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             onRefreshResult: (sourceUri, resultSetIndex, limitValue, removeLimit) =>
                 this._handleRefreshResult(sourceUri, resultSetIndex, limitValue, removeLimit),
             onExportAllRows: request => this._handleAllRowsExport(request),
-            onRequestDatabaseAggregations: (sourceUri, resultSetIndex, aggregations, timeoutSeconds, isRetry) =>
-                this._handleDatabaseAggregations(sourceUri, resultSetIndex, aggregations, timeoutSeconds, isRetry),
+            onRequestDatabaseAggregations: (sourceUri, resultSetIndex, aggregations, querySpec, timeoutSeconds, isRetry) =>
+                this._handleDatabaseAggregations(sourceUri, resultSetIndex, aggregations, querySpec, timeoutSeconds, isRetry),
             onRequestDatabaseFilterValues: (sourceUri, resultSetIndex, columnIndex, querySpec, timeoutSeconds, isRetry) =>
                 this._handleDatabaseFilterValues(sourceUri, resultSetIndex, columnIndex, querySpec, timeoutSeconds, isRetry),
             onApplyDatabaseFilter: (sourceUri, resultSetIndex, querySpec, timeoutSeconds, isRetry) =>
@@ -1994,6 +1994,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         sourceUri: string,
         resultSetIndex: number,
         aggregations: DatabaseAggregationRequest[],
+        querySpec?: DiskQuerySpec,
         timeoutSeconds?: number,
         isRetry?: boolean,
     ): Promise<DatabaseAggregationResult[]> {
@@ -2007,7 +2008,12 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             throw new Error('This result set does not have refresh SQL.');
         }
 
-        const built = buildDatabaseAggregationSql(refreshSql, resultSet.columns, aggregations, resultSet.databaseFilterSpec);
+        const built = buildDatabaseAggregationSql(
+            refreshSql,
+            resultSet.columns,
+            aggregations,
+            querySpec ?? resultSet.databaseFilterSpec,
+        );
         const connectionName =
             this._connectionManager.getConnectionForExecution(sourceUri)
             || this._connectionManager.getActiveConnectionName()
@@ -2040,10 +2046,20 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             valueByColumnName.set(column.name.toLowerCase(), firstRow[index]);
         });
 
+        const filteredCountValue = valueByColumnName.get(built.filteredCountAlias)
+            ?? valueByColumnName.get(built.filteredCountAlias.toLowerCase());
+        const parsedFilteredCount = typeof filteredCountValue === 'number'
+            ? filteredCountValue
+            : Number(filteredCountValue);
+        const filteredRowCount = Number.isFinite(parsedFilteredCount) && parsedFilteredCount >= 0
+            ? Math.trunc(parsedFilteredCount)
+            : undefined;
+
         return built.aliases.map(alias => ({
             columnIndex: alias.columnIndex,
             fn: alias.fn,
             value: valueByColumnName.get(alias.alias) ?? valueByColumnName.get(alias.alias.toLowerCase()) ?? null,
+            ...(filteredRowCount === undefined ? {} : { filteredRowCount }),
         }));
     }
 

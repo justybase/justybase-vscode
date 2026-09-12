@@ -18,7 +18,9 @@ describe('databaseAggregationSql', () => {
         expect(built.sql).toContain('SUM(t."AMOUNT") AS "agg_0_sum"');
         expect(built.sql).toContain('MEDIAN(t."AMOUNT") AS "agg_0_median"');
         expect(built.sql).toContain('MAX(t."DT") AS "agg_1_max"');
+        expect(built.sql).toContain('COUNT(*) AS "__JB_FILTERED_ROW_COUNT"');
         expect(built.sql).toContain('FROM (\nWITH c AS (SELECT * FROM T) SELECT amount, dt FROM c\n) t');
+        expect(built.filteredCountAlias).toBe('__JB_FILTERED_ROW_COUNT');
         expect(built.aliases).toEqual([
             { alias: 'agg_0_sum', columnIndex: 0, fn: 'sum' },
             { alias: 'agg_0_median', columnIndex: 0, fn: 'median' },
@@ -32,5 +34,17 @@ describe('databaseAggregationSql', () => {
             [{ name: '?COLUMN?', type: 'INTEGER' }],
             [{ columnIndex: 0, fn: 'sum' }],
         )).toThrow('stable, unique column names');
+    });
+
+    it('places the shared-grid filter outside the source query limit', () => {
+        const built = buildDatabaseAggregationSql(
+            'SELECT amount FROM orders LIMIT 50',
+            [{ name: 'AMOUNT', type: 'NUMERIC' }],
+            [{ columnIndex: 0, fn: 'sum' }],
+            { globalSearch: '42' },
+        );
+
+        expect(built.sql).toContain('FROM (\nSELECT amount FROM orders\n) t');
+        expect(built.sql).toContain('WHERE (LOWER(CAST(t."AMOUNT" AS VARCHAR(64000))) LIKE');
     });
 });

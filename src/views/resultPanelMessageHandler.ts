@@ -99,6 +99,7 @@ export interface MessageHandlerCallbacks {
         sourceUri: string,
         resultSetIndex: number,
         aggregations: DatabaseAggregationRequest[],
+        querySpec?: DiskQuerySpec,
         timeoutSeconds?: number,
         isRetry?: boolean,
     ) => Promise<DatabaseAggregationResult[]>;
@@ -591,6 +592,7 @@ export class ResultPanelMessageHandler {
                     message.resultSetIndex,
                     message.requestId,
                     message.aggregations,
+                    message.querySpec,
                     message.timeoutSeconds,
                     message.isRetry,
                 );
@@ -1485,6 +1487,7 @@ export class ResultPanelMessageHandler {
         resultSetIndex: number,
         requestId: number,
         aggregations: DatabaseAggregationRequest[],
+        querySpec?: DiskQuerySpec,
         timeoutSeconds?: number,
         isRetry?: boolean,
     ): Promise<void> {
@@ -1504,6 +1507,7 @@ export class ResultPanelMessageHandler {
                 sourceUri,
                 resultSetIndex,
                 aggregations,
+                querySpec,
                 timeoutSeconds,
                 isRetry,
             );

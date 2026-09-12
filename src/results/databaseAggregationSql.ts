@@ -13,11 +13,14 @@ export interface DatabaseAggregationResult {
     columnIndex: number;
     fn: string;
     value: unknown;
+    /** Number of rows remaining after the optional shared-grid filter. */
+    filteredRowCount?: number;
 }
 
 export interface DatabaseAggregationBuildResult {
     sql: string;
     aliases: Array<{ alias: string; columnIndex: number; fn: string }>;
+    filteredCountAlias: string;
 }
 
 const VALID_AGGREGATION_FUNCTIONS = new Set([
@@ -83,6 +86,7 @@ export function buildDatabaseAggregationSql(
     const columnNames = columns.map(column => column.name);
     const selectParts: string[] = [];
     const aliases: Array<{ alias: string; columnIndex: number; fn: string }> = [];
+    const filteredCountAlias = '__JB_FILTERED_ROW_COUNT';
 
     for (const request of requests) {
         if (!Number.isInteger(request.columnIndex) || request.columnIndex < 0 || request.columnIndex >= columns.length) {
@@ -111,6 +115,7 @@ export function buildDatabaseAggregationSql(
         throw new Error('All rows aggregation requires stable, unique column names in this result set.');
     }
 
+    selectParts.push(`COUNT(*) AS ${quoteIdentifier(filteredCountAlias)}`);
     const whereSql = buildDatabaseWhereSql(filterSpec, columns);
     return {
         sql: [
@@ -121,5 +126,6 @@ export function buildDatabaseAggregationSql(
             whereSql ? `WHERE ${whereSql}` : '',
         ].filter(Boolean).join('\n'),
         aliases,
+        filteredCountAlias,
     };
 }
