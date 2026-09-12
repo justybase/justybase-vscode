@@ -62,6 +62,8 @@ export interface DataGridProps {
   readonly onLoadMore?: () => void;
   /** Index into the supplied raw rows, even when displayed rows are filtered, sorted, or grouped. */
   readonly onRowSelect?: (rowIndex: number) => void;
+  /** Opens the host-owned guarded row editor for the context-menu row. */
+  readonly onEditRow?: (context: DataGridCellContext) => void;
   readonly selectedRowIndex?: number;
   readonly view?: DataGridViewState;
   readonly onViewChange?: (patch: Partial<UiResultViewState>) => void;
@@ -70,6 +72,8 @@ export interface DataGridProps {
   readonly onSelectionChange?: (selection: DataGridSelection | undefined) => void;
   readonly onContextMenu?: (context: DataGridCellContext) => void;
   readonly onCopySelection?: (payload: DataGridCopyPayload) => void;
+  /** Enables the shared copy/filter/sort/row-detail context menu. */
+  readonly showContextMenu?: boolean;
   /** Shows the shared column visibility/order/pinning menu. */
   readonly showColumnMenu?: boolean;
 }
@@ -478,6 +482,7 @@ export function DataGrid({
   onScroll,
   onLoadMore,
   onRowSelect,
+  onEditRow,
   selectedRowIndex,
   view,
   onViewChange,
@@ -485,6 +490,7 @@ export function DataGrid({
   onSelectionChange,
   onContextMenu,
   onCopySelection,
+  showContextMenu = true,
   showColumnMenu = true,
 }: DataGridProps): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
@@ -525,6 +531,7 @@ export function DataGrid({
   }, [columnMetadataSignature, columns, resultSetId, rows]);
   const [selection, setSelection] = useState<DataGridSelection | undefined>(undefined);
   const selectionRef = useRef<DataGridSelection | undefined>(undefined);
+  const [contextMenu, setContextMenu] = useState<DataGridCellContext | undefined>(undefined);
   const dragSelectingRef = useRef(false);
   const draggedColumnRef = useRef<number | undefined>(undefined);
   const resizeRef = useRef<{ columnId: string; startX: number; startWidth: number } | undefined>(undefined);
@@ -566,6 +573,20 @@ export function DataGrid({
       resizeRef.current = undefined;
     };
   }, []);
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = (): void => setContextMenu(undefined);
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') close();
+    };
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('click', close);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     const element = scroller.current;
@@ -652,6 +673,7 @@ export function DataGrid({
     selectionRef.current = undefined;
     setSelection(undefined);
     setCollapsedGroups(new Set());
+    setContextMenu(undefined);
     selectionChangeRef.current?.(undefined);
   }, [selectionScope]);
 
@@ -818,6 +840,51 @@ export function DataGrid({
     void navigator.clipboard.writeText(text);
   }
 
+  function copyContextPayload(payload: DataGridCopyPayload): void {
+    if (onCopySelection) {
+      onCopySelection(payload);
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
+    const text = [
+      payload.columns.map(column => column.name).join('\t'),
+      ...payload.rows.map(row => row.map((value, index) => {
+        const column = payload.columns[index];
+        return formatDataGridCellValue(value, column?.type, column);
+      }).join('\t')),
+    ].join('\n');
+    void navigator.clipboard.writeText(text);
+  }
+
+  function copyContextValue(context: DataGridCellContext, row: readonly unknown[]): void {
+    const column = resolvedColumns[context.columnIndex];
+    if (!column) return;
+    copyContextPayload({ columns: [column], rows: [[row[context.columnIndex]]] });
+    setContextMenu(undefined);
+  }
+
+  function copyContextRow(row: readonly unknown[]): void {
+    copyContextPayload({ columns: resolvedColumns, rows: [row] });
+    setContextMenu(undefined);
+  }
+
+  function filterContextValue(context: DataGridCellContext, row: readonly unknown[]): void {
+    filterColumn(context.columnIndex, row[context.columnIndex] === null || row[context.columnIndex] === undefined ? '' : String(row[context.columnIndex]));
+    setContextMenu(undefined);
+  }
+
+  function sortContextValue(columnIndex: number, descending: boolean): void {
+    const column = resolvedColumns[columnIndex];
+    if (!column) return;
+    updateView({ sorting: [{ column: columnKey(column, columnIndex), descending }] });
+    setContextMenu(undefined);
+  }
+
+  function selectContextRow(context: DataGridCellContext): void {
+    onRowSelect?.(context.rowIndex);
+    setContextMenu(undefined);
+  }
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'c') {
       event.preventDefault();
@@ -829,6 +896,9 @@ export function DataGrid({
 
   // Keep the legacy result-grid hook as a compatibility selector while the
   // shared class remains the styling/API identity for every host.
+  const contextRow = contextMenu ? rows[contextMenu.rowIndex] : undefined;
+  const contextColumn = contextMenu ? resolvedColumns[contextMenu.columnIndex] : undefined;
+
   return <div className="ui-result-grid result-grid">
     {showColumnMenu && <details className="ui-data-grid-column-menu">
       <summary>Columns</summary>
@@ -893,7 +963,7 @@ export function DataGrid({
               const value = rendered.values[columnIndex];
               const metadata = getCellMetadata?.(value, rendered.sourceIndex, columnIndex, column) ?? column;
               const displayValue = formatDataGridCellValue(value, metadata.type, metadata);
-              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, metadata)}`, isDataGridNumericColumn(metadata) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
+              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, metadata)}`, isDataGridNumericColumn(metadata) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); const context = { rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }; onContextMenu?.(context); if (showContextMenu) setContextMenu(context); }} title={displayValue}>{displayValue}</td>;
             })}
           </tr>;
         })}
@@ -901,6 +971,18 @@ export function DataGrid({
         </tbody>
       </table>}
     </div>
+    {showContextMenu && contextMenu && contextRow && contextColumn && <div className="ui-data-grid-context-menu" role="menu" aria-label={`Actions for row ${contextMenu.rowIndex + 1}`} style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
+      <strong>{contextColumn.name}</strong>
+      <button type="button" role="menuitem" onClick={() => copyContextValue(contextMenu, contextRow)}>Copy value</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRow(contextRow)}>Copy row</button>
+      <hr />
+      <button type="button" role="menuitem" onClick={() => filterContextValue(contextMenu, contextRow)}>Filter by this value</button>
+      <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, false)}>Sort ascending</button>
+      <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, true)}>Sort descending</button>
+      <hr />
+      <button type="button" role="menuitem" onClick={() => selectContextRow(contextMenu)}>View full row</button>
+      {onEditRow && <button type="button" role="menuitem" onClick={() => { onEditRow(contextMenu); setContextMenu(undefined); }}>Edit row…</button>}
+    </div>}
   </div>;
 }
 

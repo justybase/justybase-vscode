@@ -131,6 +131,38 @@ body,
   background: var(--justybase-grid-hover);
 }
 
+.ui-data-grid-context-menu {
+  position: fixed;
+  z-index: 120;
+  display: grid;
+  min-width: 190px;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 4px;
+  background: var(--justybase-grid-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.ui-data-grid-context-menu strong {
+  padding: 4px 6px;
+  color: var(--justybase-grid-text);
+  font-size: 11px;
+}
+
+.ui-data-grid-context-menu button {
+  min-height: 25px;
+  padding: 4px 6px;
+  border: 0;
+  color: var(--justybase-grid-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.ui-data-grid-context-menu button:hover { background: var(--justybase-grid-hover); }
+.ui-data-grid-context-menu hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--justybase-grid-border); }
+
 .ui-data-grid {
   position: relative;
   width: max-content;

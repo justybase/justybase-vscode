@@ -296,6 +296,38 @@ describe('shared React presentation', () => {
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
   });
 
+  it('keeps the grid context actions identical for shared hosts', () => {
+    const onViewChange = jest.fn();
+    const onCopySelection = jest.fn();
+    const onRowSelect = jest.fn();
+    render(<DataGrid
+      resultSetId="context-actions"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'VARCHAR' }]}
+      rows={[[2, 'beta'], [1, 'alpha']]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }}
+      onViewChange={onViewChange}
+      onCopySelection={onCopySelection}
+      onRowSelect={onRowSelect}
+    />);
+    const beta = screen.getByRole('cell', { name: 'beta' });
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    expect(screen.getByRole('menu', { name: 'Actions for row 1' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Filter by this value' }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ columnFilters: { NAME: 'beta' } });
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Sort descending' }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ sorting: [{ column: 'NAME', descending: true }] });
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row' }));
+    expect(onCopySelection).toHaveBeenLastCalledWith(expect.objectContaining({ rows: [[2, 'beta']] }));
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View full row' }));
+    expect(onRowSelect).toHaveBeenLastCalledWith(0);
+  });
+
   it('uses the shared column menu for visibility and pinning actions', () => {
     const onViewChange = jest.fn();
     render(<DataGrid
