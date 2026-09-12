@@ -46,6 +46,13 @@ export interface PersistedEditorTab {
 
 export type ExecutionInput = Pick<QueryStartRequest, 'connectionId' | 'sql' | 'mode' | 'cursorOffset' | 'writeConfirmed' | 'writePreviewToken'> & { database: string };
 
+let transientTabSequence = 0;
+
+export function createTransientTabId(prefix: string): string {
+  transientTabSequence += 1;
+  return `${prefix}-${Date.now().toString(36)}-${transientTabSequence.toString(36)}`;
+}
+
 export function newEditorTab(number: number, id = `query-${number}`): EditorTab {
   return { id, title: `Query ${number}`, sql: 'SELECT *\nFROM ', dirty: false, results: {}, activeStatementIndex: 0, resultView: 'grid', statementStates: {} };
 }

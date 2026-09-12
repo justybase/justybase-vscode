@@ -87,7 +87,7 @@ export interface UiCapabilitySnapshot {
 
 const capabilityStatuses: readonly CapabilityStatus[] = ['available', 'unavailable', 'requires-auth', 'read-only', 'unsupported', 'degraded'];
 
-const secretKeyPattern = /password|passphrase|secret|credential|master.?key|token|api.?key/iu;
+const secretKeyPattern = /(?:password|passphrase|secret|credential|master.?key|access.?token|refresh.?token|api.?key|token)$/iu;
 
 /**
  * Renderer-bound values may contain additive fields, so checking only the

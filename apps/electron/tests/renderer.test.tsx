@@ -167,7 +167,7 @@ describe('Electron renderer composition', () => {
     view.unmount();
   });
 
-  it('rejects stale hydrated pages and reports finalized page failures', async () => {
+  it('rejects stale hydrated pages and exposes finalized page failures once', async () => {
     const store = createUiStore(createInitialUiState({ productId: 'electron', sourceId: 'electron:scratch' }));
     const update = jest.fn();
     expect(applyHydratedPage(store, 'electron:scratch', 'missing:0', [[1]], 1, [{ name: 'ID' }], 'execution-1', update)).toBe(false);
@@ -198,7 +198,7 @@ describe('Electron renderer composition', () => {
       socket?.emit('message', { data: JSON.stringify({ queryId: 'query-1', type: 'columns', columns: [{ name: 'ID' }], sequence: 2 }) });
       socket?.emit('message', { data: JSON.stringify({ queryId: 'query-1', type: 'complete', totalRows: 0, limitReached: false, sequence: 3 }) });
     });
-    await waitFor(() => expect(screen.getByText('page failed')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Result page hydration failed: page failed')).toBeInTheDocument());
     view.unmount();
   });
 

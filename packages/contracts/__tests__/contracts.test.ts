@@ -40,6 +40,12 @@ describe("@justybase/contracts", () => {
       expect(isCapabilityDescriptor({ ...descriptor, metadata: { apiKey: "key" } })).toBe(false);
       expect(isUiCapabilitySnapshot({ descriptors: [descriptor], metadata: { authToken: "token" } })).toBe(false);
     });
+
+    it("allows additive identifiers that merely contain security words", () => {
+      expect(isCapabilityDescriptor({ ...descriptor, credentialRequestId: "request-1", tokenCount: 2, apiKeyId: "key-1" })).toBe(true);
+      expect(isUiAuthState({ status: "authenticated", credentialRequestId: "request-1", tokenCount: 2 })).toBe(true);
+      expect(isRedactedConnectionProfile({ ...profile, apiKeyId: "key-1", tokenCount: 2 })).toBe(true);
+    });
   });
 
   describe("SUPPORTED_DATABASE_KINDS", () => {

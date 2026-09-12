@@ -118,11 +118,9 @@ describe('Electron renderer execution adapter', () => {
   it('turns finalized page hydration failures into terminal stream errors', async () => {
     const fixture = fakeClient();
     fixture.client.queryPage = jest.fn(async () => { throw new Error('page failed'); });
-    const pageErrors: string[] = [];
     const port = createElectronExecutionPort({
       client: fixture.client,
       onPage: () => undefined,
-      onPageError: (_sourceId, _resultSetId, error) => pageErrors.push(error.message),
     });
     const handle = await port.start({ sourceId: 'electron:scratch', sql: 'SELECT 1', connectionId: 'connection-1', mode: 'single' });
     fixture.emit({ queryId: 'query-1', type: 'complete', totalRows: 1, limitReached: false });
@@ -132,7 +130,6 @@ describe('Electron renderer execution adapter', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'error', message: 'Result page hydration failed: page failed' });
-    expect(pageErrors).toEqual(['page failed']);
     await port.dispose();
   });
 

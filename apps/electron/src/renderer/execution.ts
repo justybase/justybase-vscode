@@ -46,7 +46,6 @@ export interface ElectronExecutionPortOptions {
   readonly onRows?: (resultSetId: string, rows: readonly (readonly unknown[])[]) => void;
   /** Replaces the adapter-owned page after the API has finalized the session. */
   readonly onPage?: (sourceId: string, resultSetId: string, rows: readonly (readonly unknown[])[], totalRowCount: number, columns: readonly QueryColumn[], executionId: string) => void;
-  readonly onPageError?: (sourceId: string, resultSetId: string, error: Error, executionId: string) => void;
 }
 
 interface ActiveStream {
@@ -90,7 +89,6 @@ function eventStream(
   client: ElectronApiClient,
   onRows: ElectronExecutionPortOptions['onRows'],
   onPage: ElectronExecutionPortOptions['onPage'],
-  onPageError: ElectronExecutionPortOptions['onPageError'],
   onActive: (stream: ActiveStream | undefined) => void,
 ): AsyncIterable<UiResultEvent> {
   const queue: UiResultEvent[] = [];
@@ -120,7 +118,6 @@ function eventStream(
     } catch (error: unknown) {
       const failure = error instanceof Error ? error : new Error('Could not load result rows.');
       if (done) return undefined;
-      onPageError?.(sourceId, resultSetId, failure, queryId);
       return failure;
     }
   };
@@ -193,7 +190,7 @@ export function createElectronExecutionPort(options: ElectronExecutionPortOption
       const started = await options.client.startQuery({ connectionId: input.connectionId, sql: input.sql, mode: input.mode });
       const sourceId = input.sourceId;
       const resultSetId = resultSetIdFor(started.queryId);
-      const events = eventStream(sourceId, started.queryId, options.client, options.onRows, options.onPage, options.onPageError, stream => {
+      const events = eventStream(sourceId, started.queryId, options.client, options.onRows, options.onPage, stream => {
         if (stream) active.set(started.queryId, stream);
         else active.delete(started.queryId);
       });

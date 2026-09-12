@@ -245,6 +245,15 @@ test('fails a changed line that was collected but never executed', () => {
   assert.match(result.failures[0], /changed line coverage/);
 });
 
+test('fails a changed executable line missing from LCOV', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/src/core/missingCoverage.ts\n@@ -1 +2 @@\n',
+    lcov: 'SF:src/core/missingCoverage.ts\nDA:1,1\nend_of_record\n',
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/core/'] } },
+  });
+  assert.match(result.failures[0], /missing from LCOV/);
+});
+
 test('merges exact duplicate LCOV records in either order, including branches', () => {
   const source = 'src/activation/resultPanelRegression.ts';
   for (const [firstLineHit, secondLineHit, firstBranchHit, secondBranchHit] of [

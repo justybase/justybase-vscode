@@ -133,9 +133,6 @@ export function App(): ReactElement {
           setRowsByResult(next);
         });
       },
-      onPageError: (_sourceId, _resultSetId, error, executionId) => {
-        if (activeExecutionRef.current?.executionId === executionId) setNotice(error.message);
-      },
     }));
   }
   const execution = executionRef.current;
