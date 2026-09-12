@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, UIEvent } from 'react';
 import type { UiResultViewState } from '@justybase/ui-core';
 import {
@@ -545,6 +545,8 @@ export function DataGrid({
   const [selection, setSelection] = useState<DataGridSelection | undefined>(undefined);
   const selectionRef = useRef<DataGridSelection | undefined>(undefined);
   const [contextMenu, setContextMenu] = useState<DataGridCellContext | undefined>(undefined);
+  const contextMenuElementRef = useRef<HTMLDivElement>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState({ left: 8, top: 8 });
   const dragSelectingRef = useRef(false);
   const draggedColumnRef = useRef<number | undefined>(undefined);
   const resizeRef = useRef<{ columnId: string; startX: number; startWidth: number } | undefined>(undefined);
@@ -599,6 +601,19 @@ export function DataGrid({
       document.removeEventListener('click', close);
       document.removeEventListener('keydown', onKeyDown);
     };
+  }, [contextMenu]);
+
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const element = contextMenuElementRef.current;
+    if (!element) return;
+    const margin = 8;
+    const bounds = element.getBoundingClientRect();
+    const maxLeft = Math.max(margin, window.innerWidth - bounds.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - bounds.height - margin);
+    const left = Math.min(Math.max(margin, contextMenu.clientX), maxLeft);
+    const top = Math.min(Math.max(margin, contextMenu.clientY), maxTop);
+    setContextMenuPosition(previous => previous.left === left && previous.top === top ? previous : { left, top });
   }, [contextMenu]);
 
   useEffect(() => {
@@ -1011,7 +1026,7 @@ export function DataGrid({
         </tbody>
       </table>}
     </div>
-    {showContextMenu && contextMenu && contextRow && contextColumn && <div className="ui-data-grid-context-menu" role="menu" aria-label={`Actions for row ${contextMenu.rowIndex + 1}`} style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
+    {showContextMenu && contextMenu && contextRow && contextColumn && <div ref={contextMenuElementRef} className="ui-data-grid-context-menu" role="menu" aria-label={`Actions for row ${contextMenu.rowIndex + 1}`} style={{ left: contextMenuPosition.left, top: contextMenuPosition.top }} onClick={event => event.stopPropagation()}>
       <strong>{contextColumn.name}</strong>
       <button type="button" role="menuitem" onClick={() => copyContextValue(contextMenu, contextRow)}>Copy value</button>
       <button type="button" role="menuitem" onClick={() => copyContextRow(contextRow)}>Copy row</button>
