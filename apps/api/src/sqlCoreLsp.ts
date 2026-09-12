@@ -333,6 +333,10 @@ export class NetezzaWebLspCore {
         edit: { changes: { [documentUri]: [{ range, newText }] } },
       });
     };
+    const insertAt = (diagnostic: CoreDiagnostic, title: string, offset: number, newText: string, isPreferred = true): void => {
+      const point = positionAt(sql, offset);
+      replace(diagnostic, title, newText, isPreferred, { start: point, end: point });
+    };
 
     for (const diagnostic of diagnostics) {
       const code = String(diagnostic.code ?? "");
@@ -360,8 +364,54 @@ export class NetezzaWebLspCore {
         replace(diagnostic, "Remove unused alias", "");
         continue;
       }
+      if (code === "PAR101" && isNetezza) {
+        const statement = statementAtOffset(sql, startOffset);
+        const insertOffset = statement
+          ? findMissingAsInCteInsertOffset(statement.sql, startOffset - statement.startOffset)
+          : undefined;
+        if (statement && insertOffset !== undefined) {
+          insertAt(
+            diagnostic,
+            "Insert missing AS in CTE definition",
+            statement.startOffset + insertOffset,
+            " AS ",
+          );
+        }
+        continue;
+      }
       if (code === "PAR003") {
         replace(diagnostic, "Remove duplicate keyword", "");
+        continue;
+      }
+
+      if (code === "NZ012" && isNetezza) {
+        replace(diagnostic, "Remove AS in UPDATE alias", "");
+        continue;
+      }
+      if (code === "NZP012" && isNetezza) {
+        replace(diagnostic, "Replace ELSEIF/ELSE IF with ELSIF", "ELSIF");
+        continue;
+      }
+      if (code === "NZ013" && isNetezza) {
+        replace(diagnostic, "Replace UNION with UNION ALL", "UNION ALL");
+        continue;
+      }
+      if ((code === "NZ021" || code === "PAR002") && isNetezza) {
+        replace(diagnostic, "Remove extra comma (,, → ,)", "");
+        continue;
+      }
+      if (code === "NZ006" && isNetezza) {
+        const statement = statementAtOffset(sql, startOffset);
+        if (statement) {
+          insertAt(diagnostic, "Add FETCH FIRST 100 ROWS ONLY", statement.endOffset, " FETCH FIRST 100 ROWS ONLY");
+        }
+        continue;
+      }
+      if ((code === "NZ002" || code === "NZ003" || code === "SQL043" || code === "SQL044") && isNetezza) {
+        const statement = statementAtOffset(sql, startOffset);
+        if (statement) {
+          insertAt(diagnostic, "Add safe WHERE guard (WHERE 1 = 0)", statement.endOffset, " WHERE 1 = 0");
+        }
         continue;
       }
 
@@ -1386,6 +1436,69 @@ function findCompletionTable(
     if (table) return { ...table, alias: reference.alias };
   }
   return undefined;
+}
+
+function statementAtOffset(sql: string, offset: number): { startOffset: number; endOffset: number; sql: string } | undefined {
+  return splitSqlStatements(sql).find((statement) =>
+    offset >= statement.startOffset && offset <= statement.endOffset,
+  );
+}
+
+interface SqlLexerTokenLike {
+  tokenType: { name: string };
+  startOffset?: number;
+}
+
+function findMissingAsInCteInsertOffset(
+  statementSql: string,
+  diagnosticOffset: number,
+): number | undefined {
+  const lexResult = SqlLexer.tokenize(statementSql);
+  if (lexResult.errors.length > 0) return undefined;
+
+  const tokens = lexResult.tokens as readonly SqlLexerTokenLike[];
+  let bestOffset: number | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 2; index < tokens.length - 1; index += 1) {
+    const openParen = tokens[index];
+    const cteName = tokens[index - 1];
+    const cteLead = tokens[index - 2];
+    const firstInner = tokens[index + 1];
+    if (!openParen || !cteName || !cteLead || !firstInner || openParen.tokenType.name !== "LParen") continue;
+    if (!isIdentifierTokenName(cteName.tokenType.name)) continue;
+    if (!isCteLeadTokenName(cteLead.tokenType.name)) continue;
+    if (!isCteQueryStartTokenName(firstInner.tokenType.name)) continue;
+
+    let hasWith = false;
+    for (let prior = index - 2; prior >= 0; prior -= 1) {
+      const tokenName = tokens[prior]?.tokenType.name;
+      if (tokenName === "With") {
+        hasWith = true;
+        break;
+      }
+      if (tokenName === "Semicolon") break;
+    }
+    if (!hasWith || openParen.startOffset === undefined) continue;
+    const distance = Math.abs(openParen.startOffset - diagnosticOffset);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestOffset = openParen.startOffset;
+    }
+  }
+  return bestOffset;
+}
+
+function isIdentifierTokenName(tokenName: string): boolean {
+  return tokenName === "Identifier" || tokenName === "QuotedIdentifier";
+}
+
+function isCteLeadTokenName(tokenName: string): boolean {
+  return tokenName === "With" || tokenName === "Recursive" || tokenName === "Comma";
+}
+
+function isCteQueryStartTokenName(tokenName: string): boolean {
+  return tokenName === "Select" || tokenName === "With" || tokenName === "Insert"
+    || tokenName === "Update" || tokenName === "Delete";
 }
 
 function offsetAt(sql: string, position: CorePosition): number {
