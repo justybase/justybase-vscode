@@ -3,18 +3,10 @@ import type { ReactElement } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import type { EditorPreferences, SqlLanguageContext } from '@justybase/contracts';
-import { EditorSurface, registerSqlLanguageFeatures } from '@justybase/ui-react';
-import type { SqlLanguageApi } from '@justybase/ui-react';
+import { EditorSurface, registerSqlLanguageFeatures, SqlProblemsPanel, sqlProblemsFromMarkers } from '@justybase/ui-react';
+import type { SqlLanguageApi, SqlProblem } from '@justybase/ui-react';
 
-export interface SqlEditorProblem {
-  readonly message: string;
-  readonly severity: 'error' | 'warning' | 'info' | 'hint';
-  readonly code?: string;
-  readonly startLineNumber: number;
-  readonly startColumn: number;
-  readonly endLineNumber: number;
-  readonly endColumn: number;
-}
+export type SqlEditorProblem = SqlProblem;
 
 export interface SqlEditorProps {
   readonly documentId: string;
@@ -26,31 +18,6 @@ export interface SqlEditorProps {
   readonly onRun: () => void;
   readonly onReady?: (editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => void;
   readonly onProblemsChange?: (problems: readonly SqlEditorProblem[]) => void;
-}
-
-function markerSeverity(severity: Monaco.MarkerSeverity): SqlEditorProblem['severity'] {
-  if (severity === 8) return 'error';
-  if (severity === 4) return 'warning';
-  if (severity === 2) return 'info';
-  return 'hint';
-}
-
-function markerCode(code: Monaco.editor.IMarker['code']): string | undefined {
-  if (typeof code === 'string') return code;
-  if (code && typeof code.value === 'string') return code.value;
-  return undefined;
-}
-
-function toProblem(marker: Monaco.editor.IMarker): SqlEditorProblem {
-  return {
-    message: marker.message,
-    severity: markerSeverity(marker.severity),
-    code: markerCode(marker.code),
-    startLineNumber: marker.startLineNumber,
-    startColumn: marker.startColumn,
-    endLineNumber: marker.endLineNumber,
-    endColumn: marker.endColumn,
-  };
 }
 
 /** Monaco boundary shared by the Electron workspace and its Problems view. */
@@ -69,7 +36,7 @@ export function SqlEditor({ documentId, value, api, preferences, getContext, onC
   }, [api, onReady]);
 
   const handleValidate = useCallback((markers: Monaco.editor.IMarker[]): void => {
-    onProblemsChange?.(markers.map(toProblem));
+    onProblemsChange?.(sqlProblemsFromMarkers(markers));
   }, [onProblemsChange]);
 
   // Jest/jsdom and the deterministic React unit suite do not provide a
@@ -111,13 +78,5 @@ export function SqlEditor({ documentId, value, api, preferences, getContext, onC
 }
 
 export function ProblemsPanel({ problems, onSelect }: { readonly problems: readonly SqlEditorProblem[]; readonly onSelect?: (problem: SqlEditorProblem) => void }): ReactElement {
-  return <section className="electron-problems" aria-label="SQL Problems">
-    <header><strong>Problems</strong><span className="electron-problems-count">{problems.length}</span></header>
-    {problems.length === 0
-      ? <div className="electron-problems-empty">No SQL problems detected.</div>
-      : <div className="electron-problems-list">{problems.map((problem, index) => <button type="button" className={`electron-problem electron-problem-${problem.severity}`} key={`${problem.code ?? 'problem'}:${problem.startLineNumber}:${problem.startColumn}:${index}`} onClick={() => onSelect?.(problem)}>
-        <span className="electron-problem-severity">{problem.severity === 'error' ? '×' : problem.severity === 'warning' ? '!' : '·'}</span>
-        <span className="electron-problem-copy"><span><strong>{problem.code ?? problem.severity}</strong> {problem.message}</span><small>Ln {problem.startLineNumber}, Col {problem.startColumn}</small></span>
-      </button>)}</div>}
-  </section>;
+  return <SqlProblemsPanel problems={problems} onSelect={onSelect} />;
 }

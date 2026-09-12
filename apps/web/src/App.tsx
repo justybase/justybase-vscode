@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import type * as Monaco from 'monaco-editor';
 import type { ConnectionProfileSummary, DatabaseKind, EditorPreferences, MetadataColumn, MetadataDatabase, SchemaTreeNode, WebUser } from '@justybase/contracts';
 import { AsyncStateView } from '@justybase/ui-react';
+import type { SqlProblem } from '@justybase/ui-react';
 import { ApiClientProvider, createApiClient, useApiClient, type ApiClient, type QueryEventSubscription } from './api';
 import { emptyResult } from './queryState';
 import { disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';
@@ -99,6 +100,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const [databases, setDatabases] = useState<MetadataDatabase[]>([]);
   const [lastQueryTime, setLastQueryTime] = useState<number | null>(null);
   const [overwrite, setOverwrite] = useState(false);
+  const [problemsByTab, setProblemsByTab] = useState<Readonly<Record<string, readonly SqlProblem[]>>>({});
 
   // Dockyard owns explorer/tool geometry; the query/result split remains a
   // product-level preference and is migrated from editor_pct.
@@ -380,6 +382,19 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     if (tabId === activeTabId) editorRef.current = null;
   }
 
+  function handleProblemsChange(tabId: string, problems: readonly SqlProblem[]): void {
+    setProblemsByTab(previous => ({ ...previous, [tabId]: problems }));
+  }
+
+  function handleProblemSelect(tabId: string, problem: SqlProblem): void {
+    activateTab(tabId);
+    const editor = editorRefs.current.get(tabId) ?? (tabId === activeTabId ? editorRef.current : null);
+    if (!editor) return;
+    editor.revealLineInCenter(problem.startLineNumber);
+    editor.setPosition({ lineNumber: problem.startLineNumber, column: problem.startColumn });
+    editor.focus();
+  }
+
   const overwriteByTabRef = useRef(new Map<string, boolean>());
   function handleOverwriteChange(tabId: string, value: boolean): void {
     overwriteByTabRef.current.set(tabId, value);
@@ -644,6 +659,12 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     const index = tabs.findIndex(item => item.id === id);
     const next = tabs.filter(item => item.id !== id);
     setTabs(next);
+    setProblemsByTab(previous => {
+      if (!(id in previous)) return previous;
+      const remaining = { ...previous };
+      delete remaining[id];
+      return remaining;
+    });
     editorRefs.current.delete(id);
     overwriteByTabRef.current.delete(id);
     if (id === activeTabId) activateTab(next[Math.max(0, index - 1)]?.id ?? next[0]!.id);
@@ -775,9 +796,12 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     error={error}
     lastQueryTime={lastQueryTime}
     overwrite={overwrite}
+    problemsByTab={problemsByTab}
     editorSplit={editorSplit}
     onEditorReady={handleEditorReady}
     onEditorDispose={handleEditorDispose}
+    onProblemsChange={handleProblemsChange}
+    onSelectProblem={handleProblemSelect}
     onOverwriteChange={handleOverwriteChange}
     onActivateTab={activateTab}
     onCloseTab={closeTab}
@@ -832,9 +856,12 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     error={error}
     lastQueryTime={lastQueryTime}
     overwrite={overwrite}
+    problemsByTab={problemsByTab}
     editorSplit={editorSplit}
     onEditorReady={handleEditorReady}
     onEditorDispose={handleEditorDispose}
+    onProblemsChange={handleProblemsChange}
+    onSelectProblem={handleProblemSelect}
     onOverwriteChange={handleOverwriteChange}
     onActivateTab={activateTab}
     onCloseTab={closeTab}

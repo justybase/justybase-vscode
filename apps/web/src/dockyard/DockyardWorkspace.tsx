@@ -13,6 +13,8 @@ import type {
   SchemaTreeNode,
   WebUser,
 } from '@justybase/contracts';
+import { SqlProblemsPanel, sqlProblemsFromMarkers } from '@justybase/ui-react';
+import type { SqlProblem } from '@justybase/ui-react';
 import { EditorToolbar } from '../EditorToolbar';
 import { ExplainPanel } from '../ExplainPanel';
 import { InspectorPanel } from '../InspectorPanel';
@@ -55,9 +57,12 @@ export interface DockyardWorkspaceProps {
   error: string;
   lastQueryTime: number | null;
   overwrite: boolean;
+  problemsByTab: Readonly<Record<string, readonly SqlProblem[]>>;
   editorSplit: DockyardEditorSplit;
   onEditorReady(tabId: string, editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco): void;
   onEditorDispose(tabId: string): void;
+  onProblemsChange(tabId: string, problems: readonly SqlProblem[]): void;
+  onSelectProblem(tabId: string, problem: SqlProblem): void;
   onOverwriteChange(tabId: string, overwrite: boolean): void;
   onActivateTab(tabId: string): void;
   onCloseTab(tabId: string): boolean;
@@ -108,6 +113,9 @@ interface QueryDocumentProps {
   editorSplit: DockyardEditorSplit;
   onEditorReady(tabId: string, editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco): void;
   onEditorDispose(tabId: string): void;
+  problems: readonly SqlProblem[];
+  onProblemsChange(tabId: string, problems: readonly SqlProblem[]): void;
+  onSelectProblem(tabId: string, problem: SqlProblem): void;
   onOverwriteChange(tabId: string, overwrite: boolean): void;
   onActivateTab(tabId: string): void;
   onUpdateSql(tabId: string, sql: string): void;
@@ -136,6 +144,9 @@ export function QueryDocument({
   editorSplit,
   onEditorReady,
   onEditorDispose,
+  problems,
+  onProblemsChange,
+  onSelectProblem,
   onOverwriteChange,
   onActivateTab,
   onUpdateSql,
@@ -207,25 +218,29 @@ export function QueryDocument({
 
     <div className="dockyard-query-split-container" ref={active ? editorSplit.containerRef : undefined}>
       <div className="editor dockyard-query-editor" style={{ height: `${editorSplit.size}%` }}>
-        <Editor
-          height="100%"
-          language="sql"
-          theme="vs-dark"
-          value={tab.sql}
-          onChange={value => onUpdateSql(tab.id, value ?? '')}
-          onMount={mountEditor}
-          options={{
-            minimap: { enabled: preferences?.minimap ?? false },
-            fontSize: preferences?.fontSize ?? 14,
-            tabSize: preferences?.tabSize ?? 4,
-            insertSpaces: preferences?.insertSpaces ?? true,
-            wordWrap: preferences?.wordWrap ?? 'off',
-            lineNumbers: preferences?.lineNumbers === false ? 'off' : 'on',
-            formatOnType: preferences?.formatOnType ?? false,
-            automaticLayout: true,
-            padding: { top: 12 },
-          }}
-        />
+        <div className="dockyard-editor-host">
+          <Editor
+            height="100%"
+            language="sql"
+            theme="vs-dark"
+            value={tab.sql}
+            onChange={value => onUpdateSql(tab.id, value ?? '')}
+            onMount={mountEditor}
+            onValidate={markers => onProblemsChange(tab.id, sqlProblemsFromMarkers(markers))}
+            options={{
+              minimap: { enabled: preferences?.minimap ?? false },
+              fontSize: preferences?.fontSize ?? 14,
+              tabSize: preferences?.tabSize ?? 4,
+              insertSpaces: preferences?.insertSpaces ?? true,
+              wordWrap: preferences?.wordWrap ?? 'off',
+              lineNumbers: preferences?.lineNumbers === false ? 'off' : 'on',
+              formatOnType: preferences?.formatOnType ?? false,
+              automaticLayout: true,
+              padding: { top: 12 },
+            }}
+          />
+        </div>
+        <SqlProblemsPanel problems={problems} onSelect={problem => onSelectProblem(tab.id, problem)} />
       </div>
       <div className="split-handle split-handle-v" onMouseDown={editorSplit.onMouseDown} />
       <section className="results dockyard-query-results" style={{ height: `${100 - editorSplit.size}%` }}>
@@ -365,9 +380,12 @@ export function DockyardWorkspace({
   error,
   lastQueryTime,
   overwrite,
+  problemsByTab,
   editorSplit,
   onEditorReady,
   onEditorDispose,
+  onProblemsChange,
+  onSelectProblem,
   onOverwriteChange,
   onActivateTab,
   onCloseTab,
@@ -522,6 +540,9 @@ export function DockyardWorkspace({
         editorSplit={editorSplit}
         onEditorReady={onEditorReady}
         onEditorDispose={onEditorDispose}
+        problems={problemsByTab[tab.id] ?? []}
+        onProblemsChange={onProblemsChange}
+        onSelectProblem={onSelectProblem}
         onOverwriteChange={onOverwriteChange}
         onActivateTab={onActivateTab}
         onUpdateSql={onUpdateSql}
