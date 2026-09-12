@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@justybase/contracts": "*",
+    "@justybase/dialect-utils": "*",
     "@justybase/ui-core": "*",
     "@justybase/ui-react": "*",
     "@justybase/web-api": "*",

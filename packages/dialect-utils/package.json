@@ -22,6 +22,11 @@
       "require": "./dist/dialectTraits.js",
       "default": "./dist/dialectTraits.js"
     },
+    "./queryTemplates": {
+      "types": "./dist/queryTemplates.d.ts",
+      "require": "./dist/queryTemplates.js",
+      "default": "./dist/queryTemplates.js"
+    },
     "./traits/*": {
       "types": "./dist/traits/*.d.ts",
       "require": "./dist/traits/*.js",

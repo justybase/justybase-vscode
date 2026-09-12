@@ -28,4 +28,21 @@ describe('web query planning', () => {
     expect(planStatements({ connectionId: 'c1', sql: 'SELECT * FROM T', mode: 'explain' }, 'sqlite').statements[0]?.sql).toBe('EXPLAIN QUERY PLAN SELECT * FROM T');
     expect(planStatements({ connectionId: 'c1', sql: 'SELECT * FROM T', mode: 'explain' }, 'duckdb').statements[0]?.sql).toBe('EXPLAIN SELECT * FROM T');
   });
+
+  it.each([
+    ['postgresql', 'EXPLAIN (VERBOSE, COSTS, FORMAT TEXT) SELECT * FROM T'],
+    ['db2', 'EXPLAIN PLAN FOR SELECT * FROM T'],
+    ['oracle', 'EXPLAIN PLAN FOR SELECT * FROM T'],
+    ['clickhouse', 'EXPLAIN PLAN SELECT * FROM T'],
+  ] as const)('uses the shared %s explain template in the API planner', (dbType, expected) => {
+    expect(planStatements({ connectionId: 'c1', sql: 'SELECT * FROM T', mode: 'explain' }, dbType).statements[0]?.sql).toBe(expected);
+  });
+
+  it('preserves SQL Server SHOWPLAN batch boundaries', () => {
+    expect(planStatements({ connectionId: 'c1', sql: 'SELECT * FROM T', mode: 'explain' }, 'mssql').statements[0]?.sql).toBe('SET SHOWPLAN_TEXT ON;\nGO\nSELECT * FROM T;\nGO\nSET SHOWPLAN_TEXT OFF;\nGO');
+  });
+
+  it('rejects explain mode for Access rather than sending unsupported SQL', () => {
+    expect(() => planStatements({ connectionId: 'c1', sql: 'SELECT * FROM T', mode: 'explain' }, 'access')).toThrow('not available');
+  });
 });
