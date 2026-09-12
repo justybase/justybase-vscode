@@ -294,6 +294,16 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
   }, [api, store]);
 
+  const reloadHistory = useCallback(async (): Promise<void> => {
+    store.dispatch({ type: 'history/status', status: 'loading' });
+    try {
+      setHistory(await api.history());
+      store.dispatch({ type: 'history/status', status: 'complete' });
+    } catch (error: unknown) {
+      store.dispatch({ type: 'history/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load history.' });
+    }
+  }, [api, store]);
+
   useEffect(() => {
     setSelectedRow(undefined);
   }, [activeResult?.sourceId, activeResult?.resultSetId]);
@@ -346,18 +356,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [schemaFavorites, schemaRecent, schemaShortcutsReadyKey, selectedConnectionId, workspaceStorage]);
 
   useEffect(() => {
-    let live = true;
-    store.dispatch({ type: 'history/status', status: 'loading' });
-    void api.history().then(entries => {
-      if (!live) return;
-      setHistory(entries);
-      store.dispatch({ type: 'history/status', status: 'complete' });
-    }).catch(error => {
-      if (!live) return;
-      store.dispatch({ type: 'history/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load history.' });
-    });
-    return () => { live = false; };
-  }, [api, store]);
+    void reloadHistory();
+  }, [reloadHistory]);
 
   const loadSchemaChildren = useCallback(async (parentId?: string, parent?: ReturnType<typeof mapSchemaNode>): Promise<readonly ReturnType<typeof mapSchemaNode>[]> => {
     if (!selectedConnectionId) return [];
@@ -651,6 +651,47 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     store.dispatch({ type: 'shell/surface', surface: 'workspace' });
   }, [authoringDatabaseKind, selectedConnection, store]);
 
+  const openHistoryEntry = useCallback((entry: HistoryViewEntry): void => {
+    const historyEntry = history.find(item => item.id === entry.id);
+    if (!historyEntry) return;
+    const profile = state.connections.profiles.find(item => item.id === historyEntry.connectionId);
+    const sourceId = sourceIdFor(user);
+    store.dispatch({
+      type: 'workspace/open-document',
+      document: {
+        id: `history:${historyEntry.id}`,
+        sourceId,
+        title: entry.label || 'History query',
+        content: historyEntry.sql,
+        dirty: false,
+        connectionId: profile?.id ?? historyEntry.connectionId,
+        databaseKind: profile?.dbType ?? runtimeDatabaseKind,
+      },
+    });
+    store.dispatch({ type: 'shell/surface', surface: 'workspace' });
+  }, [history, runtimeDatabaseKind, state.connections.profiles, store, user]);
+
+  const rerunHistoryEntry = useCallback((entry: HistoryViewEntry): void => {
+    const historyEntry = history.find(item => item.id === entry.id);
+    const profile = historyEntry ? state.connections.profiles.find(item => item.id === historyEntry.connectionId) : undefined;
+    if (!historyEntry || !profile) {
+      setNotice('The connection used by this history entry is no longer available.');
+      return;
+    }
+    openHistoryEntry(entry);
+    void run('single', { sql: historyEntry.sql, connection: profile, database: historyEntry.database });
+  }, [history, openHistoryEntry, run, state.connections.profiles]);
+
+  const copyHistoryEntry = useCallback((entry: HistoryViewEntry): void => {
+    const historyEntry = history.find(item => item.id === entry.id);
+    if (!historyEntry?.sql) return;
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      setNotice('Clipboard access is unavailable.');
+      return;
+    }
+    void navigator.clipboard.writeText(historyEntry.sql).then(() => setNotice('History SQL copied.')).catch(() => setNotice('Could not copy history SQL.'));
+  }, [history]);
+
   const openSchemaQuery = useCallback((node: SchemaTreeNode): void => {
     if (node.kind !== 'object') return;
     const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
@@ -872,7 +913,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
   }, [activeResult, api, exportFormat]);
 
-  const historyItems: HistoryViewEntry[] = useMemo(() => history.map(entry => ({ id: entry.id, label: entry.sql.slice(0, 80), status: entry.status, sqlFingerprint: `${entry.createdAt} · ${entry.rowCount} rows` })), [history]);
+  const historyItems: HistoryViewEntry[] = useMemo(() => history.map(entry => ({ id: entry.id, label: entry.sql.slice(0, 80), status: entry.status, sqlFingerprint: `${entry.createdAt} · ${entry.rowCount} rows · ${entry.durationMs} ms`, sql: entry.sql, createdAt: entry.createdAt, rowCount: entry.rowCount, durationMs: entry.durationMs, connectionId: entry.connectionId })), [history]);
   const selectedNode = state.metadata.selectedNodeId
     ? schemaNodes.find(node => node.id === state.metadata.selectedNodeId) ?? schemaSearchResults.find(node => node.id === state.metadata.selectedNodeId)
     : undefined;
@@ -912,7 +953,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     />
     <button type="button" onClick={onLogout}>Log out</button>
   </div>}>
-    {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={entry => { const sourceId = sourceIdFor(user); const historyEntry = history.find(item => item.id === entry.id); const profile = historyEntry ? state.connections.profiles.find(item => item.id === historyEntry.connectionId) : undefined; store.dispatch({ type: 'workspace/open-document', document: { id: `history:${entry.id}`, sourceId, title: entry.label || 'History query', content: historyEntry?.sql ?? '', dirty: false, connectionId: historyEntry?.connectionId, databaseKind: profile?.dbType ?? runtimeDatabaseKind } }); store.dispatch({ type: 'shell/surface', surface: 'workspace' }); }} />
+    {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={openHistoryEntry} onRerun={rerunHistoryEntry} onCopy={copyHistoryEntry} onRefresh={() => void reloadHistory()} />
       : state.shell.activeSurface === 'explain' ? <ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={cancel} />
         : state.shell.activeSurface === 'designer' ? <DesignerForm fields={designerFields} capability={state.capabilities.find(capability => capability.key === 'designer')} onChange={() => undefined} onPreview={() => setNotice('Designer preview remains adapter-backed in shared mode.')} onApply={() => setNotice('Designer apply is guarded and unavailable for this read-only capability.')} />
           : <>

@@ -274,6 +274,11 @@ export interface HistoryViewEntry {
   readonly label: string;
   readonly status: string;
   readonly sqlFingerprint: string;
+  readonly sql?: string;
+  readonly createdAt?: string | number;
+  readonly rowCount?: number;
+  readonly durationMs?: number;
+  readonly connectionId?: string;
 }
 
 export interface ResultTabsProps {
@@ -318,6 +323,9 @@ export interface HistoryViewProps {
   readonly state?: AsyncViewState;
   readonly message?: string;
   readonly onOpen?: (entry: HistoryViewEntry) => void;
+  readonly onRerun?: (entry: HistoryViewEntry) => void;
+  readonly onCopy?: (entry: HistoryViewEntry) => void;
+  readonly onRefresh?: () => void;
 }
 
 export interface ExplainViewProps {
@@ -335,8 +343,13 @@ export interface DesignerFormProps {
   readonly onApply?: () => void;
 }
 
-export function HistoryView({ entries, state = 'ready', message, onOpen }: HistoryViewProps): ReactNode {
-  return <section aria-labelledby="ui-history-title"><h2 id="ui-history-title">Query history</h2><AsyncStateView state={state} message={message} emptyLabel="No queries yet.">{entries.map(entry => <button type="button" className="ui-history-entry" key={entry.id} onClick={() => onOpen?.(entry)}><strong>{entry.status}</strong><span>{entry.label}</span><code>{entry.sqlFingerprint}</code></button>)}</AsyncStateView></section>;
+export function HistoryView({ entries, state = 'ready', message, onOpen, onRerun, onCopy, onRefresh }: HistoryViewProps): ReactNode {
+  const [filter, setFilter] = useState('');
+  const normalizedFilter = filter.trim().toLowerCase();
+  const visibleEntries = normalizedFilter
+    ? entries.filter(entry => [entry.label, entry.sqlFingerprint, entry.sql ?? ''].some(value => value.toLowerCase().includes(normalizedFilter)))
+    : entries;
+  return <section className="ui-history" aria-labelledby="ui-history-title"><header className="ui-history-header"><h2 id="ui-history-title">Query history</h2><div className="ui-history-controls"><label>Filter<input aria-label="Filter history" value={filter} onChange={event => setFilter(event.target.value)} /></label>{onRefresh && <button type="button" aria-label="Refresh history" onClick={onRefresh}>↻</button>}</div></header><AsyncStateView state={state} message={message} emptyLabel="No queries yet.">{visibleEntries.length === 0 ? <div className="ui-history-no-match" role="status">No matching queries.</div> : <div className="ui-history-list">{visibleEntries.map(entry => <article className="ui-history-entry" key={entry.id}><button type="button" className="ui-history-open" onClick={() => onOpen?.(entry)}><strong>{entry.status}</strong><span>{entry.label}</span><code>{entry.sqlFingerprint}</code></button><div className="ui-history-actions">{onRerun && <button type="button" aria-label="Run query" title={`Run ${entry.label}`} onClick={() => onRerun(entry)}>Run</button>}{onCopy && <button type="button" aria-label="Copy query" title={`Copy ${entry.label}`} onClick={() => onCopy(entry)}>Copy</button>}</div></article>)}</div>}</AsyncStateView></section>;
 }
 
 export function ExplainView({ state, plan, message, onCancel }: ExplainViewProps): ReactNode {

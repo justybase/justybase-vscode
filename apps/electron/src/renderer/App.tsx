@@ -400,6 +400,29 @@ export function App(): ReactElement {
     openDocument(entry.sql, `History · ${entry.createdAt.slice(0, 19)}`, `electron:history:${entry.id}`);
   }, [openDocument]);
 
+  const refreshHistory = useCallback((): void => {
+    const client = clientRef.current;
+    if (!client) return;
+    setHistoryState('loading');
+    setHistoryMessage(undefined);
+    void client.history().then(entries => {
+      setHistory(Array.isArray(entries) ? entries : []);
+      setHistoryState('ready');
+    }).catch(error => {
+      setHistoryState('error');
+      setHistoryMessage(error instanceof Error ? error.message : 'Could not load query history.');
+    });
+  }, []);
+
+  const copyHistoryEntry = useCallback((entry: HistoryViewEntry): void => {
+    const item = history.find(candidate => candidate.id === entry.id);
+    if (!item?.sql || !navigator.clipboard?.writeText) {
+      setNotice('Clipboard access is unavailable.');
+      return;
+    }
+    void navigator.clipboard.writeText(item.sql).then(() => setNotice('History SQL copied.')).catch(() => setNotice('Could not copy history SQL.'));
+  }, [history]);
+
   const openDdl = useCallback((sql: string, title: string, node: SchemaTreeNode): void => {
     if (node.database) setDatabase(node.database);
     if (node.schema) setSchema(node.schema);
@@ -678,6 +701,11 @@ export function App(): ReactElement {
     label: entry.sql.slice(0, 120) || '(empty SQL)',
     status: entry.status,
     sqlFingerprint: `${entry.createdAt} · ${entry.rowCount.toLocaleString()} rows · ${entry.durationMs} ms`,
+    sql: entry.sql,
+    createdAt: entry.createdAt,
+    rowCount: entry.rowCount,
+    durationMs: entry.durationMs,
+    connectionId: entry.connectionId,
   }));
   const onScroll = (position: GridScrollPosition): void => {
     if (activeResult && position.resultSetId === activeResult.resultSetId) updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
@@ -695,7 +723,7 @@ export function App(): ReactElement {
       <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={runtimeDatabaseKind} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
     </div>}
   >
-    {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} /></CapabilityGate>
+    {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} onCopy={copyHistoryEntry} onRefresh={refreshHistory} /></CapabilityGate>
       : state.shell.activeSurface === 'explain' ? <CapabilityGate capability={explainCapability} fallback={<AsyncStateView state="empty" emptyLabel="Explain is not available in this Electron shell yet." />}><ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={() => void cancel()} /></CapabilityGate>
         : <div className="electron-workspace-content">
           <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} onClose={closeDocument} />
