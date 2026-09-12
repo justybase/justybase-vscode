@@ -16,6 +16,7 @@ interface SharedSqlEditorProps {
   readonly getContext: () => SqlLanguageContext;
   readonly onChange: (value: string) => void;
   readonly onRun: () => void;
+  readonly onReady?: (editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => void;
   readonly onProblemsChange?: (problems: readonly SharedSqlEditorProblem[]) => void;
 }
 
@@ -25,7 +26,7 @@ function isTestEnvironment(): boolean {
 }
 
 /** Monaco/LSP editor used by the shared Web shell, with a testable textarea fallback. */
-export function SharedSqlEditor({ documentId, value, api, preferences, getContext, onChange, onRun, onProblemsChange }: SharedSqlEditorProps): ReactElement {
+export function SharedSqlEditor({ documentId, value, api, preferences, getContext, onChange, onRun, onReady, onProblemsChange }: SharedSqlEditorProps): ReactElement {
   const runRef = useRef(onRun);
   const contextRef = useRef(getContext);
   const preferencesRef = useRef<EditorPreferences | null>(preferences ?? null);
@@ -43,7 +44,8 @@ export function SharedSqlEditor({ documentId, value, api, preferences, getContex
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => runRef.current());
     languageHandleRef.current?.dispose();
     languageHandleRef.current = registerSqlLanguageFeatures(editor, monaco, api, () => contextRef.current(), () => preferencesRef.current);
-  }, [api]);
+    onReady?.(editor, monaco);
+  }, [api, onReady]);
 
   const handleValidate = useCallback((markers: Monaco.editor.IMarker[]): void => {
     onProblemsChange?.(sqlProblemsFromMarkers(markers));

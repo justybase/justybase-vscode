@@ -253,6 +253,32 @@ FROM seq`;
     await dialect.selectOption('netezza');
     await expect(dialect).toHaveValue('netezza');
 
+    // Exercise the production Monaco provider path, not only the textarea
+    // fallback used by component tests. Completion must arrive from the same
+    // API/LSP contract that feeds diagnostics and code actions.
+    await replaceMonacoTextAndWait(page, 'SELECT NU');
+    const editor = page.locator('.monaco-editor');
+    await editor.click();
+    await page.keyboard.press('Control+Space');
+    const suggestionWidget = page.locator('.suggest-widget');
+    await expect(suggestionWidget).toBeVisible({ timeout: 30_000 });
+    await expect(suggestionWidget).toContainText(/NULLIF|SUBSTR|NVL2/u);
+    await page.keyboard.press('Escape');
+
+    // Parser diagnostics and the shared Problems view must remain actionable
+    // on a long document, where selecting a problem also has to reveal its
+    // source line in Monaco.
+    const badSql = `${'SELECT 1;\n'.repeat(80)}SELCT 2;`;
+    await replaceMonacoTextAndWait(page, badSql);
+    const typoProblem = page.locator('.ui-sql-problem').filter({ hasText: 'PAR004' }).first();
+    await expect(typoProblem).toBeVisible({ timeout: 30_000 });
+    await typoProblem.click();
+    await page.keyboard.press('Control+.');
+    const codeActionWidget = page.locator('.action-widget');
+    await expect(codeActionWidget).toBeVisible({ timeout: 30_000 });
+    await expect(codeActionWidget).toContainText(/Fix typo|Apply PAR004/u);
+    await page.keyboard.press('Escape');
+
     await replaceMonacoTextAndWait(page, 'SX ');
     await expect.poll(async () => (await page.locator('.monaco-editor .view-line').allTextContents()).join('\n').replaceAll('\u00a0', ' ')).toContain('SELECT ');
     await replaceMonacoTextAndWait(page, fixtureQuery);
