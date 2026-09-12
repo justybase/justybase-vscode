@@ -271,6 +271,127 @@ describe('shared Netezza web SQL core — LSP feature parity (D1)', () => {
     ]));
   });
 
+  it('keeps deterministic Netezza quick fixes aligned with the desktop Problems actions', async () => {
+    const core = createCore();
+    const point = (character: number) => ({ line: 0, character });
+    const cases = [
+      {
+        code: 'NZ012',
+        sql: "UPDATE DB..CUSTOMERS AS C SET NAME = 'X'",
+        rangeStart: 21,
+        rangeEnd: 23,
+        title: 'Remove AS in UPDATE alias',
+        newText: '',
+      },
+      {
+        code: 'NZP012',
+        sql: 'ELSEIF amount > 0 THEN',
+        rangeStart: 0,
+        rangeEnd: 6,
+        title: 'Replace ELSEIF/ELSE IF with ELSIF',
+        newText: 'ELSIF',
+      },
+      {
+        code: 'NZ013',
+        sql: 'SELECT 1 UNION SELECT 2',
+        rangeStart: 9,
+        rangeEnd: 14,
+        title: 'Replace UNION with UNION ALL',
+        newText: 'UNION ALL',
+      },
+      {
+        code: 'NZ021',
+        sql: 'SELECT 1,,2 FROM table1',
+        rangeStart: 9,
+        rangeEnd: 10,
+        title: 'Remove extra comma (,, → ,)',
+        newText: '',
+      },
+      {
+        code: 'PAR003',
+        sql: 'SELECT 1 FROM FROM table1',
+        rangeStart: 14,
+        rangeEnd: 18,
+        title: 'Remove duplicate keyword',
+        newText: '',
+      },
+    ];
+
+    for (const item of cases) {
+      const diagnostic = {
+        range: { start: point(item.rangeStart), end: point(item.rangeEnd) },
+        code: item.code,
+        message: item.code,
+      };
+      const actions = await core.codeActions(item.code === 'PAR003' ? 'file:///code-actions-par.sql' : 'file:///code-actions.sql', 1, item.sql, [diagnostic]);
+      expect(actions).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          title: item.title,
+          edit: expect.objectContaining({
+            changes: expect.objectContaining({
+              [item.code === 'PAR003' ? 'file:///code-actions-par.sql' : 'file:///code-actions.sql']:
+                [expect.objectContaining({ newText: item.newText })],
+            }),
+          }),
+        }),
+      ]));
+    }
+  });
+
+  it('inserts guarded Netezza quick fixes at the statement boundary', async () => {
+    const core = createCore();
+    const sql = 'SELECT * FROM users ORDER BY created_at; DELETE FROM users;';
+    const point = (character: number) => ({ line: 0, character });
+    const orderDiagnostic = {
+      range: { start: point(sql.indexOf('ORDER BY')), end: point(sql.indexOf('ORDER BY') + 8) },
+      code: 'NZ006',
+      message: 'NZ006',
+    };
+    const deleteDiagnostic = {
+      range: { start: point(sql.indexOf('DELETE')), end: point(sql.indexOf('DELETE') + 6) },
+      code: 'NZ002',
+      message: 'NZ002',
+    };
+    const actions = await core.codeActions('file:///boundary-actions.sql', 1, sql, [orderDiagnostic, deleteDiagnostic]);
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: 'Add FETCH FIRST 100 ROWS ONLY',
+        edit: { changes: { 'file:///boundary-actions.sql': [expect.objectContaining({
+          range: { start: point(sql.indexOf(';')), end: point(sql.indexOf(';')) },
+          newText: ' FETCH FIRST 100 ROWS ONLY',
+        })] } },
+      }),
+      expect.objectContaining({
+        title: 'Add safe WHERE guard (WHERE 1 = 0)',
+        edit: { changes: { 'file:///boundary-actions.sql': [expect.objectContaining({
+          range: { start: point(sql.length - 1), end: point(sql.length - 1) },
+          newText: ' WHERE 1 = 0',
+        })] } },
+      }),
+    ]));
+  });
+
+  it('inserts AS at the affected CTE opening parenthesis', async () => {
+    const core = createCore();
+    const uri = 'file:///cte-action.sql';
+    const sql = 'WITH ABC1 (SELECT 1) SELECT * FROM ABC1';
+    const diagnostics = await core.diagnostics(uri, 1, sql);
+    const diagnostic = diagnostics.find(item => item.code === 'PAR101');
+    expect(diagnostic).toBeDefined();
+    const actions = await core.codeActions(uri, 1, sql, diagnostic ? [diagnostic] : []);
+    const action = actions.find(item => item.title === 'Insert missing AS in CTE definition');
+    expect(action).toBeDefined();
+    expect(action?.edit.changes[uri]).toEqual([
+      expect.objectContaining({
+        range: {
+          start: { line: 0, character: sql.indexOf('(') },
+          end: { line: 0, character: sql.indexOf('(') },
+        },
+        newText: ' AS ',
+      }),
+    ]);
+  });
+
   it('preserves typed metadata for SQL025 and SQL026 through the API core', async () => {
     const uri = 'file:///typed-features.sql';
     const core = new NetezzaWebLspCore({
