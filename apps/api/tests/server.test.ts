@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { gunzipSync } from 'node:zlib';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -519,6 +520,95 @@ describe('web API authentication and connection profiles', () => {
       const failedJob = await waitForQueryJob(app, String(failed.json().queryId));
       expect(failedJob.events.filter(event => event.type === 'error')).toHaveLength(1);
       expect(failedJob.events.filter(event => event.type === 'batch-complete')).toHaveLength(1);
+    } finally {
+      await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf } });
+    }
+  });
+
+  it('round-trips a guarded CSV import and compressed export through a real SQLite profile', async () => {
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
+    const rawCookie = login.headers['set-cookie'];
+    const cookies = Array.isArray(rawCookie) ? rawCookie.map(value => value.split(';')[0]) : [String(rawCookie).split(';')[0]];
+    const cookie = cookies.join('; ');
+    const csrf = cookies.find(value => value.startsWith('justybase_csrf='))?.split('=')[1] ?? '';
+    const database = `movement-${Date.now()}.sqlite`;
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/connections',
+      headers: { cookie, 'x-justybase-csrf': csrf },
+      payload: { name: `Data movement ${Date.now()}`, dbType: 'sqlite', database, readOnly: false },
+    });
+    expect(created.statusCode).toBe(201);
+    const connectionId = String(created.json().id);
+    const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { cookie } });
+    const userId = String(me.json().user.id);
+    const databasePath = resolveLocalDatabasePath(database, { root: path.join(dataDir, 'local-databases'), userId });
+    const fixture = new DatabaseSync(databasePath);
+    fixture.exec('CREATE TABLE orders (id TEXT, amount TEXT, event_at TEXT, note TEXT, optional_value TEXT); CREATE TABLE strict_orders (id TEXT, required_value TEXT NOT NULL);');
+    fixture.close();
+
+    const fileInput = {
+      connectionId,
+      database: 'main',
+      schema: 'main',
+      table: 'orders',
+      fileName: 'orders.csv',
+      format: 'csv' as const,
+      hasHeader: true,
+      contentBase64: Buffer.from('ID,AMOUNT,EVENT_AT,NOTE,OPTIONAL_VALUE\n9223372036854775807,12345678901234567890.123400,2026-09-12T10:34:56.789+02:00,"Zażółć, ""gęślą""\n第二行",\n').toString('base64'),
+    };
+    try {
+      const preview = await app.inject({ method: 'POST', url: '/api/query/import-file/preview', headers: { cookie, 'x-justybase-csrf': csrf }, payload: fileInput });
+      expect(preview.statusCode).toBe(200);
+      expect(preview.json()).toEqual(expect.objectContaining({ rowCount: 1, sql: expect.stringContaining('NULL') }));
+
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/api/query/import-file',
+        headers: { cookie, 'x-justybase-csrf': csrf },
+        payload: { ...fileInput, writeConfirmed: true, writePreviewToken: preview.json().previewToken },
+      });
+      expect(imported.statusCode).toBe(200);
+      expect(imported.json()).toEqual(expect.objectContaining({ rowsAffected: 1 }));
+
+      const started = await app.inject({ method: 'POST', url: '/api/query', headers: { cookie, 'x-justybase-csrf': csrf }, payload: { connectionId, database: 'main', sql: 'SELECT id, amount, event_at, note, optional_value FROM orders', mode: 'single' } });
+      expect(started.statusCode).toBe(202);
+      const queryId = String(started.json().queryId);
+      await waitForQueryJob(app, queryId);
+      const page = await app.inject({ method: 'POST', url: `/api/query/${queryId}/page`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { limit: 10 } });
+      expect(page.statusCode).toBe(200);
+      expect(page.json().rows).toEqual([['9223372036854775807', '12345678901234567890.123400', '2026-09-12T10:34:56.789+02:00', 'Zażółć, "gęślą"\n第二行', null]]);
+
+      const exported = await app.inject({ method: 'POST', url: `/api/query/${queryId}/export`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { format: 'csv.gz' } });
+      expect(exported.statusCode).toBe(200);
+      expect(exported.headers['content-type']).toContain('application/gzip');
+      expect(gunzipSync(Buffer.from(exported.rawPayload)).toString()).toContain('9223372036854775807');
+      expect(gunzipSync(Buffer.from(exported.rawPayload)).toString()).toContain('"Zażółć, ""gęślą""\n第二行"');
+
+      const partialFileInput = {
+        ...fileInput,
+        table: 'strict_orders',
+        contentBase64: Buffer.from('ID,REQUIRED_VALUE\n1,valid\n2,\n').toString('base64'),
+      };
+      const partialPreview = await app.inject({ method: 'POST', url: '/api/query/import-file/preview', headers: { cookie, 'x-justybase-csrf': csrf }, payload: partialFileInput });
+      expect(partialPreview.statusCode).toBe(200);
+      expect(partialPreview.json()).toEqual(expect.objectContaining({ rowCount: 2, sql: expect.stringContaining('(\'1\', \'valid\'),\n  (\'2\', NULL)') }));
+      const partialImport = await app.inject({
+        method: 'POST',
+        url: '/api/query/import-file',
+        headers: { cookie, 'x-justybase-csrf': csrf },
+        payload: { ...partialFileInput, writeConfirmed: true, writePreviewToken: partialPreview.json().previewToken },
+      });
+      expect(partialImport.statusCode).toBe(400);
+      expect(partialImport.json()).toEqual(expect.objectContaining({ code: 'FILE_IMPORT_REJECTED' }));
+      const strictCount = await app.inject({ method: 'POST', url: '/api/query', headers: { cookie, 'x-justybase-csrf': csrf }, payload: { connectionId, database: 'main', sql: 'SELECT COUNT(*) AS COUNT FROM strict_orders', mode: 'single' } });
+      expect(strictCount.statusCode).toBe(202);
+      const strictCountJob = await waitForQueryJob(app, String(strictCount.json().queryId));
+      const strictCountSessionId = strictCountJob.sessionIds.get(0);
+      expect(strictCountSessionId).toBeDefined();
+      const strictCountPage = await app.inject({ method: 'POST', url: `/api/query/${strictCount.json().queryId}/page`, headers: { cookie, 'x-justybase-csrf': csrf }, payload: { limit: 10 } });
+      expect(strictCountPage.statusCode).toBe(200);
+      expect(strictCountPage.json().rows).toEqual([[0]]);
     } finally {
       await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf } });
     }

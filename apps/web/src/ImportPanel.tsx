@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { MAX_QUERY_FILE_IMPORT_BYTES } from '@justybase/contracts';
-import type { QueryFileImportFormat, SchemaTreeNode } from '@justybase/contracts';
+import type { QueryFileImportFormat, QueryFileImportPreviewRequest, QueryFileImportRequest, SchemaTreeNode } from '@justybase/contracts';
 import { useApiClient } from './api';
 
 interface ImportPanelProps {
@@ -62,7 +62,7 @@ export function ImportPanel({ connectionId, target, database, onClose, onComplet
     setMessage('');
     try {
       const contentBase64 = await readBase64(file);
-      const input = {
+      const input: QueryFileImportPreviewRequest = {
         connectionId,
         database: database || target.database,
         schema: target.schema,
@@ -73,14 +73,15 @@ export function ImportPanel({ connectionId, target, database, onClose, onComplet
         hasHeader,
         ...(format === 'csv' ? { delimiter: delimiter || ',' } : {}),
         ...(format !== 'csv' && sheetName.trim() ? { sheetName: sheetName.trim() } : {}),
-      } as const;
+      };
       const preview = await api.importFilePreview(input);
-      const previewText = `${preview.warnings.join(' ')}\n\n${preview.sql.slice(0, 2_000)}${preview.sql.length > 2_000 ? '\n…' : ''}`;
-      if (!window.confirm(`Confirm import into ${target.schema}.${table}?\n\n${previewText}`)) {
+      const warningText = preview.warnings.length > 0 ? `\n${preview.warnings.join(' ')}` : '';
+      const previewText = `${preview.sql.slice(0, 2_000)}${preview.sql.length > 2_000 ? '\n…' : ''}`;
+      if (!window.confirm(`Confirm import of ${preview.rowCount.toLocaleString()} row(s) into ${target.schema}.${table}?${warningText}\n\n${previewText}`)) {
         setMessage('Import cancelled.');
         return;
       }
-      const result = await api.importFile({ ...input, writeConfirmed: true, writePreviewToken: preview.previewToken });
+      const result = await api.importFile({ ...input, writeConfirmed: true, writePreviewToken: preview.previewToken } satisfies QueryFileImportRequest);
       setMessage(result.message);
       onCompleted();
     } catch (reason: unknown) {
@@ -90,16 +91,17 @@ export function ImportPanel({ connectionId, target, database, onClose, onComplet
     }
   }
 
-  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <form className="modal-card import-card" onSubmit={event => void submit(event)}>
-      <div className="modal-header"><div><strong>Import data</strong><small>{target.schema}.{table}</small></div><button type="button" className="secondary small" onClick={onClose}>Close</button></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <form className="modal-card import-card" onSubmit={event => void submit(event)} role="dialog" aria-modal="true" aria-labelledby="import-title">
+      <div className="modal-header"><div><strong id="import-title">Import data</strong><small>{target.schema}.{table}</small></div><button type="button" className="secondary small" onClick={onClose}>Close</button></div>
       <label>File<input type="file" accept=".csv,.xlsx,.xlsb" onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
       <label className="checkbox"><input type="checkbox" checked={hasHeader} onChange={event => setHasHeader(event.target.checked)} />First row contains column names</label>
       {format === 'csv' && <label>CSV delimiter<input value={delimiter} maxLength={1} onChange={event => setDelimiter(event.target.value.slice(-1))} /></label>}
       {format !== undefined && format !== 'csv' && <label>Worksheet (optional)<input value={sheetName} onChange={event => setSheetName(event.target.value)} placeholder="First worksheet" /></label>}
-      {error && <div className="error">{error}</div>}
-      {message && <div className="success-message">{message}</div>}
-      <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={busy || !file}>{busy ? 'Importing…' : 'Preview and import'}</button></div>
+      {file && <small>{file.name} · {(file.size / 1024 / 1024).toFixed(2)} MB · {format?.toUpperCase() ?? 'Unsupported format'}</small>}
+      {error && <div className="error" role="alert">{error}</div>}
+      {message && <div className="success-message" role="status">{message}</div>}
+      <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={busy || !file || !format}>{busy ? 'Importing…' : 'Preview and import'}</button></div>
     </form>
   </div>;
 }

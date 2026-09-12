@@ -1,7 +1,8 @@
 'use strict';
 
 const { existsSync } = require('node:fs');
-const { mkdtemp, rm } = require('node:fs/promises');
+const { gunzipSync } = require('node:zlib');
+const { mkdtemp, readFile, rm } = require('node:fs/promises');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
@@ -250,6 +251,15 @@ FROM seq`;
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     expect((await download).suggestedFilename()).toMatch(/\.csv$/u);
     checks.push('CSV export download');
+    const compressedDownloadPromise = page.waitForEvent('download');
+    await page.getByLabel('Electron export format').selectOption('csv.gz');
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    const compressedDownload = await compressedDownloadPromise;
+    expect(compressedDownload.suggestedFilename()).toMatch(/\.csv\.gz$/u);
+    const compressedPath = await compressedDownload.path();
+    if (!compressedPath) throw new Error('Electron did not expose the compressed export download path.');
+    expect(gunzipSync(await readFile(compressedPath)).toString('utf8')).toContain('electron-grid-');
+    checks.push('CSV gzip export download and decompression');
 
     console.log(JSON.stringify({
       scenarioId: 'electron-real-window',

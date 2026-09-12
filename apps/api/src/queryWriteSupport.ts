@@ -74,6 +74,8 @@ interface SpreadsheetReader {
   read(): Promise<boolean> | boolean;
   close(): Promise<void>;
   _currentRow?: unknown[];
+  fieldCount?: number;
+  getValue?: (columnIndex: number) => unknown;
   /** Internal selection cursor exposed by the package's reader contract. */
   _currentSheetIndex?: number;
   getSheetNames?: () => string[];
@@ -82,6 +84,16 @@ interface SpreadsheetReader {
 
 interface SpreadsheetTasksModule {
   ReaderFactory?: { create(filePath: string): SpreadsheetReader };
+}
+
+function spreadsheetRow(reader: SpreadsheetReader): unknown[] {
+  if (Array.isArray(reader._currentRow) && reader._currentRow.length > 0) return [...reader._currentRow];
+  const fieldCount = reader.fieldCount;
+  const count = typeof fieldCount === 'number' && Number.isInteger(fieldCount) && fieldCount > 0 ? fieldCount : 0;
+  if (typeof reader.getValue === 'function' && count > 0) {
+    return Array.from({ length: count }, (_unused, index) => reader.getValue!(index));
+  }
+  return Array.isArray(reader._currentRow) ? [...reader._currentRow] : [];
 }
 
 function parseCsvImport(text: string, delimiter: string): unknown[][] {
@@ -165,9 +177,9 @@ async function readSpreadsheetImport(filePath: string, sheetName?: string): Prom
     }
     const rows: unknown[][] = [];
     while (await reader.read()) {
-      const values = reader._currentRow;
-      if (Array.isArray(values)) rows.push([...values]);
-      if (rows.length > 10_000) throw new Error('Imports are limited to 10,000 rows per operation.');
+      const values = spreadsheetRow(reader);
+      if (values.length > 0) rows.push(values);
+      if (rows.length > 10_001) throw new Error('Imports are limited to 10,000 rows per operation.');
     }
     return rows;
   } finally {
@@ -194,12 +206,19 @@ export async function materializeFileImport(input: QueryFileImportPreviewRequest
     const rawRows = input.format === 'csv'
       ? parseCsvImport(content.toString('utf8'), typeof input.delimiter === 'string' && input.delimiter.length === 1 ? input.delimiter : ',')
       : await readSpreadsheetImport(tempPath, input.sheetName);
+    if (rawRows.length > 10_001) throw new Error('Imports are limited to 10,000 rows per operation.');
     if (rawRows.length === 0) throw new Error('The import file does not contain any rows.');
     const width = rawRows.reduce((maximum, row) => Math.max(maximum, row.length), 0);
     if (width === 0) throw new Error('The import file does not contain any columns.');
     const hasHeader = input.hasHeader !== false;
     const header = hasHeader ? rawRows[0] : undefined;
-    const dataRows = (hasHeader ? rawRows.slice(1) : rawRows).map(row => Array.from({ length: width }, (_, index) => row[index] ?? null));
+    const dataRows = (hasHeader ? rawRows.slice(1) : rawRows).map(row => Array.from({ length: width }, (_, index) => {
+      const value = row[index];
+      // The desktop importer and Netezza external-table path both treat an
+      // empty CSV/worksheet field as NULL. Keep that contract at the shared
+      // guarded-write boundary instead of silently inserting empty strings.
+      return value === undefined || value === null || value === '' ? null : value;
+    }));
     if (dataRows.length === 0) throw new Error('The import file contains a header but no data rows.');
     if (!hasHeader && (!targetColumns || targetColumns.length < width)) throw new Error('A headerless import must fit the target table columns.');
     return {
