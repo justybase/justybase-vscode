@@ -172,6 +172,8 @@ describe('shared React presentation', () => {
       if (!scroller) return;
       Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
       act(() => { jest.runOnlyPendingTimers(); });
+      fireEvent.scroll(scroller);
+      act(() => { jest.runOnlyPendingTimers(); });
       const renderedRows = (): NodeListOf<HTMLTableRowElement> => container.querySelectorAll<HTMLTableRowElement>('tbody tr:not(.ui-data-grid-virtual-spacer)');
       expect(renderedRows().length).toBeLessThan(100);
       expect(renderedRows()[0]).toHaveTextContent('1');
@@ -183,6 +185,28 @@ describe('shared React presentation', () => {
       expect(renderedRows()[0]).toHaveTextContent('493');
       expect(renderedRows()[renderedRows().length - 1]).toHaveTextContent('512');
       expect(container.querySelector('.ui-data-grid-virtual-spacer')?.getAttribute('aria-hidden')).toBe('true');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('restores the virtual row anchor together with both scroll axes', () => {
+    jest.useFakeTimers();
+    try {
+      const rows = Array.from({ length: 1000 }, (_value, index) => [index + 1]);
+      const { container } = render(<DataGrid resultSetId="restored-virtual-grid" columns={[{ name: 'ID', type: 'INTEGER' }]} rows={rows} scroll={{ resultSetId: 'restored-virtual-grid', top: 15_000, left: 240, anchorRow: 500 }} />);
+      const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+      expect(scroller).not.toBeNull();
+      if (!scroller) return;
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
+      act(() => { jest.runOnlyPendingTimers(); });
+      fireEvent.scroll(scroller);
+      act(() => { jest.runOnlyPendingTimers(); });
+      expect(scroller.scrollTop).toBe(15_000);
+      expect(scroller.scrollLeft).toBe(240);
+      const renderedRows = container.querySelectorAll<HTMLTableRowElement>('tbody tr:not(.ui-data-grid-virtual-spacer)');
+      expect(renderedRows[0]).toHaveTextContent('493');
+      expect(renderedRows[renderedRows.length - 1]).toHaveTextContent('512');
     } finally {
       jest.useRealTimers();
     }
@@ -234,6 +258,22 @@ describe('shared React presentation', () => {
     expect(onContextMenu).toHaveBeenCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 20, clientY: 40 });
     fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
+  });
+
+  it('uses the shared column menu for visibility and pinning actions', () => {
+    const onViewChange = jest.fn();
+    render(<DataGrid
+      resultSetId="column-menu"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME' }]}
+      rows={[[1, 'Alpha']]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }}
+      onViewChange={onViewChange}
+    />);
+    fireEvent.click(screen.getByText('Columns'));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ID' }));
+    expect(onViewChange).toHaveBeenCalledWith({ columnVisibility: { ID: false } });
+    fireEvent.click(screen.getByRole('button', { name: 'Pin ID in column menu' }));
+    expect(onViewChange).toHaveBeenCalledWith({ pinnedColumns: ['ID'] });
   });
 
   it('renders formatted boolean values while preserving raw selection payloads', () => {

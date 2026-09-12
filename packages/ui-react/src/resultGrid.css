@@ -50,6 +50,87 @@ body,
   box-shadow: inset 0 0 0 1px var(--justybase-grid-accent);
 }
 
+.ui-data-grid-column-menu {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin: 4px 6px 0;
+  color: var(--justybase-grid-text);
+  font-size: 11px;
+}
+
+.ui-data-grid-column-menu summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ui-data-grid-column-menu summary:hover,
+.ui-data-grid-column-menu[open] summary {
+  border-color: var(--justybase-grid-accent);
+  background: var(--justybase-grid-hover);
+}
+
+.ui-data-grid-column-menu-panel {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  width: min(280px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 120px));
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 4px;
+  background: var(--justybase-grid-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.ui-data-grid-column-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 4px;
+}
+
+.ui-data-grid-column-menu-item:hover { background: var(--justybase-grid-hover); }
+
+.ui-data-grid-column-menu-item label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-data-grid-column-menu-item button {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--justybase-grid-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ui-data-grid-column-menu-item button:hover {
+  border-color: var(--justybase-grid-border);
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-hover);
+}
+
 .ui-data-grid {
   position: relative;
   width: max-content;
@@ -564,6 +645,54 @@ body,
 
 .electron-result-panel > .ui-result-grid {
   min-height: 0;
+}
+
+.electron-export-format {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  color: var(--justybase-grid-muted);
+  font-size: 11px;
+}
+
+.electron-export-format select {
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  font: inherit;
+}
+
+.electron-grid-context-menu {
+  position: fixed;
+  z-index: 100;
+  display: grid;
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 4px;
+  background: var(--justybase-grid-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.electron-grid-context-menu button {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 0;
+  color: var(--justybase-grid-text);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.electron-grid-context-menu button:hover,
+.electron-grid-context-menu button:focus-visible {
+  outline: none;
+  background: var(--justybase-grid-hover);
 }
 
 .ui-async-state,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
+import type { QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import { createExecutionController, createInitialUiState, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
 import {
@@ -18,12 +19,19 @@ import {
   processDataGridRows,
   resolveDataGridColumns,
 } from '@justybase/ui-react';
-import type { GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
+import type { DataGridCellContext, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import { createElectronApiClient } from './api';
 import { createElectronExecutionPort, fetchAllResultPages } from './execution';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
+
+interface ElectronGridContextMenu {
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly rowIndex: number;
+  readonly columnIndex: number;
+}
 
 export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
   return getResultAsyncState(result, rowCount);
@@ -112,6 +120,8 @@ export function App(): ReactElement {
   const rowsByResultRef = useRef<ElectronRows>({});
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [contextMenu, setContextMenu] = useState<ElectronGridContextMenu | undefined>(undefined);
+  const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const activeExecutionRef = useRef<ExecutionHandle | undefined>(undefined);
   const clientRef = useRef<ReturnType<typeof createElectronApiClient> | undefined>(undefined);
   const executionRef = useRef<ExecutionController | undefined>(undefined);
@@ -255,24 +265,83 @@ export function App(): ReactElement {
     [activeResult?.columns, rows],
   );
 
+  const copyText = useCallback(async (text: string): Promise<void> => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setNotice('Clipboard access is unavailable.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice('Copied.');
+    } catch {
+      setNotice('Could not copy to the clipboard.');
+    }
+  }, []);
+
+  const copyGridSelection = useCallback((payload: DataGridCopyPayload): void => {
+    void copyText(rowsAsText(payload.columns, payload.rows));
+  }, [copyText]);
+
   const copyActive = useCallback(async (): Promise<void> => {
     const row = selectedRow === undefined ? visibleRows[0] : rows[selectedRow];
     if (!row || !activeResult) return;
     const text = rowsAsText(activeResult.columns, [row]);
-    if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
-    setNotice('Result copied.');
-  }, [activeResult, rows, selectedRow, visibleRows]);
+    await copyText(text);
+  }, [activeResult, copyText, rows, selectedRow, visibleRows]);
 
-  const exportActive = useCallback((): void => {
+  const exportActive = useCallback(async (): Promise<void> => {
     if (!activeResult || typeof document === 'undefined') return;
-    const url = URL.createObjectURL(new Blob([rowsAsCsv(activeResult.columns, visibleRows)], { type: 'text/csv' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'justybase-result.csv';
-    link.click();
-    URL.revokeObjectURL(url);
-    setNotice('Result exported.');
-  }, [activeResult, visibleRows]);
+    const columnFilters: QueryColumnFilterSpec[] = Object.entries(activeResult.view.columnFilters)
+      .flatMap(([column, value]) => {
+        const columnIndex = activeResult.columns.findIndex(item => item.name === column || String(activeResult.columns.indexOf(item)) === column);
+        return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
+      });
+    const sorting: QuerySortSpec[] = activeResult.view.sorting.flatMap(item => {
+      const columnIndex = activeResult.columns.findIndex(column => column.name === item.column || String(activeResult.columns.indexOf(column)) === item.column);
+      return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
+    });
+    try {
+      const downloaded = await clientRef.current!.exportQuery(activeResult.executionId, {
+        statementIndex: activeResult.statementIndex,
+        format: exportFormat,
+        globalFilter: activeResult.view.globalFilter,
+        columnFilters,
+        sorting,
+      });
+      const url = URL.createObjectURL(downloaded.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloaded.fileName;
+      link.click();
+      const revokeObjectUrl = URL.revokeObjectURL;
+      if (typeof revokeObjectUrl === 'function') window.setTimeout(() => revokeObjectUrl(url), 100);
+      setNotice('Result exported.');
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not export results.');
+    }
+  }, [activeResult, exportFormat]);
+
+  const contextRow = contextMenu ? rows[contextMenu.rowIndex] : undefined;
+  const closeContextMenu = useCallback((): void => setContextMenu(undefined), []);
+  const contextText = useCallback((context: DataGridCellContext, format: 'value' | 'row'): string | undefined => {
+    const row = rows[context.rowIndex];
+    const column = activeResult?.columns[context.columnIndex];
+    if (!row || !column) return undefined;
+    if (format === 'value') return formatDataGridCellValue(row[context.columnIndex], column.type, column);
+    return rowsAsText(activeResult.columns, [row]);
+  }, [activeResult, rows]);
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = (): void => setContextMenu(undefined);
+    const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') close(); };
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('click', close);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [contextMenu]);
 
   const selectSurface = useCallback((surface: string): void => {
     const next = asSurface(surface);
@@ -325,10 +394,20 @@ export function App(): ReactElement {
             <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
             {notice && <div role="status">{notice}</div>}
             <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-            {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={exportActive} />}
+            {activeResult && <>
+              <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} />
+              <label className="electron-export-format">Export format<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label>
+            </>}
             <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…">
-              <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateView} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onRowSelect={setSelectedRow} />
+              <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateView} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onContextMenu={context => setContextMenu(context)} onRowSelect={setSelectedRow} />
             </AsyncStateView>
+            {contextMenu && contextRow && activeResult && <div className="electron-grid-context-menu" role="menu" style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
+              <button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'value'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy value</button>
+              <button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'row'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy row</button>
+              <button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ columnFilters: { ...activeResult.view.columnFilters, [column.name]: String(contextRow[contextMenu.columnIndex] ?? '') } }); closeContextMenu(); }}>Filter by value</button>
+              <button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ sorting: [{ column: column.name, descending: false }] }); closeContextMenu(); }}>Sort ascending</button>
+              <button type="button" role="menuitem" onClick={() => { setSelectedRow(contextMenu.rowIndex); closeContextMenu(); }}>View full row</button>
+            </div>}
             {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>
         </>}

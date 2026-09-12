@@ -70,6 +70,8 @@ export interface DataGridProps {
   readonly onSelectionChange?: (selection: DataGridSelection | undefined) => void;
   readonly onContextMenu?: (context: DataGridCellContext) => void;
   readonly onCopySelection?: (payload: DataGridCopyPayload) => void;
+  /** Shows the shared column visibility/order/pinning menu. */
+  readonly showColumnMenu?: boolean;
 }
 
 interface IndexedRow {
@@ -483,6 +485,7 @@ export function DataGrid({
   onSelectionChange,
   onContextMenu,
   onCopySelection,
+  showColumnMenu = true,
 }: DataGridProps): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
@@ -531,6 +534,7 @@ export function DataGrid({
   const selectionChangeRef = useRef(onSelectionChange);
   const emptyPageRequestRef = useRef<{ readonly key: string; readonly count: number } | undefined>(undefined);
   const virtualScrollFrameRef = useRef<number | undefined>(undefined);
+  const virtualViewportSyncRef = useRef<(() => void) | undefined>(undefined);
   const virtualViewportRef = useRef({ scrollTop: 0, height: DEFAULT_VIEWPORT_HEIGHT });
   const [virtualViewport, setVirtualViewport] = useState(virtualViewportRef.current);
   activeViewRef.current = activeView;
@@ -585,6 +589,7 @@ export function DataGrid({
       }
     };
 
+    virtualViewportSyncRef.current = scheduleViewport;
     scheduleViewport();
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(scheduleViewport);
     observer?.observe(element);
@@ -594,8 +599,9 @@ export function DataGrid({
         cancelAnimationFrame(virtualScrollFrameRef.current);
       }
       virtualScrollFrameRef.current = undefined;
+      virtualViewportSyncRef.current = undefined;
     };
-  }, [resultSetId]);
+  }, [columns.length, resultSetId, rows.length]);
 
   const visibleColumnIndexes = useMemo(() => orderColumns(resolvedColumns, activeView), [resolvedColumns, activeView]);
   const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing, getCellMetadata), [resolvedColumns, rows, activeView, clientProcessing, getCellMetadata]);
@@ -665,6 +671,7 @@ export function DataGrid({
       if (!element || !scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) return;
       element.scrollTop = Math.max(0, scroll.top);
       element.scrollLeft = Math.max(0, scroll.left);
+      virtualViewportSyncRef.current?.();
     };
     const element = scroller.current;
     if (!element) return;
@@ -764,6 +771,16 @@ export function DataGrid({
     updateView({ pinnedColumns: pinned });
   }
 
+  function toggleColumnVisibility(columnIndex: number, visible: boolean): void {
+    const column = resolvedColumns[columnIndex];
+    if (!column) return;
+    const id = columnKey(column, columnIndex);
+    const visibility = { ...(activeView.columnVisibility ?? {}) };
+    if (visible) delete visibility[id];
+    else visibility[id] = false;
+    updateView({ columnVisibility: visibility });
+  }
+
   function reorderColumn(columnIndex: number, targetIndex: number): void {
     const current = [...(activeView.columnOrder ?? resolvedColumns.map((_column, index) => columnKey(resolvedColumns[index]!, index)))];
     const sourceId = columnKey(resolvedColumns[columnIndex]!, columnIndex);
@@ -809,6 +826,20 @@ export function DataGrid({
   // Keep the legacy result-grid hook as a compatibility selector while the
   // shared class remains the styling/API identity for every host.
   return <div className="ui-result-grid result-grid">
+    {showColumnMenu && <details className="ui-data-grid-column-menu">
+      <summary>Columns</summary>
+      <div className="ui-data-grid-column-menu-panel" role="menu" aria-label="Column settings">
+        {resolvedColumns.map((column, columnIndex) => {
+          const id = columnKey(column, columnIndex);
+          const visible = visibleColumnIndexes.includes(columnIndex);
+          const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
+          return <div className="ui-data-grid-column-menu-item" key={id}>
+            <label><input type="checkbox" checked={visible} onChange={event => toggleColumnVisibility(columnIndex, event.target.checked)} />{column.name}</label>
+            <button type="button" aria-label={pinned ? `Unpin ${column.name} in column menu` : `Pin ${column.name} in column menu`} onClick={() => togglePin(columnIndex)}>{pinned ? 'Unpin' : 'Pin'}</button>
+          </div>;
+        })}
+      </div>
+    </details>}
     <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}>
       {processedRows.length === 0 ? <div className="ui-grid-empty" role="status">No matching rows.{hasMoreRows && <button type="button" onClick={onLoadMore}>Load more rows</button>}</div> : <table className="ui-data-grid">
         <thead><tr>
@@ -868,4 +899,12 @@ export function DataGrid({
       </table>}
     </div>
   </div>;
+}
+
+/**
+ * Canonical result-grid name for new consumers. DataGrid remains exported as a
+ * compatibility name because the first shared UI slices already consume it.
+ */
+export function ResultGrid(props: DataGridProps): ReactNode {
+  return <DataGrid {...props} />;
 }

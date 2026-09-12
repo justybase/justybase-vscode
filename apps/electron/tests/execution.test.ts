@@ -15,6 +15,7 @@ function fakeClient() {
     startQuery: jest.fn(async () => ({ queryId: 'query-1', statementCount: 1 })),
     queryPage: jest.fn(async () => ({ sessionId: 'session-1', columns: [], rows: [], offset: 0, limit: 10, totalRows: 0, hasMore: false })),
     cancelQuery: jest.fn(async () => ({ ok: true as const })),
+    exportQuery: jest.fn(async () => ({ blob: new Blob(), fileName: 'result.csv' })),
     connectToQueryEvents: jest.fn((_queryId, onEvent, onError) => {
       emit = onEvent;
       reportError = onError;

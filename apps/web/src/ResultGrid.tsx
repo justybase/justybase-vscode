@@ -5,7 +5,7 @@ import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionSta
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterSpec, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { DataGrid, formatDataGridCellValue, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
-import type { DataGridCellMetadata } from '@justybase/ui-react';
+import type { DataGridCellMetadata, DataGridCopyPayload, GridScrollPosition } from '@justybase/ui-react';
 import { aggregateResultRows, filterResultRows, type ResultColumn, type ResultColumnFilter } from '@justybase/result-core';
 import { useApiClient } from './api';
 import { readLegacyWorkspaceValue, useWorkspaceStorage, type WorkspaceStorage } from './workspacePersistence';
@@ -30,6 +30,9 @@ interface SavedGridState {
   columnOrder?: string[];
   columnWidths?: Record<string, number>;
   grouping?: string[];
+  scrollTop?: number;
+  scrollLeft?: number;
+  scrollAnchorRow?: number;
 }
 
 interface PersistedGridStateEnvelope {
@@ -167,9 +170,13 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ left: [], right: [] });
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [scrollTop, setScrollTop] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [scrollAnchorRow, setScrollAnchorRow] = useState<number | undefined>(undefined);
   const [gridGrouping, setGridGrouping] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [exporting, setExporting] = useState(false);
   const [columnOrder, setColumnOrder] = useState<string[]>(() => result.columns.map((_, i) => String(i)));
@@ -244,6 +251,9 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setColumnPinning(saved?.columnPinning ?? { left: [], right: [] });
     setColumnWidths(saved?.columnWidths ?? {});
     setGridGrouping(saved?.grouping ?? []);
+    setScrollTop(Number.isFinite(saved?.scrollTop) ? Math.max(0, saved?.scrollTop ?? 0) : 0);
+    setScrollLeft(Number.isFinite(saved?.scrollLeft) ? Math.max(0, saved?.scrollLeft ?? 0) : 0);
+    setScrollAnchorRow(Number.isInteger(saved?.scrollAnchorRow) && (saved?.scrollAnchorRow ?? 0) >= 0 ? saved?.scrollAnchorRow : undefined);
     setColumnOrder(mergedOrder);
     setGridHydratedKey(gridKey);
   }, [gridKey, legacyKey, resultSetId, result.sessionId, result.columns, storage]);
@@ -251,13 +261,13 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   useEffect(() => {
     if (gridHydratedKey !== gridKey) return;
     try {
-      const state: SavedGridState = { pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, grouping: gridGrouping };
+      const state: SavedGridState = { pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, grouping: gridGrouping, scrollTop, scrollLeft, scrollAnchorRow };
       const envelope: PersistedGridStateEnvelope = { version: 2, resultSetId, state };
       storage.set(gridKey, JSON.stringify(envelope));
     } catch {
       // A full localStorage should not make the result grid unusable.
     }
-  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, gridGrouping, storage]);
+  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, gridGrouping, scrollTop, scrollLeft, scrollAnchorRow, storage]);
 
   useEffect(() => {
     if (!queryId || !result.sessionId) return;
@@ -515,6 +525,13 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     if (patch.pinnedColumns !== undefined) setColumnPinning({ left: [...patch.pinnedColumns], right: [] });
     if (patch.columnWidths !== undefined) setColumnWidths({ ...patch.columnWidths });
     if (patch.grouping !== undefined) setGridGrouping([...patch.grouping]);
+    if (patch.scrollTop !== undefined) setScrollTop(Math.max(0, patch.scrollTop));
+    if (patch.scrollLeft !== undefined) setScrollLeft(Math.max(0, patch.scrollLeft));
+    if (patch.anchorRow !== undefined) setScrollAnchorRow(Math.max(0, patch.anchorRow));
+  }
+
+  function handleGridScroll(position: GridScrollPosition): void {
+    updateSharedGridView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
   }
 
   useEffect(() => {
@@ -532,6 +549,15 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
       return;
     }
     void writeText.call(navigator.clipboard, text).catch(() => setError('Failed to copy to clipboard'));
+  }
+
+  function copyGridSelection(payload: DataGridCopyPayload): void {
+    const text = [
+      payload.columns.map(column => column.name).join('\t'),
+      ...payload.rows.map(row => row.map((value, index) => formatDataGridCellValue(value, payload.columns[index]?.type, payload.columns[index])).join('\t')),
+    ].join('\n');
+    copyText(text);
+    setNotice('Selection copied.');
   }
 
   function contextRow(): GridRow | undefined {
@@ -611,15 +637,14 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   return <section className="advanced-grid">
     <div className="grid-toolbar">
       <input className="grid-global-filter" aria-label="Filter all result values" placeholder="Filter results…" value={globalFilter} onChange={event => setGlobalFilter(event.target.value)} />
-      <details className="grid-columns"><summary>Columns</summary><div className="grid-columns-menu">{table.getAllLeafColumns().map(column => <label key={column.id}><input type="checkbox" checked={column.getIsVisible()} onChange={event => column.toggleVisibility(event.target.checked)} /><span>{String(column.columnDef.header)}</span><button type="button" title={column.getIsPinned() ? 'Unpin column' : 'Pin column'} aria-label={column.getIsPinned() ? `Unpin ${String(column.columnDef.header)}` : `Pin ${String(column.columnDef.header)}`} onClick={() => column.pin(column.getIsPinned() ? false : 'left')}>📌</button></label>)}</div></details>
       <div className="grid-tool-group grid-copy-actions"><button className="secondary small copy-btn" aria-label="Copy selected result rows" onClick={copySelection}>Copy</button></div>
       <div className="grid-tool-group grid-analysis-actions"><button className="secondary small" disabled={aggregatesLoading} onClick={() => { const next = !showAggregates; setShowAggregates(next); if (!next) setAggregates(null); }}>{aggregatesLoading ? 'Calculating…' : showAggregates ? 'Hide aggregates' : 'Aggregates'}</button><button className="secondary small" disabled={grouping} onClick={() => void groupResults()}>{grouping ? 'Grouping…' : 'Group'}</button><button className="secondary small" disabled={grouping} onClick={() => void pivotResults()}>Pivot</button></div>
       <div className="grid-tool-group grid-export-actions"><label className="grid-export-label">Export<select className="grid-export-format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)} aria-label="Export format"><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB (preferred, faster)</option></select></label><button className="secondary small" disabled={exporting} onClick={() => void exportResult()}>{exporting ? 'Exporting…' : 'Download'}</button></div>
-      {loading && <span className="running">Loading…</span>}{error && <span className="grid-error">{error}</span>}
+      {loading && <span className="running">Loading…</span>}{notice && <span className="grid-notice" role="status">{notice}</span>}{error && <span className="grid-error" role="alert">{error}</span>}
     </div>
     {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
     {(grouped || pivot) && groupedGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">{pivot ? 'Pivot view' : `Grouped view · ${grouped?.totalGroups.toLocaleString() ?? 0} groups`}<button type="button" className="secondary small" onClick={() => { setGrouped(null); setPivot(null); }}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:${pivot ? 'pivot' : 'grouped'}`} columns={groupedGrid.columns} rows={groupedGrid.rows} totalRowCount={groupedGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} /></div></div>}
-    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onContextMenu={context => setContextMenu({ x: context.clientX, y: context.clientY, rowIndex: context.rowIndex, columnIndex: context.columnIndex })} />
+    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow }} onScroll={handleGridScroll} onCopySelection={copyGridSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onContextMenu={context => setContextMenu({ x: context.clientX, y: context.clientY, rowIndex: context.rowIndex, columnIndex: context.columnIndex })} />
     {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button type="button" onClick={() => copyContext('value')}>Copy value</button><button type="button" onClick={() => copyContext('tsv')}>Copy row as TSV</button><button type="button" onClick={() => copyContext('json')}>Copy row as JSON</button><button type="button" onClick={() => copyContext('markdown')}>Copy row as Markdown</button><button type="button" onClick={() => copyContext('sql')}>Copy SQL INSERT</button><hr /><button type="button" onClick={filterByContextValue}>Filter by this value</button><button type="button" onClick={() => sortByContextValue(false)}>Sort ascending</button><button type="button" onClick={() => sortByContextValue(true)}>Sort descending</button><hr /><button type="button" onClick={() => { setDetailRowIndex(contextMenu.rowIndex); setContextMenu(null); }}>View full row</button>{onEditRow && <button type="button" onClick={() => { const row = contextRow(); if (row) onEditRow([...row.values]); setContextMenu(null); }}>Edit row…</button>}</div>}
     {detailRowIndex !== null && gridRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{gridRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, gridColumns[index]).text}</dd></div>)}</dl></aside>}
     <div className="grid-pagination"><span>{effectiveTotalRows.toLocaleString()} rows · page {pageIndex + 1} / {totalPages}</span><label>Page size<select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageIndex(0); }}><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option></select></label><button className="secondary small" disabled={pageIndex === 0 || loading} onClick={() => setPageIndex(value => value - 1)}>Previous</button><button className="secondary small" disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex(value => value + 1)}>Next</button></div>

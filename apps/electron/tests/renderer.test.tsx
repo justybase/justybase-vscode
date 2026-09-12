@@ -51,7 +51,7 @@ const originalCreateObjectUrl = URL.createObjectURL;
 const originalRevokeObjectUrl = URL.revokeObjectURL;
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+  return { ok: status >= 200 && status < 300, status, headers: new Headers(), json: async () => body, blob: async () => new Blob([JSON.stringify(body)]) } as Response;
 }
 
 function installApi(auth: { status: 'authenticated' | 'unauthenticated'; message?: string }, workspaceStatus: 'available' | 'unsupported' = 'available', profiles: readonly [{ id: string; name: string; host: string; port: number; database: string; user: string; dbType: string; readOnly: boolean }] | readonly [] = []): void {
