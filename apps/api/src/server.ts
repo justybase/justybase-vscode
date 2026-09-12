@@ -307,10 +307,11 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
     }
     const statusCode = clientErrorStatusCode(error);
     if (statusCode !== undefined) {
+      const errorCode = typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : undefined;
       void reply.code(statusCode).send({
-        code: typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
-          ? (error as { code: string }).code
-          : 'INVALID_REQUEST',
+        code: errorCode?.startsWith('FST_ERR_') === false ? errorCode : 'INVALID_REQUEST',
         message: error instanceof Error ? error.message : 'Invalid request.',
       });
       return;
