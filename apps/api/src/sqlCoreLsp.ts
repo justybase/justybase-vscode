@@ -88,6 +88,13 @@ export interface CoreHover { range?: CoreRange; contents: CoreMarkupContent; }
 export interface CoreLocation { uri: string; range: CoreRange; }
 export interface CoreTextEdit { range: CoreRange; newText: string; }
 export interface CoreWorkspaceEdit { changes: Record<string, CoreTextEdit[]>; }
+export interface CoreCodeAction {
+  title: string;
+  kind: "quickfix";
+  isPreferred?: boolean;
+  diagnostics: CoreDiagnostic[];
+  edit: CoreWorkspaceEdit;
+}
 export interface CoreRenamePrepare { range: CoreRange; placeholder: string; }
 export interface CoreInlayHint { position: CorePosition; label: string; kind?: "type" | "parameter"; }
 export interface CoreSignatureParameter { label: string; documentation?: string; }
@@ -295,6 +302,90 @@ export class NetezzaWebLspCore {
       data: issue.suggestedFix ? { suggestedFix: issue.suggestedFix } : undefined,
     }));
     return [...parserDiagnostics, ...qualityDiagnostics].sort(compareDiagnostics);
+  }
+
+  /**
+   * Builds the same diagnostic-driven quick fixes exposed by the VS Code LSP.
+   * The Web/Electron adapters only translate the resulting workspace edits;
+   * metadata resolution and dialect-sensitive qualification stay in this
+   * shared core.
+   */
+  public async codeActions(
+    documentUri: string,
+    _version: number,
+    sql: string,
+    diagnostics: readonly CoreDiagnostic[],
+  ): Promise<CoreCodeAction[]> {
+    const state = await this.ensureState(documentUri);
+    const isNetezza = !state.context.databaseKind || state.context.databaseKind === "netezza";
+    const authoringContext = isNetezza ? collectNetezzaAuthoringContext(sql) : undefined;
+    if (isNetezza && authoringContext) await this.warmTables(documentUri, state, authoringContext.tableReferences);
+
+    const actions: CoreCodeAction[] = [];
+    const replace = (diagnostic: CoreDiagnostic, title: string, newText: string, isPreferred = true, range = diagnostic.range): void => {
+      actions.push({
+        title,
+        kind: "quickfix",
+        diagnostics: [diagnostic],
+        isPreferred,
+        edit: { changes: { [documentUri]: [{ range, newText }] } },
+      });
+    };
+
+    for (const diagnostic of diagnostics) {
+      const code = String(diagnostic.code ?? "");
+      const suggestedFix = diagnostic.data?.suggestedFix;
+      const startOffset = offsetAt(sql, diagnostic.range.start);
+      const endOffset = offsetAt(sql, diagnostic.range.end);
+      const rangeText = sql.slice(startOffset, endOffset);
+
+      if (code === "SQL004" && suggestedFix) {
+        replace(diagnostic, `Did you mean '${suggestedFix}'?`, suggestedFix);
+        continue;
+      }
+      if (code === "PAR004" && suggestedFix) {
+        replace(diagnostic, `Fix typo: ${suggestedFix}`, suggestedFix);
+        continue;
+      }
+      if (code === "SQL012") {
+        replace(diagnostic, "Add VARCHAR length (e.g., VARCHAR(100))", "(100)", true, {
+          start: diagnostic.range.end,
+          end: diagnostic.range.end,
+        });
+        continue;
+      }
+      if (code === "SQL019") {
+        replace(diagnostic, "Remove unused alias", "");
+        continue;
+      }
+      if (code === "PAR003") {
+        replace(diagnostic, "Remove duplicate keyword", "");
+        continue;
+      }
+
+      if ((code === "SQL007" || code === "SQL048") && isNetezza && authoringContext) {
+        const reference = authoringContext.tableReferences.find(candidate => {
+          const candidateStart = candidate.nameStartOffset ?? candidate.startOffset;
+          const candidateEnd = candidate.nameEndOffset ?? candidate.endOffset;
+          return candidateStart !== undefined && candidateEnd !== undefined
+            && startOffset <= candidateEnd && endOffset >= candidateStart;
+        });
+        const proposals = reference
+          ? state.qualificationProposals.get(tableKey(reference.database, reference.schema, reference.name)) ?? []
+          : [];
+        for (const [index, proposal] of proposals.entries()) {
+          replace(diagnostic, `Qualify as ${proposal.qualifiedText}`, proposal.qualifiedText, index === 0);
+        }
+        const compactName = /^(\w+)\.(\w+)$/u.exec(rangeText);
+        if (code === "SQL007" && compactName) {
+          replace(diagnostic, "Convert to DB..TABLE format (Netezza syntax)", `${compactName[1]}..${compactName[2]}`, proposals.length === 0);
+        }
+        if (proposals.length > 0 || compactName) continue;
+      }
+
+      if (suggestedFix) replace(diagnostic, `Apply ${code || "SQL"} quick-fix`, suggestedFix);
+    }
+    return actions;
   }
 
   public async hover(documentUri: string, _version: number, sql: string, position: CorePosition): Promise<CoreHover | null> {

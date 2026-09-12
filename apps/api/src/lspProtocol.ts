@@ -219,7 +219,7 @@ export function attachLspSocket(
     void (async () => {
       try {
         if (request.method === 'initialize') {
-          response(request.id, { capabilities: { textDocumentSync: 1, completionProvider: { triggerCharacters: ['.', ' ', '\n', '*'] }, diagnosticProvider: { interFileDependencies: false, workspaceDiagnostics: false }, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: { prepareProvider: true }, inlayHintProvider: true, signatureHelpProvider: { triggerCharacters: ['(', ','] }, documentSymbolProvider: true, documentFormattingProvider: true, semanticTokensProvider: { full: true, legend: { tokenTypes: ['enumMember', 'function', 'keyword', 'macro', 'modifier', 'variable', 'type', 'column', 'table', 'alias', 'schema', 'database', 'localVariable'], tokenModifiers: ['readonly', 'defaultLibrary', 'italic'] } } } });
+          response(request.id, { capabilities: { textDocumentSync: 1, completionProvider: { triggerCharacters: ['.', ' ', '\n', '*'] }, diagnosticProvider: { interFileDependencies: false, workspaceDiagnostics: false }, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: { prepareProvider: true }, codeActionProvider: { codeActionKinds: ['quickfix'] }, inlayHintProvider: true, signatureHelpProvider: { triggerCharacters: ['(', ','] }, documentSymbolProvider: true, documentFormattingProvider: true, semanticTokensProvider: { full: true, legend: { tokenTypes: ['enumMember', 'function', 'keyword', 'macro', 'modifier', 'variable', 'type', 'column', 'table', 'alias', 'schema', 'database', 'localVariable'], tokenModifiers: ['readonly', 'defaultLibrary', 'italic'] } } } });
           return;
         }
         if (request.method === 'initialized' || request.method === 'shutdown') { if (request.method === 'shutdown') response(request.id, null); return; }
@@ -272,6 +272,27 @@ export function attachLspSocket(
           const textDocument = params.textDocument as { uri?: string } | undefined;
           const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
           response(request.id, { kind: 'full', items: document ? diagnosticResponse(await core.diagnostics(textDocument!.uri!, document.version, document.text)) : [] });
+          return;
+        }
+        if (request.method === 'textDocument/codeAction') {
+          const textDocument = params.textDocument as { uri?: string } | undefined;
+          const range = params.range as { start?: { line?: number; character?: number }; end?: { line?: number; character?: number } } | undefined;
+          const context = params.context as { diagnostics?: CoreDiagnostic[] } | undefined;
+          const document = textDocument?.uri ? documents.get(textDocument.uri) : undefined;
+          if (!document || !textDocument?.uri || !range?.start || !range.end) { response(request.id, []); return; }
+          const actions = await core.codeActions(
+            textDocument.uri,
+            document.version,
+            document.text,
+            (context?.diagnostics ?? []).map(item => ({
+              ...item,
+              range: {
+                start: { line: item.range?.start?.line ?? 0, character: item.range?.start?.character ?? 0 },
+                end: { line: item.range?.end?.line ?? item.range?.start?.line ?? 0, character: item.range?.end?.character ?? item.range?.start?.character ?? 0 },
+              },
+            })),
+          );
+          response(request.id, actions);
           return;
         }
         if (request.method === 'textDocument/hover') {

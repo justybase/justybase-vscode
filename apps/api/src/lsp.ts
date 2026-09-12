@@ -157,6 +157,7 @@ function mapCoreDiagnostic(sql: string, item: CoreDiagnostic, state: LegacyDelim
     code: code || undefined,
     start: compatibilityPosition ?? item.range.start,
     end: compatibilityPosition ?? item.range.end,
+    data: item.data,
   };
 }
 

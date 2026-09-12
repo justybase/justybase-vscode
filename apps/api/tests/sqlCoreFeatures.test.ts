@@ -218,6 +218,44 @@ describe('shared Netezza web SQL core — LSP feature parity (D1)', () => {
     expect(typeof withFix!.data!.suggestedFix).toBe('string');
   });
 
+  it('turns parser fixes into LSP code actions with document edits', async () => {
+    const core = createCore();
+    const uri = 'file:///code-actions.sql';
+    const sql = 'SELCT 1;';
+    const diagnostics = await core.diagnostics(uri, 1, sql);
+    const typo = diagnostics.find(diagnostic => diagnostic.code === 'PAR004' && diagnostic.data?.suggestedFix);
+    expect(typo).toBeDefined();
+    const actions = await core.codeActions(uri, 1, sql, typo ? [typo] : diagnostics);
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: expect.stringContaining('Fix typo'),
+        edit: { changes: { [uri]: [expect.objectContaining({ newText: typo?.data?.suggestedFix })] } },
+      }),
+    ]));
+  });
+
+  it('builds metadata-backed table qualification actions', async () => {
+    const uri = 'file:///qualification-actions.sql';
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      if (params.kind === 'context') return { connectionName: 'connection-1', effectiveDatabase: 'DB', effectiveSchema: 'PUBLIC', databaseKind: 'netezza' };
+      if (params.kind === 'tables') return [{ name: 'ORDERS', database: 'DB', schema: 'REPORTING', objectType: 'TABLE' }];
+      if (params.kind === 'views') return [];
+      if (params.kind === 'qualifyTable') return [{ database: 'DB', schema: 'REPORTING', name: 'ORDERS', qualifiedText: 'DB.REPORTING.ORDERS', isPreferred: false }];
+      if (params.kind === 'cachedTableInfo' || params.kind === 'tableInfo') return { exists: true, table: 'ORDERS', database: 'DB', schema: 'REPORTING', columns: [{ name: 'ID', type: 'INTEGER' }] };
+      return [];
+    } });
+    core.setContext(uri, { connectionName: 'connection-1', effectiveDatabase: 'DB', effectiveSchema: 'PUBLIC', databaseKind: 'netezza' });
+    const sql = 'SELECT * FROM ORDERS';
+    const diagnostic = { range: { start: { line: 0, character: sql.indexOf('ORDERS') }, end: { line: 0, character: sql.length } }, code: 'SQL007', message: 'Table is not qualified.' };
+    const actions = await core.codeActions(uri, 1, sql, [diagnostic]);
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: 'Qualify as DB.REPORTING.ORDERS',
+        edit: { changes: { [uri]: [expect.objectContaining({ newText: 'DB.REPORTING.ORDERS' })] } },
+      }),
+    ]));
+  });
+
   it('preserves typed metadata for SQL025 and SQL026 through the API core', async () => {
     const uri = 'file:///typed-features.sql';
     const core = new NetezzaWebLspCore({
