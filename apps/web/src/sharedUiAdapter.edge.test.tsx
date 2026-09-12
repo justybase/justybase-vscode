@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { QueryEvent, SchemaTreeNode } from '@justybase/contracts';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
@@ -80,14 +80,36 @@ interface ApiOptions {
   readonly pageError?: boolean;
   readonly startError?: boolean;
   readonly cancelError?: boolean;
+  readonly connectionActions?: boolean;
 }
 
 function edgeApi(options: ApiOptions = {}): { api: ApiClient; fetchMock: jest.Mock } {
-  const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+  const connectionProfiles = [{ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }];
+  const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    const method = init?.method?.toUpperCase() ?? 'GET';
     if (url.endsWith('/api/connections')) {
       if (options.connectionsError) throw new Error('connections failed');
-      return response(options.noConnections ? [] : [{ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }]);
+      if (options.connectionActions && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        const profile = { id: `connection-${connectionProfiles.length + 1}`, name: String(body.name ?? 'New connection'), host: String(body.host ?? ''), port: Number(body.port ?? 5480), database: String(body.database ?? 'system'), user: String(body.user ?? ''), dbType: typeof body.dbType === 'string' ? body.dbType : 'netezza', readOnly: body.readOnly !== false };
+        connectionProfiles.push(profile);
+        return response(profile);
+      }
+      return response(options.noConnections ? [] : connectionProfiles);
+    }
+    if (options.connectionActions && url.includes('/api/connections/')) {
+      const id = url.split('/').at(-1);
+      const index = connectionProfiles.findIndex(profile => profile.id === id);
+      if (method === 'DELETE') {
+        if (index >= 0) connectionProfiles.splice(index, 1);
+        return response({ ok: true });
+      }
+      if (method === 'PUT' && index >= 0) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        connectionProfiles[index] = { ...connectionProfiles[index], name: String(body.name ?? connectionProfiles[index]!.name), database: String(body.database ?? connectionProfiles[index]!.database) };
+        return response(connectionProfiles[index]);
+      }
     }
     if (url.endsWith('/api/history')) {
       if (options.historyError) throw new Error('history failed');
@@ -247,6 +269,30 @@ describe('shared Web UI adapter edge contracts', () => {
     expect(screen.getByRole('menuitem', { name: 'Remove from favorites' })).toBeInTheDocument();
     const searchCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/schema/search'));
     expect(JSON.parse(String((searchCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ term: 'ord', objectTypes: ['TABLE', 'VIEW', 'PROCEDURE', 'SYNONYM'] }));
+  });
+
+  it('exposes guarded connection add, edit and delete actions in shared Web mode', async () => {
+    const user = userEvent.setup();
+    const { api, fetchMock } = edgeApi({ connectionActions: true });
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<SharedWebWorkspace api={api} user={{ id: 'shared-connection-user', username: 'alice', role: 'user' }} onLogout={() => undefined} />);
+    await screen.findByRole('button', { name: 'SQLite' });
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add connection' });
+    await user.type(screen.getByLabelText('Profile name'), 'Analytics');
+    await user.click(within(dialog).getByRole('button', { name: 'Add connection' }));
+    await waitFor(() => expect(screen.getByText('Connection “Analytics” saved.')).toBeInTheDocument());
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).endsWith('/api/connections') && (init as RequestInit | undefined)?.method === 'POST')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Analytics' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit Analytics connection' }));
+    expect(screen.getByRole('dialog', { name: 'Edit connection' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.getByText('Connection “Analytics” saved.')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Delete Analytics connection' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Analytics' })).not.toBeInTheDocument());
+    expect(confirm).toHaveBeenCalled();
+    expect(dialog).not.toBeInTheDocument();
+    confirm.mockRestore();
   });
 
   it('maps error, cancellation and empty result terminal states without retrying SQL', async () => {

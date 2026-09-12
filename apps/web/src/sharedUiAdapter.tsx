@@ -46,6 +46,7 @@ import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
 import { ImportPanel } from './ImportPanel';
 import { createWorkspaceStorage, migrateLegacyWorkspace, readLegacyWorkspaceValue, type WorkspaceStorage } from './workspacePersistence';
 import { readSharedSchemaShortcuts, rememberSharedSchemaObject, sharedSchemaObjectIdentity, toggleSharedSchemaFavorite, writeSharedSchemaShortcuts } from './sharedSchemaPersistence';
+import { ConnectionForm } from './workspacePanels';
 
 const sharedCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'workspace', status: 'available', owner: 'ui-core', documentation: 'Shared workspace state and presentation.', removalCondition: 'Keep the shared workspace owner.' },
@@ -248,6 +249,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [schemaFavorites, setSchemaFavorites] = useState<SchemaTreeNode[]>([]);
   const [schemaRecent, setSchemaRecent] = useState<SchemaTreeNode[]>([]);
   const [schemaShortcutsReadyKey, setSchemaShortcutsReadyKey] = useState<string | undefined>(undefined);
+  const [connectionEditor, setConnectionEditor] = useState<{ readonly initial?: ConnectionProfileSummary } | undefined>(undefined);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
@@ -273,6 +275,25 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const visibleRows = displayRows(activeResult, activeRows);
   const visibleSchema = visibleSchemaNodes(schemaNodes, state.metadata.expandedNodeIds);
 
+  const reloadConnections = useCallback(async (preferredId?: string): Promise<void> => {
+    store.dispatch({ type: 'connections/status', status: 'loading' });
+    try {
+      const profiles = (await api.connections()).map(redactedWebProfile);
+      store.dispatch({ type: 'connections/set-profiles', profiles });
+      const currentId = store.getState().connections.selectedConnectionId;
+      const nextId = preferredId && profiles.some(profile => profile.id === preferredId)
+        ? preferredId
+        : profiles.some(profile => profile.id === currentId) ? currentId : profiles[0]?.id;
+      store.dispatch({ type: 'connections/select', connectionId: nextId });
+      const currentDocumentId = store.getState().workspace.activeDocumentId;
+      const nextProfile = profiles.find(profile => profile.id === nextId);
+      if (currentDocumentId) store.dispatch({ type: 'workspace/update-document', documentId: currentDocumentId, patch: { connectionId: nextId, databaseKind: nextProfile?.dbType ?? 'netezza' } });
+      store.dispatch({ type: 'connections/status', status: 'complete' });
+    } catch (error: unknown) {
+      store.dispatch({ type: 'connections/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load connections.' });
+    }
+  }, [api, store]);
+
   useEffect(() => {
     setSelectedRow(undefined);
   }, [activeResult?.sourceId, activeResult?.resultSetId]);
@@ -285,22 +306,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [api, store]);
 
   useEffect(() => {
-    let live = true;
-    store.dispatch({ type: 'connections/status', status: 'loading' });
-    void api.connections().then(profiles => {
-      if (!live) return;
-      store.dispatch({ type: 'connections/set-profiles', profiles: profiles.map(redactedWebProfile) });
-      if (profiles[0]) {
-        store.dispatch({ type: 'connections/select', connectionId: profiles[0].id });
-        const currentDocumentId = store.getState().workspace.activeDocumentId;
-        if (currentDocumentId) store.dispatch({ type: 'workspace/update-document', documentId: currentDocumentId, patch: { connectionId: profiles[0].id, databaseKind: profiles[0].dbType } });
-      }
-    }).catch(error => {
-      if (!live) return;
-      store.dispatch({ type: 'connections/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load connections.' });
-    });
-    return () => { live = false; };
-  }, [api, store]);
+    void reloadConnections();
+  }, [reloadConnections]);
 
   useEffect(() => {
     let live = true;
@@ -750,6 +757,23 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, databaseKind: profile?.dbType ?? 'netezza' } });
   }, [activeDocument, state.connections.profiles, store]);
 
+  const saveConnection = useCallback((profile: ConnectionProfileSummary): void => {
+    setConnectionEditor(undefined);
+    setNotice(`Connection “${profile.name}” saved.`);
+    void reloadConnections(profile.id);
+  }, [reloadConnections]);
+
+  const deleteConnection = useCallback(async (profile: ConnectionProfileSummary): Promise<void> => {
+    if (typeof window !== 'undefined' && !window.confirm(`Delete connection “${profile.name}”?`)) return;
+    try {
+      await api.deleteConnection(profile.id);
+      setNotice(`Connection “${profile.name}” deleted.`);
+      await reloadConnections();
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not delete connection.');
+    }
+  }, [api, reloadConnections]);
+
   const selectAuthoringDialect = useCallback((databaseKind: DatabaseKind): void => {
     if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { databaseKind } });
   }, [activeDocument, store]);
@@ -857,7 +881,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const designerFields = { target: selectedNode?.label ?? 'Select an object', connection: selectedConnection?.name ?? 'No connection' };
 
   return <UiShell title="JustyBase" activeSurface={state.shell.activeSurface} onSurfaceChange={selectSurface} surfaces={[{ id: 'workspace', label: 'Workspace' }, { id: 'history', label: 'History' }, { id: 'explain', label: 'Explain' }, { id: 'designer', label: 'Designer' }]} sidebar={<div className="shared-sidebar">
-    <strong>Connections</strong>{state.connections.profiles.map(profile => <button type="button" key={profile.id} aria-pressed={profile.id === selectedConnectionId} onClick={() => selectConnection(profile.id)}>{profile.name}</button>)}
+    <section className="shared-connections" aria-label="Connections"><div className="shared-sidebar-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" aria-label="Add connection" title="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <div className="shared-sidebar-empty">No connections configured.<button type="button" onClick={() => setConnectionEditor({})}>Add connection</button></div> : state.connections.profiles.map(profile => <div className="shared-connection-item" key={profile.id}><button type="button" className={profile.id === selectedConnectionId ? 'active' : ''} aria-label={profile.name} aria-pressed={profile.id === selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="shared-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="shared-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} title="Edit connection" onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} title="Delete connection" onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
     <SchemaTree
       nodes={visibleSchema}
       selectedId={state.metadata.selectedNodeId}
@@ -904,5 +928,6 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
             </div>
           </>}
     {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}
+    {connectionEditor && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setConnectionEditor(undefined); }}><section className="modal-card connection-card" role="dialog" aria-modal="true" aria-labelledby="shared-connection-dialog-title"><div className="section-title"><span id="shared-connection-dialog-title">{connectionEditor.initial ? 'Edit connection' : 'Add connection'}</span><button type="button" className="icon-button" aria-label="Close connection dialog" onClick={() => setConnectionEditor(undefined)}>×</button></div><ConnectionForm api={api} initial={connectionEditor.initial} onCreated={saveConnection} onCancel={() => setConnectionEditor(undefined)} /></section></div>}
   </UiShell>;
 }

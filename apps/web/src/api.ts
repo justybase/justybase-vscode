@@ -448,3 +448,8 @@ export function useApiClient(): ApiClient {
   if (!client) throw new Error('useApiClient must be used below ApiClientProvider.');
   return client;
 }
+
+/** Allows reusable Web panels to be embedded below a different composition root. */
+export function useOptionalApiClient(): ApiClient | null {
+  return useContext(ApiClientContext);
+}
