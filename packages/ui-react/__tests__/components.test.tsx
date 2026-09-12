@@ -378,6 +378,20 @@ describe('shared React presentation', () => {
     expect(onViewRow).toHaveBeenLastCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 40, clientY: 60 });
   });
 
+  it('keeps the full grid context menu inside the viewport', () => {
+    render(<DataGrid
+      resultSetId="context-menu-position"
+      columns={[{ name: 'ID' }]}
+      rows={[[1]]}
+      onViewCell={jest.fn()}
+      onViewRow={jest.fn()}
+    />);
+    fireEvent.contextMenu(screen.getByRole('cell', { name: '1' }), { clientX: 1400, clientY: 890 });
+    const menu = screen.getByRole('menu', { name: 'Actions for row 1' });
+    expect(Number.parseFloat(menu.style.left)).toBeLessThan(1400);
+    expect(Number.parseFloat(menu.style.top)).toBeLessThan(890);
+  });
+
   it('uses the shared column menu for visibility and pinning actions', () => {
     const onViewChange = jest.fn();
     render(<DataGrid
