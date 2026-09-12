@@ -57,6 +57,57 @@ describe('Electron same-origin API adapter', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/query/query%2Fone/export', expect.objectContaining({ credentials: 'same-origin', method: 'POST', headers: expect.objectContaining({ 'x-justybase-csrf': 'csrf-fixture' }) }));
   });
 
+  it('exposes the authenticated metadata, authoring and guarded-write routes', async () => {
+    const fetcher = jest.fn(async (input: RequestInfo | URL) => {
+      const route = String(input);
+      if (route.startsWith('/api/metadata/databases')) return { ok: true, json: async () => [{ name: 'DB1' }] } as Response;
+      if (route.startsWith('/api/metadata/schemas')) return { ok: true, json: async () => [{ name: 'PUBLIC', database: 'DB1' }] } as Response;
+      if (route.startsWith('/api/metadata/objects')) return { ok: true, json: async () => [{ name: 'ORDERS', schema: 'PUBLIC', database: 'DB1', objectType: 'TABLE' }] } as Response;
+      if (route.startsWith('/api/metadata/columns')) return { ok: true, json: async () => [{ name: 'ID', type: 'INTEGER', isPk: true }] } as Response;
+      if (route.startsWith('/api/metadata/ddl')) return { ok: true, json: async () => ({ success: true, ddlCode: 'CREATE TABLE PUBLIC.ORDERS (ID INTEGER);', ddlFidelity: 'exact' }) } as Response;
+      if (route.startsWith('/api/designer/capabilities')) return { ok: true, json: async () => ({ runtimeAvailable: true, readOnly: false, target: {}, capabilities: {} }) } as Response;
+      if (route.startsWith('/api/designer/snapshot')) return { ok: true, json: async () => ({ target: {}, snapshot: {} }) } as Response;
+      if (route === '/api/history') return { ok: true, json: async () => [{ id: 'history-1', sql: 'SELECT 1', status: 'success', createdAt: '2026-09-12T00:00:00.000Z', rowCount: 1, durationMs: 1 }] } as Response;
+      if (route.startsWith('/api/audit')) return { ok: true, json: async () => [] } as Response;
+      if (route === '/api/query/preview') return { ok: true, json: async () => ({ database: 'DB1', readOnly: false, containsWrite: true, previewToken: 'preview-1', expiresAt: 1, statements: [] }) } as Response;
+      if (route === '/api/query/edit/preview' || route === '/api/query/import/preview' || route === '/api/query/import-file/preview') return { ok: true, json: async () => ({ sql: 'UPDATE …', previewToken: 'preview-1', expiresAt: 1, warnings: [], rowCount: 1 }) } as Response;
+      if (route === '/api/query/edit' || route === '/api/query/import' || route === '/api/query/import-file') return { ok: true, json: async () => ({ sql: 'UPDATE …', rowsAffected: 1, message: 'done' }) } as Response;
+      if (route.startsWith('/api/schema/tree')) return { ok: true, json: async () => ({ nodes: [] }) } as Response;
+      if (route === '/api/schema/search') return { ok: true, json: async () => ({ items: [] }) } as Response;
+      if (route === '/api/preferences/editor') return { ok: true, json: async () => ({ fontSize: 12, tabSize: 2, insertSpaces: true, wordWrap: 'off', minimap: false, lineNumbers: true, formatOnSave: false, formatOnType: false, keywordCase: 'preserve', inlineTypeHints: true, linterEnabled: true, linterRules: {} }) } as Response;
+      if (route === '/api/lsp/snippets') return { ok: true, json: async () => ({ snippets: [] }) } as Response;
+      return { ok: true, json: async () => ({ items: [], diagnostics: [], sql: 'SELECT 1', changes: [] }) } as Response;
+    });
+    const client = createElectronApiClient({ fetcher, WebSocket: FakeWebSocket as unknown as new (url: string) => WebSocket });
+    await expect(client.databases('connection-1')).resolves.toEqual([{ name: 'DB1' }]);
+    await expect(client.schemas('connection-1', 'DB1')).resolves.toEqual([{ name: 'PUBLIC', database: 'DB1' }]);
+    await expect(client.objects('connection-1', 'DB1', 'PUBLIC')).resolves.toEqual([{ name: 'ORDERS', schema: 'PUBLIC', database: 'DB1', objectType: 'TABLE' }]);
+    await expect(client.columns('connection-1', 'DB1', 'PUBLIC', 'ORDERS')).resolves.toEqual([{ name: 'ID', type: 'INTEGER', isPk: true }]);
+    await expect(client.ddl({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', objectName: 'ORDERS', objectType: 'TABLE' })).resolves.toMatchObject({ ddlCode: expect.stringContaining('CREATE TABLE') });
+    await expect(client.designerCapabilities({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', objectName: 'ORDERS', objectType: 'TABLE' })).resolves.toHaveProperty('runtimeAvailable', true);
+    await expect(client.designerSnapshot({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', objectName: 'ORDERS', objectType: 'TABLE' })).resolves.toHaveProperty('snapshot');
+    await expect(client.history()).resolves.toHaveLength(1);
+    await expect(client.audit()).resolves.toEqual([]);
+    await expect(client.previewQuery({ connectionId: 'connection-1', sql: 'DELETE FROM PUBLIC.ORDERS', mode: 'single' })).resolves.toHaveProperty('previewToken', 'preview-1');
+    await expect(client.editPreview({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', table: 'ORDERS', key: { ID: 1 }, changes: { ID: 2 } })).resolves.toHaveProperty('rowCount', 1);
+    await expect(client.edit({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', table: 'ORDERS', key: { ID: 1 }, changes: { ID: 2 }, writeConfirmed: true, writePreviewToken: 'preview-1' })).resolves.toHaveProperty('rowsAffected', 1);
+    await expect(client.importPreview({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', table: 'ORDERS', columns: ['ID'], rows: [[1]] })).resolves.toHaveProperty('previewToken', 'preview-1');
+    await expect(client.importRows({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', table: 'ORDERS', columns: ['ID'], rows: [[1]], writeConfirmed: true, writePreviewToken: 'preview-1' })).resolves.toHaveProperty('message', 'done');
+    await expect(client.importFilePreview({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', table: 'ORDERS', fileName: 'orders.csv', contentBase64: 'Zml4dHVyZQ==', format: 'csv', hasHeader: true })).resolves.toHaveProperty('previewToken', 'preview-1');
+    await expect(client.importFile({ connectionId: 'connection-1', database: 'DB1', schema: 'PUBLIC', table: 'ORDERS', fileName: 'orders.csv', contentBase64: 'Zml4dHVyZQ==', format: 'csv', hasHeader: true, writeConfirmed: true, writePreviewToken: 'preview-1' })).resolves.toHaveProperty('message', 'done');
+    await expect(client.schemaTree('connection-1')).resolves.toEqual({ nodes: [] });
+    await expect(client.searchSchema({ connectionId: 'connection-1', term: 'order' })).resolves.toEqual({ items: [] });
+    await expect(client.editorPreferences()).resolves.toHaveProperty('fontSize', 12);
+    await expect(client.updateEditorPreferences({ fontSize: 13 })).resolves.toHaveProperty('fontSize', 12);
+    await expect(client.completion({ sql: 'SELECT ', offset: 7, connectionId: 'connection-1' })).resolves.toHaveProperty('items');
+    await expect(client.diagnostics({ sql: 'SELECT ', connectionId: 'connection-1' })).resolves.toHaveProperty('diagnostics');
+    await expect(client.formatSql({ sql: 'select 1', tabSize: 2, insertSpaces: true })).resolves.toHaveProperty('sql', 'SELECT 1');
+    await expect(client.snippets()).resolves.toEqual({ snippets: [] });
+    const socket = client.openWebSocket('/api/lsp');
+    expect(socket.url).toContain('/api/lsp');
+    expect(fetcher.mock.calls.map(call => String(call[0]))).toContain('/api/query/import-file/preview');
+  });
+
   it('deduplicates malformed/foreign websocket frames and reconnects with the last sequence', () => {
     const client = createElectronApiClient({ fetcher: jest.fn(async () => ({ ok: true, json: async () => ({}) }) as Response), WebSocket: FakeWebSocket as unknown as new (url: string) => WebSocket });
     const events: unknown[] = [];
