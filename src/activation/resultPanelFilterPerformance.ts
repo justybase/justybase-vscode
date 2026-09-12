@@ -26,6 +26,25 @@ export interface ExtensionHostFilterPerformanceMetric {
     finalFilter: string;
 }
 
+export interface ExtensionHostSortPerformanceMetric {
+    name: string;
+    descending: boolean;
+    durationMs: number;
+    actualVisibleRows: number;
+    firstVisibleRowFingerprint: string;
+}
+
+export interface ExtensionHostScrollPerformanceMetric {
+    name: string;
+    durationMs: number;
+    scrollTop: number;
+    scrollLeft: number;
+    anchorRow: number;
+    restoredScrollTop: number;
+    restoredScrollLeft: number;
+    restoredAnchorRow: number;
+}
+
 export interface ExtensionHostFilterPerformanceReport {
     engine: 'sqlite';
     scenarioId: typeof SCENARIO_ID;
@@ -35,6 +54,8 @@ export interface ExtensionHostFilterPerformanceReport {
     columnCount: number;
     storageMode: string;
     metrics: ExtensionHostFilterPerformanceMetric[];
+    sortMetrics: ExtensionHostSortPerformanceMetric[];
+    scrollMetrics: ExtensionHostScrollPerformanceMetric[];
     durationMs: number;
     error?: string;
 }
@@ -224,6 +245,8 @@ export async function runExtensionHostFilterPerformance(
     let columnCount = 0;
     let storageMode = 'unknown';
     const metrics: ExtensionHostFilterPerformanceMetric[] = [];
+    const sortMetrics: ExtensionHostSortPerformanceMetric[] = [];
+    const scrollMetrics: ExtensionHostScrollPerformanceMetric[] = [];
 
     try {
         await connectionManager.saveConnection({
@@ -301,6 +324,83 @@ export async function runExtensionHostFilterPerformance(
         assertMetric(cleared, '');
         metrics.push(cleared);
 
+        const ascending = asRecord(await provider.runResultPanelTestBridge('sortResult', {
+            columnIndex: 0,
+            desc: false,
+        }));
+        const descending = asRecord(await provider.runResultPanelTestBridge('sortResult', {
+            columnIndex: 0,
+            desc: true,
+        }));
+        const ascendingFingerprint = asString(ascending.viewport && asRecord(ascending.viewport).firstVisibleRowFingerprint);
+        const descendingFingerprint = asString(descending.viewport && asRecord(descending.viewport).firstVisibleRowFingerprint);
+        if (asNumber(ascending.visibleRowCount, -1) !== PERFORMANCE_ROW_COUNT
+            || asNumber(descending.visibleRowCount, -1) !== PERFORMANCE_ROW_COUNT) {
+            throw new Error('Sorting changed the visible row count.');
+        }
+        if (asNumber(descending.durationMs, -1) < 0 || asNumber(descending.durationMs, -1) > 2_000) {
+            throw new Error(`Descending sort took ${String(descending.durationMs)} ms, over the live grid budget.`);
+        }
+        if (!ascendingFingerprint || !descendingFingerprint || ascendingFingerprint === descendingFingerprint) {
+            throw new Error('Descending sort did not change the first visible row.');
+        }
+        sortMetrics.push(
+            {
+                name: '4000x32/ascending-sort',
+                descending: false,
+                durationMs: asNumber(ascending.durationMs, -1),
+                actualVisibleRows: asNumber(ascending.visibleRowCount, -1),
+                firstVisibleRowFingerprint: ascendingFingerprint,
+            },
+            {
+                name: '4000x32/descending-sort',
+                descending: true,
+                durationMs: asNumber(descending.durationMs, -1),
+                actualVisibleRows: asNumber(descending.visibleRowCount, -1),
+                firstVisibleRowFingerprint: descendingFingerprint,
+            },
+        );
+
+        const scrollResultIndex = execution.resultSetIndex;
+        const scrolled = asRecord(await provider.runResultPanelTestBridge('scrollResult', {
+            scrollTop: 9_000,
+            scrollLeft: 320,
+        }));
+        const scrolledViewport = asRecord(scrolled.viewport);
+        const restored = asRecord(await provider.runResultPanelTestBridge('switchResultSet', {
+            resultSetIndex: 0,
+        }));
+        const restoredResult = asRecord(await provider.runResultPanelTestBridge('switchResultSet', {
+            resultSetIndex: scrollResultIndex,
+        }));
+        const restoredViewport = asRecord(restoredResult.viewport);
+        const scrollMetric: ExtensionHostScrollPerformanceMetric = {
+            name: '4000x32/scroll-and-restore',
+            durationMs: asNumber(scrolled.durationMs, -1),
+            scrollTop: asNumber(scrolledViewport.scrollTop, 0),
+            scrollLeft: asNumber(scrolledViewport.scrollLeft, 0),
+            anchorRow: asNumber(scrolledViewport.scrollAnchorIndex, -1),
+            restoredScrollTop: asNumber(restoredViewport.scrollTop, 0),
+            restoredScrollLeft: asNumber(restoredViewport.scrollLeft, 0),
+            restoredAnchorRow: asNumber(restoredViewport.scrollAnchorIndex, -1),
+        };
+        if (scrollMetric.scrollTop <= 0 || scrollMetric.scrollLeft <= 0 || scrollMetric.anchorRow <= 0) {
+            throw new Error('Live scroll performance fixture did not reach a non-zero virtualized viewport.');
+        }
+        if (scrollMetric.restoredScrollTop <= 0 || scrollMetric.restoredScrollLeft <= 0) {
+            throw new Error('Live scroll performance fixture did not restore both viewport axes.');
+        }
+        if (Math.abs(scrollMetric.restoredScrollLeft - scrollMetric.scrollLeft) > 80
+            || Math.abs(scrollMetric.restoredAnchorRow - scrollMetric.anchorRow) > 5
+            || scrollMetric.durationMs < 0
+            || scrollMetric.durationMs > 2_000) {
+            throw new Error('Live scroll performance fixture exceeded the viewport restore budget.');
+        }
+        if (asNumber(restored.pendingRequestCount, -1) !== 0 || asNumber(restoredResult.pendingRequestCount, -1) !== 0) {
+            throw new Error('Live sort/scroll performance left pending result-panel requests.');
+        }
+        scrollMetrics.push(scrollMetric);
+
         const report: ExtensionHostFilterPerformanceReport = {
             engine: 'sqlite',
             scenarioId: SCENARIO_ID,
@@ -310,6 +410,8 @@ export async function runExtensionHostFilterPerformance(
             columnCount,
             storageMode,
             metrics,
+            sortMetrics,
+            scrollMetrics,
             durationMs: Date.now() - startedAt,
         };
         writeReport(report);
@@ -324,6 +426,8 @@ export async function runExtensionHostFilterPerformance(
             columnCount,
             storageMode,
             metrics,
+            sortMetrics,
+            scrollMetrics,
             durationMs: Date.now() - startedAt,
             error: 'filter_performance_failed',
         };

@@ -75,6 +75,7 @@ interface TestBridgeResult {
     filterApplyLatencyMs?: number;
     filterDebounceMs?: number;
     filterValue?: string;
+    sorting?: Array<{ id: string; desc: boolean }>;
 }
 
 const ACTION_TIMEOUT_MS = 15_000;
@@ -231,6 +232,7 @@ function snapshot(): TestBridgeResult {
             ).trim(),
         ),
         columnFilterCount: tableState?.columnFilters?.length ?? 0,
+        sorting: tableState?.sorting ?? [],
         databaseFilterActive: isActiveFilter(activeResultSet?.databaseFilterSpec),
         groupingPanelVisible: getGroupingPanelOpen(),
         groupingResultRows: document.querySelectorAll('#groupingResultsArea .grouping-table tbody tr').length,
@@ -345,6 +347,7 @@ async function setColumnFilter(args: Record<string, unknown>): Promise<TestBridg
 }
 
 async function scrollResultAction(args: Record<string, unknown>): Promise<TestBridgeResult> {
+    const startedAt = performance.now();
     const resultSetIndex = getActiveGridIndex();
     const grid = getGrid(resultSetIndex);
     const wrapper = getGridWrapperForResultSet(resultSetIndex);
@@ -362,7 +365,25 @@ async function scrollResultAction(args: Record<string, unknown>): Promise<TestBr
     target.dispatchEvent(new Event('scroll'));
     // Virtual rows and the debounced persistence listener settle asynchronously.
     await sleep(250);
-    return snapshot();
+    return { ...snapshot(), durationMs: performance.now() - startedAt };
+}
+
+async function sortResultAction(args: Record<string, unknown>): Promise<TestBridgeResult> {
+    const startedAt = performance.now();
+    const resultSetIndex = getActiveGridIndex();
+    const grid = getGrid(resultSetIndex);
+    const table = grid?.tanTable;
+    if (!table) throw new Error('The active result has no sortable grid.');
+    const columnId = asString(args.columnId, String(asNumber(args.columnIndex, 0)));
+    const desc = args.desc === true;
+    table.setSorting([{ id: columnId, desc }]);
+    grid?.render?.();
+    await waitFor(
+        `result sort ${columnId}/${desc ? 'desc' : 'asc'}`,
+        () => table.getState().sorting?.[0]?.id === columnId
+            && table.getState().sorting?.[0]?.desc === desc,
+    );
+    return { ...snapshot(), durationMs: performance.now() - startedAt };
 }
 
 async function databaseFilterValues(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -486,6 +507,8 @@ async function dispatchAction(action: string, argsValue: unknown): Promise<unkno
             return setColumnFilter(args);
         case 'scrollResult':
             return scrollResultAction(args);
+        case 'sortResult':
+            return sortResultAction(args);
         case 'databaseFilterValues':
             return databaseFilterValues(args);
         case 'applyDatabaseFilter':

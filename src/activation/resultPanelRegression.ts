@@ -36,8 +36,24 @@ export interface ExtensionHostScenarioReport {
     streamingTransportCount: number;
     pendingResultSyncCount: number;
     untitledLanguageLifecyclePassed: boolean;
+    viewportContract?: ExtensionHostViewportContract;
     durationMs: number;
     error?: string;
+}
+
+export interface ExtensionHostViewportSample {
+    scrollTop: number;
+    scrollLeft: number;
+    anchorRow: number;
+}
+
+export interface ExtensionHostViewportContract {
+    resultSetIndex: number;
+    requestedRowIndex: number;
+    requestedScrollLeft: number;
+    scrolled: ExtensionHostViewportSample;
+    restoredFromLogs: ExtensionHostViewportSample;
+    restoredFromSource: ExtensionHostViewportSample;
 }
 
 interface ExtensionHostScenarioOptions {
@@ -314,6 +330,7 @@ export function buildReport(
     startedAt: number,
     status: 'passed' | 'failed',
     untitledLanguageLifecyclePassed: boolean,
+    viewportContract?: ExtensionHostViewportContract,
 ): ExtensionHostScenarioReport {
     const trace = provider.getResultPanelTraceSnapshot();
     writeTraceArtifact(provider);
@@ -350,6 +367,7 @@ export function buildReport(
         pendingRequestCount: provider.getResultPanelTestBridgePendingRequestCount(),
         ...runtime,
         untitledLanguageLifecyclePassed,
+        ...(viewportContract ? { viewportContract } : {}),
         durationMs: Date.now() - startedAt,
         ...(status === 'failed' ? { error: 'scenario_failed' } : {}),
     };
@@ -517,6 +535,7 @@ async function runExtensionHostScenario(
     let netezzaFixtureCreated = false;
     let sourceUri = '';
     let untitledLanguageLifecyclePassed = false;
+    let viewportContract: ExtensionHostViewportContract | undefined;
 
     try {
         if (engine === 'netezza') {
@@ -835,6 +854,26 @@ async function runExtensionHostScenario(
         if (Math.abs(restoredFromSourceLeft - scrolledLeft) > 80) {
             throw new Error('Switching result sources did not restore the horizontal viewport.');
         }
+        viewportContract = {
+            resultSetIndex: scrollResultIndex,
+            requestedRowIndex: 75,
+            requestedScrollLeft: 320,
+            scrolled: {
+                scrollTop: scrolledTop,
+                scrollLeft: scrolledLeft,
+                anchorRow: scrolledAnchor,
+            },
+            restoredFromLogs: {
+                scrollTop: restoredFromLogsTop,
+                scrollLeft: restoredFromLogsLeft,
+                anchorRow: restoredFromLogsAnchor,
+            },
+            restoredFromSource: {
+                scrollTop: restoredFromSourceTop,
+                scrollLeft: restoredFromSourceLeft,
+                anchorRow: restoredFromSourceAnchor,
+            },
+        };
 
         await provider.runResultPanelTestBridge('togglePin');
         await provider.runResultPanelTestBridge('toggleResultPin');
@@ -863,6 +902,7 @@ async function runExtensionHostScenario(
             startedAt,
             'passed',
             untitledLanguageLifecyclePassed,
+            viewportContract,
         );
         writeReport(report);
         return report;
@@ -874,6 +914,7 @@ async function runExtensionHostScenario(
             startedAt,
             'failed',
             untitledLanguageLifecyclePassed,
+            viewportContract,
         );
         writeReport(report);
         throw error;

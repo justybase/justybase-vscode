@@ -83,7 +83,14 @@ describe('result panel regression command registration', () => {
             }),
         } as never;
 
-        expect(buildReport(provider, 'sqlite', 'file:///fixture.sql', Date.now(), 'passed', true)).toEqual(expect.objectContaining({
+        expect(buildReport(provider, 'sqlite', 'file:///fixture.sql', Date.now(), 'passed', true, {
+            resultSetIndex: 1,
+            requestedRowIndex: 75,
+            requestedScrollLeft: 320,
+            scrolled: { scrollTop: 2250, scrollLeft: 320, anchorRow: 75 },
+            restoredFromLogs: { scrollTop: 2250, scrollLeft: 320, anchorRow: 75 },
+            restoredFromSource: { scrollTop: 2250, scrollLeft: 320, anchorRow: 75 },
+        })).toEqual(expect.objectContaining({
             resultSetCount: 1,
             rowCounts: [2],
             pendingRequestCount: 3,
@@ -92,6 +99,7 @@ describe('result panel regression command registration', () => {
             streamingResultCount: 3,
             streamingTransportCount: 4,
             pendingResultSyncCount: 5,
+            viewportContract: expect.objectContaining({ requestedRowIndex: 75 }),
         }));
     });
 

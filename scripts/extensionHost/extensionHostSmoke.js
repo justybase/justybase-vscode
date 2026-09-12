@@ -42,6 +42,29 @@ async function run() {
     assert.equal(report.streamingResultCount, 0, 'Scenario must finish without tracked streaming results.');
     assert.equal(report.streamingTransportCount, 0, 'Scenario must finish without transport cursors.');
     assert.equal(report.pendingResultSyncCount, 0, 'Scenario must finish without deferred result synchronization.');
+    assert.ok(report.viewportContract, 'Scenario must report the live viewport contract.');
+    assert.equal(report.viewportContract.requestedRowIndex, 75);
+    assert.equal(report.viewportContract.requestedScrollLeft, 320);
+    assert.ok(report.viewportContract.scrolled.scrollTop > 0, 'Scenario must move the vertical viewport.');
+    assert.ok(report.viewportContract.scrolled.scrollLeft > 0, 'Scenario must move the horizontal viewport.');
+    assert.ok(report.viewportContract.scrolled.anchorRow > 0, 'Scenario must move to a non-zero virtualized row anchor.');
+    assert.ok(
+        Math.abs(report.viewportContract.scrolled.anchorRow - report.viewportContract.requestedRowIndex) <= 20,
+        'Scenario must move the virtualizer anchor close to the requested row.',
+    );
+    for (const [name, restored] of Object.entries({
+        logs: report.viewportContract.restoredFromLogs,
+        source: report.viewportContract.restoredFromSource,
+    })) {
+        assert.ok(restored.scrollTop > 0, `${name} restore must preserve vertical scrolling.`);
+        assert.ok(restored.scrollLeft > 0, `${name} restore must preserve horizontal scrolling.`);
+        assert.ok(Math.abs(restored.scrollLeft - report.viewportContract.scrolled.scrollLeft) <= 80, `${name} restore changed horizontal offset.`);
+        assert.ok(
+            Math.abs(restored.anchorRow - report.viewportContract.scrolled.anchorRow) <= 5
+                || Math.abs(restored.scrollTop - report.viewportContract.scrolled.scrollTop) <= 120,
+            `${name} restore changed the vertical anchor.`,
+        );
+    }
     assert.equal(
         report.untitledLanguageLifecyclePassed,
         true,
@@ -87,6 +110,7 @@ async function run() {
         resultSetCount: report.resultSetCount,
         rowCounts: report.rowCounts,
         tracePhaseCount: report.webviewPhases.length,
+        viewport: report.viewportContract,
     }));
 }
 
