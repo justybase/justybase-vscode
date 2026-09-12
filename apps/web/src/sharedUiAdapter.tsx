@@ -10,6 +10,7 @@ import type {
   QueryEvent,
   QueryExportFormat,
   QuerySortSpec,
+  SchemaSearchResult,
   SchemaTreeNode,
   UiMode,
   WebUser,
@@ -43,6 +44,8 @@ import type { DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '
 import type { ApiClient, QueryEventSubscription } from './api';
 import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
 import { ImportPanel } from './ImportPanel';
+import { createWorkspaceStorage, migrateLegacyWorkspace, readLegacyWorkspaceValue, type WorkspaceStorage } from './workspacePersistence';
+import { readSharedSchemaShortcuts, rememberSharedSchemaObject, sharedSchemaObjectIdentity, toggleSharedSchemaFavorite, writeSharedSchemaShortcuts } from './sharedSchemaPersistence';
 
 const sharedCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'workspace', status: 'available', owner: 'ui-core', documentation: 'Shared workspace state and presentation.', removalCondition: 'Keep the shared workspace owner.' },
@@ -53,6 +56,12 @@ const sharedCapabilities: readonly CapabilityDescriptor[] = [
 ];
 
 const DOCUMENT_ID = 'shared-scratch';
+const SHARED_SCHEMA_FILTERS = [
+  { id: 'TABLE', label: 'Tables' },
+  { id: 'VIEW', label: 'Views' },
+  { id: 'PROCEDURE', label: 'Procedures' },
+  { id: 'SYNONYM', label: 'Synonyms' },
+] as const;
 
 interface WebRuntimeConfig {
   readonly __JUSTYBASE_UI_MODE__?: unknown;
@@ -98,6 +107,27 @@ function createSharedStore(user: WebUser): UiStore {
 export function mapSchemaNode(node: SchemaTreeNode, parentId = node.parentId) {
   const kind = node.kind === 'cte' ? 'object' : node.kind;
   return { ...node, ...(parentId === undefined ? {} : { parentId }), kind } as const;
+}
+
+function mapSchemaSearchResult(item: SchemaSearchResult): SchemaTreeNode {
+  const schema = item.schema ?? '';
+  return {
+    id: `search:${encodeURIComponent([item.database, schema, item.name, item.objectType].join('\u001f'))}`,
+    kind: 'object',
+    label: item.name,
+    description: item.description,
+    database: item.database,
+    schema: item.schema,
+    objectName: item.name,
+    objectType: item.objectType,
+    hasChildren: false,
+  };
+}
+
+function mergeSchemaNodes<T extends { readonly id: string }>(previous: readonly T[], additions: readonly T[]): T[] {
+  const merged = new Map(previous.map(node => [node.id, node] as const));
+  for (const node of additions) merged.set(node.id, node);
+  return [...merged.values()];
 }
 
 function visibleSchemaNodes<T extends { readonly id: string; readonly parentId?: string }>(nodes: readonly T[], expandedIds: readonly string[]): readonly T[] {
@@ -195,6 +225,11 @@ export interface SharedWebWorkspaceProps {
 
 /** Web composition root for shared mode; all effects stay in this adapter. */
 export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspaceProps): ReactElement {
+  const storageRef = useRef<{ readonly userId: string; readonly storage: WorkspaceStorage } | undefined>(undefined);
+  if (!storageRef.current || storageRef.current.userId !== user.id) {
+    storageRef.current = { userId: user.id, storage: createWorkspaceStorage(user.id) };
+  }
+  const workspaceStorage = storageRef.current.storage;
   const storeRef = useRef<UiStore | undefined>(undefined);
   if (!storeRef.current) storeRef.current = createSharedStore(user);
   const store = storeRef.current;
@@ -206,6 +241,13 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
   const [schemaNodes, setSchemaNodes] = useState<ReturnType<typeof mapSchemaNode>[]>([]);
+  const [schemaSearch, setSchemaSearch] = useState('');
+  const [schemaSearchResults, setSchemaSearchResults] = useState<SchemaTreeNode[]>([]);
+  const [schemaSearchLoading, setSchemaSearchLoading] = useState(false);
+  const [schemaFilters, setSchemaFilters] = useState<readonly string[]>(SHARED_SCHEMA_FILTERS.map(filter => filter.id));
+  const [schemaFavorites, setSchemaFavorites] = useState<SchemaTreeNode[]>([]);
+  const [schemaRecent, setSchemaRecent] = useState<SchemaTreeNode[]>([]);
+  const [schemaShortcutsReadyKey, setSchemaShortcutsReadyKey] = useState<string | undefined>(undefined);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
@@ -217,6 +259,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const pageHydrationRef = useRef(new Set<string>());
   const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
   const schemaLoadedParentsRef = useRef(new Set<string>());
+  const schemaLoadingParentsRef = useRef(new Set<string>());
+  const schemaGenerationRef = useRef(0);
   const selectedConnectionId = state.connections.selectedConnectionId;
   const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
@@ -267,6 +311,34 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [api]);
 
   useEffect(() => {
+    migrateLegacyWorkspace(workspaceStorage);
+  }, [workspaceStorage]);
+
+  useEffect(() => {
+    if (!selectedConnectionId) {
+      setSchemaFavorites([]);
+      setSchemaRecent([]);
+      setSchemaShortcutsReadyKey(undefined);
+      return;
+    }
+    const key = `${workspaceStorage.userId}:${selectedConnectionId}`;
+    setSchemaShortcutsReadyKey(undefined);
+    const shortcuts = readSharedSchemaShortcuts(
+      workspaceStorage,
+      selectedConnectionId,
+      readLegacyWorkspaceValue(`jwb_schema_${selectedConnectionId}`),
+    );
+    setSchemaFavorites([...shortcuts.favorites]);
+    setSchemaRecent([...shortcuts.recent]);
+    setSchemaShortcutsReadyKey(key);
+  }, [selectedConnectionId, workspaceStorage]);
+
+  useEffect(() => {
+    if (!selectedConnectionId || schemaShortcutsReadyKey !== `${workspaceStorage.userId}:${selectedConnectionId}`) return;
+    writeSharedSchemaShortcuts(workspaceStorage, selectedConnectionId, { favorites: schemaFavorites, recent: schemaRecent });
+  }, [schemaFavorites, schemaRecent, schemaShortcutsReadyKey, selectedConnectionId, workspaceStorage]);
+
+  useEffect(() => {
     let live = true;
     store.dispatch({ type: 'history/status', status: 'loading' });
     void api.history().then(entries => {
@@ -280,49 +352,125 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     return () => { live = false; };
   }, [api, store]);
 
+  const loadSchemaChildren = useCallback(async (parentId?: string, parent?: ReturnType<typeof mapSchemaNode>): Promise<readonly ReturnType<typeof mapSchemaNode>[]> => {
+    if (!selectedConnectionId) return [];
+    const key = parentId ?? '';
+    if (schemaLoadingParentsRef.current.has(key)) return [];
+    schemaLoadingParentsRef.current.add(key);
+    const generation = schemaGenerationRef.current;
+    store.dispatch({ type: 'metadata/status', status: 'loading' });
+    try {
+      const response = await api.schemaTree(selectedConnectionId, parentId);
+      if (generation !== schemaGenerationRef.current || store.getState().connections.selectedConnectionId !== selectedConnectionId) return [];
+      const nodes = response.nodes.map(node => mapSchemaNode(node, parent?.id));
+      schemaLoadedParentsRef.current.add(key);
+      setSchemaNodes(previous => mergeSchemaNodes(previous, nodes));
+      store.dispatch({ type: 'metadata/status', status: 'complete' });
+      return nodes;
+    } catch (error: unknown) {
+      if (generation === schemaGenerationRef.current && store.getState().connections.selectedConnectionId === selectedConnectionId) {
+        store.dispatch({ type: 'metadata/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load schema.' });
+      }
+      return [];
+    } finally {
+      schemaLoadingParentsRef.current.delete(key);
+    }
+  }, [api, selectedConnectionId, store]);
+
   useEffect(() => {
-    if (!selectedConnectionId) {
-      schemaLoadedParentsRef.current.clear();
-      setSchemaNodes([]);
+    schemaGenerationRef.current += 1;
+    schemaLoadedParentsRef.current.clear();
+    schemaLoadingParentsRef.current.clear();
+    setSchemaNodes([]);
+    setSchemaSearch('');
+    setSchemaSearchResults([]);
+    setSchemaSearchLoading(false);
+    store.dispatch({ type: 'metadata/set-expanded', nodeIds: [] });
+    if (selectedConnectionId) void loadSchemaChildren();
+  }, [loadSchemaChildren, selectedConnectionId, store]);
+
+  useEffect(() => {
+    const term = schemaSearch.trim();
+    if (!term || !selectedConnectionId || schemaFilters.length === 0) {
+      setSchemaSearchResults([]);
+      setSchemaSearchLoading(false);
       return undefined;
     }
     let live = true;
-    store.dispatch({ type: 'metadata/status', status: 'loading' });
-    void api.schemaTree(selectedConnectionId).then(response => {
-      if (!live) return;
-      schemaLoadedParentsRef.current.clear();
-      schemaLoadedParentsRef.current.add('');
-      setSchemaNodes(response.nodes.map(node => mapSchemaNode(node)));
-      store.dispatch({ type: 'metadata/status', status: 'complete' });
-    }).catch(error => {
-      if (!live) return;
-      setSchemaNodes([]);
-      store.dispatch({ type: 'metadata/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load schema.' });
-    });
-    return () => { live = false; };
-  }, [api, selectedConnectionId, store]);
+    setSchemaSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      void api.searchSchema({
+        connectionId: selectedConnectionId,
+        term,
+        objectTypes: [...schemaFilters],
+      }).then(response => {
+        if (!live) return;
+        setSchemaSearchResults(response.items.map(mapSchemaSearchResult));
+      }).catch(error => {
+        if (!live) return;
+        setSchemaSearchResults([]);
+        store.dispatch({ type: 'metadata/status', status: 'error', message: error instanceof Error ? error.message : 'Schema search failed.' });
+      }).finally(() => {
+        if (live) setSchemaSearchLoading(false);
+      });
+    }, 250);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [api, schemaFilters, schemaSearch, selectedConnectionId, store]);
 
   const toggleSchemaNode = useCallback((node: ReturnType<typeof mapSchemaNode>): void => {
     const isExpanded = state.metadata.expandedNodeIds.includes(node.id);
     store.dispatch({ type: 'metadata/toggle-expanded', nodeId: node.id });
     if (isExpanded || !node.hasChildren || !selectedConnectionId || schemaLoadedParentsRef.current.has(node.id)) return;
+    void loadSchemaChildren(node.id, node);
+  }, [loadSchemaChildren, selectedConnectionId, state.metadata.expandedNodeIds, store]);
 
-    schemaLoadedParentsRef.current.add(node.id);
-    store.dispatch({ type: 'metadata/status', status: 'loading' });
-    void api.schemaTree(selectedConnectionId, node.id).then(response => {
-      if (store.getState().connections.selectedConnectionId !== selectedConnectionId) return;
-      setSchemaNodes(previous => {
-        const merged = new Map(previous.map(item => [item.id, item] as const));
-        for (const child of response.nodes) merged.set(child.id, mapSchemaNode(child, node.id));
-        return [...merged.values()];
-      });
-      store.dispatch({ type: 'metadata/status', status: 'complete' });
-    }).catch(error => {
-      if (store.getState().connections.selectedConnectionId !== selectedConnectionId) return;
-      schemaLoadedParentsRef.current.delete(node.id);
-      store.dispatch({ type: 'metadata/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load schema.' });
-    });
-  }, [api, selectedConnectionId, state.metadata.expandedNodeIds, store]);
+  const refreshSchema = useCallback((): void => {
+    schemaGenerationRef.current += 1;
+    schemaLoadedParentsRef.current.clear();
+    schemaLoadingParentsRef.current.clear();
+    setSchemaNodes([]);
+    setSchemaSearchResults([]);
+    store.dispatch({ type: 'metadata/set-expanded', nodeIds: [] });
+    if (selectedConnectionId) void loadSchemaChildren();
+  }, [loadSchemaChildren, selectedConnectionId, store]);
+
+  const collapseSchema = useCallback((): void => {
+    store.dispatch({ type: 'metadata/set-expanded', nodeIds: [] });
+  }, [store]);
+
+  const expandSchema = useCallback(async (): Promise<void> => {
+    if (!selectedConnectionId) return;
+    const generation = schemaGenerationRef.current;
+    const loadedByParent = new Map<string, readonly ReturnType<typeof mapSchemaNode>[]>();
+    const currentNodes = [...schemaNodes];
+    loadedByParent.set('', currentNodes.filter(node => node.parentId === undefined));
+    const root = loadedByParent.get('') ?? [];
+    if (root.length === 0) {
+      const loadedRoot = await loadSchemaChildren();
+      if (generation !== schemaGenerationRef.current) return;
+      loadedByParent.set('', loadedRoot);
+    }
+    const expanded = new Set<string>();
+    const visit = async (nodes: readonly ReturnType<typeof mapSchemaNode>[]): Promise<void> => {
+      for (const node of nodes) {
+        if (generation !== schemaGenerationRef.current) return;
+        if (!node.hasChildren) continue;
+        expanded.add(node.id);
+        let children = loadedByParent.get(node.id);
+        if (!children) {
+          children = currentNodes.filter(candidate => candidate.parentId === node.id);
+          if (children.length === 0 && !schemaLoadedParentsRef.current.has(node.id)) children = await loadSchemaChildren(node.id, node);
+          loadedByParent.set(node.id, children);
+        }
+        await visit(children);
+      }
+    };
+    await visit(loadedByParent.get('') ?? []);
+    if (generation === schemaGenerationRef.current) store.dispatch({ type: 'metadata/set-expanded', nodeIds: [...expanded] });
+  }, [loadSchemaChildren, schemaNodes, selectedConnectionId, store]);
 
   const dispatchQueryEvent = useCallback((active: ActiveQuery, event: QueryEvent, nextSequence: () => number): void => {
     const base = { sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId, sequence: nextSequence() };
@@ -545,6 +693,15 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content: `${activeDocument.content}${separator}${value}`, dirty: true } });
   }, [activeDocument, authoringDatabaseKind, store]);
 
+  const activateSchemaNode = useCallback((node: SchemaTreeNode): void => {
+    if (node.kind === 'object') setSchemaRecent(previous => [...rememberSharedSchemaObject(previous, node)]);
+    if (node.kind === 'object' || node.kind === 'column') insertSchemaNode(node);
+  }, [insertSchemaNode]);
+
+  const toggleSchemaFavorite = useCallback((node: SchemaTreeNode): void => {
+    setSchemaFavorites(previous => [...toggleSharedSchemaFavorite(previous, node)]);
+  }, []);
+
   const copySchemaName = useCallback((node: SchemaTreeNode): void => {
     const value = qualifySharedSchemaNode(node, authoringDatabaseKind);
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
@@ -692,7 +849,9 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [activeResult, api, exportFormat]);
 
   const historyItems: HistoryViewEntry[] = useMemo(() => history.map(entry => ({ id: entry.id, label: entry.sql.slice(0, 80), status: entry.status, sqlFingerprint: `${entry.createdAt} · ${entry.rowCount} rows` })), [history]);
-  const selectedNode = state.metadata.selectedNodeId ? schemaNodes.find(node => node.id === state.metadata.selectedNodeId) : undefined;
+  const selectedNode = state.metadata.selectedNodeId
+    ? schemaNodes.find(node => node.id === state.metadata.selectedNodeId) ?? schemaSearchResults.find(node => node.id === state.metadata.selectedNodeId)
+    : undefined;
   const resultState = resultAsyncState(activeResult, visibleRows.length);
   const resultMessage = activeResult?.message;
   const designerFields = { target: selectedNode?.label ?? 'Select an object', connection: selectedConnection?.name ?? 'No connection' };
@@ -705,12 +864,27 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       expandedIds={state.metadata.expandedNodeIds}
       onToggle={toggleSchemaNode}
       onSelect={node => store.dispatch({ type: 'metadata/select', nodeId: node.id })}
+      onActivate={activateSchemaNode}
       onInsert={insertSchemaNode}
       onOpenQuery={openSchemaQuery}
       onOpenExplain={explainSchemaObject}
       onOpenDdl={node => { void openSchemaDdl(node); }}
       onImport={node => setImportTarget(node)}
       onCopyName={copySchemaName}
+      onToggleFavorite={toggleSchemaFavorite}
+      isFavorite={node => schemaFavorites.some(item => sharedSchemaObjectIdentity(item) === sharedSchemaObjectIdentity(node as SchemaTreeNode))}
+      favorites={schemaFavorites.map(node => mapSchemaNode(node))}
+      recent={schemaRecent.map(node => mapSchemaNode(node))}
+      searchValue={schemaSearch}
+      onSearchChange={setSchemaSearch}
+      searchResults={schemaSearchResults.map(node => mapSchemaNode(node))}
+      searchLoading={schemaSearchLoading}
+      filters={SHARED_SCHEMA_FILTERS}
+      activeFilterIds={schemaFilters}
+      onFilterToggle={id => setSchemaFilters(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id])}
+      onRefresh={refreshSchema}
+      onExpandAll={expandSchema}
+      onCollapseAll={collapseSchema}
     />
     <button type="button" onClick={onLogout}>Log out</button>
   </div>}>

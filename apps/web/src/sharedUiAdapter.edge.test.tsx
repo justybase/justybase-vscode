@@ -99,6 +99,9 @@ function edgeApi(options: ApiOptions = {}): { api: ApiClient; fetchMock: jest.Mo
         ? [{ id: 'object-1', kind: 'object', label: 'orders', database: 'main', schema: 'public', objectName: 'orders', objectType: 'TABLE', hasChildren: true }]
         : [{ id: 'cte-1', kind: 'cte', label: 'orders_cte', hasChildren: false }] });
     }
+    if (url.endsWith('/api/schema/search')) {
+      return response({ items: [{ name: 'orders', database: 'main', schema: 'public', objectType: 'TABLE', description: 'Order records', matchType: 'name' }] });
+    }
     if (url.endsWith('/api/query')) {
       if (options.startError) throw new Error('start failed');
       return response({ queryId: 'query-1' });
@@ -224,6 +227,26 @@ describe('shared Web UI adapter edge contracts', () => {
     await waitFor(() => expect((screen.getByLabelText('SQL editor') as HTMLTextAreaElement).value).toContain('FROM "public"."orders"'));
     const startCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/query'));
     expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ database: 'main' }));
+  });
+
+  it('keeps shared schema search, recent objects and favorites connected to the active editor', async () => {
+    const user = userEvent.setup();
+    const { api, fetchMock } = edgeApi({ schemaObject: true });
+    render(<SharedWebWorkspace api={api} user={{ id: 'shared-schema-search-user', username: 'alice', role: 'user' }} onLogout={() => undefined} />);
+    await screen.findByRole('button', { name: 'SQLite' });
+    const search = screen.getByRole('textbox', { name: 'Search schema' });
+    await user.type(search, 'ord');
+    const result = await screen.findByRole('treeitem', { name: /orders/i });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/schema/search'))).toBe(true));
+    await user.click(result.querySelector('button:last-child')!);
+    expect((screen.getByLabelText('SQL editor') as HTMLTextAreaElement).value).toContain('"public"."orders"');
+    expect(screen.getByText('Recent')).toBeInTheDocument();
+    fireEvent.contextMenu(result, { clientX: 32, clientY: 48 });
+    await user.click(screen.getByRole('menuitem', { name: 'Add to favorites' }));
+    fireEvent.contextMenu(result, { clientX: 32, clientY: 48 });
+    expect(screen.getByRole('menuitem', { name: 'Remove from favorites' })).toBeInTheDocument();
+    const searchCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/schema/search'));
+    expect(JSON.parse(String((searchCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ term: 'ord', objectTypes: ['TABLE', 'VIEW', 'PROCEDURE', 'SYNONYM'] }));
   });
 
   it('maps error, cancellation and empty result terminal states without retrying SQL', async () => {

@@ -603,6 +603,49 @@ describe('shared React presentation', () => {
     expect(actions.onOpenDdl).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps shared schema search, shortcuts and lifecycle controls host-neutral', async () => {
+    const user = userEvent.setup();
+    const callbacks = {
+      onSearchChange: jest.fn(),
+      onRefresh: jest.fn(),
+      onExpandAll: jest.fn(),
+      onCollapseAll: jest.fn(),
+      onActivate: jest.fn(),
+      onToggleFavorite: jest.fn(),
+      onFilterToggle: jest.fn(),
+    };
+    const table = { id: 'table-1', kind: 'object' as const, label: 'ORDERS', objectName: 'ORDERS', objectType: 'TABLE', database: 'DB', schema: 'PUBLIC', hasChildren: true };
+    const favorite = { ...table, id: 'favorite-1', label: 'CUSTOMERS', objectName: 'CUSTOMERS' };
+    render(<SchemaTree
+      nodes={[table]}
+      searchValue=""
+      searchResults={[{ ...table, id: 'search-table-1', hasChildren: false }]}
+      filters={[{ id: 'TABLE', label: 'Tables' }]}
+      activeFilterIds={['TABLE']}
+      favorites={[favorite]}
+      recent={[table]}
+      {...callbacks}
+    />);
+    await user.type(screen.getByRole('textbox', { name: 'Search schema' }), 'ord');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schema' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all schema nodes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all schema nodes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tables' }));
+    expect(callbacks.onSearchChange).toHaveBeenCalledWith('o');
+    expect(callbacks.onRefresh).toHaveBeenCalledTimes(1);
+    expect(callbacks.onExpandAll).toHaveBeenCalledTimes(1);
+    expect(callbacks.onCollapseAll).toHaveBeenCalledTimes(1);
+    expect(callbacks.onFilterToggle).toHaveBeenCalledWith('TABLE');
+    expect(screen.getByText('Favorites')).toBeInTheDocument();
+    expect(screen.getByText('Recent')).toBeInTheDocument();
+    const treeItem = screen.getAllByRole('treeitem', { name: /ORDERS/ }).at(-1)!;
+    fireEvent.contextMenu(treeItem, { clientX: 40, clientY: 40 });
+    await user.click(screen.getByRole('menuitem', { name: 'Add to favorites' }));
+    expect(callbacks.onToggleFavorite).toHaveBeenCalledWith(expect.objectContaining({ objectName: 'ORDERS' }));
+    await user.click(treeItem.querySelector('button:last-child')!);
+    expect(callbacks.onActivate).toHaveBeenCalledWith(expect.objectContaining({ objectName: 'ORDERS' }));
+  });
+
   it('keeps result tabs keyboard navigable with roving focus', () => {
     const onSelect = jest.fn();
     render(<ResultTabs results={[{ ...result, resultSetId: 'result-1' }, { ...result, resultSetId: 'result-2' }]} activeResultSetId="result-1" onSelect={onSelect} />);
