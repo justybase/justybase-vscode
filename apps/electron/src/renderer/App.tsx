@@ -14,6 +14,7 @@ import {
   ResultViewToolbar,
   RowDetail,
   SqlDialectSelect,
+  ObjectDesigner,
   UiShell,
   WorkspaceTabs,
   createDataGridClipboardPayload,
@@ -150,6 +151,8 @@ export function App(): ReactElement {
   const [historyState, setHistoryState] = useState<'loading' | 'ready' | 'error'>('ready');
   const [historyMessage, setHistoryMessage] = useState<string | undefined>(undefined);
   const [selectedObject, setSelectedObject] = useState<SchemaTreeNode | undefined>(undefined);
+  const [designerTarget, setDesignerTarget] = useState<SchemaTreeNode | undefined>(undefined);
+  const [schemaRefreshNonce, setSchemaRefreshNonce] = useState(0);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [editRow, setEditRow] = useState<{ target: SchemaTreeNode; values: ElectronRow } | undefined>(undefined);
   const [connectionEditor, setConnectionEditor] = useState<{ readonly initial?: RedactedConnectionProfile } | undefined>(undefined);
@@ -430,6 +433,15 @@ export function App(): ReactElement {
     if (node.schema) setSchema(node.schema);
     openDocument(sql, title);
   }, [openDocument]);
+
+  const openObjectDesigner = useCallback((node: SchemaTreeNode): void => {
+    if (!selectedConnection || node.kind !== 'object' || !(node.objectName ?? node.label)) {
+      setNotice('Select a schema object before opening the designer.');
+      return;
+    }
+    setSelectedObject(node);
+    setDesignerTarget(node);
+  }, [selectedConnection]);
 
   const saveDocument = useCallback((): void => {
     if (!activeDocument) return;
@@ -737,7 +749,7 @@ export function App(): ReactElement {
     sidebar={<div className="electron-sidebar-content">
       <div className="electron-sidebar-title"><strong>Explorer</strong><button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>New SQL</button></div>
       <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" className="electron-section-action" aria-label="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <div className="electron-connection-item" key={profile.id}><button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="electron-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
-      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={runtimeDatabaseKind} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
+      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={runtimeDatabaseKind} refreshNonce={schemaRefreshNonce} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenDesigner={openObjectDesigner} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
     </div>}
   >
     {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} onCopy={copyHistoryEntry} onRefresh={refreshHistory} /></CapabilityGate>
@@ -770,6 +782,7 @@ export function App(): ReactElement {
         </div>}
     </UiShell>
     {connectionEditor && <ConnectionPanel initial={connectionEditor.initial} onSaved={saveConnection} onCancel={() => setConnectionEditor(undefined)} />}
+    {designerTarget && selectedConnection && clientRef.current && <ObjectDesigner api={clientRef.current} connectionId={selectedConnection.id} database={designerTarget.database ?? (database || selectedConnection.database)} databaseKind={selectedConnection.dbType} target={designerTarget} onClose={() => setDesignerTarget(undefined)} onApplied={() => { setDesignerTarget(undefined); setSchemaRefreshNonce(previous => previous + 1); setNotice('Object designer change applied. Schema metadata refreshed.'); }} />}
     {importTarget && selectedConnection && clientRef.current && <ImportPanel api={clientRef.current} connectionId={selectedConnection.id} target={importTarget} database={database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed. Refresh the schema or rerun the query to see new rows.'); }} />}
     {editRow && selectedConnection && clientRef.current && <>{editColumnsState === 'loading' ? <div className="electron-modal-backdrop" role="presentation"><div className="electron-modal-card" role="status">Loading table columns…</div></div> : editColumnsState === 'error' ? null : <EditRowPanel api={clientRef.current} connectionId={selectedConnection.id} database={database || editRow.target.database || ''} target={editRow.target} columns={editColumns} values={editRow.values} onClose={() => setEditRow(undefined)} onCompleted={message => { setEditRow(undefined); setNotice(message); void refresh(); }} />}</>}
     {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}

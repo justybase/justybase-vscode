@@ -60,12 +60,14 @@ export interface SchemaExplorerProps {
   readonly databaseKind: DatabaseKind;
   readonly onInsert: (value: string) => void;
   readonly onObjectSelect?: (node: SchemaTreeNode) => void;
+  readonly onOpenDesigner?: (node: SchemaTreeNode) => void;
   readonly onOpenQuery?: (sql: string, title: string, node: SchemaTreeNode) => void;
   readonly onOpenDdl?: (sql: string, title: string, node: SchemaTreeNode) => void;
   readonly onImport?: (node: SchemaTreeNode) => void;
+  readonly refreshNonce?: number;
 }
 
-export function SchemaExplorer({ api, connectionId, database, databaseKind, onInsert, onObjectSelect, onOpenQuery, onOpenDdl, onImport }: SchemaExplorerProps): ReactElement {
+export function SchemaExplorer({ api, connectionId, database, databaseKind, onInsert, onObjectSelect, onOpenDesigner, onOpenQuery, onOpenDdl, onImport, refreshNonce = 0 }: SchemaExplorerProps): ReactElement {
   const [children, setChildren] = useState<Record<string, readonly SchemaTreeNode[]>>({});
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
@@ -159,7 +161,7 @@ export function SchemaExplorer({ api, connectionId, database, databaseKind, onIn
     setError(undefined);
     setNotice(undefined);
     if (connectionId) void loadChildren(ROOT);
-  }, [connectionId, loadChildren]);
+  }, [connectionId, loadChildren, refreshNonce]);
 
   useEffect(() => {
     const term = search.trim();
@@ -173,7 +175,7 @@ export function SchemaExplorer({ api, connectionId, database, databaseKind, onIn
         .catch(reason => setError(reason instanceof Error ? reason.message : 'Schema search failed.'));
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [activeFilters, api, connectionId, database, search]);
+  }, [activeFilters, api, connectionId, database, refreshNonce, search]);
 
   useEffect(() => {
     if (!menu) return undefined;
@@ -332,7 +334,7 @@ export function SchemaExplorer({ api, connectionId, database, databaseKind, onIn
     </div>}
     {search.trim() ? <div className="electron-schema-search-results">{searchItems.length === 0 ? <span className="electron-schema-empty">No matching objects.</span> : searchItems.map(item => <button type="button" key={`${item.database}.${item.schema}.${item.name}`} onClick={() => selectSearchResult(item)}><span>{item.objectType === 'VIEW' ? '◌' : '▤'}</span><span><strong>{item.name}</strong><small>{item.database}.{item.schema} · {item.objectType}</small></span></button>)}</div>
       : <div className="electron-schema-tree">{loading.has(ROOT) && rootNodes.length === 0 ? <span className="electron-schema-loading">Loading schema…</span> : visibleRootNodes.map(node => <SchemaNode key={node.id} node={node} depth={0} children={children} expanded={expanded} loading={loading} databaseKind={databaseKind} onToggle={toggleNode} onSelect={selectNode} onContextMenu={openObjectMenu} />)}</div>}
-    {menu && <div className="electron-schema-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}><strong>{menu.node.label}</strong><button type="button" onClick={() => { onInsert(objectSql(menu.node, databaseKind)); setMenu(undefined); }}>Insert qualified name</button><button type="button" onClick={() => void copyName(menu.node)}>Copy qualified name</button><button type="button" onClick={() => { onOpenQuery?.(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), `Top 1000 · ${menu.node.label}`, menu.node); setMenu(undefined); }}>View top 1000</button><button type="button" onClick={() => { try { onOpenQuery?.(buildExplainQuery(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), databaseKind), `Explain · ${menu.node.label}`, menu.node); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Explain plans are not available for this connection.'); } setMenu(undefined); }}>Explain plan</button><button type="button" onClick={() => void openDdl(menu.node)}>Open DDL</button><button type="button" onClick={() => void copyDdl(menu.node)}>Copy DDL</button>{onImport && <button type="button" onClick={() => { onImport(menu.node); setMenu(undefined); }}>Import CSV/XLSX</button>}<button type="button" onClick={() => toggleFavorite(menu.node)}>{favorites.some(item => schemaObjectIdentity(item) === schemaObjectIdentity(menu.node)) ? 'Remove from favorites' : 'Add to favorites'}</button></div>}
+    {menu && <div className="electron-schema-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}><strong>{menu.node.label}</strong><button type="button" onClick={() => { onInsert(objectSql(menu.node, databaseKind)); setMenu(undefined); }}>Insert qualified name</button><button type="button" onClick={() => void copyName(menu.node)}>Copy qualified name</button><button type="button" onClick={() => { onOpenQuery?.(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), `Top 1000 · ${menu.node.label}`, menu.node); setMenu(undefined); }}>View top 1000</button><button type="button" onClick={() => { try { onOpenQuery?.(buildExplainQuery(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), databaseKind), `Explain · ${menu.node.label}`, menu.node); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Explain plans are not available for this connection.'); } setMenu(undefined); }}>Explain plan</button>{onOpenDesigner && <button type="button" onClick={() => { onOpenDesigner(menu.node); setMenu(undefined); }}>Open Object Designer</button>}<button type="button" onClick={() => void openDdl(menu.node)}>Open DDL</button><button type="button" onClick={() => void copyDdl(menu.node)}>Copy DDL</button>{onImport && <button type="button" onClick={() => { onImport(menu.node); setMenu(undefined); }}>Import CSV/XLSX</button>}<button type="button" onClick={() => toggleFavorite(menu.node)}>{favorites.some(item => schemaObjectIdentity(item) === schemaObjectIdentity(menu.node)) ? 'Remove from favorites' : 'Add to favorites'}</button></div>}
   </section>;
 }
 
