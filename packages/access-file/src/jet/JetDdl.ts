@@ -82,7 +82,7 @@ function isVariableLength(type: number): boolean {
     }
 }
 
-function fixedDataSize(column: JetDdlColumn, _layout: JetLayout): number {
+function fixedDataSize(column: JetDdlColumn): number {
     switch (column.type) {
         case 0x02: return 1;
         case 0x03: return 2;
@@ -99,17 +99,17 @@ function fixedDataSize(column: JetDdlColumn, _layout: JetLayout): number {
     }
 }
 
-function computeStoredLength(column: JetDdlColumn, layout: JetLayout): number {
+function computeStoredLength(column: JetDdlColumn): number {
     if (isVariableLength(column.type)) {
         return column.length ?? (column.type === 0x0c ? 0 : 1);
     }
     if (isLongValueType(column.type)) {
         return 0;
     }
-    return fixedDataSize(column, layout);
+    return fixedDataSize(column);
 }
 
-function buildColumnStates(columns: readonly JetDdlColumn[], layout: JetLayout): ColumnState[] {
+function buildColumnStates(columns: readonly JetDdlColumn[]): ColumnState[] {
     const result: ColumnState[] = [];
     let varOffset = 0;
     let longVarOffset = columns.filter(c => isVariableLength(c.type) && !isLongValueType(c.type)).length;
@@ -131,7 +131,7 @@ function buildColumnStates(columns: readonly JetDdlColumn[], layout: JetLayout):
                 fixedDataOffset: column.type === 0x01 ? 0 : fixedOffset,
             });
             if (column.type !== 0x01) {
-                fixedOffset += fixedDataSize(column, layout);
+                fixedOffset += fixedDataSize(column);
             }
         }
     }
@@ -272,7 +272,7 @@ function writeColumnDefinitions(
 
         writeInt(buffer, position, 0); // unknown
         writeShort(buffer, position, state.variableLength ? 0 : state.fixedDataOffset);
-        writeShort(buffer, position, computeStoredLength(column, layout));
+        writeShort(buffer, position, computeStoredLength(column));
     }
     for (const column of columns) {
         writeName(buffer, position, column.name, layout);
@@ -564,7 +564,7 @@ interface CatalogRow {
     readonly flags: number;
 }
 
-function catalogRows(channel: JetPageChannel, _layout: JetLayout): CatalogRow[] {
+function catalogRows(channel: JetPageChannel): CatalogRow[] {
     const catalog = new JetTable(channel, 'MSysObjects', 2);
     return catalog.rowLocations()
         .map(location => catalog.readRowValues(location))
@@ -577,8 +577,8 @@ function catalogRows(channel: JetPageChannel, _layout: JetLayout): CatalogRow[] 
         }));
 }
 
-function findTablesParentId(channel: JetPageChannel, _layout: JetLayout): number {
-    for (const row of catalogRows(channel, _layout)) {
+function findTablesParentId(channel: JetPageChannel): number {
+    for (const row of catalogRows(channel)) {
         if (row.name.toLowerCase() === 'tables') {
             return row.id;
         }
@@ -586,7 +586,7 @@ function findTablesParentId(channel: JetPageChannel, _layout: JetLayout): number
     return -1;
 }
 
-function findObjectOwner(_channel: JetPageChannel, _layout: JetLayout): Uint8Array {
+function findObjectOwner(): Uint8Array {
     return new Uint8Array([0xa6, 0x33]);
 }
 
@@ -608,7 +608,7 @@ export function createTable(
     if (columns.length === 0) {
         throw new AccessFileError('A table must have at least one column.');
     }
-    if (catalogRows(channel, layout).some(row => row.name.toLowerCase() === name.toLowerCase())) {
+    if (catalogRows(channel).some(row => row.name.toLowerCase() === name.toLowerCase())) {
         throw new AccessFileError(`An object named '${name}' already exists.`);
     }
     for (const index of indexes) {
@@ -619,7 +619,7 @@ export function createTable(
         }
     }
 
-    const states = buildColumnStates(columns, layout);
+    const states = buildColumnStates(columns);
     const indexStates: IndexState[] = indexes.map(() => ({ rootPageNumber: 0, umapRowNumber: 0, umapPageNumber: 0 }));
 
     const tdefPageNumber = channel.allocateNewPage();
@@ -650,8 +650,8 @@ export function createTable(
 
     // register in the system catalog
     const catalog = new JetTable(channel, 'MSysObjects', 2);
-    const tablesParentId = findTablesParentId(channel, layout);
-    const owner = findObjectOwner(channel, layout);
+    const tablesParentId = findTablesParentId(channel);
+    const owner = findObjectOwner();
     const values: AccessValue[] = catalog.columns.map(column => {
         switch (column.name.toLowerCase()) {
             case 'id': return tdefPageNumber;
@@ -675,8 +675,7 @@ export function createTable(
 
 /** Deletes a table (data, index and table-definition pages) and removes it from the catalog. */
 export function dropTable(channel: JetPageChannel, name: string): void {
-    const layout = channel.layout;
-    const tables = catalogRows(channel, layout).filter(row => row.type === TYPE_TABLE);
+    const tables = catalogRows(channel).filter(row => row.type === TYPE_TABLE);
     const tableRow = tables.find(row => row.name.toLowerCase() === name.toLowerCase())
         ?? (tables.find(row => row.name === name));
     if (!tableRow) {
@@ -959,7 +958,7 @@ function listRelationships(channel: JetPageChannel): RelationshipRow[] {
 }
 
 function systemTablePage(channel: JetPageChannel, name: string): number {
-    const rows = catalogRows(channel, channel.layout);
+    const rows = catalogRows(channel);
     const match = rows.find(row => row.name.toLowerCase() === name.toLowerCase());
     if (!match) {
         throw new AccessFileError(`System table '${name}' is not present in the database.`);
@@ -1005,7 +1004,7 @@ function recreateTableDefinition(
     nextAutoNumber: number,
 ): void {
     const layout = channel.layout;
-    const states = buildColumnStates(columns, layout);
+    const states = buildColumnStates(columns);
     const oldTable = new JetTable(channel, name, oldTdefPage);
 
     // map retained indexes (by name) to their existing B-tree state
@@ -1097,8 +1096,7 @@ function oldUniqueCountFor(table: JetTable, indexNumber: number): number {
 }
 
 function findTable(channel: JetPageChannel, name: string): JetTable | null {
-    const layout = channel.layout;
-    for (const row of catalogRows(channel, layout)) {
+    for (const row of catalogRows(channel)) {
         if (row.type === TYPE_TABLE && row.name.toLowerCase() === name.toLowerCase()) {
             return new JetTable(channel, row.name, row.id & 0x00ffffff);
         }
@@ -1379,8 +1377,8 @@ export function parseQueryDefSql(sql: string): QueryRowSpec[] {
 }
 
 /** Allocates a negative query object id that is not already in use. */
-function allocateQueryObjectId(channel: JetPageChannel, layout: JetLayout): number {
-    const used = new Set(catalogRows(channel, layout).map(row => row.id));
+function allocateQueryObjectId(channel: JetPageChannel): number {
+    const used = new Set(catalogRows(channel).map(row => row.id));
     for (let candidate = -2147483647; candidate < 0; candidate++) {
         if (!used.has(candidate)) {
             return candidate;
@@ -1391,17 +1389,16 @@ function allocateQueryObjectId(channel: JetPageChannel, layout: JetLayout): numb
 
 /** Creates a saved SELECT QueryDef (view) in the catalog. */
 export function createView(channel: JetPageChannel, viewName: string, selectSql: string): void {
-    const layout = channel.layout;
-    if (!viewName || catalogRows(channel, layout).some(row => row.name.toLowerCase() === viewName.toLowerCase())) {
+    if (!viewName || catalogRows(channel).some(row => row.name.toLowerCase() === viewName.toLowerCase())) {
         throw new AccessFileError(`An object named '${viewName}' already exists.`);
     }
     const specification = parseQueryDefSql(selectSql);
-    const objectId = allocateQueryObjectId(channel, layout);
+    const objectId = allocateQueryObjectId(channel);
 
     // register in MSysObjects
     const catalog = new JetTable(channel, 'MSysObjects', 2);
-    const tablesParentId = findTablesParentId(channel, layout);
-    const owner = findObjectOwner(channel, layout);
+    const tablesParentId = findTablesParentId(channel);
+    const owner = findObjectOwner();
     const catalogValues: AccessValue[] = catalog.columns.map(column => {
         switch (column.name.toLowerCase()) {
             case 'id': return objectId;

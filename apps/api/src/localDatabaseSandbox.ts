@@ -47,7 +47,7 @@ function rejectEscapingSymlink(userRoot: string, candidate: string): void {
       // lstat succeeds for dangling links, while realpath does not. Reject
       // them because opening the path could create a file at an unknown target.
       try {
-        if (lstatSync(current).isSymbolicLink()) throw new Error('Dangling local database symlinks are not allowed.');
+        if (lstatSync(current).isSymbolicLink()) throw new Error('Dangling local database symlinks are not allowed.', { cause: error });
       } catch (nested: unknown) {
         if (nested instanceof Error && nested.message.includes('not allowed')) throw nested;
       }

@@ -20,10 +20,22 @@ const target: SchemaTreeNode = {
 
 function apiFixture(): jest.Mocked<Pick<ElectronWorkspaceApi, 'importFilePreview' | 'importFile' | 'editPreview' | 'edit'>> {
   return {
-    importFilePreview: jest.fn(async (_input: QueryFileImportPreviewRequest) => ({ sql: 'INSERT INTO PUBLIC.ORDERS …', previewToken: 'preview-1', expiresAt: Date.now() + 60_000, warnings: [], rowCount: 1 })),
-    importFile: jest.fn(async (_input: QueryFileImportRequest) => ({ sql: 'INSERT INTO PUBLIC.ORDERS …', rowsAffected: 1, message: 'Imported 1 row.' })),
-    editPreview: jest.fn(async (_input: QueryEditPreviewRequest) => ({ sql: 'UPDATE PUBLIC.ORDERS SET NAME = \'Beta\' WHERE ID = 1', previewToken: 'preview-2', expiresAt: Date.now() + 60_000, warnings: [], rowCount: 1 })),
-    edit: jest.fn(async (_input: QueryEditRequest) => ({ sql: 'UPDATE PUBLIC.ORDERS …', rowsAffected: 1, message: 'Updated 1 row.' })),
+    importFilePreview: jest.fn(async (input: QueryFileImportPreviewRequest) => {
+      void input;
+      return { sql: 'INSERT INTO PUBLIC.ORDERS …', previewToken: 'preview-1', expiresAt: Date.now() + 60_000, warnings: [], rowCount: 1 };
+    }),
+    importFile: jest.fn(async (input: QueryFileImportRequest) => {
+      void input;
+      return { sql: 'INSERT INTO PUBLIC.ORDERS …', rowsAffected: 1, message: 'Imported 1 row.' };
+    }),
+    editPreview: jest.fn(async (input: QueryEditPreviewRequest) => {
+      void input;
+      return { sql: 'UPDATE PUBLIC.ORDERS SET NAME = \'Beta\' WHERE ID = 1', previewToken: 'preview-2', expiresAt: Date.now() + 60_000, warnings: [], rowCount: 1 };
+    }),
+    edit: jest.fn(async (input: QueryEditRequest) => {
+      void input;
+      return { sql: 'UPDATE PUBLIC.ORDERS …', rowsAffected: 1, message: 'Updated 1 row.' };
+    }),
   };
 }
 

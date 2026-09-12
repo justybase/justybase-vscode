@@ -430,7 +430,13 @@ describe('shared React presentation', () => {
   });
 
   it('uses per-cell metadata for client filtering and sorting', () => {
-    const getCellMetadata = jest.fn((_value: unknown, _rowIndex: number, _columnIndex: number, _column: { name: string }) => ({ type: 'TEXT' }));
+    const getCellMetadata = jest.fn((value: unknown, rowIndex: number, columnIndex: number, column: { name: string }) => {
+      void value;
+      void rowIndex;
+      void columnIndex;
+      void column;
+      return { type: 'TEXT' };
+    });
     render(<DataGrid
       resultSetId="per-cell-metadata"
       columns={[{ name: 'VALUE' }]}

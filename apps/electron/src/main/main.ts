@@ -158,30 +158,22 @@ async function start(): Promise<void> {
     credentialBroker: broker,
     listConnections: async () => redactConnectionProfiles(await currentRuntime.requestJson<readonly unknown[]>('/api/connections')),
     createConnection: async (input, requestId) => {
-      let password = credentialForRequest(broker, requestId);
-      try {
-        const profile = await currentRuntime.requestJson<unknown>('/api/connections', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
-        });
-        return redactConnectionProfile(profile);
-      } finally {
-        password = undefined;
-      }
+      const password = credentialForRequest(broker, requestId);
+      const profile = await currentRuntime.requestJson<unknown>('/api/connections', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
+      });
+      return redactConnectionProfile(profile);
     },
     updateConnection: async (id, input, requestId) => {
-      let password = credentialForRequest(broker, requestId);
-      try {
-        const profile = await currentRuntime.requestJson<unknown>(`/api/connections/${encodeURIComponent(id)}`, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
-        });
-        return redactConnectionProfile(profile);
-      } finally {
-        password = undefined;
-      }
+      const password = credentialForRequest(broker, requestId);
+      const profile = await currentRuntime.requestJson<unknown>(`/api/connections/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
+      });
+      return redactConnectionProfile(profile);
     },
     deleteConnection: async id => {
       await currentRuntime.requestJson(`/api/connections/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -190,16 +182,12 @@ async function start(): Promise<void> {
       await currentRuntime.requestJson(`/api/connections/${encodeURIComponent(id)}/test`, { method: 'POST' });
     },
     testConnectionProfile: async (input, requestId) => {
-      let password = credentialForRequest(broker, requestId);
-      try {
-        await currentRuntime.requestJson('/api/connections/test', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
-        });
-      } finally {
-        password = undefined;
-      }
+      const password = credentialForRequest(broker, requestId);
+      await currentRuntime.requestJson('/api/connections/test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...input, ...(password === undefined ? {} : { password }) }),
+      });
     },
     listCapabilities: () => ({ descriptors: capabilities.list() }),
   });
