@@ -11,8 +11,8 @@ import type {
   QueryPreviewResponse,
   SchemaTreeNode,
 } from '@justybase/contracts';
-import { useApiClient, type QueryEventSubscription } from '../api';
-import { qualifySchemaNode } from '../SchemaTree';
+import type { ObjectDesignerApi, ObjectDesignerQueryEventSubscription } from './types';
+import { formatQueryObjectName } from '@justybase/dialect-utils';
 import {
   buildObjectDesignerSql,
   type ClickHousePartitionOperationInput,
@@ -27,7 +27,16 @@ import {
 } from '@justybase/designer-core';
 import { getDesignerTargetFlags, isMutatingCapability, viewDefinitionFromMetadata, type DesignerTab } from './model';
 
+function qualifyDesignerTarget(target: SchemaTreeNode, databaseKind: DatabaseKind, database: string): string {
+  return formatQueryObjectName({
+    database: target.database ?? database,
+    schema: target.schema,
+    objectName: target.objectName ?? target.label,
+  }, databaseKind);
+}
+
 export interface ObjectDesignerControllerProps {
+  api: ObjectDesignerApi;
   connectionId: string;
   database: string;
   databaseKind: DatabaseKind;
@@ -36,13 +45,13 @@ export interface ObjectDesignerControllerProps {
 }
 
 export function useObjectDesignerController({
+  api,
   connectionId,
   database,
   databaseKind,
   target,
   onApplied,
 }: ObjectDesignerControllerProps) {
-  const api = useApiClient();
   const [activeTab, setActiveTab] = useState<DesignerTab>('overview');
   const [context, setContext] = useState<DesignerCapabilitiesResponse | null>(null);
   const [snapshot, setSnapshot] = useState<DatabaseObjectSnapshot | null>(null);
@@ -104,14 +113,14 @@ export function useObjectDesignerController({
   const [preview, setPreview] = useState<QueryPreviewResponse | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
-  const subscriptionRef = useRef<QueryEventSubscription | null>(null);
+  const subscriptionRef = useRef<ObjectDesignerQueryEventSubscription | null>(null);
 
   const targetWithContext = useMemo(() => ({
     ...target,
     kind: 'object' as const,
     database: target.database ?? database,
   }), [database, target]);
-  const targetSql = useMemo(() => qualifySchemaNode(targetWithContext, databaseKind), [databaseKind, targetWithContext]);
+  const targetSql = useMemo(() => qualifyDesignerTarget(targetWithContext, databaseKind, database), [database, databaseKind, targetWithContext]);
   const { isTableTarget, isViewTarget, isRoutineTarget } = getDesignerTargetFlags(target);
   const tableDefinition = snapshot?.definition.kind === 'table' ? snapshot.definition : undefined;
 
@@ -266,7 +275,7 @@ export function useObjectDesignerController({
     });
     if (isTableTarget && target.schema && (target.objectName ?? target.label)) {
       void api.columns(connectionId, target.database ?? database, target.schema, target.objectName ?? target.label)
-        .then(response => { if (!disposed) setColumns(response); })
+        .then(response => { if (!disposed) setColumns([...response]); })
         .catch(() => { if (!disposed) setColumns([]); });
     }
     if (requiresSnapshot) {
@@ -290,7 +299,7 @@ export function useObjectDesignerController({
       subscriptionRef.current?.close();
       subscriptionRef.current = null;
     };
-  }, [connectionId, database, databaseKind, isTableTarget, target.database, target.description, target.label, target.objectName, target.objectType, target.schema, target.viewSql]);
+  }, [api, connectionId, database, databaseKind, isTableTarget, target.database, target.description, target.label, target.objectName, target.objectType, target.schema, target.viewSql]);
 
   useEffect(() => {
     let disposed = false;
@@ -304,7 +313,7 @@ export function useObjectDesignerController({
       })
       .catch(() => { if (!disposed) setReferenceTables([]); });
     return () => { disposed = true; };
-  }, [connectionId, database, isTableTarget, referencedSchema, target.database]);
+  }, [api, connectionId, database, isTableTarget, referencedSchema, target.database]);
 
   useEffect(() => {
     let disposed = false;
@@ -312,10 +321,10 @@ export function useObjectDesignerController({
     const table = referencedTable.trim();
     if (!isTableTarget || !referencedSchema.trim() || !table) return () => { disposed = true; };
     void api.columns(connectionId, target.database ?? database, referencedSchema.trim(), table)
-      .then(nextColumns => { if (!disposed) setReferenceTableColumns(nextColumns); })
+      .then(nextColumns => { if (!disposed) setReferenceTableColumns([...nextColumns]); })
       .catch(() => { if (!disposed) setReferenceTableColumns([]); });
     return () => { disposed = true; };
-  }, [connectionId, database, isTableTarget, referencedSchema, referencedTable, target.database]);
+  }, [api, connectionId, database, isTableTarget, referencedSchema, referencedTable, target.database]);
 
   useEffect(() => {
     const triggerCapability = context?.capabilities.constructs.triggers.trigger;
