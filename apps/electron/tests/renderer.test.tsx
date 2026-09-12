@@ -158,6 +158,13 @@ describe('Electron renderer composition', () => {
     fireEvent.contextMenu(screen.getByRole('cell', { name: 'Alpha' }), { clientX: 48, clientY: 72 });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row as JSON' }));
     await waitFor(() => expect(clipboard).toHaveBeenLastCalledWith(expect.stringContaining('"NAME": "Alpha"')));
+    fireEvent.contextMenu(screen.getByRole('cell', { name: 'Alpha' }), { clientX: 48, clientY: 72 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Cell Value' }));
+    expect(screen.getByRole('dialog', { name: 'Cell Value: NAME' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Value' }));
+    await waitFor(() => expect(clipboard).toHaveBeenLastCalledWith('Alpha'));
+    fireEvent.click(screen.getByRole('button', { name: 'Close cell value' }));
+    expect(screen.queryByRole('dialog', { name: 'Cell Value: NAME' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter results' }), { target: { value: 'Alpha' } });
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);

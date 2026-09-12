@@ -28,6 +28,7 @@ export { registerSqlShortcuts, sqlShortcutEdit, SQL_SHORTCUTS } from './sqlShort
 export type { SqlShortcutEdit } from './sqlShortcuts';
 export {
   AsyncStateView,
+  CellValueViewer,
   CapabilityGate,
   DataGrid,
   DesignerForm,
@@ -47,6 +48,7 @@ export {
 export type {
   AsyncStateViewProps,
   AsyncViewState,
+  CellValueViewerProps,
   CapabilityGateProps,
   DataGridCellContext,
   DataGridCopyPayload,

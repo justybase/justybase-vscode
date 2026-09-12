@@ -193,6 +193,13 @@ describe('shared Web UI adapter edge contracts', () => {
     fireEvent.contextMenu(screen.getByRole('cell', { name: 'a' }), { clientX: 48, clientY: 72 });
     await user.click(screen.getByRole('menuitem', { name: 'Copy row as JSON' }));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('"NAME": "a"')));
+    fireEvent.contextMenu(screen.getByRole('cell', { name: 'a' }), { clientX: 48, clientY: 72 });
+    await user.click(screen.getByRole('menuitem', { name: 'View Cell Value' }));
+    expect(screen.getByRole('dialog', { name: 'Cell Value: NAME' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Copy Value' }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('a'));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Cell Value: NAME' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('row', { name: /alpha|1/ }));
     await user.click(screen.getByRole('button', { name: 'Copy' }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Shared export format' }), 'json');

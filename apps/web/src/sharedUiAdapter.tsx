@@ -22,9 +22,10 @@ import {
   resultAsyncState as getResultAsyncState,
   resolveUiMode,
 } from '@justybase/ui-core';
-import type { UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
+import type { UiResultColumn, UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import {
   AsyncStateView,
+  CellValueViewer,
   DataGrid,
   createDataGridClipboardPayload,
   formatDataGridClipboard,
@@ -252,6 +253,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [schemaShortcutsReadyKey, setSchemaShortcutsReadyKey] = useState<string | undefined>(undefined);
   const [connectionEditor, setConnectionEditor] = useState<{ readonly initial?: ConnectionProfileSummary } | undefined>(undefined);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
+  const [cellViewer, setCellViewer] = useState<{ readonly column: UiResultColumn; readonly value: unknown; readonly rowNumber: number } | undefined>(undefined);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -837,6 +839,13 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     [activeResult?.columns, activeRows],
   );
 
+  const openCellValue = useCallback((context: import('@justybase/ui-react').DataGridCellContext): void => {
+    const column = activeResult?.columns[context.columnIndex];
+    const value = activeRows[context.rowIndex]?.[context.columnIndex];
+    if (!column || value === undefined && activeRows[context.rowIndex] === undefined) return;
+    setCellViewer({ column, value, rowNumber: context.rowIndex + 1 });
+  }, [activeResult?.columns, activeRows]);
+
   const copyGridPayload = useCallback(async (payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): Promise<void> => {
     const options = { includeHeaders: payload.includeHeaders ?? true };
     const formatted = createDataGridClipboardPayload(payload, options);
@@ -871,6 +880,12 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const copyGridSelection = useCallback((payload: DataGridCopyPayload, format?: DataGridClipboardFormat): void => {
     void copyGridPayload(payload, format);
   }, [copyGridPayload]);
+
+  const copyCellValue = useCallback((): void => {
+    const item = cellViewer;
+    if (!item) return;
+    void copyGridPayload({ columns: [item.column], rows: [[item.value]], includeHeaders: false });
+  }, [cellViewer, copyGridPayload]);
 
   const copySelected = useCallback(async (): Promise<void> => {
     if (!activeResult) return;
@@ -967,11 +982,12 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               {notice && <div role="status">{notice}</div>}
               <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
               {activeResult && <div className="shared-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={() => void exportResults()} /><label className="shared-export-format">Export<select aria-label="Shared export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={true} showContextMenu selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onRowSelect={setSelectedRow} /></AsyncStateView>
+              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={true} showContextMenu selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onViewCell={openCellValue} onRowSelect={setSelectedRow} /></AsyncStateView>
               {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
             </div>
           </>}
     {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}
     {connectionEditor && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setConnectionEditor(undefined); }}><section className="modal-card connection-card" role="dialog" aria-modal="true" aria-labelledby="shared-connection-dialog-title"><div className="section-title"><span id="shared-connection-dialog-title">{connectionEditor.initial ? 'Edit connection' : 'Add connection'}</span><button type="button" className="icon-button" aria-label="Close connection dialog" onClick={() => setConnectionEditor(undefined)}>×</button></div><ConnectionForm api={api} initial={connectionEditor.initial} onCreated={saveConnection} onCancel={() => setConnectionEditor(undefined)} /></section></div>}
+    {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}
   </UiShell>;
 }

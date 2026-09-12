@@ -5,6 +5,7 @@ import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurf
 import { createExecutionController, createInitialUiState, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
 import {
   AsyncStateView,
+  CellValueViewer,
   CapabilityGate,
   DataGrid,
   ExplainView,
@@ -137,6 +138,7 @@ export function App(): ReactElement {
   const [rowsByResult, setRowsByResult] = useState<ElectronRows>({});
   const rowsByResultRef = useRef<ElectronRows>({});
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
+  const [cellViewer, setCellViewer] = useState<{ readonly column: UiResultColumn; readonly value: unknown; readonly rowNumber: number } | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
@@ -582,6 +584,13 @@ export function App(): ReactElement {
     [activeResult?.columns, rows],
   );
 
+  const openCellValue = useCallback((context: DataGridCellContext): void => {
+    const column = activeResult?.columns[context.columnIndex];
+    const value = rows[context.rowIndex]?.[context.columnIndex];
+    if (!column || value === undefined && rows[context.rowIndex] === undefined) return;
+    setCellViewer({ column, value, rowNumber: context.rowIndex + 1 });
+  }, [activeResult?.columns, rows]);
+
   const copyGridPayload = useCallback(async (payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): Promise<void> => {
     const options = { includeHeaders: payload.includeHeaders ?? true };
     const formatted = createDataGridClipboardPayload(payload, options);
@@ -613,6 +622,12 @@ export function App(): ReactElement {
   const copyGridSelection = useCallback((payload: DataGridCopyPayload, format?: DataGridClipboardFormat): void => {
     void copyGridPayload(payload, format);
   }, [copyGridPayload]);
+
+  const copyCellValue = useCallback((): void => {
+    const item = cellViewer;
+    if (!item) return;
+    void copyGridPayload({ columns: [item.column], rows: [[item.value]], includeHeaders: false });
+  }, [cellViewer, copyGridPayload]);
 
   const copyActive = useCallback(async (): Promise<void> => {
     const row = selectedRow === undefined ? rows[0] : rows[selectedRow];
@@ -749,7 +764,7 @@ export function App(): ReactElement {
           <div className="electron-result-panel">
             <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
             {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
-            <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined} onRowSelect={setSelectedRow} /></AsyncStateView>
+            <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onViewCell={openCellValue} onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined} onRowSelect={setSelectedRow} /></AsyncStateView>
             {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>
         </div>}
@@ -757,5 +772,6 @@ export function App(): ReactElement {
     {connectionEditor && <ConnectionPanel initial={connectionEditor.initial} onSaved={saveConnection} onCancel={() => setConnectionEditor(undefined)} />}
     {importTarget && selectedConnection && clientRef.current && <ImportPanel api={clientRef.current} connectionId={selectedConnection.id} target={importTarget} database={database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed. Refresh the schema or rerun the query to see new rows.'); }} />}
     {editRow && selectedConnection && clientRef.current && <>{editColumnsState === 'loading' ? <div className="electron-modal-backdrop" role="presentation"><div className="electron-modal-card" role="status">Loading table columns…</div></div> : editColumnsState === 'error' ? null : <EditRowPanel api={clientRef.current} connectionId={selectedConnection.id} database={database || editRow.target.database || ''} target={editRow.target} columns={editColumns} values={editRow.values} onClose={() => setEditRow(undefined)} onCompleted={message => { setEditRow(undefined); setNotice(message); void refresh(); }} />}</>}
+    {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}
   </></CapabilityGate> as ReactElement;
 }
