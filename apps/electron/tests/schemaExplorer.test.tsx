@@ -62,6 +62,16 @@ describe('Electron schema explorer SQL templates', () => {
     expect(onOpenQuery.mock.calls[0]?.[0]).toContain('SET SHOWPLAN_TEXT OFF;\nGO');
   });
 
+  it('opens the shared Object Designer from the object context menu', async () => {
+    const onOpenDesigner = jest.fn();
+    const api = apiFixture();
+    render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" onInsert={() => undefined} onOpenDesigner={onOpenDesigner} />);
+    await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
+    fireEvent.contextMenu(schemaLabel());
+    fireEvent.click(screen.getByRole('button', { name: 'Open Object Designer' }));
+    expect(onOpenDesigner).toHaveBeenCalledWith(table);
+  });
+
   it('uses schema-qualified PostgreSQL SQL for the shared object actions', async () => {
     const onOpenQuery = jest.fn();
     const api = apiFixture();
@@ -124,6 +134,15 @@ describe('Electron schema explorer SQL templates', () => {
     expect(screen.getByRole('button', { name: 'Expand Orders' })).toHaveAttribute('aria-expanded', 'false');
     const callsBeforeRefresh = api.schemaTree.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Refresh schema' }));
+    await waitFor(() => expect(api.schemaTree.mock.calls.length).toBeGreaterThan(callsBeforeRefresh));
+  });
+
+  it('reloads the schema and an active search after a designer mutation', async () => {
+    const api = apiFixture();
+    const view = render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" refreshNonce={0} onInsert={() => undefined} />);
+    await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
+    const callsBeforeRefresh = api.schemaTree.mock.calls.length;
+    view.rerender(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" refreshNonce={1} onInsert={() => undefined} />);
     await waitFor(() => expect(api.schemaTree.mock.calls.length).toBeGreaterThan(callsBeforeRefresh));
   });
 });
