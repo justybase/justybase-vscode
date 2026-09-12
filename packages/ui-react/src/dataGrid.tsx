@@ -606,17 +606,21 @@ export function DataGrid({
   const visibleColumnIndexes = useMemo(() => orderColumns(resolvedColumns, activeView), [resolvedColumns, activeView]);
   const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing, getCellMetadata), [resolvedColumns, rows, activeView, clientProcessing, getCellMetadata]);
   const renderedRows = useMemo(() => groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata), [resolvedColumns, processedRows, activeView.grouping, getCellMetadata]);
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const visibleRenderedRows = useMemo(
+    () => renderedRows.filter(row => row.kind === 'group' || row.groupId === undefined || !collapsedGroups.has(row.groupId)),
+    [collapsedGroups, renderedRows],
+  );
   const virtualWindow = useMemo(
-    () => calculateDataGridVirtualWindow(renderedRows.length, virtualViewport.scrollTop, virtualViewport.height),
-    [renderedRows.length, virtualViewport.height, virtualViewport.scrollTop],
+    () => calculateDataGridVirtualWindow(visibleRenderedRows.length, virtualViewport.scrollTop, virtualViewport.height),
+    [visibleRenderedRows.length, virtualViewport.height, virtualViewport.scrollTop],
   );
   const virtualRenderedRows = useMemo(
-    () => renderedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex),
-    [renderedRows, virtualWindow.endIndex, virtualWindow.startIndex],
+    () => visibleRenderedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex),
+    [visibleRenderedRows, virtualWindow.endIndex, virtualWindow.startIndex],
   );
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const hasMoreRows = onLoadMore !== undefined && rows.length < totalRowCount;
   const emptyPageRequestKey = useMemo(() => JSON.stringify({
     resultSetId,
@@ -800,7 +804,7 @@ export function DataGrid({
     const selectedColumns = visibleColumnIndexes.filter((_columnIndex, position) => columnRange === undefined || (position >= columnRange.minColumn && position <= columnRange.maxColumn));
     const columnIndexes = selectedColumns.length > 0 ? selectedColumns : visibleColumnIndexes;
     const selectedRows = processedRows.slice(minRow, maxRow + 1).map(row => row.values);
-    const payload: DataGridCopyPayload = { columns: columnIndexes.map(index => columns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection };
+    const payload: DataGridCopyPayload = { columns: columnIndexes.map(index => resolvedColumns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection };
     if (onCopySelection) {
       onCopySelection(payload);
       return;
@@ -869,9 +873,8 @@ export function DataGrid({
           {virtualRenderedRows.map(rendered => {
           if (rendered.kind === 'group') {
             const collapsed = collapsedGroups.has(rendered.id);
-            return <tr className="ui-data-grid-group-row" key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
+            return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
           }
-          if (rendered.groupId !== undefined && collapsedGroups.has(rendered.groupId)) return null;
           const rowSelected = selectedRowIndex === rendered.sourceIndex;
           const rowLabel = rendered.values.map((value, columnIndex) => {
             const column = resolvedColumns[columnIndex];
@@ -879,7 +882,7 @@ export function DataGrid({
             return formatDataGridCellValue(value, metadata?.type, metadata);
           }).join(' ');
           const firstVisibleColumn = visibleColumnIndexes[0];
-          return <tr key={`${resultSetId}:${rendered.sourceIndex}`} aria-label={rowLabel} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.sourceIndex)}>
+          return <tr key={`${resultSetId}:${rendered.sourceIndex}`} data-row-index={rendered.displayIndex} data-source-index={rendered.sourceIndex} aria-label={rowLabel} className={`${rendered.displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${rowSelected ? 'ui-data-grid-row-selected' : ''}`} onClick={() => onRowSelect?.(rendered.sourceIndex)}>
             <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => selectWholeRow(rendered.displayIndex, event)} onMouseEnter={() => firstVisibleColumn !== undefined && extendSelection(rendered.displayIndex, firstVisibleColumn)}><button type="button" aria-label={`Select row ${rendered.displayIndex + 1}`} onClick={event => { event.stopPropagation(); onRowSelect?.(rendered.sourceIndex); }}>{rendered.displayIndex + 1}</button></th>
             {visibleColumnIndexes.map(columnIndex => {
               const column = resolvedColumns[columnIndex]!;
