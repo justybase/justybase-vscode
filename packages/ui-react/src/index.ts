@@ -1,6 +1,6 @@
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
-export { formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumns } from './dataGrid';
+export { formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumnIndexes, resolveDataGridColumns } from './dataGrid';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,

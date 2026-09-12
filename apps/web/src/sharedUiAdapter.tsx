@@ -28,6 +28,7 @@ import {
   ResultTabs,
   ResultViewToolbar,
   RowDetail,
+  resolveDataGridColumnIndexes,
   resolveDataGridColumns,
   SchemaTree,
   UiShell,
@@ -477,16 +478,19 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     updateResultView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
   }, [updateResultView]);
 
+  const detailColumns = useMemo(
+    () => activeResult ? resolveDataGridColumns(activeResult.columns, activeRows) : [],
+    [activeResult?.columns, activeRows],
+  );
+
   const copySelected = useCallback(async (): Promise<void> => {
     const row = selectedRow === undefined ? visibleRows[0] : visibleRows[selectedRow];
     if (!row) return;
-    const text = row.map((value, index) => {
-      const column = activeResult?.columns[index];
-      return formatDataGridCellValue(value, column?.type, column);
-    }).join('\t');
+    const indexes = resolveDataGridColumnIndexes(detailColumns, activeResult?.view);
+    const text = indexes.map(index => formatDataGridCellValue(row[index], detailColumns[index]?.type, detailColumns[index])).join('\t');
     if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
     setNotice('Row copied.');
-  }, [activeResult?.columns, activeRows, selectedRow, visibleRows]);
+  }, [activeResult?.view, detailColumns, selectedRow, visibleRows]);
 
   const exportResults = useCallback((): void => {
     if (typeof document === 'undefined') return;
@@ -503,10 +507,6 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const historyItems: HistoryViewEntry[] = useMemo(() => history.map(entry => ({ id: entry.id, label: entry.sql.slice(0, 80), status: entry.status, sqlFingerprint: `${entry.createdAt} · ${entry.rowCount} rows` })), [history]);
   const selectedNode = state.metadata.selectedNodeId ? schemaNodes.find(node => node.id === state.metadata.selectedNodeId) : undefined;
   const resultState = resultAsyncState(activeResult, visibleRows.length);
-  const detailColumns = useMemo(
-    () => activeResult ? resolveDataGridColumns(activeResult.columns, activeRows) : [],
-    [activeResult?.columns, activeRows],
-  );
   const resultMessage = activeResult?.message;
   const designerFields = { target: selectedNode?.label ?? 'Select an object', connection: selectedConnection?.name ?? 'No connection' };
 

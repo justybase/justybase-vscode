@@ -13,6 +13,8 @@ export interface DataGridCellMetadata {
   readonly scale?: number;
   readonly inferredNumericKind?: DataGridNumericKind;
   readonly inferredDateInteger?: boolean;
+  /** Presentation for an unavailable aggregate, distinct from SQL NULL. */
+  readonly undefinedPlaceholder?: string;
 }
 
 export interface DataGridIntegerFormattingOptions {
@@ -488,7 +490,8 @@ export function formatDataGridCellValue(
   metadata: Omit<DataGridCellMetadata, 'type'> & { readonly type?: string } = {},
 ): string {
   const cellMetadata: DataGridCellMetadata = { ...metadata, type: type ?? metadata.type };
-  if (value === null || value === undefined) return 'NULL';
+  if (value === undefined) return cellMetadata.undefinedPlaceholder ?? 'NULL';
+  if (value === null) return 'NULL';
   if (cellMetadata.type !== undefined && /BOOL/u.test(cellMetadata.type.toUpperCase())) {
     const isTrue = value === true || value === 1 || value === '1'
       || (typeof value === 'string' && ['t', 'true', 'yes'].includes(value.trim().toLowerCase()));
