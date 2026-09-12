@@ -95,6 +95,20 @@ async function run() {
     assert.ok(ordersReferenceOffset >= 0, 'Authoring fixture is missing the orders reference.');
     const ordersPosition = document.positionAt(ordersReferenceOffset);
 
+    const definitions = await vscode.commands.executeCommand(
+        'vscode.executeDefinitionProvider',
+        document.uri,
+        ordersPosition,
+    );
+    assert.ok(Array.isArray(definitions) && definitions.length > 0, 'SQL definition provider returned no locations.');
+    assert.ok(
+        definitions.some(location => {
+            const targetUri = location?.uri ?? location?.targetUri;
+            return targetUri && targetUri.toString() === document.uri.toString();
+        }),
+        'SQL definition provider returned no location in the source document.',
+    );
+
     const references = await vscode.commands.executeCommand(
         'vscode.executeReferenceProvider',
         document.uri,
@@ -126,7 +140,7 @@ async function run() {
     await requestScreenshot('02-sql-navigation');
     scenarioReports.push({
         name: SCENARIO_NAMES[1],
-        checks: ['references', 'hover', 'rename'],
+        checks: ['definition', 'references', 'hover', 'rename'],
     });
 
     const registeredCommands = new Set(await vscode.commands.getCommands(true));

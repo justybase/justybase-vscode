@@ -286,6 +286,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     if (process.env.NODE_ENV === 'test') {
         const navigationProvider = new NetezzaParserNavigationProvider();
         context.subscriptions.push(
+            vscode.languages.registerDefinitionProvider(navigationSelector, navigationProvider),
             vscode.languages.registerReferenceProvider(navigationSelector, navigationProvider),
             vscode.languages.registerRenameProvider(navigationSelector, new NetezzaRenameProvider()),
         );
