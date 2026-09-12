@@ -49,6 +49,18 @@ export {
 export type { JsonPrimitive, JsonValue, LegacyPersistenceRead, PersistenceCodecOptions } from './persistence';
 export { createUiStore } from './store';
 export type { UiStore } from './store';
+export {
+  RESULT_VIEW_PERSISTENCE_SCHEMA_VERSION,
+  createResultViewPersistenceCodec,
+  decodeLegacyResultView,
+  decodePersistedResultView,
+  encodePersistedResultView,
+  isResultViewPersistencePayload,
+  normalizeResultView,
+  resultViewPersistenceIdentity,
+  resultViewPersistenceKey,
+} from './resultViewPersistence';
+export type { ResultViewPersistenceOptions, ResultViewPersistencePayload } from './resultViewPersistence';
 export { createExecutionController, createWorkspaceController } from './controllers';
 export type { ExecutionController, WorkspaceController } from './controllers';
 export { resultAsyncState } from './resultState';

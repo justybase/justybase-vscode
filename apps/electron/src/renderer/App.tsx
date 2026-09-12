@@ -32,6 +32,7 @@ import { SchemaExplorer } from './SchemaExplorer';
 import { EditRowPanel } from './EditRowPanel';
 import { ImportPanel } from './ImportPanel';
 import { ConnectionPanel } from './ConnectionPanel';
+import { getElectronResultViewStorage, readElectronResultView, writeElectronResultView } from './resultViewPersistence';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
@@ -161,6 +162,8 @@ export function App(): ReactElement {
   const activeExecutionRef = useRef<ExecutionHandle | undefined>(undefined);
   const pendingPageRequestsRef = useRef(new Set<string>());
   const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
+  const restoredResultViewsRef = useRef(new Set<string>());
+  const pendingResultViewWritesRef = useRef(new Map<string, { readonly timer: ReturnType<typeof setTimeout>; readonly write: () => void }>());
   const clientRef = useRef<ReturnType<typeof createElectronApiClient> | undefined>(undefined);
   const executionRef = useRef<ExecutionController | undefined>(undefined);
   const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
@@ -197,6 +200,7 @@ export function App(): ReactElement {
   const subscribe = useCallback((listener: () => void) => store.subscribe(() => listener()), [store]);
   const getSnapshot = useCallback(() => store.getState(), [store]);
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const resultViewStorage = useMemo(() => getElectronResultViewStorage(), []);
 
   useEffect(() => {
     let active = true;
@@ -255,6 +259,26 @@ export function App(): ReactElement {
   const resultState = resultAsyncState(activeResult, rows.length);
   const resultMessage = activeResult?.message;
 
+  const flushResultViewWrites = useCallback((): void => {
+    for (const [key, pending] of pendingResultViewWritesRef.current) {
+      clearTimeout(pending.timer);
+      pending.write();
+      pendingResultViewWritesRef.current.delete(key);
+    }
+  }, []);
+
+  const scheduleResultViewWrite = useCallback((result: UiResultSurfaceState, view: UiResultSurfaceState['view']): void => {
+    const key = `${result.sourceId}\u0000${result.resultSetId}`;
+    const previous = pendingResultViewWritesRef.current.get(key);
+    if (previous) clearTimeout(previous.timer);
+    const write = (): void => writeElectronResultView(resultViewStorage, result, view);
+    const timer = setTimeout(() => {
+      write();
+      pendingResultViewWritesRef.current.delete(key);
+    }, 180);
+    pendingResultViewWritesRef.current.set(key, { timer, write });
+  }, [resultViewStorage]);
+
   useEffect(() => {
     if (!activeDocument) return;
     const remembered = documentContextRef.current.get(activeDocument.id);
@@ -299,6 +323,25 @@ export function App(): ReactElement {
   useEffect(() => {
     setSelectedRow(undefined);
   }, [activeResult?.sourceId, activeResult?.resultSetId]);
+
+  useEffect(() => {
+    if (state.auth.status !== 'authenticated' || !activeResult) return;
+    const resultKey = `${activeResult.sourceId}\u0000${activeResult.resultSetId}`;
+    if (restoredResultViewsRef.current.has(resultKey)) return;
+    restoredResultViewsRef.current.add(resultKey);
+    const restored = readElectronResultView(resultViewStorage, activeResult);
+    if (restored) store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch: restored });
+  }, [activeResult?.resultSetId, activeResult?.sourceId, resultViewStorage, state.auth.status, store]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const flush = (): void => flushResultViewWrites();
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flushResultViewWrites();
+    };
+  }, [flushResultViewWrites]);
 
   const updateRows = useCallback((resultSetId: string, nextRows: readonly ElectronRow[]): void => {
     const next = { ...rowsByResultRef.current, [resultSetId]: nextRows };
@@ -576,11 +619,12 @@ export function App(): ReactElement {
     if (!activeResult) return;
     const nextView = { ...activeResult.view, ...patch };
     store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
+    scheduleResultViewWrite(activeResult, nextView);
     if (patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.sorting !== undefined) {
       pageStateRef.current.delete(activeResult.resultSetId);
       void loadResultPage({ ...activeResult, view: nextView }, 0, true, nextView);
     }
-  }, [activeResult, loadResultPage, store]);
+  }, [activeResult, loadResultPage, scheduleResultViewWrite, store]);
 
   const loadMoreRows = useCallback((): void => {
     if (!activeResult) return;

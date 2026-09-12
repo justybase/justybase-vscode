@@ -6,6 +6,8 @@ import type { QueryEvent, SchemaTreeNode } from '@justybase/contracts';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import { createApiClient, type ApiClient } from './api';
 import { displayRows, mapSchemaNode, resultAsyncState, SharedWebWorkspace } from './sharedUiAdapter';
+import { readSharedResultView, writeSharedResultView } from './sharedResultViewPersistence';
+import { createWorkspaceStorage } from './workspacePersistence';
 
 function response(body: unknown, ok = true, status = 200): Response {
   return { ok, status, headers: new Headers(), json: async () => body, blob: async () => new Blob() } as unknown as Response;
@@ -333,6 +335,34 @@ describe('shared Web UI adapter edge contracts', () => {
     expect(await screen.findByRole('cell', { name: 'b' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Result 1' })).toHaveAttribute('data-result-status', 'complete');
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/query/query-1/page'), expect.anything());
+  });
+
+  it('restores the persisted shared grid view and both scroll axes on a fresh workspace mount', async () => {
+    const user = userEvent.setup();
+    const { api } = edgeApi();
+    const storage = createWorkspaceStorage('persisted-shared-grid-user');
+    writeSharedResultView(storage, storage.userId, { sourceId: 'web:persisted-shared-grid-user', resultSetId: 'query-1:0' }, {
+      globalFilter: 'a',
+      columnFilters: {},
+      sorting: [],
+      grouping: [],
+      scrollTop: 4_500,
+      scrollLeft: 192,
+      anchorRow: 150,
+    });
+    const view = render(<SharedWebWorkspace api={api} user={{ id: storage.userId, username: 'persisted', role: 'user' }} onLogout={() => undefined} />);
+    await screen.findByRole('button', { name: 'SQLite' });
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+    const table = await screen.findByRole('table');
+    const grid = table.parentElement as HTMLDivElement;
+    await waitFor(() => {
+      expect(grid.scrollTop).toBe(4_500);
+      expect(grid.scrollLeft).toBe(192);
+    });
+    expect(screen.getByRole('textbox', { name: 'Filter results' })).toHaveValue('a');
+    expect(readSharedResultView(storage, storage.userId, { sourceId: 'web:persisted-shared-grid-user', resultSetId: 'query-1:0' })?.view.scrollTop).toBe(4_500);
+    view.unmount();
+    storage.remove('result_view_v1_query-1%3A0');
   });
 
   it('uses a safe message when finalized page hydration rejects with a non-Error value', async () => {
