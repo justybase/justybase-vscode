@@ -257,6 +257,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
   const rowsByResultRef = useRef(rowsByResult);
   const activeQueryRef = useRef<ActiveQuery | undefined>(undefined);
   const runGenerationRef = useRef(0);
@@ -762,6 +763,14 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     void navigator.clipboard.writeText(value).then(() => setNotice('Qualified name copied.')).catch(() => setNotice('Could not copy the qualified name.'));
   }, [authoringDatabaseKind]);
 
+  const revealProblem = useCallback((problem: import('./SharedSqlEditor').SharedSqlEditorProblem): void => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.revealLineInCenter(problem.startLineNumber);
+    editor.setPosition({ lineNumber: problem.startLineNumber, column: problem.startColumn });
+    editor.focus();
+  }, []);
+
   const cancel = useCallback(async (): Promise<void> => {
     const active = activeQueryRef.current;
     if (!active) return;
@@ -976,7 +985,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         : state.shell.activeSurface === 'designer' ? <DesignerForm fields={designerFields} capability={state.capabilities.find(capability => capability.key === 'designer')} onChange={() => undefined} onPreview={() => setNotice('Designer preview remains adapter-backed in shared mode.')} onApply={() => setNotice('Designer apply is guarded and unavailable for this read-only capability.')} />
           : <>
             <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} />
-            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onProblemsChange={setProblems} /><SharedSqlProblems problems={problems} onSelect={problem => setNotice(`SQL problem at line ${problem.startLineNumber}, column ${problem.startColumn}.`)} /></div>
+            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onReady={editor => { editorRef.current = editor; }} onProblemsChange={setProblems} /><SharedSqlProblems problems={problems} onSelect={revealProblem} /></div>
             <div className="shared-result-panel">
               <div className="shared-editor-actions" role="toolbar" aria-label="SQL editor actions"><button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button><SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" /></div>
               {notice && <div role="status">{notice}</div>}

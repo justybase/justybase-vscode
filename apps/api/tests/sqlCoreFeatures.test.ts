@@ -102,6 +102,21 @@ describe('shared Netezza web SQL core — LSP feature parity (D1)', () => {
     expect(await core.completion('file:///features.sql', 1, "SELECT 'SEL", { line: 0, character: 10 })).toEqual([]);
   });
 
+  it('keeps static completion available when catalog metadata fails', async () => {
+    const uri = 'file:///metadata-unavailable.sql';
+    const core = new NetezzaWebLspCore({
+      requestMetadata: async params => {
+        if (params.kind === 'context') return { databaseKind: 'netezza' };
+        throw new Error('catalog unavailable');
+      },
+    });
+    core.setContext(uri, { databaseKind: 'netezza', effectiveDatabase: 'DB', effectiveSchema: 'PUBLIC' });
+
+    const completion = await core.completion(uri, 1, 'SELECT NU', { line: 0, character: 9 });
+
+    expect(completion.some(item => item.label === 'NULLIF')).toBe(true);
+  });
+
   it('preserves quoted identifier style during rename and rejects empty names', async () => {
     const core = createCore();
     const uri = 'file:///quoted-rename.sql';

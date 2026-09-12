@@ -183,11 +183,13 @@ export class NetezzaWebLspCore {
   private readonly requestMetadata: WebLspCoreOptions["requestMetadata"];
   private readonly authoring: DatabaseSqlAuthoring;
   private readonly authoringForContext: (context: WebLspContext) => DatabaseSqlAuthoring;
+  private readonly logger: WebLspCoreOptions['logger'];
 
   public constructor(options: WebLspCoreOptions) {
     this.requestMetadata = options.requestMetadata;
     this.authoring = options.authoring ?? NETEZZA_SQL_AUTHORING;
     this.authoringForContext = options.authoringForContext ?? (() => this.authoring);
+    this.logger = options.logger;
   }
 
   private getAuthoring(context: WebLspContext): DatabaseSqlAuthoring {
@@ -876,13 +878,13 @@ export class NetezzaWebLspCore {
     const key = `${state.context.effectiveDatabase}|${state.context.effectiveSchema ?? ""}`.toUpperCase();
     if (state.tableLists.has(key)) return;
     const responses = [
-      await this.requestMetadata({
+      await this.safeMetadataRequest({
         documentUri,
         kind: "tables",
         database: state.context.effectiveDatabase,
         schema: state.context.effectiveSchema,
       }),
-      await this.requestMetadata({
+      await this.safeMetadataRequest({
         documentUri,
         kind: "views",
         database: state.context.effectiveDatabase,
@@ -908,7 +910,7 @@ export class NetezzaWebLspCore {
       const qualificationKey = tableKey(reference.database, reference.schema, reference.name);
       if (!state.qualificationProposals.has(qualificationKey)
         && !(reference.database && reference.schema)) {
-        const qualificationResponse = await this.requestMetadata({
+        const qualificationResponse = await this.safeMetadataRequest({
           documentUri,
           kind: "qualifyTable",
           database: reference.database,
@@ -923,7 +925,7 @@ export class NetezzaWebLspCore {
       // The object-list cache supplies names only. Keep warming a referenced
       // table until its columns are available for completion and validation.
       if (state.tables.get(key)?.columns.length || state.knownMissingTables.has(key)) continue;
-      const response = await this.requestMetadata({
+      const response = await this.safeMetadataRequest({
         documentUri,
         kind: "cachedTableInfo",
         database: reference.database ?? state.context.effectiveDatabase,
@@ -932,7 +934,7 @@ export class NetezzaWebLspCore {
       });
       let table = parseMetadataTable(response);
       if (!table || (table.columns ?? []).length === 0) {
-        const fetched = await this.requestMetadata({
+        const fetched = await this.safeMetadataRequest({
           documentUri,
           kind: "tableInfo",
           database: reference.database ?? state.context.effectiveDatabase,
@@ -948,6 +950,22 @@ export class NetezzaWebLspCore {
         state.knownMissingTables.add(key);
       }
 
+    }
+  }
+
+  /**
+   * Metadata is an enhancement to SQL authoring, not a prerequisite for it.
+   * A connection can be unavailable, a local database can have no catalog
+   * matching the selected authoring profile, or a remote catalog request can
+   * fail transiently. Keep static completion, parsing and quick fixes usable
+   * in all of those cases and let the next explicit refresh retry metadata.
+   */
+  private async safeMetadataRequest(params: WebLspMetadataRequestParams): Promise<unknown> {
+    try {
+      return await this.requestMetadata(params);
+    } catch (error: unknown) {
+      this.logger?.error(`SQL metadata request failed; continuing without metadata: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return undefined;
     }
   }
 
