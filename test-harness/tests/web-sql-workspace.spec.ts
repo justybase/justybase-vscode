@@ -36,7 +36,7 @@ async function capture(page: Page, name: string): Promise<void> {
 }
 
 async function replaceEditorText(page: Page, sql: string): Promise<void> {
-  const editor = page.locator('.monaco-editor');
+  const editor = page.locator('.monaco-editor:visible').first();
   await expect(editor).toBeVisible();
   await editor.click();
   await page.keyboard.press('Control+A');
@@ -203,12 +203,12 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     const dirtyTabMenu = page.getByRole('menu', { name: 'Query 3' });
     await expect(dirtyTabMenu).toBeVisible();
     page.once('dialog', dialog => { void dialog.dismiss(); });
-    await dirtyTabMenu.getByRole('menuitem', { name: 'Close', exact: true }).click();
+    await dirtyTabMenu.getByRole('menuitem', { name: /^Close Ctrl\+F4$/u }).click();
     await expect(documents).toHaveCount(3);
     await documents.nth(2).click({ button: 'right' });
     await expect(dirtyTabMenu).toBeVisible();
     page.once('dialog', dialog => { void dialog.accept(); });
-    await dirtyTabMenu.getByRole('menuitem', { name: 'Close', exact: true }).click();
+    await dirtyTabMenu.getByRole('menuitem', { name: /^Close Ctrl\+F4$/u }).click();
     await expect(documents).toHaveCount(2);
 
     const secondTabBox = await documents.nth(1).boundingBox();
