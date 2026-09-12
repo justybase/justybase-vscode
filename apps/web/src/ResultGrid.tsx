@@ -4,7 +4,7 @@ import { getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterSpec, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
 import type { UiResultViewState } from '@justybase/ui-core';
-import { DataGrid, formatDataGridCellValue, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
+import { DataGrid, createDataGridClipboardPayload, formatDataGridCellValue, formatDataGridClipboard, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
 import type { DataGridCellMetadata, DataGridCopyPayload, GridScrollPosition } from '@justybase/ui-react';
 import { aggregateResultRows, filterResultRows, type ResultColumn, type ResultColumnFilter } from '@justybase/result-core';
 import { useApiClient } from './api';
@@ -85,47 +85,6 @@ function parseLegacyGridState(value: string | null): SavedGridState | undefined 
 
 function readLegacyGridState(storage: WorkspaceStorage, key: string): SavedGridState | undefined {
   return parseLegacyGridState(storage.get(key));
-}
-
-function serialiseValue(value: unknown): unknown {
-  return typeof value === 'bigint' ? value.toString() : value;
-}
-
-function sqlLiteral(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL';
-  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
-  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function uniqueJsonNames(columns: string[]): string[] {
-  const used = new Set<string>();
-  return columns.map((column, index) => {
-    const base = column || `column_${index + 1}`;
-    let candidate = base;
-    let suffix = 2;
-    while (used.has(candidate)) { candidate = `${base}_${suffix}`; suffix += 1; }
-    used.add(candidate);
-    return candidate;
-  });
-}
-
-function rowAsJson(columns: string[], values: readonly unknown[]): string {
-  const record: Record<string, unknown> = {};
-  uniqueJsonNames(columns).forEach((column, index) => { record[column] = serialiseValue(values[index]); });
-  return JSON.stringify(record, null, 2);
-}
-
-function rowAsMarkdown(columns: string[], values: readonly unknown[], metadata: readonly DataGridCellMetadata[]): string {
-  const header = `| ${columns.join(' | ')} |`;
-  const separator = `| ${columns.map(() => '---').join(' | ')} |`;
-  const body = `| ${values.map((value, index) => formatCellValue(value, metadata[index]).text.replace(/\|/g, '\\|')).join(' | ')} |`;
-  return [header, separator, body].join('\n');
-}
-
-function rowAsInsert(columns: string[], values: readonly unknown[]): string {
-  const names = columns.map((column, index) => `"${(column || `column_${index + 1}`).replace(/"/g, '""')}"`).join(', ');
-  return `INSERT INTO <table> (${names}) VALUES (${values.map(sqlLiteral).join(', ')});`;
 }
 
 /**
@@ -551,12 +510,26 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     void writeText.call(navigator.clipboard, text).catch(() => setError('Failed to copy to clipboard'));
   }
 
+  async function copyGridPayload(payload: DataGridCopyPayload, plainFormat: 'text' | 'markdown' | 'json' | 'sql' = 'text'): Promise<void> {
+    const formatted = createDataGridClipboardPayload(payload);
+    const plainText = formatDataGridClipboard(payload, plainFormat);
+    if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard?.write === 'function') {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([formatted.html], { type: 'text/html' }),
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
+        })]);
+        return;
+      } catch {
+        // Fall back to plain text for browsers that expose write() but reject
+        // HTML clipboard items in the current permission context.
+      }
+    }
+    copyText(plainText);
+  }
+
   function copyGridSelection(payload: DataGridCopyPayload): void {
-    const text = [
-      payload.columns.map(column => column.name).join('\t'),
-      ...payload.rows.map(row => row.map((value, index) => formatDataGridCellValue(value, payload.columns[index]?.type, payload.columns[index])).join('\t')),
-    ].join('\n');
-    copyText(text);
+    void copyGridPayload(payload);
     setNotice('Selection copied.');
   }
 
@@ -570,12 +543,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     const row = contextRow();
     if (!row) return;
     const value = row.values[contextMenu.columnIndex];
-    const text = format === 'value' ? formatCellValue(value, gridColumns[contextMenu.columnIndex]).text
-      : format === 'tsv' ? [result.columns.join('\t'), row.values.map((item, index) => formatCellValue(item, gridColumns[index]).text).join('\t')].join('\n')
-        : format === 'json' ? rowAsJson(result.columns, row.values)
-          : format === 'markdown' ? rowAsMarkdown(result.columns, row.values, gridColumns)
-            : rowAsInsert(result.columns, row.values);
-    copyText(text);
+    if (format === 'value') copyText(formatCellValue(value, gridColumns[contextMenu.columnIndex]).text);
+    else void copyGridPayload({ columns: gridColumns, rows: [row.values] }, format === 'tsv' ? 'text' : format);
     setContextMenu(null);
   }
 
