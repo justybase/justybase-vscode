@@ -400,6 +400,16 @@ FROM seq`;
     await expect(page.locator('tr[data-source-index="0"]')).toBeVisible({ timeout: 30_000 });
     checks.push('server-backed filter and clear');
 
+    phase = 'result analysis';
+    await page.getByRole('button', { name: 'Aggregate', exact: true }).click();
+    const analysis = page.getByRole('region', { name: 'Result analysis', exact: true });
+    await expect(analysis).toBeVisible({ timeout: 30_000 });
+    await expect(analysis.getByRole('heading', { name: 'Aggregates', exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(analysis).toContainText('1 200');
+    await page.getByRole('button', { name: 'Close result analysis', exact: true }).click();
+    await expect(analysis).toBeHidden();
+    checks.push('server-backed aggregate analysis through the shared grid');
+
     phase = 'scroll persistence';
     await grid.evaluate(element => {
       element.scrollTop = 9_000;
