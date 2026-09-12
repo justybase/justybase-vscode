@@ -135,6 +135,16 @@ describe('Electron schema explorer SQL templates', () => {
     const callsBeforeRefresh = api.schemaTree.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Refresh schema' }));
     await waitFor(() => expect(api.schemaTree.mock.calls.length).toBeGreaterThan(callsBeforeRefresh));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Database schema' })).toHaveAttribute('aria-busy', 'false'));
+  });
+
+  it('reloads the root before expanding all children after a metadata mutation', async () => {
+    const api = apiFixture();
+    render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" onInsert={() => undefined} />);
+    await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
+    const callsBeforeExpand = api.schemaTree.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all schema nodes' }));
+    await waitFor(() => expect(api.schemaTree.mock.calls.length).toBeGreaterThan(callsBeforeExpand));
   });
 
   it('reloads the schema and an active search after a designer mutation', async () => {

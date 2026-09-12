@@ -229,8 +229,11 @@ export function SchemaExplorer({ api, connectionId, database, databaseKind, onIn
 
   const expandAll = async (): Promise<void> => {
     const generation = generationRef.current;
-    const loaded = new Map<string, readonly SchemaTreeNode[]>(Object.entries(children));
-    const root = loaded.get(ROOT) ?? await loadChildren(ROOT);
+    // A full expansion is an explicit request for a current tree. Do not
+    // reuse nested children from before a schema mutation/refresh; those
+    // nodes may have the same stable ids while their columns have changed.
+    const loaded = new Map<string, readonly SchemaTreeNode[]>();
+    const root = await loadChildren(ROOT);
     if (generationRef.current !== generation) return;
     loaded.set(ROOT, root);
     const nextExpanded = new Set<string>([ROOT]);
@@ -322,8 +325,8 @@ export function SchemaExplorer({ api, connectionId, database, databaseKind, onIn
 
   const visibleRootNodes = useMemo(() => rootNodes.filter(node => node.kind !== 'object' || !node.objectType || activeFilters.has(node.objectType.toUpperCase())), [activeFilters, rootNodes]);
 
-  return <section className="electron-schema-explorer" aria-label="Database schema">
-    <div className="electron-schema-heading"><strong>Schema</strong><div className="electron-schema-actions"><button type="button" aria-label="Refresh schema" title="Refresh schema" onClick={refreshSchema}>↻</button><button type="button" aria-label="Expand all schema nodes" title="Expand all" onClick={() => void expandAll()}>＋</button><button type="button" aria-label="Collapse all schema nodes" title="Collapse all" onClick={collapseAll}>−</button></div></div>
+  return <section className="electron-schema-explorer" aria-label="Database schema" aria-busy={loading.has(ROOT) ? 'true' : 'false'}>
+    <div className="electron-schema-heading"><strong>Schema</strong><div className="electron-schema-actions"><button type="button" aria-label="Refresh schema" title="Refresh schema" onClick={refreshSchema}>↻</button><button type="button" aria-label="Expand all schema nodes" title="Expand all" disabled={loading.has(ROOT)} onClick={() => void expandAll()}>＋</button><button type="button" aria-label="Collapse all schema nodes" title="Collapse all" onClick={collapseAll}>−</button></div></div>
     <label className="electron-schema-search"><span>⌕</span><input aria-label="Search schema" placeholder="Search tables, views…" value={search} onChange={event => setSearch(event.target.value)} /></label>
     <div className="electron-schema-filters">{OBJECT_FILTERS.map(filter => <button type="button" key={filter} className={activeFilters.has(filter) ? 'active' : ''} onClick={() => toggleFilter(filter)}>{filter}</button>)}</div>
     {error && <div className="electron-schema-error" role="alert">{error}</div>}
