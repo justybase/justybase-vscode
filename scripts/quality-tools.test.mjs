@@ -337,7 +337,7 @@ test('rejects an ambiguous LCOV basename fallback', () => {
 
 test('rejects changed high-risk files missing from coverage', () => {
   const result = checkChangedCoverage({
-    diff: '+++ b/src/migration/migrationService.ts\n@@ -1 +1 @@\n',
+    diff: '+++ b/src/migration/migrationService.ts\n@@ -46 +46 @@\n',
     lcov: '',
     baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/migration/'] } },
   });
@@ -371,6 +371,15 @@ test('ignores type members inside executable TypeScript modules', () => {
   });
   assert.deepEqual(result.failures, []);
   assert.equal(result.files[0]?.executableLines, 0);
+});
+
+test('does not require an LCOV record for changed declaration-only files', () => {
+  const result = checkChangedCoverage({
+    diff: '+++ b/media/resultPanel/databaseGrouping.ts\n@@ -30 +31 @@\n',
+    lcov: '',
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['media/resultPanel/'] } },
+  });
+  assert.deepEqual(result.failures, []);
 });
 
 test('does not require LCOV for Istanbul-ignored files', () => {

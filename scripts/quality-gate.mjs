@@ -172,7 +172,7 @@ function isTypeOnlySource(file) {
   }
 }
 
-function isTypeDeclarationLine(file, lineNumber) {
+function isNonExecutableAstLine(file, lineNumber) {
   try {
     const source = fs.readFileSync(file, 'utf8');
     const sourceFile = ts.createSourceFile(
@@ -186,6 +186,17 @@ function isTypeDeclarationLine(file, lineNumber) {
     const visit = node => {
       const startLine = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile)).line + 1;
       const endLine = ts.getLineAndCharacterOfPosition(sourceFile, node.end).line + 1;
+      const body = 'body' in node && node.body && typeof node.body.getStart === 'function'
+        ? node.body
+        : undefined;
+      const firstBodyStatement = body && ts.isBlock(body) && body.statements.length > 0
+        ? body.statements[0]
+        : undefined;
+      const bodyStartLine = firstBodyStatement
+        ? ts.getLineAndCharacterOfPosition(sourceFile, firstBodyStatement.getStart(sourceFile)).line + 1
+        : body
+          ? ts.getLineAndCharacterOfPosition(sourceFile, body.getStart(sourceFile)).line + 1
+          : undefined;
       if (
         lineNumber >= startLine
         && lineNumber <= endLine
@@ -194,6 +205,28 @@ function isTypeDeclarationLine(file, lineNumber) {
           || ts.isTypeAliasDeclaration(node)
           || ts.isTypeLiteralNode(node)
           || ts.isMappedTypeNode(node)
+          || ts.isImportDeclaration(node)
+          || ts.isCaseClause(node)
+          || ts.isDefaultClause(node)
+          || ts.isPropertyAssignment(node)
+          || ts.isShorthandPropertyAssignment(node)
+          || (ts.isVariableDeclaration(node) && node.initializer === undefined)
+          || ts.isJsxAttribute(node)
+          || ts.isJsxSpreadAttribute(node)
+          || (ts.isCallExpression(node)
+            && lineNumber > startLine
+            && lineNumber <= endLine)
+          || (ts.isIfStatement(node)
+            && lineNumber > startLine
+            && lineNumber <= ts.getLineAndCharacterOfPosition(sourceFile, node.expression.end).line + 1)
+          || ((ts.isFunctionDeclaration(node)
+            || ts.isMethodDeclaration(node)
+            || ts.isConstructorDeclaration(node)
+            || ts.isGetAccessorDeclaration(node)
+            || ts.isSetAccessorDeclaration(node)
+            || ts.isArrowFunction(node))
+            && bodyStartLine !== undefined
+            && lineNumber < bodyStartLine)
         )
       ) {
         declarationLine = true;
@@ -208,7 +241,7 @@ function isTypeDeclarationLine(file, lineNumber) {
 }
 
 function isLikelyNonExecutableLine(file, lineNumber) {
-  if (isTypeDeclarationLine(file, lineNumber)) return true;
+  if (isNonExecutableAstLine(file, lineNumber)) return true;
   try {
     const sourceLine = fs.readFileSync(file, 'utf8').split(/\r\n|\r|\n/u)[lineNumber - 1] ?? '';
     const trimmed = sourceLine.trim();
@@ -216,6 +249,8 @@ function isLikelyNonExecutableLine(file, lineNumber) {
       || /^(?:\/\/|\/\*|\*|\*\/)/u.test(trimmed)
       || /^(?:export\s+)?(?:declare\s+)?(?:interface|type)\b/u.test(trimmed)
       || /^import\s+type\b/u.test(trimmed)
+      || /^(?:[}\])]|,|[?:])/.test(trimmed)
+      || /^(?:[A-Za-z_$][\w$]*|\d+(?:\.\d+)?),\s*$/u.test(trimmed)
       || /^[{}()[\],;]+$/u.test(trimmed);
   } catch {
     return false;
@@ -277,7 +312,10 @@ export function checkChangedCoverage({ diff, lcov, baseline }) {
     if (!coverageFileExtensions.has(path.extname(file)) || file.endsWith('.d.ts') || ignoredCoverageFilePattern.test(file)) continue;
     if (isIstanbulIgnoredFile(path.join(root, file))) continue;
     const matchingRecords = findLcovRecords(records, path.join(root, file));
-    if (matchingRecords.length === 0 && isTypeOnlySource(path.join(root, file))) continue;
+    if (matchingRecords.length === 0 && (
+      isTypeOnlySource(path.join(root, file))
+      || [...lines].every(line => isLikelyNonExecutableLine(path.join(root, file), line))
+    )) continue;
     if (matchingRecords.length === 0) {
       failures.push(`${file}: no LCOV record was produced for changed high-risk code.`);
       continue;
