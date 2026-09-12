@@ -1,0 +1,91 @@
+name: Web Dockyard workspace
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'packages/contracts/**'
+      - 'packages/database-runtime/**'
+      - 'packages/designer-core/**'
+      - 'packages/duckdb-runtime/**'
+      - 'packages/netezza-runtime/**'
+      - 'packages/sql-core/**'
+      - 'packages/ui-core/**'
+      - 'packages/ui-react/**'
+      - 'test-harness/tests/web-sql-workspace.spec.ts'
+      - 'test-harness/web-sql-playwright.config.ts'
+      - 'vendor/dockyard/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/web-dockyard.yml'
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'packages/contracts/**'
+      - 'packages/database-runtime/**'
+      - 'packages/designer-core/**'
+      - 'packages/duckdb-runtime/**'
+      - 'packages/netezza-runtime/**'
+      - 'packages/sql-core/**'
+      - 'packages/ui-core/**'
+      - 'packages/ui-react/**'
+      - 'test-harness/tests/web-sql-workspace.spec.ts'
+      - 'test-harness/web-sql-playwright.config.ts'
+      - 'vendor/dockyard/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/web-dockyard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    name: Web Dockyard (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium (Linux)
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npx playwright install chromium
+
+      - name: Run Web Dockyard API/browser gate
+        run: npm run test:playwright:web-api
+
+      - name: Upload Web Dockyard diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dockyard-${{ matrix.os }}
+          path: test-results/web-sql
+          if-no-files-found: warn
+          retention-days: 14
