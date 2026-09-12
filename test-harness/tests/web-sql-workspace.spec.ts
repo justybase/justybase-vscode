@@ -42,7 +42,9 @@ async function replaceEditorText(page: Page, sql: string): Promise<void> {
   await page.keyboard.press('Control+A');
   await page.keyboard.press('Backspace');
   await page.keyboard.insertText(sql);
-  await page.waitForTimeout(300);
+  const visibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
+  const expectedMarker = sql.trim().toUpperCase() === 'SX' ? 'SELECT' : visibleMarker;
+  await expect.poll(async () => (await page.locator('.monaco-editor .view-line').allTextContents()).join('\n').replaceAll('\u00a0', ' ')).toContain(expectedMarker);
 }
 
 async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> {
@@ -194,6 +196,20 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await page.getByRole('button', { name: 'New query', exact: true }).click();
     await expect(documents).toHaveCount(2);
     await expect(documents.nth(1).locator('.ad-label-text')).toContainText('Query 2');
+    await page.getByRole('button', { name: 'New query', exact: true }).click();
+    await expect(documents).toHaveCount(3);
+    await replaceEditorText(page, 'SELECT 99 AS CLOSE_CANCEL');
+    await documents.nth(2).click({ button: 'right' });
+    const dirtyTabMenu = page.getByRole('menu', { name: 'Query 3' });
+    await expect(dirtyTabMenu).toBeVisible();
+    page.once('dialog', dialog => { void dialog.dismiss(); });
+    await dirtyTabMenu.getByRole('menuitem', { name: 'Close', exact: true }).click();
+    await expect(documents).toHaveCount(3);
+    await documents.nth(2).click({ button: 'right' });
+    await expect(dirtyTabMenu).toBeVisible();
+    page.once('dialog', dialog => { void dialog.accept(); });
+    await dirtyTabMenu.getByRole('menuitem', { name: 'Close', exact: true }).click();
+    await expect(documents).toHaveCount(2);
 
     const secondTabBox = await documents.nth(1).boundingBox();
     const firstTabBox = await documents.nth(0).boundingBox();
@@ -204,6 +220,14 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await page.mouse.move(firstTabBox!.x + 4, firstTabBox!.y + firstTabBox!.height / 2, { steps: 10 });
     await page.mouse.up();
     await expect.poll(async () => (await documents.nth(0).locator('.ad-label-text').textContent())?.trim()).toBe('Query 2');
+
+    await documents.nth(0).click({ button: 'right' });
+    const queryMenu = page.getByRole('menu', { name: 'Query 2' });
+    await expect(queryMenu).toBeVisible();
+    await expect(queryMenu.getByRole('menuitem', { name: 'Float', exact: true })).toBeVisible();
+    await expect(queryMenu.getByRole('menuitem', { name: 'Open in browser window', exact: true })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(queryMenu).toHaveCount(0);
 
     await documents.nth(0).dblclick();
     await expect(page.locator('.ad-floating')).toHaveCount(1);

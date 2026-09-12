@@ -13,7 +13,7 @@ export default defineConfig({
   testMatch: /web-sql-workspace\.spec\.ts/,
   timeout: 120_000,
   expect: { timeout: 20_000 },
-  retries: 1,
+  retries: 0,
   outputDir: path.resolve(repositoryRoot, 'test-results/web-sql'),
   use: {
     baseURL: 'http://127.0.0.1:3010',

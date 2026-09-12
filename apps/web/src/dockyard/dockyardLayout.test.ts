@@ -1,11 +1,13 @@
 /** @jest-environment jsdom */
 
 import type { LayoutSnapshot } from 'avalondock-web';
+import { DockingManager } from 'avalondock-web';
 import {
   DOCKYARD_CONTENT_IDS,
   DockyardManagerAdapter,
   createDefaultDockyardLayout,
   explainToolId,
+  filterDockyardContextMenu,
   queryDocumentId,
   type DockyardContentDefinition,
 } from './dockyardManagerAdapter';
@@ -120,6 +122,16 @@ describe('Dockyard layout persistence', () => {
       explainToolId('tab-1'),
     ]));
   });
+
+  it('treats storage read failures as an empty layout', () => {
+    const storage: WorkspaceStorage = {
+      userId: 'alice',
+      get: () => { throw new Error('storage unavailable'); },
+      set: () => undefined,
+      remove: () => undefined,
+    };
+    expect(loadDockyardLayout(storage)).toBeUndefined();
+  });
 });
 
 describe('Dockyard DOM adapter lifecycle', () => {
@@ -154,5 +166,60 @@ describe('Dockyard DOM adapter lifecycle', () => {
     adapter.dispose();
     adapter.dispose();
     expect(adapter.getContentHost(DOCKYARD_CONTENT_IDS.connections)).toBeUndefined();
+  });
+
+  it('removes the unsupported browser-window action from both context menus', () => {
+    const storage = memoryStorage('menu-user');
+    const adapter = new DockyardManagerAdapter({ host: document.createElement('div'), storage, definitions: definitions(document), explorerWidth: 275 });
+    const menuEntries = [
+      { Label: 'Float' },
+      { Label: 'Open in browser window' },
+      { Label: 'Close' },
+      null,
+    ];
+    const documentMenu = adapter.manager.DocumentContextMenu;
+    const anchorableMenu = adapter.manager.AnchorableContextMenu;
+    expect(typeof documentMenu).toBe('function');
+    expect(typeof anchorableMenu).toBe('function');
+    const model = adapter.manager.Find(queryDocumentId('tab-1'));
+    expect(model).not.toBeNull();
+    if (model && typeof documentMenu === 'function' && typeof anchorableMenu === 'function') {
+      expect(documentMenu(model, adapter.manager, menuEntries)).toEqual([{ Label: 'Float' }, { Label: 'Close' }, null]);
+      expect(anchorableMenu(model, adapter.manager, menuEntries)).toEqual([{ Label: 'Float' }, { Label: 'Close' }, null]);
+    }
+    expect(filterDockyardContextMenu(model!, adapter.manager, menuEntries)).toEqual([{ Label: 'Float' }, { Label: 'Close' }, null]);
+    adapter.dispose();
+  });
+
+  it('cancels a document close and disposes after failed initialization', () => {
+    const storage = memoryStorage('close-user');
+    const denied: string[] = [];
+    const adapter = new DockyardManagerAdapter({
+      host: document.createElement('div'),
+      storage,
+      definitions: definitions(document),
+      explorerWidth: 275,
+      onDocumentClosing: tabId => { denied.push(tabId); return false; },
+    });
+    const model = adapter.manager.Find(queryDocumentId('tab-1'));
+    expect(model).not.toBeNull();
+    if (model) expect(adapter.manager.Close(model)).toBe(false);
+    expect(denied).toEqual(['tab-1']);
+    expect(adapter.manager.Find(queryDocumentId('tab-1'))).not.toBeNull();
+    adapter.dispose();
+
+    const dispose = jest.spyOn(DockingManager.prototype, 'Dispose');
+    const beginUpdate = jest.spyOn(DockingManager.prototype, 'BeginUpdate').mockImplementation(() => {
+      throw new Error('initial sync failed');
+    });
+    expect(() => new DockyardManagerAdapter({
+      host: document.createElement('div'),
+      storage: memoryStorage('failed-init-user'),
+      definitions: definitions(document),
+      explorerWidth: 275,
+    })).toThrow('initial sync failed');
+    expect(dispose).toHaveBeenCalledTimes(1);
+    beginUpdate.mockRestore();
+    dispose.mockRestore();
   });
 });
