@@ -45,6 +45,7 @@ function xmlValue(value: unknown): string {
 }
 
 function markdownValue(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL';
   return textValue(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 

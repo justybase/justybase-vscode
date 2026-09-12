@@ -57,6 +57,19 @@ describe('Electron same-origin API adapter', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/query/query%2Fone/export', expect.objectContaining({ credentials: 'same-origin', method: 'POST', headers: expect.objectContaining({ 'x-justybase-csrf': 'csrf-fixture' }) }));
   });
 
+  it('preserves compressed export filenames in the Electron download adapter', async () => {
+    const blob = new Blob(['compressed'], { type: 'application/gzip' });
+    const fetcher = jest.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-disposition': 'attachment; filename="orders.csv.gz"' }),
+      blob: async () => blob,
+    }) as Response);
+    const client = createElectronApiClient({ fetcher });
+    await expect(client.exportQuery('query-1', { format: 'csv.gz', offset: 0, limit: 500 })).resolves.toEqual({ blob, fileName: 'orders.csv.gz' });
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(expect.objectContaining({ format: 'csv.gz' }));
+  });
+
   it('exposes the authenticated metadata, authoring and guarded-write routes', async () => {
     const fetcher = jest.fn(async (input: RequestInfo | URL) => {
       const route = String(input);
