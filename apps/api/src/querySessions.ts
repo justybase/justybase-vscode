@@ -299,10 +299,13 @@ export class QuerySessionManager {
       if (functionName !== 'count' && !hasColumn) return [];
       const columnName = hasColumn ? session.manifest.columns[aggregate.columnIndex ?? 0]?.name ?? `Column ${(aggregate.columnIndex ?? 0) + 1}` : '*';
       const source = hasColumn ? session.manifest.columns[aggregate.columnIndex ?? 0] : undefined;
+      const outputScale = functionName === 'avg' && source?.scale !== undefined
+        ? source.scale + 20
+        : source?.scale;
       outputColumns.push({
         name: `${functionName.toUpperCase()}(${columnName})`,
         type: functionName === 'count' ? 'BIGINT' : numericType(source?.type) ? 'DECIMAL' : source?.type,
-        ...(functionName === 'count' || source?.scale === undefined ? {} : { scale: source.scale }),
+        ...(functionName === 'count' || outputScale === undefined ? {} : { scale: outputScale }),
       });
       return [{ functionName, columnIndex: hasColumn ? aggregate.columnIndex : undefined }];
     });

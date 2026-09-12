@@ -26,7 +26,7 @@ type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
 
 export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
-  return getResultAsyncState(result, rowCount, { streamingEmpty: 'loading', streamingWithUnloadedRows: 'loading' });
+  return getResultAsyncState(result, rowCount);
 }
 
 export function displayRows(result: UiResultSurfaceState | undefined, rows: readonly ElectronRow[]): readonly ElectronRow[] {
