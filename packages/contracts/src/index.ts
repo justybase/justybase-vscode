@@ -182,3 +182,4 @@ export type {
   SqlLanguageContext,
   WebUser,
 } from './webApi';
+export { MAX_QUERY_FILE_IMPORT_BYTES } from './webApi';

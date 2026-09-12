@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
+import { MAX_QUERY_FILE_IMPORT_BYTES } from '@justybase/contracts';
 import type { QueryFileImportFormat, SchemaTreeNode } from '@justybase/contracts';
 import { useApiClient } from './api';
 
@@ -46,6 +47,10 @@ export function ImportPanel({ connectionId, target, database, onClose, onComplet
     event.preventDefault();
     if (!file || !format) {
       setError('Choose a CSV, XLSX, or XLSB file.');
+      return;
+    }
+    if (file.size > MAX_QUERY_FILE_IMPORT_BYTES) {
+      setError('The selected file is larger than the 25 MB import limit.');
       return;
     }
     if (!target.schema || !table) {

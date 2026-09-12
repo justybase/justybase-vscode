@@ -7,6 +7,7 @@ import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
+import { MAX_QUERY_FILE_IMPORT_BYTES } from '@justybase/contracts';
 import type { AdminRestoreRequest, QueryPreviewResponse, QueryStartRequest } from '@justybase/contracts';
 import { createExecutionOrchestrator, ExecutionOrchestrator, isConnectionBrokenError, isSafeToRetrySql, type ExecutionBackend } from '@justybase/database-runtime';
 import { type ApiConfig } from './config';
@@ -36,10 +37,9 @@ const CSRF_COOKIE = 'justybase_csrf';
 const LOGIN_RATE_LIMIT = { max: 10, windowMs: 60_000 };
 const QUERY_RATE_LIMIT = { max: 120, windowMs: 60_000 };
 const MAX_ADMIN_BACKUP_BYTES = 100 * 1024 * 1024;
-const MAX_IMPORT_FILE_BYTES = 25 * 1024 * 1024;
 const REQUEST_BODY_OVERHEAD_BYTES = 1024 * 1024;
 const MAX_ADMIN_RESTORE_BODY_BYTES = Math.ceil(MAX_ADMIN_BACKUP_BYTES / 3) * 4 + REQUEST_BODY_OVERHEAD_BYTES;
-const MAX_IMPORT_BODY_BYTES = Math.ceil(MAX_IMPORT_FILE_BYTES / 3) * 4 + REQUEST_BODY_OVERHEAD_BYTES;
+const MAX_IMPORT_BODY_BYTES = Math.ceil(MAX_QUERY_FILE_IMPORT_BYTES / 3) * 4 + REQUEST_BODY_OVERHEAD_BYTES;
 
 interface RateLimitBucket { count: number; resetAt: number; }
 

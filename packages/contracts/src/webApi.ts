@@ -6,6 +6,9 @@ import type {
   DatabaseKind,
 } from './database';
 
+/** Maximum raw file size accepted by the query import endpoints and clients. */
+export const MAX_QUERY_FILE_IMPORT_BYTES = 25 * 1024 * 1024;
+
 export interface ApiError {
   code: string;
   message: string;
