@@ -214,6 +214,10 @@ describe('shared Web UI adapter edge contracts', () => {
     await user.click(screen.getByRole('button', { name: 'orders_cte' }));
     await user.click(screen.getByRole('button', { name: 'History' }));
     await screen.findByRole('heading', { name: 'Query history' });
+    await user.click(screen.getByRole('button', { name: 'Copy query' }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('SELECT 7'));
+    await user.click(screen.getByRole('button', { name: 'Refresh history' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/api/history')).length).toBeGreaterThan(1));
     await user.click(screen.getByRole('button', { name: /SELECT 7/ }));
     expect(screen.getByLabelText('SQL editor')).toHaveValue('SELECT 7');
     anchorClick.mockRestore();

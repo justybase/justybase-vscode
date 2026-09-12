@@ -759,6 +759,39 @@ body,
 
 .ui-sql-dialect-select small { color: var(--justybase-grid-muted); font-size: 9px; }
 
+.ui-history {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  color: var(--justybase-grid-text);
+}
+
+.ui-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ui-history-header h2 { margin: 0; font-size: 14px; }
+.ui-history-controls { display: flex; align-items: center; gap: 5px; }
+.ui-history-controls label { display: flex; align-items: center; gap: 5px; color: var(--justybase-grid-muted); font-size: 11px; }
+.ui-history-controls input { width: min(280px, 35vw); min-height: 25px; padding: 3px 6px; border: 1px solid var(--justybase-grid-border); border-radius: 3px; color: var(--justybase-grid-text); background: var(--justybase-grid-bg); font: inherit; }
+.ui-history-controls input:focus { border-color: var(--justybase-grid-accent); outline: none; }
+.ui-history-controls button { min-width: 26px; padding: 3px 6px; }
+.ui-history-list { display: grid; gap: 5px; }
+.ui-history-entry { display: flex; min-width: 0; align-items: stretch; gap: 6px; border: 1px solid var(--justybase-grid-border); border-radius: 4px; background: var(--justybase-grid-surface); }
+.ui-history-open { display: grid; min-width: 0; flex: 1; gap: 2px; padding: 8px; border: 0; color: var(--justybase-grid-text); background: transparent; text-align: left; }
+.ui-history-open:hover { background: var(--justybase-grid-hover); }
+.ui-history-open strong { color: var(--justybase-grid-accent); font-size: 10px; text-transform: uppercase; }
+.ui-history-open span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-history-open code { overflow: hidden; color: var(--justybase-grid-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-history-actions { display: flex; align-items: center; gap: 3px; padding: 5px; }
+.ui-history-actions button { min-width: 48px; padding: 3px 6px; }
+.ui-history-no-match { padding: 12px 4px; color: var(--justybase-grid-muted); }
+
 .shared-editor-stack {
   display: flex;
   min-width: 0;

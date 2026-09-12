@@ -646,6 +646,23 @@ describe('shared React presentation', () => {
     expect(callbacks.onActivate).toHaveBeenCalledWith(expect.objectContaining({ objectName: 'ORDERS' }));
   });
 
+  it('keeps history filtering and row actions in the shared presentation layer', async () => {
+    const user = userEvent.setup();
+    const callbacks = { onOpen: jest.fn(), onRerun: jest.fn(), onCopy: jest.fn(), onRefresh: jest.fn() };
+    render(<HistoryView entries={[{ id: 'history-1', label: 'SELECT orders', status: 'success', sqlFingerprint: 'today · 3 rows', sql: 'SELECT * FROM orders' }, { id: 'history-2', label: 'DELETE old rows', status: 'error', sqlFingerprint: 'yesterday', sql: 'DELETE FROM old_rows' }]} {...callbacks} />);
+    await user.type(screen.getByRole('textbox', { name: 'Filter history' }), 'orders');
+    expect(screen.getByRole('button', { name: /SELECT orders/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /DELETE old rows/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Run query' }));
+    await user.click(screen.getByRole('button', { name: 'Copy query' }));
+    await user.click(screen.getByRole('button', { name: /SELECT orders/ }));
+    await user.click(screen.getByRole('button', { name: 'Refresh history' }));
+    expect(callbacks.onRerun).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-1' }));
+    expect(callbacks.onCopy).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-1' }));
+    expect(callbacks.onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-1' }));
+    expect(callbacks.onRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps result tabs keyboard navigable with roving focus', () => {
     const onSelect = jest.fn();
     render(<ResultTabs results={[{ ...result, resultSetId: 'result-1' }, { ...result, resultSetId: 'result-2' }]} activeResultSetId="result-1" onSelect={onSelect} />);
