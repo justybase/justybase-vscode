@@ -259,11 +259,14 @@ export class DockyardManagerAdapter {
       }
       this.syncDefinitions(options.definitions);
     } catch (reason: unknown) {
-      for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
-      manager.Dispose();
-      this.models.clear();
-      this.hosts.clear();
-      this.definitions.clear();
+      this.unsubscribeFromManager();
+      try {
+        manager.Dispose();
+      } finally {
+        this.models.clear();
+        this.hosts.clear();
+        this.definitions.clear();
+      }
       throw reason;
     }
   }
@@ -277,8 +280,9 @@ export class DockyardManagerAdapter {
     if (this.disposed) return;
     this.replaceDefinitions(definitions);
     this.synchronizing = true;
-    const update = this.manager.BeginUpdate();
+    let update: { Dispose(): void } | undefined;
     try {
+      update = this.manager.BeginUpdate();
       for (const definition of definitions) {
         this.hosts.set(definition.id, definition.content);
         let model = this.manager.Find(definition.id);
@@ -309,7 +313,7 @@ export class DockyardManagerAdapter {
     } catch (reason: unknown) {
       this.callbacks.onError?.(errorValue(reason));
     } finally {
-      update.Dispose();
+      update?.Dispose();
       this.synchronizing = false;
     }
     this.persistLayout();
@@ -369,12 +373,26 @@ export class DockyardManagerAdapter {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
-    this.manager.Dispose();
-    this.models.clear();
-    this.hosts.clear();
-    this.definitions.clear();
-    this.callbacks = {};
+    this.unsubscribeFromManager();
+    try {
+      this.manager.Dispose();
+    } finally {
+      this.models.clear();
+      this.hosts.clear();
+      this.definitions.clear();
+      this.callbacks = {};
+    }
+  }
+
+  private unsubscribeFromManager(): void {
+    for (const unsubscribe of this.subscriptions.splice(0)) {
+      try {
+        unsubscribe();
+      } catch {
+        // Teardown is best effort for individual vendor subscriptions; the
+        // manager itself is still disposed immediately afterwards.
+      }
+    }
   }
 
   private replaceDefinitions(definitions: readonly DockyardContentDefinition[]): void {
