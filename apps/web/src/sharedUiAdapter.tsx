@@ -30,7 +30,6 @@ import {
   createDataGridClipboardPayload,
   formatDataGridClipboard,
   processDataGridRows,
-  DesignerForm,
   ExplainView,
   HistoryView,
   ResultTabs,
@@ -43,8 +42,10 @@ import {
   WorkspaceTabs,
 } from '@justybase/ui-react';
 import type { DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
+import { ApiClientProvider } from './api';
 import type { ApiClient, QueryEventSubscription } from './api';
 import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
+import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
 import { createWorkspaceStorage, migrateLegacyWorkspace, readLegacyWorkspaceValue, type WorkspaceStorage } from './workspacePersistence';
 import { readSharedSchemaShortcuts, rememberSharedSchemaObject, sharedSchemaObjectIdentity, toggleSharedSchemaFavorite, writeSharedSchemaShortcuts } from './sharedSchemaPersistence';
@@ -54,7 +55,7 @@ const sharedCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'workspace', status: 'available', owner: 'ui-core', documentation: 'Shared workspace state and presentation.', removalCondition: 'Keep the shared workspace owner.' },
   { key: 'results.read', status: 'available', owner: 'web-api-adapter', documentation: 'Read result pages and stream events from the API.', removalCondition: 'Keep the shared result port.' },
   { key: 'results.write', status: 'read-only', owner: 'web-api-adapter', reason: 'Writes require the guarded preview/apply workflow.', documentation: 'API guarded-write routes.', removalCondition: 'Expose the guarded write port in shared mode.' },
-  { key: 'designer', status: 'read-only', owner: 'web-api-adapter', reason: 'Shared designer preview is available; apply remains adapter-owned.', documentation: 'Designer capability API.', removalCondition: 'Wire the shared DesignerPort apply workflow.' },
+  { key: 'designer', status: 'available', owner: 'web-api-adapter', documentation: 'Guarded designer preview/apply API.', removalCondition: 'Keep the guarded designer workflow.' },
   { key: 'history', status: 'available', owner: 'web-api-adapter', documentation: 'User-scoped query history.', removalCondition: 'Keep the shared history port.' },
 ];
 
@@ -245,6 +246,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
   const [schemaNodes, setSchemaNodes] = useState<ReturnType<typeof mapSchemaNode>[]>([]);
   const [schemaSearch, setSchemaSearch] = useState('');
+  const [schemaSearchRevision, setSchemaSearchRevision] = useState(0);
   const [schemaSearchResults, setSchemaSearchResults] = useState<SchemaTreeNode[]>([]);
   const [schemaSearchLoading, setSchemaSearchLoading] = useState(false);
   const [schemaFilters, setSchemaFilters] = useState<readonly string[]>(SHARED_SCHEMA_FILTERS.map(filter => filter.id));
@@ -252,6 +254,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [schemaRecent, setSchemaRecent] = useState<SchemaTreeNode[]>([]);
   const [schemaShortcutsReadyKey, setSchemaShortcutsReadyKey] = useState<string | undefined>(undefined);
   const [connectionEditor, setConnectionEditor] = useState<{ readonly initial?: ConnectionProfileSummary } | undefined>(undefined);
+  const [designerTarget, setDesignerTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [cellViewer, setCellViewer] = useState<{ readonly column: UiResultColumn; readonly value: unknown; readonly rowNumber: number } | undefined>(undefined);
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
@@ -429,7 +432,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       live = false;
       window.clearTimeout(timer);
     };
-  }, [api, schemaFilters, schemaSearch, selectedConnectionId, store]);
+  }, [api, schemaFilters, schemaSearch, schemaSearchRevision, selectedConnectionId, store]);
 
   const toggleSchemaNode = useCallback((node: ReturnType<typeof mapSchemaNode>): void => {
     const isExpanded = state.metadata.expandedNodeIds.includes(node.id);
@@ -444,6 +447,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     schemaLoadingParentsRef.current.clear();
     setSchemaNodes([]);
     setSchemaSearchResults([]);
+    setSchemaSearchRevision(previous => previous + 1);
     store.dispatch({ type: 'metadata/set-expanded', nodeIds: [] });
     if (selectedConnectionId) void loadSchemaChildren();
   }, [loadSchemaChildren, selectedConnectionId, store]);
@@ -759,6 +763,14 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
   }, [api, selectedConnection]);
 
+  const openSchemaDesigner = useCallback((node: SchemaTreeNode): void => {
+    if (node.kind !== 'object' || !selectedConnection || !node.schema) {
+      setNotice('Select a schema object before opening the designer.');
+      return;
+    }
+    setDesignerTarget(node);
+  }, [selectedConnection]);
+
   const insertSchemaNode = useCallback((node: SchemaTreeNode): void => {
     if (!activeDocument) return;
     const value = qualifySharedSchemaNode(node, authoringDatabaseKind);
@@ -967,7 +979,6 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     : undefined;
   const resultState = resultAsyncState(activeResult, visibleRows.length);
   const resultMessage = activeResult?.message;
-  const designerFields = { target: selectedNode?.label ?? 'Select an object', connection: selectedConnection?.name ?? 'No connection' };
 
   return <UiShell title="JustyBase" activeSurface={state.shell.activeSurface} onSurfaceChange={selectSurface} surfaces={[{ id: 'workspace', label: 'Workspace' }, { id: 'history', label: 'History' }, { id: 'explain', label: 'Explain' }, { id: 'designer', label: 'Designer' }]} sidebar={<div className="shared-sidebar">
     <section className="shared-connections" aria-label="Connections"><div className="shared-sidebar-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" aria-label="Add connection" title="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <div className="shared-sidebar-empty">No connections configured.<button type="button" onClick={() => setConnectionEditor({})}>Add connection</button></div> : state.connections.profiles.map(profile => <div className="shared-connection-item" key={profile.id}><button type="button" className={profile.id === selectedConnectionId ? 'active' : ''} aria-label={profile.name} aria-pressed={profile.id === selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="shared-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="shared-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} title="Edit connection" onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} title="Delete connection" onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
@@ -981,6 +992,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       onInsert={insertSchemaNode}
       onOpenQuery={openSchemaQuery}
       onOpenExplain={explainSchemaObject}
+      onOpenDesigner={node => openSchemaDesigner(node as SchemaTreeNode)}
       onOpenDdl={node => { void openSchemaDdl(node); }}
       onCopyDdl={node => { void copySchemaDdl(node); }}
       onImport={node => setImportTarget(node)}
@@ -1004,7 +1016,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   </div>}>
     {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={openHistoryEntry} onRerun={rerunHistoryEntry} onCopy={copyHistoryEntry} onRefresh={() => void reloadHistory()} />
       : state.shell.activeSurface === 'explain' ? <ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={cancel} />
-        : state.shell.activeSurface === 'designer' ? <DesignerForm fields={designerFields} capability={state.capabilities.find(capability => capability.key === 'designer')} onChange={() => undefined} onPreview={() => setNotice('Designer preview remains adapter-backed in shared mode.')} onApply={() => setNotice('Designer apply is guarded and unavailable for this read-only capability.')} />
+        : state.shell.activeSurface === 'designer' ? <div className="shared-designer-launch"><h2>Object Designer</h2><p>Select a table, view, or routine in the schema explorer and choose <em>Open Object Designer</em> from its context menu.</p>{selectedNode?.kind === 'object' && <button type="button" onClick={() => openSchemaDesigner(selectedNode as SchemaTreeNode)}>Open selected object</button>}</div>
           : <>
             <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} />
             <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onReady={editor => { editorRef.current = editor; }} onProblemsChange={setProblems} /><SharedSqlProblems problems={problems} onSelect={revealProblem} /></div>
@@ -1018,6 +1030,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
             </div>
           </>}
     {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}
+    {designerTarget && selectedConnection && <ApiClientProvider client={api}><ObjectDesigner connectionId={selectedConnection.id} database={designerTarget.database ?? selectedConnection.database} databaseKind={selectedConnection.dbType} target={designerTarget} onClose={() => setDesignerTarget(undefined)} onApplied={() => { setDesignerTarget(undefined); setNotice('Object designer change applied. Refresh the schema to see the updated definition.'); refreshSchema(); }} /></ApiClientProvider>}
     {connectionEditor && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setConnectionEditor(undefined); }}><section className="modal-card connection-card" role="dialog" aria-modal="true" aria-labelledby="shared-connection-dialog-title"><div className="section-title"><span id="shared-connection-dialog-title">{connectionEditor.initial ? 'Edit connection' : 'Add connection'}</span><button type="button" className="icon-button" aria-label="Close connection dialog" onClick={() => setConnectionEditor(undefined)}>×</button></div><ConnectionForm api={api} initial={connectionEditor.initial} onCreated={saveConnection} onCancel={() => setConnectionEditor(undefined)} /></section></div>}
     {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}
   </UiShell>;

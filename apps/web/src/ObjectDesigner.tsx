@@ -478,7 +478,7 @@ function ObjectDesigner({ connectionId, database, databaseKind, target, onClose,
           <button type="button" className="icon-button" aria-label="Close object designer" onClick={onClose} disabled={applying}>×</button>
         </header>
 
-        {loading ? <div className="object-designer-loading">Loading capabilities…</div> : (
+        {loading ? <div className="object-designer-loading">Loading capabilities and object metadata…</div> : (
           <>
             {context && <div className="object-designer-statusbar"><span className={context.runtimeAvailable ? 'status-ok' : 'status-warning'}>{context.runtimeAvailable ? 'Runtime available' : 'Runtime unavailable'}</span><span>{context.readOnly ? 'Read-only connection' : 'Writable connection'}</span></div>}
             <nav className="object-designer-tabs" aria-label="Object designer sections">

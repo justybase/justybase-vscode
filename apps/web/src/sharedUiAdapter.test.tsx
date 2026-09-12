@@ -2,6 +2,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { getDatabaseDesignerCapabilities } from '@justybase/contracts';
 import { createApiClient, type ApiClient } from './api';
 import { SharedWebWorkspace } from './sharedUiAdapter';
 
@@ -48,7 +49,8 @@ function fixtureApi(): ApiClient {
     const url = String(input);
     if (url.endsWith('/api/connections')) return jsonResponse([{ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }]);
     if (url.endsWith('/api/history')) return jsonResponse([{ id: 'history-1', connectionId: 'connection-1', database: ':memory:', sql: 'SELECT 7', status: 'success', durationMs: 1, rowCount: 1, createdAt: '2026-09-11T00:00:00.000Z' }]);
-    if (url.includes('/api/schema/tree')) return jsonResponse({ nodes: [{ id: 'table-1', kind: 'object', label: 'orders', hasChildren: false }] });
+    if (url.includes('/api/schema/tree')) return jsonResponse({ nodes: [{ id: 'table-1', kind: 'object', label: 'orders', database: 'main', schema: 'main', objectName: 'orders', objectType: 'TABLE', hasChildren: false }] });
+    if (url.includes('/api/designer/capabilities')) return jsonResponse({ target: { connectionId: 'connection-1', database: ':memory:', schema: 'main', objectName: 'orders', objectType: 'TABLE' }, capabilities: getDatabaseDesignerCapabilities('sqlite'), runtimeAvailable: true, readOnly: true });
     if (url.endsWith('/api/query')) return jsonResponse({ queryId: 'query-1' });
     if (url.includes('/page')) return jsonResponse({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }], rows: [[7]], offset: 0, limit: 500, totalRows: 1, hasMore: false });
     if (url.includes('/cancel')) return jsonResponse({ ok: true });
@@ -94,8 +96,16 @@ describe('shared Web UI adapter', () => {
     render(<SharedWebWorkspace api={fixtureApi()} user={{ id: 'user-2', username: 'bob', role: 'user' }} onLogout={() => undefined} />);
     await screen.findByRole('button', { name: 'SQLite' });
     await user.click(screen.getByRole('button', { name: 'Designer' }));
-    expect(screen.getByRole('heading', { name: 'Designer' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    expect(screen.getByRole('heading', { name: 'Object Designer' })).toBeInTheDocument();
+    expect(screen.getByText(/Open Object Designer/)).toBeInTheDocument();
+    const treeItem = screen.getByText('orders').closest('[role="treeitem"]');
+    if (!treeItem) throw new Error('Schema table tree item was not rendered.');
+    fireEvent.contextMenu(treeItem);
+    await user.click(screen.getByRole('menuitem', { name: 'Open Object Designer' }));
+    expect(await screen.findByRole('dialog', { name: 'orders' })).toBeInTheDocument();
+    expect(screen.getByText('Runtime available')).toBeInTheDocument();
+    expect(screen.getByText('Read-only connection')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close object designer' }));
     await user.click(screen.getByRole('button', { name: 'Explain' }));
     expect(screen.getByRole('heading', { name: 'Explain' })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Workspace' })).toBeInTheDocument());

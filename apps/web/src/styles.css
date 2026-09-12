@@ -384,6 +384,10 @@ tbody tr:hover td { background: #1e293b; }
 .object-designer-preview-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; color: #94a3b8; font-size: 11px; }
 .object-designer-message, .object-designer-notice { margin: 0; }
 .object-designer-notice { padding: 8px 10px; border-radius: 4px; color: #bbf7d0; background: #14532d; font-size: 12px; }
+.shared-designer-launch { display: grid; align-content: start; gap: 10px; max-width: 760px; margin: 24px auto; padding: 24px; border: 1px solid #334155; border-radius: 8px; background: rgba(15,23,42,.55); }
+.shared-designer-launch h2 { margin: 0; color: #f8fafc; font-size: 18px; }
+.shared-designer-launch p { margin: 0; color: #94a3b8; }
+.shared-designer-launch button { justify-self: start; }
 @media (max-width: 720px) {
   .object-designer-backdrop { padding: 8px; }
   .object-designer-modal { max-height: calc(100vh - 16px); }

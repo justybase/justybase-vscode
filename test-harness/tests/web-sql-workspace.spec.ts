@@ -52,11 +52,13 @@ async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> 
   await page.keyboard.press('Control+A');
   await page.keyboard.press('Backspace');
   await page.keyboard.insertText(sql);
+  // Monaco virtualizes view lines. Move the caret to the end so the marker
+  // used below is in the rendered viewport even for long diagnostic fixtures.
+  await page.keyboard.press('Control+End');
   // Monaco may append an auto-closing parenthesis when a multi-line paste
   // contains a CTE. Remove only that generated trailing delimiter; the
   // source fixture remains the exact SQL sent to the API.
   if (sql.includes('(')) {
-    await page.keyboard.press('Control+End');
     await page.keyboard.press('Backspace');
   }
   const visibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
@@ -92,7 +94,7 @@ async function connectionIdByName(page: Page, profileName: string): Promise<stri
 }
 
 /** Execute a guarded schema mutation and wait for the real query event terminal. */
-async function executeWriteStatement(page: Page, connectionId: string, sql: string): Promise<void> {
+async function executeWriteStatement(page: Page, connectionId: string, sql: string, database = ':memory:'): Promise<void> {
   const outcome = await page.evaluate(async input => {
     const csrfCookie = document.cookie.split('; ').find(cookie => cookie.startsWith('justybase_csrf='));
     const csrf = csrfCookie?.slice('justybase_csrf='.length);
@@ -110,10 +112,10 @@ async function executeWriteStatement(page: Page, connectionId: string, sql: stri
       if (!response.ok) throw new Error(`${url} failed (${response.status}): ${String(payload.message ?? text).slice(0, 300)}`);
       return payload;
     };
-    const preview = await postJson('/api/query/preview', { connectionId: input.connectionId, database: ':memory:', sql: input.sql, mode: 'single' });
+    const preview = await postJson('/api/query/preview', { connectionId: input.connectionId, database: input.database, sql: input.sql, mode: 'single' });
     const started = await postJson('/api/query', {
       connectionId: input.connectionId,
-      database: ':memory:',
+      database: input.database,
       sql: input.sql,
       mode: 'single',
       writeConfirmed: true,
@@ -139,7 +141,7 @@ async function executeWriteStatement(page: Page, connectionId: string, sql: stri
       });
       socket.addEventListener('error', () => finish(() => reject(new Error('The schema mutation WebSocket failed.'))));
     });
-  }, { connectionId, sql });
+  }, { connectionId, database, sql });
   expect(outcome.status, outcome.message).toBe('complete');
 }
 
@@ -277,6 +279,7 @@ SELECT 3, 'SQLITE_FIXTURE'`;
 test.describe('shared React web workspace', () => {
   test('opens and copies reconstructed SQLite table/view DDL from the schema explorer @web-shared', async ({ page }) => {
     const profileName = `Shared DDL SQLite ${Date.now()}`;
+    const database = `shared-ddl-${Date.now()}.sqlite`;
     const tableName = `pw_ddl_table_${Date.now()}`;
     const viewName = `pw_ddl_view_${Date.now()}`;
 
@@ -288,15 +291,15 @@ test.describe('shared React web workspace', () => {
     const dialog = page.getByRole('dialog', { name: 'Add connection' });
     await dialog.getByLabel('Database type').selectOption('sqlite');
     await dialog.getByLabel('Profile name').fill(profileName);
-    await dialog.locator('#connection-database').fill(':memory:');
+    await dialog.locator('#connection-database').fill(database);
     await dialog.getByLabel('User').fill('local');
     await dialog.locator('input[type="checkbox"]').uncheck();
     await dialog.getByRole('button', { name: 'Add connection', exact: true }).click();
     await expect(page.getByRole('button', { name: profileName, exact: true })).toBeVisible();
 
     const connectionId = await connectionIdByName(page, profileName);
-    await executeWriteStatement(page, connectionId, `CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount NUMERIC);`);
-    await executeWriteStatement(page, connectionId, `CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName};`);
+    await executeWriteStatement(page, connectionId, `CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount NUMERIC);`, 'main');
+    await executeWriteStatement(page, connectionId, `CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName};`, 'main');
 
     const schema = page.getByRole('tree', { name: 'Schema' });
     await page.getByRole('button', { name: 'Refresh schema' }).click();
@@ -317,6 +320,30 @@ test.describe('shared React web workspace', () => {
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain(`CREATE TABLE main.${tableName}`);
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain('label TEXT');
     await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL opened' })).toBeVisible();
+
+    await tableNode.click({ button: 'right' });
+    await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Open Object Designer', exact: true }).click();
+    const designer = page.getByRole('dialog', { name: tableName });
+    await expect(designer).toBeVisible();
+    await expect(designer.getByText('Runtime available')).toBeVisible();
+    await expect(designer.getByText('Writable connection')).toBeVisible();
+    await designer.getByRole('button', { name: 'Columns', exact: true }).click();
+    await designer.getByLabel('Column name').fill('designer_added');
+    await designer.getByLabel('Data type').fill('TEXT');
+    await designer.getByRole('button', { name: 'Preview SQL', exact: true }).click();
+    await expect.poll(() => designer.getByLabel('SQL preview').inputValue()).toContain(`ALTER TABLE "main"."${tableName}"`);
+    await expect(designer.getByText('1 statement(s)')).toBeVisible();
+    await designer.getByRole('button', { name: 'Apply preview', exact: true }).click();
+    await expect(designer).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByRole('status').filter({ hasText: 'Object designer change applied' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Refresh schema' }).click();
+    await search.fill(tableName);
+    const refreshedTableNode = schema.getByRole('treeitem').filter({ hasText: tableName }).first();
+    await expect(refreshedTableNode).toBeVisible({ timeout: 30_000 });
+    await refreshedTableNode.click({ button: 'right' });
+    await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Copy DDL', exact: true }).click();
+    await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain('designer_added TEXT');
 
     await search.fill(viewName);
     const viewNode = schema.getByRole('treeitem').filter({ hasText: viewName }).first();
