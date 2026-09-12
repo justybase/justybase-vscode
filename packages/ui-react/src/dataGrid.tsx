@@ -78,6 +78,8 @@ export interface DataGridProps {
   readonly onCopySelection?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void;
   /** Opens the host-specific large-value viewer for a context-menu cell. */
   readonly onViewCell?: (context: DataGridCellContext) => void;
+  /** Opens the host-specific full-row detail view for a context-menu row. */
+  readonly onViewRow?: (context: DataGridCellContext) => void;
   /** Opens the host-specific result formatting surface. */
   readonly onOpenResultFormatting?: () => void;
   /** Enables the shared copy/filter/sort/row-detail context menu. */
@@ -499,6 +501,7 @@ export function DataGrid({
   onContextMenu,
   onCopySelection,
   onViewCell,
+  onViewRow,
   onOpenResultFormatting,
   showContextMenu = true,
   showColumnMenu = true,
@@ -897,6 +900,7 @@ export function DataGrid({
 
   function selectContextRow(context: DataGridCellContext): void {
     onRowSelect?.(context.rowIndex);
+    onViewRow?.(context);
     setContextMenu(undefined);
   }
 

@@ -315,6 +315,7 @@ describe('shared React presentation', () => {
     const onViewChange = jest.fn();
     const onCopySelection = jest.fn();
     const onRowSelect = jest.fn();
+    const onViewRow = jest.fn();
     const onViewCell = jest.fn();
     const onOpenResultFormatting = jest.fn();
     render(<DataGrid
@@ -325,6 +326,7 @@ describe('shared React presentation', () => {
       onViewChange={onViewChange}
       onCopySelection={onCopySelection}
       onRowSelect={onRowSelect}
+      onViewRow={onViewRow}
       onViewCell={onViewCell}
       onOpenResultFormatting={onOpenResultFormatting}
     />);
@@ -373,6 +375,7 @@ describe('shared React presentation', () => {
     fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
     fireEvent.click(screen.getByRole('menuitem', { name: 'View full row' }));
     expect(onRowSelect).toHaveBeenLastCalledWith(0);
+    expect(onViewRow).toHaveBeenLastCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 40, clientY: 60 });
   });
 
   it('uses the shared column menu for visibility and pinning actions', () => {
