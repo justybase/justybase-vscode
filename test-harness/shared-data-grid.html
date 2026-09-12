@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shared Result Grid Performance Harness</title>
+  <link rel="stylesheet" href="/dist/test-harness/shared-data-grid.css">
+  <style>
+    :root {
+      --vscode-editor-background: #1e1e1e;
+      --vscode-editor-foreground: #cccccc;
+      --vscode-editorGroupHeader-tabsBackground: #252526;
+      --vscode-panel-border: #3c3c3c;
+      --vscode-focusBorder: #007fd4;
+      --vscode-descriptionForeground: #9d9d9d;
+      --vscode-list-activeSelectionBackground: #094771;
+      --vscode-list-hoverBackground: #2a2d2e;
+      --vscode-scrollbarSlider-background: #79797966;
+      --justybase-results-grid-font-family: Consolas, monospace;
+      --justybase-results-grid-font-size: 12px;
+    }
+    html, body, #root { width: 100%; height: 100%; margin: 0; }
+    body { overflow: hidden; color: #cccccc; background: #1e1e1e; font-family: sans-serif; }
+    .shared-grid-harness { display: flex; height: 100%; flex-direction: column; }
+    .shared-grid-harness > header { display: flex; flex: 0 0 32px; align-items: center; gap: 14px; padding: 0 12px; border-bottom: 1px solid #3c3c3c; color: #9d9d9d; font-size: 11px; }
+    .shared-grid-harness > header strong { color: #cccccc; }
+    .shared-grid-harness > .ui-result-grid { min-height: 0; flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/dist/test-harness/shared-data-grid.js"></script>
+</body>
+</html>
