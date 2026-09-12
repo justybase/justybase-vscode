@@ -2,9 +2,9 @@
 
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { WebUser } from '@justybase/contracts';
-import { ApiClientProvider, createApiClient } from './api';
-import { Login } from './workspacePanels';
+import type { ConnectionProfileSummary, WebUser } from '@justybase/contracts';
+import { ApiClientProvider, createApiClient, type ApiClient } from './api';
+import { ConnectionForm, Login } from './workspacePanels';
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -27,6 +27,30 @@ function renderLogin(fetch: typeof globalThis.fetch, onLogin = jest.fn()): jest.
     </ApiClientProvider>,
   );
   return onLogin;
+}
+
+function connectionProfile(overrides: Partial<ConnectionProfileSummary> = {}): ConnectionProfileSummary {
+  return {
+    id: 'connection-1',
+    name: 'Authoring profile',
+    host: 'db.example.com',
+    port: 5480,
+    database: 'SYSTEM',
+    user: 'admin',
+    dbType: 'postgresql',
+    readOnly: true,
+    ...overrides,
+  };
+}
+
+function connectionApi(overrides: Partial<ApiClient> = {}): ApiClient {
+  return {
+    createConnection: jest.fn(async () => connectionProfile({ dbType: 'netezza' })),
+    updateConnection: jest.fn(async () => connectionProfile({ dbType: 'netezza' })),
+    testConnection: jest.fn(async () => ({ ok: true as const })),
+    testConnectionProfile: jest.fn(async () => ({ ok: true as const })),
+    ...overrides,
+  } as ApiClient;
 }
 
 describe('Login test harness affordance', () => {
@@ -76,5 +100,34 @@ describe('Login test harness affordance', () => {
       method: 'POST',
       body: JSON.stringify({ username: 'admin', password: 'normal-password' }),
     }));
+  });
+});
+
+describe('Web connection dialect catalog', () => {
+  it('shows every supported authoring dialect and blocks profiles without a Web runtime', () => {
+    render(<ConnectionForm api={connectionApi()} onCreated={jest.fn()} onCancel={jest.fn()} />);
+
+    const select = screen.getByRole('combobox', { name: /Database type/u }) as HTMLSelectElement;
+    expect(Array.from(select.options).map(option => option.value)).toEqual([
+      'netezza', 'oracle', 'postgresql', 'vertica', 'snowflake', 'sqlite', 'duckdb', 'db2', 'mssql', 'mysql', 'clickhouse', 'access',
+    ]);
+    for (const value of ['oracle', 'postgresql', 'vertica', 'snowflake', 'db2', 'mssql', 'mysql', 'clickhouse', 'access']) {
+      expect(select.querySelector(`option[value="${value}"]`)).toBeDisabled();
+    }
+    expect(screen.getByText('Metadata, execution and Result Grid are available.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add connection' })).toBeEnabled();
+  });
+
+  it('keeps an authoring-only existing profile visible but prevents a false runtime save or test', () => {
+    const api = connectionApi();
+    render(<ConnectionForm api={api} initial={connectionProfile()} onCreated={jest.fn()} onCancel={jest.fn()} />);
+
+    const select = screen.getByRole('combobox', { name: /Database type/u }) as HTMLSelectElement;
+    expect(select.value).toBe('postgresql');
+    expect(screen.getByText('SQL authoring profile is available; Web runtime connection is not enabled.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test connection' })).toBeDisabled();
+    expect(api.updateConnection).not.toHaveBeenCalled();
+    expect(api.testConnection).not.toHaveBeenCalled();
   });
 });

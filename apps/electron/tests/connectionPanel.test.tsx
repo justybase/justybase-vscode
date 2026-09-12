@@ -53,4 +53,18 @@ describe('Electron connection panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
     await waitFor(() => expect(testConnectionProfile).toHaveBeenCalledWith(expect.objectContaining({ host: 'db2.example.com' }), 'opaque-password-handle'));
   });
+
+  it('exposes the complete shared dialect catalog while keeping authoring-only runtimes guarded', () => {
+    installApi();
+    render(<ConnectionPanel onSaved={jest.fn()} onCancel={jest.fn()} />);
+
+    const select = screen.getByRole('combobox', { name: /Database type/u }) as HTMLSelectElement;
+    expect(Array.from(select.options).map(option => option.value)).toEqual([
+      'netezza', 'oracle', 'postgresql', 'vertica', 'snowflake', 'sqlite', 'duckdb', 'db2', 'mssql', 'mysql', 'clickhouse', 'access',
+    ]);
+    for (const value of ['oracle', 'postgresql', 'vertica', 'snowflake', 'db2', 'mssql', 'mysql', 'clickhouse', 'access']) {
+      expect(select.querySelector(`option[value="${value}"]`)).toBeDisabled();
+    }
+    expect(screen.getByRole('button', { name: 'Add connection' })).toBeEnabled();
+  });
 });

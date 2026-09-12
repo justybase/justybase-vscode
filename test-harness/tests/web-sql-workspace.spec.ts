@@ -248,8 +248,24 @@ FROM seq`;
     await expect(connection).toHaveAttribute('aria-pressed', 'true');
 
     const dialect = page.getByLabel('SQL authoring dialect');
-    await dialect.selectOption('postgresql');
-    await expect(dialect).toHaveValue('postgresql');
+    const authoringCompletionChecks = [
+      ['postgresql', 'RETURN', 'RETURNING'],
+      ['db2', 'FETCH', 'FETCH FIRST'],
+      ['clickhouse', 'PRE', 'PREWHERE'],
+      ['oracle', 'CONNECT', 'CONNECT BY'],
+      ['mssql', 'TOP', 'TOP'],
+    ] as const;
+    for (const [kind, prefix, expected] of authoringCompletionChecks) {
+      await dialect.selectOption(kind);
+      await expect(dialect).toHaveValue(kind);
+      await replaceMonacoTextAndWait(page, `SELECT * FROM T ${prefix}`);
+      await page.locator('.monaco-editor').click();
+      await page.keyboard.press('Control+Space');
+      const dialectSuggestionWidget = page.locator('.suggest-widget');
+      await expect(dialectSuggestionWidget).toBeVisible({ timeout: 30_000 });
+      await expect(dialectSuggestionWidget).toContainText(expected);
+      await page.keyboard.press('Escape');
+    }
     await dialect.selectOption('netezza');
     await expect(dialect).toHaveValue('netezza');
 
