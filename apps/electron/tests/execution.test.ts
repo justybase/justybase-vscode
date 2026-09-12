@@ -76,7 +76,7 @@ describe('Electron renderer execution adapter', () => {
     await port.dispose();
   });
 
-  it('hydrates every finalized API page before completing the stream', async () => {
+  it('hydrates only the first finalized page before completing the stream', async () => {
     const fixture = fakeClient();
     fixture.client.queryPage = jest.fn(async (_queryId, input) => input.offset === 0
       ? {
@@ -110,8 +110,8 @@ describe('Electron renderer execution adapter', () => {
     }
 
     expect(fixture.client.queryPage).toHaveBeenNthCalledWith(1, 'query-1', { statementIndex: 0, offset: 0, limit: 500 });
-    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(2, 'query-1', { statementIndex: 0, offset: 2, limit: 500 });
-    expect(pages).toEqual([[[1], [2], [3]]]);
+    expect(fixture.client.queryPage).toHaveBeenCalledTimes(1);
+    expect(pages).toEqual([[[1], [2]]]);
     expect(order).toEqual(['page', 'complete']);
     await port.dispose();
   });

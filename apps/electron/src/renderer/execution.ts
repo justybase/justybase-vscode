@@ -2,12 +2,45 @@ import type { QueryColumn, QueryEvent } from '@justybase/contracts';
 import type { ExecutionHandle, ExecutionInput, ExecutionPort, UiResultEvent } from '@justybase/ui-core';
 import type { ElectronApiClient, QueryEventSubscription } from './api';
 
-const RESULT_PAGE_SIZE = 500;
+export const RESULT_PAGE_SIZE = 500;
 
 export interface HydratedResultRows {
   readonly columns: readonly QueryColumn[];
   readonly rows: readonly (readonly unknown[])[];
   readonly totalRowCount: number;
+  readonly offset: number;
+  readonly hasMore: boolean;
+}
+
+/** Loads one bounded page from the API-owned result spool. */
+export async function fetchResultPage(
+  client: ElectronApiClient,
+  queryId: string,
+  statementIndex = 0,
+  offset = 0,
+  limit = RESULT_PAGE_SIZE,
+  request: { readonly globalFilter?: string; readonly columnFilters?: readonly { readonly columnIndex: number; readonly value: string }[]; readonly sorting?: readonly { readonly columnIndex: number; readonly desc: boolean }[] } = {},
+): Promise<HydratedResultRows> {
+  const page = await client.queryPage(queryId, {
+    statementIndex,
+    offset,
+    limit,
+    ...(request.globalFilter === undefined ? {} : { globalFilter: request.globalFilter }),
+    ...(request.columnFilters === undefined ? {} : { columnFilters: [...request.columnFilters] }),
+    ...(request.sorting === undefined ? {} : { sorting: [...request.sorting] }),
+  });
+  if (page.offset !== offset) throw new Error('Electron result paging returned a non-contiguous offset.');
+  return {
+    columns: page.columns.map(column => ({
+      name: column.name,
+      ...(column.type === undefined ? {} : { type: column.type }),
+      ...(column.scale === undefined ? {} : { scale: column.scale }),
+    })),
+    rows: page.rows.map(row => [...row]),
+    totalRowCount: page.totalRows,
+    offset: page.offset,
+    hasMore: page.hasMore,
+  };
 }
 
 /** Loads the complete finalized result for one statement from the API spool. */
@@ -20,20 +53,16 @@ export async function fetchAllResultPages(
   let offset = 0;
 
   for (;;) {
-    const page = await client.queryPage(queryId, { statementIndex, offset, limit: RESULT_PAGE_SIZE });
-    if (page.offset !== offset) throw new Error('Electron result paging returned a non-contiguous offset.');
-
-    rows.push(...page.rows.map(row => [...row]));
+    const page = await fetchResultPage(client, queryId, statementIndex, offset);
+    rows.push(...page.rows);
 
     if (!page.hasMore) {
       return {
-        columns: page.columns.map(column => ({
-          name: column.name,
-          ...(column.type === undefined ? {} : { type: column.type }),
-          ...(column.scale === undefined ? {} : { scale: column.scale }),
-        })),
+        columns: page.columns,
         rows,
-        totalRowCount: page.totalRows,
+        totalRowCount: page.totalRowCount,
+        offset: 0,
+        hasMore: false,
       };
     }
     if (page.rows.length === 0) throw new Error('Electron result paging made no progress.');
@@ -44,8 +73,8 @@ export async function fetchAllResultPages(
 export interface ElectronExecutionPortOptions {
   readonly client: ElectronApiClient;
   readonly onRows?: (resultSetId: string, rows: readonly (readonly unknown[])[]) => void;
-  /** Replaces the adapter-owned page after the API has finalized the session. */
-  readonly onPage?: (sourceId: string, resultSetId: string, rows: readonly (readonly unknown[])[], totalRowCount: number, columns: readonly QueryColumn[], executionId: string) => void;
+  /** Delivers the first bounded page after the API has finalized the session. */
+  readonly onPage?: (sourceId: string, resultSetId: string, rows: readonly (readonly unknown[])[], totalRowCount: number, columns: readonly QueryColumn[], executionId: string, offset: number, hasMore: boolean) => void;
 }
 
 interface ActiveStream {
@@ -104,7 +133,7 @@ function eventStream(
     pageRequested = true;
     const resultSetId = resultSetIdFor(queryId, statementIndex);
     try {
-      const hydrated = await fetchAllResultPages(client, queryId, statementIndex);
+      const hydrated = await fetchResultPage(client, queryId, statementIndex, 0, RESULT_PAGE_SIZE);
       if (done) return undefined;
       onPage(
         sourceId,
@@ -113,6 +142,8 @@ function eventStream(
         hydrated.totalRowCount,
         hydrated.columns,
         queryId,
+        hydrated.offset,
+        hydrated.hasMore,
       );
       return undefined;
     } catch (error: unknown) {

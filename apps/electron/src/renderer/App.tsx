@@ -21,7 +21,7 @@ import {
 } from '@justybase/ui-react';
 import type { DataGridCellContext, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import { createElectronApiClient } from './api';
-import { createElectronExecutionPort, fetchAllResultPages } from './execution';
+import { createElectronExecutionPort, fetchResultPage, RESULT_PAGE_SIZE } from './execution';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
@@ -68,6 +68,22 @@ export function rowsAsCsv(columns: readonly UiResultColumn[], rows: readonly Ele
     return `"${text.replaceAll('"', '""')}"`;
   };
   return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map(value => quote(value)).join(','))].join('\n');
+}
+
+/** Merges a contiguous API page without creating holes in the renderer window. */
+export function mergeElectronResultRows(
+  existingRows: readonly ElectronRow[],
+  pageRows: readonly ElectronRow[],
+  offset: number,
+  replace = false,
+): readonly ElectronRow[] {
+  if (replace || offset === 0) return pageRows.map(row => [...row]);
+  if (!Number.isInteger(offset) || offset < 0 || offset > existingRows.length) return existingRows;
+  return [
+    ...existingRows.slice(0, offset),
+    ...pageRows.map(row => [...row]),
+    ...existingRows.slice(offset + pageRows.length),
+  ];
 }
 
 /** Applies a page only when it still belongs to the result execution in the store. */
@@ -123,6 +139,8 @@ export function App(): ReactElement {
   const [contextMenu, setContextMenu] = useState<ElectronGridContextMenu | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const activeExecutionRef = useRef<ExecutionHandle | undefined>(undefined);
+  const pendingPageRequestsRef = useRef(new Set<string>());
+  const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
   const clientRef = useRef<ReturnType<typeof createElectronApiClient> | undefined>(undefined);
   const executionRef = useRef<ExecutionController | undefined>(undefined);
   if (!clientRef.current) clientRef.current = createElectronApiClient();
@@ -131,12 +149,16 @@ export function App(): ReactElement {
       client: clientRef.current,
       onRows: (resultSetId, rows) => {
         setRowsByResult(previous => {
-          const next = { ...previous, [resultSetId]: [...(previous[resultSetId] ?? []), ...rows] };
+          // Streaming remains responsive, but the finalized API page owns the
+          // complete result. Never retain an unbounded stream in the renderer.
+          const nextRows = [...(previous[resultSetId] ?? []), ...rows].slice(0, RESULT_PAGE_SIZE);
+          const next = { ...previous, [resultSetId]: nextRows };
           rowsByResultRef.current = next;
           return next;
         });
       },
-      onPage: (sourceId, resultSetId, rows, totalRowCount, columns, executionId) => {
+      onPage: (sourceId, resultSetId, rows, totalRowCount, columns, executionId, _offset, hasMore) => {
+        pageStateRef.current.set(resultSetId, { totalRows: totalRowCount, hasMore });
         applyHydratedPage(store, sourceId, resultSetId, rows, totalRowCount, columns, executionId, (id, nextRows) => {
           const next = { ...rowsByResultRef.current, [id]: nextRows };
           rowsByResultRef.current = next;
@@ -196,9 +218,8 @@ export function App(): ReactElement {
     ? Object.values(state.results.byResultSetId).find(result => result.sourceId === state.results.activeSourceId && result.resultSetId === state.results.activeResultSetId)
     : undefined;
   const rows = activeResult ? rowsByResult[activeResult.resultSetId] ?? [] : [];
-  const visibleRows = useMemo(() => displayRows(activeResult, rows), [activeResult, rows]);
   const selectedConnection = state.connections.profiles.find(profile => profile.id === state.connections.selectedConnectionId);
-  const resultState = resultAsyncState(activeResult, visibleRows.length);
+  const resultState = resultAsyncState(activeResult, rows.length);
   const resultMessage = activeResult?.message;
 
   useEffect(() => {
@@ -210,6 +231,71 @@ export function App(): ReactElement {
     rowsByResultRef.current = next;
     setRowsByResult(next);
   }, []);
+
+  const resultViewRequestKey = useCallback((view: UiResultSurfaceState['view']): string => {
+    const columnFilters = Object.entries(view.columnFilters)
+      .filter(([, value]) => value.trim().length > 0)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return JSON.stringify({
+      globalFilter: view.globalFilter,
+      columnFilters,
+      sorting: view.sorting,
+    });
+  }, []);
+
+  const loadResultPage = useCallback(async (
+    result: UiResultSurfaceState,
+    offset: number,
+    replace: boolean,
+    requestedView = result.view,
+  ): Promise<void> => {
+    const client = clientRef.current;
+    if (!client) return;
+    const columnFilters: QueryColumnFilterSpec[] = Object.entries(requestedView.columnFilters)
+      .flatMap(([column, value]) => {
+        const columnIndex = result.columns.findIndex(item => item.name === column || String(result.columns.indexOf(item)) === column);
+        return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
+      });
+    const sorting: QuerySortSpec[] = requestedView.sorting.flatMap(item => {
+      const columnIndex = result.columns.findIndex(column => column.name === item.column || String(result.columns.indexOf(column)) === item.column);
+      return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
+    });
+    const viewKey = resultViewRequestKey(requestedView);
+    const requestKey = `${result.sourceId}\u0000${result.resultSetId}\u0000${result.executionId}\u0000${offset}\u0000${viewKey}`;
+    if (pendingPageRequestsRef.current.has(requestKey)) return;
+    pendingPageRequestsRef.current.add(requestKey);
+    try {
+      const page = await fetchResultPage(client, result.executionId, result.statementIndex, offset, RESULT_PAGE_SIZE, {
+        ...(requestedView.globalFilter.trim() ? { globalFilter: requestedView.globalFilter } : {}),
+        ...(columnFilters.length > 0 ? { columnFilters } : {}),
+        ...(sorting.length > 0 ? { sorting } : {}),
+      });
+      const current = Object.values(store.getState().results.byResultSetId)
+        .find(item => item.sourceId === result.sourceId && item.resultSetId === result.resultSetId);
+      if (!current || current.executionId !== result.executionId || resultViewRequestKey(current.view) !== viewKey) return;
+      const existingRows = rowsByResultRef.current[result.resultSetId] ?? [];
+      const nextRows = mergeElectronResultRows(existingRows, page.rows, page.offset, replace || page.offset === 0);
+      updateRows(result.resultSetId, nextRows);
+      pageStateRef.current.set(result.resultSetId, { totalRows: page.totalRowCount, hasMore: page.hasMore });
+      store.dispatch({
+        type: 'results/hydrate',
+        sourceId: current.sourceId,
+        executionId: current.executionId,
+        resultSetId: current.resultSetId,
+        loadedRowCount: nextRows.length,
+        totalRowCount: page.totalRowCount,
+        columns: page.columns,
+      });
+    } catch (error: unknown) {
+      const current = Object.values(store.getState().results.byResultSetId)
+        .find(item => item.sourceId === result.sourceId && item.resultSetId === result.resultSetId);
+      if (current?.executionId === result.executionId && current.status !== 'cancelled' && current.status !== 'error') {
+        setNotice(error instanceof Error ? error.message : 'Could not load result rows.');
+      }
+    } finally {
+      pendingPageRequestsRef.current.delete(requestKey);
+    }
+  }, [resultViewRequestKey, store, updateRows]);
 
   const run = useCallback(async (mode: 'single' | 'explain' = 'single'): Promise<void> => {
     if (!selectedConnection) {
@@ -230,6 +316,7 @@ export function App(): ReactElement {
     try {
       const handle = await execution.run({ sourceId: 'electron:scratch', sql: activeDocument.content, connectionId: selectedConnection.id, mode });
       activeExecutionRef.current = handle;
+      pageStateRef.current.delete(handle.resultSetId);
       updateRows(handle.resultSetId, []);
       store.dispatch({ type: 'results/select', sourceId: handle.sourceId, resultSetId: handle.resultSetId });
       store.dispatch({ type: 'shell/surface', surface: 'results' });
@@ -246,19 +333,28 @@ export function App(): ReactElement {
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!activeResult) return;
-    const { executionId, resultSetId, statementIndex } = activeResult;
-    try {
-      const hydrated = await fetchAllResultPages(clientRef.current!, executionId, statementIndex);
-      applyHydratedPage(store, activeResult.sourceId, resultSetId, hydrated.rows, hydrated.totalRowCount, hydrated.columns, executionId, updateRows);
-      setNotice(undefined);
-    } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : 'Could not refresh results.');
-    }
-  }, [activeResult, store, updateRows]);
+    setNotice(undefined);
+    await loadResultPage(activeResult, 0, true);
+  }, [activeResult, loadResultPage]);
 
   const updateView = useCallback((patch: Partial<UiResultSurfaceState['view']>): void => {
-    if (activeResult) store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
-  }, [activeResult, store]);
+    if (!activeResult) return;
+    const nextView = { ...activeResult.view, ...patch };
+    store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
+    if (patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.sorting !== undefined) {
+      pageStateRef.current.delete(activeResult.resultSetId);
+      void loadResultPage({ ...activeResult, view: nextView }, 0, true, nextView);
+    }
+  }, [activeResult, loadResultPage, store]);
+
+  const loadMoreRows = useCallback((): void => {
+    if (!activeResult) return;
+    const loadedRows = rowsByResultRef.current[activeResult.resultSetId]?.length ?? 0;
+    const pageState = pageStateRef.current.get(activeResult.resultSetId);
+    const totalRows = pageState?.totalRows ?? activeResult.totalRowCount;
+    if (loadedRows >= totalRows || pageState?.hasMore === false) return;
+    void loadResultPage(activeResult, loadedRows, false);
+  }, [activeResult, loadResultPage]);
 
   const detailColumns = useMemo(
     () => activeResult ? resolveDataGridColumns(activeResult.columns, rows) : [],
@@ -283,11 +379,11 @@ export function App(): ReactElement {
   }, [copyText]);
 
   const copyActive = useCallback(async (): Promise<void> => {
-    const row = selectedRow === undefined ? visibleRows[0] : rows[selectedRow];
+    const row = selectedRow === undefined ? rows[0] : rows[selectedRow];
     if (!row || !activeResult) return;
     const text = rowsAsText(activeResult.columns, [row]);
     await copyText(text);
-  }, [activeResult, copyText, rows, selectedRow, visibleRows]);
+  }, [activeResult, copyText, rows, selectedRow]);
 
   const exportActive = useCallback(async (): Promise<void> => {
     if (!activeResult || typeof document === 'undefined') return;
@@ -399,7 +495,7 @@ export function App(): ReactElement {
               <label className="electron-export-format">Export format<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label>
             </>}
             <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…">
-              <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateView} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onContextMenu={context => setContextMenu(context)} onRowSelect={setSelectedRow} />
+              <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onContextMenu={context => setContextMenu(context)} onRowSelect={setSelectedRow} />
             </AsyncStateView>
             {contextMenu && contextRow && activeResult && <div className="electron-grid-context-menu" role="menu" style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
               <button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'value'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy value</button>

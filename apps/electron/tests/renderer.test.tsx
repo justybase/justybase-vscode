@@ -2,7 +2,7 @@
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
-import { App, applyHydratedPage, asSurface, displayRows, resultAsyncState, rowsAsCsv, rowsAsText } from '../src/renderer/App';
+import { App, applyHydratedPage, asSurface, displayRows, mergeElectronResultRows, resultAsyncState, rowsAsCsv, rowsAsText } from '../src/renderer/App';
 import { createInitialUiState, createUiStore } from '@justybase/ui-core';
 
 class FakeQueryWebSocket {
@@ -105,6 +105,9 @@ describe('Electron renderer composition', () => {
     expect(rowsAsCsv([{ name: 'ID' }], [[1], ['two']])).toBe('"ID"\n"1"\n"two"');
     expect(rowsAsCsv([{ name: 'A"B' }], [['x"y']])).toBe('"A""B"\n"x""y"');
     expect(rowsAsCsv([{ name: 'ENABLED', type: 'BOOLEAN' }], [[true]])).toBe('"ENABLED"\n"true"');
+    expect(mergeElectronResultRows([[1], [2], [3]], [[9], [8]], 1)).toEqual([[1], [9], [8]]);
+    expect(mergeElectronResultRows([[1], [2]], [[7]], 9)).toEqual([[1], [2]]);
+    expect(mergeElectronResultRows([[1], [2]], [[7]], 4, true)).toEqual([[7]]);
   });
 
   it('renders authenticated shared presentation after the preload bootstrap resolves', async () => {
