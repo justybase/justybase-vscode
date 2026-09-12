@@ -9,6 +9,8 @@ import { formatDataGridCellValue } from './dataGrid';
 import type { DataGridColumn } from './dataGrid';
 export { DataGrid, formatDataGridCellValue, ResultGrid } from './dataGrid';
 export type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
+export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
+export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
 
 export type AsyncViewState = 'loading' | 'empty' | 'error' | 'cancelled' | 'ready';
 

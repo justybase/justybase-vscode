@@ -17,7 +17,9 @@ import {
   UiShell,
   WorkspaceTabs,
   calculateDataGridVirtualWindow,
+  createDataGridClipboardPayload,
   formatDataGridCellValue,
+  formatDataGridClipboard,
   processDataGridRows,
 } from '../src';
 
@@ -52,6 +54,27 @@ describe('shared React presentation', () => {
     expect(formatDataGridCellValue(20260315, 'INTEGER', { inferredDateInteger: true })).toBe('2026 03 15');
     expect(formatDataGridCellValue('AQIDBAUG', 'BLOB')).toBe('[BLOB · 6 B]');
     expect(formatDataGridCellValue({ nested: true }, 'JSON')).toBe('{"nested":true}');
+  });
+
+  it('keeps typed clipboard formats identical across hosts', () => {
+    const payload = createDataGridClipboardPayload({
+      columns: [
+        { name: 'ID', type: 'INTEGER' },
+        { name: 'LABEL', type: 'VARCHAR' },
+        { name: 'ENABLED', type: 'BOOLEAN' },
+      ],
+      rows: [[1234567, "A|B\nC", true], [null, "O'Reilly", false]],
+    });
+    expect(payload.text).toBe('ID\tLABEL\tENABLED\n1 234 567\tA|B\nC\t✓ true\nNULL\tO\'Reilly\t✗ false');
+    expect(payload.markdown).toContain('A\\|B<br>C');
+    expect(payload.csv).toContain('"A|B\nC"');
+    expect(payload.json).toContain('"ID": 1234567');
+    expect(payload.sql).toContain("'O''Reilly'");
+    expect(payload.html).toContain('x:num="1234567"');
+    expect(formatDataGridClipboard({
+      columns: [{ name: 'ID', type: 'INTEGER' }],
+      rows: [[2]],
+    }, 'csv')).toBe('ID\n2');
   });
 
   it('filters formatted values using compact separators and excludes NULL cells', () => {
