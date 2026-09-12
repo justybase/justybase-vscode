@@ -131,7 +131,7 @@ function tokenize(sql: string): Token[] {
             continue;
         }
         let stop = index + 1;
-        while (stop < sql.length && !/[\s(),;'\"#\[]/.test(sql[stop]!)) {
+        while (stop < sql.length && !/[\s(),;'"#[]/.test(sql[stop]!)) {
             stop++;
         }
         const text = sql.slice(index, stop);
