@@ -342,6 +342,8 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
       if (expanded.has(action.nodeId)) expanded.delete(action.nodeId); else expanded.add(action.nodeId);
       return { ...state, metadata: { ...state.metadata, expandedNodeIds: [...expanded] } };
     }
+    case 'metadata/set-expanded':
+      return { ...state, metadata: { ...state.metadata, expandedNodeIds: [...new Set(action.nodeIds)] } };
     case 'history/status':
       return { ...state, history: { ...state.history, status: action.status, message: action.message } };
     case 'history/select':

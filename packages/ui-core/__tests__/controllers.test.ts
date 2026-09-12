@@ -188,6 +188,8 @@ describe('ui-core reducer action coverage', () => {
     state = reduceUiState(state, { type: 'metadata/select', nodeId: 'table-1' });
     state = reduceUiState(state, { type: 'metadata/toggle-expanded', nodeId: 'table-1' });
     state = reduceUiState(state, { type: 'metadata/toggle-expanded', nodeId: 'table-1' });
+    state = reduceUiState(state, { type: 'metadata/set-expanded', nodeIds: ['database-1', 'table-1', 'database-1'] });
+    expect(state.metadata.expandedNodeIds).toEqual(['database-1', 'table-1']);
     state = reduceUiState(state, { type: 'history/status', status: 'complete' });
     state = reduceUiState(state, { type: 'history/select', entryId: 'history-1' });
     state = reduceUiState(state, { type: 'designer/status', status: 'loading' });

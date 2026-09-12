@@ -193,6 +193,7 @@ export type UiAction =
   | { readonly type: 'metadata/status'; readonly status: UiOperationStatus; readonly message?: string }
   | { readonly type: 'metadata/select'; readonly nodeId?: string }
   | { readonly type: 'metadata/toggle-expanded'; readonly nodeId: string }
+  | { readonly type: 'metadata/set-expanded'; readonly nodeIds: readonly string[] }
   | { readonly type: 'history/status'; readonly status: UiOperationStatus; readonly message?: string }
   | { readonly type: 'history/select'; readonly entryId?: string }
   | { readonly type: 'designer/status'; readonly status: UiOperationStatus; readonly message?: string }

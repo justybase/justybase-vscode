@@ -635,6 +635,47 @@ body,
   color: var(--justybase-grid-text);
 }
 
+.ui-schema-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 4px;
+}
+
+.ui-schema-search {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-muted);
+  background: var(--justybase-grid-bg);
+}
+
+.ui-schema-search:focus-within { border-color: var(--justybase-grid-accent); }
+.ui-schema-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--justybase-grid-text); background: transparent; font: inherit; }
+.ui-schema-toolbar-actions { display: flex; gap: 2px; }
+.ui-schema-toolbar-actions button { min-width: 25px; padding: 2px 5px; color: var(--justybase-grid-muted); background: transparent; }
+.ui-schema-toolbar-actions button:hover { color: var(--justybase-grid-text); background: var(--justybase-grid-hover); }
+
+.ui-schema-filters { display: flex; flex-wrap: wrap; gap: 3px; padding: 0 0 4px; }
+.ui-schema-filters button { min-height: 22px; padding: 2px 5px; border: 1px solid var(--justybase-grid-border); border-radius: 10px; color: var(--justybase-grid-muted); background: transparent; font-size: 10px; }
+.ui-schema-filters button.active { border-color: var(--justybase-grid-accent); color: var(--justybase-grid-text); background: color-mix(in srgb, var(--justybase-grid-accent) 14%, transparent); }
+
+.ui-schema-shortcuts { display: grid; gap: 5px; padding: 2px 0 5px; }
+.ui-schema-shortcuts-title { padding: 2px 5px; color: var(--justybase-grid-muted); font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.ui-schema-search-results { min-height: 30px; }
+.ui-schema-empty { padding: 8px 5px; color: var(--justybase-grid-muted); font-size: 11px; }
+.ui-schema-expander-placeholder { display: inline-block; min-width: 22px; }
+.ui-schema-glyph { flex: 0 0 14px; color: var(--justybase-grid-accent); text-align: center; }
+.ui-schema-node > button:last-child { display: flex; align-items: center; gap: 5px; }
+.ui-schema-node > button:last-child span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ui-schema-node > button:last-child small { margin-left: auto; color: var(--justybase-grid-muted); font-size: 9px; }
+.ui-schema-shortcut > button:last-child { width: 100%; }
+
 .ui-schema-node {
   display: flex;
   align-items: center;

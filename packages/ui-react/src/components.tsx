@@ -179,7 +179,7 @@ export function RowDetail({ columns, row, onClose }: RowDetailProps): ReactNode 
   return <aside className="ui-row-detail" aria-labelledby="ui-row-detail-title"><div><h2 id="ui-row-detail-title">Row details</h2><button type="button" onClick={onClose}>Close</button></div><dl>{columns.map((column, index) => <div key={`${column.name}:${index}`}><dt>{column.name}</dt><dd>{formatDataGridCellValue(row[index], column.type, column)}</dd></div>)}</dl></aside>;
 }
 
-export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect, onInsert, onOpenQuery, onOpenExplain, onOpenDdl, onImport, onCopyName }: SchemaTreeProps): ReactNode {
+export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect, onActivate, onInsert, onOpenQuery, onOpenExplain, onOpenDdl, onImport, onCopyName, onToggleFavorite, isFavorite, favorites = [], recent = [], searchValue = '', onSearchChange, searchResults = [], searchLoading = false, searchPlaceholder = 'Search tables, views…', filters = [], activeFilterIds = [], onFilterToggle, onRefresh, onExpandAll, onCollapseAll }: SchemaTreeProps): ReactNode {
   const expanded = new Set(expandedIds ?? []);
   const [contextMenu, setContextMenu] = useState<{ readonly node: MetadataNode; readonly clientX: number; readonly clientY: number } | undefined>(undefined);
   useEffect(() => {
@@ -207,21 +207,66 @@ export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect,
     if (node) action?.(node);
   };
   const hasObjectActions = contextMenu?.node.kind === 'object';
+  const activate = (node: MetadataNode): void => {
+    onSelect?.(node);
+    onActivate?.(node);
+  };
+  const nodeDepth = (node: MetadataNode): number => {
+    const byId = new Map(nodes.map(item => [item.id, item] as const));
+    let depth = 0;
+    let parentId = node.parentId;
+    const seen = new Set<string>();
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      depth += 1;
+      parentId = byId.get(parentId)?.parentId;
+    }
+    return Math.min(depth, 12);
+  };
+  const renderNode = (node: MetadataNode, shortcut = false): ReactNode => <div className={`ui-schema-node${shortcut ? ' ui-schema-shortcut' : ''}`} role="treeitem" aria-selected={node.id === selectedId} aria-expanded={!shortcut && node.hasChildren ? expanded.has(node.id) : undefined} key={node.id} onContextMenu={event => openMenu(event, node)} style={shortcut ? undefined : { paddingLeft: `${4 + nodeDepth(node) * 14}px` }}>
+    {!shortcut && node.hasChildren && <button type="button" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.label}`} onClick={() => onToggle?.(node)}>{expanded.has(node.id) ? '▾' : '▸'}</button>}
+    {!shortcut && !node.hasChildren && <span className="ui-schema-expander-placeholder" aria-hidden="true" />}
+    <button type="button" title={node.description} onClick={() => activate(node)}><span className="ui-schema-glyph" aria-hidden="true">{schemaNodeGlyph(node)}</span><span>{node.label}</span>{node.kind === 'column' && node.columnType ? <small>{node.columnType}</small> : node.kind === 'object' && node.objectType ? <small>{node.objectType}</small> : null}</button>
+  </div>;
 
-  return <div className="ui-schema-tree" role="tree" aria-label="Schema">{nodes.map(node => <div className="ui-schema-node" role="treeitem" aria-selected={node.id === selectedId} aria-expanded={node.hasChildren ? expanded.has(node.id) : undefined} key={node.id} onContextMenu={event => openMenu(event, node)}>
-    {node.hasChildren && <button type="button" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.label}`} onClick={() => onToggle?.(node)}>{expanded.has(node.id) ? '▾' : '▸'}</button>}
-    <button type="button" title={node.description} onClick={() => onSelect?.(node)}>{node.label}{node.kind === 'column' && node.columnType ? ` · ${node.columnType}` : ''}</button>
-  </div>)}
+  return <div className="ui-schema-tree" role="tree" aria-label="Schema">
+    {(onSearchChange || onRefresh || onExpandAll || onCollapseAll) && <div className="ui-schema-toolbar">
+      {onSearchChange && <label className="ui-schema-search"><span aria-hidden="true">⌕</span><input aria-label="Search schema" placeholder={searchPlaceholder} value={searchValue} onChange={event => onSearchChange(event.target.value)} /></label>}
+      <div className="ui-schema-toolbar-actions">
+        {onRefresh && <button type="button" aria-label="Refresh schema" title="Refresh schema" onClick={onRefresh}>↻</button>}
+        {onExpandAll && <button type="button" aria-label="Expand all schema nodes" title="Expand all" onClick={() => void onExpandAll()}>＋</button>}
+        {onCollapseAll && <button type="button" aria-label="Collapse all schema nodes" title="Collapse all" onClick={onCollapseAll}>−</button>}
+      </div>
+    </div>}
+    {filters.length > 0 && <div className="ui-schema-filters" aria-label="Schema object filters">{filters.map(filter => <button type="button" key={filter.id} className={activeFilterIds.includes(filter.id) ? 'active' : ''} aria-pressed={activeFilterIds.includes(filter.id)} onClick={() => onFilterToggle?.(filter.id)}>{filter.label}</button>)}</div>}
+    {(favorites.length > 0 || recent.length > 0) && <div className="ui-schema-shortcuts">
+      {favorites.length > 0 && <div><div className="ui-schema-shortcuts-title">Favorites</div>{favorites.map(node => renderNode(node, true))}</div>}
+      {recent.length > 0 && <div><div className="ui-schema-shortcuts-title">Recent</div>{recent.slice(0, 5).map(node => renderNode(node, true))}</div>}
+    </div>}
+    {searchValue.trim() ? <div className="ui-schema-search-results" aria-live="polite">
+      {searchLoading ? <div className="ui-schema-empty">Searching schema…</div> : searchResults.length === 0 ? <div className="ui-schema-empty">No matching objects.</div> : searchResults.map(node => renderNode(node, true))}
+    </div> : nodes.map(node => renderNode(node))}
     {contextMenu && <div className="ui-schema-context-menu" role="menu" aria-label={`Actions for ${contextMenu.node.label}`} style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
       <strong>{contextMenu.node.label}</strong>
-      {onInsert && <button type="button" role="menuitem" onClick={() => runAction(onInsert)}>Insert name</button>}
+      {onInsert && <button type="button" role="menuitem" onClick={() => runAction(onInsert)}>Insert qualified name</button>}
       {hasObjectActions && onOpenQuery && <button type="button" role="menuitem" onClick={() => runAction(onOpenQuery)}>View top 1000</button>}
       {hasObjectActions && onOpenExplain && <button type="button" role="menuitem" onClick={() => runAction(onOpenExplain)}>Explain plan</button>}
       {hasObjectActions && onOpenDdl && <button type="button" role="menuitem" onClick={() => runAction(onOpenDdl)}>Open DDL</button>}
       {hasObjectActions && onImport && <button type="button" role="menuitem" onClick={() => runAction(onImport)}>Import CSV/XLSX</button>}
       {onCopyName && <button type="button" role="menuitem" onClick={() => runAction(onCopyName)}>Copy qualified name</button>}
+      {hasObjectActions && onToggleFavorite && <button type="button" role="menuitem" onClick={() => runAction(onToggleFavorite)}>{(isFavorite?.(contextMenu.node) ?? favorites.some(node => node.id === contextMenu.node.id)) ? 'Remove from favorites' : 'Add to favorites'}</button>}
     </div>}
   </div>;
+}
+
+function schemaNodeGlyph(node: MetadataNode): string {
+  if (node.kind === 'database') return '◉';
+  if (node.kind === 'schema') return '▦';
+  if (node.kind === 'group') return '▰';
+  if (node.kind === 'column') return '·';
+  if (node.objectType?.toUpperCase() === 'VIEW') return '◌';
+  if (node.objectType?.toUpperCase() === 'PROCEDURE') return 'ƒ';
+  return '▤';
 }
 
 export interface HistoryViewEntry {
@@ -244,12 +289,28 @@ export interface SchemaTreeProps {
   readonly expandedIds?: readonly string[];
   readonly onToggle?: (node: MetadataNode) => void;
   readonly onSelect?: (node: MetadataNode) => void;
+  readonly onActivate?: (node: MetadataNode) => void;
   readonly onInsert?: (node: MetadataNode) => void;
   readonly onOpenQuery?: (node: MetadataNode) => void;
   readonly onOpenExplain?: (node: MetadataNode) => void;
   readonly onOpenDdl?: (node: MetadataNode) => void;
   readonly onImport?: (node: MetadataNode) => void;
   readonly onCopyName?: (node: MetadataNode) => void;
+  readonly onToggleFavorite?: (node: MetadataNode) => void;
+  readonly isFavorite?: (node: MetadataNode) => boolean;
+  readonly favorites?: readonly MetadataNode[];
+  readonly recent?: readonly MetadataNode[];
+  readonly searchValue?: string;
+  readonly onSearchChange?: (value: string) => void;
+  readonly searchResults?: readonly MetadataNode[];
+  readonly searchLoading?: boolean;
+  readonly searchPlaceholder?: string;
+  readonly filters?: readonly { readonly id: string; readonly label: string }[];
+  readonly activeFilterIds?: readonly string[];
+  readonly onFilterToggle?: (id: string) => void;
+  readonly onRefresh?: () => void;
+  readonly onExpandAll?: () => void | Promise<void>;
+  readonly onCollapseAll?: () => void;
 }
 
 export interface HistoryViewProps {
