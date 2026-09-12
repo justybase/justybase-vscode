@@ -54,7 +54,7 @@ describe('Electron main composition root', () => {
       ipcMain: { handle: jest.Mock; removeHandler: jest.Mock };
       session: { defaultSession: { cookies: { set: jest.Mock } } };
     };
-    for (let attempt = 0; attempt < 200 && electron.__windows.length === 0; attempt += 1) {
+    for (let attempt = 0; attempt < 2_000 && (electron.__windows[0] === undefined || electron.__windows[0].loadURL.mock.calls.length === 0); attempt += 1) {
       await new Promise<void>(resolve => setImmediate(resolve));
     }
     const windowInstance = electron.__windows[0];
