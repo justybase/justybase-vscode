@@ -143,7 +143,7 @@ describe('shared Web UI adapter edge contracts', () => {
 
   it('covers shared result controls, two-axis scroll, history, schema and guarded surfaces', async () => {
     const user = userEvent.setup();
-    const { api } = edgeApi();
+    const { api, fetchMock } = edgeApi();
     const writeText = jest.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:fixture') });
@@ -164,7 +164,17 @@ describe('shared Web UI adapter edge contracts', () => {
     fireEvent.scroll(grid);
     await user.click(screen.getByRole('row', { name: /alpha|1/ }));
     await user.click(screen.getByRole('button', { name: 'Copy' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Shared export format' }), 'json');
     await user.click(screen.getByRole('button', { name: 'Export' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/query/query-1/export'))).toBe(true));
+    const exportCall = fetchMock.mock.calls.find(([input]) => String(input).includes('/api/query/query-1/export'));
+    expect(exportCall).toBeDefined();
+    expect(JSON.parse(String((exportCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({
+      format: 'json',
+      globalFilter: 'a',
+      columnFilters: [{ columnIndex: 1, value: 'a' }],
+      sorting: [{ columnIndex: 0, desc: false }],
+    }));
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(writeText).toHaveBeenCalled();
 

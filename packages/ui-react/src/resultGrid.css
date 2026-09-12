@@ -679,6 +679,25 @@ body,
 
 .shared-result-panel { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 .shared-result-panel > .ui-result-tabs { flex: 0 0 auto; }
+.shared-result-controls { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.shared-result-controls .ui-result-toolbar { min-width: 0; flex: 1; }
+.shared-export-format {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  color: var(--justybase-grid-muted);
+  font-size: 11px;
+}
+.shared-export-format select {
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  font: inherit;
+}
 
 .electron-sidebar-content {
   display: flex;

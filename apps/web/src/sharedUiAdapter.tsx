@@ -6,7 +6,10 @@ import type {
   DatabaseKind,
   EditorPreferences,
   HistoryEntry,
+  QueryColumnFilterSpec,
   QueryEvent,
+  QueryExportFormat,
+  QuerySortSpec,
   SchemaTreeNode,
   UiMode,
   WebUser,
@@ -21,7 +24,7 @@ import type { UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@j
 import {
   AsyncStateView,
   DataGrid,
-  formatDataGridCellValue,
+  createDataGridClipboardPayload,
   processDataGridRows,
   DesignerForm,
   ExplainView,
@@ -29,14 +32,13 @@ import {
   ResultTabs,
   ResultViewToolbar,
   RowDetail,
-  resolveDataGridColumnIndexes,
   resolveDataGridColumns,
   SchemaTree,
   SqlDialectSelect,
   UiShell,
   WorkspaceTabs,
 } from '@justybase/ui-react';
-import type { GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
+import type { DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import type { ApiClient, QueryEventSubscription } from './api';
 import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
 
@@ -187,6 +189,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
   const [schemaNodes, setSchemaNodes] = useState<ReturnType<typeof mapSchemaNode>[]>([]);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
+  const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const rowsByResultRef = useRef(rowsByResult);
   const activeQueryRef = useRef<ActiveQuery | undefined>(undefined);
@@ -512,26 +515,82 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     [activeResult?.columns, activeRows],
   );
 
-  const copySelected = useCallback(async (): Promise<void> => {
-    const row = selectedRow === undefined ? visibleRows[0] : visibleRows[selectedRow];
-    if (!row) return;
-    const indexes = resolveDataGridColumnIndexes(detailColumns, activeResult?.view);
-    const text = indexes.map(index => formatDataGridCellValue(row[index], detailColumns[index]?.type, detailColumns[index])).join('\t');
-    if (typeof navigator !== 'undefined' && navigator.clipboard) await navigator.clipboard.writeText(text);
-    setNotice('Row copied.');
-  }, [activeResult?.view, detailColumns, selectedRow, visibleRows]);
+  const copyGridPayload = useCallback(async (payload: DataGridCopyPayload): Promise<void> => {
+    const formatted = createDataGridClipboardPayload(payload);
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setNotice('Clipboard access is unavailable.');
+      return;
+    }
+    try {
+      if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([formatted.html], { type: 'text/html' }),
+          'text/plain': new Blob([formatted.text], { type: 'text/plain' }),
+        })]);
+      } else if (typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(formatted.text);
+      } else {
+        setNotice('Clipboard access is unavailable.');
+        return;
+      }
+      setNotice('Copied.');
+    } catch {
+      try {
+        await navigator.clipboard.writeText(formatted.text);
+        setNotice('Copied.');
+      } catch {
+        setNotice('Could not copy to the clipboard.');
+      }
+    }
+  }, []);
 
-  const exportResults = useCallback((): void => {
-    if (typeof document === 'undefined') return;
-    const blob = new Blob([`${rowsAsCsv(activeResult?.columns ?? [], visibleRows)}\n`], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'justybase-result.csv';
-    link.click();
-    URL.revokeObjectURL(url);
-    setNotice('Result exported.');
-  }, [activeResult?.columns, visibleRows]);
+  const copyGridSelection = useCallback((payload: DataGridCopyPayload): void => {
+    void copyGridPayload(payload);
+  }, [copyGridPayload]);
+
+  const copySelected = useCallback(async (): Promise<void> => {
+    if (!activeResult) return;
+    const row = selectedRow === undefined ? activeRows[0] : activeRows[selectedRow];
+    if (!row) return;
+    await copyGridPayload({ columns: activeResult.columns, rows: [row] });
+  }, [activeResult, activeRows, copyGridPayload, selectedRow]);
+
+  const exportResults = useCallback(async (): Promise<void> => {
+    if (!activeResult || typeof document === 'undefined') return;
+    const queryId = queryByResultRef.current.get(activeResult.resultSetId) ?? activeResult.executionId;
+    if (!queryId) {
+      setNotice('Result export is unavailable for this result.');
+      return;
+    }
+    const columnFilters: QueryColumnFilterSpec[] = Object.entries(activeResult.view.columnFilters)
+      .flatMap(([column, value]) => {
+        const columnIndex = activeResult.columns.findIndex((item, index) => item.name === column || String(index) === column);
+        return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
+      });
+    const sorting: QuerySortSpec[] = activeResult.view.sorting.flatMap(item => {
+      const columnIndex = activeResult.columns.findIndex((column, index) => column.name === item.column || String(index) === item.column);
+      return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
+    });
+    try {
+      const downloaded = await api.exportQuery(queryId, {
+        statementIndex: activeResult.statementIndex,
+        format: exportFormat,
+        globalFilter: activeResult.view.globalFilter,
+        columnFilters,
+        sorting,
+      });
+      const url = URL.createObjectURL(downloaded.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloaded.fileName;
+      link.click();
+      const revokeObjectUrl = URL.revokeObjectURL;
+      if (typeof revokeObjectUrl === 'function') window.setTimeout(() => revokeObjectUrl(url), 100);
+      setNotice('Result exported.');
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not export results.');
+    }
+  }, [activeResult, api, exportFormat]);
 
   const historyItems: HistoryViewEntry[] = useMemo(() => history.map(entry => ({ id: entry.id, label: entry.sql.slice(0, 80), status: entry.status, sqlFingerprint: `${entry.createdAt} · ${entry.rowCount} rows` })), [history]);
   const selectedNode = state.metadata.selectedNodeId ? schemaNodes.find(node => node.id === state.metadata.selectedNodeId) : undefined;
@@ -554,9 +613,9 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               <div className="shared-editor-actions" role="toolbar" aria-label="SQL editor actions"><button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button><SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" /></div>
               {notice && <div role="status">{notice}</div>}
               <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-              {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={exportResults} />}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={visibleRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={false} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
-              {selectedRow !== undefined && visibleRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={visibleRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+              {activeResult && <div className="shared-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={() => void exportResults()} /><label className="shared-export-format">Export<select aria-label="Shared export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
+              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={true} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onRowSelect={setSelectedRow} /></AsyncStateView>
+              {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
             </div>
           </>}
   </UiShell>;
