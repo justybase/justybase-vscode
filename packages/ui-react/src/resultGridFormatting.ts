@@ -221,7 +221,7 @@ function roundDecimalParts(parsed: ParsedDecimalParts, scale: number, roundingMo
   const nextDigit = discarded[0]!;
   const remainder = discarded.slice(1);
   const discardedHasValue = hasNonZeroDigits(discarded);
-  let shouldRoundUp = false;
+  let shouldRoundUp: boolean;
   switch (roundingMode) {
     case 'ceil': shouldRoundUp = parsed.sign !== '-' && discardedHasValue; break;
     case 'floor': shouldRoundUp = parsed.sign === '-' && discardedHasValue; break;

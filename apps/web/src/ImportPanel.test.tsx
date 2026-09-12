@@ -18,18 +18,24 @@ const target: SchemaTreeNode = {
 
 function apiFixture(): jest.Mocked<Pick<ApiClient, 'importFilePreview' | 'importFile'>> {
   return {
-    importFilePreview: jest.fn(async (_input: QueryFileImportPreviewRequest) => ({
-      sql: 'INSERT INTO PUBLIC.ORDERS …',
-      previewToken: 'preview-1',
-      expiresAt: Date.now() + 60_000,
-      warnings: ['Verify the target table.'],
-      rowCount: 2,
-    })),
-    importFile: jest.fn(async (_input: QueryFileImportRequest) => ({
-      sql: 'INSERT INTO PUBLIC.ORDERS …',
-      rowsAffected: 2,
-      message: 'Imported 2 rows.',
-    })),
+    importFilePreview: jest.fn(async (input: QueryFileImportPreviewRequest) => {
+      void input;
+      return {
+        sql: 'INSERT INTO PUBLIC.ORDERS …',
+        previewToken: 'preview-1',
+        expiresAt: Date.now() + 60_000,
+        warnings: ['Verify the target table.'],
+        rowCount: 2,
+      };
+    }),
+    importFile: jest.fn(async (input: QueryFileImportRequest) => {
+      void input;
+      return {
+        sql: 'INSERT INTO PUBLIC.ORDERS …',
+        rowsAffected: 2,
+        message: 'Imported 2 rows.',
+      };
+    }),
   };
 }
 

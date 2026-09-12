@@ -59,12 +59,16 @@ describe('Electron same-origin API adapter', () => {
 
   it('preserves compressed export filenames in the Electron download adapter', async () => {
     const blob = new Blob(['compressed'], { type: 'application/gzip' });
-    const fetcher = jest.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+    const fetcher = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return ({
       ok: true,
       status: 200,
       headers: new Headers({ 'content-disposition': 'attachment; filename="orders.csv.gz"' }),
       blob: async () => blob,
-    }) as Response);
+      }) as Response;
+    });
     const client = createElectronApiClient({ fetcher });
     await expect(client.exportQuery('query-1', { format: 'csv.gz', offset: 0, limit: 500 })).resolves.toEqual({ blob, fileName: 'orders.csv.gz' });
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(expect.objectContaining({ format: 'csv.gz' }));

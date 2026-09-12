@@ -11,7 +11,10 @@ jest.mock('electron', () => {
   const windows: MockBrowserWindow[] = [];
   class MockBrowserWindow {
     public readonly events = new Map<string, (...args: unknown[]) => void>();
-    public readonly loadURL = jest.fn(async (_url: string) => undefined);
+    public readonly loadURL = jest.fn(async (url: string) => {
+      void url;
+      return undefined;
+    });
     public readonly show = jest.fn();
     public readonly close = jest.fn();
     public constructor(public readonly options: Record<string, unknown>) { windows.push(this); }

@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import type {
@@ -31,7 +32,7 @@ function sqlWriteLiteral(value: unknown): string {
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
   const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  return `'${text.replace(/\u0000/g, '').replace(/'/g, "''")}'`;
+  return `'${text.replaceAll('\u0000', '').replace(/'/g, "''")}'`;
 }
 
 function sqlWritePredicate(column: string, value: unknown, field: string): string {
@@ -158,9 +159,9 @@ function importColumnNames(header: unknown[] | undefined, width: number, targetC
 async function readSpreadsheetImport(filePath: string, sheetName?: string): Promise<unknown[][]> {
   let spreadsheet: SpreadsheetTasksModule;
   try {
-    spreadsheet = require('@justybase/spreadsheet-tasks') as SpreadsheetTasksModule;
+    spreadsheet = createRequire(__filename)('@justybase/spreadsheet-tasks') as SpreadsheetTasksModule;
   } catch (error: unknown) {
-    throw new Error(`Spreadsheet import is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Spreadsheet import is unavailable: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   const factory = spreadsheet.ReaderFactory;
   if (!factory) throw new Error('Spreadsheet import is unavailable in this installation.');

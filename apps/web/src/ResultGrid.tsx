@@ -441,7 +441,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
         if (sourceColumnIndex === undefined) return column;
         const sourceColumn = gridColumns[sourceColumnIndex];
         if (sourceColumn === undefined) return column;
-        const { inferredDateInteger: _inferredDateInteger, ...sourceWithoutInferredDate } = sourceColumn;
+        const sourceWithoutInferredDate = { ...sourceColumn };
+        delete sourceWithoutInferredDate.inferredDateInteger;
         return {
           ...sourceWithoutInferredDate,
           ...(columnIndex === 3 ? { type: 'DECIMAL', scale: Math.max(1, sourceColumn.scale ?? 4), inferredNumericKind: 'decimal' as const } : {}),

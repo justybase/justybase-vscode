@@ -1,5 +1,6 @@
 import { createGzip, createZstdCompress } from 'node:zlib';
 import { createReadStream, mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { Readable } from 'node:stream';
 import path from 'node:path';
 import type { QueryColumn, QueryExportFormat, QueryExportRequest } from '@justybase/contracts';
@@ -142,7 +143,7 @@ function createXlsxLikeStream(manager: QuerySessionManager, userId: string, sess
     const exportDirectory = process.env.JUSTYBASE_WEB_EXPORT_DIR ?? '/tmp';
     mkdirSync(exportDirectory, { recursive: true });
     const filePath = path.join(exportDirectory, `justybase-export-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`);
-    const spreadsheetTasks = require('@justybase/spreadsheet-tasks') as {
+    const spreadsheetTasks = createRequire(__filename)('@justybase/spreadsheet-tasks') as {
       XlsxWriter: new (path: string) => SpreadsheetWriter;
       XlsbWriter: new (path: string) => SpreadsheetWriter;
     };
