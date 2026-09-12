@@ -38,6 +38,7 @@
     "@fastify/websocket": "^11.2.0",
     "@justybase/database-runtime": "*",
     "@justybase/contracts": "*",
+    "@justybase/dialect-utils": "*",
     "@justybase/designer-core": "*",
     "@justybase/duckdb-runtime": "*",
     "@justybase/metadata-core": "*",

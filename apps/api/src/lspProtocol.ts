@@ -4,6 +4,7 @@ import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import type { AppStore } from './store';
 import { ApiMetadataService } from './metadataCache';
 import { STALE_TTL_MULTIPLIER } from '@justybase/metadata-core';
+import { getSqlAuthoring } from './sqlAuthoring';
 
 interface WebSocketLike {
   readyState: number;
@@ -181,6 +182,7 @@ export function attachLspSocket(
   const knownConnectionIds = new Set<string>();
   const core = new NetezzaWebLspCore({
     requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId, metadataService),
+    authoringForContext: context => getSqlAuthoring(context.databaseKind),
     logger: { error: message => console.error(message) },
   });
   const send = (message: unknown): void => { if (socket.readyState === 1) socket.send(JSON.stringify({ jsonrpc: '2.0', ...message as object })); };

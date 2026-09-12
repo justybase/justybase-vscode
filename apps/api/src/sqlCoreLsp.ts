@@ -1,4 +1,4 @@
-import type { DatabaseKind } from "@justybase/contracts";
+import type { DatabaseKind, DatabaseSqlAuthoring } from "@justybase/contracts";
 import {
   NETEZZA_SQL_AUTHORING,
   NetezzaSqlSemanticValidator,
@@ -117,6 +117,10 @@ export interface WebLspContext {
 }
 export interface WebLspCoreOptions {
   requestMetadata(params: WebLspMetadataRequestParams): Promise<unknown>;
+  /** Dialect authoring remains available even when execution is unavailable. */
+  authoring?: DatabaseSqlAuthoring;
+  /** WebSocket sessions can contain documents for multiple database kinds. */
+  authoringForContext?: (context: WebLspContext) => DatabaseSqlAuthoring;
   logger?: { error(message: string): void };
 }
 
@@ -170,9 +174,17 @@ interface ApiTableInfo extends TableInfo {
 export class NetezzaWebLspCore {
   private readonly documents = new Map<string, DocumentState>();
   private readonly requestMetadata: WebLspCoreOptions["requestMetadata"];
+  private readonly authoring: DatabaseSqlAuthoring;
+  private readonly authoringForContext: (context: WebLspContext) => DatabaseSqlAuthoring;
 
   public constructor(options: WebLspCoreOptions) {
     this.requestMetadata = options.requestMetadata;
+    this.authoring = options.authoring ?? NETEZZA_SQL_AUTHORING;
+    this.authoringForContext = options.authoringForContext ?? (() => this.authoring);
+  }
+
+  private getAuthoring(context: WebLspContext): DatabaseSqlAuthoring {
+    return this.authoringForContext(context);
   }
 
   public setContext(documentUri: string, context: WebLspContext): void {
@@ -260,7 +272,7 @@ export class NetezzaWebLspCore {
   ): Promise<CoreDiagnostic[]> {
     const state = await this.ensureState(documentUri);
     if (state.context.databaseKind && state.context.databaseKind !== "netezza") {
-      return this.genericDiagnostics(sql);
+      return this.genericDiagnostics(sql, this.getAuthoring(state.context));
     }
     await this.warmTables(
       documentUri,
@@ -432,11 +444,11 @@ export class NetezzaWebLspCore {
 
   public async signatureHelp(_documentUri: string, _version: number, sql: string, position: CorePosition): Promise<CoreSignatureHelp | null> {
     const state = await this.ensureState(_documentUri);
-    if (state.context.databaseKind && state.context.databaseKind !== "netezza") return null;
+    if (state.context.databaseKind && state.context.databaseKind !== "netezza") return this.genericSignatureHelp(sql, position, this.getAuthoring(state.context));
     const prefix = sql.slice(0, offsetAt(sql, position));
     const match = /([A-Za-z_][A-Za-z0-9_$]*)\s*\(([^()]*)$/.exec(prefix);
     if (!match) return null;
-    const signatures = NETEZZA_SQL_AUTHORING.signatures.get(match[1].toUpperCase());
+    const signatures = this.getAuthoring(state.context).signatures.get(match[1].toUpperCase());
     if (!signatures?.length) return null;
     const activeParameter = match[2].split(",").length - 1;
     return {
@@ -447,6 +459,23 @@ export class NetezzaWebLspCore {
       })),
       activeSignature: 0,
       activeParameter,
+    };
+  }
+
+  private genericSignatureHelp(sql: string, position: CorePosition, authoring = this.authoring): CoreSignatureHelp | null {
+    const prefix = sql.slice(0, offsetAt(sql, position));
+    const match = /([A-Za-z_][A-Za-z0-9_$]*)\s*\(([^()]*)$/u.exec(prefix);
+    if (!match) return null;
+    const signatures = authoring.signatures.get(match[1].toUpperCase());
+    if (!signatures?.length) return null;
+    return {
+      signatures: signatures.map(signature => ({
+        label: `${signature.name}(${signature.parameters.join(', ')})`,
+        documentation: signature.description,
+        parameters: signature.parameters.map(parameter => ({ label: parameter })),
+      })),
+      activeSignature: 0,
+      activeParameter: match[2].split(',').length - 1,
     };
   }
 
@@ -492,14 +521,15 @@ export class NetezzaWebLspCore {
     position: CorePosition,
     state: DocumentState,
   ): Promise<CoreCompletionItem[]> {
+    const authoring = this.getAuthoring(state.context);
     const offset = offsetAt(sql, position);
     if (isCompletionSuppressed(sql, offset)) return [];
     await this.ensureTableList(documentUri, state);
     const prefix = sql.slice(0, offset);
     const currentWord = /[A-Za-z_][A-Za-z0-9_$]*$/.exec(prefix)?.[0] ?? "";
     const qualifier = /(?:^|[^A-Za-z0-9_$])([A-Za-z_][A-Za-z0-9_$]*)\.[A-Za-z0-9_$]*$/.exec(prefix)?.[1];
-    const genericKeywords = ["SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "INSERT INTO", "UPDATE", "DELETE FROM", "CREATE TABLE", "ALTER TABLE", "DROP TABLE", "WITH", "AS", "AND", "OR", "NOT", "NULL", "IS NULL", "IN", "EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END"];
-    const genericFunctions = ["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF", "SUBSTR", "SUBSTRING", "TRIM", "UPPER", "LOWER", "CAST"];
+    const genericKeywords = authoring.completionKeywords;
+    const genericFunctions = Array.from(authoring.signatures.keys());
     const items: CoreCompletionItem[] = [
       ...genericKeywords.map(label => ({ label, kind: 14 })),
       ...genericFunctions.map(label => ({ label, kind: 3, detail: `${state.context.databaseKind ?? "SQL"} function` })),
@@ -530,7 +560,7 @@ export class NetezzaWebLspCore {
     }).slice(0, 200);
   }
 
-  private genericDiagnostics(sql: string): CoreDiagnostic[] {
+  private genericDiagnostics(sql: string, authoring = this.authoring): CoreDiagnostic[] {
     const state = scanGenericDelimiters(sql);
     const diagnostics: CoreDiagnostic[] = state.unexpectedClosingParenthesisOffsets.map(offset => ({
       range: rangeFromOffsets(sql, offset, offset + 1),
@@ -553,7 +583,17 @@ export class NetezzaWebLspCore {
       source: "justybase-web",
       message: "Unclosed parenthesis.",
     });
-    return diagnostics;
+    const qualityDiagnostics = authoring.qualityRules
+      .filter(rule => !rule.onDemandOnly)
+      .flatMap(rule => rule.check(sql).map(issue => ({
+        range: rangeFromOffsets(sql, issue.startOffset, issue.endOffset),
+        severity: issue.severity + 1,
+        code: issue.ruleId,
+        source: `justybase-${authoring.validation.databaseKind ?? 'sql'}`,
+        message: issue.message,
+        data: issue.suggestedFix ? { suggestedFix: issue.suggestedFix } : undefined,
+      })));
+    return [...diagnostics, ...qualityDiagnostics].sort(compareDiagnostics);
   }
 
   private async genericHover(documentUri: string, sql: string, position: CorePosition, state: DocumentState): Promise<CoreHover | null> {
@@ -675,7 +715,7 @@ export class NetezzaWebLspCore {
 
   public async semanticTokens(_documentUri: string, _version: number, sql: string): Promise<CoreSemanticTokenResult> {
     const state = await this.ensureState(_documentUri);
-    if (state.context.databaseKind && state.context.databaseKind !== "netezza") return genericSemanticTokens(sql);
+    if (state.context.databaseKind && state.context.databaseKind !== "netezza") return genericSemanticTokens(sql, this.getAuthoring(state.context));
     const usages = collectSqlSymbolUsages(sql);
     const roles = new Map<number, string>();
     for (const usage of usages) {
@@ -1103,9 +1143,15 @@ function formatObjectPath(database: string | undefined, schema: string | undefin
   return [database, schema, table].filter(Boolean).join(".") || table;
 }
 
-function genericSemanticTokens(sql: string): CoreSemanticTokenResult {
-  const keywords = new Set(["SELECT", "FROM", "WHERE", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "ON", "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "WITH", "AS", "AND", "OR", "NOT", "NULL", "IS", "IN", "EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END", "INSERT", "INTO", "UPDATE", "SET", "DELETE", "CREATE", "ALTER", "DROP", "TABLE", "VIEW", "VALUES", "CAST"]);
-  const functions = new Set(["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF", "SUBSTR", "SUBSTRING", "TRIM", "UPPER", "LOWER", "CAST"]);
+function genericSemanticTokens(sql: string, authoring: DatabaseSqlAuthoring): CoreSemanticTokenResult {
+  const keywords = new Set<string>();
+  for (const keyword of [...authoring.completionKeywords, ...authoring.formatter.keywords]) {
+    for (const word of keyword.split(/\s+/u)) if (word) keywords.add(word.toUpperCase());
+  }
+  const functions = new Set([
+    ...Array.from(authoring.signatures.keys()),
+    ...Array.from(authoring.validation.builtinFunctions),
+  ].map(value => value.toUpperCase()));
   const tokens = scanIdentifiers(sql).map(item => {
     const upper = item.normalized.toUpperCase();
     const after = sql.slice(item.end).match(/^\s*\(/u);

@@ -1,4 +1,5 @@
 import { NetezzaWebLspCore, type WebLspMetadataRequestParams } from '../src/sqlCoreLsp';
+import { getSqlAuthoring } from '../src/sqlAuthoring';
 
 const NO_CONNECTION_METADATA = async (params: WebLspMetadataRequestParams): Promise<unknown> =>
   params.kind === 'context' ? { databaseKind: 'netezza' } : [];
@@ -118,6 +119,31 @@ describe('shared Netezza web SQL core — LSP feature parity (D1)', () => {
     const diagnostics = await core.diagnostics(uri, 1, "SELECT datetime('now')");
     expect(diagnostics).toEqual([]);
     expect(await core.format('select datetime(\'now\')', { databaseKind: 'sqlite', keywordCase: 'upper' })).toBe("SELECT\n    datetime('now')");
+  });
+
+  it.each([
+    ['postgresql', 'RETURNING', 'STRING_AGG('],
+    ['db2', 'FETCH FIRST', 'VARCHAR('],
+    ['mssql', 'TOP', 'GETDATE('],
+    ['clickhouse', 'PREWHERE', 'argMax('],
+    ['oracle', 'CONNECT BY', 'NVL('],
+  ] as const)('uses the selected %s authoring profile for completion and signature help', async (databaseKind, keyword, signature) => {
+    const uri = `file:///${databaseKind}.sql`;
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => params.kind === 'context' ? { databaseKind } : [], authoring: getSqlAuthoring(databaseKind) });
+    core.setContext(uri, { databaseKind });
+    const completion = await core.completion(uri, 1, 'SELECT ', { line: 0, character: 7 });
+    expect(completion.some(item => item.label.toUpperCase() === keyword)).toBe(true);
+    const help = await core.signatureHelp(uri, 1, `SELECT ${signature}`, { line: 0, character: `SELECT ${signature}`.length });
+    expect(help).not.toBeNull();
+  });
+
+  it('runs dialect quality rules for non-Netezza documents without inventing parser errors', async () => {
+    const uri = 'file:///clickhouse.sql';
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => params.kind === 'context' ? { databaseKind: 'clickhouse' } : [], authoring: getSqlAuthoring('clickhouse') });
+    core.setContext(uri, { databaseKind: 'clickhouse' });
+    const diagnostics = await core.diagnostics(uri, 1, 'ALTER TABLE orders DELETE WHERE id = 1');
+    expect(diagnostics.map(item => item.code)).toEqual(expect.arrayContaining(['CH001']));
+    expect(diagnostics.some(item => item.code?.toString().startsWith('PAR'))).toBe(false);
   });
 
   it('keeps macro symbols and skips outlines for large scripts', async () => {

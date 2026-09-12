@@ -5,6 +5,7 @@ import type { ApiConfig } from './config';
 import type { ApiDatabaseRuntimeRegistry } from './databaseRuntime/contracts';
 import type { AppStore, StoredConnection } from './store';
 import { ApiMetadataService } from './metadataCache';
+import { getSqlAuthoring } from './sqlAuthoring';
 
 interface HttpDocumentState { text: string; version: number; context: SqlLanguageContext; }
 interface HttpCoreCacheEntry {
@@ -57,6 +58,7 @@ function getHttpCore(
       const documents = new Map<string, HttpDocumentState>();
       const core = new NetezzaWebLspCore({
         requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId, metadataService),
+        authoring: getSqlAuthoring(context.databaseKind),
       });
       return {
         connectionId: context.connectionId,
@@ -132,16 +134,6 @@ function scanLegacyDelimiters(sql: string): LegacyDelimiterState {
   return { quoteOpen, parentheses, unexpectedClosingParenthesisOffsets };
 }
 
-function legacyDelimiterDiagnostics(sql: string, state: LegacyDelimiterState): SqlDiagnostic[] {
-  const diagnostics: SqlDiagnostic[] = [];
-  if (state.quoteOpen) diagnostics.push(diagnostic(sql, 'Unterminated string literal.', 'error', Math.max(0, sql.lastIndexOf("'")), 'WEB002'));
-  for (const offset of state.unexpectedClosingParenthesisOffsets) {
-    diagnostics.push(diagnostic(sql, 'Unexpected closing parenthesis.', 'error', offset, 'WEB001'));
-  }
-  if (state.parentheses > 0) diagnostics.push(diagnostic(sql, 'Unclosed parenthesis.', 'error', sql.length, 'WEB003'));
-  return diagnostics;
-}
-
 function mapCoreDiagnostic(sql: string, item: CoreDiagnostic, state: LegacyDelimiterState): SqlDiagnostic {
   const parserCode = String(item.code ?? '');
   const code = parserCode.startsWith('LEX') && state.quoteOpen
@@ -168,7 +160,7 @@ function mapCoreDiagnostic(sql: string, item: CoreDiagnostic, state: LegacyDelim
   };
 }
 
-async function provideNetezzaDiagnostics(
+async function provideDialectDiagnostics(
   store: AppStore,
   runtimes: ApiDatabaseRuntimeRegistry,
   userId: string,
@@ -188,6 +180,7 @@ async function provideNetezzaDiagnostics(
   }]]);
   const core = new NetezzaWebLspCore({
     requestMetadata: params => requestMetadata(params, documents, store, runtimes, userId, metadataService),
+    authoring: getSqlAuthoring(request.databaseKind),
   });
   core.setContext(documentUri, {
     connectionName: request.connectionId,
@@ -209,9 +202,7 @@ export async function provideSqlDiagnostics(
   metadataService = new ApiMetadataService(),
 ): Promise<SqlDiagnosticsResponse> {
   const sql = request.sql;
-  const diagnostics = request.databaseKind && request.databaseKind !== 'netezza'
-    ? legacyDelimiterDiagnostics(sql, scanLegacyDelimiters(sql))
-    : await provideNetezzaDiagnostics(store, runtimes, userId, request, metadataService);
+  const diagnostics = await provideDialectDiagnostics(store, runtimes, userId, request, metadataService);
   const profile = getProfile(store, userId, request.connectionId);
   if (profile?.readOnly && sql.trim() && !runtimes.isReadOnlySql(profile, sql)) diagnostics.push(diagnostic(sql, 'This connection is read-only; the statement may be rejected.', 'warning', 0, 'WEB004'));
   return { diagnostics };
