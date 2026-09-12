@@ -824,7 +824,8 @@ body,
   outline: 0;
   color: var(--justybase-grid-text);
   background: transparent;
-  font: 11px inherit;
+  font-family: inherit;
+  font-size: 11px;
 }
 
 .electron-schema-filters { display: flex; flex-wrap: wrap; gap: 3px; }
@@ -1021,6 +1022,104 @@ body,
 
 .ui-row-detail dt { color: var(--justybase-grid-muted); }
 .ui-row-detail dd { color: var(--justybase-grid-text); white-space: pre-wrap; }
+
+.electron-modal-backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 58%);
+}
+
+.electron-modal-card {
+  display: grid;
+  width: min(620px, 100%);
+  max-height: min(90vh, 760px);
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 6px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 45%);
+}
+
+.electron-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+}
+
+.electron-modal-header > div { display: grid; gap: 4px; }
+.electron-modal-header strong { color: var(--vscode-titleBar-activeForeground, #fff); font-size: 14px; }
+.electron-modal-header small,
+.electron-modal-hint { color: var(--justybase-grid-muted); font-size: 11px; }
+
+.electron-modal-card > label {
+  display: grid;
+  gap: 5px;
+  color: var(--justybase-grid-muted);
+  font-size: 11px;
+}
+
+.electron-modal-card input[type='text'],
+.electron-modal-card input[type='file'],
+.electron-modal-card input:not([type]),
+.electron-modal-card label > input:not([type='checkbox']) {
+  min-height: 28px;
+  padding: 5px 7px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-bg);
+  font: inherit;
+}
+
+.electron-modal-card input[type='file'] { padding: 4px; }
+.electron-modal-card input:focus { border-color: var(--justybase-grid-accent); outline: none; }
+.electron-checkbox { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 7px !important; }
+.electron-checkbox input { accent-color: var(--justybase-grid-accent); }
+.electron-modal-card p { margin: 0; line-height: 1.45; }
+
+.electron-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--justybase-grid-border);
+}
+
+.electron-modal-card button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--justybase-grid-accent) 55%, var(--justybase-grid-border));
+  border-radius: 3px;
+  color: #fff;
+  background: #0e639c;
+  cursor: pointer;
+  font: inherit;
+}
+
+.electron-modal-card button:disabled { cursor: not-allowed; opacity: .55; }
+.electron-modal-card button.electron-secondary { color: var(--justybase-grid-text); background: transparent; border-color: var(--justybase-grid-border); }
+.electron-modal-card button.electron-secondary:hover { background: var(--justybase-grid-hover); }
+.electron-modal-error { padding: 7px 8px; color: #fecaca; background: rgb(127 29 29 / 28%); font-size: 11px; }
+.electron-modal-success { padding: 7px 8px; color: #bbf7d0; background: rgb(20 83 45 / 28%); font-size: 11px; }
+
+.electron-edit-row-grid { display: grid; gap: 3px; min-width: 0; }
+.electron-edit-row-header,
+.electron-edit-row-line { display: grid; grid-template-columns: 42px minmax(120px, .45fr) minmax(180px, 1fr); align-items: center; gap: 8px; }
+.electron-edit-row-header { padding: 3px 0; color: var(--justybase-grid-muted); font-size: 10px; text-transform: uppercase; }
+.electron-edit-row-line { min-height: 32px; color: var(--justybase-grid-text); font-size: 11px; }
+.electron-edit-row-line input[type='checkbox'] { justify-self: center; accent-color: var(--justybase-grid-accent); }
+.electron-edit-row-line input:not([type='checkbox']) { min-width: 0; min-height: 27px; padding: 4px 6px; border: 1px solid var(--justybase-grid-border); border-radius: 3px; color: var(--justybase-grid-text); background: var(--justybase-grid-bg); font: inherit; }
+.electron-edit-row-line input:not([type='checkbox']):focus { border-color: var(--justybase-grid-accent); outline: none; }
 
 @media (max-width: 720px) {
   .ui-shell-sidebar {

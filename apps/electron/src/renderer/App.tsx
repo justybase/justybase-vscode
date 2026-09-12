@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
-import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataDatabase, QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec, SchemaTreeNode } from '@justybase/contracts';
+import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec, SchemaTreeNode } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import { createExecutionController, createInitialUiState, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
 import {
@@ -27,6 +27,8 @@ import { createElectronExecutionPort, fetchResultPage, RESULT_PAGE_SIZE } from '
 import { ProblemsPanel, SqlEditor } from './SqlEditor';
 import type { SqlEditorProblem } from './SqlEditor';
 import { SchemaExplorer } from './SchemaExplorer';
+import { EditRowPanel } from './EditRowPanel';
+import { ImportPanel } from './ImportPanel';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
@@ -151,6 +153,11 @@ export function App(): ReactElement {
   const [history, setHistory] = useState<readonly HistoryEntry[]>([]);
   const [historyState, setHistoryState] = useState<'loading' | 'ready' | 'error'>('ready');
   const [historyMessage, setHistoryMessage] = useState<string | undefined>(undefined);
+  const [selectedObject, setSelectedObject] = useState<SchemaTreeNode | undefined>(undefined);
+  const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
+  const [editRow, setEditRow] = useState<{ target: SchemaTreeNode; values: ElectronRow } | undefined>(undefined);
+  const [editColumns, setEditColumns] = useState<readonly MetadataColumn[]>([]);
+  const [editColumnsState, setEditColumnsState] = useState<'idle' | 'loading' | 'error'>('idle');
   const activeExecutionRef = useRef<ExecutionHandle | undefined>(undefined);
   const pendingPageRequestsRef = useRef(new Set<string>());
   const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
@@ -599,6 +606,34 @@ export function App(): ReactElement {
     }
   }, [activeResult, exportFormat]);
 
+  const openEditRow = useCallback(async (context: ElectronGridContextMenu): Promise<void> => {
+    const target = selectedObject;
+    const row = rows[context.rowIndex];
+    const connectionId = selectedConnection?.id;
+    const targetDatabase = database || target?.database;
+    if (!target || target.kind !== 'object' || target.objectType?.toUpperCase() === 'VIEW' || !target.schema || !target.objectName || !connectionId || !targetDatabase || !row) {
+      setNotice('Select a writable table in the schema explorer before editing a row.');
+      setContextMenu(undefined);
+      return;
+    }
+    setContextMenu(undefined);
+    setEditColumnsState('loading');
+    setEditRow({ target, values: row });
+    try {
+      const loaded = await clientRef.current!.columns(connectionId, targetDatabase, target.schema, target.objectName);
+      if (loaded.length > 0) {
+        setEditColumns(loaded);
+      } else {
+        setEditColumns((activeResult?.columns ?? []).map(column => ({ name: column.name, type: column.type })));
+      }
+      setEditColumnsState('idle');
+    } catch (error: unknown) {
+      setEditColumnsState('error');
+      setEditRow(undefined);
+      setNotice(error instanceof Error ? error.message : 'Could not load table columns.');
+    }
+  }, [activeResult?.columns, database, rows, selectedConnection?.id, selectedObject]);
+
   const contextRow = contextMenu ? rows[contextMenu.rowIndex] : undefined;
   const closeContextMenu = useCallback((): void => setContextMenu(undefined), []);
   const contextText = useCallback((context: DataGridCellContext, format: 'value' | 'row'): string | undefined => {
@@ -650,7 +685,8 @@ export function App(): ReactElement {
     if (activeResult && position.resultSetId === activeResult.resultSetId) updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
   };
 
-  return <CapabilityGate capability={workspaceCapability}><UiShell
+  return <CapabilityGate capability={workspaceCapability}><>
+    <UiShell
     title="JustyBase"
     activeSurface={state.shell.activeSurface}
     onSurfaceChange={selectSurface}
@@ -658,7 +694,7 @@ export function App(): ReactElement {
     sidebar={<div className="electron-sidebar-content">
       <div className="electron-sidebar-title"><strong>Explorer</strong><button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>New SQL</button></div>
       <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} key={profile.id} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button>)}</section>
-      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={databaseKind} onInsert={insertSql} onObjectSelect={() => undefined} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={() => setNotice('Import workflow will open from the selected schema object.')} /></CapabilityGate>
+      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={databaseKind} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
     </div>}
   >
     {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} /></CapabilityGate>
@@ -685,9 +721,12 @@ export function App(): ReactElement {
             <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
             {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
             <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onContextMenu={context => setContextMenu(context)} onRowSelect={setSelectedRow} /></AsyncStateView>
-            {contextMenu && contextRow && activeResult && <div className="electron-grid-context-menu" role="menu" style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'value'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy value</button><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'row'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy row</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ columnFilters: { ...activeResult.view.columnFilters, [column.name]: String(contextRow[contextMenu.columnIndex] ?? '') } }); closeContextMenu(); }}>Filter by value</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ sorting: [{ column: column.name, descending: false }] }); closeContextMenu(); }}>Sort ascending</button><button type="button" role="menuitem" onClick={() => { setSelectedRow(contextMenu.rowIndex); closeContextMenu(); }}>View full row</button></div>}
+            {contextMenu && contextRow && activeResult && <div className="electron-grid-context-menu" role="menu" style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'value'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy value</button><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'row'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy row</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ columnFilters: { ...activeResult.view.columnFilters, [column.name]: String(contextRow[contextMenu.columnIndex] ?? '') } }); closeContextMenu(); }}>Filter by value</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ sorting: [{ column: column.name, descending: false }] }); closeContextMenu(); }}>Sort ascending</button><button type="button" role="menuitem" onClick={() => { setSelectedRow(contextMenu.rowIndex); closeContextMenu(); }}>View full row</button>{selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' && <button type="button" role="menuitem" onClick={() => void openEditRow(contextMenu)}>Edit row</button>}</div>}
             {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>
         </div>}
-  </UiShell></CapabilityGate> as ReactElement;
+    </UiShell>
+    {importTarget && selectedConnection && clientRef.current && <ImportPanel api={clientRef.current} connectionId={selectedConnection.id} target={importTarget} database={database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed. Refresh the schema or rerun the query to see new rows.'); }} />}
+    {editRow && selectedConnection && clientRef.current && <>{editColumnsState === 'loading' ? <div className="electron-modal-backdrop" role="presentation"><div className="electron-modal-card" role="status">Loading table columns…</div></div> : editColumnsState === 'error' ? null : <EditRowPanel api={clientRef.current} connectionId={selectedConnection.id} database={database || editRow.target.database || ''} target={editRow.target} columns={editColumns} values={editRow.values} onClose={() => setEditRow(undefined)} onCompleted={message => { setEditRow(undefined); setNotice(message); void refresh(); }} />}</>}
+  </></CapabilityGate> as ReactElement;
 }
