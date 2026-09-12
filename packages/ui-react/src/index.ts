@@ -1,6 +1,7 @@
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
 export { calculateDataGridVirtualWindow, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumnIndexes, resolveDataGridColumns } from './dataGrid';
+export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,
@@ -18,6 +19,7 @@ export type {
   DataGridIntegerFormattingOptions,
   DataGridNumericKind,
 } from './resultGridFormatting';
+export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
 export {
   AsyncStateView,
   CapabilityGate,
