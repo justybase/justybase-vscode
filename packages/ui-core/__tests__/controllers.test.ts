@@ -122,6 +122,36 @@ describe('ui-core product controllers', () => {
     await controller.dispose();
     store.dispose();
   });
+
+  it('creates and consumes additional result surfaces for script statements', async () => {
+    const release = deferred();
+    const execution: ExecutionPort = {
+      start: jest.fn(async () => ({
+        sourceId: 'source-1',
+        executionId: 'script-1',
+        resultSetId: 'script-1:0',
+        events: (async function* (): AsyncIterable<UiResultEvent> {
+          yield { type: 'started', sourceId: 'source-1', executionId: 'script-1', resultSetId: 'script-1:0', statementIndex: 0, sequence: 1 };
+          yield { type: 'statement-started', sourceId: 'source-1', executionId: 'script-1', resultSetId: 'script-1:1', statementIndex: 1, sequence: 1 };
+          yield { type: 'columns', sourceId: 'source-1', executionId: 'script-1', resultSetId: 'script-1:1', statementIndex: 1, sequence: 2, columns: [{ name: 'VALUE', type: 'INTEGER' }] };
+          yield { type: 'complete', sourceId: 'source-1', executionId: 'script-1', resultSetId: 'script-1:1', statementIndex: 1, sequence: 3, totalRowCount: 1 };
+          release.resolve();
+        })(),
+      })),
+      cancel: jest.fn(async () => ({ requestId: 'cancel-script', status: 'acknowledged' as const })),
+      dispose: jest.fn(),
+    };
+    const store = createUiStore(createInitialUiState(identity));
+    const controller = createExecutionController(store, execution);
+    await controller.run({ ...input(), mode: 'script' });
+    await release.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = store.getState().results.byResultSetId['source-1\u0000script-1:1'];
+    expect(second).toMatchObject({ resultSetId: 'script-1:1', statementIndex: 1, status: 'complete', lastSequence: 3 });
+    await controller.dispose();
+    store.dispose();
+  });
 });
 
 describe('ui-core reducer action coverage', () => {

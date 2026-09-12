@@ -116,6 +116,52 @@ describe('Electron renderer execution adapter', () => {
     await port.dispose();
   });
 
+  it('keeps script result sets independent and hydrates each statement before batch completion', async () => {
+    const fixture = fakeClient();
+    fixture.client.startQuery = jest.fn(async () => ({ queryId: 'query-1', statementCount: 2 }));
+    fixture.client.queryPage = jest.fn(async (_queryId, input) => ({
+      sessionId: `session-${input.statementIndex ?? 0}`,
+      columns: [{ name: 'value', type: 'INTEGER' }],
+      rows: [[input.statementIndex ?? 0]],
+      offset: 0,
+      limit: 500,
+      totalRows: 1,
+      hasMore: false,
+    }));
+    const pages: string[] = [];
+    const port = createElectronExecutionPort({
+      client: fixture.client,
+      onPage: (_sourceId, resultSetId) => pages.push(resultSetId),
+    });
+    const handle = await port.start({ sourceId: 'electron:scratch', sql: 'SELECT 0; SELECT 1', connectionId: 'connection-1', mode: 'script' });
+    fixture.emit({ queryId: 'query-1', type: 'started', startedAt: 1, sequence: 1, statementCount: 2 });
+    fixture.emit({ queryId: 'query-1', type: 'statement-started', sequence: 2, statementIndex: 0, statementCount: 2 });
+    fixture.emit({ queryId: 'query-1', type: 'columns', sequence: 3, statementIndex: 0, statementCount: 2, columns: [{ name: 'value', type: 'INTEGER' }] });
+    fixture.emit({ queryId: 'query-1', type: 'complete', sequence: 4, statementIndex: 0, statementCount: 2, totalRows: 1, limitReached: false });
+    fixture.emit({ queryId: 'query-1', type: 'statement-started', sequence: 5, statementIndex: 1, statementCount: 2 });
+    fixture.emit({ queryId: 'query-1', type: 'columns', sequence: 6, statementIndex: 1, statementCount: 2, columns: [{ name: 'value', type: 'INTEGER' }] });
+    fixture.emit({ queryId: 'query-1', type: 'complete', sequence: 7, statementIndex: 1, statementCount: 2, totalRows: 1, limitReached: false });
+    fixture.emit({ queryId: 'query-1', type: 'batch-complete', sequence: 8, statementCount: 2, status: 'complete', completedStatements: 2 });
+
+    const events = [];
+    for await (const event of handle.events) events.push(event);
+
+    expect(events.map(event => `${event.resultSetId}:${event.type}:${event.sequence}`)).toEqual([
+      'query-1:0:started:1',
+      'query-1:0:statement-started:2',
+      'query-1:0:columns:3',
+      'query-1:0:complete:4',
+      'query-1:1:statement-started:1',
+      'query-1:1:columns:2',
+      'query-1:1:complete:3',
+    ]);
+    expect(pages).toEqual(['query-1:0', 'query-1:1']);
+    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(1, 'query-1', { statementIndex: 0, offset: 0, limit: 500 });
+    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(2, 'query-1', { statementIndex: 1, offset: 0, limit: 500 });
+    expect(fixture.subscription.closed).toBe(true);
+    await port.dispose();
+  });
+
   it('turns finalized page hydration failures into terminal stream errors', async () => {
     const fixture = fakeClient();
     fixture.client.queryPage = jest.fn(async () => { throw new Error('page failed'); });
