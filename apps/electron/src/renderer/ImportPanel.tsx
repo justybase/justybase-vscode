@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
+import { MAX_QUERY_FILE_IMPORT_BYTES } from '@justybase/contracts';
 import type { QueryFileImportFormat, QueryFileImportPreviewRequest, QueryFileImportRequest, SchemaTreeNode } from '@justybase/contracts';
 import type { ElectronWorkspaceApi } from './api';
 
@@ -11,8 +12,6 @@ interface ImportPanelProps {
   onClose(): void;
   onCompleted(): void;
 }
-
-const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 
 function fileFormat(fileName: string): QueryFileImportFormat | undefined {
   const extension = fileName.toLowerCase().split('.').pop();
@@ -50,8 +49,8 @@ export function ImportPanel({ api, connectionId, target, database, onClose, onCo
       setError('Choose a CSV, XLSX, or XLSB file.');
       return;
     }
-    if (file.size > MAX_IMPORT_BYTES) {
-      setError('The selected file is larger than the 100 MB Electron import limit.');
+    if (file.size > MAX_QUERY_FILE_IMPORT_BYTES) {
+      setError('The selected file is larger than the 25 MB import limit.');
       return;
     }
     if (!target.schema || !table) {

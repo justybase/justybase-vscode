@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MAX_QUERY_FILE_IMPORT_BYTES } from '@justybase/contracts';
 import type { QueryEditPreviewRequest, QueryEditRequest, QueryFileImportPreviewRequest, QueryFileImportRequest, SchemaTreeNode } from '@justybase/contracts';
 import type { ElectronWorkspaceApi } from '../src/renderer/api';
 import { EditRowPanel, valueFromInput } from '../src/renderer/EditRowPanel';
@@ -72,6 +73,17 @@ describe('Electron guarded data movement panels', () => {
     await waitFor(() => expect(api.importFilePreview).toHaveBeenCalled());
     expect(api.importFile).not.toHaveBeenCalled();
     expect(screen.getByRole('status')).toHaveTextContent('Import cancelled.');
+  });
+
+  it('rejects files above the API import limit before reading or sending them', async () => {
+    const api = apiFixture();
+    render(<ImportPanel api={api as unknown as ElectronWorkspaceApi} connectionId="connection-1" target={target} database="DB1" onClose={() => undefined} onCompleted={() => undefined} />);
+    const file = new File([new Uint8Array(MAX_QUERY_FILE_IMPORT_BYTES + 1)], 'orders.csv', { type: 'text/csv' });
+    fireEvent.change(screen.getByLabelText('File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview and import' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('25 MB import limit'));
+    expect(api.importFilePreview).not.toHaveBeenCalled();
+    expect(api.importFile).not.toHaveBeenCalled();
   });
 
   it('previews and applies a guarded row edit with primary-key defaults', async () => {

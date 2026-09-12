@@ -6,9 +6,8 @@ import type {
   QueryFileImportPreviewRequest,
   QueryImportPreviewRequest,
 } from '@justybase/contracts';
+import { MAX_QUERY_FILE_IMPORT_BYTES } from '@justybase/contracts';
 import type { StoredConnection } from './store';
-
-const MAX_IMPORT_FILE_BYTES = 25 * 1024 * 1024;
 
 function quoteWriteIdentifier(value: string, field: string): string {
   const trimmed = value.trim();
@@ -186,7 +185,7 @@ export async function materializeFileImport(input: QueryFileImportPreviewRequest
   if (typeof input.contentBase64 !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(input.contentBase64)) throw new Error('contentBase64 is invalid.');
   const content = Buffer.from(input.contentBase64, 'base64');
   if (content.length === 0) throw new Error('The import file is empty.');
-  if (content.length > MAX_IMPORT_FILE_BYTES) throw new Error('Import files are limited to 25 MB.');
+  if (content.length > MAX_QUERY_FILE_IMPORT_BYTES) throw new Error('Import files are limited to 25 MB.');
   const extension = expectedExtension;
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'justybase-web-import-'));
   const tempPath = path.join(tempDir, `upload.${extension}`);
