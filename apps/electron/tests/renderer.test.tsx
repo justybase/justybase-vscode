@@ -104,6 +104,7 @@ describe('Electron renderer composition', () => {
     expect(rowsAsText([{ name: 'AMOUNT', type: 'NUMERIC', scale: 2 }], [['1234.5']])).toBe('AMOUNT\n1 234.50');
     expect(rowsAsCsv([{ name: 'ID' }], [[1], ['two']])).toBe('"ID"\n"1"\n"two"');
     expect(rowsAsCsv([{ name: 'A"B' }], [['x"y']])).toBe('"A""B"\n"x""y"');
+    expect(rowsAsCsv([{ name: 'ENABLED', type: 'BOOLEAN' }], [[true]])).toBe('"ENABLED"\n"true"');
   });
 
   it('renders authenticated shared presentation after the preload bootstrap resolves', async () => {
@@ -169,10 +170,10 @@ describe('Electron renderer composition', () => {
   it('rejects stale hydrated pages and reports finalized page failures', async () => {
     const store = createUiStore(createInitialUiState({ productId: 'electron', sourceId: 'electron:scratch' }));
     const update = jest.fn();
-    expect(applyHydratedPage(store, 'missing:0', [[1]], 1, [{ name: 'ID' }], 'execution-1', update)).toBe(false);
+    expect(applyHydratedPage(store, 'electron:scratch', 'missing:0', [[1]], 1, [{ name: 'ID' }], 'execution-1', update)).toBe(false);
     store.dispatch({ type: 'execution/start', sourceId: 'electron:scratch', executionId: 'execution-1', resultSetId: 'result-1' });
-    expect(applyHydratedPage(store, 'result-1', [[1]], 1, [{ name: 'ID' }], 'old-execution', update)).toBe(false);
-    expect(applyHydratedPage(store, 'result-1', [[1]], 1, [{ name: 'ID' }], 'execution-1', update)).toBe(true);
+    expect(applyHydratedPage(store, 'electron:scratch', 'result-1', [[1]], 1, [{ name: 'ID' }], 'old-execution', update)).toBe(false);
+    expect(applyHydratedPage(store, 'electron:scratch', 'result-1', [[1]], 1, [{ name: 'ID' }], 'execution-1', update)).toBe(true);
     expect(update).toHaveBeenCalledWith('result-1', [[1]]);
     store.dispose();
 

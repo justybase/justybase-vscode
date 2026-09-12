@@ -81,9 +81,9 @@ function withResult(state: UiState, result: UiResultSurfaceState): UiState {
 }
 
 function findResultById(state: UiState, resultSetId: string, sourceId?: string): UiResultSurfaceState | undefined {
-  return sourceId === undefined
-    ? Object.values(state.results.byResultSetId).find(result => result.resultSetId === resultSetId)
-    : resultFor(state, sourceId, resultSetId);
+  if (sourceId !== undefined) return resultFor(state, sourceId, resultSetId);
+  const matches = Object.values(state.results.byResultSetId).filter(result => result.resultSetId === resultSetId);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function updateResultView(state: UiState, resultSetId: string, sourceId: string | undefined, patch: Partial<UiResultViewState>): UiState {

@@ -35,7 +35,7 @@ const identityKeys: readonly (keyof UiIdentity)[] = [
   'resultSetId',
   'storageId',
 ];
-const persistenceSecretKeyPattern = /password|passphrase|secret|credential|master.?key|token|api.?key/iu;
+const persistenceSecretKeyPattern = /password|passphrase|secret|credential|master.?key|access.?token|refresh.?token|api.?key|(?:^|[_-])token(?:$|[_-])|token$/iu;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

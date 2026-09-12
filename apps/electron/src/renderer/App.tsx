@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
-import { createExecutionController, createInitialUiState, createUiStore } from '@justybase/ui-core';
+import { createExecutionController, createInitialUiState, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
 import {
   AsyncStateView,
   CapabilityGate,
@@ -16,6 +16,7 @@ import {
   WorkspaceTabs,
   formatDataGridCellValue,
   processDataGridRows,
+  resolveDataGridColumns,
 } from '@justybase/ui-react';
 import type { GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import { createElectronApiClient } from './api';
@@ -24,21 +25,8 @@ import { createElectronExecutionPort, fetchAllResultPages } from './execution';
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
 
-export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number): 'loading' | 'empty' | 'error' | 'cancelled' | 'ready' {
-  if (!result) return 'empty';
-  if (result.status === 'error') return 'error';
-  if (result.status === 'cancelled') return 'cancelled';
-  const hasViewFilter = result.view.globalFilter.trim().length > 0
-    || Object.values(result.view.columnFilters).some(value => value.trim().length > 0);
-  const rowsMayBeOutsideView = result.totalRowCount > 0
-    && (hasViewFilter || result.loadedRowCount < result.totalRowCount);
-  if (result.status === 'loading') return 'loading';
-  // Electron keeps result rows local until the stream has finalized and page
-  // hydration completes, so a progress event must not look like an empty
-  // result while there are still no displayed rows.
-  if (result.status === 'streaming' && rowCount === 0) return 'loading';
-  if (result.status === 'empty' || (rowCount === 0 && !rowsMayBeOutsideView)) return 'empty';
-  return 'ready';
+export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
+  return getResultAsyncState(result, rowCount, { streamingEmpty: 'loading', streamingWithUnloadedRows: 'loading' });
 }
 
 export function displayRows(result: UiResultSurfaceState | undefined, rows: readonly ElectronRow[]): readonly ElectronRow[] {
@@ -57,13 +45,27 @@ export function rowsAsText(columns: readonly UiResultColumn[], rows: readonly El
 }
 
 export function rowsAsCsv(columns: readonly UiResultColumn[], rows: readonly ElectronRow[]): string {
-  const quote = (value: unknown): string => `"${String(value ?? '').replaceAll('"', '""')}"`;
-  return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map((value, index) => quote(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type, columns[index]))).join(','))].join('\n');
+  const quote = (value: unknown): string => {
+    if (value === null || value === undefined) return '""';
+    let text: string;
+    if (typeof value === 'object') {
+      try {
+        text = JSON.stringify(value) ?? String(value);
+      } catch {
+        text = String(value);
+      }
+    } else {
+      text = String(value);
+    }
+    return `"${text.replaceAll('"', '""')}"`;
+  };
+  return [columns.map(column => quote(column.name)).join(','), ...rows.map(row => row.map(value => quote(value)).join(','))].join('\n');
 }
 
 /** Applies a page only when it still belongs to the result execution in the store. */
 export function applyHydratedPage(
   store: UiStore,
+  sourceId: string,
   resultSetId: string,
   rows: readonly ElectronRow[],
   totalRowCount: number,
@@ -72,7 +74,7 @@ export function applyHydratedPage(
   update: (resultSetId: string, rows: readonly ElectronRow[]) => void,
 ): boolean {
   const result = Object.values(store.getState().results.byResultSetId)
-    .find(item => item.sourceId === 'electron:scratch' && item.resultSetId === resultSetId);
+    .find(item => item.sourceId === sourceId && item.resultSetId === resultSetId);
   if (!result || result.executionId !== executionId) return false;
   update(resultSetId, rows);
   store.dispatch({ type: 'results/hydrate', sourceId: result.sourceId, executionId, resultSetId, loadedRowCount: rows.length, totalRowCount, columns });
@@ -124,14 +126,14 @@ export function App(): ReactElement {
           return next;
         });
       },
-      onPage: (resultSetId, rows, totalRowCount, columns, executionId) => {
-        applyHydratedPage(store, resultSetId, rows, totalRowCount, columns, executionId, (id, nextRows) => {
+      onPage: (sourceId, resultSetId, rows, totalRowCount, columns, executionId) => {
+        applyHydratedPage(store, sourceId, resultSetId, rows, totalRowCount, columns, executionId, (id, nextRows) => {
           const next = { ...rowsByResultRef.current, [id]: nextRows };
           rowsByResultRef.current = next;
           setRowsByResult(next);
         });
       },
-      onPageError: (_resultSetId, error, executionId) => {
+      onPageError: (_sourceId, _resultSetId, error, executionId) => {
         if (activeExecutionRef.current?.executionId === executionId) setNotice(error.message);
       },
     }));
@@ -240,7 +242,7 @@ export function App(): ReactElement {
     const { executionId, resultSetId, statementIndex } = activeResult;
     try {
       const hydrated = await fetchAllResultPages(clientRef.current!, executionId, statementIndex);
-      applyHydratedPage(store, resultSetId, hydrated.rows, hydrated.totalRowCount, hydrated.columns, executionId, updateRows);
+      applyHydratedPage(store, activeResult.sourceId, resultSetId, hydrated.rows, hydrated.totalRowCount, hydrated.columns, executionId, updateRows);
       setNotice(undefined);
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : 'Could not refresh results.');
@@ -250,6 +252,11 @@ export function App(): ReactElement {
   const updateView = useCallback((patch: Partial<UiResultSurfaceState['view']>): void => {
     if (activeResult) store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
   }, [activeResult, store]);
+
+  const detailColumns = useMemo(
+    () => activeResult ? resolveDataGridColumns(activeResult.columns, rows) : [],
+    [activeResult?.columns, rows],
+  );
 
   const copyActive = useCallback(async (): Promise<void> => {
     const row = selectedRow === undefined ? visibleRows[0] : rows[selectedRow];
@@ -325,7 +332,7 @@ export function App(): ReactElement {
             <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…">
               <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateView} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onRowSelect={setSelectedRow} />
             </AsyncStateView>
-            {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={activeResult.columns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+            {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>
         </>}
   </UiShell></CapabilityGate> as ReactElement;

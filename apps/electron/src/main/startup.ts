@@ -26,6 +26,9 @@ export interface ElectronStartupOptions {
   readonly dataDirectory?: string;
   readonly webDistDirectory: string;
   readonly productId?: string;
+  readonly masterKey?: string;
+  readonly adminUsername?: string;
+  readonly adminPassword?: string;
   /** Test/dev fixture only; creates a read-only in-memory SQLite profile. */
   readonly provisionSqliteFixture?: boolean;
   readonly apiFactory?: (configuration: ApiConfig) => EmbeddedApiServer;
@@ -82,15 +85,15 @@ async function loginAtServer(url: string, username: string, password: string, fe
 export async function startElectronSession(options: ElectronStartupOptions): Promise<ElectronSessionHandle> {
   const ownsProfile = options.dataDirectory === undefined;
   const profileDirectory = options.dataDirectory ?? await mkdtemp(path.join(os.tmpdir(), 'justybase-electron-profile-'));
-  const username = `r9-electron-${randomValue(8)}`;
-  let password = randomValue(32);
+  const username = options.adminUsername ?? `r9-electron-${randomValue(8)}`;
+  let password = options.adminPassword ?? randomValue(32);
   const clearPassword = (): void => { password = ''; };
   const configuration: ApiConfig = {
     host: '127.0.0.1',
     port: 0,
     dataDir: profileDirectory,
     webDistDir: options.webDistDirectory,
-    masterKey: randomValue(32),
+    masterKey: options.masterKey ?? randomValue(32),
     adminUsername: username,
     adminPassword: password,
   };
@@ -116,16 +119,19 @@ export async function startElectronSession(options: ElectronStartupOptions): Pro
     const requestJson = async <T>(route: string, init: RequestInit = {}): Promise<T> => {
       if (closed) throw new Error('Electron session is closed.');
       if (!cookieHeader) throw new Error('Electron session authentication is unavailable.');
+      const headers = new Headers(init.headers);
+      headers.set('Cookie', cookieHeader);
+      if (csrfToken) headers.set('x-justybase-csrf', csrfToken);
       const response = await fetcher(`${url}${route.startsWith('/') ? route : `/${route}`}`, {
         ...init,
-        headers: {
-          ...(init.headers ?? {}),
-          Cookie: cookieHeader,
-          ...(csrfToken ? { 'x-justybase-csrf': csrfToken } : {}),
-        },
+        headers,
       });
       if (!response.ok) throw new Error(`Embedded API request failed with status ${response.status}.`);
-      return response.json() as Promise<T>;
+      try {
+        return await response.json() as T;
+      } catch {
+        throw new Error('Embedded API returned an invalid JSON response.');
+      }
     };
     if (options.provisionSqliteFixture) {
       await requestJson('/api/connections', {
@@ -140,19 +146,24 @@ export async function startElectronSession(options: ElectronStartupOptions): Pro
       sessionId: randomValue(18),
       capabilities: { descriptors: defaultCapabilities.map(descriptor => ({ ...descriptor })) },
     };
+    let serverClosed = false;
     const close = (): Promise<void> => {
       if (closing) return closing;
-      closing = (async () => {
+      const attempt = (async () => {
         closed = true;
         cookies = undefined;
         cookieHeader = undefined;
         csrfToken = undefined;
-        try {
+        if (!serverClosed) {
           await currentServer.close();
-        } finally {
-          if (ownsProfile) await rm(profileDirectory, { recursive: true, force: true });
+          serverClosed = true;
         }
+        if (ownsProfile) await rm(profileDirectory, { recursive: true, force: true });
       })();
+      closing = attempt;
+      void attempt.catch(() => {
+        if (closing === attempt) closing = undefined;
+      });
       return closing;
     };
     return {

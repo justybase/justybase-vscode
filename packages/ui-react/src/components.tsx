@@ -6,6 +6,7 @@ import type { UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { uiTokens } from './tokens';
 import { formatDataGridCellValue } from './dataGrid';
+import type { DataGridColumn } from './dataGrid';
 export { DataGrid, formatDataGridCellValue } from './dataGrid';
 export type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, GridScrollPosition } from './dataGrid';
 
@@ -142,13 +143,13 @@ export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, 
 }
 
 export interface RowDetailProps {
-  readonly columns: readonly { readonly name: string; readonly type?: string }[];
+  readonly columns: readonly DataGridColumn[];
   readonly row: readonly unknown[];
   readonly onClose: () => void;
 }
 
 export function RowDetail({ columns, row, onClose }: RowDetailProps): ReactNode {
-  return <aside className="ui-row-detail" aria-labelledby="ui-row-detail-title"><div><h2 id="ui-row-detail-title">Row details</h2><button type="button" onClick={onClose}>Close</button></div><dl>{columns.map((column, index) => <div key={column.name}><dt>{column.name}</dt><dd>{formatDataGridCellValue(row[index], column.type)}</dd></div>)}</dl></aside>;
+  return <aside className="ui-row-detail" aria-labelledby="ui-row-detail-title"><div><h2 id="ui-row-detail-title">Row details</h2><button type="button" onClick={onClose}>Close</button></div><dl>{columns.map((column, index) => <div key={`${column.name}:${index}`}><dt>{column.name}</dt><dd>{formatDataGridCellValue(row[index], column.type, column)}</dd></div>)}</dl></aside>;
 }
 
 export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect }: SchemaTreeProps): ReactNode {

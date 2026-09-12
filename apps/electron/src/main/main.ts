@@ -1,5 +1,7 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, safeStorage, session } from 'electron';
 import { CapabilityRegistry } from '@justybase/ui-core';
 import { MainCredentialBroker } from './credentialBroker';
 import { registerIpcHandlers } from './ipc';
@@ -15,6 +17,44 @@ let shutdownPromise: Promise<void> | undefined;
 let quitPromise: Promise<void> | undefined;
 let quitRequested = false;
 let quitAllowed = false;
+
+const ELECTRON_DATA_DIRECTORY = 'api';
+const ELECTRON_MASTER_KEY_FILE = '.master-key';
+
+async function loadOrCreateMasterKey(dataDirectory: string): Promise<string> {
+  await mkdir(dataDirectory, { recursive: true });
+  const keyPath = path.join(dataDirectory, ELECTRON_MASTER_KEY_FILE);
+  try {
+    const stored = (await readFile(keyPath, 'utf8')).trim();
+    if (stored.startsWith('safe:')) {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Electron safe storage is unavailable for the existing profile key.');
+      return safeStorage.decryptString(Buffer.from(stored.slice('safe:'.length), 'base64'));
+    }
+    if (stored.length > 0) return stored;
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  const masterKey = randomBytes(32).toString('base64url');
+  const storedKey = safeStorage.isEncryptionAvailable()
+    ? `safe:${safeStorage.encryptString(masterKey).toString('base64')}`
+    : masterKey;
+  await writeFile(keyPath, `${storedKey}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' }).catch(async error => {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  });
+  try {
+    const persisted = (await readFile(keyPath, 'utf8')).trim();
+    return persisted.startsWith('safe:') && safeStorage.isEncryptionAvailable()
+      ? safeStorage.decryptString(Buffer.from(persisted.slice('safe:'.length), 'base64'))
+      : persisted;
+  } catch {
+    return masterKey;
+  }
+}
+
+function localAdminPassword(masterKey: string): string {
+  return createHash('sha256').update('justybase-electron-admin\0').update(masterKey, 'utf8').digest('base64url');
+}
 
 async function shutdown(): Promise<void> {
   if (shutdownPromise) return shutdownPromise;
@@ -54,9 +94,15 @@ async function requestQuit(waitForStartup: boolean): Promise<void> {
 async function start(): Promise<void> {
   await app.whenReady();
   if (quitRequested) return;
+  const dataDirectory = process.env.JUSTYBASE_ELECTRON_DATA_DIR
+    ?? path.join(app.getPath('userData'), ELECTRON_DATA_DIRECTORY);
+  const masterKey = await loadOrCreateMasterKey(dataDirectory);
   const startedRuntime = await startElectronSession({
+    dataDirectory,
     webDistDirectory: process.env.JUSTYBASE_ELECTRON_WEB_DIST ?? path.resolve(__dirname, '../renderer'),
-    provisionSqliteFixture: true,
+    masterKey,
+    adminUsername: 'electron-local-admin',
+    adminPassword: localAdminPassword(masterKey),
   });
   if (quitRequested) {
     await startedRuntime.close();

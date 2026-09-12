@@ -79,7 +79,7 @@ function clientErrorStatusCode(error: unknown): number | undefined {
   return typeof statusCode === 'number'
     && Number.isInteger(statusCode)
     && statusCode >= 400
-    && statusCode < 500
+    && (statusCode < 500 || statusCode === 501)
     ? statusCode
     : undefined;
 }
@@ -308,7 +308,9 @@ export async function buildServer(apiConfig: ApiConfig): Promise<FastifyInstance
     const statusCode = clientErrorStatusCode(error);
     if (statusCode !== undefined) {
       void reply.code(statusCode).send({
-        code: 'INVALID_REQUEST',
+        code: typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+          ? (error as { code: string }).code
+          : 'INVALID_REQUEST',
         message: error instanceof Error ? error.message : 'Invalid request.',
       });
       return;

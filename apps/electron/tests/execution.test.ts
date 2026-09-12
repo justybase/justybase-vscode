@@ -63,14 +63,14 @@ describe('Electron renderer execution adapter', () => {
       hasMore: false,
     }));
     const pages: Array<readonly (readonly unknown[])[]> = [];
-    const port = createElectronExecutionPort({ client: fixture.client, onPage: (_resultSetId, rows) => pages.push(rows) });
+    const port = createElectronExecutionPort({ client: fixture.client, onPage: (_sourceId, _resultSetId, rows) => pages.push(rows) });
     const handle = await port.start({ sourceId: 'electron:scratch', sql: 'SELECT 9', connectionId: 'connection-1', mode: 'single' });
     fixture.emit({ queryId: 'query-1', type: 'started', startedAt: 1 });
     fixture.emit({ queryId: 'query-1', type: 'columns', columns: [{ name: 'value', type: 'INTEGER' }] });
-    fixture.emit({ queryId: 'query-1', type: 'complete', totalRows: 1, limitReached: false });
+    fixture.emit({ queryId: 'query-1', type: 'complete', statementIndex: 2, totalRows: 1, limitReached: false });
     for await (const _event of handle.events) void _event;
     await new Promise<void>(resolve => queueMicrotask(resolve));
-    expect(fixture.client.queryPage).toHaveBeenCalledWith('query-1', { statementIndex: 0, offset: 0, limit: 500 });
+    expect(fixture.client.queryPage).toHaveBeenCalledWith('query-1', { statementIndex: 2, offset: 0, limit: 500 });
     expect(pages).toEqual([[[9]]]);
     await port.dispose();
   });
@@ -100,7 +100,7 @@ describe('Electron renderer execution adapter', () => {
     const pages: Array<readonly (readonly unknown[])[]> = [];
     const port = createElectronExecutionPort({
       client: fixture.client,
-      onPage: (_resultSetId, rows) => { order.push('page'); pages.push(rows); },
+      onPage: (_sourceId, _resultSetId, rows) => { order.push('page'); pages.push(rows); },
     });
     const handle = await port.start({ sourceId: 'electron:scratch', sql: 'SELECT 1', connectionId: 'connection-1', mode: 'single' });
     fixture.emit({ queryId: 'query-1', type: 'complete', totalRows: 3, limitReached: false });
@@ -122,7 +122,7 @@ describe('Electron renderer execution adapter', () => {
     const port = createElectronExecutionPort({
       client: fixture.client,
       onPage: () => undefined,
-      onPageError: (_resultSetId, error) => pageErrors.push(error.message),
+      onPageError: (_sourceId, _resultSetId, error) => pageErrors.push(error.message),
     });
     const handle = await port.start({ sourceId: 'electron:scratch', sql: 'SELECT 1', connectionId: 'connection-1', mode: 'single' });
     fixture.emit({ queryId: 'query-1', type: 'complete', totalRows: 1, limitReached: false });

@@ -42,12 +42,16 @@ export function parseDesignerCapabilitiesRequest(value: unknown): DesignerCapabi
 
 export function parseMetadataDdlRequest(value: unknown): MetadataDdlRequest {
   const record = objectValue(value, 'query');
+  const objectType = requiredString(record.objectType, 'objectType').toUpperCase();
+  if (objectType !== 'TABLE' && objectType !== 'VIEW') {
+    throw new RequestValidationError('objectType must be TABLE or VIEW.');
+  }
   return {
     connectionId: requiredString(record.connectionId, 'connectionId'),
     database: requiredString(record.database, 'database'),
     schema: requiredString(record.schema, 'schema'),
     objectName: requiredString(record.objectName, 'objectName'),
-    objectType: requiredString(record.objectType, 'objectType'),
+    objectType,
   };
 }
 

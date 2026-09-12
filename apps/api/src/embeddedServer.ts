@@ -53,14 +53,20 @@ export function createEmbeddedApiServer(configuration: ApiConfig): EmbeddedApiSe
 
   const close = (): Promise<void> => {
     if (closing) return closing;
-    closing = (async () => {
+    const attempt = (async () => {
       closed = true;
       if (starting) await starting.catch(() => undefined);
       const candidate = instance;
-      instance = undefined;
-      address = undefined;
-      if (candidate) await candidate.close();
+      if (candidate) {
+        await candidate.close();
+        instance = undefined;
+        address = undefined;
+      }
     })();
+    closing = attempt;
+    void attempt.catch(() => {
+      if (closing === attempt) closing = undefined;
+    });
     return closing;
   };
 

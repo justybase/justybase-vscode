@@ -6,6 +6,7 @@ import {
   inferDataGridColumnMetadata,
   isDataGridNumericColumn,
   isDataGridTemporalColumn,
+  matchesDataGridFilterValue,
 } from './resultGridFormatting';
 import type { DataGridCellMetadata } from './resultGridFormatting';
 
@@ -94,6 +95,7 @@ type RenderedRow = RenderedGroup | RenderedDataRow;
 const ROW_NUMBER_WIDTH = 48;
 const DEFAULT_COLUMN_WIDTH = 144;
 const MIN_COLUMN_WIDTH = 72;
+const MAX_EMPTY_PAGE_REQUESTS = 3;
 const ROW_HEIGHT = 30;
 
 function normaliseView(view: DataGridViewState | undefined): DataGridViewState {
@@ -250,7 +252,7 @@ function resolveColumnIndex(columns: readonly DataGridColumn[], key: string): nu
   return -1;
 }
 
-function resolveDataGridColumns(
+export function resolveDataGridColumns(
   columns: readonly DataGridColumn[],
   rows: readonly (readonly unknown[])[],
 ): readonly DataGridColumn[] {
@@ -285,11 +287,11 @@ function matchesRow(
   values: readonly unknown[],
   view: DataGridViewState,
 ): boolean {
-  const globalFilter = view.globalFilter.trim().toLocaleLowerCase();
-  if (globalFilter && !values.some((value, columnIndex) => formatDataGridCellValue(value, columns[columnIndex]?.type, columns[columnIndex]).toLocaleLowerCase().includes(globalFilter))) return false;
+  const globalFilter = view.globalFilter.trim();
+  if (globalFilter && !values.some((value, columnIndex) => matchesDataGridFilterValue(value, globalFilter, columns[columnIndex]))) return false;
   return columns.every((column, columnIndex) => {
-    const filter = filterValue(view, column, columnIndex).trim().toLocaleLowerCase();
-    return !filter || formatDataGridCellValue(values[columnIndex], column.type, column).toLocaleLowerCase().includes(filter);
+    const filter = filterValue(view, column, columnIndex).trim();
+    return !filter || matchesDataGridFilterValue(values[columnIndex], filter, column);
   });
 }
 
@@ -325,6 +327,16 @@ export function processDataGridRows(
 ): readonly (readonly unknown[])[] {
   const resolvedColumns = resolveDataGridColumns(columns, rows);
   return processIndexedRows(resolvedColumns, rows, view, true).map(item => item.values);
+}
+
+/** Returns source-row indexes after applying the same filtering and sorting as the grid. */
+export function processDataGridRowIndices(
+  columns: readonly DataGridColumn[],
+  rows: readonly (readonly unknown[])[],
+  view: DataGridViewState,
+): readonly number[] {
+  const resolvedColumns = resolveDataGridColumns(columns, rows);
+  return processIndexedRows(resolvedColumns, rows, view, true).map(item => item.sourceIndex);
 }
 
 function indexedRows(
@@ -407,7 +419,39 @@ export function DataGrid({
   const scroller = useRef<HTMLDivElement>(null);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
   const activeView = normaliseView(view ?? internalView);
-  const resolvedColumns = useMemo(() => resolveDataGridColumns(columns, rows), [columns, rows]);
+  const resolvedColumnsCacheRef = useRef<{
+    readonly resultSetId: string;
+    readonly signature: string;
+    readonly columns: readonly DataGridColumn[];
+    readonly ready: boolean;
+  } | undefined>(undefined);
+  const columnMetadataSignature = useMemo(
+    () => columns.map(column => [column.name, column.type ?? '', column.scale ?? '', column.inferredNumericKind ?? '', column.inferredDateInteger ? 'date' : ''].join('\u0000')).join('\u0001'),
+    [columns],
+  );
+  const resolvedColumns = useMemo(() => {
+    const cache = resolvedColumnsCacheRef.current;
+    const stableResultSetId = resultSetId ?? '';
+    if (cache
+      && cache.resultSetId === stableResultSetId
+      && cache.signature === columnMetadataSignature
+      && (cache.ready || rows.length === 0)) {
+      return cache.columns;
+    }
+    const nextColumns = resolveDataGridColumns(columns, rows);
+    const ready = rows.length > 0 || columns.every(column =>
+      column.type !== undefined
+      || column.inferredNumericKind !== undefined
+      || column.inferredDateInteger !== undefined,
+    );
+    resolvedColumnsCacheRef.current = {
+      resultSetId: stableResultSetId,
+      signature: columnMetadataSignature,
+      columns: nextColumns,
+      ready,
+    };
+    return nextColumns;
+  }, [columnMetadataSignature, columns, resultSetId, rows]);
   const [selection, setSelection] = useState<DataGridSelection | undefined>(undefined);
   const selectionRef = useRef<DataGridSelection | undefined>(undefined);
   const dragSelectingRef = useRef(false);
@@ -417,7 +461,7 @@ export function DataGrid({
   const updateViewRef = useRef<(patch: Partial<UiResultViewState>) => void>(() => undefined);
   const selectionScopeRef = useRef<string | undefined>(undefined);
   const selectionChangeRef = useRef(onSelectionChange);
-  const emptyPageRequestRef = useRef<string | undefined>(undefined);
+  const emptyPageRequestRef = useRef<{ readonly key: string; readonly count: number } | undefined>(undefined);
   activeViewRef.current = activeView;
   selectionChangeRef.current = onSelectionChange;
 
@@ -455,13 +499,13 @@ export function DataGrid({
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const hasMoreRows = onLoadMore !== undefined && rows.length < totalRowCount;
-  const emptyPageRequestKey = JSON.stringify({
-    rowCount: rows.length,
+  const emptyPageRequestKey = useMemo(() => JSON.stringify({
+    resultSetId,
     totalRowCount,
     globalFilter: activeView.globalFilter,
     columnFilters: activeView.columnFilters,
-  });
-  const selectionScope = JSON.stringify({
+  }), [activeView.columnFilters, activeView.globalFilter, resultSetId, totalRowCount]);
+  const selectionScope = useMemo(() => JSON.stringify({
     sourceId,
     resultSetId,
     clientProcessing,
@@ -475,7 +519,7 @@ export function DataGrid({
       columnOrder: activeView.columnOrder,
       pinnedColumns: activeView.pinnedColumns,
     },
-  });
+  }), [activeView.columnFilters, activeView.columnOrder, activeView.columnVisibility, activeView.grouping, activeView.pinnedColumns, activeView.globalFilter, activeView.sorting, clientProcessing, columns, resolvedColumns, resultSetId, sourceId]);
 
   useEffect(() => {
     const previousScope = selectionScopeRef.current;
@@ -493,8 +537,12 @@ export function DataGrid({
       emptyPageRequestRef.current = undefined;
       return;
     }
-    if (emptyPageRequestRef.current === emptyPageRequestKey) return;
-    emptyPageRequestRef.current = emptyPageRequestKey;
+    const previous = emptyPageRequestRef.current;
+    if (previous?.key === emptyPageRequestKey && previous.count >= MAX_EMPTY_PAGE_REQUESTS) return;
+    emptyPageRequestRef.current = {
+      key: emptyPageRequestKey,
+      count: previous?.key === emptyPageRequestKey ? previous.count + 1 : 1,
+    };
     onLoadMore?.();
   }, [emptyPageRequestKey, hasMoreRows, onLoadMore, processedRows.length]);
 

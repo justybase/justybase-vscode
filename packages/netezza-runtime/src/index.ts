@@ -402,7 +402,21 @@ export class NetezzaRuntime {
     table: string,
   ): Promise<NetezzaTableDdlMetadata> {
     const db = formatNetezzaIdentifier(database);
-    const columns = await this.queryMetadata(target, `
+    const connection = await this.connectionFactory({ ...target.details, database: unquoteNetezzaIdentifier(database) });
+    try {
+      const queryOnConnection = async <T>(sql: string, map: (values: unknown[]) => T): Promise<T[]> => {
+        const rows: T[] = [];
+        const command = connection.createCommand(sql);
+        command.commandTimeout = 90;
+        const reader = await command.executeReader();
+        try {
+          while (await reader.read()) rows.push(map(Array.from({ length: reader.fieldCount }, (_, index) => reader.getValue(index))));
+        } finally {
+          await reader.close();
+        }
+        return rows;
+      };
+      const columns = (await queryOnConnection(`
       SELECT
         X.OBJID::INT AS OBJID,
         X.ATTNUM,
@@ -413,40 +427,46 @@ export class NetezzaRuntime {
         X.COLDEFAULT
       FROM ${db}.._V_RELATION_COLUMN X
       INNER JOIN ${db}.._V_OBJECT_DATA D ON X.OBJID = D.OBJID
-      WHERE X.TYPE IN ('TABLE','VIEW','SEQUENCE','SYSTEM VIEW','SYSTEM TABLE')
+      WHERE ${identifierEquality('D.DBNAME', database)}
+        AND D.OBJTYPE IN ('TABLE', 'VIEW', 'EXTERNAL TABLE')
         AND X.OBJID NOT IN (4,5)
         AND ${identifierEquality('D.SCHEMA', schema)}
         AND ${identifierEquality('D.OBJNAME', table)}
       ORDER BY OBJID, ATTNUM
-    `.trim(), values => ({
-      name: stringValue(values[2]),
-      description: optionalDescription(values[3]),
-      fullTypeName: stringValue(values[4]),
-      notNull: booleanValue(values[5]),
-      defaultValue: values[6] ? String(values[6]) : null,
-    }), database).then(rows => rows.filter(row => row.name.length > 0));
+      `.trim(), values => ({
+        name: stringValue(values[2]),
+        description: optionalDescription(values[3]),
+        fullTypeName: stringValue(values[4]),
+        notNull: booleanValue(values[5]),
+        defaultValue: values[6] ? String(values[6]) : null,
+      }))).filter(row => row.name.length > 0);
 
-    if (columns.length === 0) {
-      throw new Error(`Table ${database}.${schema}.${table} not found or has no columns`);
-    }
-
-    const distributionPromise = this.queryMetadata(target, `
+      let metadataComplete = true;
+      const readAncillary = async <T>(sql: string, map: (values: unknown[]) => T): Promise<T[]> => {
+        try {
+          return await queryOnConnection(sql, map);
+        } catch {
+          metadataComplete = false;
+          return [];
+        }
+      };
+      const distributionColumns = await readAncillary(`
       SELECT ATTNAME
       FROM ${db}.._V_TABLE_DIST_MAP
       WHERE ${identifierEquality('SCHEMA', schema)}
         AND ${identifierEquality('TABLENAME', table)}
       ORDER BY DISTSEQNO
-    `.trim(), values => rawStringValue(values[0]), database).catch(() => [] as string[]);
+      `.trim(), values => rawStringValue(values[0]));
 
-    const organizePromise = this.queryMetadata(target, `
+      const organizeColumns = await readAncillary(`
       SELECT ATTNAME
       FROM ${db}.._V_TABLE_ORGANIZE_COLUMN
       WHERE ${identifierEquality('SCHEMA', schema)}
         AND ${identifierEquality('TABLENAME', table)}
       ORDER BY ORGSEQNO
-    `.trim(), values => rawStringValue(values[0]), database).catch(() => [] as string[]);
+      `.trim(), values => rawStringValue(values[0]));
 
-    const keysPromise = this.queryMetadata(target, `
+      const keyRows = await readAncillary(`
       SELECT
         X.CONSTRAINTNAME,
         X.CONTYPE,
@@ -462,76 +482,61 @@ export class NetezzaRuntime {
         AND ${identifierEquality('X.SCHEMA', schema)}
         AND ${identifierEquality('X.RELATION', table)}
       ORDER BY X.SCHEMA, X.RELATION, X.CONSEQ
-    `.trim(), values => ({
-      name: stringValue(values[0]),
-      typeChar: rawStringValue(values[1]),
-      column: rawStringValue(values[2]),
-      pkDatabase: optionalStringValue(values[3]),
-      pkSchema: optionalStringValue(values[4]),
-      pkRelation: optionalStringValue(values[5]),
-      pkColumn: optionalStringValue(values[6]),
-      updateType: optionalStringValue(values[7]) || 'NO ACTION',
-      deleteType: optionalStringValue(values[8]) || 'NO ACTION',
-    }), database).then(rows => {
-      const keys = new Map<string, DatabaseDdlKeyInfo>();
-      for (const row of rows) {
-        if (!keys.has(row.name)) {
-          const type = row.typeChar === 'p'
-            ? 'PRIMARY KEY'
-            : row.typeChar === 'f'
-              ? 'FOREIGN KEY'
-              : row.typeChar === 'u'
-                ? 'UNIQUE'
-                : 'UNKNOWN';
-          keys.set(row.name, {
-            type,
-            typeChar: row.typeChar,
-            columns: [],
-            pkDatabase: row.pkDatabase,
-            pkSchema: row.pkSchema,
-            pkRelation: row.pkRelation,
-            pkColumns: [],
-            updateType: row.updateType,
-            deleteType: row.deleteType,
-          });
+      `.trim(), values => ({
+        name: stringValue(values[0]),
+        typeChar: rawStringValue(values[1]),
+        column: rawStringValue(values[2]),
+        pkDatabase: optionalStringValue(values[3]),
+        pkSchema: optionalStringValue(values[4]),
+        pkRelation: optionalStringValue(values[5]),
+        pkColumn: optionalStringValue(values[6]),
+        updateType: optionalStringValue(values[7]) || 'NO ACTION',
+        deleteType: optionalStringValue(values[8]) || 'NO ACTION',
+      }));
+      const keys = (() => {
+        const keys = new Map<string, DatabaseDdlKeyInfo>();
+        for (const row of keyRows) {
+          if (!row.column.trim()) continue;
+          if (!keys.has(row.name)) {
+            const type = row.typeChar === 'p'
+              ? 'PRIMARY KEY'
+              : row.typeChar === 'f'
+                ? 'FOREIGN KEY'
+                : row.typeChar === 'u'
+                  ? 'UNIQUE'
+                  : 'UNKNOWN';
+            keys.set(row.name, {
+              type,
+              typeChar: row.typeChar,
+              columns: [],
+              pkDatabase: row.pkDatabase,
+              pkSchema: row.pkSchema,
+              pkRelation: row.pkRelation,
+              pkColumns: [],
+              updateType: row.updateType,
+              deleteType: row.deleteType,
+            });
+          }
+          const key = keys.get(row.name);
+          if (!key) continue;
+          key.columns.push(row.column);
+          if (row.pkColumn) key.pkColumns.push(row.pkColumn);
         }
-        const key = keys.get(row.name);
-        if (!key) continue;
-        key.columns.push(row.column);
-        if (row.pkColumn) key.pkColumns.push(row.pkColumn);
-      }
-      return [...keys.entries()].map(([name, info]) => ({ name, info }));
-    }).catch(() => [] as Array<{ name: string; info: DatabaseDdlKeyInfo }>);
+        return [...keys.entries()].map(([name, info]) => ({ name, info }));
+      })();
 
-    const tableCommentPromise = this.queryMetadata(target, `
+      const commentRows = await readAncillary(`
       SELECT DESCRIPTION
       FROM ${db}.._V_OBJECT_DATA
       WHERE ${identifierEquality('DBNAME', database)}
         AND ${identifierEquality('SCHEMA', schema)}
         AND ${identifierEquality('OBJNAME', table)}
         AND OBJTYPE = 'TABLE'
-    `.trim(), values => optionalStringValue(values[0]), database).then(rows => rows[0] ?? null).catch(async () => {
-      try {
-        const rows = await this.queryMetadata(target, `
-          SELECT DESCRIPTION
-          FROM ${db}.._V_OBJECT_DATA
-          WHERE ${identifierEquality('DBNAME', database)}
-            AND ${identifierEquality('SCHEMA', schema)}
-            AND ${identifierEquality('OBJNAME', table)}
-        `.trim(), values => optionalStringValue(values[0]), database);
-        return rows[0] ?? null;
-      } catch {
-        return null;
-      }
-    });
-
-    const [distributionColumns, organizeColumns, keys, tableComment] = await Promise.all([
-      distributionPromise,
-      organizePromise,
-      keysPromise,
-      tableCommentPromise,
-    ]);
-    return { columns, distributionColumns, organizeColumns, keys, tableComment };
+      `.trim(), values => optionalStringValue(values[0]));
+      return { columns, distributionColumns, organizeColumns, keys, tableComment: commentRows[0] ?? null, metadataComplete };
+    } finally {
+      await connection.close();
+    }
   }
 
   /**
@@ -551,7 +556,7 @@ export class NetezzaRuntime {
       FROM ${db}.._V_VIEW
       WHERE ${identifierEquality('SCHEMA', schema)}
         AND ${identifierEquality('VIEWNAME', view)}
-    `.trim(), values => String(values[0] ?? ''), database);
+    `.trim(), values => String(values[0] ?? ''), unquoteNetezzaIdentifier(database));
     if (rows.length === 0) throw new Error(`View ${database}.${schema}.${view} not found`);
     return rows[0] ?? '';
   }

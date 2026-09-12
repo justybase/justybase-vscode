@@ -50,6 +50,27 @@ describe('shared React presentation', () => {
     expect(formatDataGridCellValue(new Date('2024-06-15T14:30:45.000Z'), 'TIMESTAMP')).toBe('2024-06-15 14:30:45');
     expect(formatDataGridCellValue(20260315, 'INTEGER', { inferredDateInteger: true })).toBe('2026 03 15');
     expect(formatDataGridCellValue('AQIDBAUG', 'BLOB')).toBe('[BLOB · 6 B]');
+    expect(formatDataGridCellValue({ nested: true }, 'JSON')).toBe('{"nested":true}');
+  });
+
+  it('filters formatted values using compact separators and excludes NULL cells', () => {
+    const columns = [{ name: 'VALUE', type: 'INTEGER' }];
+    expect(processDataGridRows(columns, [[1234567], [null], [42]], {
+      globalFilter: '1234567', columnFilters: {}, sorting: [], grouping: [],
+    })).toEqual([[1234567]]);
+    expect(processDataGridRows(columns, [[1234567], [null], [42]], {
+      globalFilter: '', columnFilters: { VALUE: '1234567' }, sorting: [], grouping: [],
+    })).toEqual([[1234567]]);
+    expect(processDataGridRows([{ name: 'DATE', type: 'INTEGER', inferredDateInteger: true }], [[20260315], [null]], {
+      globalFilter: '20260315', columnFilters: {}, sorting: [], grouping: [],
+    })).toEqual([[20260315]]);
+  });
+
+  it('uses row-detail metadata when formatting values', () => {
+    const onClose = jest.fn();
+    render(<RowDetail columns={[{ name: 'DATE', type: 'INTEGER', inferredDateInteger: true }, { name: 'AMOUNT', type: 'NUMERIC', scale: 2 }]} row={[20260315, '1234.5']} onClose={onClose} />);
+    expect(screen.getByText('2026 03 15')).toBeInTheDocument();
+    expect(screen.getByText('1 234.50')).toBeInTheDocument();
   });
 
   it('infers the same display metadata for untyped result columns', () => {
