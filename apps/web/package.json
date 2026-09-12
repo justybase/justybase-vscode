@@ -15,6 +15,7 @@
   "dependencies": {
     "@justybase/contracts": "*",
     "@justybase/designer-core": "*",
+    "@justybase/dialect-utils": "*",
     "@justybase/result-core": "*",
     "@justybase/ui-core": "*",
     "@justybase/ui-react": "*",

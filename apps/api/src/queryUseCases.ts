@@ -18,6 +18,7 @@ import type {
   WriteOperationPreviewResponse,
 } from '@justybase/contracts';
 import { StaleDesignerSnapshotError } from '@justybase/database-runtime';
+import { buildExplainQuery } from '@justybase/dialect-utils';
 import { getSqlStatementAtPosition, splitSqlStatements } from '@justybase/sql-core';
 import { getDesignerSnapshotResponse } from './designerSnapshotService';
 import {
@@ -89,13 +90,6 @@ function hasExecutableSql(sql: string): boolean {
   return false;
 }
 
-function explainSql(sql: string, dbType: StoredConnection['dbType']): string {
-  if (dbType === 'duckdb') return `EXPLAIN ${sql.trim()}`;
-  if (dbType === 'sqlite' && /^(?:SELECT|WITH)\b/i.test(sql.trim())) return `EXPLAIN QUERY PLAN ${sql.trim()}`;
-  if (dbType === 'sqlite') return `EXPLAIN ${sql.trim()}`;
-  return `EXPLAIN VERBOSE ${sql.trim()}`;
-}
-
 export function planStatements(input: QueryStartRequest, dbType: StoredConnection['dbType'] = 'netezza'): { mode: QueryExecutionMode; statements: PlannedStatement[] } {
   const requestedMode = input.mode ?? 'single';
   if (requestedMode !== 'single' && requestedMode !== 'script' && requestedMode !== 'explain') throw new Error('mode must be single, script, or explain.');
@@ -115,14 +109,14 @@ export function planStatements(input: QueryStartRequest, dbType: StoredConnectio
   if (typeof input.cursorOffset === 'number' && Number.isFinite(input.cursorOffset)) {
     const statement = getSqlStatementAtPosition(input.sql, input.cursorOffset);
     if (statement && hasExecutableSql(statement.sql)) {
-      const sql = mode === 'explain' ? explainSql(statement.sql, dbType) : statement.sql;
+      const sql = mode === 'explain' ? buildExplainQuery(statement.sql, dbType) : statement.sql;
       return { mode, statements: [{ index: 0, startOffset: statement.start, endOffset: statement.end, sql }] };
     }
   }
 
   const sql = input.sql.trim();
   if (!hasExecutableSql(sql)) throw new Error('SQL is required.');
-  return { mode, statements: [{ index: 0, startOffset: input.sql.indexOf(sql), endOffset: input.sql.indexOf(sql) + sql.length, sql: mode === 'explain' ? explainSql(sql, dbType) : sql }] };
+  return { mode, statements: [{ index: 0, startOffset: input.sql.indexOf(sql), endOffset: input.sql.indexOf(sql) + sql.length, sql: mode === 'explain' ? buildExplainQuery(sql, dbType) : sql }] };
 }
 
 async function assertDesignerSnapshotCurrent(

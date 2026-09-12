@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { DatabaseKind, MetadataColumn, SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
+import { buildExplainQuery, buildTopRowsQuery, formatQueryObjectName, formatQuerySchemaName, quoteIdentifierForQuery } from '@justybase/dialect-utils';
 
 interface SchemaApi {
   schemaTree(connectionId: string, parentId?: string): Promise<{ nodes: SchemaTreeNode[] }>;
@@ -12,24 +13,16 @@ interface SchemaApi {
 const ROOT = '__root__';
 const OBJECT_FILTERS = ['TABLE', 'VIEW', 'PROCEDURE', 'SYNONYM'] as const;
 
-function quoteIdentifier(value: string, databaseKind: DatabaseKind): string {
-  if (databaseKind === 'mysql' || databaseKind === 'clickhouse') return `\`${value.replaceAll('`', '``')}\``;
-  if (databaseKind === 'mssql') return `[${value.replaceAll(']', ']]')}]`;
-  return `"${value.replaceAll('"', '""')}"`;
-}
-
 function qualifiedName(node: SchemaTreeNode, databaseKind: DatabaseKind): string {
   if (node.kind === 'column') {
     const object = qualifiedName({ ...node, kind: 'object', label: node.objectName ?? node.label }, databaseKind);
-    return `${object}.${quoteIdentifier(node.label, databaseKind)}`;
+    return `${object}.${quoteIdentifierForQuery(node.label, databaseKind)}`;
   }
   if (node.kind === 'object') {
-    const object = node.objectName ?? node.label;
-    if (databaseKind === 'netezza' && node.database && !node.schema) return `${quoteIdentifier(node.database, databaseKind)}..${quoteIdentifier(object, databaseKind)}`;
-    return [node.database, node.schema, object].filter((part): part is string => Boolean(part)).map(part => quoteIdentifier(part, databaseKind)).join('.');
+    return formatQueryObjectName({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, databaseKind);
   }
-  if (node.kind === 'schema') return [node.database, node.schema ?? node.label].filter((part): part is string => Boolean(part)).map(part => quoteIdentifier(part, databaseKind)).join('.');
-  return quoteIdentifier(node.label, databaseKind);
+  if (node.kind === 'schema') return formatQuerySchemaName(node.database, node.schema ?? node.label, databaseKind);
+  return quoteIdentifierForQuery(node.label, databaseKind);
 }
 
 function nodeGlyph(node: SchemaTreeNode): string {
@@ -185,7 +178,7 @@ export function SchemaExplorer({ api, connectionId, database, databaseKind, onIn
     {error && <div className="electron-schema-error" role="alert">{error}</div>}
     {search.trim() ? <div className="electron-schema-search-results">{searchItems.length === 0 ? <span className="electron-schema-empty">No matching objects.</span> : searchItems.map(item => <button type="button" key={`${item.database}.${item.schema}.${item.name}`} onClick={() => onInsert(qualifiedName({ id: `search:${item.name}`, kind: 'object', label: item.name, database: item.database, schema: item.schema, objectName: item.name, objectType: item.objectType, hasChildren: false }, databaseKind))}><span>{item.objectType === 'VIEW' ? '◌' : '▤'}</span><span><strong>{item.name}</strong><small>{item.database}.{item.schema} · {item.objectType}</small></span></button>)}</div>
       : <div className="electron-schema-tree">{loading.has(ROOT) && rootNodes.length === 0 ? <span className="electron-schema-loading">Loading schema…</span> : visibleRootNodes.map(node => <SchemaNode key={node.id} node={node} depth={0} children={children} expanded={expanded} loading={loading} databaseKind={databaseKind} onToggle={toggleNode} onSelect={selectNode} onContextMenu={(event, item) => { if (item.kind === 'object') { event.preventDefault(); event.stopPropagation(); onObjectSelect?.(item); setMenu({ node: item, x: event.clientX, y: event.clientY }); } }} />)}</div>}
-    {menu && <div className="electron-schema-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}><strong>{menu.node.label}</strong><button type="button" onClick={() => onInsert(objectSql(menu.node, databaseKind))}>Insert qualified name</button><button type="button" onClick={() => { onOpenQuery?.(`SELECT *\nFROM ${objectSql(menu.node, databaseKind)}\nLIMIT 1000`, `Top 1000 · ${menu.node.label}`, menu.node); setMenu(undefined); }}>View top 1000</button><button type="button" onClick={() => { onOpenQuery?.(`EXPLAIN VERBOSE SELECT *\nFROM ${objectSql(menu.node, databaseKind)}\nLIMIT 1000`, `Explain · ${menu.node.label}`, menu.node); setMenu(undefined); }}>Explain plan</button><button type="button" onClick={() => void openDdl(menu.node)}>Open DDL</button>{onImport && <button type="button" onClick={() => { onImport(menu.node); setMenu(undefined); }}>Import CSV/XLSX</button>}</div>}
+    {menu && <div className="electron-schema-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}><strong>{menu.node.label}</strong><button type="button" onClick={() => onInsert(objectSql(menu.node, databaseKind))}>Insert qualified name</button><button type="button" onClick={() => { onOpenQuery?.(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), `Top 1000 · ${menu.node.label}`, menu.node); setMenu(undefined); }}>View top 1000</button><button type="button" onClick={() => { try { onOpenQuery?.(buildExplainQuery(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), databaseKind), `Explain · ${menu.node.label}`, menu.node); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Explain plans are not available for this connection.'); } setMenu(undefined); }}>Explain plan</button><button type="button" onClick={() => void openDdl(menu.node)}>Open DDL</button>{onImport && <button type="button" onClick={() => { onImport(menu.node); setMenu(undefined); }}>Import CSV/XLSX</button>}</div>}
   </section>;
 }
 

@@ -7,6 +7,10 @@ module.exports = {
   moduleNameMapper: {
     '^.+\\.css$': '<rootDir>/tests/styleStub.cjs',
     '^@justybase/contracts$': '<rootDir>/../../packages/contracts/src',
+    '^@justybase/dialect-utils$': '<rootDir>/../../packages/dialect-utils/src',
+    '^@justybase/dialect-utils/(.*)$': '<rootDir>/../../packages/dialect-utils/src/$1',
+    '^@justybase/sql-core$': '<rootDir>/../../packages/sql-core/src/index.ts',
+    '^@justybase/sql-core/(.*)$': '<rootDir>/../../packages/sql-core/src/$1',
     '^@justybase/ui-core$': '<rootDir>/../../packages/ui-core/src',
     '^@justybase/ui-react$': '<rootDir>/../../packages/ui-react/src',
   },

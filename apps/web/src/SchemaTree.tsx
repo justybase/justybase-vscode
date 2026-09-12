@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement, DragEvent } from 'react';
 import type { DatabaseKind, SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
+import { buildExplainQuery, buildTopRowsQuery, formatQueryObjectName, formatQuerySchemaName, quoteIdentifierForQuery } from '@justybase/dialect-utils';
 import { useApiClient } from './api';
 import { readLegacyWorkspaceValue, useWorkspaceStorage } from './workspacePersistence';
 
@@ -8,41 +9,20 @@ const ROOT = '__root__';
 
 // ── Qualified name helpers ─────────────────────────────
 
-function quoteIdentifier(value: string, databaseKind: DatabaseKind = 'netezza'): string {
-  if (databaseKind === 'mysql' || databaseKind === 'clickhouse') {
-    return `\`${value.replace(/`/g, '``')}\``;
-  }
-  if (databaseKind === 'mssql') {
-    return `[${value.replace(/]/g, ']]')}]`;
-  }
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
 /** One dialect-aware qualification rule used by copy, insert and drag/drop. */
 export function qualifySchemaNode(node: SchemaTreeNode, databaseKind: DatabaseKind = 'netezza'): string {
-  if (node.kind === 'database') return quoteIdentifier(node.database || node.label, databaseKind);
+  if (node.kind === 'database') return quoteIdentifierForQuery(node.database || node.label, databaseKind);
   if (node.kind === 'schema') {
-    return databaseKind === 'sqlite'
-      ? quoteIdentifier(node.database || node.schema || node.label, databaseKind)
-      : [node.database, node.schema || node.label].filter((part): part is string => Boolean(part)).map(part => quoteIdentifier(part, databaseKind)).join('.');
+    return formatQuerySchemaName(node.database, node.schema || node.label, databaseKind);
   }
   if (node.kind === 'object' || node.kind === 'column') {
-    const objectParts = databaseKind === 'sqlite'
-      ? [node.database, node.objectName || node.label]
-      : [node.database, node.schema, node.objectName || node.label];
-    const parts = node.kind === 'column' ? [...objectParts, node.label] : objectParts;
-    return parts.filter((part): part is string => Boolean(part)).map(part => quoteIdentifier(part, databaseKind)).join('.');
+    const objectName = formatQueryObjectName({ database: node.database, schema: node.schema, objectName: node.objectName || node.label }, databaseKind);
+    return node.kind === 'column' ? `${objectName}.${quoteIdentifierForQuery(node.label, databaseKind)}` : objectName;
   }
-  return quoteIdentifier(node.label, databaseKind);
+  return quoteIdentifierForQuery(node.label, databaseKind);
 }
 
-export function buildExplainSql(sql: string, databaseKind: DatabaseKind = 'netezza'): string {
-  const trimmed = sql.trim();
-  if (databaseKind === 'duckdb') return `EXPLAIN ${trimmed}`;
-  if (databaseKind === 'sqlite' && /^(?:SELECT|WITH)\b/i.test(trimmed)) return `EXPLAIN QUERY PLAN ${trimmed}`;
-  if (databaseKind === 'sqlite') return `EXPLAIN ${trimmed}`;
-  return `EXPLAIN VERBOSE ${trimmed}`;
-}
+export const buildExplainSql = buildExplainQuery;
 
 // ── SVG Icons ──────────────────────────────────────────
 
@@ -464,7 +444,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   }
 
   function openObjectData(node: SchemaTreeNode): void {
-    onOpenQuery?.(`SELECT *\nFROM ${objectSqlName(node)}\nLIMIT 1000`, `Top 1000 · ${node.label}`, node);
+    onOpenQuery?.(buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName || node.label }, databaseKind), `Top 1000 · ${node.label}`, node);
     setObjectMenu(null);
   }
 
@@ -474,7 +454,11 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   }
 
   function explainObject(node: SchemaTreeNode): void {
-    onOpenQuery?.(buildExplainSql(`SELECT *\nFROM ${objectSqlName(node)}\nLIMIT 1000`, databaseKind), `Explain · ${node.label}`, node);
+    try {
+      onOpenQuery?.(buildExplainQuery(buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName || node.label }, databaseKind), databaseKind), `Explain · ${node.label}`, node);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Explain plans are not available for this connection.');
+    }
     setObjectMenu(null);
   }
 
